@@ -528,6 +528,8 @@ fn form_owner_collection_is_supported(collection: &str) -> bool {
         collection,
         "Catalogs"
             | "Documents"
+            | "DocumentJournals"
+            | "Enums"
             | "Reports"
             | "DataProcessors"
             | "ExchangePlans"
@@ -535,16 +537,35 @@ fn form_owner_collection_is_supported(collection: &str) -> bool {
             | "Tasks"
             | "SettingsStorages"
             | "FilterCriteria"
-            | "Constants"
-            | "Sequences"
             | "InformationRegisters"
             | "AccumulationRegisters"
             | "AccountingRegisters"
             | "CalculationRegisters"
-            | "DocumentJournals"
             | "ChartsOfAccounts"
             | "ChartsOfCalculationTypes"
             | "ChartsOfCharacteristicTypes"
+    )
+}
+
+/// Exact source-folder projection of the 14 owner kinds evidenced by
+/// `COMMAND_COLLECTION_LIST_MARKERS` in `mssql_dump::refs`.
+fn command_owner_collection_is_supported(collection: &str) -> bool {
+    matches!(
+        collection,
+        "DataProcessors"
+            | "Catalogs"
+            | "Documents"
+            | "InformationRegisters"
+            | "Reports"
+            | "DocumentJournals"
+            | "ExchangePlans"
+            | "BusinessProcesses"
+            | "Tasks"
+            | "ChartsOfAccounts"
+            | "FilterCriteria"
+            | "ChartsOfCharacteristicTypes"
+            | "AccountingRegisters"
+            | "AccumulationRegisters"
     )
 }
 
@@ -601,7 +622,8 @@ fn module_owner_is_supported(owner: &[&str], file_name: &str) -> bool {
         ),
         "CommandModule.bsl" => {
             (is_top_level_owner && collection == Some("CommonCommands"))
-                || (is_owned_command && collection.is_some_and(form_owner_collection_is_supported))
+                || (is_owned_command
+                    && collection.is_some_and(command_owner_collection_is_supported))
         }
         "ValueManagerModule.bsl" => is_top_level_owner && collection == Some("Constants"),
         "RecordSetModule.bsl" => matches!(
@@ -1145,6 +1167,55 @@ mod tests {
     }
 
     #[test]
+    fn managed_form_owner_map_accepts_enum_and_rejects_constant_and_sequence() {
+        let active = inventory(&[
+            ("Enums/Status.xml", "owner"),
+            ("Enums/Status/Forms/Card.xml", "form"),
+            ("Enums/Status/Forms/Card/Ext/Form.xml", "old"),
+        ]);
+        let proposed = inventory(&[
+            ("Enums/Status.xml", "owner"),
+            ("Enums/Status/Forms/Card.xml", "form"),
+            ("Enums/Status/Forms/Card/Ext/Form.xml", "new"),
+        ]);
+        assert!(
+            classify_source_change(
+                &active,
+                &proposed,
+                "Enums/Status/Forms/Card/Ext/Form.xml",
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            )
+            .is_ok()
+        );
+
+        for collection in ["Constants", "Sequences"] {
+            let owner = format!("{collection}/Owner.xml");
+            let form = format!("{collection}/Owner/Forms/Card.xml");
+            let body = format!("{collection}/Owner/Forms/Card/Ext/Form.xml");
+            let tree = SourceInventory::from_files(vec![
+                file(&owner, "owner"),
+                file(&form, "form"),
+                file(&body, "body"),
+            ])
+            .unwrap();
+            assert!(
+                matches!(
+                    classify_source_change(
+                        &tree,
+                        &tree,
+                        &body,
+                        ActivationTarget::Main,
+                        ActivationMode::Online,
+                    ),
+                    Err(SourceChangeError::UnsupportedSourcePath(_))
+                ),
+                "{collection}"
+            );
+        }
+    }
+
+    #[test]
     fn unchanged_payload_is_a_successful_no_op() {
         let plan = classify_source_change(
             &common_module("same"),
@@ -1405,6 +1476,25 @@ mod tests {
                 ActivationMode::Online,
             ),
             Err(SourceChangeError::MissingRequiredPeer { .. })
+        ));
+
+        let unproven_owner = inventory(&[
+            ("SettingsStorages/Store.xml", "owner"),
+            ("SettingsStorages/Store/Commands/Run.xml", "command"),
+            (
+                "SettingsStorages/Store/Commands/Run/Ext/CommandModule.bsl",
+                "body",
+            ),
+        ]);
+        assert!(matches!(
+            classify_source_change(
+                &unproven_owner,
+                &unproven_owner,
+                "SettingsStorages/Store/Commands/Run/Ext/CommandModule.bsl",
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            ),
+            Err(SourceChangeError::UnsupportedSourcePath(_))
         ));
     }
 
