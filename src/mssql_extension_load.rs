@@ -1,8 +1,10 @@
 //! Compile extension XML sources and stage an overlay in `ConfigCASSave`.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use flate2::Compression;
@@ -13,14 +15,17 @@ use ibcmd_xml::source_tree::{SourceEntry, SourceTree};
 use serde::Serialize;
 use uuid::Uuid;
 
-use crate::cli::{MssqlExtensionListArgs, MssqlExtensionListFormat, MssqlLoadExtensionArgs};
+use crate::cli::{
+    MssqlActivateStagedExtensionArgs, MssqlExtensionListArgs, MssqlExtensionListFormat,
+    MssqlLoadExtensionArgs,
+};
 use crate::compiler::bootstrap::compile_extension_overlay_source_tree;
 use crate::mssql_dump::cas::{
     CasHash, MssqlStorageTable, fetch_cas_storage_image_with_manifest_bcp,
 };
 use crate::mssql_extension_stage::{
     ConfigInfoIdentity, ExtensionRegistrySnapshot, ExtensionStagePlan, ExtensionStageRow,
-    prepare_extension_stage,
+    extension_namespace_prefix, prepare_extension_stage,
 };
 use crate::mssql_extensions::{MssqlExtensionInfo, list_extensions};
 use crate::profile_registry::load_bundled_profile_registry;
@@ -42,6 +47,17 @@ pub struct MssqlExtensionLoadEntry {
     pub staged_bytes: u64,
     pub compiled_targets: usize,
     pub retained_base_targets: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlExtensionActivationReport {
+    pub database: String,
+    pub extension: String,
+    pub dry_run: bool,
+    pub executed: bool,
+    pub activation: crate::mssql_extension_activation::ExtensionActivationDryRun,
+    pub script: PathBuf,
+    pub recovery: PathBuf,
 }
 
 struct PreparedLoad {
@@ -165,6 +181,168 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
         activation_required: true,
         extensions: reports,
     })
+}
+
+pub fn activate_staged_extension(
+    args: &MssqlActivateStagedExtensionArgs,
+) -> Result<MssqlExtensionActivationReport> {
+    if !args.allow_non_lab {
+        bail!("direct extension writes require explicit --allow-non-lab");
+    }
+    let password = args
+        .sql_pwd
+        .clone()
+        .filter(|value| !value.is_empty())
+        .or_else(|| std::env::var(&args.sql_pwd_env).ok());
+    let registry = list_extensions(&MssqlExtensionListArgs {
+        sqlcmd: args.sqlcmd.clone(),
+        server: args.server.clone(),
+        sql_user: args.sql_user.clone(),
+        sql_pwd: args.sql_pwd.clone(),
+        sql_pwd_env: args.sql_pwd_env.clone(),
+        database: args.database.clone(),
+        format: MssqlExtensionListFormat::Json,
+    })?;
+    let extension = registry
+        .extensions
+        .iter()
+        .find(|item| item.name == args.extension)
+        .ok_or_else(|| anyhow!("extension {:?} was not found", args.extension))?;
+    let namespace = extension_namespace_prefix(extension.physical_registry_id);
+    let prefix = format!("{namespace}__");
+    let all_stage = crate::mssql_dump::fetch_main_activation_rows_bcp(
+        &args.sqlcmd,
+        &args.bcp_executable,
+        &args.server,
+        args.sql_user.as_deref(),
+        password.as_deref(),
+        &args.database,
+        "ConfigCASSave",
+        &BTreeSet::new(),
+    )?;
+    let rows = all_stage
+        .into_iter()
+        .filter_map(|row| {
+            row.file_name
+                .strip_prefix(&prefix)
+                .map(|logical_name| ExtensionStageRow {
+                    logical_name: logical_name.to_owned(),
+                    attributes: 0,
+                    binary_data: row.binary_data,
+                    part_no: row.part_no,
+                })
+        })
+        .collect::<Vec<_>>();
+    let stage = ExtensionStagePlan::from_complete_rows(extension.physical_registry_id, rows)?;
+    let marker_name = format!("dbStruFinal{namespace}");
+    let marker_rows = crate::mssql_dump::fetch_main_activation_rows_bcp(
+        &args.sqlcmd,
+        &args.bcp_executable,
+        &args.server,
+        args.sql_user.as_deref(),
+        password.as_deref(),
+        &args.database,
+        "ConfigCAS",
+        &BTreeSet::from([marker_name]),
+    )?;
+    if marker_rows.len() > 1 {
+        bail!("selected extension has duplicate dbStruFinal rows");
+    }
+    let snapshot = ExtensionRegistrySnapshot {
+        extension_id: extension.physical_registry_id,
+        version: extension.registry_version,
+        zipped_info: extension.zipped_info.clone(),
+    };
+    let plan = crate::mssql_extension_activation::prepare_extension_activation(
+        crate::mssql_extension_activation::ExtensionActivationMode::Exclusive,
+        snapshot,
+        &stage,
+        crate::mssql_extension_activation::ExtensionServiceMarkerSnapshot {
+            present: marker_rows.len() == 1,
+        },
+        args.allow_non_lab,
+    )?;
+    let rendered =
+        crate::mssql_extension_activation::render_extension_activation_sql(&args.database, &plan)?;
+    let artifact_root = std::env::temp_dir().join("ibcmd-rs");
+    fs::create_dir_all(&artifact_root)?;
+    let root_token = &rendered.report.published_root_sha1[..16];
+    let script = args.script_output.clone().unwrap_or_else(|| {
+        artifact_root.join(format!("activate_extension_{namespace}_{root_token}.sql"))
+    });
+    let recovery = args.recovery_output.clone().unwrap_or_else(|| {
+        artifact_root.join(format!("recovery_extension_{namespace}_{root_token}.json"))
+    });
+    write_activation_artifact(&script, rendered.sql().as_bytes())?;
+    write_activation_artifact(&recovery, &serde_json::to_vec_pretty(&rendered.recovery)?)?;
+    if !args.dry_run && !rendered.sql().is_empty() {
+        run_activation_sqlcmd(args, password.as_deref(), &script)?;
+    }
+    Ok(MssqlExtensionActivationReport {
+        database: args.database.clone(),
+        extension: args.extension.clone(),
+        dry_run: args.dry_run,
+        executed: !args.dry_run && !rendered.sql().is_empty(),
+        activation: rendered.report,
+        script,
+        recovery,
+    })
+}
+
+fn write_activation_artifact(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    match fs::read(path) {
+        Ok(existing) if existing == bytes => Ok(()),
+        Ok(_) => bail!(
+            "refusing to overwrite activation artifact {}",
+            path.display()
+        ),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+        }
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
+}
+
+fn run_activation_sqlcmd(
+    args: &MssqlActivateStagedExtensionArgs,
+    password: Option<&str>,
+    script: &Path,
+) -> Result<()> {
+    let mut command = Command::new(&args.sqlcmd);
+    command.arg("-S").arg(&args.server);
+    if let Some(user) = args.sql_user.as_deref() {
+        command.arg("-U").arg(user);
+        if let Some(password) = password {
+            command.arg("-P").arg(password);
+        }
+    } else {
+        command.arg("-E");
+    }
+    if args.sqlcmd_trust_cert {
+        command.arg("-C");
+    }
+    let output = command
+        .arg("-x")
+        .arg("-f")
+        .arg("65001")
+        .arg("-b")
+        .arg("-r")
+        .arg("1")
+        .arg("-i")
+        .arg(script)
+        .output()
+        .with_context(|| format!("failed to launch {}", args.sqlcmd.display()))?;
+    if !output.status.success() {
+        bail!(
+            "extension activation sqlcmd failed: stdout={} stderr={}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    Ok(())
 }
 
 fn overlay_stage_plan(

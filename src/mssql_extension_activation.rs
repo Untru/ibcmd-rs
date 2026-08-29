@@ -136,7 +136,7 @@ impl ExtensionActivationPlan {
             staged_bytes: self.staged_bytes,
             immutable_cas_rows: self.cas_rows.len(),
             touched_tables: if self.no_op {
-                Vec::new()
+                vec!["ConfigCASSave".to_owned()]
             } else {
                 vec!["ConfigCAS", "ConfigCASSave", "_ExtensionsInfo"]
                     .into_iter()
@@ -345,13 +345,6 @@ pub fn render_extension_activation_sql(
 ) -> Result<ExtensionActivationScript, ExtensionActivationError> {
     let report = plan.dry_run();
     let recovery = plan.recovery();
-    if plan.no_op {
-        return Ok(ExtensionActivationScript {
-            sql: String::new(),
-            report,
-            recovery,
-        });
-    }
     let db = quote_ident(database)?;
     let pattern = format!("{}~_~_%", plan.namespace_prefix);
     let marker = format!("dbStruFinal{}", plan.namespace_prefix);
@@ -364,6 +357,16 @@ pub fn render_extension_activation_sql(
     for (name, attributes, bytes, part) in &plan.staged_rows {
         let full_name = format!("{}__{}", plan.namespace_prefix, name);
         writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.ConfigCASSave WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'{}' AND Attributes={} AND DataSize={} AND DATALENGTH(BinaryData)={} AND BinaryData=0x{} AND PartNo={}) <> 1 THROW 57203, 'Selected ConfigCASSave row changed', 1;", quote_string(&full_name), attributes, bytes.len(), bytes.len(), hex(bytes), part).unwrap();
+    }
+    if plan.no_op {
+        writeln!(sql, "DELETE dbo.ConfigCASSave WHERE FileName LIKE N'{}' ESCAPE N'~'; IF @@ROWCOUNT<>{} THROW 57209, 'Selected ConfigCASSave cleanup count changed', 1;", quote_string(&pattern), plan.staged_rows.len()).unwrap();
+        writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.ConfigCASSave WHERE FileName LIKE N'{}' ESCAPE N'~') THROW 57211, 'Selected staging prefix remains', 1;", quote_string(&pattern)).unwrap();
+        sql.push_str("COMMIT TRANSACTION;\n");
+        return Ok(ExtensionActivationScript {
+            sql,
+            report,
+            recovery,
+        });
     }
     for row in &plan.cas_rows {
         writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.ConfigCAS WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'{}') BEGIN IF (SELECT COUNT_BIG(*) FROM dbo.ConfigCAS WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'{}') <> 1 OR (SELECT COUNT_BIG(*) FROM dbo.ConfigCAS WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'{}' AND Attributes=0 AND DataSize={} AND DATALENGTH(BinaryData)={} AND BinaryData=0x{} AND PartNo=0) <> 1 THROW 57204, 'Immutable ConfigCAS collision or drift', 1; END ELSE BEGIN INSERT dbo.ConfigCAS (FileName,Creation,Modified,Attributes,DataSize,BinaryData,PartNo) VALUES (N'{}',DATEADD(year,2000,SYSUTCDATETIME()),DATEADD(year,2000,SYSUTCDATETIME()),0,{},0x{},0); IF @@ROWCOUNT<>1 THROW 57205, 'ConfigCAS insert failed', 1; END;", row.file_name, row.file_name, row.file_name, row.binary_data.len(), row.binary_data.len(), hex(&row.binary_data), row.file_name, row.binary_data.len(), hex(&row.binary_data)).unwrap();
@@ -663,5 +666,35 @@ mod tests {
         .unwrap();
         assert!(sql.contains("DELETE dbo.ConfigCAS"));
         assert!(sql.contains("0000000000010203"));
+    }
+
+    #[test]
+    fn unchanged_extension_only_validates_and_clears_its_stage() {
+        let (snapshot, stage) = fixture();
+        let first = prepare_extension_activation(
+            ExtensionActivationMode::Exclusive,
+            snapshot.clone(),
+            &stage,
+            ExtensionServiceMarkerSnapshot { present: true },
+            true,
+        )
+        .unwrap();
+        let snapshot = ExtensionRegistrySnapshot {
+            zipped_info: first.recovery().published_registry_blob,
+            ..snapshot
+        };
+        let plan = prepare_extension_activation(
+            ExtensionActivationMode::Exclusive,
+            snapshot,
+            &stage,
+            ExtensionServiceMarkerSnapshot { present: true },
+            true,
+        )
+        .unwrap();
+        assert!(plan.is_no_op());
+        let script = render_extension_activation_sql("db", &plan).unwrap();
+        assert!(script.sql().contains("DELETE dbo.ConfigCASSave"));
+        assert!(!script.sql().contains("UPDATE dbo._ExtensionsInfo SET"));
+        assert_eq!(script.report.touched_tables, vec!["ConfigCASSave"]);
     }
 }

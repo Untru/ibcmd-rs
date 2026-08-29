@@ -323,6 +323,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql_extension_load::load_extensions(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlActivateStagedExtension(args) => {
+            let report = ibcmd_rs::mssql_extension_load::activate_staged_extension(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlDumpTimingSummary(args) => {
             let summaries = ibcmd_rs::mssql_dump::read_dump_timing_summaries(&args.input)?;
             let json = serde_json::to_string_pretty(&summaries)?;

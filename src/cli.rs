@@ -73,6 +73,8 @@ pub enum Commands {
     MssqlDumpExtension(MssqlDumpExtensionArgs),
     /// Compile and stage one or all configuration extensions in ConfigCASSave.
     MssqlLoadExtension(MssqlLoadExtensionArgs),
+    /// Publish one already staged extension without native ibcmd.
+    MssqlActivateStagedExtension(MssqlActivateStagedExtensionArgs),
     /// Summarize saved mssql-dump-config JSON timing reports.
     MssqlDumpTimingSummary(MssqlDumpTimingSummaryArgs),
     /// Write SQL Server and tech-log trace templates for an ibcmd run.
@@ -1359,6 +1361,37 @@ pub struct MssqlLoadExtensionArgs {
     /// Hierarchical XML source version.
     #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
     pub source_version: InfobaseConfigSourceVersion,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlActivateStagedExtensionArgs {
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    #[arg(long)]
+    pub database: String,
+    /// Exact extension name from mssql-extension-list.
+    #[arg(long)]
+    pub extension: String,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+    #[arg(long)]
+    pub recovery_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

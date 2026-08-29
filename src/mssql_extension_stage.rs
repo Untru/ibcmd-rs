@@ -103,6 +103,45 @@ impl ExtensionStagePlan {
     pub fn rows(&self) -> &[ExtensionStageRow] {
         &self.rows
     }
+
+    /// Rehydrates a complete, already namespaced ConfigCASSave stage for the
+    /// activation layer. Full configinfo graph validation is repeated by the
+    /// activation planner before SQL is rendered.
+    pub fn from_complete_rows(
+        extension_id: [u8; 16],
+        rows: Vec<ExtensionStageRow>,
+    ) -> Result<Self, ExtensionStageError> {
+        if rows.is_empty() {
+            return Err(ExtensionStageError::InvalidRow(
+                "complete extension stage is empty".to_owned(),
+            ));
+        }
+        let mut names = std::collections::BTreeSet::new();
+        for row in &rows {
+            validate_logical_name(&row.logical_name)?;
+            if row.attributes != 0 || row.part_no != 0 {
+                return Err(ExtensionStageError::InvalidRow(format!(
+                    "{} must have Attributes=0 and PartNo=0",
+                    row.logical_name
+                )));
+            }
+            if !names.insert(row.logical_name.clone()) {
+                return Err(ExtensionStageError::InvalidRow(format!(
+                    "duplicate logical name {}",
+                    row.logical_name
+                )));
+            }
+        }
+        if !names.contains("configinfo") {
+            return Err(ExtensionStageError::InvalidRow(
+                "complete extension stage has no configinfo".to_owned(),
+            ));
+        }
+        Ok(Self {
+            namespace_prefix: extension_namespace_prefix(extension_id),
+            rows,
+        })
+    }
 }
 
 /// Bounded script payload and the exact postconditions it enforces.
