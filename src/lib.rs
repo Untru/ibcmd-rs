@@ -16,6 +16,7 @@ pub(crate) mod metadata_owner_graph;
 pub mod module_blob;
 pub mod mssql;
 pub mod mssql_dump;
+pub mod mssql_extension_activation;
 pub mod mssql_extension_export;
 pub mod mssql_extension_load;
 pub mod mssql_extension_stage;
