@@ -87,6 +87,8 @@ pub enum Commands {
     MssqlActivationSnapshot(MssqlActivationSnapshotArgs),
     /// Diff two activation snapshots without connecting to SQL Server.
     MssqlActivationDiff(MssqlActivationDiffArgs),
+    /// Publish an already staged non-structural main-configuration change without native ibcmd.
+    MssqlActivateStagedMain(MssqlActivateStagedMainArgs),
     /// Dry-run source load parity and bootstrap base-blob readiness without writing ConfigSave.
     MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
@@ -1434,6 +1436,52 @@ pub struct MssqlActivationDiffArgs {
     /// Optional JSON destination. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MssqlMainActivationModeArg {
+    Exclusive,
+    Online,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlActivateStagedMainArgs {
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// bcp executable path.
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server login; integrated authentication is used when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    /// Target MSSQL database.
+    #[arg(long)]
+    pub database: String,
+    /// Publication mode.
+    #[arg(long, value_enum)]
+    pub mode: MssqlMainActivationModeArg,
+    /// Render and validate the exact transition without executing it.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Required explicit acknowledgement for a database write.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Optional path for the generated SQL script.
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+    /// Optional path for the bounded recovery JSON artifact.
+    #[arg(long)]
+    pub recovery_output: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

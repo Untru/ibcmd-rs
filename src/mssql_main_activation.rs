@@ -22,8 +22,9 @@ const SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
 #[serde(rename_all = "snake_case")]
 pub enum MainActivationMode {
     Exclusive,
-    /// The SQL row protocol is evidenced, but live cache invalidation is not.
-    OnlineExperimental,
+    /// Publish while sessions remain connected. Existing sessions retain their
+    /// loaded generation; sessions opened afterwards use the new generation.
+    Online,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -73,16 +74,18 @@ pub struct MainActivationDryRunReport {
     pub staged_rows: usize,
     pub staged_bytes: usize,
     pub no_op: bool,
-    pub online_protocol_experimental: bool,
-    pub live_cache_invalidation_verified: bool,
+    pub online_protocol_verified: bool,
+    pub existing_sessions_retain_generation: bool,
     pub recovery_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MainActivationPlan {
     mode: MainActivationMode,
+    ordinary_generation: Uuid,
     old_generation: Uuid,
     new_generation: Uuid,
+    dynamic_history: Vec<Uuid>,
     staged_rows: Vec<MainStorageRow>,
     active_rows: Vec<MainStorageRow>,
     changed_targets: Vec<String>,
@@ -157,7 +160,7 @@ impl MainActivationPlan {
             } else {
                 match self.mode {
                     MainActivationMode::Exclusive => vec!["Config", "ConfigSave"],
-                    MainActivationMode::OnlineExperimental => {
+                    MainActivationMode::Online => {
                         vec!["Config", "ConfigSave", "Params"]
                     }
                 }
@@ -172,8 +175,8 @@ impl MainActivationPlan {
                 .map(|row| row.binary_data.len())
                 .sum(),
             no_op: self.no_op,
-            online_protocol_experimental: self.mode == MainActivationMode::OnlineExperimental,
-            live_cache_invalidation_verified: false,
+            online_protocol_verified: self.mode == MainActivationMode::Online,
+            existing_sessions_retain_generation: self.mode == MainActivationMode::Online,
             recovery_token: hex(&Sha256::digest(recovery_json)),
         }
     }
@@ -251,7 +254,7 @@ pub fn prepare_main_activation(
 
     let ordinary_generation =
         generation_from_versions(&active[&("versions".to_owned(), 0)].binary_data)?;
-    let old_generation = active_generation_from_markers(
+    let (old_generation, dynamic_history) = active_generation_from_markers(
         ordinary_generation,
         snapshot.config_dynamically_updated.as_ref(),
         snapshot.params_dynamically_updated.as_ref(),
@@ -279,8 +282,10 @@ pub fn prepare_main_activation(
     };
     Ok(MainActivationPlan {
         mode,
+        ordinary_generation,
         old_generation,
         new_generation,
+        dynamic_history,
         staged_rows,
         active_rows: snapshot.config_rows,
         changed_targets,
@@ -338,7 +343,7 @@ pub fn render_main_activation_sql(
 
     match plan.mode {
         MainActivationMode::Exclusive => render_exclusive_transition(&mut sql, plan),
-        MainActivationMode::OnlineExperimental => render_online_transition(&mut sql, plan),
+        MainActivationMode::Online => render_online_transition(&mut sql, plan),
     }
     writeln!(sql, "DELETE FROM dbo.ConfigSave;").unwrap();
     writeln!(
@@ -366,6 +371,7 @@ pub fn render_main_activation_sql(
 }
 
 fn render_exclusive_transition(sql: &mut String, plan: &MainActivationPlan) {
+    writeln!(sql, "IF EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE is_user_process=1 AND session_id<>@@SPID AND database_id=DB_ID()) THROW 57209, 'exclusive activation requires no other database sessions', 1;").unwrap();
     for row in &plan.staged_rows {
         let name = quote_string(&row.file_name);
         writeln!(
@@ -410,11 +416,7 @@ fn render_online_transition(sql: &mut String, plan: &MainActivationPlan) {
         )
         .unwrap();
     }
-    let config_payload = utf8_bom(&format!("{{1,1,{generation}}}"));
-    let params_payload = utf8_bom(&format!(
-        "{{0,2,{},{generation}}}",
-        plan.old_generation.hyphenated()
-    ));
+    let (config_payload, params_payload) = next_dynamic_marker_payloads(plan);
     render_marker_upsert(sql, "Config", &config_payload, 57213);
     render_marker_upsert(sql, "Params", &params_payload, 57214);
 }
@@ -471,7 +473,7 @@ fn render_postconditions(sql: &mut String, plan: &MainActivationPlan) {
         .iter()
         .cloned()
         .map(|mut row| {
-            if plan.mode == MainActivationMode::OnlineExperimental {
+            if plan.mode == MainActivationMode::Online {
                 row.file_name = match row.file_name.as_str() {
                     "root" | "version" => row.file_name,
                     "versions" => format!("versions_dynupdate_{generation}"),
@@ -483,12 +485,8 @@ fn render_postconditions(sql: &mut String, plan: &MainActivationPlan) {
         .collect::<Vec<_>>();
     render_expected_table(sql, "ExpectedPublished", &published);
     render_selected_assertion(sql, "Config", "ExpectedPublished", 57222);
-    if plan.mode == MainActivationMode::OnlineExperimental {
-        let config_payload = utf8_bom(&format!("{{1,1,{generation}}}"));
-        let params_payload = utf8_bom(&format!(
-            "{{0,2,{},{generation}}}",
-            plan.old_generation.hyphenated()
-        ));
+    if plan.mode == MainActivationMode::Online {
+        let (config_payload, params_payload) = next_dynamic_marker_payloads(plan);
         writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.Config WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(bigint,DataSize)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW 57223, 'Config.DynamicallyUpdated postcondition failed', 1;", config_payload.len(), hex(&Sha256::digest(&config_payload))).unwrap();
         writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.Params WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(bigint,DataSize)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW 57224, 'Params.DynamicallyUpdated postcondition failed', 1;", params_payload.len(), hex(&Sha256::digest(&params_payload))).unwrap();
     }
@@ -654,48 +652,98 @@ fn active_generation_from_markers(
     ordinary: Uuid,
     config_marker: Option<&MainStorageRow>,
     params_marker: Option<&MainStorageRow>,
-) -> Result<Uuid, MainActivationError> {
+) -> Result<(Uuid, Vec<Uuid>), MainActivationError> {
     match (config_marker, params_marker) {
-        (None, None) => Ok(ordinary),
+        (None, None) => Ok((ordinary, Vec::new())),
         (Some(config), Some(params)) => {
             let config = marker_fields(&config.binary_data)?;
             let params = marker_fields(&params.binary_data)?;
-            if config.len() != 3 || config[0] != "1" || config[1] != "1" {
+            let config_count = marker_count(&config, "Config")?;
+            let params_count = marker_count(&params, "Params")?;
+            if config[0] != "1" || config_count == 0 || config.len() != config_count + 2 {
                 return Err(MainActivationError::Versions(
                     "unsupported Config.DynamicallyUpdated marker".to_owned(),
                 ));
             }
-            if params.len() != 4 || params[0] != "0" || params[1] != "2" {
+            if params[0] != "0"
+                || params_count != config_count + 1
+                || params.len() != params_count + 2
+            {
                 return Err(MainActivationError::Versions(
                     "unsupported Params.DynamicallyUpdated marker".to_owned(),
                 ));
             }
-            let config_current = Uuid::parse_str(config[2]).map_err(|_| {
-                MainActivationError::Versions(
-                    "Config.DynamicallyUpdated has an invalid generation".to_owned(),
-                )
-            })?;
-            let params_current = Uuid::parse_str(params[3]).map_err(|_| {
-                MainActivationError::Versions(
-                    "Params.DynamicallyUpdated has an invalid current generation".to_owned(),
-                )
-            })?;
-            Uuid::parse_str(params[2]).map_err(|_| {
-                MainActivationError::Versions(
-                    "Params.DynamicallyUpdated has an invalid prior generation".to_owned(),
-                )
-            })?;
-            if config_current != params_current {
-                return Err(MainActivationError::Versions(
-                    "Config/Params dynamic generations disagree".to_owned(),
+            if config_count > 4096 {
+                return Err(MainActivationError::Limit(
+                    "dynamic generation history exceeds 4096 entries".to_owned(),
                 ));
             }
-            Ok(config_current)
+            let params_ordinary = Uuid::parse_str(params[2]).map_err(|_| {
+                MainActivationError::Versions(
+                    "Params.DynamicallyUpdated has an invalid ordinary generation".to_owned(),
+                )
+            })?;
+            if params_ordinary != ordinary {
+                return Err(MainActivationError::Versions(
+                    "Params dynamic ordinary generation disagrees with versions".to_owned(),
+                ));
+            }
+            let history = config[2..]
+                .iter()
+                .map(|value| {
+                    Uuid::parse_str(value).map_err(|_| {
+                        MainActivationError::Versions(
+                            "Config.DynamicallyUpdated has an invalid generation".to_owned(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let params_history = params[3..]
+                .iter()
+                .map(|value| {
+                    Uuid::parse_str(value).map_err(|_| {
+                        MainActivationError::Versions(
+                            "Params.DynamicallyUpdated has an invalid generation".to_owned(),
+                        )
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            if history != params_history {
+                return Err(MainActivationError::Versions(
+                    "Config/Params dynamic generation histories disagree".to_owned(),
+                ));
+            }
+            Ok((*history.last().expect("non-empty history"), history))
         }
         _ => Err(MainActivationError::Versions(
             "Config and Params dynamic markers must both be present or both absent".to_owned(),
         )),
     }
+}
+
+fn marker_count(fields: &[&str], table: &str) -> Result<usize, MainActivationError> {
+    fields
+        .get(1)
+        .ok_or_else(|| MainActivationError::Versions(format!("{table} marker has no count")))?
+        .parse::<usize>()
+        .map_err(|_| MainActivationError::Versions(format!("{table} marker count is invalid")))
+}
+
+fn next_dynamic_marker_payloads(plan: &MainActivationPlan) -> (Vec<u8>, Vec<u8>) {
+    let mut history = plan.dynamic_history.clone();
+    history.push(plan.new_generation);
+    let generations = history
+        .iter()
+        .map(|value| value.hyphenated().to_string())
+        .collect::<Vec<_>>()
+        .join(",");
+    let config = utf8_bom(&format!("{{1,{},{generations}}}", history.len()));
+    let params = utf8_bom(&format!(
+        "{{0,{},{},{generations}}}",
+        history.len() + 1,
+        plan.ordinary_generation.hyphenated()
+    ));
+    (config, params)
 }
 
 fn marker_fields(blob: &[u8]) -> Result<Vec<&str>, MainActivationError> {
@@ -827,6 +875,11 @@ mod tests {
         assert!(
             script
                 .sql
+                .contains("exclusive activation requires no other database sessions")
+        );
+        assert!(
+            script
+                .sql
                 .contains("DELETE FROM dbo.Config WHERE FileName=N'root'")
         );
         assert!(!script.sql.contains("_dynupdate_"));
@@ -838,8 +891,7 @@ mod tests {
     #[test]
     fn online_preserves_ordinary_body_and_creates_evidenced_aliases() {
         let script =
-            render_main_activation_sql("lab", &fixture(MainActivationMode::OnlineExperimental))
-                .unwrap();
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Online)).unwrap();
         assert!(script.sql.contains(&format!("{BODY}_dynupdate_{NEW}")));
         assert!(script.sql.contains(&format!("{BODY}_dynupdate_{NEW}.0")));
         assert!(script.sql.contains(&format!("versions_dynupdate_{NEW}")));
@@ -850,8 +902,8 @@ mod tests {
         );
         assert!(script.sql.contains("EFBBBF7B312C312C"));
         assert!(script.sql.contains("EFBBBF7B302C322C"));
-        assert!(script.report.online_protocol_experimental);
-        assert!(!script.report.live_cache_invalidation_verified);
+        assert!(script.report.online_protocol_verified);
+        assert!(script.report.existing_sessions_retain_generation);
     }
 
     #[test]
@@ -982,7 +1034,7 @@ mod tests {
 
     #[test]
     fn recovery_token_covers_prior_rows_and_markers() {
-        let plan = fixture(MainActivationMode::OnlineExperimental);
+        let plan = fixture(MainActivationMode::Online);
         let report = plan.dry_run_report();
         assert_eq!(report.recovery_token.len(), 64);
         assert_eq!(plan.recovery().overwritten_config_rows.len(), 5);
@@ -991,7 +1043,7 @@ mod tests {
 
     #[test]
     fn prior_dynamic_marker_overrides_stale_ordinary_versions_generation() {
-        let base = fixture(MainActivationMode::OnlineExperimental);
+        let base = fixture(MainActivationMode::Online);
         let current = "a05f2e61-a8a0-4d85-999b-663afc575ced";
         let config_marker = row(
             "DynamicallyUpdated",
@@ -1002,7 +1054,7 @@ mod tests {
             utf8_bom(&format!("{{0,2,{OLD},{current}}}")),
         );
         let plan = prepare_main_activation(
-            MainActivationMode::OnlineExperimental,
+            MainActivationMode::Online,
             base.staged_rows,
             MainActivationSnapshot {
                 config_rows: base.active_rows,
@@ -1015,8 +1067,9 @@ mod tests {
         .unwrap();
         assert_eq!(plan.old_generation().to_string(), current);
         let script = render_main_activation_sql("lab", &plan).unwrap();
-        assert!(!script.sql.contains(&format!("{{0,2,{current},{NEW}}}")));
-        let expected_hex = hex(&utf8_bom(&format!("{{0,2,{current},{NEW}}}")));
-        assert!(script.sql.contains(&expected_hex));
+        let expected_config = hex(&utf8_bom(&format!("{{1,2,{current},{NEW}}}")));
+        let expected_params = hex(&utf8_bom(&format!("{{0,3,{OLD},{current},{NEW}}}")));
+        assert!(script.sql.contains(&expected_config));
+        assert!(script.sql.contains(&expected_params));
     }
 }

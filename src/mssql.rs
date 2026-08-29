@@ -17,28 +17,28 @@ use serde::{Deserialize, Serialize};
 
 use crate::adapters::mssql_legacy::LEGACY_MSSQL_STORAGE_PROFILE_ID;
 use crate::cli::{
-    InfobaseConfigSourceVersion, MssqlActivationDiffArgs, MssqlActivationSnapshotArgs,
-    MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs, MssqlDeltaExportArgs,
-    MssqlDeltaImportArgs, MssqlStageAccountingRegisterObjectArgs,
-    MssqlStageAccumulationRegisterObjectArgs, MssqlStageBotObjectArgs,
-    MssqlStageBusinessProcessObjectArgs, MssqlStageCalculationRegisterObjectArgs,
-    MssqlStageCatalogObjectArgs, MssqlStageChartOfAccountsObjectArgs,
-    MssqlStageChartOfCalculationRegistersObjectArgs, MssqlStageChartOfCalculationTypesObjectArgs,
-    MssqlStageChartOfCharacteristicTypesObjectArgs, MssqlStageCommandGroupObjectArgs,
-    MssqlStageCommonAttributeObjectArgs, MssqlStageCommonCommandObjectArgs,
-    MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs, MssqlStageCommonModuleMetadataArgs,
-    MssqlStageCommonModuleObjectArgs, MssqlStageCommonModuleObjectsArgs,
-    MssqlStageCommonModulesArgs, MssqlStageCommonPictureObjectArgs,
-    MssqlStageCommonTemplateObjectArgs, MssqlStageConstantObjectArgs,
-    MssqlStageDataProcessorObjectArgs, MssqlStageDefinedTypeObjectArgs,
-    MssqlStageDocumentJournalObjectArgs, MssqlStageDocumentNumeratorObjectArgs,
-    MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs, MssqlStageEventSubscriptionObjectArgs,
-    MssqlStageExchangePlanObjectArgs, MssqlStageFilterCriteriaObjectArgs,
-    MssqlStageFunctionalOptionObjectArgs, MssqlStageFunctionalOptionsParameterObjectArgs,
-    MssqlStageHTTPServiceObjectArgs, MssqlStageInformationRegisterObjectArgs,
-    MssqlStageIntegrationServiceObjectArgs, MssqlStageLanguageObjectArgs,
-    MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs, MssqlStageRoleObjectArgs,
-    MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
+    InfobaseConfigSourceVersion, MssqlActivateStagedMainArgs, MssqlActivationDiffArgs,
+    MssqlActivationSnapshotArgs, MssqlAuditSourceParityArgs, MssqlCloneArgs, MssqlCompareArgs,
+    MssqlDeltaExportArgs, MssqlDeltaImportArgs, MssqlMainActivationModeArg,
+    MssqlStageAccountingRegisterObjectArgs, MssqlStageAccumulationRegisterObjectArgs,
+    MssqlStageBotObjectArgs, MssqlStageBusinessProcessObjectArgs,
+    MssqlStageCalculationRegisterObjectArgs, MssqlStageCatalogObjectArgs,
+    MssqlStageChartOfAccountsObjectArgs, MssqlStageChartOfCalculationRegistersObjectArgs,
+    MssqlStageChartOfCalculationTypesObjectArgs, MssqlStageChartOfCharacteristicTypesObjectArgs,
+    MssqlStageCommandGroupObjectArgs, MssqlStageCommonAttributeObjectArgs,
+    MssqlStageCommonCommandObjectArgs, MssqlStageCommonFormObjectArgs, MssqlStageCommonModuleArgs,
+    MssqlStageCommonModuleMetadataArgs, MssqlStageCommonModuleObjectArgs,
+    MssqlStageCommonModuleObjectsArgs, MssqlStageCommonModulesArgs,
+    MssqlStageCommonPictureObjectArgs, MssqlStageCommonTemplateObjectArgs,
+    MssqlStageConstantObjectArgs, MssqlStageDataProcessorObjectArgs,
+    MssqlStageDefinedTypeObjectArgs, MssqlStageDocumentJournalObjectArgs,
+    MssqlStageDocumentNumeratorObjectArgs, MssqlStageDocumentObjectArgs, MssqlStageEnumObjectArgs,
+    MssqlStageEventSubscriptionObjectArgs, MssqlStageExchangePlanObjectArgs,
+    MssqlStageFilterCriteriaObjectArgs, MssqlStageFunctionalOptionObjectArgs,
+    MssqlStageFunctionalOptionsParameterObjectArgs, MssqlStageHTTPServiceObjectArgs,
+    MssqlStageInformationRegisterObjectArgs, MssqlStageIntegrationServiceObjectArgs,
+    MssqlStageLanguageObjectArgs, MssqlStageMetadataObjectsArgs, MssqlStageReportObjectArgs,
+    MssqlStageRoleObjectArgs, MssqlStageScheduledJobObjectArgs, MssqlStageSequenceObjectArgs,
     MssqlStageSessionParameterObjectArgs, MssqlStageSettingsStorageObjectArgs,
     MssqlStageSourceCommonModuleObjectsArgs, MssqlStageSourceMetadataObjectsArgs,
     MssqlStageSourceObjectsArgs, MssqlStageStyleItemObjectArgs, MssqlStageStyleObjectArgs,
@@ -74,6 +74,11 @@ use crate::module_blob::{
     predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
     raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
     versions_base_free_blockers,
+};
+use crate::mssql_main_activation::{
+    MainActivationDryRunReport, MainActivationMode,
+    MainActivationSnapshot as MainPublicationSnapshot, MainStorageRow, prepare_main_activation,
+    render_main_activation_sql,
 };
 use crate::parallel;
 use crate::source::{scan_sources, scan_sources_with_prefixes};
@@ -308,6 +313,8 @@ pub struct MssqlActivationSnapshot {
     pub tables: Vec<StorageTableManifest>,
     pub config_rows: Vec<ConfigSaveRowDigest>,
     pub config_save_rows: Vec<ConfigSaveRowDigest>,
+    #[serde(default)]
+    pub params_rows: Vec<ConfigSaveRowDigest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -323,6 +330,17 @@ pub struct MssqlActivationDiffReport {
     pub tables: Vec<MssqlActivationTableDiff>,
     pub config_rows: MssqlActivationRowsDiff,
     pub config_save_rows: MssqlActivationRowsDiff,
+    pub params_rows: MssqlActivationRowsDiff,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MssqlActivateStagedMainReport {
+    pub database: String,
+    pub dry_run: bool,
+    pub executed: bool,
+    pub activation: MainActivationDryRunReport,
+    pub script: PathBuf,
+    pub recovery: PathBuf,
 }
 
 #[derive(Debug, Serialize)]
@@ -802,6 +820,7 @@ pub fn capture_activation_snapshot(
             &args.database,
             "ConfigSave",
         )?,
+        params_rows: config_row_digests(&args.sqlcmd, &args.server, &args.database, "Params")?,
     };
     let text = serde_json::to_string_pretty(&snapshot)?;
     fs::write(&args.output, text)
@@ -859,7 +878,177 @@ pub fn diff_activation_snapshots(
         tables,
         config_rows: diff_activation_rows(before.config_rows, after.config_rows),
         config_save_rows: diff_activation_rows(before.config_save_rows, after.config_save_rows),
+        params_rows: diff_activation_rows(before.params_rows, after.params_rows),
     })
+}
+
+pub fn activate_staged_main(
+    args: &MssqlActivateStagedMainArgs,
+) -> Result<MssqlActivateStagedMainReport> {
+    if !args.allow_non_lab {
+        bail!("--allow-non-lab acknowledgement is required");
+    }
+    let password = resolve_sqlcmd_password(
+        args.sql_user.as_deref(),
+        args.sql_pwd.as_deref(),
+        &args.sql_pwd_env,
+    );
+    let user = args.sql_user.as_deref();
+    let empty = BTreeSet::new();
+    let staged = crate::mssql_dump::fetch_main_activation_rows_bcp(
+        &args.sqlcmd,
+        &args.bcp_executable,
+        &args.server,
+        user,
+        password.as_deref(),
+        &args.database,
+        "ConfigSave",
+        &empty,
+    )?;
+    if staged.is_empty() {
+        bail!("ConfigSave is empty; there is no staged main-configuration change");
+    }
+    let selected = staged
+        .iter()
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let active = crate::mssql_dump::fetch_main_activation_rows_bcp(
+        &args.sqlcmd,
+        &args.bcp_executable,
+        &args.server,
+        user,
+        password.as_deref(),
+        &args.database,
+        "Config",
+        &selected,
+    )?;
+    let marker_name = BTreeSet::from(["DynamicallyUpdated".to_owned()]);
+    let config_marker = exactly_one_optional_marker(
+        "Config",
+        crate::mssql_dump::fetch_main_activation_rows_bcp(
+            &args.sqlcmd,
+            &args.bcp_executable,
+            &args.server,
+            user,
+            password.as_deref(),
+            &args.database,
+            "Config",
+            &marker_name,
+        )?,
+    )?;
+    let params_marker = exactly_one_optional_marker(
+        "Params",
+        crate::mssql_dump::fetch_main_activation_rows_bcp(
+            &args.sqlcmd,
+            &args.bcp_executable,
+            &args.server,
+            user,
+            password.as_deref(),
+            &args.database,
+            "Params",
+            &marker_name,
+        )?,
+    )?;
+    let allowed_targets = staged
+        .iter()
+        .filter(|row| !matches!(row.file_name.as_str(), "root" | "version" | "versions"))
+        .map(|row| row.file_name.clone())
+        .collect::<Vec<_>>();
+    let mode = match args.mode {
+        MssqlMainActivationModeArg::Exclusive => MainActivationMode::Exclusive,
+        MssqlMainActivationModeArg::Online => MainActivationMode::Online,
+    };
+    let plan = prepare_main_activation(
+        mode,
+        staged,
+        MainPublicationSnapshot {
+            config_rows: active,
+            config_dynamically_updated: config_marker,
+            params_dynamically_updated: params_marker,
+        },
+        &allowed_targets,
+        args.allow_non_lab,
+    )
+    .map_err(anyhow::Error::new)?;
+    let rendered = render_main_activation_sql(&args.database, &plan).map_err(anyhow::Error::new)?;
+
+    let artifact_root = std::env::temp_dir().join("ibcmd-rs");
+    fs::create_dir_all(&artifact_root)
+        .with_context(|| format!("failed to create {}", artifact_root.display()))?;
+    let token = &rendered.report.recovery_token[..16];
+    let script = args.script_output.clone().unwrap_or_else(|| {
+        artifact_root.join(format!(
+            "activate_{}_{}.sql",
+            safe_file_stem(&args.database),
+            token
+        ))
+    });
+    let recovery = args.recovery_output.clone().unwrap_or_else(|| {
+        artifact_root.join(format!(
+            "recovery_{}_{}.json",
+            safe_file_stem(&args.database),
+            token
+        ))
+    });
+    write_new_or_identical(&script, rendered.sql.as_bytes())?;
+    let recovery_json = serde_json::to_vec_pretty(&rendered.recovery)?;
+    write_new_or_identical(&recovery, &recovery_json)?;
+
+    if !args.dry_run {
+        let sql_auth = SqlAuth {
+            user,
+            password: password.as_deref(),
+        };
+        run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
+    }
+
+    Ok(MssqlActivateStagedMainReport {
+        database: args.database.clone(),
+        dry_run: args.dry_run,
+        executed: !args.dry_run,
+        activation: rendered.report,
+        script,
+        recovery,
+    })
+}
+
+fn exactly_one_optional_marker(
+    table: &str,
+    mut rows: Vec<MainStorageRow>,
+) -> Result<Option<MainStorageRow>> {
+    match rows.len() {
+        0 => Ok(None),
+        1 => Ok(rows.pop()),
+        count => bail!("{table}.DynamicallyUpdated returned {count} rows"),
+    }
+}
+
+fn safe_file_stem(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect()
+}
+
+fn write_new_or_identical(path: &Path, bytes: &[u8]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    match fs::read(path) {
+        Ok(existing) if existing == bytes => Ok(()),
+        Ok(_) => bail!("refusing to overwrite existing artifact {}", path.display()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+        }
+        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    }
 }
 
 pub fn write_activation_diff(report: &MssqlActivationDiffReport, output: &Path) -> Result<()> {
@@ -5931,6 +6120,12 @@ fn config_row_digests(
         table_ident = quote_ident(table),
     );
     let stdout = run_sql_capture(sqlcmd, server, &sql)?;
+    // `sqlcmd` emits no result row for an empty top-level `FOR JSON PATH`
+    // query (apart from the database-context diagnostic). The command has
+    // already succeeded, so this is the canonical empty digest set.
+    if !stdout.contains('[') {
+        return Ok(Vec::new());
+    }
     let json = extract_json_array(&stdout, &format!("config_row_digests({table}, {database})"))?;
     serde_json::from_str(&json)
         .with_context(|| format!("failed to parse {table} digests JSON for {database}"))

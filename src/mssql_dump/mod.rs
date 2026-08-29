@@ -982,6 +982,44 @@ mod source_asset_diagnostics;
 mod source_assets;
 mod timing;
 
+pub(crate) fn fetch_main_activation_rows_bcp(
+    sqlcmd: &Path,
+    bcp: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+    fetch::fetch_binary_rows_bcp(
+        sqlcmd,
+        bcp,
+        server,
+        user,
+        password,
+        database,
+        table,
+        selected_file_names,
+        false,
+    )?
+    .into_iter()
+    .map(|row| {
+        let data_size = u64::try_from(row.data_size)
+            .with_context(|| format!("negative DataSize for {table}.{}", row.file_name))?;
+        Ok(crate::mssql_main_activation::MainStorageRow {
+            file_name: row.file_name,
+            part_no: row.part_no,
+            creation: String::new(),
+            modified: String::new(),
+            attributes: 0,
+            data_size,
+            binary_data: row.binary,
+        })
+    })
+    .collect()
+}
+
 #[cfg(feature = "platform-oracle")]
 pub(crate) use fetch::bcp_executable_for_sqlcmd;
 
