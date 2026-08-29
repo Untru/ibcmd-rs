@@ -340,6 +340,18 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::MssqlActivationSnapshot(args) => {
+            let report = ibcmd_rs::mssql::capture_activation_snapshot(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlActivationDiff(args) => {
+            let report = ibcmd_rs::mssql::diff_activation_snapshots(&args)?;
+            if let Some(output) = args.output {
+                ibcmd_rs::mssql::write_activation_diff(&report, &output)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::MssqlAuditSourceParity(args) => {
             let report = ibcmd_rs::mssql::audit_source_parity(&args)?;
             if let Some(output) = args.output {
