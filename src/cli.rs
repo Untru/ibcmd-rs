@@ -1253,6 +1253,9 @@ pub struct MssqlExtensionListArgs {
     /// Environment variable containing the SQL Server password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub sql_pwd_env: String,
+    /// Pass sqlcmd -C to trust the SQL Server certificate.
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
     /// SQL Server database name.
     #[arg(long)]
     pub database: String,
@@ -1281,6 +1284,9 @@ pub struct MssqlDumpExtensionArgs {
     /// Environment variable containing the SQL Server password.
     #[arg(long, default_value = "IBCMD_DB_PSW")]
     pub sql_pwd_env: String,
+    /// Trust the SQL Server certificate for registry and storage reads.
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
     /// SQL Server database name.
     #[arg(long)]
     pub database: String,

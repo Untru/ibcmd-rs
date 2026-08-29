@@ -344,6 +344,7 @@ pub fn list_extensions(args: &MssqlExtensionListArgs) -> Result<MssqlExtensionLi
         &args.server,
         args.sql_user.as_deref(),
         password.as_deref(),
+        args.sqlcmd_trust_cert,
         &extension_registry_preflight_query(&args.database),
     )?;
     let bounds = parse_preflight(&preflight_stdout)?;
@@ -353,6 +354,7 @@ pub fn list_extensions(args: &MssqlExtensionListArgs) -> Result<MssqlExtensionLi
         &args.server,
         args.sql_user.as_deref(),
         password.as_deref(),
+        args.sqlcmd_trust_cert,
         &extension_registry_rows_query(&args.database),
     )?;
     if stdout.len() > MAX_REGISTRY_TRANSPORT_BYTES {
@@ -523,6 +525,7 @@ fn run_sqlcmd(
     server: &str,
     user: Option<&str>,
     password: Option<&str>,
+    trust_server_certificate: bool,
     sql: &str,
 ) -> Result<String> {
     let mut command = Command::new(executable);
@@ -530,13 +533,15 @@ fn run_sqlcmd(
     if let Some(user) = user {
         command.arg("-U").arg(user);
         if let Some(password) = password {
-            command.arg("-P").arg(password);
+            command.env("SQLCMDPASSWORD", password);
         }
     } else {
         command.arg("-E");
     }
+    if trust_server_certificate {
+        command.arg("-C");
+    }
     let output = command
-        .arg("-C")
         .arg("-f")
         .arg("65001")
         .arg("-b")
@@ -962,6 +967,7 @@ mod tests {
             sql_user: user.map(str::to_owned),
             sql_pwd: password.map(str::to_owned),
             sql_pwd_env: "TEST_PASSWORD".to_owned(),
+            sqlcmd_trust_cert: false,
             database: "db".to_owned(),
             format: crate::cli::MssqlExtensionListFormat::Json,
         }

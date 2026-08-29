@@ -1020,6 +1020,47 @@ pub(crate) fn fetch_main_activation_rows_bcp(
     .collect()
 }
 
+pub(crate) fn fetch_extension_activation_rows_sqlcmd(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    trust_server_certificate: bool,
+    database: &str,
+    table: &str,
+    prefix: &str,
+    max_rows: usize,
+    max_total_bytes: u64,
+) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+    fetch::fetch_exact_prefix_rows_sqlcmd(
+        sqlcmd,
+        server,
+        user,
+        password,
+        trust_server_certificate,
+        database,
+        table,
+        prefix,
+        max_rows,
+        max_total_bytes,
+    )?
+    .into_iter()
+    .map(|row| {
+        let data_size = u64::try_from(row.data_size)
+            .with_context(|| format!("negative DataSize for {table}.{}", row.file_name))?;
+        Ok(crate::mssql_main_activation::MainStorageRow {
+            file_name: row.file_name,
+            part_no: row.part_no,
+            creation: String::new(),
+            modified: String::new(),
+            attributes: row.attributes,
+            data_size,
+            binary_data: row.binary,
+        })
+    })
+    .collect()
+}
+
 #[cfg(feature = "platform-oracle")]
 pub(crate) use fetch::bcp_executable_for_sqlcmd;
 

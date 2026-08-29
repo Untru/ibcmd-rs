@@ -1044,7 +1044,8 @@ pub(super) fn parse_config_direct_rows(stdout: &str) -> Result<Vec<ConfigRow>> {
 pub(super) fn parse_config_chunk_rows(stdout: &str) -> Result<Vec<ConfigChunkRow>> {
     let mut rows = Vec::new();
     for (line_index, line) in stdout.lines().enumerate() {
-        let line = line.trim_end();
+        // Preserve a trailing tab: it represents an empty BinaryData chunk.
+        let line = line.trim_end_matches(['\r', ' ']);
         if line.is_empty() {
             continue;
         }
@@ -1290,17 +1291,153 @@ pub(super) fn run_sql_capture_tsv(
     password: Option<&str>,
     sql: &str,
 ) -> Result<String> {
-    let mut arguments = vec!["-C".to_owned(), "-S".to_owned(), server.to_owned()];
+    run_sql_capture_tsv_with_policy(sqlcmd, server, user, password, true, sql)
+}
+
+#[derive(Debug)]
+pub(super) struct ExactStorageRow {
+    pub file_name: String,
+    pub part_no: i32,
+    pub attributes: i32,
+    pub data_size: i64,
+    pub binary: Vec<u8>,
+}
+
+/// Reads only one already-bound storage prefix. The lightweight header pass
+/// proves row shape and resource bounds before any BinaryData is materialized.
+pub(super) fn fetch_exact_prefix_rows_sqlcmd(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    trust_server_certificate: bool,
+    database: &str,
+    table: &str,
+    prefix: &str,
+    max_rows: usize,
+    max_total_bytes: u64,
+) -> Result<Vec<ExactStorageRow>> {
+    let escaped_pattern = prefix
+        .replace('~', "~~")
+        .replace('%', "~%")
+        .replace('_', "~_");
+    let header_sql = format!(
+        "SET NOCOUNT ON; SELECT TOP ({}) FileName AS file_name,PartNo,Attributes,CONVERT(bigint,DataSize),CONVERT(bigint,DATALENGTH(BinaryData)) FROM {} WHERE FileName LIKE N'{}%' ESCAPE N'~' ORDER BY FileName,PartNo;",
+        max_rows.saturating_add(1),
+        qualified_storage_table(database, table),
+        quote_string(&escaped_pattern),
+    );
+    let stdout = run_sql_capture_tsv_with_policy(
+        sqlcmd,
+        server,
+        user,
+        password,
+        trust_server_certificate,
+        &header_sql,
+    )?;
+    let mut headers = BTreeMap::<String, (i32, i32, i64)>::new();
+    let mut total_bytes = 0_u64;
+    for (line_index, line) in stdout.lines().enumerate() {
+        let line = line.trim_end();
+        if line.is_empty() || is_sqlcmd_header_or_separator(line) {
+            continue;
+        }
+        let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.len() != 5 {
+            bail!("unexpected exact-prefix header line {}", line_index + 1);
+        }
+        let file_name = fields[0].trim_end().to_owned();
+        if !file_name.starts_with(prefix) {
+            bail!("exact-prefix query returned an unrelated FileName");
+        }
+        let part_no = fields[1].trim().parse::<i32>()?;
+        let attributes = fields[2].trim().parse::<i32>()?;
+        let data_size = fields[3].trim().parse::<i64>()?;
+        let binary_size = fields[4].trim().parse::<i64>()?;
+        if part_no != 0 {
+            bail!("{table}.{file_name} uses unsupported PartNo {part_no}");
+        }
+        if data_size < 0 || data_size != binary_size {
+            bail!("{table}.{file_name} has inconsistent DataSize/BinaryData length");
+        }
+        total_bytes = total_bytes
+            .checked_add(data_size as u64)
+            .ok_or_else(|| anyhow!("exact-prefix byte count overflow"))?;
+        if total_bytes > max_total_bytes {
+            bail!("exact-prefix data exceeds {max_total_bytes} bytes");
+        }
+        if headers
+            .insert(file_name.clone(), (part_no, attributes, data_size))
+            .is_some()
+        {
+            bail!("duplicate exact-prefix row {file_name}");
+        }
+        if headers.len() > max_rows {
+            bail!("exact-prefix row count exceeds {max_rows}");
+        }
+    }
+    if headers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let selected = headers.keys().cloned().collect::<BTreeSet<_>>();
+    let binary_sql = build_fetch_rows_sql(database, table, &selected);
+    let binary_stdout = run_sql_capture_tsv_with_policy(
+        sqlcmd,
+        server,
+        user,
+        password,
+        trust_server_certificate,
+        &binary_sql,
+    )?;
+    let chunks = parse_config_chunk_rows(&binary_stdout)?;
+    let binary_rows = assemble_config_rows(chunks)?;
+    if binary_rows.len() != headers.len() {
+        bail!("exact-prefix BinaryData row count changed during snapshot");
+    }
+    let mut output = Vec::with_capacity(binary_rows.len());
+    for row in binary_rows {
+        let (part_no, attributes, data_size) = headers
+            .remove(&row.file_name)
+            .ok_or_else(|| anyhow!("exact-prefix BinaryData returned an unexpected row"))?;
+        if row.part_no != part_no || row.data_size != data_size {
+            bail!("exact-prefix row {} changed during snapshot", row.file_name);
+        }
+        let binary = row.binary_bytes()?.into_owned();
+        output.push(ExactStorageRow {
+            file_name: row.file_name,
+            part_no,
+            attributes,
+            data_size,
+            binary,
+        });
+    }
+    Ok(output)
+}
+
+pub(super) fn run_sql_capture_tsv_with_policy(
+    sqlcmd: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    trust_server_certificate: bool,
+    sql: &str,
+) -> Result<String> {
+    let mut arguments = vec!["-S".to_owned(), server.to_owned()];
+    if trust_server_certificate {
+        arguments.insert(0, "-C".to_owned());
+    }
     let mut sanitized_arguments = arguments.clone();
     if let Some(user) = user {
         arguments.extend(["-U".to_owned(), user.to_owned()]);
         sanitized_arguments.extend(["-U".to_owned(), user.to_owned()]);
-        if let Some(password) = password {
-            arguments.extend(["-P".to_owned(), password.to_owned()]);
-            sanitized_arguments.extend(["-P".to_owned(), password_source_marker()]);
-        }
+    } else {
+        arguments.push("-E".to_owned());
+        sanitized_arguments.push("-E".to_owned());
     }
-    let common_arguments = ["-s", "\t", "-w", "65535", "-y", "0", "-Y", "0"].map(ToOwned::to_owned);
+    let common_arguments = [
+        "-b", "-r", "1", "-x", "-f", "65001", "-s", "\t", "-w", "65535", "-y", "0", "-Y", "0",
+    ]
+    .map(ToOwned::to_owned);
     arguments.extend(common_arguments.clone());
     sanitized_arguments.extend(common_arguments);
     let sql_file = if sql.chars().count() > SQLCMD_INLINE_QUERY_MAX_CHARS {
@@ -1330,7 +1467,12 @@ pub(super) fn run_sql_capture_tsv(
         timed_out: false,
         exception: None,
     })?;
-    let output = Command::new(sqlcmd).args(&arguments).output();
+    let mut command = Command::new(sqlcmd);
+    command.args(&arguments);
+    if let Some(password) = password.filter(|_| user.is_some()) {
+        command.env("SQLCMDPASSWORD", password);
+    }
+    let output = command.output();
     if let Some(path) = &sql_file {
         let _ = fs::remove_file(path);
     }

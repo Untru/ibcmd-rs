@@ -40,6 +40,7 @@ pub fn dump_extensions(args: &MssqlDumpExtensionArgs) -> Result<MssqlExtensionDu
         sql_user: args.sql_user.clone(),
         sql_pwd: args.sql_pwd.clone(),
         sql_pwd_env: args.sql_pwd_env.clone(),
+        sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         database: args.database.clone(),
         format: MssqlExtensionListFormat::Json,
     })?;
