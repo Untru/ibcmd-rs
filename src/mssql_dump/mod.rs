@@ -960,6 +960,7 @@ mod characteristics {
     }
 }
 mod additional_indexes;
+pub mod cas;
 mod command_interface;
 mod config_dump_info;
 mod config_rows;
@@ -2455,8 +2456,8 @@ fn export_direct_storage_rows_to_source(
         true,
         true,
         source_version,
-        RootMetadataInventoryScope::Scoped,
-        SourceAssetCompletenessScope::Scoped,
+        RootMetadataInventoryScope::Full,
+        SourceAssetCompletenessScope::Full,
         true,
         false,
         config_dump_info_plan.config_dump_info_eligible(),

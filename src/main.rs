@@ -301,6 +301,28 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql_dump::dump_config(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlExtensionList(args) => {
+            let report = ibcmd_rs::mssql_extensions::list_extensions(&args)?;
+            match args.format {
+                ibcmd_rs::cli::MssqlExtensionListFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&report)?);
+                }
+                ibcmd_rs::cli::MssqlExtensionListFormat::Table => {
+                    print!(
+                        "{}",
+                        ibcmd_rs::mssql_extensions::render_extension_table(&report)
+                    );
+                }
+            }
+        }
+        Commands::MssqlDumpExtension(args) => {
+            let report = ibcmd_rs::mssql_extension_export::dump_extensions(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlLoadExtension(args) => {
+            let report = ibcmd_rs::mssql_extension_load::load_extensions(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlDumpTimingSummary(args) => {
             let summaries = ibcmd_rs::mssql_dump::read_dump_timing_summaries(&args.input)?;
             let json = serde_json::to_string_pretty(&summaries)?;

@@ -640,7 +640,7 @@ pub(super) fn build_fetch_binary_rows_query(
     )
 }
 
-fn split_selected_file_names_for_bcp_query(
+pub(super) fn split_selected_file_names_for_bcp_query(
     database: &str,
     table: &str,
     selected_file_names: &BTreeSet<String>,

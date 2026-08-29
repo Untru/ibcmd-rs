@@ -227,6 +227,26 @@ pub fn compile_bootstrap_source_tree(
     xml_dialect: XmlDialect,
     target_profile: &EffectiveProfile,
 ) -> Result<BootstrapCompilation, BootstrapCompileError> {
+    compile_source_tree_mode(tree, xml_dialect, target_profile, false)
+}
+
+/// Compiles extension-owned source rows for an overlay on an active CAS image.
+/// Extension-only root properties are validated as text but are not projected;
+/// callers must retain the active configuration-root and special rows.
+pub fn compile_extension_overlay_source_tree(
+    tree: &SourceTree,
+    xml_dialect: XmlDialect,
+    target_profile: &EffectiveProfile,
+) -> Result<BootstrapCompilation, BootstrapCompileError> {
+    compile_source_tree_mode(tree, xml_dialect, target_profile, true)
+}
+
+fn compile_source_tree_mode(
+    tree: &SourceTree,
+    xml_dialect: XmlDialect,
+    target_profile: &EffectiveProfile,
+    extension_overlay: bool,
+) -> Result<BootstrapCompilation, BootstrapCompileError> {
     tree.validate()
         .map_err(|source| BootstrapCompileError::SourceTree(source.to_string()))?;
     let platform_build = target_profile
@@ -334,6 +354,7 @@ pub fn compile_bootstrap_source_tree(
                 SpecialEntryProfile::from_effective(target_profile)
                     .map_err(|error| profile_error("special entries", error))?
                     .compatibility(),
+                extension_overlay,
             )?);
             decode_configuration_envelope(&document, source_profile.clone(), object_path)
         } else {
@@ -1156,6 +1177,7 @@ fn object_name(object: &CanonicalObject) -> Option<&str> {
 fn project_configuration(
     document: &XmlDocument,
     target_compatibility: u32,
+    extension_overlay: bool,
 ) -> Result<ConfigurationProjection, BootstrapCompileError> {
     let configuration = only_child_element(document.root(), "MetaDataObject")?;
     if configuration.name().local() != "Configuration" {
@@ -1178,6 +1200,13 @@ fn project_configuration(
             )));
         }
         match name {
+            "ObjectBelonging"
+            | "ConfigurationExtensionPurpose"
+            | "KeepMappingToExtendedConfigurationObjectsByIDs"
+                if extension_overlay =>
+            {
+                let _ = simple_text(element)?;
+            }
             "Name" => properties.name = simple_text(element)?,
             "Synonym" => properties.synonyms = localized(element)?,
             "Comment" => properties.comment = simple_text(element)?,
@@ -2129,7 +2158,7 @@ mod tests {
 
     fn project_native_text(xml: &str) -> Result<ConfigurationProjection, BootstrapCompileError> {
         let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
-        project_configuration(&document, 80_327)
+        project_configuration(&document, 80_327, false)
     }
 
     fn entry(path: &str, bytes: &[u8]) -> SourceEntry {

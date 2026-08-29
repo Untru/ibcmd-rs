@@ -1026,6 +1026,11 @@ cargo run -- source-diff C:\ibcmd-export C:\ibcmd-rs-dump --path-prefix Catalogs
 cargo run --features platform-oracle -- profile-run --capture-output -- ibcmd infobase config load ...
 cargo run --features platform-oracle -- dump-sources --settings C:\repo\autumn-properties.json --extension EmergingTravelGroup -o C:\repo\src\cfe\EmergingTravelGroup --overwrite
 cargo run -- mssql-dump-config --database MyInfobase -o C:\repo\db-dump --include-config-save --inflate --extract-module-text
+cargo run -- mssql-extension-list --database MyInfobase --format table
+cargo run -- mssql-dump-extension --database MyInfobase --extension MyExtension -o C:\repo\extensions\MyExtension
+cargo run -- mssql-dump-extension --database MyInfobase --all-extensions -o C:\repo\extensions
+cargo run -- mssql-load-extension --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --replace-staging --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-load-extension --database lab_clone --all-extensions -i C:\repo\extensions --replace-staging --allow-non-lab --sqlcmd-trust-cert
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- storage-map .\trace\events.xml -o storage-map.json
@@ -1048,6 +1053,36 @@ cargo run -- mssql-stage-source-metadata-objects --database target_db --source-r
 cargo run -- mssql-stage-source-common-module-objects --database target_db --source-root C:\full\xml-sources --replace-config-save --allow-non-lab
 cargo run -- mssql-stage-source-objects --database target_db --source-root C:\full\xml-sources --source-version 2.21 --replace-config-save --allow-non-lab
 ```
+
+### Расширения конфигурации в SQL Server
+
+Экспериментальные команды расширений проверены на платформе 1С 8.3.27 и базе
+SQL Server. `mssql-extension-list` читает реестр `_ExtensionsInfo` и возвращает
+имя, UUID, активный корень CAS, версию и флаги каждого расширения.
+`mssql-dump-extension` принимает либо `--extension`, либо `--all-extensions` и
+публикует дерево атомарно. Для всех расширений создаются одноимённые дочерние
+каталоги.
+
+`mssql-load-extension` также принимает одно имя или все расширения. Команда
+сначала читает и компилирует все выбранные деревья, затем транзакционно помещает
+изменённые строки только в пространство выбранного расширения в
+`ConfigCASSave`. Она намеренно не активирует изменения: после успешного staging
+нужно отдельно выполнить штатный `ibcmd config apply --extension=<имя>`.
+Прямые записи требуют явного `--allow-non-lab`; существующий staging заменяется
+только с `--replace-staging`. Доверие сертификату SQL Server не отключается
+неявно: для локального сервера с самоподписанным сертификатом отдельно укажите
+`--sqlcmd-trust-cert`.
+
+Сейчас гарантирован round-trip деревьев, выгруженных этой же реализацией, с
+сохранением неизвестных тел метаданных из активного CAS. На тестовой копии базы
+8.3.27 пустое демо-расширение после staging и штатного `config apply` совпало с
+исходным нативным экспортом во всех содержательных файлах; изменился только ID
+поколения в `ConfigDumpInfo.xml`. Полная XML-эквивалентность штатной выгрузке для
+непустых расширений пока не заявляется: свойства принадлежности, назначение
+расширения, `KeepMapping`, префикс имени и отображения заимствованных объектов
+ещё не полностью проецируются обычным writer-ом. Отчёт выгрузки явно возвращает
+`native_xml_parity: false` до реализации этого слоя. Импорт произвольного дерева,
+созданного штатным `ibcmd`, также пока не является гарантированным контрактом.
 
 ### Контракт собственной онлайн-активации
 

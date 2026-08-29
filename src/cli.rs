@@ -67,6 +67,12 @@ pub enum Commands {
     DumpSources(DumpSourcesArgs),
     /// Dump Config/ConfigSave storage rows directly from SQL Server.
     MssqlDumpConfig(MssqlDumpConfigArgs),
+    /// List configuration extensions directly from the SQL Server registry.
+    MssqlExtensionList(MssqlExtensionListArgs),
+    /// Export one or all configuration extensions directly from SQL Server CAS.
+    MssqlDumpExtension(MssqlDumpExtensionArgs),
+    /// Compile and stage one or all configuration extensions in ConfigCASSave.
+    MssqlLoadExtension(MssqlLoadExtensionArgs),
     /// Summarize saved mssql-dump-config JSON timing reports.
     MssqlDumpTimingSummary(MssqlDumpTimingSummaryArgs),
     /// Write SQL Server and tech-log trace templates for an ibcmd run.
@@ -1216,6 +1222,141 @@ pub struct MssqlDumpConfigArgs {
     /// Write manifest.json with row-level dump details.
     #[arg(long, default_value_t = true, hide = true)]
     pub write_manifest: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum MssqlExtensionListFormat {
+    /// A stable, machine-readable JSON document.
+    Json,
+    /// A compact human-readable table.
+    Table,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlExtensionListArgs {
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server login. Uses integrated authentication when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    /// SQL Server database name.
+    #[arg(long)]
+    pub database: String,
+    /// Output representation.
+    #[arg(long, value_enum, default_value_t = MssqlExtensionListFormat::Table)]
+    pub format: MssqlExtensionListFormat,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlDumpExtensionArgs {
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// bcp executable path.
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server login. Uses integrated authentication when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    /// SQL Server database name.
+    #[arg(long)]
+    pub database: String,
+    /// Export exactly this extension name.
+    #[arg(
+        long,
+        conflicts_with = "all_extensions",
+        required_unless_present = "all_extensions"
+    )]
+    pub extension: Option<String>,
+    /// Export every extension into a child directory named after the extension.
+    #[arg(
+        long,
+        conflicts_with = "extension",
+        required_unless_present = "extension"
+    )]
+    pub all_extensions: bool,
+    /// Output source directory. For --all-extensions, contains one child per extension.
+    #[arg(short, long)]
+    pub output_dir: PathBuf,
+    /// Replace an existing output tree.
+    #[arg(long)]
+    pub overwrite: bool,
+    /// Hierarchical XML source version.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlLoadExtensionArgs {
+    /// sqlcmd executable path.
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    /// bcp executable path.
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server login. Uses integrated authentication when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    /// SQL Server database name.
+    #[arg(long)]
+    pub database: String,
+    /// Stage exactly this extension name.
+    #[arg(
+        long,
+        conflicts_with = "all_extensions",
+        required_unless_present = "all_extensions"
+    )]
+    pub extension: Option<String>,
+    /// Stage every extension from a same-named child directory.
+    #[arg(
+        long,
+        conflicts_with = "extension",
+        required_unless_present = "extension"
+    )]
+    pub all_extensions: bool,
+    /// Input source directory. For --all-extensions, contains one child per extension.
+    #[arg(short, long)]
+    pub input_dir: PathBuf,
+    /// Replace existing rows for only the selected extension prefix in ConfigCASSave.
+    #[arg(long)]
+    pub replace_staging: bool,
+    /// Required acknowledgement for direct writes to a non-lab database.
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    /// Pass sqlcmd -C to trust the SQL Server certificate during staging.
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
+    /// Hierarchical XML source version.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
 }
 
 #[derive(Debug, Args)]
@@ -5206,5 +5347,101 @@ mod tests {
         assert_eq!(args.output_dir, PathBuf::from("task-evidence"));
         assert_eq!(args.profile, "storage:native-evidence");
         assert_eq!(args.compression, CfCompression::RawDeflate);
+    }
+
+    #[test]
+    fn parses_mssql_extension_list_command() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-extension-list",
+            "--database",
+            "BSP_Service",
+            "--server",
+            "localhost",
+            "--sql-user",
+            "sa",
+            "--sql-pwd-env",
+            "TEST_SQL_PASSWORD",
+            "--format",
+            "json",
+        ]);
+
+        let Commands::MssqlExtensionList(args) = cli.command else {
+            panic!("expected mssql-extension-list command");
+        };
+        assert_eq!(args.database, "BSP_Service");
+        assert_eq!(args.server, "localhost");
+        assert_eq!(args.sql_user.as_deref(), Some("sa"));
+        assert_eq!(args.sql_pwd_env, "TEST_SQL_PASSWORD");
+        assert_eq!(args.format, MssqlExtensionListFormat::Json);
+    }
+
+    #[test]
+    fn parses_single_extension_dump_and_all_extension_load() {
+        let dump = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-dump-extension",
+            "--database",
+            "BSP_Service",
+            "--extension",
+            "_ДемоПустоеРасширение",
+            "-o",
+            r"C:\dump\empty",
+        ]);
+        let Commands::MssqlDumpExtension(dump) = dump.command else {
+            panic!("expected mssql-dump-extension command");
+        };
+        assert_eq!(dump.extension.as_deref(), Some("_ДемоПустоеРасширение"));
+        assert!(!dump.all_extensions);
+        assert_eq!(dump.output_dir, PathBuf::from(r"C:\dump\empty"));
+
+        let load = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-load-extension",
+            "--database",
+            "extension_lab",
+            "--all-extensions",
+            "-i",
+            r"C:\dump\extensions",
+            "--replace-staging",
+            "--allow-non-lab",
+        ]);
+        let Commands::MssqlLoadExtension(load) = load.command else {
+            panic!("expected mssql-load-extension command");
+        };
+        assert!(load.extension.is_none());
+        assert!(load.all_extensions);
+        assert!(load.replace_staging);
+        assert!(load.allow_non_lab);
+        assert!(!load.sqlcmd_trust_cert);
+    }
+
+    #[test]
+    fn extension_selection_is_mutually_exclusive_and_required() {
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-dump-extension",
+                "--database",
+                "BSP_Service",
+                "-o",
+                r"C:\dump",
+            ])
+            .is_err()
+        );
+        assert!(
+            Cli::try_parse_from([
+                "ibcmd-rs",
+                "mssql-load-extension",
+                "--database",
+                "extension_lab",
+                "--extension",
+                "One",
+                "--all-extensions",
+                "-i",
+                r"C:\dump",
+            ])
+            .is_err()
+        );
     }
 }

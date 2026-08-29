@@ -33,6 +33,7 @@ ibcmd-xml = { path = "crates/ibcmd-xml" }
 quick-xml = "0.38"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
+sha1 = "0.10"
 sha2 = "0.10"
 rayon = "1.10"
 uuid = { version = "1.19", features = ["v4"] }
