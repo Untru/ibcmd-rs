@@ -20,6 +20,7 @@ pub mod mssql_extension_export;
 pub mod mssql_extension_load;
 pub mod mssql_extension_stage;
 pub mod mssql_extensions;
+pub mod mssql_source_change;
 pub mod mxl_line_provenance;
 pub mod parallel;
 pub mod plan;
