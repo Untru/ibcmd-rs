@@ -34,6 +34,10 @@ const MANIFEST_SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
 /// vendor .cf; counting it as an object with no version entry failed every
 /// .cf the platform saves, and so every purpose-built seed configuration.
 const OPTIONAL_SERVICE_NAME: &str = "deleted";
+/// Dynamic publication marker written beside object rows. It is service
+/// state, is absent from the versions object inventory, and has no source
+/// projection.
+const DYNAMIC_UPDATE_SERVICE_NAME: &str = "DynamicallyUpdated";
 
 /// The Configuration object's own metadata text always embeds a `{1,0,...}`
 /// header reference to its (thick-client) `CommandInterface` sub-object at
@@ -373,7 +377,11 @@ fn validate_versions_inventory(
     let manifest_names = file_names
         .iter()
         .map(String::as_str)
-        .filter(|name| !is_dynamic_update_entry(name) && *name != OPTIONAL_SERVICE_NAME)
+        .filter(|name| {
+            !is_dynamic_update_entry(name)
+                && *name != OPTIONAL_SERVICE_NAME
+                && *name != DYNAMIC_UPDATE_SERVICE_NAME
+        })
         .collect::<BTreeSet<_>>();
     if version_names == manifest_names {
         return Ok(());
@@ -738,4 +746,27 @@ fn format_config_dump_info_xml(
     }
     xml.push_str("\t</ConfigVersions>\r\n</ConfigDumpInfo>");
     xml.into_bytes()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dynamic_update_service_marker_is_not_an_object_inventory_entry() {
+        let versions = vec![ConfigVersionEntry {
+            id: "object.0".to_owned(),
+            version: Uuid::nil(),
+        }];
+        let names = [
+            "object.0",
+            "root",
+            "version",
+            "versions",
+            "DynamicallyUpdated",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect::<BTreeSet<_>>();
+        validate_versions_inventory(&versions, &names).unwrap();
+    }
 }

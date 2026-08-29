@@ -63,6 +63,7 @@ pub struct ExtensionActivationDryRun {
     pub no_op: bool,
     pub live_cache_invalidation_verified: bool,
     pub existing_sessions_retain_generation: bool,
+    pub recovery_token: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -148,6 +149,7 @@ impl ExtensionActivationPlan {
             no_op: self.no_op,
             live_cache_invalidation_verified: self.mode == ExtensionActivationMode::Online,
             existing_sessions_retain_generation: self.mode == ExtensionActivationMode::Online,
+            recovery_token: String::new(),
         }
     }
 
@@ -340,8 +342,14 @@ pub fn render_extension_activation_sql(
     database: &str,
     plan: &ExtensionActivationPlan,
 ) -> Result<ExtensionActivationScript, ExtensionActivationError> {
-    let report = plan.dry_run();
+    let mut report = plan.dry_run();
     let recovery = plan.recovery();
+    let recovery_json = serde_json::to_vec(&recovery).map_err(|error| {
+        ExtensionActivationError::Recovery(format!(
+            "failed to serialize extension recovery token: {error}"
+        ))
+    })?;
+    report.recovery_token = hex(&sha2::Sha256::digest(&recovery_json));
     let db = quote_ident(database)?;
     let pattern = format!("{}~_~_%", plan.namespace_prefix);
     let marker = format!("dbStruFinal{}", plan.namespace_prefix);
@@ -631,6 +639,7 @@ mod tests {
         assert!(online.dry_run().existing_sessions_retain_generation);
         let online_sql = render_extension_activation_sql("db", &online).unwrap();
         assert!(!online_sql.sql().contains("sys.dm_exec_sessions"));
+        assert_eq!(online_sql.report.recovery_token.len(), 64);
         assert!(
             prepare_extension_activation(
                 ExtensionActivationMode::Exclusive,

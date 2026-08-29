@@ -7,12 +7,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
-use flate2::Compression;
-use flate2::write::DeflateEncoder;
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::storage::{MultipartIdentity, StorageImage, StoragePatch, StoragePatchOutcome};
 use ibcmd_xml::source_tree::{SourceEntry, SourceTree};
 use serde::Serialize;
+use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
@@ -40,6 +39,8 @@ pub struct MssqlExtensionLoadReport {
     pub database: String,
     pub all_extensions: bool,
     pub activation_required: bool,
+    pub dry_run: bool,
+    pub executed: bool,
     pub extensions: Vec<MssqlExtensionLoadEntry>,
 }
 
@@ -49,6 +50,7 @@ pub struct MssqlExtensionLoadEntry {
     pub input_dir: String,
     pub staged_rows: usize,
     pub staged_bytes: u64,
+    pub proposed_cas_root: String,
     pub compiled_targets: usize,
     pub retained_base_targets: usize,
 }
@@ -127,6 +129,7 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
             )
         })?;
         let (compile_tree, retained_metadata) = sanitize_extension_tree(&tree)?;
+        let compile_tree = filter_extension_tree(&compile_tree, &args.path_prefix)?;
         let patch = compile_extension_overlay_source_tree(
             &compile_tree,
             args.source_version.version_axes().xml_dialect().clone(),
@@ -153,28 +156,54 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
 
     let mut reports = Vec::with_capacity(prepared.len());
     for item in prepared {
+        let staged_rows = item.plan.rows().len();
+        let staged_bytes = item
+            .plan
+            .rows()
+            .iter()
+            .map(|row| row.data_size())
+            .sum::<u64>();
+        let configinfo = item
+            .plan
+            .rows()
+            .iter()
+            .find(|row| row.logical_name == "configinfo")
+            .ok_or_else(|| anyhow!("prepared extension stage has no configinfo row"))?;
+        let proposed_cas_root = Sha1::digest(&configinfo.binary_data)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>();
         let snapshot = ExtensionRegistrySnapshot {
             extension_id: item.extension.physical_registry_id,
             version: item.extension.registry_version,
             zipped_info: item.extension.zipped_info.clone(),
         };
-        let execution = crate::mssql_extension_stage::execute_configcassave_stage(
-            &args.sqlcmd,
-            &args.server,
-            args.sql_user.as_deref(),
-            password.as_deref(),
-            &args.database,
-            &snapshot,
-            &item.plan,
-            args.replace_staging,
-            args.allow_non_lab,
-            args.sqlcmd_trust_cert,
-        )?;
+        let execution = if args.dry_run {
+            None
+        } else {
+            Some(crate::mssql_extension_stage::execute_configcassave_stage(
+                &args.sqlcmd,
+                &args.server,
+                args.sql_user.as_deref(),
+                password.as_deref(),
+                &args.database,
+                &snapshot,
+                &item.plan,
+                args.replace_staging,
+                args.allow_non_lab,
+                args.sqlcmd_trust_cert,
+            )?)
+        };
         reports.push(MssqlExtensionLoadEntry {
             name: item.extension.name,
             input_dir: item.input_dir.display().to_string(),
-            staged_rows: execution.expected_rows,
-            staged_bytes: execution.expected_bytes,
+            staged_rows: execution
+                .as_ref()
+                .map_or(staged_rows, |value| value.expected_rows),
+            staged_bytes: execution
+                .as_ref()
+                .map_or(staged_bytes, |value| value.expected_bytes),
+            proposed_cas_root,
             compiled_targets: item.compiled_targets,
             retained_base_targets: item.retained_base_targets,
         });
@@ -184,6 +213,8 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
         database: args.database.clone(),
         all_extensions: args.all_extensions,
         activation_required: true,
+        dry_run: args.dry_run,
+        executed: !args.dry_run,
         extensions: reports,
     })
 }
@@ -586,7 +617,7 @@ fn overlay_stage_plan(
             StoragePatchOutcome::Compiled(payload) => {
                 rows.insert(
                     target.to_owned(),
-                    ExtensionStageRow::new(target, deflate_raw(payload.bytes())?),
+                    ExtensionStageRow::new(target, compiled_extension_payload(payload.bytes())),
                 );
                 compiled += 1;
             }
@@ -611,6 +642,178 @@ fn overlay_stage_plan(
     let rows = rows.into_values().collect::<Vec<_>>();
     let plan = prepare_extension_stage(extension_id, identity, rows)?;
     Ok((plan, compiled, retained))
+}
+fn compiled_extension_payload(bytes: &[u8]) -> Vec<u8> {
+    bytes.to_vec()
+}
+
+fn filter_extension_tree(tree: &SourceTree, prefixes: &[String]) -> Result<SourceTree> {
+    if prefixes.is_empty() {
+        return Ok(tree.clone());
+    }
+    let mut prefixes = prefixes
+        .iter()
+        .map(|value| value.trim_matches('/').replace('\\', "/"))
+        .collect::<Vec<_>>();
+    if prefixes
+        .iter()
+        .any(|value| value.is_empty() || value.contains(".."))
+    {
+        bail!("extension source path prefixes must be non-empty relative paths");
+    }
+    let mut entries = Vec::new();
+    if let Some(configuration) = tree.entries().iter().find(|entry| {
+        entry
+            .path()
+            .as_str()
+            .eq_ignore_ascii_case("Configuration.xml")
+    }) {
+        let text = std::str::from_utf8(configuration.bytes())
+            .context("extension Configuration.xml is not UTF-8")?;
+        if let Some(language) = xml_element_text(text, "DefaultLanguage")
+            .and_then(|value| value.strip_prefix("Language."))
+        {
+            prefixes.push(format!("Languages/{language}"));
+        }
+    }
+    prefixes.sort();
+    prefixes.dedup();
+    for entry in tree.entries() {
+        let path = entry.path().as_str().replace('\\', "/");
+        let selected = path.eq_ignore_ascii_case("Configuration.xml")
+            || prefixes.iter().any(|prefix| {
+                path.eq_ignore_ascii_case(prefix)
+                    || path
+                        .strip_prefix(prefix)
+                        .is_some_and(|suffix| suffix.starts_with('/'))
+                    || path.eq_ignore_ascii_case(&format!("{prefix}.xml"))
+            });
+        if selected {
+            let bytes = if path.eq_ignore_ascii_case("Configuration.xml") {
+                scoped_extension_configuration(entry.bytes(), &prefixes)?
+            } else {
+                entry.bytes().to_vec()
+            };
+            entries.push(SourceEntry::from_bytes(entry.path().clone(), bytes)?);
+        }
+    }
+    if entries.len() <= 1 {
+        bail!("extension source prefixes selected no compilable source entries");
+    }
+    Ok(SourceTree::new(entries)?)
+}
+
+fn xml_element_text<'a>(text: &'a str, name: &str) -> Option<&'a str> {
+    let open = format!("<{name}>");
+    let close = format!("</{name}>");
+    let start = text.find(&open)? + open.len();
+    let end = start + text[start..].find(&close)?;
+    Some(text[start..end].trim())
+}
+
+fn scoped_extension_configuration(bytes: &[u8], prefixes: &[String]) -> Result<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).context("extension Configuration.xml is not UTF-8")?;
+    let mut selectors = Vec::new();
+    for prefix in prefixes {
+        if prefix.eq_ignore_ascii_case("Configuration") {
+            continue;
+        }
+        let parts = prefix.split('/').collect::<Vec<_>>();
+        if parts.len() < 2 {
+            bail!("extension source prefix {prefix:?} does not identify an existing owner");
+        }
+        let tag = source_collection_child_tag(parts[0])
+            .ok_or_else(|| anyhow!("unsupported extension source collection {:?}", parts[0]))?;
+        selectors.push(format!("<{tag}>{}</{tag}>", escape_xml_text(parts[1])));
+    }
+    selectors.sort();
+    selectors.dedup();
+
+    let open = "<ChildObjects>";
+    let close = "</ChildObjects>";
+    let start = text
+        .find(open)
+        .ok_or_else(|| anyhow!("extension Configuration.xml has no ChildObjects"))?
+        + open.len();
+    let relative_end = text[start..]
+        .find(close)
+        .ok_or_else(|| anyhow!("extension Configuration.xml has unterminated ChildObjects"))?;
+    let end = start + relative_end;
+    let inner = &text[start..end];
+    let mut matched = std::collections::BTreeSet::new();
+    let eol = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut replacement = String::new();
+    replacement.push_str(eol);
+    for line in inner.lines() {
+        let trimmed = line.trim();
+        if selectors.iter().any(|selector| selector == trimmed) {
+            replacement.push_str("\t\t\t");
+            replacement.push_str(trimmed);
+            replacement.push_str(eol);
+            matched.insert(trimmed.to_owned());
+        }
+    }
+    for selector in &selectors {
+        if !matched.contains(selector) {
+            bail!("selected extension owner {selector} is absent from Configuration ChildObjects");
+        }
+    }
+    replacement.push_str("\t\t");
+    let mut output = String::with_capacity(text.len());
+    output.push_str(&text[..start]);
+    output.push_str(&replacement);
+    output.push_str(&text[end..]);
+    Ok(output.into_bytes())
+}
+
+fn source_collection_child_tag(collection: &str) -> Option<&'static str> {
+    Some(match collection {
+        "Languages" => "Language",
+        "Subsystems" => "Subsystem",
+        "StyleItems" => "StyleItem",
+        "Styles" => "Style",
+        "CommonPictures" => "CommonPicture",
+        "SessionParameters" => "SessionParameter",
+        "Roles" => "Role",
+        "CommonTemplates" => "CommonTemplate",
+        "CommonModules" => "CommonModule",
+        "XDTOPackages" => "XDTOPackage",
+        "WebServices" => "WebService",
+        "HTTPServices" => "HTTPService",
+        "WSReferences" => "WSReference",
+        "SettingsStorages" => "SettingsStorage",
+        "DefinedTypes" => "DefinedType",
+        "CommonCommands" => "CommonCommand",
+        "CommandGroups" => "CommandGroup",
+        "CommonForms" => "CommonForm",
+        "Catalogs" => "Catalog",
+        "Documents" => "Document",
+        "Enums" => "Enum",
+        "Reports" => "Report",
+        "DataProcessors" => "DataProcessor",
+        "InformationRegisters" => "InformationRegister",
+        "AccumulationRegisters" => "AccumulationRegister",
+        "AccountingRegisters" => "AccountingRegister",
+        "CalculationRegisters" => "CalculationRegister",
+        "ChartsOfAccounts" => "ChartOfAccounts",
+        "ChartsOfCalculationTypes" => "ChartOfCalculationTypes",
+        "ChartsOfCharacteristicTypes" => "ChartOfCharacteristicTypes",
+        "ExchangePlans" => "ExchangePlan",
+        "BusinessProcesses" => "BusinessProcess",
+        "Tasks" => "Task",
+        "DocumentJournals" => "DocumentJournal",
+        "Constants" => "Constant",
+        "Sequences" => "Sequence",
+        "FilterCriteria" => "FilterCriterion",
+        _ => return None,
+    })
+}
+
+fn escape_xml_text(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
 }
 
 fn sanitize_extension_tree(
@@ -666,12 +869,6 @@ fn remove_xml_element(text: &str, local_name: &str) -> Result<String> {
     output.push_str(&text[..start]);
     output.push_str(&text[end..]);
     Ok(output)
-}
-
-fn deflate_raw(bytes: &[u8]) -> Result<Vec<u8>> {
-    let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
-    encoder.write_all(bytes)?;
-    Ok(encoder.finish()?)
 }
 
 fn select_extensions<'a>(
@@ -757,7 +954,7 @@ mod tests {
             StorageProfileId::parse("storage:test").unwrap(),
             StorageProvenance::new("test").unwrap(),
         );
-        let packed = deflate_raw(b"old").unwrap();
+        let packed = b"old".to_vec();
         let active = StorageImage::new(vec![
             StorageEntry::new(
                 StorageName::new("old").unwrap(),
@@ -765,12 +962,17 @@ mod tests {
                 MultipartIdentity::single(),
                 OpaqueStorageMetadata::new(Vec::new(), Vec::new()).unwrap(),
                 StoragePayloads::new(packed, b"old".to_vec()).unwrap(),
-                CompressionKind::raw_deflate(),
+                CompressionKind::stored(),
                 origin,
             )
             .unwrap(),
         ])
         .unwrap();
         assert_eq!(active.len(), 1);
+    }
+    #[test]
+    fn compiled_extension_payload_is_already_storage_ready() {
+        let compiled = b"storage-ready";
+        assert_eq!(compiled_extension_payload(compiled), compiled);
     }
 }

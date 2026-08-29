@@ -91,6 +91,8 @@ pub enum Commands {
     MssqlActivationDiff(MssqlActivationDiffArgs),
     /// Publish an already staged non-structural main-configuration change without native ibcmd.
     MssqlActivateStagedMain(MssqlActivateStagedMainArgs),
+    /// Compile, stage, and publish one existing module or managed form without native ibcmd.
+    MssqlApplySourceChange(MssqlApplySourceChangeArgs),
     /// Dry-run source load parity and bootstrap base-blob readiness without writing ConfigSave.
     MssqlAuditSourceParity(MssqlAuditSourceParityArgs),
     /// Clone a SQL Server database with backup/restore.
@@ -1355,9 +1357,15 @@ pub struct MssqlLoadExtensionArgs {
     /// Input source directory. For --all-extensions, contains one child per extension.
     #[arg(short, long)]
     pub input_dir: PathBuf,
+    /// Optional source path prefix to compile. Can be repeated.
+    #[arg(long)]
+    pub path_prefix: Vec<String>,
     /// Replace existing rows for only the selected extension prefix in ConfigCASSave.
     #[arg(long)]
     pub replace_staging: bool,
+    /// Compile and calculate the staged CAS root without writing ConfigCASSave.
+    #[arg(long)]
+    pub dry_run: bool,
     /// Required acknowledgement for direct writes to a non-lab database.
     #[arg(long)]
     pub allow_non_lab: bool,
@@ -1523,6 +1531,44 @@ pub struct MssqlActivateStagedMainArgs {
     #[arg(long)]
     pub script_output: Option<PathBuf>,
     /// Optional path for the bounded recovery JSON artifact.
+    #[arg(long)]
+    pub recovery_output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct MssqlApplySourceChangeArgs {
+    #[arg(long, default_value = "sqlcmd")]
+    pub sqlcmd: PathBuf,
+    #[arg(long, default_value = "bcp")]
+    pub bcp_executable: PathBuf,
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
+    #[arg(long)]
+    pub database: String,
+    #[arg(long)]
+    pub source_root: PathBuf,
+    #[arg(long = "path")]
+    pub source_path: PathBuf,
+    #[arg(long)]
+    pub extension: Option<String>,
+    #[arg(long, value_enum)]
+    pub mode: MssqlMainActivationModeArg,
+    #[arg(long)]
+    pub dry_run: bool,
+    #[arg(long)]
+    pub allow_non_lab: bool,
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
     #[arg(long)]
     pub recovery_output: Option<PathBuf>,
 }
@@ -5534,5 +5580,41 @@ mod tests {
             ])
             .is_err()
         );
+    }
+    #[test]
+    fn parses_mssql_apply_source_change_for_one_extension_body() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-apply-source-change",
+            "--server",
+            "localhost",
+            "--database",
+            "extension_lab",
+            "--source-root",
+            r"C:\src\extension",
+            "--path",
+            "CommonModules/Tools/Ext/Module.bsl",
+            "--extension",
+            "Demo",
+            "--mode",
+            "online",
+            "--dry-run",
+            "--allow-non-lab",
+            "--sqlcmd-trust-cert",
+        ]);
+        let Commands::MssqlApplySourceChange(args) = cli.command else {
+            panic!("unexpected command");
+        };
+        assert_eq!(args.database, "extension_lab");
+        assert_eq!(args.source_root, PathBuf::from(r"C:\src\extension"));
+        assert_eq!(
+            args.source_path,
+            PathBuf::from("CommonModules/Tools/Ext/Module.bsl")
+        );
+        assert_eq!(args.extension.as_deref(), Some("Demo"));
+        assert_eq!(args.mode, MssqlMainActivationModeArg::Online);
+        assert!(args.dry_run);
+        assert!(args.allow_non_lab);
+        assert!(args.sqlcmd_trust_cert);
     }
 }

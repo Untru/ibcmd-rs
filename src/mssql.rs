@@ -6425,7 +6425,7 @@ fn sqlcmd_command_with_auth(
         Some(user) => {
             command.arg("-U").arg(user);
             if let Some(password) = sql_auth.password {
-                command.arg("-P").arg(password);
+                command.env("SQLCMDPASSWORD", password);
             }
         }
         None => {
@@ -6460,7 +6460,7 @@ fn sqlcmd_file_command_with_auth(
         Some(user) => {
             command.arg("-U").arg(user);
             if let Some(password) = sql_auth.password {
-                command.arg("-P").arg(password);
+                command.env("SQLCMDPASSWORD", password);
             }
         }
         None => {
@@ -14137,7 +14137,13 @@ mod tests {
 
         assert!(!args.contains(&"-E".to_string()));
         assert!(args.windows(2).any(|pair| pair == ["-U", "stage-user"]));
-        assert!(args.windows(2).any(|pair| pair == ["-P", "stage-secret"]));
+        assert!(!args.contains(&"-P".to_string()));
+        assert!(command.get_envs().any(|(name, value)| {
+            name == "SQLCMDPASSWORD"
+                && value
+                    .and_then(|item| item.to_str())
+                    .is_some_and(|item| item == "stage-secret")
+        }));
     }
 
     #[test]

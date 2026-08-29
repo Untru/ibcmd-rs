@@ -1031,6 +1031,8 @@ cargo run -- mssql-dump-extension --database MyInfobase --extension MyExtension 
 cargo run -- mssql-dump-extension --database MyInfobase --all-extensions -o C:\repo\extensions
 cargo run -- mssql-load-extension --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --replace-staging --allow-non-lab --sqlcmd-trust-cert
 cargo run -- mssql-load-extension --database lab_clone --all-extensions -i C:\repo\extensions --replace-staging --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-load-extension --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --path-prefix CommonModules/Tools --dry-run --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --database lab_clone --source-root C:\repo\extensions\MyExtension --path CommonModules/Tools/Ext/Module.bsl --extension MyExtension --mode online --dry-run --allow-non-lab --sqlcmd-trust-cert
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- storage-map .\trace\events.xml -o storage-map.json
@@ -1066,12 +1068,20 @@ SQL Server. `mssql-extension-list` читает реестр `_ExtensionsInfo` �
 `mssql-load-extension` также принимает одно имя или все расширения. Команда
 сначала читает и компилирует все выбранные деревья, затем транзакционно помещает
 изменённые строки только в пространство выбранного расширения в
-`ConfigCASSave`. Она намеренно не активирует изменения: после успешного staging
-нужно отдельно выполнить штатный `ibcmd config apply --extension=<имя>`.
+`ConfigCASSave`. Флаги `--path-prefix` и `--dry-run` рассчитывают точечный
+CAS-корень без записи. Публикацию выполняет `mssql-activate-staged-extension`;
+штатный `ibcmd config apply` не требуется.
 Прямые записи требуют явного `--allow-non-lab`; существующий staging заменяется
 только с `--replace-staging`. Доверие сертификату SQL Server не отключается
 неявно: для локального сервера с самоподписанным сертификатом отдельно укажите
 `--sqlcmd-trust-cert`.
+
+`mssql-apply-source-change` объединяет экспорт активного состояния,
+fail-closed классификацию одного существующего BSL/form body, staging и
+`online`/`exclusive` публикацию. Для расширения путь проверен на 8.3.27.2214:
+целевой модуль побайтово совпал с входом, а 156 остальных файлов не изменились.
+Для основной конфигурации команда сохраняет строгий global source-asset gate
+и может отказать на opaque assets.
 
 Сейчас гарантирован round-trip деревьев, выгруженных этой же реализацией, с
 сохранением неизвестных тел метаданных из активного CAS. На тестовой копии базы

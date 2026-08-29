@@ -382,6 +382,10 @@ fn main() -> Result<()> {
             let report = ibcmd_rs::mssql::activate_staged_main(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlApplySourceChange(args) => {
+            let report = ibcmd_rs::mssql_apply::apply_source_change(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlAuditSourceParity(args) => {
             let report = ibcmd_rs::mssql::audit_source_parity(&args)?;
             if let Some(output) = args.output {
