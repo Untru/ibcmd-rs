@@ -1096,6 +1096,47 @@ pub(crate) use form_body::{
     FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context,
 };
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
+
+pub(crate) fn extract_standalone_metadata_source_xml(
+    blob: &[u8],
+    uuid: &str,
+    expected_path: &Path,
+    source_version: InfobaseConfigSourceVersion,
+) -> Option<(PathBuf, Vec<u8>)> {
+    let object_refs = BTreeMap::new();
+    let object_ref_indexes = MetadataObjectReferenceIndexes::from_legacy(&object_refs);
+    let form_kind = if expected_path.starts_with("CommonForms") {
+        "CommonForm"
+    } else {
+        "Form"
+    };
+    let form_refs = BTreeMap::from([(
+        uuid.to_owned(),
+        FormSourceReference {
+            relative_path: expected_path.to_path_buf(),
+            kind: form_kind,
+        },
+    )]);
+    extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
+        blob,
+        uuid,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+        &object_ref_indexes.resolutions,
+        &object_refs,
+        &object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &form_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        source_version,
+        &MetadataTypeSetLeafIndex::new(),
+    )
+    .map(|extracted| (extracted.relative_path, extracted.xml))
+}
 pub use moxel::try_extract_moxel_spreadsheet_xml;
 pub(crate) use moxel::{
     MoxelLineTraceEvent, MoxelLineTraceSink,

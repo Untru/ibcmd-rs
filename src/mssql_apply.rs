@@ -100,6 +100,13 @@ pub fn apply_source_change(
             .extensions
             .first()
             .map(|entry| entry.active_cas_root.clone())
+    } else if let Some(generation) = export_active_managed_form_fast(
+        args,
+        &selected_path,
+        &selected_storage_file_names,
+        &active_root,
+    )? {
+        generation
     } else {
         let report = crate::mssql_dump::dump_config(&MssqlDumpConfigArgs {
             sqlcmd: args.sqlcmd.clone(),
@@ -385,6 +392,159 @@ pub fn apply_source_change(
             total_ms: total_started.elapsed().as_millis(),
         },
     })
+}
+
+fn export_active_managed_form_fast(
+    args: &MssqlApplySourceChangeArgs,
+    selected_path: &str,
+    selected_storage_file_names: &[String],
+    active_root: &Path,
+) -> Result<Option<Option<String>>> {
+    let Some((form_root, metadata_id, body_id)) =
+        managed_form_fast_target(selected_path, selected_storage_file_names)
+    else {
+        return Ok(None);
+    };
+
+    let password = if args.sql_user.is_some() {
+        args.sql_pwd
+            .clone()
+            .filter(|value| !value.is_empty())
+            .or_else(|| std::env::var(&args.sql_pwd_env).ok())
+    } else {
+        None
+    };
+    let fetch = |table: &str, names: &std::collections::BTreeSet<String>| {
+        crate::mssql_dump::fetch_main_activation_rows_bcp(
+            &args.sqlcmd,
+            &args.bcp_executable,
+            &args.server,
+            args.sql_user.as_deref(),
+            password.as_deref(),
+            &args.database,
+            table,
+            names,
+        )
+    };
+
+    let marker_name = std::collections::BTreeSet::from(["DynamicallyUpdated".to_owned()]);
+    let config_marker = fetch("Config", &marker_name)?;
+    let params_marker = fetch("Params", &marker_name)?;
+    let generations = match (config_marker.as_slice(), params_marker.as_slice()) {
+        ([], []) => Vec::new(),
+        ([config], [params]) => dynamic_generations(&config.binary_data, &params.binary_data)?,
+        _ => bail!("Config/Params dynamic markers must both contain exactly one row"),
+    };
+
+    let mut config_names = std::collections::BTreeSet::from([metadata_id.clone(), body_id.clone()]);
+    config_names.extend(
+        generations
+            .iter()
+            .map(|generation| dynamic_alias(&body_id, generation)),
+    );
+    let rows = fetch("Config", &config_names)?;
+    let Some(metadata_row) = rows
+        .iter()
+        .find(|row| row.file_name == *metadata_id && row.part_no == 0)
+    else {
+        return Ok(None);
+    };
+    let body_row = generations
+        .iter()
+        .rev()
+        .find_map(|generation| {
+            let alias = dynamic_alias(&body_id, generation);
+            rows.iter()
+                .find(|row| row.file_name == alias && row.part_no == 0)
+        })
+        .or_else(|| {
+            rows.iter()
+                .find(|row| row.file_name == body_id && row.part_no == 0)
+        });
+    let Some(body_row) = body_row else {
+        return Ok(None);
+    };
+
+    let expected_descriptor = path_from_slashes(&format!("{form_root}.xml"));
+    let Some((descriptor_path, descriptor_xml)) =
+        crate::mssql_dump::extract_standalone_metadata_source_xml(
+            &metadata_row.binary_data,
+            &metadata_id,
+            &expected_descriptor,
+            args.source_version,
+        )
+    else {
+        return Ok(None);
+    };
+    if descriptor_path != expected_descriptor {
+        return Ok(None);
+    }
+    let Some(form_xml) = crate::mssql_dump::extract_form_body_xml(
+        &body_row.binary_data,
+        &std::collections::BTreeMap::new(),
+    ) else {
+        return Ok(None);
+    };
+    let parsed = crate::module_blob::parse_form_body_blob(&body_row.binary_data)?;
+    let packed = crate::module_blob::pack_form_body_blob_from_form_xml(
+        &body_row.binary_data,
+        form_xml.as_bytes(),
+        Some(parsed.module_text.as_bytes()),
+    )?;
+    if packed.blob != body_row.binary_data {
+        return Ok(None);
+    }
+
+    let descriptor_path = active_root.join(descriptor_path);
+    if let Some(parent) = descriptor_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    crate::mssql_dump::write_source_xml_file(
+        &descriptor_path,
+        descriptor_xml,
+        args.source_version,
+    )?;
+    let form_path = active_root.join(path_from_slashes(&format!("{form_root}/Ext/Form.xml")));
+    if let Some(parent) = form_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    crate::mssql_dump::write_source_xml_file(&form_path, form_xml, args.source_version)?;
+    if !parsed.module_text.is_empty() {
+        let module_path = active_root.join(path_from_slashes(&format!(
+            "{form_root}/Ext/Form/Module.bsl"
+        )));
+        if let Some(parent) = module_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(module_path, form_module_source_bytes(&parsed.module_text))?;
+    }
+
+    Ok(Some(generations.last().cloned()))
+}
+
+fn managed_form_fast_target(
+    selected_path: &str,
+    selected_storage_file_names: &[String],
+) -> Option<(String, String, String)> {
+    let form_root = selected_path
+        .strip_suffix("/Ext/Form.xml")
+        .or_else(|| selected_path.strip_suffix("/Ext/Form/Module.bsl"))?;
+    let root_parts = form_root.split('/').collect::<Vec<_>>();
+    let is_common = matches!(root_parts.as_slice(), ["CommonForms", _]);
+    let is_owned = matches!(root_parts.as_slice(), [_, _, "Forms", _]);
+    if !is_common && !is_owned {
+        return None;
+    }
+    let metadata_id = selected_storage_file_names
+        .iter()
+        .find(|name| name.len() == 36)?
+        .clone();
+    let body_id = format!("{metadata_id}.0");
+    (selected_storage_file_names.len() == 2
+        && selected_storage_file_names
+            .iter()
+            .any(|name| name == &body_id))
+    .then(|| (form_root.to_owned(), metadata_id, body_id))
 }
 
 fn normalize_relative_path(path: &Path) -> Result<String> {
@@ -926,6 +1086,30 @@ mod tests {
     const OLD: &str = "719baa18-69ed-439a-8962-1de53d98e05e";
     const NEW: &str = "968a0bc0-969b-4bf2-b9ef-19d0e8bf8ce4";
     const OWNER: &str = "ab132638-5188-470d-9432-de85f2b2c7d8";
+
+    #[test]
+    fn fast_target_accepts_only_one_exact_managed_form_pair() {
+        let metadata = "a627e390-8fad-4a95-afe6-674f54813188".to_owned();
+        let body = format!("{metadata}.0");
+        let selected = vec![metadata.clone(), body.clone()];
+        assert_eq!(
+            managed_form_fast_target("CommonForms/Demo/Ext/Form.xml", &selected,),
+            Some(("CommonForms/Demo".to_owned(), metadata, body))
+        );
+        assert_eq!(
+            managed_form_fast_target("Catalogs/Goods/Forms/Card/Ext/Form.xml", &selected,),
+            Some((
+                "Catalogs/Goods/Forms/Card".to_owned(),
+                selected[0].clone(),
+                selected[1].clone(),
+            ))
+        );
+        let mut extra = selected;
+        extra.push("versions".to_owned());
+        assert!(
+            managed_form_fast_target("CommonForms/Demo/Ext/Form/Module.bsl", &extra,).is_none()
+        );
+    }
 
     fn marker(text: &str) -> Vec<u8> {
         let mut bytes = vec![0xef, 0xbb, 0xbf];

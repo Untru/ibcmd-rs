@@ -44,6 +44,8 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - The first live Form.xml title update exposed native 8.3.27 button/command variants 31/9 that the packer did not match, causing two buttons and one command to be appended. The next generation was not published until the exact 20-leaf duplication diff had been explained and the native variants were covered by a regression test.
 - The corrected online update published generation e83af6c7-f250-41cb-8907-ae583a2d8b81 -> cb01f23c-deea-4e12-a1bb-0cba4ecbaf12 in 33.192 s. Repeating the same source returned no_op=true in 30.390 s, and the full active/proposed Form.xml leaf diff contained zero differences.
 - Existing Form.xml changes are supported when every selected facet has an evidenced codec; unknown references and unsupported facets remain fail-closed.
+- The 30.390 s no-op was traced to the generic exporter resolving configuration-wide form reference indexes before reading one selected form. A bounded managed-form fast path now fetches only its descriptor/body, `DynamicallyUpdated` markers, and effective aliases. It accepts the result only after an exact active-blob unpack/repack proof and otherwise falls back to the generic fail-closed exporter. The live target below is a CommonForm; owned-form path eligibility is covered by the focused regression.
+- On 2026-08-30 the same 8.3.27.2214 clone published a second Form.xml title update from generation cb01f23c-deea-4e12-a1bb-0cba4ecbaf12 to 269e4f70-7d4c-4c28-b8df-7fd9a147ac76 in 3.156 s: active read 259 ms, classification 4 ms, two-row staging 2.158 s, activation 724 ms. The immediate repeated dry-run was a no-op in 253 ms: active read 235 ms and classification 11 ms. The recovery token remains outside the repository.
 
 ## Tests and build
 
@@ -53,6 +55,7 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - DynamicallyUpdated inventory regression test: passed.
 - Focused high-level apply tests: 6 passed, including dynamic form-module BOM reconstruction.
 - Form regressions: semantic XML equality/value-change tests and native 31/9 button/command recognition passed.
+- Bounded managed-form fast-path eligibility/fallback regression passed; live changed/no-op timings are recorded above.
 - Full suite: 2536 passed, 16 pre-existing form-decoder tests failed; one failure reproduces in isolation.
 - cargo build --release --locked: passed.
 
