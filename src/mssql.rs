@@ -337,6 +337,9 @@ pub struct MssqlActivationDiffReport {
 #[derive(Debug, Serialize)]
 pub struct MssqlActivateStagedMainReport {
     pub database: String,
+    pub claimed_platform_profile: String,
+    pub verified_platform_profile: String,
+    pub storage_schema_sha256: String,
     pub dry_run: bool,
     pub executed: bool,
     pub activation: MainActivationDryRunReport,
@@ -889,6 +892,25 @@ pub fn diff_activation_snapshots(
 pub fn activate_staged_main(
     args: &MssqlActivateStagedMainArgs,
 ) -> Result<MssqlActivateStagedMainReport> {
+    let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: &args.sqlcmd,
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
+    args.platform_profile.require_main_write_supported()?;
     if !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required");
     }
@@ -999,12 +1021,8 @@ pub fn activate_staged_main(
             Some(crate::mssql_worker_switch::WorkerSwitchOptions {
                 rac: args.rac.clone(),
                 ras_endpoint: args.ras_endpoint.clone(),
-                cluster_id: args
-                    .cluster_id
-                    .ok_or_else(|| anyhow!("--cluster-id is required for worker activation"))?,
-                infobase_id: args
-                    .infobase_id
-                    .ok_or_else(|| anyhow!("--infobase-id is required for worker activation"))?,
+                cluster_id: profile_verification.verified_cluster_id,
+                infobase_id: profile_verification.verified_infobase_id,
                 timeout: Duration::from_secs(10),
             })
         } else {
@@ -1054,6 +1072,9 @@ pub fn activate_staged_main(
     let activation_no_op = rendered.report.no_op;
     Ok(MssqlActivateStagedMainReport {
         database: args.database.clone(),
+        claimed_platform_profile: profile_verification.claimed_platform_profile,
+        verified_platform_profile: profile_verification.verified_platform_profile,
+        storage_schema_sha256: profile_verification.storage_schema_sha256,
         dry_run: args.dry_run,
         executed: !args.dry_run,
         activation: rendered.report,
@@ -7670,15 +7691,17 @@ mod tests {
         BinaryBlobRow, ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest,
         DeltaBundleManifest, PreparedCommonModuleObjectStage, PreparedCommonModuleStage,
         PreparedMetadataBodyStage, PreparedMetadataObjectStage, StorageBundleManifest,
-        StorageTableManifest, TableShape, build_source_stage_batches, compare_shapes,
-        compare_storage_table_manifests, diff_activation_rows, encode_hex,
+        StorageTableManifest, TableShape, activate_staged_main, build_source_stage_batches,
+        compare_shapes, compare_storage_table_manifests, diff_activation_rows, encode_hex,
         filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
         is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
         require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
         source_stage_batch_reports, source_xml_version_from_bytes, validate_delta_manifest,
         validate_selected_source_versions, validate_storage_manifest,
     };
-    use crate::cli::InfobaseConfigSourceVersion;
+    use crate::cli::{
+        InfobaseConfigSourceVersion, MssqlActivateStagedMainArgs, MssqlMainActivationModeArg,
+    };
     use crate::compiler::bodies::template::TemplateKind;
     #[cfg(feature = "mssql-live-tests")]
     use crate::module_blob::parse_simple_metadata_xml_properties;
@@ -7689,6 +7712,36 @@ mod tests {
         pack_raw_deflated_blob_from_bytes, pack_style_body_blob_from_xml,
         raw_deflated_first_base64_payload_sha256, raw_deflated_plain_sha256,
     };
+    use crate::mssql_platform_profile::MssqlNativePlatformProfile;
+
+    #[test]
+    fn runtime_profile_verification_fails_before_main_stage_read() {
+        let args = MssqlActivateStagedMainArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
+            sqlcmd_trust_cert: false,
+            sqlcmd: PathBuf::from("must-not-run-sqlcmd"),
+            bcp_executable: PathBuf::from("must-not-run-bcp"),
+            server: "must-not-connect".to_owned(),
+            sql_user: None,
+            sql_pwd: None,
+            sql_pwd_env: "MUST_NOT_READ".to_owned(),
+            database: "must_not_connect".to_owned(),
+            mode: MssqlMainActivationModeArg::Exclusive,
+            dry_run: false,
+            allow_non_lab: true,
+            script_output: None,
+            recovery_output: None,
+            tail_log_output: None,
+            rac: PathBuf::from("must-not-run-rac"),
+            ras_endpoint: "must-not-connect".to_owned(),
+            cluster_id: None,
+            infobase_id: None,
+            infobase_user: None,
+            infobase_pwd: None,
+        };
+        let error = activate_staged_main(&args).expect_err("unverified write must fail closed");
+        assert!(error.to_string().contains("failed to launch rac"));
+    }
     #[cfg(feature = "mssql-live-tests")]
     use crate::mssql_dump::extract_moxel_spreadsheet_xml;
     use crate::source::{SourceFile, SourceKind, SourceManifest};

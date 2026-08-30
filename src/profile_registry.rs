@@ -374,6 +374,12 @@ mod tests {
             );
             assert!(profile.xml_dialect.is_none());
             assert!(profile.compatibility_mode.is_none());
+            if matches!(version, "8.3.27.1989" | "8.5.1.1150") {
+                assert_eq!(
+                    profile.storage_profile.as_ref().unwrap().value.as_str(),
+                    "storage:mssql-config-configsave"
+                );
+            }
             if version == "8.3.27.1989" {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.constant.layout"].value,
@@ -411,16 +417,23 @@ mod tests {
                     profile.constants["bootstrap.metadata.settings_storage.layout"].value,
                     "settings-storage-v1-crlf-utf8-bom"
                 );
-                assert_eq!(
-                    profile.storage_profile.as_ref().unwrap().value.as_str(),
-                    "storage:mssql-config-configsave"
-                );
             } else {
-                assert!(profile.storage_profile.is_none());
+                if version == "8.3.24.1819" {
+                    assert!(profile.storage_profile.is_none());
+                }
             }
             assert!(profile.container_revision.is_none());
             assert!(profile.dbms.is_none());
-            assert!(profile.fingerprints.is_empty());
+            if version == "8.5.1.1150" {
+                assert_eq!(profile.fingerprints["mssql.ibversion"].value, "7|80313");
+                let capability = CapabilityId::parse("mssql.main.write").unwrap();
+                assert_eq!(
+                    profile.capabilities[&capability].value,
+                    CapabilityState::Unsupported
+                );
+            } else {
+                assert!(profile.fingerprints.is_empty());
+            }
             if version == "8.3.27.1989" {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.functional_option.layout"].value,
@@ -461,7 +474,9 @@ mod tests {
             } else {
                 assert!(profile.constants.is_empty());
             }
-            assert!(profile.capabilities.is_empty());
+            if version != "8.5.1.1150" {
+                assert!(profile.capabilities.is_empty());
+            }
             assert_eq!(profile.inheritance_chain, [id]);
             assert_eq!(profile.source_chain.len(), 1);
         }
@@ -486,7 +501,8 @@ mod tests {
                 .get(&ProfileId::parse("platform-8.5.1.1150").unwrap())
                 .unwrap()
                 .evidence
-                .is_empty()
+                .iter()
+                .any(|value| value.value.ends_with("baseline-20260830.md"))
         );
     }
 

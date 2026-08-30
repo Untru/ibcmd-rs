@@ -16,15 +16,16 @@ zeroes.
 
 The repository embeds six minimal experimental seed profiles: three XML
 dialects (`2.17`, `2.20`, and `2.21`) and three exact platform builds
-(`8.3.24.1819`, `8.3.27.1989`, and `8.5.1.1150`). Each seed declares exactly
-one version axis. The XML profiles form a parent-first `2.17` → `2.20` → `2.21`
-baseline/delta chain; platform profiles remain independent. There is no mapping
+(`8.3.24.1819`, `8.3.27.1989`, and `8.5.1.1150`). The XML profiles form a
+parent-first `2.17` → `2.20` → `2.21` baseline/delta chain; platform profiles
+remain independent. There is no mapping
 between a platform build and an XML dialect, and no compatibility, storage,
 container, or DBMS value is inferred. XML fingerprints record observed XCF
 evidence and the 2.21 profile declares only confirmed feature deltas; platform
-seeds deliberately contain no invented fingerprints or capabilities. Empty
-evidence on the 8.3.24 and 8.5.1 seeds is honest: the coordinate is requested
-for future research, not verified support.
+seeds deliberately contain no invented fingerprints or capabilities. The
+8.5.1 profile records only the exact live SQL fingerprint and extension-registry
+read evidence; main and extension writes remain explicitly unsupported because
+the native generation-selection protocol is not yet reproduced.
 
 `profile_registry::BUNDLED_PROFILES` embeds these files at compile time and
 `load_bundled_profile_registry` resolves them without filesystem or platform

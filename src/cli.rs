@@ -4,6 +4,7 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use uuid::Uuid;
 
 pub use crate::legacy_version::InfobaseConfigSourceVersion;
+use crate::mssql_platform_profile::MssqlNativePlatformProfile;
 
 #[derive(Debug, Parser)]
 #[command(name = "ibcmd-rs")]
@@ -1320,6 +1321,27 @@ pub struct MssqlDumpExtensionArgs {
 
 #[derive(Debug, Args)]
 pub struct MssqlLoadExtensionArgs {
+    /// Exact native MSSQL platform layout. Independent from --source-version.
+    #[arg(long)]
+    pub platform_profile: MssqlNativePlatformProfile,
+    /// rac executable used to verify the exact RAS agent build.
+    #[arg(long, default_value = "rac")]
+    pub rac: PathBuf,
+    /// RAS endpoint whose exact agent build must match --platform-profile.
+    #[arg(long, default_value = "localhost:1545")]
+    pub ras_endpoint: String,
+    /// Exact cluster UUID containing the target infobase registration.
+    #[arg(long, required = true)]
+    pub cluster_id: Option<Uuid>,
+    /// Exact target infobase UUID.
+    #[arg(long, required = true)]
+    pub infobase_id: Option<Uuid>,
+    /// Infobase administrator used by `rac infobase info`.
+    #[arg(long)]
+    pub infobase_user: Option<String>,
+    /// Infobase administrator password; empty when omitted.
+    #[arg(long)]
+    pub infobase_pwd: Option<String>,
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -1380,6 +1402,21 @@ pub struct MssqlLoadExtensionArgs {
 
 #[derive(Debug, Args)]
 pub struct MssqlActivateStagedExtensionArgs {
+    /// Exact native MSSQL platform layout.
+    #[arg(long)]
+    pub platform_profile: MssqlNativePlatformProfile,
+    #[arg(long, default_value = "rac")]
+    pub rac: PathBuf,
+    #[arg(long, default_value = "localhost:1545")]
+    pub ras_endpoint: String,
+    #[arg(long, required = true)]
+    pub cluster_id: Option<Uuid>,
+    #[arg(long, required = true)]
+    pub infobase_id: Option<Uuid>,
+    #[arg(long)]
+    pub infobase_user: Option<String>,
+    #[arg(long)]
+    pub infobase_pwd: Option<String>,
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
     #[arg(long, default_value = "bcp")]
@@ -1500,6 +1537,12 @@ pub enum MssqlMainActivationModeArg {
 
 #[derive(Debug, Clone, Args)]
 pub struct MssqlActivateStagedMainArgs {
+    /// Exact native MSSQL platform layout.
+    #[arg(long)]
+    pub platform_profile: MssqlNativePlatformProfile,
+    /// Pass sqlcmd -C while verifying and activating the native database.
+    #[arg(long)]
+    pub sqlcmd_trust_cert: bool,
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -1545,16 +1588,23 @@ pub struct MssqlActivateStagedMainArgs {
     /// RAS endpoint used by worker activation.
     #[arg(long, default_value = "localhost:1545")]
     pub ras_endpoint: String,
-    /// 1C cluster UUID required by worker activation.
-    #[arg(long)]
+    /// 1C cluster UUID required to bind the verified registration.
+    #[arg(long, required = true)]
     pub cluster_id: Option<Uuid>,
-    /// 1C infobase UUID required by worker activation.
-    #[arg(long)]
+    /// 1C infobase UUID required to bind the verified registration.
+    #[arg(long, required = true)]
     pub infobase_id: Option<Uuid>,
+    #[arg(long)]
+    pub infobase_user: Option<String>,
+    #[arg(long)]
+    pub infobase_pwd: Option<String>,
 }
 
 #[derive(Debug, Clone, Args)]
 pub struct MssqlApplySourceChangeArgs {
+    /// Exact native MSSQL platform layout. Independent from --source-version.
+    #[arg(long)]
+    pub platform_profile: MssqlNativePlatformProfile,
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
     #[arg(long, default_value = "bcp")]
@@ -1596,10 +1646,14 @@ pub struct MssqlApplySourceChangeArgs {
     pub rac: PathBuf,
     #[arg(long, default_value = "localhost:1545")]
     pub ras_endpoint: String,
-    #[arg(long)]
+    #[arg(long, required = true)]
     pub cluster_id: Option<Uuid>,
-    #[arg(long)]
+    #[arg(long, required = true)]
     pub infobase_id: Option<Uuid>,
+    #[arg(long)]
+    pub infobase_user: Option<String>,
+    #[arg(long)]
+    pub infobase_pwd: Option<String>,
     /// Watch the selected source closure and activate every stable save.
     #[arg(long)]
     pub watch: bool,
@@ -5570,6 +5624,12 @@ mod tests {
         let load = Cli::parse_from([
             "ibcmd-rs",
             "mssql-load-extension",
+            "--platform-profile",
+            "platform-8.3.27.1989",
+            "--cluster-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--infobase-id",
+            "22222222-2222-2222-2222-222222222222",
             "--database",
             "extension_lab",
             "--all-extensions",
@@ -5586,6 +5646,10 @@ mod tests {
         assert!(load.replace_staging);
         assert!(load.allow_non_lab);
         assert!(!load.sqlcmd_trust_cert);
+        assert_eq!(
+            load.platform_profile,
+            MssqlNativePlatformProfile::Platform8_3_27_1989
+        );
     }
 
     #[test]
@@ -5605,6 +5669,8 @@ mod tests {
             Cli::try_parse_from([
                 "ibcmd-rs",
                 "mssql-load-extension",
+                "--platform-profile",
+                "platform-8.3.27.1989",
                 "--database",
                 "extension_lab",
                 "--extension",
@@ -5621,6 +5687,12 @@ mod tests {
         let cli = Cli::parse_from([
             "ibcmd-rs",
             "mssql-apply-source-change",
+            "--platform-profile",
+            "platform-8.3.27.1989",
+            "--cluster-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--infobase-id",
+            "22222222-2222-2222-2222-222222222222",
             "--server",
             "localhost",
             "--database",
@@ -5658,6 +5730,12 @@ mod tests {
         let cli = Cli::parse_from([
             "ibcmd-rs",
             "mssql-apply-source-change",
+            "--platform-profile",
+            "platform-8.3.27.1989",
+            "--cluster-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--infobase-id",
+            "22222222-2222-2222-2222-222222222222",
             "--database",
             "main_lab",
             "--source-root",
@@ -5686,6 +5764,8 @@ mod tests {
         let cli = Cli::parse_from([
             "ibcmd-rs",
             "mssql-apply-source-change",
+            "--platform-profile",
+            "platform-8.3.27.1989",
             "--database",
             "main_lab",
             "--source-root",
@@ -5715,5 +5795,55 @@ mod tests {
         assert_eq!(args.ras_endpoint, "localhost:2545");
         assert!(args.cluster_id.is_some());
         assert!(args.infobase_id.is_some());
+    }
+
+    #[test]
+    fn mssql_write_commands_require_a_closed_platform_profile() {
+        let missing = Cli::try_parse_from([
+            "ibcmd-rs",
+            "mssql-activate-staged-main",
+            "--database",
+            "main_lab",
+            "--mode",
+            "exclusive",
+            "--allow-non-lab",
+        ]);
+        assert!(missing.is_err());
+
+        let unknown = Cli::try_parse_from([
+            "ibcmd-rs",
+            "mssql-activate-staged-main",
+            "--platform-profile",
+            "platform-8.5.2.9999",
+            "--database",
+            "main_lab",
+            "--mode",
+            "exclusive",
+            "--allow-non-lab",
+        ]);
+        assert!(unknown.is_err());
+
+        let known_read_only = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-activate-staged-main",
+            "--platform-profile",
+            "platform-8.5.1.1150",
+            "--cluster-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--infobase-id",
+            "22222222-2222-2222-2222-222222222222",
+            "--database",
+            "main_lab",
+            "--mode",
+            "exclusive",
+            "--allow-non-lab",
+        ]);
+        let Commands::MssqlActivateStagedMain(args) = known_read_only.command else {
+            panic!("expected mssql-activate-staged-main command");
+        };
+        assert_eq!(
+            args.platform_profile,
+            MssqlNativePlatformProfile::Platform8_5_1_1150
+        );
     }
 }

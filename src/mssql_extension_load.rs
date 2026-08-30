@@ -37,6 +37,9 @@ const MAX_ACTIVATION_STAGE_BYTES: u64 = 512 * 1024 * 1024;
 pub struct MssqlExtensionLoadReport {
     pub schema_version: u32,
     pub database: String,
+    pub claimed_platform_profile: String,
+    pub verified_platform_profile: String,
+    pub storage_schema_sha256: String,
     pub all_extensions: bool,
     pub activation_required: bool,
     pub dry_run: bool,
@@ -58,6 +61,9 @@ pub struct MssqlExtensionLoadEntry {
 #[derive(Debug, Serialize)]
 pub struct MssqlExtensionActivationReport {
     pub database: String,
+    pub claimed_platform_profile: String,
+    pub verified_platform_profile: String,
+    pub storage_schema_sha256: String,
     pub extension: String,
     pub dry_run: bool,
     pub executed: bool,
@@ -75,6 +81,25 @@ struct PreparedLoad {
 }
 
 pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLoadReport> {
+    args.platform_profile.require_extension_write_supported()?;
+    let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: &args.sqlcmd,
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
     if !args.allow_non_lab {
         bail!("direct extension writes require explicit --allow-non-lab");
     }
@@ -95,10 +120,10 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
         args.all_extensions,
     )?;
     let profiles = load_bundled_profile_registry()?;
-    let profile_id = ProfileId::parse("platform-8.3.27.1989")?;
+    let profile_id = ProfileId::parse(args.platform_profile.id())?;
     let target_profile = profiles
         .get(&profile_id)
-        .ok_or_else(|| anyhow!("bundled 8.3.27 target profile is missing"))?;
+        .ok_or_else(|| anyhow!("bundled target profile `{profile_id}` is missing"))?;
 
     // Compile and fetch every selected extension before the first write. This
     // prevents --all-extensions from publishing a prefix after a later source
@@ -211,6 +236,9 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
     Ok(MssqlExtensionLoadReport {
         schema_version: 1,
         database: args.database.clone(),
+        claimed_platform_profile: profile_verification.claimed_platform_profile,
+        verified_platform_profile: profile_verification.verified_platform_profile,
+        storage_schema_sha256: profile_verification.storage_schema_sha256,
         all_extensions: args.all_extensions,
         activation_required: true,
         dry_run: args.dry_run,
@@ -222,6 +250,25 @@ pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLo
 pub fn activate_staged_extension(
     args: &MssqlActivateStagedExtensionArgs,
 ) -> Result<MssqlExtensionActivationReport> {
+    args.platform_profile.require_extension_write_supported()?;
+    let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: &args.sqlcmd,
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
     if !args.allow_non_lab {
         bail!("direct extension writes require explicit --allow-non-lab");
     }
@@ -373,6 +420,9 @@ pub fn activate_staged_extension(
     }
     Ok(MssqlExtensionActivationReport {
         database: args.database.clone(),
+        claimed_platform_profile: profile_verification.claimed_platform_profile,
+        verified_platform_profile: profile_verification.verified_platform_profile,
+        storage_schema_sha256: profile_verification.storage_schema_sha256,
         extension: args.extension.clone(),
         dry_run: args.dry_run,
         executed: !args.dry_run && !rendered.sql().is_empty(),
@@ -921,11 +971,72 @@ fn resolve_password(args: &MssqlLoadExtensionArgs) -> Result<Option<String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mssql_platform_profile::MssqlNativePlatformProfile;
     use ibcmd_core::artifact::StorageProfileId;
     use ibcmd_core::storage::{
         CompressionKind, OpaqueStorageMetadata, StorageEntry, StorageKey, StorageName,
         StorageOrigin, StoragePayloads, StorageProvenance,
     };
+
+    #[test]
+    fn unsupported_platform_fails_before_extension_registry_read() {
+        let args = MssqlLoadExtensionArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
+            rac: PathBuf::from("must-not-run-rac"),
+            ras_endpoint: "must-not-connect".to_owned(),
+            cluster_id: None,
+            infobase_id: None,
+            infobase_user: None,
+            infobase_pwd: None,
+            sqlcmd: PathBuf::from("must-not-run-sqlcmd"),
+            bcp_executable: PathBuf::from("must-not-run-bcp"),
+            server: "must-not-connect".to_owned(),
+            sql_user: None,
+            sql_pwd: None,
+            sql_pwd_env: "MUST_NOT_READ".to_owned(),
+            database: "must_not_connect".to_owned(),
+            extension: Some("Test".to_owned()),
+            all_extensions: false,
+            input_dir: PathBuf::from("missing-source-must-not-be-read"),
+            path_prefix: Vec::new(),
+            replace_staging: true,
+            dry_run: false,
+            allow_non_lab: true,
+            sqlcmd_trust_cert: true,
+            source_version: crate::cli::InfobaseConfigSourceVersion::V2_20,
+        };
+        let error = load_extensions(&args).expect_err("8.5 write must fail closed");
+        assert!(error.to_string().contains("currently read-only"));
+    }
+
+    #[test]
+    fn unsupported_platform_fails_before_extension_activation_read() {
+        let args = MssqlActivateStagedExtensionArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
+            rac: PathBuf::from("must-not-run-rac"),
+            ras_endpoint: "must-not-connect".to_owned(),
+            cluster_id: None,
+            infobase_id: None,
+            infobase_user: None,
+            infobase_pwd: None,
+            sqlcmd: PathBuf::from("must-not-run-sqlcmd"),
+            bcp_executable: PathBuf::from("must-not-run-bcp"),
+            server: "must-not-connect".to_owned(),
+            sql_user: None,
+            sql_pwd: None,
+            sql_pwd_env: "MUST_NOT_READ".to_owned(),
+            database: "must_not_connect".to_owned(),
+            extension: "Test".to_owned(),
+            mode: crate::cli::MssqlMainActivationModeArg::Exclusive,
+            dry_run: false,
+            allow_non_lab: true,
+            sqlcmd_trust_cert: true,
+            script_output: None,
+            recovery_output: None,
+        };
+        let error = activate_staged_extension(&args).expect_err("8.5 write must fail closed");
+        assert!(error.to_string().contains("currently read-only"));
+    }
 
     #[test]
     fn activation_artifacts_are_no_clobber_and_recovery_first_safe() {

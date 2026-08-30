@@ -2,5 +2,18 @@
   "schema_version": 1,
   "id": "platform-8.5.1.1150",
   "status": "experimental",
-  "platform_build": "8.5.1.1150"
+  "platform_build": "8.5.1.1150",
+  "storage_profile": "storage:mssql-config-configsave",
+  "fingerprints": {
+    "mssql.ibversion": "7|80313",
+    "mssql.config-schema.sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3"
+  },
+  "capabilities": {
+    "mssql.extension.registry-read": "supported",
+    "mssql.extension.write": "unsupported",
+    "mssql.main.write": "unsupported"
+  },
+  "evidence": [
+    "openspec/changes/support-platform-8-5-live-activation/evidence/baseline-20260830.md"
+  ]
 }

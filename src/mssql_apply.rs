@@ -25,6 +25,9 @@ use crate::mssql_source_change::{
 pub struct MssqlApplySourceChangeReport {
     pub schema_version: u32,
     pub database: String,
+    pub claimed_platform_profile: String,
+    pub verified_platform_profile: String,
+    pub storage_schema_sha256: String,
     pub target: String,
     pub selected_path: String,
     pub mode: String,
@@ -55,6 +58,30 @@ pub fn apply_source_change(
     args: &MssqlApplySourceChangeArgs,
 ) -> Result<MssqlApplySourceChangeReport> {
     let total_started = Instant::now();
+    let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: &args.sqlcmd,
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
+    if args.extension.is_some() {
+        args.platform_profile.require_extension_write_supported()?;
+    } else {
+        args.platform_profile.require_main_write_supported()?;
+        require_supported_main_source_cohort(args)?;
+    }
     if !args.dry_run && !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required for source activation");
     }
@@ -76,12 +103,8 @@ pub fn apply_source_change(
             &crate::mssql_worker_switch::WorkerSwitchOptions {
                 rac: args.rac.clone(),
                 ras_endpoint: args.ras_endpoint.clone(),
-                cluster_id: args
-                    .cluster_id
-                    .ok_or_else(|| anyhow!("--cluster-id is required for worker activation"))?,
-                infobase_id: args
-                    .infobase_id
-                    .ok_or_else(|| anyhow!("--infobase-id is required for worker activation"))?,
+                cluster_id: profile_verification.verified_cluster_id,
+                infobase_id: profile_verification.verified_infobase_id,
                 timeout: Duration::from_secs(10),
             },
         )?;
@@ -216,6 +239,9 @@ pub fn apply_source_change(
         return Ok(MssqlApplySourceChangeReport {
             schema_version: 1,
             database: args.database.clone(),
+            claimed_platform_profile: profile_verification.claimed_platform_profile.clone(),
+            verified_platform_profile: profile_verification.verified_platform_profile.clone(),
+            storage_schema_sha256: profile_verification.storage_schema_sha256.clone(),
             target: target_name,
             selected_path,
             mode: mode_name,
@@ -245,6 +271,13 @@ pub fn apply_source_change(
     let staging = if let Some(extension) = args.extension.as_deref() {
         serde_json::to_value(crate::mssql_extension_load::load_extensions(
             &MssqlLoadExtensionArgs {
+                platform_profile: args.platform_profile,
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args.cluster_id,
+                infobase_id: args.infobase_id,
+                infobase_user: args.infobase_user.clone(),
+                infobase_pwd: args.infobase_pwd.clone(),
                 sqlcmd: args.sqlcmd.clone(),
                 bcp_executable: args.bcp_executable.clone(),
                 server: args.server.clone(),
@@ -312,6 +345,13 @@ pub fn apply_source_change(
         Some(serde_json::to_value(
             crate::mssql_extension_load::activate_staged_extension(
                 &MssqlActivateStagedExtensionArgs {
+                    platform_profile: args.platform_profile,
+                    rac: args.rac.clone(),
+                    ras_endpoint: args.ras_endpoint.clone(),
+                    cluster_id: args.cluster_id,
+                    infobase_id: args.infobase_id,
+                    infobase_user: args.infobase_user.clone(),
+                    infobase_pwd: args.infobase_pwd.clone(),
                     sqlcmd: args.sqlcmd.clone(),
                     bcp_executable: args.bcp_executable.clone(),
                     server: args.server.clone(),
@@ -332,6 +372,8 @@ pub fn apply_source_change(
     } else {
         Some(serde_json::to_value(crate::mssql::activate_staged_main(
             &MssqlActivateStagedMainArgs {
+                platform_profile: args.platform_profile,
+                sqlcmd_trust_cert: args.sqlcmd_trust_cert,
                 sqlcmd: args.sqlcmd.clone(),
                 bcp_executable: args.bcp_executable.clone(),
                 server: args.server.clone(),
@@ -349,6 +391,8 @@ pub fn apply_source_change(
                 ras_endpoint: args.ras_endpoint.clone(),
                 cluster_id: args.cluster_id,
                 infobase_id: args.infobase_id,
+                infobase_user: args.infobase_user.clone(),
+                infobase_pwd: args.infobase_pwd.clone(),
             },
         )?)?)
     };
@@ -413,6 +457,9 @@ pub fn apply_source_change(
     Ok(MssqlApplySourceChangeReport {
         schema_version: 1,
         database: args.database.clone(),
+        claimed_platform_profile: profile_verification.claimed_platform_profile,
+        verified_platform_profile: profile_verification.verified_platform_profile,
+        storage_schema_sha256: profile_verification.storage_schema_sha256,
         target: target_name,
         selected_path,
         mode: mode_name,
@@ -438,6 +485,26 @@ pub fn apply_source_change(
 }
 
 pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    crate::mssql_platform_profile::verify_mssql_native_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: &args.sqlcmd,
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
+    args.platform_profile.require_main_write_supported()?;
+    require_supported_main_source_cohort(args)?;
     if !args.watch {
         bail!("watch_source_changes requires --watch");
     }
@@ -499,6 +566,26 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
             ),
         }
     }
+}
+
+fn require_supported_main_source_cohort(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    if !matches!(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_5_1_1150
+    ) {
+        return Ok(());
+    }
+    let selected = normalize_relative_path(&args.source_path)?;
+    let common_module =
+        selected.starts_with("CommonModules/") && selected.ends_with("/Ext/Module.bsl");
+    let managed_form_module = selected.ends_with("/Ext/Form/Module.bsl")
+        && (selected.starts_with("CommonForms/") || selected.contains("/Forms/"));
+    if !common_module && !managed_form_module {
+        bail!(
+            "platform-8.5.1.1150 main writes are currently limited to common-module and managed-form-module source bodies"
+        );
+    }
+    Ok(())
 }
 
 fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u8; 32]> {
@@ -1203,6 +1290,77 @@ impl Drop for TemporaryApplyRoot {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mssql_platform_profile::MssqlNativePlatformProfile;
+
+    #[test]
+    fn runtime_profile_verification_fails_before_active_export() {
+        let args = MssqlApplySourceChangeArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
+            sqlcmd: PathBuf::from("must-not-run-sqlcmd"),
+            bcp_executable: PathBuf::from("must-not-run-bcp"),
+            server: "must-not-connect".to_owned(),
+            sql_user: None,
+            sql_pwd: None,
+            sql_pwd_env: "MUST_NOT_READ".to_owned(),
+            sqlcmd_trust_cert: true,
+            database: "must_not_connect".to_owned(),
+            source_root: PathBuf::from("missing-source-must-not-be-read"),
+            source_path: PathBuf::from("CommonModules/Test/Ext/Module.bsl"),
+            extension: None,
+            mode: MssqlMainActivationModeArg::Exclusive,
+            dry_run: false,
+            allow_non_lab: true,
+            source_version: crate::cli::InfobaseConfigSourceVersion::V2_20,
+            script_output: None,
+            recovery_output: None,
+            tail_log_output: None,
+            rac: PathBuf::from("must-not-run-rac"),
+            ras_endpoint: "must-not-connect".to_owned(),
+            cluster_id: None,
+            infobase_id: None,
+            infobase_user: None,
+            infobase_pwd: None,
+            watch: false,
+            watch_debounce_ms: 300,
+        };
+        let error = apply_source_change(&args).expect_err("unverified write must fail closed");
+        assert!(error.to_string().contains("failed to launch rac"));
+    }
+
+    #[test]
+    fn runtime_profile_verification_fails_before_watch_reads_missing_source() {
+        let args = MssqlApplySourceChangeArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
+            sqlcmd: PathBuf::from("must-not-run-sqlcmd"),
+            bcp_executable: PathBuf::from("must-not-run-bcp"),
+            server: "must-not-connect".to_owned(),
+            sql_user: None,
+            sql_pwd: None,
+            sql_pwd_env: "MUST_NOT_READ".to_owned(),
+            sqlcmd_trust_cert: true,
+            database: "must_not_connect".to_owned(),
+            source_root: PathBuf::from("missing-source-must-not-be-read"),
+            source_path: PathBuf::from("CommonModules/Test/Ext/Module.bsl"),
+            extension: None,
+            mode: MssqlMainActivationModeArg::Worker,
+            dry_run: false,
+            allow_non_lab: true,
+            source_version: crate::cli::InfobaseConfigSourceVersion::V2_21,
+            script_output: None,
+            recovery_output: None,
+            tail_log_output: None,
+            rac: PathBuf::from("must-not-run-rac"),
+            ras_endpoint: "must-not-connect".to_owned(),
+            cluster_id: None,
+            infobase_id: None,
+            infobase_user: None,
+            infobase_pwd: None,
+            watch: true,
+            watch_debounce_ms: 300,
+        };
+        let error = watch_source_changes(&args).expect_err("unverified watch must fail closed");
+        assert!(error.to_string().contains("failed to launch rac"));
+    }
 
     const OLD: &str = "719baa18-69ed-439a-8962-1de53d98e05e";
     const NEW: &str = "968a0bc0-969b-4bf2-b9ef-19d0e8bf8ce4";

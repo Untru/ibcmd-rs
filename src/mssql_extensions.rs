@@ -381,6 +381,9 @@ pub fn list_extensions(args: &MssqlExtensionListArgs) -> Result<MssqlExtensionLi
         .collect::<Result<Vec<_>>>()?;
     Ok(MssqlExtensionListReport {
         schema_version: 1,
+        // Keep the schema-v1 public value stable for existing JSON consumers.
+        // The same read envelope is evidenced on 8.5, but renaming this field
+        // requires a future schema-version bump.
         storage_profile: "mssql-extensions-info-8.3.27",
         database: args.database.clone(),
         extensions,
