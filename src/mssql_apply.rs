@@ -746,9 +746,9 @@ fn overlay_active_dynamic_module(
     }
     let active_path = active_root.join(path_from_slashes(selected_path));
     let text = if selected_path.ends_with("/Ext/Form/Module.bsl") {
-        crate::module_blob::parse_form_body_blob(&row.binary_data)?
-            .module_text
-            .into_bytes()
+        form_module_source_bytes(
+            &crate::module_blob::parse_form_body_blob(&row.binary_data)?.module_text,
+        )
     } else {
         crate::module_blob::unpack_module_blob_text(&row.binary_data)?
     };
@@ -759,6 +759,13 @@ fn overlay_active_dynamic_module(
         )
     })?;
     Ok(Some(generation))
+}
+
+fn form_module_source_bytes(module_text: &str) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(3 + module_text.len());
+    bytes.extend_from_slice(b"\xef\xbb\xbf");
+    bytes.extend_from_slice(module_text.as_bytes());
+    bytes
 }
 
 fn dynamic_generations(config: &[u8], params: &[u8]) -> Result<Vec<String>> {
@@ -926,6 +933,14 @@ mod tests {
         assert_eq!(
             dynamic_alias(&format!("{OWNER}.0"), NEW),
             format!("{OWNER}_dynupdate_{NEW}.0")
+        );
+    }
+
+    #[test]
+    fn restores_source_bom_for_dynamic_form_module() {
+        assert_eq!(
+            form_module_source_bytes("Процедура Тест()\nКонецПроцедуры"),
+            b"\xef\xbb\xbf\xd0\x9f\xd1\x80\xd0\xbe\xd1\x86\xd0\xb5\xd0\xb4\xd1\x83\xd1\x80\xd0\xb0 \xd0\xa2\xd0\xb5\xd1\x81\xd1\x82()\n\xd0\x9a\xd0\xbe\xd0\xbd\xd0\xb5\xd1\x86\xd0\x9f\xd1\x80\xd0\xbe\xd1\x86\xd0\xb5\xd0\xb4\xd1\x83\xd1\x80\xd1\x8b"
         );
     }
 

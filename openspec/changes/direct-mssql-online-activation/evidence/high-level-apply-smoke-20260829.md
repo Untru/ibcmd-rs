@@ -37,7 +37,9 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - The initial selected dump exposed global form-index uncertainty caused by unrelated forms and the prior module alias. Exact selected-row, owner-identity, and emitted-path checks now admit only the evidenced target form note and reject every other target diagnostic.
 - A changed Form/Module.bsl initially attempted to rebuild Form.xml and hit unsupported Form.StandardCommand.Cancel. Module-only compile now removes Form.xml from the temporary compiler tree after classification, preserving the active layout and replacing only module text.
 - The resulting dry-run prepared one metadata object, one body row, one batch, and zero prepare failures. No SQL write occurred.
-- A live online form-module write was requested but the external approval reviewer required a new explicit user confirmation for that mutating command, so it was not retried.
+- After explicit user approval, online apply published generation 968a0bc0-969b-4bf2-b9ef-19d0e8bf8ce4 -> ade0166e-82bd-47e6-93b0-cfaa3027d4dd in 36.963 s and produced a recovery artifact. The recovery token is intentionally not copied into this repository.
+- The published alias contains the requested BSL comment. The first repeated dry-run exposed that the dynamic-alias overlay omitted the UTF-8 BOM used by canonical source exports; content was equal but byte classification was not.
+- After restoring the canonical BOM on alias reads, a repeated read-only run returned no_op=true, changed_paths=[], no staging, and no activation. Both active and proposed generation were ade0166e-82bd-47e6-93b0-cfaa3027d4dd.
 - Full Form.xml changes remain fail-closed on unsupported compiler facets.
 
 ## Tests and build
@@ -46,12 +48,12 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - Focused extension activation tests: 5 passed.
 - CLI tests: 56 passed after adding the high-level parser case.
 - DynamicallyUpdated inventory regression test: passed.
+- Focused high-level apply tests: 6 passed, including dynamic form-module BOM reconstruction.
 - Full suite: 2536 passed, 16 pre-existing form-decoder tests failed; one failure reproduces in isolation.
 - cargo build --release --locked: passed.
 
 ## Remaining closure blockers
 
-- Live online main-form module write and repeated alias no-op after explicit approval.
 - Full native XML parity for extension-only properties/adopted mappings remains false in mssql-dump-extension.
 - Full Form.xml and extension-form high-level live smoke.
 - Explicit SQL-auth/trust review for the legacy main staging path.
