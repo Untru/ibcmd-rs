@@ -2,11 +2,13 @@
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
-use std::time::Instant;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::Value;
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -60,6 +62,29 @@ pub fn apply_source_change(
         bail!(
             "main source apply requires explicit --sqlcmd-trust-cert because the legacy main SQL runner trusts the server certificate"
         );
+    }
+    if args.extension.is_some()
+        && matches!(
+            args.mode,
+            MssqlMainActivationModeArg::Live | MssqlMainActivationModeArg::Worker
+        )
+    {
+        bail!("live/worker activation is not supported for extensions; use online or exclusive");
+    }
+    if matches!(args.mode, MssqlMainActivationModeArg::Worker) && !args.dry_run {
+        crate::mssql_worker_switch::prepare_dedicated_worker(
+            &crate::mssql_worker_switch::WorkerSwitchOptions {
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args
+                    .cluster_id
+                    .ok_or_else(|| anyhow!("--cluster-id is required for worker activation"))?,
+                infobase_id: args
+                    .infobase_id
+                    .ok_or_else(|| anyhow!("--infobase-id is required for worker activation"))?,
+                timeout: Duration::from_secs(10),
+            },
+        )?;
     }
 
     let source_root = fs::canonicalize(&args.source_root)
@@ -160,7 +185,9 @@ pub fn apply_source_change(
     };
     let activation_mode = match args.mode {
         MssqlMainActivationModeArg::Online => ActivationMode::Online,
-        MssqlMainActivationModeArg::Exclusive => ActivationMode::Exclusive,
+        MssqlMainActivationModeArg::Exclusive
+        | MssqlMainActivationModeArg::Live
+        | MssqlMainActivationModeArg::Worker => ActivationMode::Exclusive,
     };
     let classified = classify_source_change(
         &active_inventory,
@@ -180,6 +207,8 @@ pub fn apply_source_change(
     let mode_name = match args.mode {
         MssqlMainActivationModeArg::Online => "online",
         MssqlMainActivationModeArg::Exclusive => "exclusive",
+        MssqlMainActivationModeArg::Live => "live",
+        MssqlMainActivationModeArg::Worker => "worker",
     }
     .to_owned();
 
@@ -315,6 +344,11 @@ pub fn apply_source_change(
                 allow_non_lab: args.allow_non_lab,
                 script_output: args.script_output.clone(),
                 recovery_output: args.recovery_output.clone(),
+                tail_log_output: args.tail_log_output.clone(),
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args.cluster_id,
+                infobase_id: args.infobase_id,
             },
         )?)?)
     };
@@ -357,14 +391,23 @@ pub fn apply_source_change(
             "ConfigCAS".to_owned(),
             "_ExtensionsInfo".to_owned(),
         ]
-    } else if matches!(args.mode, MssqlMainActivationModeArg::Online) {
+    } else if matches!(
+        args.mode,
+        MssqlMainActivationModeArg::Online
+            | MssqlMainActivationModeArg::Live
+            | MssqlMainActivationModeArg::Worker
+    ) {
         vec![
             "ConfigSave".to_owned(),
             "Config".to_owned(),
             "Params".to_owned(),
         ]
     } else {
-        vec!["ConfigSave".to_owned(), "Config".to_owned()]
+        vec![
+            "ConfigSave".to_owned(),
+            "Config".to_owned(),
+            "Params".to_owned(),
+        ]
     };
 
     Ok(MssqlApplySourceChangeReport {
@@ -392,6 +435,84 @@ pub fn apply_source_change(
             total_ms: total_started.elapsed().as_millis(),
         },
     })
+}
+
+pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    if !args.watch {
+        bail!("watch_source_changes requires --watch");
+    }
+    if !matches!(args.mode, MssqlMainActivationModeArg::Worker) {
+        bail!("--watch currently requires --mode worker");
+    }
+    if args.dry_run || args.extension.is_some() {
+        bail!("--watch requires a writable main-configuration target");
+    }
+    if args.script_output.is_some()
+        || args.recovery_output.is_some()
+        || args.tail_log_output.is_some()
+    {
+        bail!(
+            "--watch allocates unique artifacts automatically; explicit activation artifacts are not accepted"
+        );
+    }
+    let source_root = fs::canonicalize(&args.source_root)
+        .with_context(|| format!("failed to canonicalize {}", args.source_root.display()))?;
+    let selected_path = normalize_relative_path(&args.source_path)?;
+    let paths = selected_source_closure_paths(&source_root, &selected_path)?;
+    let mut observed = source_closure_fingerprint(&source_root, &paths)?;
+    let debounce = Duration::from_millis(args.watch_debounce_ms.clamp(50, 10_000));
+    let mut changed_at = None;
+    eprintln!(
+        "watching {} source file(s); debounce={}ms",
+        paths.len(),
+        debounce.as_millis()
+    );
+
+    loop {
+        thread::sleep(Duration::from_millis(100));
+        let current = match source_closure_fingerprint(&source_root, &paths) {
+            Ok(value) => value,
+            Err(error) => {
+                eprintln!("watch fingerprint error: {error:#}");
+                continue;
+            }
+        };
+        if current != observed {
+            observed = current;
+            changed_at = Some(Instant::now());
+            continue;
+        }
+        if !changed_at.is_some_and(|started| started.elapsed() >= debounce) {
+            continue;
+        }
+        changed_at = None;
+        let mut invocation = args.clone();
+        invocation.watch = false;
+        invocation.script_output = None;
+        invocation.recovery_output = None;
+        invocation.tail_log_output = None;
+        match apply_source_change(&invocation) {
+            Ok(report) => println!("{}", serde_json::to_string(&report)?),
+            Err(error) => eprintln!(
+                "{}",
+                serde_json::json!({"event":"activation_error","error":format!("{error:#}")})
+            ),
+        }
+    }
+}
+
+fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u8; 32]> {
+    let mut digest = Sha256::new();
+    for relative in paths {
+        digest.update((relative.len() as u64).to_le_bytes());
+        digest.update(relative.as_bytes());
+        let path = source_root.join(path_from_slashes(relative));
+        let bytes = fs::read(&path)
+            .with_context(|| format!("failed to read watched source {}", path.display()))?;
+        digest.update((bytes.len() as u64).to_le_bytes());
+        digest.update(&bytes);
+    }
+    Ok(digest.finalize().into())
 }
 
 fn export_active_managed_form_fast(
@@ -1219,5 +1340,19 @@ mod tests {
             "version_patch_error": null
         });
         ensure_main_dry_run_stageable(&stageable).unwrap();
+    }
+
+    #[test]
+    fn watched_source_fingerprint_changes_only_with_content() {
+        let root = std::env::temp_dir().join(format!("ibcmd-rs-watch-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join("Module.bsl"), "v1").unwrap();
+        let paths = vec!["Module.bsl".to_owned()];
+        let first = source_closure_fingerprint(&root, &paths).unwrap();
+        fs::write(root.join("Module.bsl"), "v1").unwrap();
+        assert_eq!(source_closure_fingerprint(&root, &paths).unwrap(), first);
+        fs::write(root.join("Module.bsl"), "v2").unwrap();
+        assert_ne!(source_closure_fingerprint(&root, &paths).unwrap(), first);
+        fs::remove_dir_all(root).unwrap();
     }
 }

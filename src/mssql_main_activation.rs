@@ -25,6 +25,12 @@ pub enum MainActivationMode {
     /// Publish while sessions remain connected. Existing sessions retain their
     /// loaded generation; sessions opened afterwards use the new generation.
     Online,
+    /// Publish ordinary rows, then force a lossless SQL recovery cycle so the
+    /// already-connected 1C session reloads the new generation.
+    Live,
+    /// Publish ordinary rows while sessions are connected. The caller must
+    /// hand the dedicated 1C worker process off after the SQL commit.
+    Worker,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,6 +82,8 @@ pub struct MainActivationDryRunReport {
     pub no_op: bool,
     pub online_protocol_verified: bool,
     pub existing_sessions_retain_generation: bool,
+    pub live_session_switch_expected: bool,
+    pub requires_tail_log_artifact: bool,
     pub recovery_token: String,
 }
 
@@ -159,7 +167,11 @@ impl MainActivationPlan {
                 vec!["ConfigSave"]
             } else {
                 match self.mode {
-                    MainActivationMode::Exclusive => vec!["Config", "ConfigSave"],
+                    MainActivationMode::Exclusive
+                    | MainActivationMode::Live
+                    | MainActivationMode::Worker => {
+                        vec!["Config", "ConfigSave", "Params"]
+                    }
                     MainActivationMode::Online => {
                         vec!["Config", "ConfigSave", "Params"]
                     }
@@ -177,6 +189,11 @@ impl MainActivationPlan {
             no_op: self.no_op,
             online_protocol_verified: self.mode == MainActivationMode::Online,
             existing_sessions_retain_generation: self.mode == MainActivationMode::Online,
+            live_session_switch_expected: matches!(
+                self.mode,
+                MainActivationMode::Live | MainActivationMode::Worker
+            ),
+            requires_tail_log_artifact: self.mode == MainActivationMode::Live && !self.no_op,
             recovery_token: hex(&Sha256::digest(recovery_json)),
         }
     }
@@ -299,11 +316,36 @@ pub fn prepare_main_activation(
 pub fn render_main_activation_sql(
     database: &str,
     plan: &MainActivationPlan,
+    tail_log_output: Option<&str>,
 ) -> Result<MainActivationScript, MainActivationError> {
-    let database = quote_ident(database)?;
+    let database_name = database;
+    let database_literal = quote_string(database_name);
+    let database = quote_ident(database_name)?;
+    let live_tail = match (plan.mode, plan.no_op, tail_log_output) {
+        (MainActivationMode::Live, false, Some(path)) => Some(validate_tail_log_output(path)?),
+        (MainActivationMode::Live, false, None) => {
+            return Err(MainActivationError::SafetyGate(
+                "--tail-log-output is required for live activation".to_owned(),
+            ));
+        }
+        (MainActivationMode::Live, true, _) => None,
+        (_, _, Some(_)) => {
+            return Err(MainActivationError::SafetyGate(
+                "--tail-log-output is only valid for live activation".to_owned(),
+            ));
+        }
+        (_, _, None) => None,
+    };
     let mut sql = String::new();
     writeln!(sql, "SET NOCOUNT ON;").unwrap();
     writeln!(sql, "SET XACT_ABORT ON;").unwrap();
+    if let Some(tail) = live_tail.as_deref() {
+        writeln!(sql, "USE [master];").unwrap();
+        writeln!(sql, "IF DB_ID(N'{database_literal}') IS NULL THROW 57230, 'live activation database does not exist', 1;").unwrap();
+        writeln!(sql, "IF (SELECT recovery_model FROM sys.databases WHERE name=N'{database_literal}') NOT IN (1,2) THROW 57231, 'live activation requires FULL or BULK_LOGGED recovery', 1;").unwrap();
+        writeln!(sql, "IF (SELECT state FROM sys.databases WHERE name=N'{database_literal}') <> 0 THROW 57232, 'live activation requires an ONLINE database', 1;").unwrap();
+        writeln!(sql, "IF EXISTS (SELECT 1 FROM sys.dm_os_file_exists(N'{}') WHERE file_exists=1 OR file_is_a_directory=1) THROW 57233, 'tail-log output already exists or is a directory', 1;", quote_string(tail)).unwrap();
+    }
     writeln!(sql, "USE {database};").unwrap();
     writeln!(sql, "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;").unwrap();
     writeln!(sql, "BEGIN TRY").unwrap();
@@ -333,7 +375,7 @@ pub fn render_main_activation_sql(
         .unwrap();
         writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.ConfigSave) THROW 57206, 'ConfigSave postcondition failed', 1;").unwrap();
         writeln!(sql, "COMMIT TRANSACTION;").unwrap();
-        render_catch(&mut sql);
+        render_catch(&mut sql, None);
         return Ok(MainActivationScript {
             sql,
             report: plan.dry_run_report(),
@@ -342,8 +384,11 @@ pub fn render_main_activation_sql(
     }
 
     match plan.mode {
-        MainActivationMode::Exclusive => render_exclusive_transition(&mut sql, plan),
+        MainActivationMode::Exclusive => render_ordinary_transition(&mut sql, plan, true),
         MainActivationMode::Online => render_online_transition(&mut sql, plan),
+        MainActivationMode::Live | MainActivationMode::Worker => {
+            render_ordinary_transition(&mut sql, plan, false)
+        }
     }
     writeln!(sql, "DELETE FROM dbo.ConfigSave;").unwrap();
     writeln!(
@@ -355,7 +400,10 @@ pub fn render_main_activation_sql(
     render_postconditions(&mut sql, plan);
     writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.ConfigSave) THROW 57221, 'ConfigSave postcondition failed', 1;").unwrap();
     writeln!(sql, "COMMIT TRANSACTION;").unwrap();
-    render_catch(&mut sql);
+    render_catch(&mut sql, None);
+    if let Some(tail) = live_tail.as_deref() {
+        render_live_recovery(&mut sql, &database, &database_literal, tail);
+    }
 
     if sql.len() > MAX_PLAN_BYTES {
         return Err(MainActivationError::Limit(format!(
@@ -370,8 +418,14 @@ pub fn render_main_activation_sql(
     })
 }
 
-fn render_exclusive_transition(sql: &mut String, plan: &MainActivationPlan) {
-    writeln!(sql, "IF EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE is_user_process=1 AND session_id<>@@SPID AND database_id=DB_ID()) THROW 57209, 'exclusive activation requires no other database sessions', 1;").unwrap();
+fn render_ordinary_transition(
+    sql: &mut String,
+    plan: &MainActivationPlan,
+    require_no_sessions: bool,
+) {
+    if require_no_sessions {
+        writeln!(sql, "IF EXISTS (SELECT 1 FROM sys.dm_exec_sessions WHERE is_user_process=1 AND session_id<>@@SPID AND database_id=DB_ID()) THROW 57209, 'exclusive activation requires no other database sessions', 1;").unwrap();
+    }
     for row in &plan.staged_rows {
         let name = quote_string(&row.file_name);
         writeln!(
@@ -387,6 +441,8 @@ fn render_exclusive_transition(sql: &mut String, plan: &MainActivationPlan) {
         )
         .unwrap();
     }
+    render_marker_delete(sql, "Config", plan.config_marker.is_some(), 57215);
+    render_marker_delete(sql, "Params", plan.params_marker.is_some(), 57216);
 }
 
 fn render_online_transition(sql: &mut String, plan: &MainActivationPlan) {
@@ -466,6 +522,20 @@ fn render_marker_upsert(sql: &mut String, table: &str, payload: &[u8], code: u32
     .unwrap();
 }
 
+fn render_marker_delete(sql: &mut String, table: &str, expected: bool, code: u32) {
+    writeln!(
+        sql,
+        "DELETE FROM dbo.{table} WHERE FileName=N'DynamicallyUpdated';"
+    )
+    .unwrap();
+    writeln!(
+        sql,
+        "IF @@ROWCOUNT <> {} THROW {code}, '{table}.DynamicallyUpdated cleanup drifted', 1;",
+        if expected { 1 } else { 0 }
+    )
+    .unwrap();
+}
+
 fn render_postconditions(sql: &mut String, plan: &MainActivationPlan) {
     let generation = plan.new_generation.hyphenated().to_string();
     let published = plan
@@ -489,15 +559,85 @@ fn render_postconditions(sql: &mut String, plan: &MainActivationPlan) {
         let (config_payload, params_payload) = next_dynamic_marker_payloads(plan);
         writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.Config WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(bigint,DataSize)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW 57223, 'Config.DynamicallyUpdated postcondition failed', 1;", config_payload.len(), hex(&Sha256::digest(&config_payload))).unwrap();
         writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.Params WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(bigint,DataSize)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW 57224, 'Params.DynamicallyUpdated postcondition failed', 1;", params_payload.len(), hex(&Sha256::digest(&params_payload))).unwrap();
+    } else {
+        writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.Config WHERE FileName=N'DynamicallyUpdated') THROW 57225, 'Config.DynamicallyUpdated cleanup postcondition failed', 1;").unwrap();
+        writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.Params WHERE FileName=N'DynamicallyUpdated') THROW 57226, 'Params.DynamicallyUpdated cleanup postcondition failed', 1;").unwrap();
     }
 }
 
-fn render_catch(sql: &mut String) {
+fn render_catch(sql: &mut String, live_database: Option<(&str, &str)>) {
     writeln!(sql, "END TRY").unwrap();
     writeln!(sql, "BEGIN CATCH").unwrap();
     writeln!(sql, "IF XACT_STATE() <> 0 ROLLBACK TRANSACTION;").unwrap();
+    if let Some((database, database_name)) = live_database {
+        writeln!(sql, "USE [master];").unwrap();
+        writeln!(sql, "IF DB_ID(N'{}') IS NOT NULL AND DATABASEPROPERTYEX(N'{}','Status') <> N'RESTORING' ALTER DATABASE {database} SET MULTI_USER;", quote_string(database_name), quote_string(database_name)).unwrap();
+    }
     writeln!(sql, "THROW;").unwrap();
     writeln!(sql, "END CATCH;").unwrap();
+}
+
+fn render_live_recovery(
+    sql: &mut String,
+    database: &str,
+    database_literal: &str,
+    tail_log_output: &str,
+) {
+    let tail = quote_string(tail_log_output);
+    writeln!(sql, "DECLARE @LiveExpected1cConnections int=(SELECT COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process=1 AND database_id=DB_ID(N'{database_literal}') AND program_name=N'1CV83 Server');").unwrap();
+    writeln!(sql, "CHECKPOINT;").unwrap();
+    writeln!(sql, "USE [master];").unwrap();
+    writeln!(sql, "BEGIN TRY").unwrap();
+    // The first recovery makes rphost observe the newly committed ordinary
+    // generation. The second recovery advances already open 1C sessions to
+    // that prepared generation. Both log backup sets are retained in one
+    // operator-owned artifact.
+    writeln!(
+        sql,
+        "ALTER DATABASE {database} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+    )
+    .unwrap();
+    writeln!(
+        sql,
+        "BACKUP LOG {database} TO DISK=N'{tail}' WITH NORECOVERY, INIT, COMPRESSION, CHECKSUM;"
+    )
+    .unwrap();
+    writeln!(sql, "RESTORE DATABASE {database} WITH RECOVERY;").unwrap();
+    writeln!(sql, "ALTER DATABASE {database} SET MULTI_USER;").unwrap();
+    writeln!(sql, "DECLARE @LiveReconnectDeadline datetime2(3)=DATEADD(millisecond,4000,SYSUTCDATETIME()), @LiveStableSince datetime2(3)=NULL, @LiveObserved1cConnections int=0;").unwrap();
+    writeln!(sql, "WHILE @LiveExpected1cConnections > 0 AND SYSUTCDATETIME() < @LiveReconnectDeadline BEGIN SELECT @LiveObserved1cConnections=COUNT(*) FROM sys.dm_exec_sessions WHERE is_user_process=1 AND database_id=DB_ID(N'{database_literal}') AND program_name=N'1CV83 Server'; IF @LiveObserved1cConnections >= @LiveExpected1cConnections BEGIN IF @LiveStableSince IS NULL SET @LiveStableSince=SYSUTCDATETIME(); IF DATEDIFF(millisecond,@LiveStableSince,SYSUTCDATETIME()) >= 500 BREAK; END ELSE SET @LiveStableSince=NULL; WAITFOR DELAY '00:00:00.100'; END;").unwrap();
+    writeln!(sql, "IF @LiveExpected1cConnections > 0 AND (@LiveObserved1cConnections < @LiveExpected1cConnections OR @LiveStableSince IS NULL OR DATEDIFF(millisecond,@LiveStableSince,SYSUTCDATETIME()) < 500) THROW 57234, '1C SQL connections did not recover before the live activation deadline; database is online and the second recovery was not started', 1;").unwrap();
+    writeln!(
+        sql,
+        "ALTER DATABASE {database} SET SINGLE_USER WITH ROLLBACK IMMEDIATE;"
+    )
+    .unwrap();
+    writeln!(
+        sql,
+        "BACKUP LOG {database} TO DISK=N'{tail}' WITH NORECOVERY, NOINIT, COMPRESSION, CHECKSUM;"
+    )
+    .unwrap();
+    writeln!(sql, "RESTORE DATABASE {database} WITH RECOVERY;").unwrap();
+    writeln!(sql, "ALTER DATABASE {database} SET MULTI_USER;").unwrap();
+    writeln!(sql, "END TRY").unwrap();
+    writeln!(sql, "BEGIN CATCH").unwrap();
+    writeln!(sql, "IF DB_ID(N'{database_literal}') IS NOT NULL AND DATABASEPROPERTYEX(N'{database_literal}','Status') <> N'RESTORING' ALTER DATABASE {database} SET MULTI_USER;").unwrap();
+    writeln!(sql, "IF DB_ID(N'{database_literal}') IS NOT NULL AND DATABASEPROPERTYEX(N'{database_literal}','Status') = N'RESTORING' BEGIN DECLARE @LiveRecoveryMessage nvarchar(2048)=N'live activation left database restoring; run RESTORE DATABASE {database} WITH RECOVERY; original error: '+ERROR_MESSAGE(); THROW 57250,@LiveRecoveryMessage,1; END;").unwrap();
+    writeln!(sql, "THROW;").unwrap();
+    writeln!(sql, "END CATCH;").unwrap();
+}
+
+fn validate_tail_log_output(path: &str) -> Result<String, MainActivationError> {
+    if path.is_empty()
+        || path.encode_utf16().count() > 2048
+        || path.chars().any(|ch| ch == '\0' || ch.is_control())
+    {
+        return Err(MainActivationError::SafetyGate(
+            "tail-log output path is empty, contains control characters, or exceeds 2048 UTF-16 code units"
+                .to_owned(),
+        ));
+    }
+    Ok(path.to_owned())
 }
 
 fn validate_rows(
@@ -864,7 +1004,8 @@ mod tests {
     #[test]
     fn exclusive_replaces_only_exact_staged_ordinary_rows() {
         let script =
-            render_main_activation_sql("lab]db", &fixture(MainActivationMode::Exclusive)).unwrap();
+            render_main_activation_sql("lab]db", &fixture(MainActivationMode::Exclusive), None)
+                .unwrap();
         assert!(script.sql.contains("USE [lab]]db]"));
         assert!(
             script
@@ -891,7 +1032,7 @@ mod tests {
     #[test]
     fn online_preserves_ordinary_body_and_creates_evidenced_aliases() {
         let script =
-            render_main_activation_sql("lab", &fixture(MainActivationMode::Online)).unwrap();
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Online), None).unwrap();
         assert!(script.sql.contains(&format!("{BODY}_dynupdate_{NEW}")));
         assert!(script.sql.contains(&format!("{BODY}_dynupdate_{NEW}.0")));
         assert!(script.sql.contains(&format!("versions_dynupdate_{NEW}")));
@@ -907,9 +1048,127 @@ mod tests {
     }
 
     #[test]
+    fn live_promotes_ordinary_rows_then_runs_guarded_tail_recovery() {
+        let script = render_main_activation_sql(
+            "lab]db",
+            &fixture(MainActivationMode::Live),
+            Some(r"C:\tail's\generation.trn"),
+        )
+        .unwrap();
+        let promotion = script
+            .sql
+            .find("DELETE FROM dbo.Config WHERE FileName=N'root'")
+            .unwrap();
+        let single_users = script
+            .sql
+            .match_indices("SET SINGLE_USER")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let backups = script
+            .sql
+            .match_indices("BACKUP LOG [lab]]db]")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        let recoveries = script
+            .sql
+            .match_indices("RESTORE DATABASE [lab]]db] WITH RECOVERY")
+            .map(|(index, _)| index)
+            .collect::<Vec<_>>();
+        assert_eq!(single_users.len(), 2);
+        assert_eq!(backups.len(), 2);
+        assert_eq!(recoveries.len(), 3);
+        assert!(promotion < single_users[0]);
+        assert!(single_users[0] < backups[0] && backups[0] < recoveries[0]);
+        assert!(recoveries[0] < single_users[1]);
+        assert!(single_users[1] < backups[1] && backups[1] < recoveries[1]);
+        assert!(script.sql.contains("program_name=N'1CV83 Server'"));
+        assert!(script.sql.contains("DATEADD(millisecond,4000"));
+        assert!(script.sql.contains("WAITFOR DELAY '00:00:00.100'"));
+        assert!(
+            script
+                .sql
+                .contains("did not recover before the live activation deadline")
+        );
+        assert!(!script.sql.contains("WAITFOR DELAY '00:00:05'"));
+        assert!(script.sql.contains("sys.dm_os_file_exists"));
+        assert!(script.sql.contains("file_is_a_directory=1"));
+        assert!(script.sql.contains("C:\\tail''s\\generation.trn"));
+        assert!(
+            script
+                .sql
+                .contains("WITH NORECOVERY, INIT, COMPRESSION, CHECKSUM")
+        );
+        assert!(
+            script
+                .sql
+                .contains("WITH NORECOVERY, NOINIT, COMPRESSION, CHECKSUM")
+        );
+        assert!(!script.sql.contains("COPY_ONLY"));
+        assert!(script.sql.contains("SET MULTI_USER"));
+        assert!(
+            script
+                .sql
+                .contains("live activation left database restoring")
+        );
+        assert!(script.report.live_session_switch_expected);
+        assert!(script.report.requires_tail_log_artifact);
+        assert!(!script.report.existing_sessions_retain_generation);
+        assert_eq!(
+            script.report.touched_tables,
+            ["Config", "ConfigSave", "Params"]
+        );
+    }
+
+    #[test]
+    fn live_requires_a_bounded_tail_path_and_other_modes_reject_it() {
+        assert!(matches!(
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Live), None),
+            Err(MainActivationError::SafetyGate(_))
+        ));
+        assert!(matches!(
+            render_main_activation_sql(
+                "lab",
+                &fixture(MainActivationMode::Exclusive),
+                Some(r"C:\tail.trn")
+            ),
+            Err(MainActivationError::SafetyGate(_))
+        ));
+        assert!(matches!(
+            render_main_activation_sql(
+                "lab",
+                &fixture(MainActivationMode::Live),
+                Some("bad\npath")
+            ),
+            Err(MainActivationError::SafetyGate(_))
+        ));
+    }
+
+    #[test]
+    fn worker_promotes_ordinary_rows_without_database_recovery() {
+        let script =
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Worker), None).unwrap();
+        assert!(
+            script
+                .sql
+                .contains("DELETE FROM dbo.Config WHERE FileName=N'root'")
+        );
+        assert!(
+            !script
+                .sql
+                .contains("exclusive activation requires no other database sessions")
+        );
+        assert!(!script.sql.contains("SET SINGLE_USER"));
+        assert!(!script.sql.contains("BACKUP LOG"));
+        assert!(!script.sql.contains("RESTORE DATABASE"));
+        assert!(script.report.live_session_switch_expected);
+        assert!(!script.report.requires_tail_log_artifact);
+    }
+
+    #[test]
     fn exact_sha_and_row_set_guards_precede_mutations() {
         let script =
-            render_main_activation_sql("lab", &fixture(MainActivationMode::Exclusive)).unwrap();
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Exclusive), None)
+                .unwrap();
         let guard = script.sql.find("SHA2_256").unwrap();
         let mutation = script.sql.find("DELETE FROM dbo.Config WHERE").unwrap();
         assert!(guard < mutation);
@@ -1027,7 +1286,7 @@ mod tests {
         )
         .unwrap();
         assert!(plan.is_no_op());
-        let script = render_main_activation_sql("lab", &plan).unwrap();
+        let script = render_main_activation_sql("lab", &plan, None).unwrap();
         assert!(!script.sql.contains("exclusive promotion source drifted"));
         assert!(script.sql.contains("DELETE FROM dbo.ConfigSave"));
     }
@@ -1066,10 +1325,51 @@ mod tests {
         )
         .unwrap();
         assert_eq!(plan.old_generation().to_string(), current);
-        let script = render_main_activation_sql("lab", &plan).unwrap();
+        let script = render_main_activation_sql("lab", &plan, None).unwrap();
         let expected_config = hex(&utf8_bom(&format!("{{1,2,{current},{NEW}}}")));
         let expected_params = hex(&utf8_bom(&format!("{{0,3,{OLD},{current},{NEW}}}")));
         assert!(script.sql.contains(&expected_config));
         assert!(script.sql.contains(&expected_params));
+    }
+
+    #[test]
+    fn exclusive_normalizes_both_dynamic_markers_with_exact_counts() {
+        let base = fixture(MainActivationMode::Exclusive);
+        let current = "a05f2e61-a8a0-4d85-999b-663afc575ced";
+        let plan = prepare_main_activation(
+            MainActivationMode::Exclusive,
+            base.staged_rows,
+            MainActivationSnapshot {
+                config_rows: base.active_rows,
+                config_dynamically_updated: Some(row(
+                    "DynamicallyUpdated",
+                    utf8_bom(&format!("{{1,1,{current}}}")),
+                )),
+                params_dynamically_updated: Some(row(
+                    "DynamicallyUpdated",
+                    utf8_bom(&format!("{{0,2,{OLD},{current}}}")),
+                )),
+            },
+            &[BODY.to_owned(), format!("{BODY}.0")],
+            true,
+        )
+        .unwrap();
+        let script = render_main_activation_sql("lab", &plan, None).unwrap();
+        assert!(
+            script
+                .sql
+                .contains("DELETE FROM dbo.Config WHERE FileName=N'DynamicallyUpdated'")
+        );
+        assert!(
+            script
+                .sql
+                .contains("DELETE FROM dbo.Params WHERE FileName=N'DynamicallyUpdated'")
+        );
+        assert!(script.sql.contains(
+            "IF @@ROWCOUNT <> 1 THROW 57215, 'Config.DynamicallyUpdated cleanup drifted'"
+        ));
+        assert!(script.sql.contains(
+            "IF @@ROWCOUNT <> 1 THROW 57216, 'Params.DynamicallyUpdated cleanup drifted'"
+        ));
     }
 }

@@ -24,6 +24,7 @@ pub mod mssql_extension_stage;
 pub mod mssql_extensions;
 pub mod mssql_main_activation;
 pub mod mssql_source_change;
+pub mod mssql_worker_switch;
 pub mod mxl_line_provenance;
 pub mod parallel;
 pub mod plan;

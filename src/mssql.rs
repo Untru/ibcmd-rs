@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use ibcmd_core::artifact::StorageProfileId;
@@ -341,6 +342,9 @@ pub struct MssqlActivateStagedMainReport {
     pub activation: MainActivationDryRunReport,
     pub script: PathBuf,
     pub recovery: PathBuf,
+    pub tail_log_output: Option<PathBuf>,
+    pub live_recovery_command: Option<String>,
+    pub worker_switch: Option<crate::mssql_worker_switch::WorkerSwitchReport>,
 }
 
 #[derive(Debug, Serialize)]
@@ -957,6 +961,8 @@ pub fn activate_staged_main(
     let mode = match args.mode {
         MssqlMainActivationModeArg::Exclusive => MainActivationMode::Exclusive,
         MssqlMainActivationModeArg::Online => MainActivationMode::Online,
+        MssqlMainActivationModeArg::Live => MainActivationMode::Live,
+        MssqlMainActivationModeArg::Worker => MainActivationMode::Worker,
     };
     let plan = prepare_main_activation(
         mode,
@@ -970,7 +976,40 @@ pub fn activate_staged_main(
         args.allow_non_lab,
     )
     .map_err(anyhow::Error::new)?;
-    let rendered = render_main_activation_sql(&args.database, &plan).map_err(anyhow::Error::new)?;
+    if matches!(args.mode, MssqlMainActivationModeArg::Live)
+        && args
+            .tail_log_output
+            .as_ref()
+            .is_some_and(|path| !path.is_absolute())
+    {
+        bail!("--tail-log-output must be an absolute SQL Server-local path");
+    }
+    let tail_log_output = args
+        .tail_log_output
+        .as_ref()
+        .map(|path| {
+            path.to_str()
+                .ok_or_else(|| anyhow!("--tail-log-output is not valid Unicode"))
+        })
+        .transpose()?;
+    let rendered = render_main_activation_sql(&args.database, &plan, tail_log_output)
+        .map_err(anyhow::Error::new)?;
+    let worker_options =
+        if matches!(args.mode, MssqlMainActivationModeArg::Worker) && !plan.is_no_op() {
+            Some(crate::mssql_worker_switch::WorkerSwitchOptions {
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args
+                    .cluster_id
+                    .ok_or_else(|| anyhow!("--cluster-id is required for worker activation"))?,
+                infobase_id: args
+                    .infobase_id
+                    .ok_or_else(|| anyhow!("--infobase-id is required for worker activation"))?,
+                timeout: Duration::from_secs(10),
+            })
+        } else {
+            None
+        };
 
     let artifact_root = std::env::temp_dir().join("ibcmd-rs");
     fs::create_dir_all(&artifact_root)
@@ -994,14 +1033,25 @@ pub fn activate_staged_main(
     let recovery_json = serde_json::to_vec_pretty(&rendered.recovery)?;
     write_new_or_identical(&recovery, &recovery_json)?;
 
+    let mut worker_switch = None;
     if !args.dry_run {
+        let worker_plan = worker_options
+            .as_ref()
+            .map(crate::mssql_worker_switch::prepare_dedicated_worker)
+            .transpose()?;
         let sql_auth = SqlAuth {
             user,
             password: password.as_deref(),
         };
         run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
+        if let (Some(options), Some(plan)) = (worker_options.as_ref(), worker_plan.as_ref()) {
+            worker_switch = Some(crate::mssql_worker_switch::switch_dedicated_worker(
+                options, plan,
+            )?);
+        }
     }
 
+    let activation_no_op = rendered.report.no_op;
     Ok(MssqlActivateStagedMainReport {
         database: args.database.clone(),
         dry_run: args.dry_run,
@@ -1009,6 +1059,24 @@ pub fn activate_staged_main(
         activation: rendered.report,
         script,
         recovery,
+        tail_log_output: if matches!(args.mode, MssqlMainActivationModeArg::Live)
+            && !activation_no_op
+        {
+            args.tail_log_output.clone()
+        } else {
+            None
+        },
+        live_recovery_command: if matches!(args.mode, MssqlMainActivationModeArg::Live)
+            && !activation_no_op
+        {
+            Some(format!(
+                "RESTORE DATABASE [{}] WITH RECOVERY;",
+                args.database.replace(']', "]]"),
+            ))
+        } else {
+            None
+        },
+        worker_switch,
     })
 }
 

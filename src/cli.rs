@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
+use uuid::Uuid;
 
 pub use crate::legacy_version::InfobaseConfigSourceVersion;
 
@@ -1493,9 +1494,11 @@ pub struct MssqlActivationDiffArgs {
 pub enum MssqlMainActivationModeArg {
     Exclusive,
     Online,
+    Live,
+    Worker,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct MssqlActivateStagedMainArgs {
     /// sqlcmd executable path.
     #[arg(long, default_value = "sqlcmd")]
@@ -1533,9 +1536,24 @@ pub struct MssqlActivateStagedMainArgs {
     /// Optional path for the bounded recovery JSON artifact.
     #[arg(long)]
     pub recovery_output: Option<PathBuf>,
+    /// SQL Server-local tail-log backup retained by live activation.
+    #[arg(long)]
+    pub tail_log_output: Option<PathBuf>,
+    /// rac executable used by worker activation.
+    #[arg(long, default_value = "rac")]
+    pub rac: PathBuf,
+    /// RAS endpoint used by worker activation.
+    #[arg(long, default_value = "localhost:1545")]
+    pub ras_endpoint: String,
+    /// 1C cluster UUID required by worker activation.
+    #[arg(long)]
+    pub cluster_id: Option<Uuid>,
+    /// 1C infobase UUID required by worker activation.
+    #[arg(long)]
+    pub infobase_id: Option<Uuid>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct MssqlApplySourceChangeArgs {
     #[arg(long, default_value = "sqlcmd")]
     pub sqlcmd: PathBuf,
@@ -1571,6 +1589,23 @@ pub struct MssqlApplySourceChangeArgs {
     pub script_output: Option<PathBuf>,
     #[arg(long)]
     pub recovery_output: Option<PathBuf>,
+    /// SQL Server-local tail-log backup retained by live activation.
+    #[arg(long)]
+    pub tail_log_output: Option<PathBuf>,
+    #[arg(long, default_value = "rac")]
+    pub rac: PathBuf,
+    #[arg(long, default_value = "localhost:1545")]
+    pub ras_endpoint: String,
+    #[arg(long)]
+    pub cluster_id: Option<Uuid>,
+    #[arg(long)]
+    pub infobase_id: Option<Uuid>,
+    /// Watch the selected source closure and activate every stable save.
+    #[arg(long)]
+    pub watch: bool,
+    /// Stable interval used to debounce editor save bursts.
+    #[arg(long, default_value_t = 300)]
+    pub watch_debounce_ms: u64,
 }
 
 #[derive(Debug, Args)]
@@ -5616,5 +5651,69 @@ mod tests {
         assert!(args.dry_run);
         assert!(args.allow_non_lab);
         assert!(args.sqlcmd_trust_cert);
+    }
+
+    #[test]
+    fn parses_mssql_live_source_change_with_tail_log_artifact() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-apply-source-change",
+            "--database",
+            "main_lab",
+            "--source-root",
+            r"C:\src\main",
+            "--path",
+            "CommonModules/Tools/Ext/Module.bsl",
+            "--mode",
+            "live",
+            "--tail-log-output",
+            r"C:\sql-backups\main-live.trn",
+            "--allow-non-lab",
+            "--sqlcmd-trust-cert",
+        ]);
+        let Commands::MssqlApplySourceChange(args) = cli.command else {
+            panic!("unexpected command");
+        };
+        assert_eq!(args.mode, MssqlMainActivationModeArg::Live);
+        assert_eq!(
+            args.tail_log_output,
+            Some(PathBuf::from(r"C:\sql-backups\main-live.trn"))
+        );
+    }
+
+    #[test]
+    fn parses_worker_editor_watch_contract() {
+        let cli = Cli::parse_from([
+            "ibcmd-rs",
+            "mssql-apply-source-change",
+            "--database",
+            "main_lab",
+            "--source-root",
+            r"C:\src\main",
+            "--path",
+            "CommonForms/Demo/Ext/Form/Module.bsl",
+            "--mode",
+            "worker",
+            "--watch",
+            "--watch-debounce-ms",
+            "250",
+            "--ras-endpoint",
+            "localhost:2545",
+            "--cluster-id",
+            "24c580ef-d5de-4b78-b204-b94b64eb2fae",
+            "--infobase-id",
+            "aab1bddd-3840-4899-bcc5-625500ebb115",
+            "--allow-non-lab",
+            "--sqlcmd-trust-cert",
+        ]);
+        let Commands::MssqlApplySourceChange(args) = cli.command else {
+            panic!("unexpected command");
+        };
+        assert_eq!(args.mode, MssqlMainActivationModeArg::Worker);
+        assert!(args.watch);
+        assert_eq!(args.watch_debounce_ms, 250);
+        assert_eq!(args.ras_endpoint, "localhost:2545");
+        assert!(args.cluster_id.is_some());
+        assert!(args.infobase_id.is_some());
     }
 }

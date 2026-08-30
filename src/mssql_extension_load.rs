@@ -325,6 +325,12 @@ pub fn activate_staged_extension(
         crate::cli::MssqlMainActivationModeArg::Online => {
             crate::mssql_extension_activation::ExtensionActivationMode::Online
         }
+        crate::cli::MssqlMainActivationModeArg::Live => {
+            bail!("live activation is not supported for extensions; use online or exclusive")
+        }
+        crate::cli::MssqlMainActivationModeArg::Worker => {
+            bail!("worker activation is not supported for extensions; use online or exclusive")
+        }
     };
     let plan = crate::mssql_extension_activation::prepare_extension_activation(
         mode,

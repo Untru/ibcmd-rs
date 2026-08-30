@@ -383,8 +383,12 @@ fn main() -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::MssqlApplySourceChange(args) => {
-            let report = ibcmd_rs::mssql_apply::apply_source_change(&args)?;
-            println!("{}", serde_json::to_string_pretty(&report)?);
+            if args.watch {
+                ibcmd_rs::mssql_apply::watch_source_changes(&args)?;
+            } else {
+                let report = ibcmd_rs::mssql_apply::apply_source_change(&args)?;
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
         }
         Commands::MssqlAuditSourceParity(args) => {
             let report = ibcmd_rs::mssql::audit_source_parity(&args)?;
