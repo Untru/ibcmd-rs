@@ -1106,6 +1106,7 @@ pub(crate) use moxel::{
 pub(crate) use moxel::{
     debug_moxel_number_format_usage, debug_moxel_spreadsheet_summary_from_blob,
 };
+pub(crate) use source_assets::write_source_xml_file;
 
 pub use timing::{
     MssqlDumpTableTimingSummary, MssqlDumpTimingReport, MssqlDumpTimingSummary,

@@ -40,7 +40,10 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - After explicit user approval, online apply published generation 968a0bc0-969b-4bf2-b9ef-19d0e8bf8ce4 -> ade0166e-82bd-47e6-93b0-cfaa3027d4dd in 36.963 s and produced a recovery artifact. The recovery token is intentionally not copied into this repository.
 - The published alias contains the requested BSL comment. The first repeated dry-run exposed that the dynamic-alias overlay omitted the UTF-8 BOM used by canonical source exports; content was equal but byte classification was not.
 - After restoring the canonical BOM on alias reads, a repeated read-only run returned no_op=true, changed_paths=[], no staging, and no activation. Both active and proposed generation were ade0166e-82bd-47e6-93b0-cfaa3027d4dd.
-- Full Form.xml changes remain fail-closed on unsupported compiler facets.
+- Dynamic alias reads now reconstruct the complete active Form.xml and its sibling Module.bsl. XML classification compares indexed elements, attributes, and values instead of serialization whitespace while malformed XML still fails closed.
+- The first live Form.xml title update exposed native 8.3.27 button/command variants 31/9 that the packer did not match, causing two buttons and one command to be appended. The next generation was not published until the exact 20-leaf duplication diff had been explained and the native variants were covered by a regression test.
+- The corrected online update published generation e83af6c7-f250-41cb-8907-ae583a2d8b81 -> cb01f23c-deea-4e12-a1bb-0cba4ecbaf12 in 33.192 s. Repeating the same source returned no_op=true in 30.390 s, and the full active/proposed Form.xml leaf diff contained zero differences.
+- Existing Form.xml changes are supported when every selected facet has an evidenced codec; unknown references and unsupported facets remain fail-closed.
 
 ## Tests and build
 
@@ -49,12 +52,13 @@ Target: _ДемоРасширение / CommonModules/ОтчетыКлиентП
 - CLI tests: 56 passed after adding the high-level parser case.
 - DynamicallyUpdated inventory regression test: passed.
 - Focused high-level apply tests: 6 passed, including dynamic form-module BOM reconstruction.
+- Form regressions: semantic XML equality/value-change tests and native 31/9 button/command recognition passed.
 - Full suite: 2536 passed, 16 pre-existing form-decoder tests failed; one failure reproduces in isolation.
 - cargo build --release --locked: passed.
 
 ## Remaining closure blockers
 
 - Full native XML parity for extension-only properties/adopted mappings remains false in mssql-dump-extension.
-- Full Form.xml and extension-form high-level live smoke.
+- Extension-form high-level live smoke.
 - Explicit SQL-auth/trust review for the legacy main staging path.
 - Existing unrelated red form-decoder regression tests.

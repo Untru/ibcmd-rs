@@ -1885,7 +1885,7 @@ pub(super) fn ws_reference_definition_members(
     })
 }
 
-pub(super) fn write_source_xml_file(
+pub(crate) fn write_source_xml_file(
     path: &Path,
     xml: impl AsRef<[u8]>,
     source_version: InfobaseConfigSourceVersion,

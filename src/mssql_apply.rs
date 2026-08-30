@@ -739,16 +739,35 @@ fn overlay_active_dynamic_module(
     let Some(row) = row else {
         return Ok(Some(generation));
     };
-    if selected_path.ends_with("/Ext/Form.xml") {
-        bail!(
-            "bounded apply of a form layout over an existing dynamic version of that form is not yet supported"
-        );
-    }
     let active_path = active_root.join(path_from_slashes(selected_path));
-    let text = if selected_path.ends_with("/Ext/Form/Module.bsl") {
-        form_module_source_bytes(
-            &crate::module_blob::parse_form_body_blob(&row.binary_data)?.module_text,
+    if selected_path.ends_with("/Ext/Form.xml") || selected_path.ends_with("/Ext/Form/Module.bsl") {
+        let parsed = crate::module_blob::parse_form_body_blob(&row.binary_data)?;
+        let form_root = selected_path
+            .strip_suffix("/Ext/Form.xml")
+            .or_else(|| selected_path.strip_suffix("/Ext/Form/Module.bsl"))
+            .expect("selected form path has a known suffix");
+        let form_xml = crate::mssql_dump::extract_form_body_xml(
+            &row.binary_data,
+            &std::collections::BTreeMap::new(),
         )
+        .ok_or_else(|| anyhow!("active dynamic form body cannot be reconstructed as source XML"))?;
+        let form_xml_path =
+            active_root.join(path_from_slashes(&format!("{form_root}/Ext/Form.xml")));
+        crate::mssql_dump::write_source_xml_file(&form_xml_path, form_xml, args.source_version)?;
+        let module_path = active_root.join(path_from_slashes(&format!(
+            "{form_root}/Ext/Form/Module.bsl"
+        )));
+        if parsed.module_text.is_empty() {
+            if module_path.is_file() {
+                fs::remove_file(&module_path)?;
+            }
+        } else {
+            fs::write(&module_path, form_module_source_bytes(&parsed.module_text))?;
+        }
+        return Ok(Some(generation));
+    }
+    let text = if selected_path.ends_with("/Ext/Form/Module.bsl") {
+        unreachable!("form modules return after reconstructing their complete active body")
     } else {
         crate::module_blob::unpack_module_blob_text(&row.binary_data)?
     };

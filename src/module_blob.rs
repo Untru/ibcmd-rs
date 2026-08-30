@@ -17223,6 +17223,7 @@ fn form_standard_command_uuid(command_name: &str) -> Option<&'static str> {
     match command_name {
         "Form.StandardCommand.Create" => Some("4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
         "Form.StandardCommand.Help" => Some("39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+        "Form.StandardCommand.Cancel" => Some("679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
         _ => None,
     }
 }
@@ -17250,7 +17251,7 @@ fn form_layout_child_item_tag<'a>(
             "1" => Some("PictureDecoration"),
             _ => None,
         },
-        "34" => Some("Button"),
+        "31" | "34" => Some("Button"),
         "37" if matches!(fields.len(), 59 | 60) => {
             let top_level_offset = fields.len() - 59;
             let discriminator = fields
@@ -17296,7 +17297,7 @@ fn form_layout_child_item_name_range(
     fields: &[Range<usize>],
 ) -> Option<Range<usize>> {
     let indexes: &[usize] = match wrapper {
-        "73" | "55" | "34" => &[5],
+        "73" | "55" | "31" | "34" => &[5],
         "37" | "48" => &[6, 7],
         _ => &[6],
     };
@@ -17316,7 +17317,7 @@ fn form_layout_child_item_title_range(
 ) -> Option<Range<usize>> {
     let indexes: &[usize] = match wrapper {
         "73" | "55" => &[9],
-        "34" => &[6],
+        "31" | "34" => &[6],
         "37" | "48" => &[9, 10],
         _ => &[7],
     };
@@ -17620,7 +17621,10 @@ fn retain_form_body_commands(text: &mut String, commands: &[FormXmlCommand]) -> 
 
 fn form_body_command_entry_identity(text: &str) -> Result<Option<(String, String)>> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("9" | "11")
+    ) {
         return Ok(None);
     }
     let Some(identity_range) = fields.get(1) else {
@@ -19280,7 +19284,10 @@ fn patch_form_body_command_entry(
     source: Option<&MetadataSourceContext>,
 ) -> Result<bool> {
     let fields = scan_braced_fields(text, 0)?;
-    if fields.first().map(|range| text[range.clone()].trim()) != Some("11") {
+    if !matches!(
+        fields.first().map(|range| text[range.clone()].trim()),
+        Some("9" | "11")
+    ) {
         return Ok(false);
     }
     let existing_id = fields
@@ -25950,6 +25957,36 @@ mod tests {
         parse_common_command_representation,
     };
     use crate::v8_container::{V8Element, make_v8_element_header, parse_v8_container};
+
+    #[test]
+    fn resolves_cancel_as_a_platform_standard_form_command() {
+        assert_eq!(
+            super::form_standard_command_uuid("Form.StandardCommand.Cancel"),
+            Some("679b62d9-ff72-4329-bf3a-c0c32b311dd2")
+        );
+    }
+
+    #[test]
+    fn recognizes_native_form_button_and_command_variants() -> anyhow::Result<()> {
+        let button =
+            r#"{31,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"ФормаКомандаОК",{1,0},1,{0}}"#;
+        let button_fields = super::scan_braced_fields(button, 0)?;
+        assert_eq!(
+            super::form_layout_child_item_tag("31", button, &button_fields),
+            Some("Button")
+        );
+        assert_eq!(
+            super::form_layout_child_item_name(button, "31", &button_fields).as_deref(),
+            Some("ФормаКомандаОК")
+        );
+
+        let command = r#"{9,{5,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"КомандаОК",{0},{0},{0},{0},{0},"КомандаОК",3}"#;
+        assert_eq!(
+            super::form_body_command_entry_identity(command)?,
+            Some(("5".to_owned(), "КомандаОК".to_owned()))
+        );
+        Ok(())
+    }
 
     #[test]
     fn normalizes_chart_decimal_percentages_without_leading_zero_artifacts() {

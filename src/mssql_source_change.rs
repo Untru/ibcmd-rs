@@ -430,14 +430,38 @@ fn inventory_diff(
                 actual: proposed_file.path.clone(),
             });
         }
-        if active_file.size_bytes != proposed_file.size_bytes
-            || active_file.sha256 != proposed_file.sha256
-        {
+        if !source_files_equal(active_file, proposed_file)? {
             changed.push(active_file.path.clone());
         }
     }
     changed.sort_by_key(|path| windows_path_key(path));
     Ok(changed)
+}
+
+fn source_files_equal(
+    active: &SourceFileDigest,
+    proposed: &SourceFileDigest,
+) -> Result<bool, SourceChangeError> {
+    if active.size_bytes == proposed.size_bytes && active.sha256 == proposed.sha256 {
+        return Ok(true);
+    }
+    if !active.path.ends_with(".xml") {
+        return Ok(false);
+    }
+    let (Some(active_bytes), Some(proposed_bytes)) =
+        (active.verified_bytes(), proposed.verified_bytes())
+    else {
+        return Ok(false);
+    };
+    let parse = |side: &str, bytes: &[u8]| {
+        crate::plan::parse_indexed_xml_values(bytes).map_err(|error| {
+            SourceChangeError::Io(format!(
+                "failed to parse {side} XML {}: {error:#}",
+                active.path
+            ))
+        })
+    };
+    Ok(parse("active", active_bytes)? == parse("proposed", proposed_bytes)?)
 }
 
 fn classify_supported_body(
@@ -1116,9 +1140,38 @@ mod tests {
         .unwrap()
     }
 
+    #[test]
+    fn xml_formatting_is_not_a_source_change() {
+        let active = file(
+            "CommonForms/Demo/Ext/Form.xml",
+            "<Form><Title>Demo</Title></Form>",
+        );
+        let proposed = file(
+            "CommonForms/Demo/Ext/Form.xml",
+            "<?xml version=\"1.0\"?>\n<Form>\n  <Title>Demo</Title>\n</Form>\n",
+        );
+        assert!(source_files_equal(&active, &proposed).unwrap());
+    }
+
+    #[test]
+    fn xml_value_change_remains_a_source_change() {
+        let active = file(
+            "CommonForms/Demo/Ext/Form.xml",
+            "<Form><Title>Before</Title></Form>",
+        );
+        let proposed = file(
+            "CommonForms/Demo/Ext/Form.xml",
+            "<Form><Title>After</Title></Form>",
+        );
+        assert!(!source_files_equal(&active, &proposed).unwrap());
+    }
+
     fn common_module(value: &str) -> SourceInventory {
         inventory(&[
-            ("Configuration.xml", "root"),
+            (
+                "Configuration.xml",
+                "<Configuration><Name>root</Name></Configuration>",
+            ),
             ("CommonModules/Work.xml", "metadata"),
             ("CommonModules/Work/Ext/Module.bsl", value),
         ])
@@ -1154,8 +1207,8 @@ mod tests {
     #[test]
     fn classifies_existing_form_body_and_module_as_one_closure() {
         let plan = classify_source_change(
-            &managed_form("old body", "old module"),
-            &managed_form("new body", "new module"),
+            &managed_form("<Form><Title>old</Title></Form>", "old module"),
+            &managed_form("<Form><Title>new</Title></Form>", "new module"),
             "Catalogs/Goods/Forms/Card/Ext/Form.xml",
             ActivationTarget::extension("ServiceDesk").unwrap(),
             ActivationMode::Exclusive,
@@ -1171,12 +1224,18 @@ mod tests {
         let active = inventory(&[
             ("Enums/Status.xml", "owner"),
             ("Enums/Status/Forms/Card.xml", "form"),
-            ("Enums/Status/Forms/Card/Ext/Form.xml", "old"),
+            (
+                "Enums/Status/Forms/Card/Ext/Form.xml",
+                "<Form><Title>old</Title></Form>",
+            ),
         ]);
         let proposed = inventory(&[
             ("Enums/Status.xml", "owner"),
             ("Enums/Status/Forms/Card.xml", "form"),
-            ("Enums/Status/Forms/Card/Ext/Form.xml", "new"),
+            (
+                "Enums/Status/Forms/Card/Ext/Form.xml",
+                "<Form><Title>new</Title></Form>",
+            ),
         ]);
         assert!(
             classify_source_change(
@@ -1301,7 +1360,10 @@ mod tests {
     fn rejects_changes_outside_selected_module_closure() {
         let active = common_module("old");
         let proposed = inventory(&[
-            ("Configuration.xml", "changed root"),
+            (
+                "Configuration.xml",
+                "<Configuration><Name>changed root</Name></Configuration>",
+            ),
             ("CommonModules/Work.xml", "metadata"),
             ("CommonModules/Work/Ext/Module.bsl", "new"),
         ]);
@@ -1503,7 +1565,10 @@ mod tests {
         let active = common_module("old");
         let digest: [u8; SHA256_BYTES] = Sha256::digest(b"new").into();
         let proposed = SourceInventory::from_files(vec![
-            file("Configuration.xml", "root"),
+            file(
+                "Configuration.xml",
+                "<Configuration><Name>root</Name></Configuration>",
+            ),
             file("CommonModules/Work.xml", "metadata"),
             SourceFileDigest::new("CommonModules/Work/Ext/Module.bsl", 3, digest).unwrap(),
         ])

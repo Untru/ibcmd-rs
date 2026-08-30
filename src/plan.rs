@@ -1398,17 +1398,21 @@ fn parse_xml_path_shape(xml: &[u8]) -> Result<XmlPathShape> {
     Ok(shape)
 }
 
-fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, String>> {
+pub(crate) fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, String>> {
     let mut reader = Reader::from_reader(xml);
     reader.config_mut().trim_text(false);
     let mut values = BTreeMap::<String, String>::new();
     let mut path = Vec::<String>::new();
     let mut sibling_counts = vec![BTreeMap::<String, usize>::new()];
     let mut text_stack = Vec::<String>::new();
+    let mut root_elements = 0usize;
 
     loop {
         match reader.read_event() {
             Ok(Event::Start(event)) => {
+                if path.is_empty() {
+                    root_elements += 1;
+                }
                 let segment = next_indexed_segment(&mut sibling_counts, local_name(&event));
                 path.push(segment);
                 let current = path.join("/");
@@ -1423,6 +1427,9 @@ fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, String>> {
                 text_stack.push(String::new());
             }
             Ok(Event::Empty(event)) => {
+                if path.is_empty() {
+                    root_elements += 1;
+                }
                 let segment = next_indexed_segment(&mut sibling_counts, local_name(&event));
                 path.push(segment);
                 let current = path.join("/");
@@ -1462,6 +1469,12 @@ fn parse_indexed_xml_values(xml: &[u8]) -> Result<BTreeMap<String, String>> {
             Err(error) => return Err(anyhow!("invalid XML: {error}")),
             _ => {}
         }
+    }
+
+    if root_elements != 1 || !path.is_empty() || !text_stack.is_empty() {
+        return Err(anyhow!(
+            "XML must contain exactly one complete root element"
+        ));
     }
 
     Ok(values)
