@@ -758,6 +758,100 @@ pub(super) enum WrittenSourceAsset {
         primary_path: PathBuf,
         diagnostics: Vec<FormSourceAssetDiagnostic>,
     },
+    /// A classified refusal from a non-form source-asset codec, collected
+    /// instead of aborting the diagnostic traversal. The codec named a stable
+    /// diagnostic code and a failure class, which is what makes the refusal
+    /// reportable rather than an arbitrary error.
+    TypedRejectionNotEmitted {
+        primary_path: PathBuf,
+        family: &'static str,
+        code: &'static str,
+        classification: &'static str,
+        raw_length: usize,
+        raw_sha256: String,
+    },
+}
+
+/// A refusal a codec located in the stored source data.
+///
+/// Carrying a stable code and a failure class is what makes a refusal
+/// reportable: the diagnostic export records it and continues, while every
+/// other error stays fatal. A codec must raise it before it writes any part of
+/// the asset, so a collected refusal never leaves a partial file behind.
+#[derive(Debug)]
+pub(super) struct SourceAssetRefusal {
+    code: &'static str,
+    class: MetadataSourceFailureClass,
+    detail: String,
+}
+
+impl SourceAssetRefusal {
+    pub(super) fn new(
+        code: &'static str,
+        class: MetadataSourceFailureClass,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            code,
+            class,
+            detail: detail.into(),
+        }
+    }
+
+    pub(super) const fn code(&self) -> &'static str {
+        self.code
+    }
+
+    pub(super) const fn class(&self) -> MetadataSourceFailureClass {
+        self.class
+    }
+}
+
+impl std::fmt::Display for SourceAssetRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Same header shape the persisted diagnostic ledger uses.
+        write!(
+            formatter,
+            "[error {} {}] {}",
+            self.code,
+            self.class.as_str(),
+            self.detail
+        )
+    }
+}
+
+impl std::error::Error for SourceAssetRefusal {}
+
+/// Digest of the exact stored bytes a refusal was raised for.
+pub(super) fn raw_body_sha256(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    format!("{:x}", hasher.finalize())
+}
+
+/// Stable family token used by the completeness report and its clusters.
+pub(super) const fn source_asset_family_token(kind: &SourceAssetKind) -> &'static str {
+    match kind {
+        SourceAssetKind::Form { .. } => "form",
+        SourceAssetKind::DataCompositionSchema => "dcs",
+        _ => "unknown",
+    }
+}
+
+/// A classified refusal is collectible when the codec located the failure in
+/// the source data: the bytes are outside the evidenced cohort, malformed, or
+/// unresolved against the configuration. Internal invariants and unclassified
+/// failures stay fatal, because they describe a defect in this tool.
+pub(super) const fn is_collectible_source_refusal(class: MetadataSourceFailureClass) -> bool {
+    matches!(
+        class,
+        MetadataSourceFailureClass::Unsupported
+            | MetadataSourceFailureClass::Malformed
+            | MetadataSourceFailureClass::Unresolved
+            | MetadataSourceFailureClass::Ambiguous
+    )
 }
 
 pub(super) fn source_asset_paths_with_indexes(
@@ -1932,6 +2026,39 @@ pub(super) fn write_source_asset(
     parsed_form_body: Option<&ParsedFormBodyBlob>,
     timings: &mut MssqlDumpTimingReport,
 ) -> Result<WrittenSourceAsset> {
+    match write_source_asset_inner(context, asset, bytes, parsed_form_body, timings) {
+        Ok(written) => Ok(written),
+        Err(error) => {
+            // A classified refusal is reportable: the diagnostic export records
+            // it and keeps traversing instead of losing every later row.
+            if context.collect_all_source_asset_diagnostics {
+                if let Some(refusal) = error
+                    .chain()
+                    .find_map(|cause| cause.downcast_ref::<SourceAssetRefusal>())
+                    .filter(|refusal| is_collectible_source_refusal(refusal.class()))
+                {
+                    return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
+                        primary_path: asset.primary_path.clone(),
+                        family: source_asset_family_token(&asset.kind),
+                        code: refusal.code(),
+                        classification: refusal.class().as_str(),
+                        raw_length: bytes.len(),
+                        raw_sha256: raw_body_sha256(bytes),
+                    });
+                }
+            }
+            Err(error)
+        }
+    }
+}
+
+fn write_source_asset_inner(
+    context: &DumpRowContext<'_>,
+    asset: &SourceAsset,
+    bytes: &[u8],
+    parsed_form_body: Option<&ParsedFormBodyBlob>,
+    timings: &mut MssqlDumpTimingReport,
+) -> Result<WrittenSourceAsset> {
     let output_dir = context.output_dir;
     let mut diagnostics = Vec::new();
     let mut opaque_not_emitted = false;
@@ -2171,23 +2298,31 @@ pub(super) fn write_source_asset(
             let content = match body.layout() {
                 crate::compiler::bodies::dcs::DcsBodyLayout::NativeThreeDocument => {
                     let documents = body.documents();
-                    crate::mssql_dump::dcs::normalize_data_composition_schema_template_documents_with_profiles(
+                    match crate::mssql_dump::dcs::normalize_data_composition_schema_template_documents_with_profiles(
                         &documents,
                         context.dcs_type_index,
                         context.object_refs,
                         adapter.provider_id(),
                         &target_profile,
-                    )
-                    // The typed step-level reason travels out as this error's
-                    // source, so `{error:#}` in the failed-row ledger names the
-                    // stage that rejected the template instead of reporting a
-                    // bare "failed to normalize".
-                    .with_context(|| {
-                        format!(
-                            "failed to normalize native data-composition source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?
+                    ) {
+                        Ok(content) => content,
+                        Err(error) => {
+                            // The typed step-level reason travels out as this
+                            // error's source, so `{error:#}` in the failed-row
+                            // ledger names the stage that rejected the template
+                            // instead of reporting a bare "failed to normalize",
+                            // and the classified refusal stays machine-readable.
+                            let refusal = SourceAssetRefusal::new(
+                                error.code(),
+                                error.class(),
+                                format!("{error}"),
+                            );
+                            return Err(anyhow::Error::new(refusal).context(format!(
+                                "failed to normalize native data-composition source asset {}",
+                                asset.primary_path.display()
+                            )));
+                        }
+                    }
                 }
                 crate::compiler::bodies::dcs::DcsBodyLayout::DirectXml => body.plaintext().to_vec(),
             };
@@ -5123,7 +5258,13 @@ pub(super) fn extract_standalone_content_xml(
         let reference = references
             .object_refs
             .get(uuid)
-            .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+            .ok_or_else(|| {
+                SourceAssetRefusal::new(
+                    "standalone-content.reference-unresolved",
+                    MetadataSourceFailureClass::Unresolved,
+                    format!("standalone content reference not found: {uuid}"),
+                )
+            })?;
         push_standalone_metadata_item_xml(&mut xml, "UsedItem", reference);
     }
     let mut index = 2 + count;
@@ -5148,7 +5289,13 @@ pub(super) fn extract_standalone_content_xml(
             let reference = references
                 .object_refs
                 .get(uuid)
-                .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+                .ok_or_else(|| {
+                SourceAssetRefusal::new(
+                    "standalone-content.reference-unresolved",
+                    MetadataSourceFailureClass::Unresolved,
+                    format!("standalone content reference not found: {uuid}"),
+                )
+            })?;
             push_standalone_metadata_item_xml(&mut xml, "UnusedItem", reference);
         }
         let mut trailing_uuids = fields
@@ -5161,7 +5308,13 @@ pub(super) fn extract_standalone_content_xml(
             let reference = references
                 .object_refs
                 .get(&uuid)
-                .ok_or_else(|| anyhow!("standalone content reference not found: {uuid}"))?;
+                .ok_or_else(|| {
+                SourceAssetRefusal::new(
+                    "standalone-content.reference-unresolved",
+                    MetadataSourceFailureClass::Unresolved,
+                    format!("standalone content reference not found: {uuid}"),
+                )
+            })?;
             push_standalone_priority_item_xml(&mut xml, reference);
         }
         if child_count > 0 {

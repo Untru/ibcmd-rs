@@ -5547,21 +5547,34 @@ fn dump_table_row_bytes(
                     parsed_form_body.as_ref(),
                     &mut timings,
                 )?;
-                let (emitted, primary_path, form_diagnostics) = match written {
+                let (emitted, primary_path, form_diagnostics, typed_rejection) = match written {
                     WrittenSourceAsset::Emitted {
                         primary_path,
                         diagnostics,
-                    } => (true, primary_path, diagnostics),
+                    } => (true, primary_path, diagnostics, None),
                     WrittenSourceAsset::OpaqueNotEmitted {
                         primary_path,
                         diagnostics,
-                    } => (false, primary_path, diagnostics),
+                    } => (false, primary_path, diagnostics, None),
                     WrittenSourceAsset::RejectedNotEmitted {
                         primary_path,
                         diagnostics,
-                    } => (false, primary_path, diagnostics),
+                    } => (false, primary_path, diagnostics, None),
+                    WrittenSourceAsset::TypedRejectionNotEmitted {
+                        primary_path,
+                        family,
+                        code,
+                        classification,
+                        raw_length,
+                        raw_sha256,
+                    } => (
+                        false,
+                        primary_path,
+                        Vec::new(),
+                        Some((family, code, classification, raw_length, raw_sha256)),
+                    ),
                 };
-                if !emitted && form_diagnostics.is_empty() {
+                if !emitted && form_diagnostics.is_empty() && typed_rejection.is_none() {
                     bail!(
                         "source asset {} was suppressed without an opaque diagnostic",
                         primary_path.display()
@@ -5569,7 +5582,7 @@ fn dump_table_row_bytes(
                 }
                 source_asset_rows = usize::from(emitted);
                 let asset_path = primary_path.to_string_lossy().replace('\\', "/");
-                let diagnostics = form_diagnostics
+                let mut diagnostics = form_diagnostics
                     .into_iter()
                     .map(|diagnostic| SourceAssetCompletenessEntry {
                         family: "form".to_string(),
@@ -5589,6 +5602,28 @@ fn dump_table_row_bytes(
                         raw_sha256: diagnostic.raw_sha256,
                     })
                     .collect::<Vec<_>>();
+                if let Some((family, code, classification, raw_length, raw_sha256)) = typed_rejection
+                {
+                    // One entry per refused asset: the codec classified the
+                    // whole body, not an individual property slot.
+                    diagnostics.push(SourceAssetCompletenessEntry {
+                        family: family.to_string(),
+                        code: code.to_string(),
+                        classification: classification.to_string(),
+                        parse_error_class: None,
+                        table: context.table.to_string(),
+                        source_row_id: file_name.to_string(),
+                        asset_path: asset_path.clone(),
+                        form_owner_reference: form_owner_reference.clone(),
+                        form_item_id: String::new(),
+                        form_item_tag: String::new(),
+                        property: String::new(),
+                        property_profile: String::new(),
+                        property_slot: 0,
+                        raw_length,
+                        raw_sha256,
+                    });
+                }
                 if diagnostics.is_empty() {
                     debug_assert!(emitted);
                     source_assets.record_emitted();

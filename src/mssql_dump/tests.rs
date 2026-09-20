@@ -7693,6 +7693,197 @@ fn collect_all_records_multiple_diagnosed_rejections_and_writes_later_form() {
     let _ = fs::remove_dir_all(root);
 }
 
+/// Three-document DCS envelope: header version, settings count, one length per
+/// stored document, then the primary schema, the settings variants and the
+/// terminal document. The primary schema below is well-formed XML that no
+/// admitted parser recognizes, which is exactly the classified refusal a
+/// diagnostic export must collect instead of aborting on.
+fn unadmitted_dcs_schema_template_body_for_test() -> Vec<u8> {
+    fn document(body: &str) -> Vec<u8> {
+        let mut document = Vec::new();
+        document.extend_from_slice("\u{feff}".as_bytes());
+        document.extend_from_slice(b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        document.extend_from_slice(body.as_bytes());
+        document
+    }
+
+    let primary = document(concat!(
+        "<SchemaFile xmlns=\"\">\r\n",
+        "\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n",
+        "\t\t<outsideEveryAdmittedCohort/>\r\n",
+        "\t</dataCompositionSchema>\r\n",
+        "</SchemaFile>"
+    ));
+    let settings = document(
+        "<settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\"/>",
+    );
+    let terminal = document("<AreaTemplate xmlns=\"\"/>");
+
+    let mut plain = Vec::new();
+    plain.extend_from_slice(&0_u32.to_le_bytes());
+    plain.extend_from_slice(&1_u32.to_le_bytes());
+    plain.extend_from_slice(&(primary.len() as u64).to_le_bytes());
+    plain.extend_from_slice(&(settings.len() as u64).to_le_bytes());
+    plain.extend_from_slice(&primary);
+    plain.extend_from_slice(&settings);
+    plain.extend_from_slice(&terminal);
+    deflate_for_test(&plain)
+}
+
+#[test]
+fn only_source_side_refusal_classes_are_collected() {
+    for class in [
+        MetadataSourceFailureClass::Unsupported,
+        MetadataSourceFailureClass::Malformed,
+        MetadataSourceFailureClass::Unresolved,
+        MetadataSourceFailureClass::Ambiguous,
+    ] {
+        assert!(is_collectible_source_refusal(class), "{class:?}");
+    }
+    for class in [
+        MetadataSourceFailureClass::Invariant,
+        MetadataSourceFailureClass::Unknown,
+    ] {
+        assert!(!is_collectible_source_refusal(class), "{class:?}");
+    }
+}
+
+#[test]
+fn collect_all_records_data_composition_refusal_and_writes_later_form() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab1";
+    let template_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab2";
+    let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab3";
+    let catalog_metadata = deflate_for_test(
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[], &[template_uuid])
+            .as_bytes(),
+    );
+    // Template type code 6 is `DataCompositionSchema`, so the asset kind does
+    // not depend on sniffing the refused body.
+    let template_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{2,6,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let template_body = unadmitted_dcs_schema_template_body_for_test();
+    let form_metadata =
+        common_form_metadata_for_source_asset_diagnostic_test(form_uuid, "ValidAfterTemplate");
+    let form_body = deflate_for_test(b"{4,{0},\"Procedure Valid()\r\nEndProcedure\r\n\",{0}}");
+    let row = |file_name: String, data: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+    let rows = vec![
+        row(catalog_uuid.to_owned(), &catalog_metadata),
+        row(template_uuid.to_owned(), &template_metadata),
+        row(format!("{template_uuid}.0"), &template_body),
+        row(form_uuid.to_owned(), &form_metadata),
+        row(format!("{form_uuid}.0"), &form_body),
+    ];
+
+    let dumped =
+        dump_table_rows_with_collect_all_source_asset_diagnostics(&root, "Config", rows, true)
+            .unwrap();
+
+    assert!(
+        !root
+            .join("Catalogs/Products/Templates/Scheme/Ext/Template.xml")
+            .exists(),
+        "a refused template must not be written"
+    );
+    assert!(
+        root.join("CommonForms/ValidAfterTemplate/Ext/Form.xml")
+            .exists(),
+        "the traversal must continue after a collected refusal"
+    );
+    assert_eq!(dumped.source_assets.opaque, 1);
+    assert_eq!(dumped.source_assets.emitted, 1);
+    let entry = dumped
+        .source_assets
+        .affected_assets
+        .iter()
+        .find(|entry| entry.family == "dcs")
+        .expect("the refusal is recorded under its own family");
+    assert!(
+        entry.code.starts_with("dcs.template-normalize."),
+        "{}",
+        entry.code
+    );
+    assert!(
+        ["unsupported", "malformed", "unresolved", "ambiguous"]
+            .contains(&entry.classification.as_str()),
+        "{}",
+        entry.classification
+    );
+    assert_eq!(
+        entry.asset_path,
+        "Catalogs/Products/Templates/Scheme/Ext/Template.xml"
+    );
+    assert_eq!(entry.source_row_id, format!("{template_uuid}.0"));
+    assert_eq!(entry.raw_length, template_body.len());
+    assert_eq!(entry.raw_sha256.len(), 64);
+
+    let _ = fs::remove_dir_all(root);
+}
+
+#[test]
+fn default_mode_keeps_data_composition_refusal_fatal() {
+    let root = std::env::temp_dir().join(format!(
+        "ibcmd-rs-mssql-dump-test-{}",
+        uuid::Uuid::new_v4().hyphenated()
+    ));
+    fs::create_dir_all(&root).unwrap();
+    let catalog_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab4";
+    let template_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaab5";
+    let catalog_metadata = deflate_for_test(
+        catalog_metadata_text_for_test("57", catalog_uuid, "Products", &[], &[template_uuid])
+            .as_bytes(),
+    );
+    let template_metadata = deflate_for_test(
+        format!(
+            "{{1,\r\n{{2,6,\r\n{{3,\r\n{{1,0,{template_uuid}}},\"Scheme\",{{1,\"en\",\"Scheme\"}},\"\"}}\r\n,0}}\r\n}}"
+        )
+        .as_bytes(),
+    );
+    let template_body = unadmitted_dcs_schema_template_body_for_test();
+    let row = |file_name: String, data: &[u8]| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: data.len() as i64,
+        binary_hex: encode_hex_for_test(data),
+    };
+
+    let error = match dump_table_rows(
+        &root,
+        "Config",
+        vec![
+            row(catalog_uuid.to_owned(), &catalog_metadata),
+            row(template_uuid.to_owned(), &template_metadata),
+            row(format!("{template_uuid}.0"), &template_body),
+        ],
+        false,
+        false,
+        true,
+    ) {
+        Ok(_) => panic!("the default mode must fail on a refused template"),
+        Err(error) => error,
+    };
+
+    assert!(
+        format!("{error:#}").contains("data-composition source asset"),
+        "{error:#}"
+    );
+
+    let _ = fs::remove_dir_all(root);
+}
+
 #[test]
 fn collect_all_keeps_rejection_without_structured_diagnostics_fatal() {
     let root = std::env::temp_dir().join(format!(
