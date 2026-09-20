@@ -892,6 +892,9 @@ pub fn diff_activation_snapshots(
 pub fn activate_staged_main(
     args: &MssqlActivateStagedMainArgs,
 ) -> Result<MssqlActivateStagedMainReport> {
+    // The declared policy is checked before any external process starts, so an
+    // unsupported build never reaches rac, sqlcmd, or the source tree.
+    args.platform_profile.require_main_write_supported()?;
     let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
@@ -910,7 +913,6 @@ pub fn activate_staged_main(
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
-    args.platform_profile.require_main_write_supported()?;
     if !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required");
     }
@@ -7740,7 +7742,7 @@ mod tests {
             infobase_pwd: None,
         };
         let error = activate_staged_main(&args).expect_err("unverified write must fail closed");
-        assert!(error.to_string().contains("failed to launch rac"));
+        assert!(error.to_string().contains("explicitly unsupported"));
     }
     #[cfg(feature = "mssql-live-tests")]
     use crate::mssql_dump::extract_moxel_spreadsheet_xml;

@@ -16,7 +16,7 @@ use crate::mssql_extension_stage::{
     ExtensionRegistrySnapshot, ExtensionStagePlan, extension_namespace_prefix,
     validate_configinfo_manifest,
 };
-use crate::mssql_extensions::decode_extension_zipped_info;
+use crate::mssql_extensions::{DecodedExtensionZippedInfo, decode_extension_zipped_info};
 
 const MAX_REGISTRY_BYTES: usize = 4_000;
 const MAX_ROWS: usize = 100_000;
@@ -167,6 +167,30 @@ impl ExtensionActivationPlan {
     }
 }
 
+/// Validates the registry envelope that the direct publisher must rewrite.
+///
+/// Callers run it as a read-only precheck before staging, so a refusal cannot
+/// leave a staged `ConfigCASSave` namespace behind. It performs no I/O.
+pub fn require_supported_registry_transition(
+    zipped_info: &[u8],
+) -> Result<DecodedExtensionZippedInfo, ExtensionActivationError> {
+    if zipped_info.len() > MAX_REGISTRY_BYTES {
+        return Err(ExtensionActivationError::Limit(format!(
+            "registry blob has {} bytes, maximum is {MAX_REGISTRY_BYTES}",
+            zipped_info.len()
+        )));
+    }
+    let decoded = decode_extension_zipped_info(zipped_info)
+        .map_err(|e| ExtensionActivationError::UnsupportedPlatform(e.to_string()))?;
+    if zipped_info.get(30) != Some(&0) {
+        return Err(ExtensionActivationError::UnsupportedPlatform(
+            "only the clean published-to-published 8.3.27 transition (byte 30 = 0) is enabled"
+                .to_owned(),
+        ));
+    }
+    Ok(decoded)
+}
+
 /// Validates a complete selected-extension stage and prepares the evidenced
 /// 8.3.27 registry transition. This function performs no I/O.
 pub fn prepare_extension_activation(
@@ -181,20 +205,7 @@ pub fn prepare_extension_activation(
             "--allow-non-lab acknowledgement is required".to_owned(),
         ));
     }
-    if snapshot.zipped_info.len() > MAX_REGISTRY_BYTES {
-        return Err(ExtensionActivationError::Limit(format!(
-            "registry blob has {} bytes, maximum is {MAX_REGISTRY_BYTES}",
-            snapshot.zipped_info.len()
-        )));
-    }
-    let decoded = decode_extension_zipped_info(&snapshot.zipped_info)
-        .map_err(|e| ExtensionActivationError::UnsupportedPlatform(e.to_string()))?;
-    if snapshot.zipped_info.get(30) != Some(&0) {
-        return Err(ExtensionActivationError::UnsupportedPlatform(
-            "only the clean published-to-published 8.3.27 transition (byte 30 = 0) is enabled"
-                .to_owned(),
-        ));
-    }
+    let decoded = require_supported_registry_transition(&snapshot.zipped_info)?;
     let old_root = parse_sha1(&decoded.active_cas_root)?;
     let namespace = extension_namespace_prefix(snapshot.extension_id);
     if stage.namespace_prefix() != namespace {

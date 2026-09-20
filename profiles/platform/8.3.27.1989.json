@@ -59,6 +59,13 @@
     "bootstrap.versions.layout": "versions-v1",
     "bootstrap.version.compatibility": "80327"
   },
+  "fingerprints": {
+    "mssql.ibversion": "7|80313",
+    "mssql.config-schema.sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3"
+  },
+  "capabilities": {
+    "mssql.extension.registry-read": "supported"
+  },
   "evidence": [
     "docs/ssl-lab-2026-06-25.md",
     "docs/evidence/bootstrap-special-8.3.27.md",

@@ -80,6 +80,42 @@ struct PreparedLoad {
     retained_base_targets: usize,
 }
 
+/// Read-only precheck for callers that stage and publish in one command.
+///
+/// `mssql-load-extension` may legitimately stage for a later native apply, so
+/// the publisher's registry requirement is not enforced there. The high-level
+/// apply path calls this first: without it a refused publication would leave a
+/// staged `ConfigCASSave` namespace behind.
+pub fn require_publishable_extension_registry(args: &MssqlLoadExtensionArgs) -> Result<()> {
+    let registry = list_extensions(&MssqlExtensionListArgs {
+        sqlcmd: args.sqlcmd.clone(),
+        server: args.server.clone(),
+        sql_user: args.sql_user.clone(),
+        sql_pwd: args.sql_pwd.clone(),
+        sql_pwd_env: args.sql_pwd_env.clone(),
+        sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        database: args.database.clone(),
+        format: MssqlExtensionListFormat::Json,
+    })?;
+    let selected = select_extensions(
+        &registry.extensions,
+        args.extension.as_deref(),
+        args.all_extensions,
+    )?;
+    for extension in selected {
+        crate::mssql_extension_activation::require_supported_registry_transition(
+            &extension.zipped_info,
+        )
+        .map_err(|error| {
+            anyhow!(
+                "extension {:?} cannot be published by the direct protocol, nothing was staged: {error}",
+                extension.name
+            )
+        })?;
+    }
+    Ok(())
+}
+
 pub fn load_extensions(args: &MssqlLoadExtensionArgs) -> Result<MssqlExtensionLoadReport> {
     args.platform_profile.require_extension_write_supported()?;
     let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
@@ -1006,7 +1042,7 @@ mod tests {
             source_version: crate::cli::InfobaseConfigSourceVersion::V2_20,
         };
         let error = load_extensions(&args).expect_err("8.5 write must fail closed");
-        assert!(error.to_string().contains("currently read-only"));
+        assert!(error.to_string().contains("explicitly unsupported"));
     }
 
     #[test]
@@ -1035,7 +1071,7 @@ mod tests {
             recovery_output: None,
         };
         let error = activate_staged_extension(&args).expect_err("8.5 write must fail closed");
-        assert!(error.to_string().contains("currently read-only"));
+        assert!(error.to_string().contains("explicitly unsupported"));
     }
 
     #[test]

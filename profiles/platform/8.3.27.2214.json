@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "id": "platform-8.3.27.2214",
+  "extends": "platform-8.3.27.1989",
+  "status": "experimental",
+  "platform_build": "8.3.27.2214",
+  "capabilities": {
+    "mssql.main.write": "supported",
+    "mssql.extension.write": "supported"
+  },
+  "evidence": [
+    "openspec/changes/direct-mssql-online-activation/evidence/benchmark-bsp-8327-20260829.md",
+    "openspec/changes/direct-mssql-online-activation/evidence/extension-live-validation.md",
+    "openspec/changes/direct-mssql-online-activation/evidence/high-level-apply-smoke-20260829.md",
+    "openspec/changes/add-mssql-live-generation-switch/evidence/live-stable-v7.md",
+    "openspec/changes/add-mssql-live-generation-switch/evidence/worker-watch-20260830.md",
+    "openspec/changes/evidence-bound-platform-profiles/evidence/parity-8327-20260919.md"
+  ]
+}

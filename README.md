@@ -1029,12 +1029,12 @@ cargo run -- mssql-dump-config --database MyInfobase -o C:\repo\db-dump --includ
 cargo run -- mssql-extension-list --database MyInfobase --format table
 cargo run -- mssql-dump-extension --database MyInfobase --extension MyExtension -o C:\repo\extensions\MyExtension
 cargo run -- mssql-dump-extension --database MyInfobase --all-extensions -o C:\repo\extensions
-cargo run -- mssql-load-extension --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --replace-staging --allow-non-lab --sqlcmd-trust-cert
-cargo run -- mssql-load-extension --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --all-extensions -i C:\repo\extensions --replace-staging --allow-non-lab --sqlcmd-trust-cert
-cargo run -- mssql-load-extension --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --path-prefix CommonModules/Tools --dry-run --allow-non-lab --sqlcmd-trust-cert
-cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\repo\extensions\MyExtension --path CommonModules/Tools/Ext/Module.bsl --extension MyExtension --mode online --dry-run --allow-non-lab --sqlcmd-trust-cert
-cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\\repo\\main --path CommonModules/Tools/Ext/Module.bsl --mode online --dry-run --sqlcmd-trust-cert
-cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.1989 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\\repo\\main --path CommonForms/MyForm/Ext/Form/Module.bsl --mode online --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-load-extension --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --replace-staging --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-load-extension --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --all-extensions -i C:\repo\extensions --replace-staging --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-load-extension --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --extension MyExtension -i C:\repo\extensions\MyExtension --path-prefix CommonModules/Tools --dry-run --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\repo\extensions\MyExtension --path CommonModules/Tools/Ext/Module.bsl --extension MyExtension --mode online --dry-run --allow-non-lab --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\\repo\\main --path CommonModules/Tools/Ext/Module.bsl --mode online --dry-run --sqlcmd-trust-cert
+cargo run -- mssql-apply-source-change --platform-profile platform-8.3.27.2214 --cluster-id $clusterId --infobase-id $infobaseId --database lab_clone --source-root C:\\repo\\main --path CommonForms/MyForm/Ext/Form/Module.bsl --mode online --allow-non-lab --sqlcmd-trust-cert
 cargo run -- trace-template .\trace
 cargo run -- trace-analyze .\trace\events.xml -o trace-analysis.json
 cargo run -- storage-map .\trace\events.xml -o storage-map.json
@@ -1074,11 +1074,18 @@ SQL Server. `mssql-extension-list` читает реестр `_ExtensionsInfo` �
 CAS-корень без записи. Публикацию выполняет `mssql-activate-staged-extension`;
 штатный `ibcmd config apply` не требуется.
 Все MSSQL-команды записи требуют точный `--platform-profile`; эта ось не
-выводится из версии XML. Профиль `platform-8.5.1.1150` распознаётся, однако
-запись пока остаётся fail-closed: нативная динамическая активация дополнительно
-меняет generation-selection строки `.ui` в `Params`, и одной совместимой формы
-таблиц недостаточно. Перед чтением исходников команда сверяет точную версию
-RAS-агента и полный SQL fingerprint пяти нативных таблиц с выбранным профилем.
+выводится из версии XML. Право на запись объявляет сам профиль в
+`profiles/platform`, а не код: команда требует явную capability
+`mssql.main.write` или `mssql.extension.write`, и необъявленная capability
+отклоняется так же, как явный `unsupported`. Поэтому запись разрешена только
+для `platform-8.3.27.2214`, на котором сняты доказательства активации, live и
+worker. Профиль `platform-8.3.27.1989` сохраняет доказательства чтения, а
+`platform-8.5.1.1150` остаётся явно read-only: нативная динамическая активация
+дополнительно меняет generation-selection строки `.ui` в `Params`, и одной
+совместимой формы таблиц недостаточно. Проверка политики выполняется до запуска
+rac и sqlcmd. Затем, перед чтением исходников, команда сверяет точную версию
+RAS-агента и полный SQL fingerprint пяти нативных таблиц с объявленными в
+профиле значениями.
 Для этой привязки также обязательны `--cluster-id` и `--infobase-id`; если
 `rac infobase info` защищён, передайте `--infobase-user` и
 `--infobase-pwd`. Проверенная регистрация должна указывать именно на заданные

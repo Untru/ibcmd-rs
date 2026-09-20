@@ -58,6 +58,14 @@ pub fn apply_source_change(
     args: &MssqlApplySourceChangeArgs,
 ) -> Result<MssqlApplySourceChangeReport> {
     let total_started = Instant::now();
+    // Declared policy first: an unsupported build must not reach rac, sqlcmd or
+    // the source tree.
+    if args.extension.is_some() {
+        args.platform_profile.require_extension_write_supported()?;
+    } else {
+        args.platform_profile.require_main_write_supported()?;
+        require_supported_main_source_cohort(args)?;
+    }
     let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
@@ -76,12 +84,6 @@ pub fn apply_source_change(
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
-    if args.extension.is_some() {
-        args.platform_profile.require_extension_write_supported()?;
-    } else {
-        args.platform_profile.require_main_write_supported()?;
-        require_supported_main_source_cohort(args)?;
-    }
     if !args.dry_run && !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required for source activation");
     }
@@ -269,33 +271,35 @@ pub fn apply_source_change(
     let path_prefix = owner_prefix(&selected_path)?;
     let staging_started = Instant::now();
     let staging = if let Some(extension) = args.extension.as_deref() {
-        serde_json::to_value(crate::mssql_extension_load::load_extensions(
-            &MssqlLoadExtensionArgs {
-                platform_profile: args.platform_profile,
-                rac: args.rac.clone(),
-                ras_endpoint: args.ras_endpoint.clone(),
-                cluster_id: args.cluster_id,
-                infobase_id: args.infobase_id,
-                infobase_user: args.infobase_user.clone(),
-                infobase_pwd: args.infobase_pwd.clone(),
-                sqlcmd: args.sqlcmd.clone(),
-                bcp_executable: args.bcp_executable.clone(),
-                server: args.server.clone(),
-                sql_user: args.sql_user.clone(),
-                sql_pwd: args.sql_pwd.clone(),
-                sql_pwd_env: args.sql_pwd_env.clone(),
-                database: args.database.clone(),
-                extension: Some(extension.to_owned()),
-                all_extensions: false,
-                input_dir: proposed_root.clone(),
-                path_prefix: vec![path_prefix.clone()],
-                replace_staging: true,
-                dry_run: args.dry_run,
-                allow_non_lab: args.allow_non_lab,
-                sqlcmd_trust_cert: args.sqlcmd_trust_cert,
-                source_version: args.source_version,
-            },
-        )?)?
+        let load_args = MssqlLoadExtensionArgs {
+            platform_profile: args.platform_profile,
+            rac: args.rac.clone(),
+            ras_endpoint: args.ras_endpoint.clone(),
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.clone(),
+            infobase_pwd: args.infobase_pwd.clone(),
+            sqlcmd: args.sqlcmd.clone(),
+            bcp_executable: args.bcp_executable.clone(),
+            server: args.server.clone(),
+            sql_user: args.sql_user.clone(),
+            sql_pwd: args.sql_pwd.clone(),
+            sql_pwd_env: args.sql_pwd_env.clone(),
+            database: args.database.clone(),
+            extension: Some(extension.to_owned()),
+            all_extensions: false,
+            input_dir: proposed_root.clone(),
+            path_prefix: vec![path_prefix.clone()],
+            replace_staging: true,
+            dry_run: args.dry_run,
+            allow_non_lab: args.allow_non_lab,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+            source_version: args.source_version,
+        };
+        // This command stages and publishes together, so the publisher's
+        // registry requirement is verified before the first staged row.
+        crate::mssql_extension_load::require_publishable_extension_registry(&load_args)?;
+        serde_json::to_value(crate::mssql_extension_load::load_extensions(&load_args)?)?
     } else if args.dry_run {
         if args.sql_user.is_some() {
             bail!(
@@ -485,6 +489,8 @@ pub fn apply_source_change(
 }
 
 pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    args.platform_profile.require_main_write_supported()?;
+    require_supported_main_source_cohort(args)?;
     crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
@@ -503,8 +509,6 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
-    args.platform_profile.require_main_write_supported()?;
-    require_supported_main_source_cohort(args)?;
     if !args.watch {
         bail!("watch_source_changes requires --watch");
     }
@@ -1324,7 +1328,17 @@ mod tests {
             watch_debounce_ms: 300,
         };
         let error = apply_source_change(&args).expect_err("unverified write must fail closed");
-        assert!(error.to_string().contains("failed to launch rac"));
+        // The declared policy stops an unsupported build before rac, sqlcmd or
+        // the source tree are touched.
+        assert!(error.to_string().contains("explicitly unsupported"));
+
+        let evidenced = MssqlApplySourceChangeArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_3_27_2214,
+            ..args
+        };
+        let runtime_error =
+            apply_source_change(&evidenced).expect_err("runtime verification must still run");
+        assert!(runtime_error.to_string().contains("failed to launch rac"));
     }
 
     #[test]
@@ -1359,7 +1373,15 @@ mod tests {
             watch_debounce_ms: 300,
         };
         let error = watch_source_changes(&args).expect_err("unverified watch must fail closed");
-        assert!(error.to_string().contains("failed to launch rac"));
+        assert!(error.to_string().contains("explicitly unsupported"));
+
+        let evidenced = MssqlApplySourceChangeArgs {
+            platform_profile: MssqlNativePlatformProfile::Platform8_3_27_2214,
+            ..args
+        };
+        let runtime_error =
+            watch_source_changes(&evidenced).expect_err("runtime verification must still run");
+        assert!(runtime_error.to_string().contains("failed to launch rac"));
     }
 
     const OLD: &str = "719baa18-69ed-439a-8962-1de53d98e05e";

@@ -11,15 +11,31 @@ use std::process::{Command, ExitStatus, Stdio};
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
+use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::profile::{CapabilityId, CapabilityState, EffectiveProfile};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+/// Capability that admits main-configuration writes for a platform profile.
+pub const CAPABILITY_MAIN_WRITE: &str = "mssql.main.write";
+/// Capability that admits extension writes for a platform profile.
+pub const CAPABILITY_EXTENSION_WRITE: &str = "mssql.extension.write";
+/// Profile fingerprint key for `IBVersion`/`PlatformVersionReq`.
+pub const FINGERPRINT_IB_VERSION: &str = "mssql.ibversion";
+/// Profile fingerprint key for the canonical five-table schema digest.
+pub const FINGERPRINT_CONFIG_SCHEMA: &str = "mssql.config-schema.sha256";
+
 /// Native platform layouts that may be selected by MSSQL commands.
+///
+/// The enum keeps the command line closed; what each build may do is declared
+/// by its bundled profile in `profiles/platform`, never by a match arm here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, ValueEnum)]
 pub enum MssqlNativePlatformProfile {
     #[value(name = "platform-8.3.27.1989")]
     Platform8_3_27_1989,
+    #[value(name = "platform-8.3.27.2214")]
+    Platform8_3_27_2214,
     #[value(name = "platform-8.5.1.1150")]
     Platform8_5_1_1150,
 }
@@ -28,32 +44,50 @@ impl MssqlNativePlatformProfile {
     pub const fn id(self) -> &'static str {
         match self {
             Self::Platform8_3_27_1989 => "platform-8.3.27.1989",
+            Self::Platform8_3_27_2214 => "platform-8.3.27.2214",
             Self::Platform8_5_1_1150 => "platform-8.5.1.1150",
         }
     }
 
-    /// Main writes stay closed until the complete activation protocol is
-    /// evidenced.  On 8.5 the table shape matches 8.3, but native dynamic
-    /// apply also rewrites generation-selection `.ui` rows in `Params`.
-    pub fn require_main_write_supported(self) -> Result<()> {
-        match self {
-            Self::Platform8_3_27_1989 => Ok(()),
-            Self::Platform8_5_1_1150 => bail!(
-                "MSSQL main writes are not supported for platform profile `{}`; the 8.5 generation-selection Params protocol is not yet evidenced",
+    /// Resolves the bundled declaration that owns this build's policy.
+    pub fn effective_profile(self) -> Result<EffectiveProfile> {
+        let registry = crate::profile_registry::load_bundled_profile_registry()?;
+        let id = ProfileId::parse(self.id())
+            .map_err(|error| anyhow!("invalid platform profile id `{}`: {error}", self.id()))?;
+        registry
+            .get(&id)
+            .cloned()
+            .ok_or_else(|| anyhow!("platform profile `{}` is not bundled", self.id()))
+    }
+
+    /// Admits an operation only when the profile declares the capability as
+    /// `supported`. An undeclared capability fails closed exactly like an
+    /// explicit `unsupported` declaration.
+    fn require_capability(self, capability: &str) -> Result<()> {
+        let profile = self.effective_profile()?;
+        let id = CapabilityId::parse(capability)
+            .map_err(|error| anyhow!("invalid capability id `{capability}`: {error}"))?;
+        match profile.capabilities.get(&id).map(|entry| entry.value) {
+            Some(CapabilityState::Supported) => Ok(()),
+            Some(CapabilityState::Unsupported) => bail!(
+                "capability `{capability}` is explicitly unsupported for platform profile `{}`",
+                self.id()
+            ),
+            None => bail!(
+                "capability `{capability}` is not declared for platform profile `{}`; declare it in profiles/platform/ only with native evidence",
                 self.id()
             ),
         }
     }
 
-    /// Extension mutation still has evidence only for 8.3.27.
+    /// Main writes require an evidenced activation protocol for the build.
+    pub fn require_main_write_supported(self) -> Result<()> {
+        self.require_capability(CAPABILITY_MAIN_WRITE)
+    }
+
+    /// Extension mutation requires an evidenced CAS/registry protocol.
     pub fn require_extension_write_supported(self) -> Result<()> {
-        match self {
-            Self::Platform8_3_27_1989 => Ok(()),
-            Self::Platform8_5_1_1150 => bail!(
-                "MSSQL native writes are not supported for platform profile `{}`; 8.5 is currently read-only while storage-layout evidence is collected",
-                self.id()
-            ),
-        }
+        self.require_capability(CAPABILITY_EXTENSION_WRITE)
     }
 }
 
@@ -442,6 +476,28 @@ fn parse_probe(output: &str) -> Result<NativeStorageProbe> {
     })
 }
 
+/// Compares one live observation with the value the profile declares. A profile
+/// that declares no value for the key fails closed: a write must never rely on
+/// an unevidenced storage shape.
+fn require_declared_fingerprint(
+    profile: &EffectiveProfile,
+    key: &str,
+    observed: &str,
+) -> Result<()> {
+    match profile.fingerprints.get(key) {
+        Some(declared) if declared.value == observed => Ok(()),
+        Some(declared) => bail!(
+            "live `{key}` is `{observed}` but platform profile `{}` declares `{}`",
+            profile.id.as_str(),
+            declared.value
+        ),
+        None => bail!(
+            "platform profile `{}` declares no `{key}` fingerprint; native writes stay closed until it is evidenced",
+            profile.id.as_str()
+        ),
+    }
+}
+
 fn verify_probe(
     claimed: MssqlNativePlatformProfile,
     agent_build: &str,
@@ -478,13 +534,6 @@ fn verify_probe(
     if probe.columns != expected {
         bail!("native storage schema does not exactly match the evidenced five-table fingerprint");
     }
-    if probe.ib_version != 7 || probe.platform_version_req != 80313 {
-        bail!(
-            "unsupported IBVersion identity: IBVersion={}, PlatformVersionReq={}",
-            probe.ib_version,
-            probe.platform_version_req
-        );
-    }
     let claimed_build = claimed
         .id()
         .strip_prefix("platform-")
@@ -505,6 +554,10 @@ fn verify_probe(
         digest.update(b"\n");
     }
     let observed_fingerprint = format!("{:x}", digest.finalize());
+    let observed_ib_version = format!("{}|{}", probe.ib_version, probe.platform_version_req);
+    let profile = claimed.effective_profile()?;
+    require_declared_fingerprint(&profile, FINGERPRINT_IB_VERSION, &observed_ib_version)?;
+    require_declared_fingerprint(&profile, FINGERPRINT_CONFIG_SCHEMA, &observed_fingerprint)?;
     Ok(MssqlNativeProfileVerification {
         claimed_platform_profile: claimed.id().to_owned(),
         verified_platform_profile: format!("platform-{agent_build}"),
@@ -561,18 +614,28 @@ mod tests {
     }
 
     #[test]
-    fn only_evidenced_8_3_profile_allows_native_writes() {
-        MssqlNativePlatformProfile::Platform8_3_27_1989
+    fn write_policy_comes_from_the_bundled_profile_declaration() {
+        MssqlNativePlatformProfile::Platform8_3_27_2214
             .require_extension_write_supported()
-            .expect("8.3.27 write profile is evidenced");
-        let error = MssqlNativePlatformProfile::Platform8_5_1_1150
-            .require_extension_write_supported()
-            .expect_err("8.5 writes must fail closed");
-        assert!(error.to_string().contains("currently read-only"));
-        let main_error = MssqlNativePlatformProfile::Platform8_5_1_1150
+            .expect("8.3.27.2214 extension writes are evidenced");
+        MssqlNativePlatformProfile::Platform8_3_27_2214
+            .require_main_write_supported()
+            .expect("8.3.27.2214 main writes are evidenced");
+
+        // 8.3.27.1989 keeps its read evidence but declares no write capability.
+        let undeclared = MssqlNativePlatformProfile::Platform8_3_27_1989
+            .require_main_write_supported()
+            .expect_err("an undeclared capability must fail closed");
+        assert!(undeclared.to_string().contains("is not declared"));
+
+        let explicit = MssqlNativePlatformProfile::Platform8_5_1_1150
             .require_main_write_supported()
             .expect_err("8.5 main activation must fail closed");
-        assert!(main_error.to_string().contains("Params protocol"));
+        assert!(explicit.to_string().contains("explicitly unsupported"));
+        let explicit_extension = MssqlNativePlatformProfile::Platform8_5_1_1150
+            .require_extension_write_supported()
+            .expect_err("8.5 extension writes must fail closed");
+        assert!(explicit_extension.to_string().contains("8.5.1.1150"));
     }
 
     #[test]
@@ -588,18 +651,21 @@ mod tests {
     #[test]
     fn claimed_profile_must_match_agent_and_live_storage_shape() {
         let verified = verify_probe(
-            MssqlNativePlatformProfile::Platform8_3_27_1989,
-            "8.3.27.1989",
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            "8.3.27.2214",
             evidenced_probe(),
             test_binding(),
         )
         .unwrap();
-        assert_eq!(verified.verified_platform_profile, "platform-8.3.27.1989");
-        assert_eq!(verified.storage_schema_sha256.len(), 64);
+        assert_eq!(verified.verified_platform_profile, "platform-8.3.27.2214");
+        assert_eq!(
+            verified.storage_schema_sha256,
+            "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3"
+        );
 
         let build_error = verify_probe(
-            MssqlNativePlatformProfile::Platform8_3_27_1989,
-            "8.5.1.1150",
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            "8.3.27.1989",
             evidenced_probe(),
             test_binding(),
         )
@@ -609,13 +675,28 @@ mod tests {
         let mut wrong_schema = evidenced_probe();
         wrong_schema.columns.pop();
         let schema_error = verify_probe(
-            MssqlNativePlatformProfile::Platform8_3_27_1989,
-            "8.3.27.1989",
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            "8.3.27.2214",
             wrong_schema,
             test_binding(),
         )
         .unwrap_err();
         assert!(schema_error.to_string().contains("does not exactly match"));
+
+        let mut wrong_identity = evidenced_probe();
+        wrong_identity.platform_version_req = 80327;
+        let identity_error = verify_probe(
+            MssqlNativePlatformProfile::Platform8_3_27_2214,
+            "8.3.27.2214",
+            wrong_identity,
+            test_binding(),
+        )
+        .unwrap_err();
+        assert!(
+            identity_error
+                .to_string()
+                .contains("live `mssql.ibversion` is `7|80327`")
+        );
     }
 
     #[test]

@@ -3,3 +3,4 @@ tests/fixtures/native-evidence/** -text whitespace=cr-at-eol
 tests/fixtures/migrations/** -text
 tests/fixtures/form_choice_parameters_slot27_live.json text eol=lf
 crates/ibcmd-schema/data/** text eol=lf
+tests/fixtures/mssql_extension_list_snapshot.json text eol=lf

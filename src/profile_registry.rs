@@ -57,6 +57,10 @@ pub const BUNDLED_PROFILES: &[BundledProfile<'static>] = &[
         json: include_str!("../profiles/platform/8.3.27.1989.json"),
     },
     BundledProfile {
+        name: "profiles/platform/8.3.27.2214.json",
+        json: include_str!("../profiles/platform/8.3.27.2214.json"),
+    },
+    BundledProfile {
         name: "profiles/platform/8.5.1.1150.json",
         json: include_str!("../profiles/platform/8.5.1.1150.json"),
     },
@@ -74,7 +78,7 @@ pub const BUNDLED_PROFILES: &[BundledProfile<'static>] = &[
     },
 ];
 
-/// Resolves the six project-owned seed profiles without filesystem access.
+/// Resolves the seven project-owned seed profiles without filesystem access.
 pub fn load_bundled_profile_registry() -> Result<ProfileRegistry> {
     load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())
 }
@@ -246,8 +250,8 @@ mod tests {
     #[test]
     fn bundled_seed_profiles_keep_version_axes_independent() {
         let registry = load_bundled_profile_registry().unwrap();
-        assert_eq!(BUNDLED_PROFILES.len(), 6);
-        assert_eq!(registry.profiles().len(), 6);
+        assert_eq!(BUNDLED_PROFILES.len(), 7);
+        assert_eq!(registry.profiles().len(), 7);
 
         for version in ["2.17", "2.20", "2.21"] {
             let id = ProfileId::parse(&format!("xml-{version}")).unwrap();
@@ -364,7 +368,7 @@ mod tests {
             );
         }
 
-        for version in ["8.3.24.1819", "8.3.27.1989", "8.5.1.1150"] {
+        for version in ["8.3.24.1819", "8.3.27.1989", "8.3.27.2214", "8.5.1.1150"] {
             let id = ProfileId::parse(&format!("platform-{version}")).unwrap();
             let profile = registry.get(&id).unwrap();
             assert_eq!(profile.status.value, ProfileStatus::Experimental);
@@ -374,13 +378,13 @@ mod tests {
             );
             assert!(profile.xml_dialect.is_none());
             assert!(profile.compatibility_mode.is_none());
-            if matches!(version, "8.3.27.1989" | "8.5.1.1150") {
+            if matches!(version, "8.3.27.1989" | "8.3.27.2214" | "8.5.1.1150") {
                 assert_eq!(
                     profile.storage_profile.as_ref().unwrap().value.as_str(),
                     "storage:mssql-config-configsave"
                 );
             }
-            if version == "8.3.27.1989" {
+            if matches!(version, "8.3.27.1989" | "8.3.27.2214") {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.constant.layout"].value,
                     "constant-v1-crlf-utf8-bom"
@@ -424,17 +428,60 @@ mod tests {
             }
             assert!(profile.container_revision.is_none());
             assert!(profile.dbms.is_none());
-            if version == "8.5.1.1150" {
-                assert_eq!(profile.fingerprints["mssql.ibversion"].value, "7|80313");
-                let capability = CapabilityId::parse("mssql.main.write").unwrap();
-                assert_eq!(
-                    profile.capabilities[&capability].value,
-                    CapabilityState::Unsupported
-                );
-            } else {
+            // The live MSSQL configuration-storage shape is identical on every
+            // evidenced build, so 8.3.27 and 8.5.1 declare the same fingerprints.
+            if version == "8.3.24.1819" {
                 assert!(profile.fingerprints.is_empty());
+            } else {
+                assert_eq!(profile.fingerprints["mssql.ibversion"].value, "7|80313");
+                assert_eq!(
+                    profile.fingerprints["mssql.config-schema.sha256"].value,
+                    "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3"
+                );
             }
-            if version == "8.3.27.1989" {
+            let main_write = CapabilityId::parse("mssql.main.write").unwrap();
+            match version {
+                "8.3.24.1819" => assert!(profile.capabilities.is_empty()),
+                "8.3.27.1989" => {
+                    assert!(!profile.capabilities.contains_key(&main_write));
+                    assert_eq!(
+                        profile.capabilities
+                            [&CapabilityId::parse("mssql.extension.registry-read").unwrap()]
+                            .value,
+                        CapabilityState::Supported
+                    );
+                }
+                "8.3.27.2214" => {
+                    assert_eq!(
+                        profile.capabilities[&main_write].value,
+                        CapabilityState::Supported
+                    );
+                    assert_eq!(
+                        profile.capabilities[&main_write].declared_by.as_str(),
+                        "platform-8.3.27.2214"
+                    );
+                    assert_eq!(
+                        profile.capabilities
+                            [&CapabilityId::parse("mssql.extension.write").unwrap()]
+                            .value,
+                        CapabilityState::Supported
+                    );
+                    // Read support is inherited from the parent build profile.
+                    assert_eq!(
+                        profile.capabilities
+                            [&CapabilityId::parse("mssql.extension.registry-read").unwrap()]
+                            .declared_by
+                            .as_str(),
+                        "platform-8.3.27.1989"
+                    );
+                }
+                "8.5.1.1150" => assert_eq!(
+                    profile.capabilities[&main_write].value,
+                    CapabilityState::Unsupported
+                ),
+                _ => unreachable!(),
+            }
+            if matches!(version, "8.3.27.1989" | "8.3.27.2214") {
                 assert_eq!(
                     profile.constants["bootstrap.metadata.functional_option.layout"].value,
                     "functional-option-v1-crlf-utf8-bom"
@@ -474,11 +521,15 @@ mod tests {
             } else {
                 assert!(profile.constants.is_empty());
             }
-            if version != "8.5.1.1150" {
-                assert!(profile.capabilities.is_empty());
+            if version == "8.3.27.2214" {
+                assert_eq!(
+                    profile.inheritance_chain,
+                    [ProfileId::parse("platform-8.3.27.1989").unwrap(), id]
+                );
+            } else {
+                assert_eq!(profile.inheritance_chain, [id]);
             }
-            assert_eq!(profile.inheritance_chain, [id]);
-            assert_eq!(profile.source_chain.len(), 1);
+            assert_eq!(profile.source_chain.len(), profile.inheritance_chain.len());
         }
 
         assert!(
