@@ -42930,6 +42930,15 @@ fn selected_file_names_from_args(
     Ok(expand_selected_file_names(&combined))
 }
 
+/// The exact set of storage identities a selected-row export may read.
+///
+/// Callers that bound a change to one object use it to check that an export
+/// stayed inside the selected closure: the dump reads the named identities plus
+/// the documented module-body expansion of each one, and nothing else.
+pub fn expanded_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
+    expand_selected_file_names(file_names)
+}
+
 fn expand_selected_file_names(file_names: &[String]) -> BTreeSet<String> {
     let mut selected = BTreeSet::new();
     for file_name in file_names {

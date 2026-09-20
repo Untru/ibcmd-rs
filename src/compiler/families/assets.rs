@@ -456,6 +456,37 @@ const ROUTES: &[SourceAssetRoute] = &[
     route!("CommonForm", Help, ".1", "Ext/Help.xml", Help),
     route!("Form", Help, ".1", "Ext/Help.xml", Help),
     route!("Subsystem", Help, ".0", "Ext/Help.xml", Help),
+    // The remaining families, read off the same `ConfigDumpInfo.xml` record
+    // names on two independent native 8.3.27.2214 exports: ERP УХ 3.3.3.3
+    // (6,465 help records) and the BSP demo infobase (628). Every family below
+    // uses exactly one suffix across both corpora -- `Report` `.1` (901 + 40),
+    // `Document` `.1` (645 + 19), `DocumentJournal` `.0` (29 + 3),
+    // `BusinessProcess` `.5` (16 + 2), `ChartOfCharacteristicTypes` `.5`
+    // (13 + 4), `AccumulationRegister` `.0` (10 + 2), `ExchangePlan` `.0`
+    // (7 + 1), `ChartOfAccounts` `.5` (3 + 1), `AccountingRegister` `.5`
+    // (2 + 2), `Task` `.5` (2 + 1), `ChartOfCalculationTypes` `.1` (1 + 1) and
+    // `CalculationRegister` `.0` (0 + 1) -- and none of those suffixes was
+    // claimed by another route of the same family. An object whose help body
+    // is empty emits no `Ext/Help.xml`, so only this table can name its record
+    // in `ConfigDumpInfo.xml`.
+    route!("Report", Help, ".1", "Ext/Help.xml", Help),
+    route!("Document", Help, ".1", "Ext/Help.xml", Help),
+    route!("DocumentJournal", Help, ".0", "Ext/Help.xml", Help),
+    route!("BusinessProcess", Help, ".5", "Ext/Help.xml", Help),
+    route!(
+        "ChartOfCharacteristicTypes",
+        Help,
+        ".5",
+        "Ext/Help.xml",
+        Help
+    ),
+    route!("AccumulationRegister", Help, ".0", "Ext/Help.xml", Help),
+    route!("ExchangePlan", Help, ".0", "Ext/Help.xml", Help),
+    route!("ChartOfAccounts", Help, ".5", "Ext/Help.xml", Help),
+    route!("AccountingRegister", Help, ".5", "Ext/Help.xml", Help),
+    route!("Task", Help, ".5", "Ext/Help.xml", Help),
+    route!("ChartOfCalculationTypes", Help, ".1", "Ext/Help.xml", Help),
+    route!("CalculationRegister", Help, ".0", "Ext/Help.xml", Help),
     route!("Role", Rights, ".0", "Ext/Rights.xml", Rights),
     route!(
         "AccumulationRegister",

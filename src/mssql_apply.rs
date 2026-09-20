@@ -573,18 +573,28 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
 }
 
 fn require_supported_main_source_cohort(args: &MssqlApplySourceChangeArgs) -> Result<()> {
-    if !matches!(
-        args.platform_profile,
-        crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_5_1_1150
-    ) {
-        return Ok(());
-    }
     let selected = normalize_relative_path(&args.source_path)?;
     let common_module =
         selected.starts_with("CommonModules/") && selected.ends_with("/Ext/Module.bsl");
-    let managed_form_module = selected.ends_with("/Ext/Form/Module.bsl")
-        && (selected.starts_with("CommonForms/") || selected.contains("/Forms/"));
-    if !common_module && !managed_form_module {
+    let common_form_body = selected.starts_with("CommonForms/")
+        && (selected.ends_with("/Ext/Form.xml") || selected.ends_with("/Ext/Form/Module.bsl"));
+    if !common_module && !common_form_body {
+        // A body owned by a top-level object needs that object's own metadata
+        // XML in the active tree, and reconstructing it requires the reference
+        // closure of every child and type it names. The bounded export reads
+        // only the selected rows, so it cannot produce that descriptor yet;
+        // refusing here names the gap instead of failing later inside the
+        // bounded completeness check.
+        bail!(
+            "main writes currently support common-module bodies and common-form bodies; `{selected}` is owned by a top-level metadata object whose reference closure the bounded active export cannot resolve yet"
+        );
+    }
+    if matches!(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_5_1_1150
+    ) && !common_module
+        && !selected.ends_with("/Ext/Form/Module.bsl")
+    {
         bail!(
             "platform-8.5.1.1150 main writes are currently limited to common-module and managed-form-module source bodies"
         );
@@ -964,6 +974,25 @@ fn selected_storage_file_names_for_source_paths(
         };
         selected.insert(owner_uuid.clone());
         selected.insert(format!("{owner_uuid}{suffix}"));
+        // A nested asset (`Kind/Name/Forms/Form/Ext/...`) is placed by its
+        // top-level object, and the classifier requires that descriptor in the
+        // active tree, so its own storage row belongs to the closure too.
+        if ext_index > 2 {
+            let top_level_relative: PathBuf =
+                [components[0].clone(), format!("{}.xml", components[1])]
+                    .iter()
+                    .collect();
+            let top_level_path = source_root.join(&top_level_relative);
+            let top_level_xml = fs::read(&top_level_path).with_context(|| {
+                format!(
+                    "failed to read top-level owner {}",
+                    top_level_path.display()
+                )
+            })?;
+            let properties =
+                crate::module_blob::parse_simple_metadata_xml_properties(&top_level_xml)?;
+            selected.insert(properties.uuid);
+        }
     }
     if selected.is_empty() {
         bail!("selected source closure resolved to no storage rows");
@@ -986,9 +1015,22 @@ fn ensure_bounded_export_complete(
         .iter()
         .find(|table| table.table == "Config")
         .ok_or_else(|| anyhow!("bounded export has no Config table report"))?;
-    if table.rows != selected_storage_file_names.len() {
+    // The dump reads exactly the identities it was given plus the documented
+    // module-body expansion of each one, so an object that stores more bodies
+    // than the change selects is still bounded. Anything beyond that set would
+    // mean the export read rows outside the selected closure.
+    let bounded_row_limit =
+        crate::mssql_dump::expanded_selected_file_names(selected_storage_file_names).len();
+    if table.rows > bounded_row_limit {
         bail!(
-            "bounded export returned {} rows for {} exact storage identities",
+            "bounded export returned {} rows for {} reachable storage identities",
+            table.rows,
+            bounded_row_limit
+        );
+    }
+    if table.rows < selected_storage_file_names.len() {
+        bail!(
+            "bounded export returned {} rows for {} selected storage identities",
             table.rows,
             selected_storage_file_names.len()
         );
