@@ -1899,18 +1899,49 @@ pub(crate) struct FormCommandSchema<'a> {
     picture: FormPictureValueSchema,
     current_row_use: Option<FormCommandCurrentRowUse>,
     associated_table_element_id: Option<&'a str>,
+    extra_action_slots: (usize, usize),
 }
 
 impl<'a> FormCommandSchema<'a> {
+    /// Slot 15 is the command's action-binding count, and each binding past
+    /// the first inserts a `<handler>,1` pair behind slot 16, moving the two
+    /// members that close the record along with it.
+    ///
+    /// Evidence, ERP УХ 3.3.3.3
+    /// `Catalogs/НастройкиРаспределенияЗатратМСФО/Forms/ФормаЭлемента`: four
+    /// of its six commands are the ordinary nineteen-member record with `1` at
+    /// slot 15 and `0,0,<current row use>` closing it, and the other two carry
+    /// `2` there, an empty action at slot 8 and one
+    /// `"Расш1_…После",1` pair behind slot 16, closed by the identical
+    /// `0,<current row use>`. The platform writes both of those commands, with
+    /// the extra binding as their `<Action>`; this reader refused the whole
+    /// record on its arity, so the form lost two `<Command>` elements and
+    /// every `<CommandName>` that named them.
     pub(crate) fn from_raw_layout(
         fields: &'a [&'a str],
         picture_value: &[&str],
         picture_reference: &[&str],
     ) -> Option<Self> {
-        if fields.len() != 19
-            || !matches!(fields.first().map(|field| field.trim()), Some("9" | "11"))
-        {
+        if !matches!(fields.first().map(|field| field.trim()), Some("9" | "11")) {
             return None;
+        }
+        let bindings = fields
+            .get(15)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .filter(|bindings| *bindings >= 1)?;
+        let extra = bindings.checked_sub(1)?.checked_mul(2)?;
+        if fields.len() != 19usize.checked_add(extra)? {
+            return None;
+        }
+        for index in 0..bindings.checked_sub(1)? {
+            let handler = fields.get(17 + index * 2)?.trim();
+            if !handler.starts_with('"')
+                || !handler.ends_with('"')
+                || handler.len() < 3
+                || fields.get(18 + index * 2).map(|field| field.trim()) != Some("1")
+            {
+                return None;
+            }
         }
 
         let picture = FormPictureValueSchema::from_raw_layout(picture_value)?;
@@ -1929,7 +1960,7 @@ impl<'a> FormCommandSchema<'a> {
             return None;
         }
 
-        let current_row_use = match fields.get(18).map(|field| field.trim()) {
+        let current_row_use = match fields.get(18 + extra).map(|field| field.trim()) {
             Some("0") => Some(FormCommandCurrentRowUse::Use),
             Some("1") => Some(FormCommandCurrentRowUse::DontUse),
             Some("2") => None,
@@ -1945,7 +1976,14 @@ impl<'a> FormCommandSchema<'a> {
             picture,
             current_row_use,
             associated_table_element_id,
+            extra_action_slots: (17, bindings - 1),
         })
+    }
+
+    /// The record slots that carry the command's action bindings past the
+    /// first: a start slot and how many `<handler>,1` pairs follow it.
+    pub(crate) const fn extra_action_slots(self) -> (usize, usize) {
+        self.extra_action_slots
     }
 
     pub(crate) const fn picture(self) -> FormPictureValueSchema {

@@ -9546,7 +9546,24 @@ fn parse_form_command_with_items(
         .get(1)
         .and_then(|value| parse_non_zero_uuid(value.trim()))?;
     let name = parse_1c_quoted_string_with_len(fields.get(2)?.trim())?.0;
-    let action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
+    let mut action = parse_1c_quoted_string_with_len(fields.get(8)?.trim())?.0;
+    // A command whose own action slot is empty is bound only by its later
+    // bindings, and the platform writes the first of those as the `<Action>`.
+    if action.is_empty() {
+        let (start, count) = schema.extra_action_slots();
+        for index in 0..count {
+            let Some(extra) = fields
+                .get(start + index * 2)
+                .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
+                .map(|(handler, _)| handler)
+                .filter(|handler| !handler.is_empty())
+            else {
+                continue;
+            };
+            action = extra;
+            break;
+        }
+    }
     if id.is_empty() || name.is_empty() {
         return None;
     }
@@ -22051,10 +22068,7 @@ fn parse_form_schema_backed_event_record(
     else {
         return Vec::new();
     };
-    let Some(expected_fields) = count.checked_mul(5).and_then(|value| value.checked_add(3)) else {
-        return Vec::new();
-    };
-    if fields.len() != expected_fields {
+    if fields.len() < 1 + count * 2 + 2 {
         return Vec::new();
     }
 
@@ -22066,6 +22080,7 @@ fn parse_form_schema_backed_event_record(
     }
 
     let mut events = Vec::with_capacity(count);
+    let mut metadata_start = trailer_start + 2;
     for event_index in 0..count {
         let event_id = fields[1 + event_index * 2].trim();
         let handler_field = fields[2 + event_index * 2].trim();
@@ -22097,20 +22112,76 @@ fn parse_form_schema_backed_event_record(
             return Vec::new();
         }
 
-        let metadata_start = trailer_start + 2 + event_index * 3;
-        if !fields[metadata_start].trim().eq_ignore_ascii_case(event_id)
-            || fields[metadata_start + 1].trim() != "0"
-            || fields[metadata_start + 2].trim() != "1"
+        // Each event's metadata group opens `<identifier>,0,<handler count>`.
+        // A count above one is followed by that many minus one
+        // `<handler>,1` pairs: one event of one item can be bound more than
+        // once, and the platform writes an `<Event>` element for every
+        // binding, in this order, behind the head binding the pair list above
+        // carries.
+        //
+        // Evidence, ERP УХ 3.3.3.3
+        // `Catalogs/НастройкиРаспределенияЗатратМСФО/Forms/ФормаЭлемента`,
+        // whose items carry 26 such extra bindings. The dynamic-list table
+        // `КомпоновщикБазыРаспределенияНастройкиОтбор` states the whole shape
+        // at once: three head pairs -- `Выбор`, an *empty* `OnStartEdit`
+        // handler and `ПриИзменении` -- and three metadata groups, each
+        // `<id>,0,2,"Расш1_…После",1`. The platform writes five elements: the
+        // two non-empty head handlers each followed by their own extra, and
+        // for the empty one only the extra. The single-binding groups of every
+        // other item in the corpus are `<id>,0,1` with nothing after them,
+        // which is this same shape at count one.
+        if !fields
+            .get(metadata_start)
+            .is_some_and(|field| field.trim().eq_ignore_ascii_case(event_id))
+            || fields.get(metadata_start + 1).map(|field| field.trim()) != Some("0")
         {
             return Vec::new();
         }
-        if handler.is_empty() {
-            continue;
+        let Some(binding_count) = fields
+            .get(metadata_start + 2)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .filter(|count| *count >= 1)
+        else {
+            return Vec::new();
+        };
+        metadata_start += 3;
+        let mut extra_handlers = Vec::with_capacity(binding_count - 1);
+        for _ in 1..binding_count {
+            let (Some(handler_field), Some(flag)) =
+                (fields.get(metadata_start), fields.get(metadata_start + 1))
+            else {
+                return Vec::new();
+            };
+            let handler_field = handler_field.trim();
+            let Some((extra, consumed)) = parse_1c_quoted_string_with_len(handler_field) else {
+                return Vec::new();
+            };
+            let extra = extra.trim();
+            if consumed != handler_field.len()
+                || flag.trim() != "1"
+                || extra.is_empty()
+                || !is_probable_form_event_handler(extra)
+            {
+                return Vec::new();
+            }
+            extra_handlers.push(extra.to_string());
+            metadata_start += 2;
         }
-        events.push(FormBodyEvent {
-            name: name.to_string(),
-            handler: handler.to_string(),
-        });
+        if !handler.is_empty() {
+            events.push(FormBodyEvent {
+                name: name.to_string(),
+                handler: handler.to_string(),
+            });
+        }
+        for extra in extra_handlers {
+            events.push(FormBodyEvent {
+                name: name.to_string(),
+                handler: extra,
+            });
+        }
+    }
+    if metadata_start != fields.len() {
+        return Vec::new();
     }
     events
 }
@@ -22128,9 +22199,14 @@ pub(super) fn parse_form_child_item_event_fields(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
+        let head = parse_form_child_item_event_record(&nested, names_events);
         append_unique_form_body_events(
             &mut events,
-            parse_form_child_item_event_record(&nested, names_events),
+            interleave_form_child_item_event_bindings(
+                &nested,
+                names_events,
+                head,
+            ),
         );
     }
     for window in fields.windows(2) {
@@ -22171,6 +22247,110 @@ pub(super) fn parse_form_child_item_event_record(
     events
 }
 
+/// The bindings an event collection carries *beyond* the first one of each
+/// event, read from the metadata trailer that follows the head pair list.
+///
+/// One event of one item can be bound more than once, and the platform writes
+/// an `<Event>` element for every binding. The head pair list carries the
+/// first binding of each event -- which is all
+/// [`parse_form_child_item_event_record`] reads -- and the trailer carries the
+/// rest: `<identifier>,0,<binding count>` followed by that count minus one
+/// `<handler>,1` pairs.
+///
+/// Evidence, ERP УХ 3.3.3.3
+/// `Catalogs/НастройкиРаспределенияЗатратМСФО/Forms/ФормаЭлемента`, whose
+/// items carry 26 such extra bindings and whose dynamic-list table
+/// `КомпоновщикБазыРаспределенияНастройкиОтбор` states the whole shape at
+/// once: three head pairs -- `Выбор`, an *empty* `OnStartEdit` handler and
+/// `ПриИзменении` -- and three trailer groups, each
+/// `<id>,0,2,"Расш1_…После",1`. The platform writes five elements: the two
+/// non-empty head handlers each followed by their own extra, and for the empty
+/// head only the extra. Every single-binding collection of the corpus spells
+/// the same trailer at count one, `<id>,0,1`, with nothing after it.
+fn interleave_form_child_item_event_bindings(
+    fields: &[&str],
+    names_events: bool,
+    head: Vec<FormBodyEvent>,
+) -> Vec<FormBodyEvent> {
+    let Some(extra) = parse_form_child_item_event_extra_bindings(fields, names_events) else {
+        return head;
+    };
+    if extra.iter().all(Vec::is_empty) {
+        return head;
+    }
+    // `head` holds one entry per *bound* event, in the order of the pair list,
+    // while `extra` is indexed by that list: an entry whose head handler is
+    // empty contributes nothing to `head` but can still carry extras.
+    let mut head = head.into_iter().peekable();
+    let mut events = Vec::new();
+    for (event_index, extras) in extra.into_iter().enumerate() {
+        if let Some(bound) = head.peek()
+            && fields
+                .get(2 + event_index * 2)
+                .and_then(|field| parse_1c_quoted_string_with_len(field.trim()))
+                .is_some_and(|(handler, _)| handler.trim() == bound.handler)
+            && let Some(bound) = head.next()
+        {
+            events.push(bound);
+        }
+        events.extend(extras);
+    }
+    events.extend(head);
+    events
+}
+
+fn parse_form_child_item_event_extra_bindings(
+    fields: &[&str],
+    names_events: bool,
+) -> Option<Vec<Vec<FormBodyEvent>>> {
+    let count = fields
+        .first()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|count| *count > 0)?;
+    let trailer_start = 1 + count * 2;
+    if fields.len() < trailer_start + 2
+        || fields[trailer_start].trim() != "1"
+        || fields[trailer_start + 1].trim() != "0"
+    {
+        return None;
+    }
+    let mut events = Vec::with_capacity(count);
+    let mut index = trailer_start + 2;
+    for event_index in 0..count {
+        let event_id = fields[1 + event_index * 2].trim();
+        if !fields
+            .get(index)
+            .is_some_and(|field| field.trim().eq_ignore_ascii_case(event_id))
+            || fields.get(index + 1).map(|field| field.trim()) != Some("0")
+        {
+            return None;
+        }
+        let binding_count = fields
+            .get(index + 2)
+            .and_then(|field| field.trim().parse::<usize>().ok())
+            .filter(|bindings| *bindings >= 1)?;
+        index += 3;
+        let mut bound = Vec::with_capacity(binding_count - 1);
+        for _ in 1..binding_count {
+            let (Some(handler_field), Some(flag)) = (fields.get(index), fields.get(index + 1))
+            else {
+                return None;
+            };
+            if flag.trim() != "1" {
+                return None;
+            }
+            bound.push(parse_form_child_item_event_pair(
+                fields[1 + event_index * 2],
+                handler_field,
+                names_events,
+            )?);
+            index += 2;
+        }
+        events.push(bound);
+    }
+    (index == fields.len()).then_some(events)
+}
+
 pub(super) fn append_unique_form_body_events(
     target: &mut Vec<FormBodyEvent>,
     extra: Vec<FormBodyEvent>,
@@ -22205,9 +22385,10 @@ pub(super) fn collect_form_nested_child_item_event_records(
         let Some(nested) = split_1c_braced_fields(field, 0) else {
             continue;
         };
+        let head = parse_form_child_item_event_record(&nested, NAMES_EVENTS);
         append_unique_form_body_events(
             events,
-            parse_form_child_item_event_record(&nested, NAMES_EVENTS),
+            interleave_form_child_item_event_bindings(&nested, NAMES_EVENTS, head),
         );
         collect_form_nested_child_item_event_records(&nested, events);
     }

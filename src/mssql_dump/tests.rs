@@ -18705,6 +18705,73 @@ fn extracts_form_popup_picture_from_layout_code() {
     assert!(xml.contains("<xr:Ref>StdPicture.CreateListItem</xr:Ref>"));
 }
 
+/// A command bound only by a later binding keeps the command and names that
+/// binding as its action.
+///
+/// Evidence, ERP УХ 3.3.3.3
+/// `Catalogs/НастройкиРаспределенияЗатратМСФО/Forms/ФормаЭлемента`: two of its
+/// six commands carry `2` at the binding-count slot, an empty action slot and
+/// one `"Расш1_…После",1` pair behind slot 16, and the platform writes both of
+/// them with that handler as their `<Action>`. This reader refused the whole
+/// record on its arity, so the form lost two `<Command>` elements and every
+/// `<CommandName>` that named them.
+#[test]
+fn extracts_a_form_command_whose_only_action_is_a_later_binding() {
+    let command = parse_form_command(
+        r#"{9,{5,409b9a53-7f7e-4178-86c1-33176c7c7a7a},"ЗаполнитьОтборПоДокументу",{1,1,{"ru","Заполнить отбор по документу"}},{1,1,{"ru","Заполнить отбор по документу"}},{0,{0,{"B",1},0}},{0,0,0},{4,0,{0},"",-1,-1,1,0,""},"",3,0,0,{0,0},1,0,2,0,"Расш1_ЗаполнитьОтборПоДокументуПосле",1,0,2}"#,
+        &BTreeMap::new(),
+    )
+    .expect("a command with a later binding is still a command");
+
+    assert_eq!(command.id, "5");
+    assert_eq!(command.name, "ЗаполнитьОтборПоДокументу");
+    assert_eq!(command.action, "Расш1_ЗаполнитьОтборПоДокументуПосле");
+    assert!(command.picture_ref.is_none());
+}
+
+/// One event of one item can be bound more than once, and every binding is
+/// written, each behind the head binding of its own event.
+///
+/// Evidence, same form: the dynamic-list table
+/// `КомпоновщикБазыРаспределенияНастройкиОтбор` carries three head pairs --
+/// `Выбор`, an *empty* `OnStartEdit` handler and `ПриИзменении` -- and three
+/// trailer groups, each `<id>,0,2,"Расш1_…После",1`. The platform writes five
+/// elements, in this order.
+#[test]
+fn extracts_every_binding_of_a_repeatedly_bound_form_item_event() {
+    let record = r#"{3,1282f000-23b6-4887-87f4-9e8e79db3d32,"КомпоновщикБазыРаспределенияНастройкиОтборВыбор",b3c10170-c5ff-4cba-b537-679e1c872b45,"",fe115cc8-9e33-4684-a166-bd5136fe7a9f,"КомпоновщикБазыРаспределенияНастройкиОтборПриИзменении",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,2,"Расш1_КомпоновщикБазыРаспределенияНастройкиОтборВыборПосле",1,b3c10170-c5ff-4cba-b537-679e1c872b45,0,2,"Расш1_КомпоновщикБазыРаспределенияНастройкиОтборПриНачалеРедактированияПосле",1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,2,"Расш1_КомпоновщикБазыРаспределенияНастройкиОтборПриИзмененииПосле",1}"#;
+    let events = parse_form_child_item_event_fields(&[record], true);
+
+    assert_eq!(
+        events
+            .iter()
+            .map(|event| (event.name.as_str(), event.handler.as_str()))
+            .collect::<Vec<_>>(),
+        vec![
+            (
+                "Selection",
+                "КомпоновщикБазыРаспределенияНастройкиОтборВыбор"
+            ),
+            (
+                "Selection",
+                "Расш1_КомпоновщикБазыРаспределенияНастройкиОтборВыборПосле"
+            ),
+            (
+                "OnStartEdit",
+                "Расш1_КомпоновщикБазыРаспределенияНастройкиОтборПриНачалеРедактированияПосле"
+            ),
+            (
+                "OnChange",
+                "КомпоновщикБазыРаспределенияНастройкиОтборПриИзменении"
+            ),
+            (
+                "OnChange",
+                "Расш1_КомпоновщикБазыРаспределенияНастройкиОтборПриИзмененииПосле"
+            ),
+        ]
+    );
+}
+
 #[test]
 fn extracts_form_command_customize_list_standard_picture() {
     let command = parse_form_command(
