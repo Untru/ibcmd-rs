@@ -31306,6 +31306,9 @@ fn parse_metadata_choice_parameter_value(
     {
         return Some(MetadataChoiceParameterValue::String(text));
     }
+    if let Some(pair) = unnameable_metadata_design_time_pair(value, type_index, object_refs) {
+        return Some(MetadataChoiceParameterValue::DesignTimeRef(pair));
+    }
     let value_refs = parse_design_time_references(value, object_refs);
     match value_refs.len() {
         // The register decoder already carries a complete typed reader for this
@@ -31579,6 +31582,63 @@ fn owner_scoped_design_time_reference(
             resolved
         })
         .cloned()
+}
+
+/// The `<type>.<value>` pair the platform writes for a wrapped design-time
+/// reference whose type identifier names no type this configuration carries.
+///
+/// A wrapped choice-parameter value spells the pair explicitly --
+/// `{"#",<container>,{0,<type>,<value>}}` -- and the platform answers it the
+/// same way the form reader already answers its own slot: a reference it
+/// cannot name is written physically rather than dropped or guessed. The
+/// value-identifier lookup this reader otherwise does cannot see that,
+/// because a stale type leaves a live *value* behind: the identifier still
+/// names an object, just not one of that type.
+///
+/// Evidence, ERP УХ 3.3.3.3
+/// `DataProcessors/ГенерацияКассовыхОрдеров`: the attribute's two choice
+/// parameters store the identical shape. `Отбор.ФормаОплаты` names type
+/// `b3d3fa57-…`, which is the `EnumRef.ФормыОплаты` generated type, and the
+/// platform writes `Enum.ФормыОплаты.EnumValue.Наличная`.
+/// `Отбор.СостояниеОбъекта` names type `74217710-…`, which appears nowhere in
+/// the configuration -- the whole native export mentions it only in this one
+/// file -- and the platform writes
+/// `74217710-53a3-4971-93c9-4bd74c53a81a.e8218ef1-026a-48b5-b5ca-934efd6df05e`,
+/// although the value identifier `e8218ef1-…` is a live enumeration value of
+/// `Enum.СостоянияСогласования`.
+///
+/// The same `{0,<a>,<b>}` record also spells a *fixed array* of two
+/// design-time references, so the two are told apart the only way the record
+/// allows: an array names two objects the reference index carries, a pair
+/// names a type and a value. This answers only the case where the first
+/// identifier names neither a type nor an object -- the one case the
+/// identifier-based reader silently turns into a single, wrongly-typed
+/// reference -- and leaves every other shape to it.
+fn unnameable_metadata_design_time_pair(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.len() != 3 || parse_1c_quoted_string(fields[0].trim()).as_deref() != Some("#") {
+        return None;
+    }
+    let pair = split_1c_braced_fields(fields[2].trim(), 0)?;
+    let [marker, type_id, value_id] = pair.as_slice() else {
+        return None;
+    };
+    if marker.trim() != "0" {
+        return None;
+    }
+    let type_uuid = parse_non_zero_uuid(type_id.trim())?;
+    let value_uuid = parse_non_zero_uuid(value_id.trim())?;
+    if type_index.contains_key(&type_uuid) || object_refs.contains_key(&type_uuid) {
+        return None;
+    }
+    if !object_refs.contains_key(&value_uuid) {
+        return None;
+    }
+    Some(format!("{type_uuid}.{value_uuid}"))
 }
 
 fn parse_design_time_references(text: &str, object_refs: &BTreeMap<String, String>) -> Vec<String> {
@@ -33723,7 +33783,10 @@ fn standard_picture_name(uuid: &str) -> Option<&'static str> {
         // wrote through as a bare `0:<uuid>` reference.
         "021c20a0-071b-4a60-8e44-12487adde0c8" => Some("StdPicture.EditInDialog"),
         "64ca52ee-f1a3-468f-8055-311935077515" => Some("StdPicture.QueryWizardTempTable"),
-        "a9481ba4-dc85-4112-9c50-f9f340a61298" => Some("StdPicture.QueryWizardReplaceTable"),        "7df3febb-2640-41b7-ad8b-7a23b7ad4aec" => {
+        "a9481ba4-dc85-4112-9c50-f9f340a61298" => Some("StdPicture.QueryWizardReplaceTable"),
+        // Same reading, from the attribute picture of
+        // `Catalogs/ПоляНаборовДанныхМСФО`, the one place ERP УХ names it.
+        "f695666a-bad9-49f6-ab7c-5198d7ea4739" => Some("StdPicture.CustomExpression"),        "7df3febb-2640-41b7-ad8b-7a23b7ad4aec" => {
             Some("StdPicture.QueryWizardCreateTempTableDropQuery")
         }
         "8ac19694-383a-457a-b050-0a3ee937f5f3" => Some("StdPicture.DataCompositionNewNestedScheme"),
@@ -33890,11 +33953,58 @@ fn parse_common_command_group_value(
     common_command_group_name(uuid).map(str::to_string)
 }
 
+/// A command's parameter type pattern, keeping an unnameable type identifier
+/// instead of losing the whole list to it.
+///
+/// This is the rule the form pattern reader already follows
+/// (`parse_form_metadata_type_pattern`): the platform preserves a type
+/// identifier the configuration resolves to no name rather than discarding the
+/// block. The command reader had no such fallback, so one stale identifier
+/// turned the whole pattern into `None`, which `unwrap_or_default` then wrote
+/// as an empty `<CommandParameterType/>`.
+///
+/// Evidence, ERP УХ 3.3.3.3 `Reports/АналитикаПотребностиПоДокументу`: the
+/// navigation command's pattern names six types, of which the platform writes
+/// four as `cfg:DocumentRef.…` and the remaining two -- `4d285bf9-…` and
+/// `fa6b56de-…`, which the whole native export mentions nowhere else -- as
+/// `<v8:TypeId>`. Storage interleaves them (`Type Type Type TypeId Type
+/// TypeId`) and the platform writes the names first and the identifiers last,
+/// so the unnameable ones are moved behind the named ones, each group keeping
+/// its own order -- the same stable partition the root metadata `<Type>` block
+/// already applies to its type sets.
+fn parse_command_parameter_type_pattern(
+    value: &str,
+    type_index: &BTreeMap<String, String>,
+) -> Option<Vec<ConstantValueType>> {
+    let fields = split_1c_braced_fields(value, 0)?;
+    if fields.first()?.trim() != r#""Pattern""# {
+        return None;
+    }
+    let value_types = fields
+        .iter()
+        .skip(1)
+        .map(|field| {
+            parse_metadata_type_pattern_element(field, type_index).or_else(|| {
+                let element = split_1c_braced_fields(field, 0)?;
+                (element.first()?.trim() == r##""#""## && element.len() >= 2)
+                    .then(|| parse_uuid_field(element.get(1)?.trim()))
+                    .flatten()
+                    .map(|type_id| ConstantValueType::TypeId { type_id })
+            })
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let (mut named, unnameable): (Vec<_>, Vec<_>) = value_types
+        .into_iter()
+        .partition(|value_type| !matches!(value_type, ConstantValueType::TypeId { .. }));
+    named.extend(unnameable);
+    Some(named)
+}
+
 fn parse_common_command_parameter_types(
     value: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Vec<ConstantValueType> {
-    parse_metadata_type_pattern(value, type_index)
+    parse_command_parameter_type_pattern(value, type_index)
         .unwrap_or_default()
         .into_iter()
         .map(|value_type| match value_type {
@@ -40191,10 +40301,16 @@ fn format_common_command_parameter_type_xml_with_indent(
     }
     xml.push_str(&format!("{indent}<CommandParameterType>\r\n"));
     for value_type in types {
-        let tag_name = if matches!(value_type, ConstantValueType::ReferenceTypeSet { .. }) {
-            "TypeSet"
-        } else {
-            "Type"
+        let tag_name = match value_type {
+            ConstantValueType::ReferenceTypeSet { .. } => "TypeSet",
+            // A type identifier the configuration resolves to no name is
+            // echoed verbatim, exactly as a form pattern echoes one. Evidence:
+            // ERP УХ 3.3.3.3 `Reports/АналитикаПотребностиПоДокументу`, whose
+            // navigation command names four `cfg:DocumentRef` types and then
+            // `4d285bf9-…` and `fa6b56de-…`, neither of which the
+            // configuration carries, as two `<v8:TypeId>`.
+            ConstantValueType::TypeId { .. } => "TypeId",
+            _ => "Type",
         };
         xml.push_str(&format!(
             "{indent}\t<v8:{tag_name}>{}</v8:{tag_name}>\r\n",

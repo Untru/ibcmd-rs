@@ -13321,12 +13321,25 @@ pub(super) enum MoxelChartSeriesAutomaticName {
 
 impl MoxelChartSeriesAutomaticName {
     /// What `ibcmd` itself publishes on the host this export is running on.
+    ///
+    /// The cache, everywhere. The operating system is not the discriminator it
+    /// was taken for: on 20.09.2026 the native `ibcmd` of 8.3.27.2214 exported
+    /// ERP УХ 3.3.3.3 **on Windows** and published `Сводная` on all 36 series
+    /// of the 16 files that carry one, `Pivot` on none -- including the two
+    /// `ФинансовыйАнализ` templates the earlier Windows round-2 capture of УТ
+    /// 11.5.27.75 published `Pivot` for, and 5 of which this export was
+    /// therefore republishing against the very tree it is measured on.
+    ///
+    /// Whatever separates those two Windows captures -- the platform's
+    /// interface language is the likeliest candidate, since `Pivot` is the
+    /// English derivation of the same automatic name -- is not something this
+    /// export can observe, so it publishes what every capture on the stand
+    /// publishes and what the one reproducible capture on this host publishes.
+    /// [`Self::RepublishedInEnglish`] stays expressible, and
+    /// `push_moxel_chart_series_text_xml_with_host` still takes the choice, so
+    /// the alternative behaviour remains available and tested.
     pub(super) const fn host() -> Self {
-        if cfg!(target_os = "macos") {
-            Self::Stored
-        } else {
-            Self::RepublishedInEnglish
-        }
+        Self::Stored
     }
 }
 

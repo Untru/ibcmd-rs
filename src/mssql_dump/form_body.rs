@@ -28105,6 +28105,13 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         // `Form.Item.КомпоновщикНастроекНастройки.StandardCommand.AddGroup` on
         // ERP УХ `Catalogs/АналитическиеПанели/Forms/ФормаНастройкиСКДОбласти`.
         "7b70c79a-199e-4e87-a7eb-29dea9a5ad69" => Some("AddGroup"),
+        // Read the same way, from the two buttons of ERP УХ 3.3.3.3
+        // `Reports/ОСВМСФО/Forms/СтруктураВариантаОтчета` the platform names
+        // `Form.Item.КомпоновщикПримечанияНастройки.StandardCommand.AddTable`
+        // -- both spelled `ДобавитьТаблицу`, both beside siblings this table
+        // already names `AddGroup` and `Copy` on the same item -- and which
+        // this export wrote through as the bare `3:<uuid>` reference.
+        "46647493-f1bf-4cd6-9110-6bfab80b62de" => Some("AddTable"),
         _ => None,
     }
 }
@@ -31298,7 +31305,12 @@ pub(super) fn format_form_child_item_xml(
         // `Title` but a `TitleLocation`, so it lands behind `DataPath` and
         // ahead of `TitleLocation`). Reading either half as a whole-block
         // rule breaks the other corpus; the between-position satisfies both.
-        if let Some(title_back_color) = &item.title_back_color {
+        //
+        // A `ColumnGroup` is not in that run at all: it writes the property
+        // behind `Group`, past `ToolTip`, and has its own site further down.
+        if item.tag != "ColumnGroup"
+            && let Some(title_back_color) = &item.title_back_color
+        {
             xml.push_str(&format!(
                 "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
                 escape_xml_text(title_back_color)

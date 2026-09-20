@@ -3157,11 +3157,32 @@ impl RewriteState {
 /// landing strictly inside the interval is not evidenced and is refused rather
 /// than guessed, so a configuration carrying a type uuid in that gap fails
 /// closed instead of being written in a made-up order.
+/// A second, independent corpus narrows six of these intervals.
+///
+/// Every multi-member `Type` list of the native ERP УХ 3.3.3.3 export (7 272
+/// of them, over 98 117 files) was measured the same way: each builtin's lower
+/// bound is the greatest reference uuid ever written before it and its upper
+/// bound the least ever written after it. Not one pair contradicts another,
+/// and not one contradicts the reference configuration's measurement below --
+/// every bound the УХ corpus states is inside the interval that corpus already
+/// gave, so the table holds the intersection of the two.
+///
+/// The three independent checks named above still pass against the narrowed
+/// intervals: `v8:ValueListType` 4772b3b4 lies between 3a87ef2a and 55adb97e,
+/// `v8:UUID` fc01b5df above e460fa87, `v8:StandardPeriod` 2fdc88ec below
+/// e63fc7d1.
+///
+/// `v8:ComparisonType` is the one builtin the УХ corpus places (lower
+/// 875d45b2, upper f2c84078) that this table does not carry. It is left out:
+/// admitting a builtin turns lists that currently order by storage's own
+/// grouping into lists this comparator decides, which is a change no
+/// observation of a *mixed* list demands, and the three pairs behind those
+/// bounds are too few to take that on.
 const BUILTIN_TYPE_SORT_BOUNDS: &[(&str, Option<&str>, Option<&str>)] = &[
     (
         "v8:Null",
-        Some("1eb045d5-0080-4aae-8c01-7562e94c399a"),
-        None,
+        Some("aec47505-7600-4f8b-a857-be17226c4eb7"),
+        Some("bf183a56-c710-48e7-85ff-4cc5fae0e549"),
     ),
     (
         "v8:StandardPeriod",
@@ -3170,27 +3191,27 @@ const BUILTIN_TYPE_SORT_BOUNDS: &[(&str, Option<&str>, Option<&str>)] = &[
     ),
     (
         "v8:TypeDescription",
-        Some("5507e9a1-c199-40e0-a820-7436d2faac4b"),
+        Some("6a946d6e-1974-42dc-8848-c062d6b03571"),
         None,
     ),
     (
         "v8:UUID",
-        Some("b687901c-87e7-4f68-b440-5cda82ad3676"),
+        Some("e460fa87-ad0b-439b-93f4-e71430552930"),
         None,
     ),
     (
         "v8:ValueListType",
-        Some("2e86fe94-4898-4ea5-988a-42122b917bee"),
+        Some("3a87ef2a-9de1-4d34-9e5f-3c8cdf53b3ab"),
         Some("55adb97e-a84e-453e-8020-7665bb2abdef"),
     ),
     (
         "xs:boolean",
-        Some("56c86461-d1a1-4757-ac34-d36ef2ecf333"),
-        Some("604931cd-d4a8-48d0-bc59-2ac90e044abb"),
+        Some("5d12bac6-11b9-4548-9a92-6bf3454f6ce3"),
+        Some("5ddff675-43df-4ca6-b0fe-766898f44b3a"),
     ),
     (
         "xs:dateTime",
-        Some("a8102d85-e4f4-485c-ba59-8068bb30e9ce"),
+        Some("a8154859-3590-41c6-8899-a5b5a9fd240b"),
         Some("abb75494-7154-4303-b8c6-5840c31ac3ec"),
     ),
     (

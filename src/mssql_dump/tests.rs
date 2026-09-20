@@ -31365,6 +31365,62 @@ fn parses_metadata_child_choice_parameter_links_from_wrapped_collection() {
     assert_eq!(links[2].value_change, "DontChange");
 }
 
+/// A wrapped pair whose type the configuration does not carry keeps both
+/// identifiers, and the same record shape with two *objects* stays the fixed
+/// array it is.
+///
+/// Evidence, ERP УХ 3.3.3.3 `DataProcessors/ГенерацияКассовыхОрдеров`: the
+/// attribute's two choice parameters store the identical shape.
+/// `Отбор.ФормаОплаты` names `EnumRef.ФормыОплаты` beside a value and the
+/// platform writes `Enum.ФормыОплаты.EnumValue.Наличная`;
+/// `Отбор.СостояниеОбъекта` names `74217710-…`, which the whole native export
+/// mentions only in that one file, and the platform writes the pair, although
+/// its value identifier is a live enumeration value.
+#[test]
+fn metadata_choice_parameter_keeps_a_pair_whose_type_the_configuration_lost() {
+    let stale_type = "74217710-53a3-4971-93c9-4bd74c53a81a";
+    let live_type = "b3d3fa57-e3db-46d3-b7a9-68e89ebae723";
+    let approved = "e8218ef1-026a-48b5-b5ca-934efd6df05e";
+    let cash = "d450cea1-6bc0-427b-b3f6-68344c8dba57";
+    let type_index = BTreeMap::from([(live_type.to_string(), "cfg:EnumRef.ФормыОплаты".to_string())]);
+    let object_refs = BTreeMap::from([
+        (
+            approved.to_string(),
+            "Enum.СостоянияСогласования.EnumValue.Утверждена".to_string(),
+        ),
+        (
+            cash.to_string(),
+            "Enum.ФормыОплаты.EnumValue.Наличная".to_string(),
+        ),
+    ]);
+    let parameters = parse_metadata_child_choice_parameters(
+        Some(&format!(
+            r##"{{0,2,"Отбор.СостояниеОбъекта",{{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{{0,{stale_type},{approved}}}}},"Отбор.ФормаОплаты",{{"#",5c14e26f-099b-4d37-84a6-b433d87400da,{{0,{live_type},{cash}}}}}}}"##
+        )),
+        &type_index,
+        &object_refs,
+    )
+    .expect("both parameters parse");
+
+    assert_eq!(parameters.len(), 2);
+    assert!(
+        matches!(
+            &parameters[0].value,
+            MetadataChoiceParameterValue::DesignTimeRef(value)
+                if value == &format!("{stale_type}.{approved}")
+        ),
+        "the stale pair must be written physically"
+    );
+    assert!(
+        matches!(
+            &parameters[1].value,
+            MetadataChoiceParameterValue::DesignTimeRef(value)
+                if value == "Enum.ФормыОплаты.EnumValue.Наличная"
+        ),
+        "the live pair must resolve to its value's name"
+    );
+}
+
 #[test]
 fn parses_and_formats_metadata_child_choice_parameter_values() {
     let object_refs = BTreeMap::from([
@@ -31598,12 +31654,21 @@ fn wrapped_data_processor_child_reads_the_proven_property_slots() {
         "0",
     ];
 
+    // The choice parameter names the enumeration's `Ref` type beside the
+    // value, so the type index carries it: a pair whose type the
+    // configuration does not carry is the one the platform writes as an
+    // identifier pair (`unnameable_metadata_design_time_pair`), which is not
+    // the case this fixture is about.
+    let type_index = BTreeMap::from([(
+        "d19811b1-1650-47cd-a01c-a79958cb224c".to_string(),
+        "cfg:EnumRef.ТипыСкладов".to_string(),
+    )]);
     let properties = parse_data_processor_wrapped_child_properties(
         &fields,
         1,
         "DataProcessor.Owner.",
         &[],
-        &BTreeMap::new(),
+        &type_index,
         &object_refs,
         &object_refs,
         &BTreeMap::new(),
@@ -60331,10 +60396,23 @@ fn extracts_data_processor_child_attribute_choice_parameters() {
             )
             .as_bytes(),
         );
-    let type_index = BTreeMap::from([(
-        "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".to_string(),
-        "cfg:CatalogRef.Products".to_string(),
-    )]);
+    // The single parameter's value names the enumeration's own `Ref` type
+    // beside the value; a real type index carries every generated type of the
+    // configuration, and a pair whose type it does *not* carry is the one the
+    // platform writes as an identifier pair
+    // (`unnameable_metadata_design_time_pair`). Index it, so the fixture
+    // states the case it means -- a resolvable reference -- rather than the
+    // other one by omission.
+    let type_index = BTreeMap::from([
+        (
+            "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee".to_string(),
+            "cfg:CatalogRef.Products".to_string(),
+        ),
+        (
+            "e9aecab4-da2b-4a51-b13c-fb8ca3924bce".to_string(),
+            "cfg:EnumRef.Statuses".to_string(),
+        ),
+    ]);
     let object_refs = BTreeMap::from([
         (
             status_uuid.to_string(),

@@ -864,6 +864,30 @@ pub(super) const fn is_collectible_source_refusal(class: MetadataSourceFailureCl
     )
 }
 
+/// Whether a storage row's owner names a configuration generation an online
+/// update has already superseded.
+///
+/// An online (dynamic) configuration update renames the outgoing generation's
+/// rows by inserting `_dynupdate_<generation uuid>` before the storage suffix
+/// -- the alias `mssql_main_activation` itself writes when it performs that
+/// transition -- and leaves them beside the active ones. They are a previous
+/// configuration, not a second claimant on this one's source tree.
+///
+/// Evidence, ERP УХ 3.3.3.3: the `Config` table carries 156 such rows, under
+/// the two generations `15bcc426-54ca-410a-9543-768987b832ac` and
+/// `17894f1a-0404-4132-9792-15816a396671`, and the native export publishes the
+/// content of none of them. Only one of them was ever visible in the output:
+/// `Ext/ParentConfigurations.bin` is named by the configuration root's own
+/// uuid, which both superseded generations also carry, so all three rows
+/// claimed the one path and the collision rule withheld the active row along
+/// with the two stale ones -- the file the native export does write.
+fn is_superseded_generation_owner(owner: &str) -> bool {
+    let Some((base, generation)) = owner.split_once("_dynupdate_") else {
+        return false;
+    };
+    !base.is_empty() && uuid::Uuid::parse_str(generation).is_ok()
+}
+
 pub(super) fn source_asset_paths_with_indexes(
     rows: &[ConfigRow],
     metadata_texts: &[MetadataTextRow],
@@ -889,6 +913,9 @@ pub(super) fn source_asset_paths_with_indexes(
         let Ok(row_id) = ConfigRowId::parse(file_name) else {
             continue;
         };
+        if is_superseded_generation_owner(row_id.owner()) {
+            continue;
+        }
         suffixes_by_id
             .entry(row_id.owner())
             .or_default()
