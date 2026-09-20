@@ -6981,15 +6981,23 @@ fn form_dynamic_list_query_selects_undeclared_field(
         // valid list universes. Refuse the verdict for those families until
         // their complete field model is available.
         //
-        // Documents were admitted here for one measured case -- ERP УХ
-        // 3.3.3.3 `Documents/ПрограммаЗакупок/Forms/ФормаЧерновиков`, whose
-        // query selects `ДокументСтрокаПланаЗакупок.РегистрационныйНомер` from
-        // a document that declares no such field, and whose fourteen data
-        // paths the platform marks to a one -- and withdrawn again: the same
-        // corpus then marked nineteen other lists the platform writes plain,
-        // so this index's silence about a document's fields is not a denial
-        // either.
-        if !matches!(kind, "Catalog" | "InformationRegister") {
+        // Documents joined the set on ERP УХ 3.3.3.3
+        // `Documents/ПрограммаЗакупок/Forms/ФормаЧерновиков`, whose query
+        // selects `ДокументСтрокаПланаЗакупок.РегистрационныйНомер` from
+        // `Документ.СтрокаПланаЗакупок`, which declares no such field and no
+        // common attribute of that name covers it. The query therefore does
+        // not compile, the platform's available-field universe is empty, and
+        // it marks all fourteen of that list's data paths -- the only list of
+        // that tree's 776 document-sourced manual queries whose paths are
+        // marked to a one.
+        //
+        // Admitting them first marked nineteen lists the platform writes
+        // plain, every one of them through the same missing fact: the
+        // document row of `form_dynamic_list_std_attribute_pairs` did not
+        // list `ВерсияДанных`, which those lists select and the platform
+        // resolves. With that row complete the verdict agrees with the
+        // platform on all 776.
+        if !matches!(kind, "Catalog" | "Document" | "InformationRegister") {
             return false;
         }
         // Presentation is a query-language field of a reference-valued row,
@@ -7337,12 +7345,26 @@ pub(super) fn form_dynamic_list_std_attribute_pairs(
         ("ЭтоГруппа", "IsFolder"),
         ("Владелец", "Owner"),
     ];
-    const DOCUMENT: [(&str, &str); 6] = [
+    const DOCUMENT: [(&str, &str); 7] = [
         ("Ссылка", "Ref"),
         ("ПометкаУдаления", "DeletionMark"),
         ("Дата", "Date"),
         ("Номер", "Number"),
         ("Проведен", "Posted"),
+        // `DataVersion` is a standard attribute of a document exactly as it is
+        // of a catalogue, a chart of characteristic types and a chart of
+        // accounts, all three of which this table already lists it for; only
+        // the document row was missing it.
+        //
+        // Evidence, ERP УХ 3.3.3.3: nineteen manual-query lists select
+        // `<alias>.ВерсияДанных` from a document -- among them
+        // `Documents/ЗаявкаНаРасход/Forms/ФормаСписка` and
+        // `Documents/КассоваяСмена/Forms/ФормаСписка` -- and the platform
+        // writes every data path of every one of them plain, so it resolves
+        // that field against the document. No path anywhere in that tree ends
+        // in `ВерсияДанных` or `DataVersion`, marked or not, so nothing
+        // contradicts it either.
+        ("ВерсияДанных", "DataVersion"),
         // `PointInTime` is a standard attribute of a document like the five
         // above it, and a list bound to a document resolves a path onto it.
         // Evidence: across all eight stand trees no path ending `.PointInTime`
