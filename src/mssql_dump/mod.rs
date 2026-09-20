@@ -33650,7 +33650,12 @@ fn standard_picture_name(uuid: &str) -> Option<&'static str> {
         "5182f57f-e834-4d11-9c9f-4aedc002b6e9" => Some("StdPicture.FixTable"),
         "affb1617-24bc-4170-9c84-0902cc3ef206" => Some("StdPicture.DataCompositionSettingsWizard"),
         "ad8cb448-a6bb-43b4-886a-7d6a8367eef2" => Some("StdPicture.DataCompositionGroupFields"),
-        "7df3febb-2640-41b7-ad8b-7a23b7ad4aec" => {
+        // Read off native ERP УХ 3.3.3.3 form command pictures, where the
+        // platform writes the name for the same descriptor uuid this export
+        // wrote through as a bare `0:<uuid>` reference.
+        "021c20a0-071b-4a60-8e44-12487adde0c8" => Some("StdPicture.EditInDialog"),
+        "64ca52ee-f1a3-468f-8055-311935077515" => Some("StdPicture.QueryWizardTempTable"),
+        "a9481ba4-dc85-4112-9c50-f9f340a61298" => Some("StdPicture.QueryWizardReplaceTable"),        "7df3febb-2640-41b7-ad8b-7a23b7ad4aec" => {
             Some("StdPicture.QueryWizardCreateTempTableDropQuery")
         }
         "8ac19694-383a-457a-b050-0a3ee937f5f3" => Some("StdPicture.DataCompositionNewNestedScheme"),

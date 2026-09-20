@@ -519,11 +519,13 @@ fn config_dump_top_name(
     let base = canonical_refs
         .get(base_id)
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has unknown metadata owner {base_id}"))?;
-    let role_path = emitted_source_asset_paths
+    // An asset this export actually discovered or emitted names its own role:
+    // a form body writes `Ext/Form.xml`, which the platform names `.Form`
+    // although the same row also yields the form module.
+    let emitted_role_path = emitted_source_asset_paths
         .get(id)
-        .or_else(|| source_assets.get(id).map(|asset| &asset.primary_path))
-        .or_else(|| module_text_paths.get(id));
-    if let Some(role_path) = role_path {
+        .or_else(|| source_assets.get(id).map(|asset| &asset.primary_path));
+    if let Some(role_path) = emitted_role_path {
         let role = role_path
             .file_stem()
             .and_then(|role| role.to_str())
@@ -531,25 +533,32 @@ fn config_dump_top_name(
             .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has an invalid row-role route"))?;
         return Ok(format!("{base}.{role}"));
     }
-    // A record that decodes to nothing still has a name here. The three
-    // lookups above all go through an asset that was actually discovered or
-    // emitted, and an empty help body or an empty command interface produces
-    // neither -- the platform writes no `Ext/*.xml` for them, but
-    // `ConfigDumpInfo.xml` names them all the same (11 such entries on
-    // Документооборот КОРП 3.0.21.3, and the very same situation the
-    // Configuration root's own `.9`/`.a` pair already resolves from the route
-    // table in `add_configuration_root_command_interface_references`). So the
-    // role comes from the same typed (family, suffix) table, keyed by the
-    // owner's own family.
+    // Otherwise the typed (family, suffix) table decides, because it is read
+    // off native record names and is exact for every row an owner family
+    // stores: `Catalog` `.0`/`.1`/`.3` are `ObjectModule`/`Help`/`ManagerModule`
+    // and `CommonModule` `.0` is `Module`. A record that decodes to nothing --
+    // an empty help body or an empty command interface -- produces no file at
+    // all, so only this table can name it.
     let (_, suffix) = id
         .rsplit_once('.')
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no row suffix"))?;
     let family = metadata_reference_family(base)
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} owner {base} names no family"))?;
-    let role = crate::compiler::families::assets::SourceAssetRegistry
+    if let Some(role) = crate::compiler::families::assets::SourceAssetRegistry
         .route_by_suffix(family, suffix)
         .and_then(|route| Path::new(route.relative_path()).file_stem())
         .and_then(|role| role.to_str())
+    {
+        return Ok(format!("{base}.{role}"));
+    }
+    // Only when the owner family declares no route for the suffix does the
+    // module-text map get a say: it is derived from the owner's metadata text
+    // rather than from the record itself.
+    let role = module_text_paths
+        .get(id)
+        .and_then(|path| path.file_stem())
+        .and_then(|role| role.to_str())
+        .filter(|role| !role.is_empty())
         .ok_or_else(|| anyhow!("ConfigDumpInfo entry {id} has no typed row-role route"))?;
     Ok(format!("{base}.{role}"))
 }
