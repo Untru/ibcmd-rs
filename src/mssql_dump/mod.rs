@@ -3186,6 +3186,7 @@ fn dump_table_rows_with_options_mode(
                                             build_metadata_field_declaration_index_from_texts(
                                                 metadata_texts,
                                                 &object_refs,
+                                                &type_index,
                                             )
                                         } else {
                                             MetadataFieldDeclarationIndex::default()
@@ -4328,7 +4329,11 @@ fn dump_table_rows_streamed(
         },
     );
     let metadata_field_declarations = if extract_metadata_xml && source_reference_needs.field_refs {
-        build_metadata_field_declaration_index_from_texts(&index_metadata_texts, &object_refs)
+        build_metadata_field_declaration_index_from_texts(
+            &index_metadata_texts,
+            &object_refs,
+            &type_index,
+        )
     } else {
         MetadataFieldDeclarationIndex::default()
     };

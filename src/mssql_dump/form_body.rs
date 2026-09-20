@@ -6769,6 +6769,27 @@ pub(super) fn form_dynamic_list_nested_field_is_declared(
             .map(|declared| declared.into_iter().all(|value| value));
     }
 
+    // A head that is an ordinary field of the main table dereferences into
+    // whatever its declared type names, and the terminal is a member of that
+    // object or it is nothing. Only a field that declares exactly one
+    // reference type answers here: a value with more than one possible type
+    // has no single set of members, and the index leaves those out.
+    //
+    // Evidence, ERP УХ 3.3.3.3
+    // `AccumulationRegisters/ПланированиеПотребностей/Forms/ФормаСписка`:
+    // the dimensions `АналитикаИсточника` and `АналитикаПланирования` both
+    // declare `cfg:CatalogRef.КлючиАналитикиПланирования`, and of the five
+    // paths the form writes under each, the platform marks
+    // `.Этап`, `.ОбъектПланирования`, `.ДатаОперации` and `.Цена` -- none of
+    // which that catalogue declares, it carries them only as `Удалить_…`
+    // renames -- and writes `.АналитикаСтруктуры`, which it does declare,
+    // plain.
+    if let Some(declarations) = declarations
+        && let Some(owner) = declarations.field_reference_owner(main_table, head)
+    {
+        return form_metadata_owner_declares_direct_member(owner, terminal, Some(declarations));
+    }
+
     let section = object_refs.values().find(|reference| {
         reference
             .strip_prefix(&format!("{main_table}.TabularSection."))

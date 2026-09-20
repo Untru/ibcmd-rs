@@ -8406,11 +8406,29 @@ pub(super) fn parse_moxel_format_table(
             continue;
         }
         let mut formats = Vec::with_capacity(count);
+        if std::env::var_os("IBCMD_DEBUG_MOXEL").is_some() {
+            eprintln!(
+                "[moxel] format table count={count} kinds={:?}",
+                drawing_format_indices
+            );
+        }
         for (format_offset, field) in fields[index + 1..=index + count].iter().enumerate() {
             let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
                 formats.clear();
                 break;
             };
+            if std::env::var_os("IBCMD_DEBUG_MOXEL").is_some() && format_offset + 1 >= 12 {
+                eprintln!(
+                    "[moxel] #{} kind={:?} width={:?} back={:?} border={:?} text={:?} raw={}",
+                    format_offset + 1,
+                    drawing_format_indices.get(&(format_offset + 1)),
+                    format.width,
+                    format.back_color,
+                    format.border_color,
+                    format.text_color,
+                    &field[..field.len().min(160)]
+                );
+            }
             if let Some(kind) = drawing_format_indices.get(&(format_offset + 1))
                 && format.width.is_none()
             {

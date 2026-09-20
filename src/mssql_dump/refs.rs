@@ -272,6 +272,12 @@ pub(super) struct MetadataFieldDeclarationIndex {
     /// case. The object-reference index supplies these names independently of
     /// any query text, so query validation never infers declarations from use.
     data_fields: BTreeMap<String, BTreeSet<String>>,
+    /// The owner a top-level data field's *single declared reference type*
+    /// names, keyed by the owning table and the folded field name. A field
+    /// that declares no type, several, or a non-reference one is absent: a
+    /// value with more than one possible type has no single set of fields to
+    /// dereference into.
+    field_types: BTreeMap<String, BTreeMap<String, String>>,
     /// Declared fields whose metadata property enables password mode, keyed by
     /// their owning table and folded field name. Password fields are excluded
     /// from a dynamic list's automatically available fields by the platform.
@@ -310,6 +316,15 @@ impl MetadataFieldDeclarationIndex {
         self.data_fields
             .get(table)
             .map(|fields| fields.contains(&field.to_lowercase()))
+    }
+
+    /// The metadata object a field of `table` holds a reference to, when the
+    /// field declares exactly one reference type and nothing else.
+    pub(super) fn field_reference_owner(&self, table: &str, field: &str) -> Option<&str> {
+        self.field_types
+            .get(table)?
+            .get(&field.to_lowercase())
+            .map(String::as_str)
     }
 
     /// What the constant with this uuid declares, or `None` when this index
@@ -439,6 +454,7 @@ impl MetadataCommonAttributeContent {
 pub(super) fn build_metadata_field_declaration_index_from_texts(
     rows: &[MetadataTextRow],
     object_refs: &BTreeMap<String, String>,
+    type_index: &BTreeMap<String, String>,
 ) -> MetadataFieldDeclarationIndex {
     let mut index = MetadataFieldDeclarationIndex::default();
     index.declared_tables = object_refs
@@ -466,6 +482,50 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
                 .entry(format!("{}.{}", parts[0], parts[1]))
                 .or_default()
                 .insert(parts[3].to_lowercase());
+        }
+    }
+    // The type side of the same field names: for every top-level data field
+    // that declares exactly one reference type, the object that type names.
+    // Read from the same header walk the field-type index is built from, and
+    // keyed the way the query side asks -- by table and field name rather
+    // than by the child's uuid.
+    for row in rows {
+        for (header, marker_start) in
+            nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
+        {
+            let Some(reference) = object_refs.get(&header.uuid) else {
+                continue;
+            };
+            let parts = reference.split('.').collect::<Vec<_>>();
+            if parts.len() != 4 || !DATA_FIELD_KINDS.contains(&parts[2]) {
+                continue;
+            }
+            let value_types = parse_metadata_child_value_types_with_builtin(
+                &row.text,
+                marker_start,
+                &header.uuid,
+                type_index,
+                builtin_type_reference,
+            );
+            let [ConstantValueType::Reference {
+                reference: type_reference,
+            }] = value_types.as_slice()
+            else {
+                continue;
+            };
+            let Some(owner) =
+                parse_generated_metadata_reference_owner(type_reference).map(|owner| {
+                    let owner = owner.owner_reference();
+                    owner
+                })
+            else {
+                continue;
+            };
+            index
+                .field_types
+                .entry(format!("{}.{}", parts[0], parts[1]))
+                .or_default()
+                .insert(parts[3].to_lowercase(), owner);
         }
     }
     for row in rows {
