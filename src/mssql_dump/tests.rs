@@ -19361,10 +19361,10 @@ fn minimal_radio_button_literal_ref_choice_is_typed_and_near_misses_are_opaque()
                 fixture.type_id
             ),
         ),
-        (
-            "nil pair in reference mode",
-            format!(r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{presentation}}}}}"##),
-        ),
+        // The nil pair in reference mode is not a near miss any more: ERP УХ
+        // 3.3.3.3 carries one, and the platform writes it as an empty
+        // design-time reference. See
+        // `minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml`.
         (
             "malformed type UUID",
             format!(
@@ -19535,12 +19535,9 @@ fn minimal_radio_button_empty_ref_choice_is_typed_and_near_misses_are_opaque() {
                 r##"{{"#",{discriminator},{{0,1,{{"U"}},{type_id},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
             ),
         ),
-        (
-            "nil type",
-            format!(
-                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic empty reference"}}}}}}}}"##
-            ),
-        ),
+        // A nil type beside a nil value is not a near miss any more: it is the
+        // platform's empty design-time reference. See
+        // `minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml`.
         (
             "wrong discriminator",
             format!(
@@ -19694,13 +19691,6 @@ fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
             false,
         ),
         (
-            "wrong payload mode",
-            format!(
-                r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
-            ),
-            false,
-        ),
-        (
             "extra payload field",
             format!(
                 r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}},0}}}}"##
@@ -19760,6 +19750,38 @@ fn minimal_radio_button_nil_choice_list_is_typed_and_matches_native_xml() {
             "{label}"
         );
     }
+
+    // Payload mode `0` under the same nil pair is not a near miss: it is the
+    // shape the platform writes as an empty design-time reference. ERP УХ
+    // 3.3.3.3 carries one such item, on `RadioButtonField`
+    // `ВариантВыбытияМаркируемойПродукции` of
+    // `Documents/ВерсияСоглашенияКоммерческийДоговор/Forms/ФормаДокумента`,
+    // and refusing it made that list opaque and cost the form its whole
+    // `Form.xml`.
+    let mode_zero_item = format!(
+        r##"{{"#",{discriminator},{{0,0,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##
+    );
+    let mode_zero = format!(
+        r#"{{3,1,"",{mode_zero_item},{{0,{{4,0,{{0}},"",-1,-1,1,0,""}}}}}}"#
+    );
+    let mut options = vec!["0"; 12];
+    options[fixture.slot] = &mode_zero;
+    let canonical = canonical_form_radio_button_choice_list(
+        Some(&options),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &empty_object_refs,
+    );
+    let CanonicalFormChoiceList::Typed { items, .. } = &canonical else {
+        panic!("the mode-zero nil pair is the platform's empty design-time reference");
+    };
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].value, FormChoiceListValue::EmptyDesignTimeRef);
+    assert!(
+        format_form_choice_list_xml(&canonical, 1)
+            .unwrap()
+            .contains("<Value xsi:type=\"xr:DesignTimeRef\"/>")
+    );
 
     let exact_item = format!(
         r##"{{"#",{discriminator},{{0,1,{{"U"}},{nil},{nil},{{1,1,{{"en","Synthetic nil choice"}}}}}}}}"##

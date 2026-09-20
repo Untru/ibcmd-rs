@@ -596,6 +596,10 @@ pub enum FormChoiceListValue {
     EmptyRef(String),
     LiteralDesignTimeRef(String),
     DesignTimeRef(String),
+    /// A design-time reference to nothing at all: the item's identifier pair
+    /// is nil on both halves and the platform writes the element empty rather
+    /// than nil, naming only the type.
+    EmptyDesignTimeRef,
     /// A design-time value of a platform-defined type: the value member names
     /// the type by its platform identifier and the member by its ordinal, and
     /// the platform writes the type's own QName as the `xsi:type` and the
@@ -691,6 +695,11 @@ impl FormChoiceListValue {
                 xml_opening: Cow::Borrowed("<Value xsi:type=\"xr:DesignTimeRef\">"),
                 xml_closing: "</Value>",
                 text: Some(value),
+            },
+            Self::EmptyDesignTimeRef => FormChoiceListValueWireShape {
+                xml_opening: Cow::Borrowed("<Value xsi:type=\"xr:DesignTimeRef\"/>"),
+                xml_closing: "",
+                text: None,
             },
             Self::DesignTimePlatformValue {
                 type_reference,
@@ -934,6 +943,27 @@ where
                     FormChoiceListValue::Nil
                 }
                 ("1", true, true) => FormChoiceListValue::Nil,
+                // A radio button's list writes the same nil-on-both-halves
+                // pair as an empty design-time reference rather than as a nil
+                // value: the platform names the type and writes the element
+                // empty.
+                //
+                // Evidence, ERP УХ 3.3.3.3: the whole native tree carries one
+                // `<Value xsi:type="xr:DesignTimeRef"/>`, in
+                // `Documents/ВерсияСоглашенияКоммерческийДоговор/Forms/ФормаДокумента`
+                // on the first item of `RadioButtonField`
+                // `ВариантВыбытияМаркируемойПродукции`, whose stored item is
+                // `{"#",0e704aa2-…,{0,0,{"U"},00000000-…,00000000-…,<presentation>}}`
+                // beside a second item that names a live enumeration value.
+                // Refusing it made the whole list opaque and cost the form its
+                // entire `Form.xml`. The 15 `<Value xsi:nil="true"/>` of the
+                // same tree all belong to the input-field layout, which the
+                // arm above answers.
+                ("0", true, true)
+                    if layout == FormChoiceListLayoutProfile::RadioButtonOptions =>
+                {
+                    FormChoiceListValue::EmptyDesignTimeRef
+                }
                 ("0", false, true) => {
                     if let Some(owner) = resolve_empty_ref_owner(type_id.trim()) {
                         FormChoiceListValue::EmptyRef(format!("{owner}.EmptyRef"))
