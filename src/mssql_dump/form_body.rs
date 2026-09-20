@@ -6974,13 +6974,23 @@ fn form_dynamic_list_query_selects_undeclared_field(
             return false;
         };
         // This declaration index is complete enough to reject arbitrary data
-        // fields only for catalogues and information registers. Other query
-        // sources expose fields which are not metadata children in the owner
-        // graph (journal columns and the platform's calculated record fields,
-        // among others); treating the index's silence as a denial collapsed
-        // valid list universes. Refuse the verdict for those families until
-        // their complete field model is available.
-        if !matches!(kind, "Catalog" | "InformationRegister") {
+        // fields only for catalogues, documents and information registers.
+        // Other query sources expose fields which are not metadata children in
+        // the owner graph (journal columns and the platform's calculated
+        // record fields, among others); treating the index's silence as a
+        // denial collapsed valid list universes. Refuse the verdict for those
+        // families until their complete field model is available.
+        //
+        // Documents joined the set on ERP УХ 3.3.3.3
+        // `Documents/ПрограммаЗакупок/Forms/ФормаЧерновиков`, whose query
+        // selects `ДокументСтрокаПланаЗакупок.РегистрационныйНомер` from
+        // `Документ.СтрокаПланаЗакупок`, which declares no such field and no
+        // common attribute of that name covers it. The query therefore does
+        // not compile, the platform's available-field universe is empty, and
+        // it marks all fourteen of that list's data paths -- the only list of
+        // the 776 document-sourced manual queries in that tree whose paths are
+        // marked to a one.
+        if !matches!(kind, "Catalog" | "Document" | "InformationRegister") {
             return false;
         }
         // Presentation is a query-language field of a reference-valued row,
@@ -23171,11 +23181,26 @@ fn resolve_form_dynamic_list_chain_data_path(
     let Some(attribute) = attribute_metadata_owners_by_id.get(attribute_id) else {
         return FormOwnerScopedDataPath::Unknown;
     };
-    let marker = owner_scoped_bindings
-        .invalid_nested_columns
-        .contains(&key)
-        .then_some("~")
-        .unwrap_or_default();
+    // A field the list cannot resolve at all is marked wherever its data path
+    // is written, and a chain is one of those places. The row-picture route
+    // one grammar over already reads this very index (`unresolvable_columns`)
+    // beside the nested one; the chain route read only the nested one, so a
+    // list whose whole available-field universe is empty still wrote its
+    // dotted paths plain.
+    //
+    // Evidence, ERP УХ 3.3.3.3 `DataProcessors/
+    // ПодборНоменклатурыПоПлануПоставкиПоДоговору/Forms/
+    // ФормаПодбораПоПлануПоставкиПоДоговору`: the list
+    // `СписокПланПоставокПоДоговору` reads a virtual table the query does not
+    // declare, so its universe is empty and the platform marks all sixteen of
+    // its data paths -- fifteen of which this export already marked through
+    // the same index, and the sixteenth,
+    // `~СписокПланПоставокПоДоговору.Номенклатура.ЕдиницаИзмерения`, only
+    // because it is spelled as a chain.
+    let marker = (owner_scoped_bindings.invalid_nested_columns.contains(&key)
+        || owner_scoped_bindings.unresolvable_columns.contains(&key))
+    .then_some("~")
+    .unwrap_or_default();
     FormOwnerScopedDataPath::Resolved(format!("{marker}{}.{}", attribute.name, field_name))
 }
 
