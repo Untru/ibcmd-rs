@@ -738,6 +738,16 @@ pub(crate) enum SourceAssetKind {
 #[derive(Clone, Default)]
 pub(super) struct StandaloneContentReferences {
     pub(super) object_refs: BTreeMap<String, String>,
+    /// Every uuid that owns a configuration storage record.
+    ///
+    /// A standalone-content list may still name a uuid this configuration no
+    /// longer stores. The platform drops such an item from its own
+    /// `Ext/StandaloneConfigurationContent.bin` -- ERP УХ 3.3.3.3 lists
+    /// `b5cd6fb8-8130-459a-9a23-96f1f1f5e17e`, which owns no `Config` row, and
+    /// the native file writes 5,269 items and never mentions it. Keeping the
+    /// set separate lets a name that is missing for a record that *does* exist
+    /// stay fail-closed, because that would be a gap in this index.
+    pub(super) storage_record_uuids: BTreeSet<String>,
 }
 
 pub(super) struct SourceAsset {
@@ -2124,8 +2134,13 @@ fn write_source_asset_inner(
             write_source_xml_file(&path, xml, context.source_version)?;
         }
         SourceAssetKind::StyleBody => {
-            let xml = extract_style_body_xml(bytes, context.object_refs, context.source_version)
-                .with_context(|| {
+            let xml = extract_style_body_xml(
+                bytes,
+                context.object_refs,
+                context.configuration_root_child_order,
+                context.source_version,
+            )
+            .with_context(|| {
                     format!(
                         "failed to extract style body from source asset {}",
                         asset.primary_path.display()
@@ -5224,6 +5239,32 @@ pub(super) fn extract_schedule_xml(bytes: &[u8]) -> Result<String> {
     Ok(format_job_schedule_xml(&schedule))
 }
 
+/// Resolves one standalone-content item, or reports that the platform writes
+/// no item for it.
+///
+/// A uuid this configuration stores must be nameable: failing to name it is a
+/// gap in the reference index, so it stays fail-closed. A uuid that owns no
+/// storage record at all is a stale entry of the list itself, and the platform
+/// drops it from its own export.
+fn standalone_content_item_reference<'a>(
+    references: &'a StandaloneContentReferences,
+    uuid: &str,
+) -> Result<Option<&'a String>> {
+    if let Some(reference) = references.object_refs.get(uuid) {
+        return Ok(Some(reference));
+    }
+    if !references.storage_record_uuids.is_empty()
+        && !references.storage_record_uuids.contains(uuid)
+    {
+        return Ok(None);
+    }
+    Err(anyhow::Error::new(SourceAssetRefusal::new(
+        "standalone-content.reference-unresolved",
+        MetadataSourceFailureClass::Unresolved,
+        format!("standalone content reference not found: {uuid}"),
+    )))
+}
+
 pub(super) fn extract_standalone_content_xml(
     bytes: &[u8],
     references: &StandaloneContentReferences,
@@ -5255,16 +5296,9 @@ pub(super) fn extract_standalone_content_xml(
         .collect::<Vec<_>>();
     selected_uuids.sort_unstable();
     for uuid in selected_uuids {
-        let reference = references
-            .object_refs
-            .get(uuid)
-            .ok_or_else(|| {
-                SourceAssetRefusal::new(
-                    "standalone-content.reference-unresolved",
-                    MetadataSourceFailureClass::Unresolved,
-                    format!("standalone content reference not found: {uuid}"),
-                )
-            })?;
+        let Some(reference) = standalone_content_item_reference(references, uuid)? else {
+            continue;
+        };
         push_standalone_metadata_item_xml(&mut xml, "UsedItem", reference);
     }
     let mut index = 2 + count;
@@ -5286,16 +5320,9 @@ pub(super) fn extract_standalone_content_xml(
             .collect::<Vec<_>>();
         child_uuids.sort_unstable();
         for uuid in child_uuids {
-            let reference = references
-                .object_refs
-                .get(uuid)
-                .ok_or_else(|| {
-                SourceAssetRefusal::new(
-                    "standalone-content.reference-unresolved",
-                    MetadataSourceFailureClass::Unresolved,
-                    format!("standalone content reference not found: {uuid}"),
-                )
-            })?;
+            let Some(reference) = standalone_content_item_reference(references, uuid)? else {
+                continue;
+            };
             push_standalone_metadata_item_xml(&mut xml, "UnusedItem", reference);
         }
         let mut trailing_uuids = fields
@@ -5305,16 +5332,9 @@ pub(super) fn extract_standalone_content_xml(
             .collect::<Vec<_>>();
         trailing_uuids.sort_unstable();
         for uuid in trailing_uuids {
-            let reference = references
-                .object_refs
-                .get(&uuid)
-                .ok_or_else(|| {
-                SourceAssetRefusal::new(
-                    "standalone-content.reference-unresolved",
-                    MetadataSourceFailureClass::Unresolved,
-                    format!("standalone content reference not found: {uuid}"),
-                )
-            })?;
+            let Some(reference) = standalone_content_item_reference(references, &uuid)? else {
+                continue;
+            };
             push_standalone_priority_item_xml(&mut xml, reference);
         }
         if child_count > 0 {

@@ -1051,6 +1051,32 @@ pub(super) fn configuration_root_metadata_file_names_from_texts(
     roots
 }
 
+/// Each top-level metadata object's position inside its own family, as the
+/// Configuration root row lists them.
+///
+/// This is the order `Configuration.xml` writes its `<ChildObjects>` in, and
+/// it is the only order a style body can be written in: a style names its
+/// items by identifier, and the platform writes them in exactly this order
+/// (see [`super::extract_style_body_xml`]). The index is per family, because
+/// the families are already partitioned by kind, and a caller that mixes two
+/// families is a caller that already knows which kind it is asking about.
+pub(super) fn build_configuration_root_child_order_from_texts(
+    rows: &[MetadataTextRow],
+) -> BTreeMap<String, usize> {
+    let mut index = BTreeMap::new();
+    for row in rows {
+        let Some(layout) = parse_configuration_root_layout(&row.text, &row.file_name) else {
+            continue;
+        };
+        for family in &layout.child_families {
+            for (order, uuid) in family.iter().enumerate() {
+                index.entry(uuid.clone()).or_insert(order);
+            }
+        }
+    }
+    index
+}
+
 pub(super) fn parse_configuration_header_uuid(text: &str) -> Option<String> {
     if !text.trim_start().starts_with("{2,") {
         return None;
@@ -1150,6 +1176,7 @@ pub(super) fn build_standalone_content_references(
 
     StandaloneContentReferences {
         object_refs: standalone_object_refs,
+        storage_record_uuids: BTreeSet::new(),
     }
 }
 
@@ -1314,6 +1341,7 @@ pub(super) fn build_standalone_content_references_for_uuids(
 
     StandaloneContentReferences {
         object_refs: standalone_object_refs,
+        storage_record_uuids: BTreeSet::new(),
     }
 }
 

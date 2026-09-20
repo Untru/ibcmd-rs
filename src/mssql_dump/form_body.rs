@@ -13772,7 +13772,13 @@ fn parse_form_child_item_with_metadata_owners(
         three_state: check_box_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.three_state(options)),
-        item_width: parse_form_radio_button_item_width(radio_button_options.as_deref()),
+        item_width: parse_form_radio_button_item_width(radio_button_options.as_deref()).or_else(
+            || {
+                check_box_field_layout
+                    .as_ref()
+                    .and_then(|(_, options)| parse_form_check_box_item_width(Some(options)))
+            },
+        ),
         item_title_height: parse_form_radio_button_item_title_height(
             radio_button_options.as_deref(),
         )
@@ -13914,7 +13920,10 @@ fn parse_form_child_item_with_metadata_owners(
         title_back_color: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| fields.get(schema.title_back_color_slot()))
-            .and_then(|field| parse_form_control_color(field, object_refs)),
+            .and_then(|field| parse_form_control_color(field, object_refs))
+            .or_else(|| {
+                parse_form_column_group_title_back_color(wrapper, tag, &fields, object_refs)
+            }),
         hidden_state_title_back_color: show_title_schema
             .and_then(|schema| {
                 show_title_options
@@ -19310,6 +19319,21 @@ pub(super) fn parse_form_radio_button_item_title_height(
     (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
 }
 
+/// `ItemWidth` of the thirteen-member `CheckBoxField` option tuple, which
+/// keeps it at member 9 rather than the radio button's member 10.
+///
+/// Evidence, ERP УХ 3.3.3.3: the whole native tree carries five
+/// `<ItemWidth>` inside a `<CheckBoxField>`, all in
+/// `Catalogs/ЗакупочныеПроцедуры/Forms/НастройкаКритериев`, all `19`, and all
+/// five stored tuples end `…,{7,3,0,1,100},0,19,0,2,2}` -- member 9 is the
+/// written width. A check box that writes no width stores `0` there:
+/// `Catalogs/БанковскиеСчетаОрганизаций/Forms/ФормаЭлемента` holds twelve such
+/// tuples, every one ending `…,{7,3,0,1,100},0,0,0,2,0}`.
+pub(super) fn parse_form_check_box_item_width(options: Option<&[&str]>) -> Option<String> {
+    let value = options?.get(9)?.trim();
+    (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
+}
+
 pub(super) fn parse_form_input_field_auto_mark_incomplete(
     extended_options: Option<&[&str]>,
 ) -> Option<bool> {
@@ -21760,6 +21784,34 @@ fn parse_form_field_footer_picture(
         return None;
     }
     parse_form_owned_picture(raw, &value, schema.picture(), "FooterPicture", object_refs)
+}
+
+/// `TitleBackColor` of a `ColumnGroup`, read from the very same header
+/// container its `HeaderPicture` comes out of.
+fn parse_form_column_group_title_back_color(
+    wrapper: &str,
+    item_tag: &str,
+    fields: &[&str],
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    if wrapper != "22" || item_tag != "ColumnGroup" {
+        return None;
+    }
+    let container = split_1c_braced_fields(
+        fields
+            .get(FormFieldHeaderPictureSchema::COLUMN_GROUP_CONTAINER_SLOT)?
+            .trim(),
+        0,
+    )?;
+    if container.len() != FormFieldHeaderPictureSchema::COLUMN_GROUP_CONTAINER_FIELDS
+        || container.first().map(|field| field.trim()) != Some("2")
+    {
+        return None;
+    }
+    parse_form_control_color(
+        container.get(FormFieldHeaderPictureSchema::COLUMN_GROUP_TITLE_BACK_COLOR_SLOT)?,
+        object_refs,
+    )
 }
 
 /// `HeaderPicture` of a `ColumnGroup`, read one level down from the header
@@ -31677,7 +31729,9 @@ pub(super) fn format_form_child_item_xml(
     // `ItemTitleHeight` (12) repeats the same relations and leads
     // `ColumnsCount` (8), `EqualColumnsWidth` (2) and `ChoiceList` (12).  No
     // pair is observed in both directions.
-    if let Some(item_width) = &item.item_width {
+    if item.tag != "CheckBoxField"
+        && let Some(item_width) = &item.item_width
+    {
         xml.push_str(&format!(
             "{tab}\t<ItemWidth>{}</ItemWidth>\r\n",
             escape_xml_text(item_width)
@@ -32623,6 +32677,17 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(group)
         ));
     }
+    // A `ColumnGroup` writes its `TitleBackColor` directly behind `Group`: the
+    // one native occurrence trails `Title`, `ToolTip` and `Group` and leads
+    // `ShowInHeader`, `ExtendedTooltip` and `ChildItems`.
+    if item.tag == "ColumnGroup"
+        && let Some(title_back_color) = &item.title_back_color
+    {
+        xml.push_str(&format!(
+            "{tab}\t<TitleBackColor>{}</TitleBackColor>\r\n",
+            escape_xml_text(title_back_color)
+        ));
+    }
     xml.push_str(&format_form_usual_group_properties_xml(
         item,
         FormUsualGroupXmlAnchor::BeforeBehavior,
@@ -32732,6 +32797,22 @@ pub(super) fn format_form_child_item_xml(
             "EditFormat",
             &item.edit_format,
             indent + 1,
+        ));
+    }
+    // A check box writes its `ItemWidth` in the same scalar tail, directly
+    // behind its own `EditFormat`. All five native occurrences
+    // (`Catalogs/ЗакупочныеПроцедуры/Forms/НастройкаКритериев`) trail
+    // `CheckBoxField`, `DataPath`, `CheckBoxType` and `EditFormat` -- four of
+    // them `Title`, two `Visible` and two `TitleLocation` -- and lead
+    // `ContextMenu`, `ExtendedTooltip` and `Events`, with no counter-example
+    // and no check box that carries it together with `ItemHeight`,
+    // `ItemTitleHeight` or `EqualItemsWidth`.
+    if item.tag == "CheckBoxField"
+        && let Some(item_width) = &item.item_width
+    {
+        xml.push_str(&format!(
+            "{tab}\t<ItemWidth>{}</ItemWidth>\r\n",
+            escape_xml_text(item_width)
         ));
     }
     // Check boxes keep `ItemHeight` in their scalar tail, after `EditFormat`

@@ -2006,6 +2006,18 @@ impl FormFieldHeaderPictureSchema {
     pub(crate) const COLUMN_GROUP_CONTAINER_SLOT: usize = 20;
     pub(crate) const COLUMN_GROUP_CONTAINER_FIELDS: usize = 12;
     pub(crate) const COLUMN_GROUP_PICTURE_SLOT: usize = 5;
+    /// The same header container carries the group's `TitleBackColor` one slot
+    /// behind the picture, in the ordinary three-member control-colour record.
+    ///
+    /// Evidence, ERP УХ 3.3.3.3: the native tree writes
+    /// `<TitleBackColor>` inside exactly one of its 7 389 `<ColumnGroup>`
+    /// items -- `DataProcessors/ОбработкаПлановыхПотребностей/Forms/
+    /// ФормаЛотирование`, group `ТППодборГруппаВДокумент`,
+    /// `style:ДобавленныйРеквизитФон` -- and that group is the only one of the
+    /// nine in its form whose container slot 6 holds a colour
+    /// (`{3,3,{0,42544966-…}}`, the uuid of `StyleItems/ДобавленныйРеквизитФон`);
+    /// the other eight hold the unset encoding `{3,4,{0}}`.
+    pub(crate) const COLUMN_GROUP_TITLE_BACK_COLOR_SLOT: usize = 6;
 
     pub(crate) fn from_column_group_layout(
         wrapper: &str,
@@ -7230,6 +7242,7 @@ enum FormTooltipRepresentationItemKind {
     SpreadSheetDocumentField,
     HTMLDocumentField,
     FormattedDocumentField,
+    TextDocumentField,
     CommandBar,
     Button,
     Other,
@@ -7259,6 +7272,7 @@ impl FormTooltipRepresentationItemKind {
             "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
             "HTMLDocumentField" => Self::HTMLDocumentField,
             "FormattedDocumentField" => Self::FormattedDocumentField,
+            "TextDocumentField" => Self::TextDocumentField,
             "CommandBar" => Self::CommandBar,
             "Button" => Self::Button,
             _ => Self::Other,
@@ -7374,6 +7388,17 @@ pub(crate) fn form_tooltip_representation_schema(
                 | FormTooltipRepresentationItemKind::SpreadSheetDocumentField
                 | FormTooltipRepresentationItemKind::HTMLDocumentField
                 | FormTooltipRepresentationItemKind::FormattedDocumentField
+                // A `TextDocumentField` is the third document-field kind the
+                // whitelist never named, and it reads the same offset.
+                // Evidence, ERP УХ 3.3.3.3: the native tree carries 140 of
+                // them and prints `<ToolTipRepresentation>` on exactly 2 --
+                // both `Button`, both in
+                // `Catalogs/РасширенияПанелиНалоговогоМониторинга/Forms/ФормаЭлемента`
+                // -- whose 60-member records read `3` (`Button`) at reverse
+                // offset 9, while the 59-member records of
+                // `DataProcessors/НастройкаОтраженияДокументовВРеглУчете/Forms/ТестированиеПроводок`,
+                // which print nothing, read `0` (`Omit`) at the same offset.
+                | FormTooltipRepresentationItemKind::TextDocumentField
         )
     {
         return Some(FormTooltipRepresentationSchema {
@@ -7442,6 +7467,10 @@ pub(crate) fn form_tooltip_representation_xml_order(
         // geometry run (`Width`, `Height`, `MaxHeight`), `BorderColor`,
         // `ContextMenu` and `ExtendedTooltip`.
         | FormTooltipRepresentationItemKind::HTMLDocumentField
+        // A `TextDocumentField` writes it at the same site: both native
+        // occurrences trail `DataPath` and `ToolTip` and lead `Height`,
+        // `ContextMenu` and `ExtendedTooltip`.
+        | FormTooltipRepresentationItemKind::TextDocumentField
         | FormTooltipRepresentationItemKind::FormattedDocumentField => {
             Some(FormTooltipRepresentationXmlOrder::FieldProperties)
         }

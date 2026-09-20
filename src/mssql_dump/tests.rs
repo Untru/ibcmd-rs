@@ -6441,6 +6441,10 @@ fn extracts_standalone_content_used_items() {
                 "CommonCommand.OpenAllReports".to_string(),
             ),
         ]),
+        storage_record_uuids: BTreeSet::from([
+            first_uuid.to_string(),
+            second_uuid.to_string(),
+        ]),
     };
 
     let xml =
@@ -6452,6 +6456,52 @@ fn extracts_standalone_content_used_items() {
     assert!(xml.contains("<Metadata>CommonCommand.OpenAllReports</Metadata>"));
     assert!(
         xml.find("Role.ReadOnlyUsers").unwrap() < xml.find("CommonCommand.OpenAllReports").unwrap()
+    );
+}
+
+/// A used-item uuid that owns no storage record at all is dropped, not refused.
+///
+/// Evidence: ERP УХ 3.3.3.3 lists 5 270 used items, of which the platform
+/// writes 5 269; the one it never mentions,
+/// `b5cd6fb8-8130-459a-9a23-96f1f1f5e17e`, holds no `Config` row of its own,
+/// so nothing in the configuration can name it. A uuid that *does* own a
+/// record and still resolves to no reference stays a refusal, because there
+/// the export is failing to name something the configuration carries.
+#[test]
+fn standalone_content_drops_used_items_without_a_storage_record() {
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let dangling_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let body = deflate_for_test(format!("{{2,2,{first_uuid},{dangling_uuid},0}}").as_bytes());
+    let references = StandaloneContentReferences {
+        object_refs: BTreeMap::from([(first_uuid.to_string(), "Role.ReadOnlyUsers".to_string())]),
+        storage_record_uuids: BTreeSet::from([first_uuid.to_string()]),
+    };
+
+    let xml =
+        String::from_utf8(extract_standalone_content_xml(&body, &references).unwrap()).unwrap();
+
+    assert!(xml.contains("<Metadata>Role.ReadOnlyUsers</Metadata>"));
+    assert!(!xml.contains(dangling_uuid));
+}
+
+#[test]
+fn standalone_content_refuses_an_unnamed_item_that_owns_a_record() {
+    let first_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let unnamed_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    let body = deflate_for_test(format!("{{2,2,{first_uuid},{unnamed_uuid},0}}").as_bytes());
+    let references = StandaloneContentReferences {
+        object_refs: BTreeMap::from([(first_uuid.to_string(), "Role.ReadOnlyUsers".to_string())]),
+        storage_record_uuids: BTreeSet::from([
+            first_uuid.to_string(),
+            unnamed_uuid.to_string(),
+        ]),
+    };
+
+    let error = extract_standalone_content_xml(&body, &references)
+        .expect_err("an item that owns a record must be named");
+    assert!(
+        format!("{error:#}").contains(unnamed_uuid),
+        "refusal should name the unresolved item: {error:#}"
     );
 }
 
@@ -14115,16 +14165,15 @@ fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
     // it doesn't belong in this "should be rejected" fuzz list; "9" (past
     // the valid range) and "-1" (negative) remain correctly rejected.
     //
-    // The kind row is `"7"` (`TextDocumentField`), not `"6"`
-    // (`SpreadSheetDocumentField`): a census of all 89 813 wrapper-`37`
-    // records in UT 11.5.27.75 reads reverse offset 9 as `0` on all 68
-    // `TextDocumentField` records — the platform prints
-    // `ToolTipRepresentation` on none of the corpus's 68 text-document
-    // fields — while it reads `1` on 2 of the 222 spreadsheet-document
-    // fields, exactly the 2 the platform prints `None` on. Keying the row to
-    // kind `"6"` asserted a rule the platform's own bytes disprove; keying it
-    // to a value (`"3"`) that offset never carries for that kind made the
-    // fixture spell a record the platform does not write.
+    // The kind row is `"14"` (`GraphicalSchemaField`), the one wrapper-`37`
+    // kind no corpus has ever shown carrying the property. It used to be
+    // `"7"` (`TextDocumentField`), on the strength of a census of all 89 813
+    // wrapper-`37` records of UT 11.5.27.75, where reverse offset 9 reads `0`
+    // on all 68 text-document fields; ERP УХ 3.3.3.3 then showed two that read
+    // `3` and that the platform prints `<ToolTipRepresentation>Button` on, so
+    // the kind is admitted and the UT reading is simply `Omit`, which writes
+    // nothing either way. (It was `"6"`, `SpreadSheetDocumentField`, before
+    // that, which the same UT census disproved.)
     //
     // The arity rows stay: the same census finds the record length is a total
     // function of the head shape — 83 290 records with an unshifted head are
@@ -14133,7 +14182,7 @@ fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
     // They pin the reader to reading *its own* record's reverse offset 9.
     for (wrapper, kind, field_count, raw) in [
         ("48", "2", 59, "3"),
-        ("37", "7", 59, "3"),
+        ("37", "14", 59, "3"),
         ("37", "2", 58, "3"),
         ("37", "2", 60, "3"),
         ("37", "2", 59, ""),
@@ -14204,7 +14253,7 @@ fn direct_formatter_does_not_emit_tooltip_representation_for_unadmitted_tags() {
     let mut item = parse_tooltip_representation_field_for_test(
         &tooltip_representation_field_record_for_test("37", "2", 59, "3", "{1,0}"),
     );
-    item.tag = "TextDocumentField";
+    item.tag = "GraphicalSchemaField";
     item.tooltip_representation = Some("Button");
 
     assert!(!format_form_child_item_xml(&item, 1, false).contains("ToolTipRepresentation"));

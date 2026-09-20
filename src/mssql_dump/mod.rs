@@ -2767,6 +2767,9 @@ struct DumpRowContext<'a> {
     form_object_refs: &'a BTreeMap<String, String>,
     role_rights_object_refs: &'a BTreeMap<String, String>,
     metadata_order: &'a BTreeMap<String, usize>,
+    /// Each top-level object's position inside its own Configuration root
+    /// child family. The style body writer orders its items by it.
+    configuration_root_child_order: &'a BTreeMap<String, usize>,
     field_refs: &'a BTreeMap<String, String>,
     field_type_refs: &'a Arc<BTreeMap<String, String>>,
     /// The leaves every named type set of the configuration declares. The
@@ -3309,6 +3312,13 @@ fn dump_table_rows_with_options_mode(
     } else {
         StandaloneContentReferences::default()
     };
+    let standalone_refs = {
+        let mut refs = standalone_refs;
+        refs.storage_record_uuids = storage_record_uuids_from_file_names(
+            file_names_owned.iter().map(String::as_str),
+        );
+        refs
+    };
     let needs_predefined_item_refs =
         predefined_data_needs_item_references(&file_names_owned, &body_owners);
     let predefined_item_refs = if needs_predefined_item_refs {
@@ -3342,6 +3352,8 @@ fn dump_table_rows_with_options_mode(
         &type_index,
         &object_refs,
     )?;
+    let configuration_root_child_order =
+        build_configuration_root_child_order_from_texts(metadata_texts);
     let mut form_object_refs = object_refs.clone();
     form_object_refs.extend(build_form_predefined_item_reference_index(
         &rows,
@@ -3420,6 +3432,7 @@ fn dump_table_rows_with_options_mode(
         form_object_refs: &form_object_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
+        configuration_root_child_order: &configuration_root_child_order,
         field_refs: &field_refs,
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
@@ -4408,6 +4421,13 @@ fn dump_table_rows_streamed(
     } else {
         StandaloneContentReferences::default()
     };
+    let standalone_refs = {
+        let mut refs = standalone_refs;
+        refs.storage_record_uuids = storage_record_uuids_from_file_names(
+            headers.iter().map(|header| header.file_name.as_str()),
+        );
+        refs
+    };
     timings.prepare_standalone_refs_ms += elapsed_ms(index_part_started);
     let index_part_started = Instant::now();
     let body_owners = if (extract_metadata_xml
@@ -4511,10 +4531,52 @@ fn dump_table_rows_streamed(
         &type_index,
         &object_refs,
     )?;
+    let configuration_root_child_order =
+        build_configuration_root_child_order_from_texts(&index_metadata_texts);
+    // A form names a predefined item of *any* object, not only of the objects
+    // whose own metadata XML needs predefined names, so the form index is
+    // built over every owner that stores a predefined-data body rather than
+    // over the subset `required_body_owners` narrows to.
+    //
+    // Evidence: ERP УХ 3.3.3.3 selects 27 owners for its metadata values, and
+    // the five owners its forms name predefined items of --
+    // `Catalog.ТерриториальныеУсловияПФР`, `Catalog.ВидыВычетовНДФЛ`,
+    // `Catalog.СостоянияПроцессов`,
+    // `ChartOfCharacteristicTypes.СтатьиРасходов` and
+    // `ChartOfCharacteristicTypes.АналитикиСтатейБюджетов` -- are none of
+    // them, so all 19 of those references were written as the identifier pair
+    // the platform keeps only for a reference it cannot name.
+    let form_predefined_file_names = predefined_data_body_file_names(&body_owners);
+    let form_predefined_rows = if form_predefined_file_names
+        .iter()
+        .all(|name| body_file_names.contains(name))
+    {
+        Vec::new()
+    } else {
+        let form_predefined_fetch_started = Instant::now();
+        let fetched = fetch_config_rows_bcp(
+            sqlcmd,
+            bcp,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &form_predefined_file_names,
+        )?;
+        let elapsed = elapsed_ms(form_predefined_fetch_started);
+        timings.prepare_metadata_fetch_ms += elapsed;
+        timings.prepare_metadata_fetch_bcp_ms += elapsed;
+        fetched
+    };
     let mut form_object_refs = object_refs.clone();
     form_object_refs.extend(build_form_predefined_item_reference_index(
-        &rows,
-        &required_body_owners,
+        if form_predefined_rows.is_empty() {
+            &rows
+        } else {
+            &form_predefined_rows
+        },
+        &body_owners,
         &type_index,
         &object_refs,
     ));
@@ -4586,6 +4648,7 @@ fn dump_table_rows_streamed(
         form_object_refs: &form_object_refs,
         role_rights_object_refs: &role_rights_object_refs,
         metadata_order: &metadata_order,
+        configuration_root_child_order: &configuration_root_child_order,
         field_refs: &field_refs,
         field_type_refs: &field_type_refs,
         information_register_field_refs: &information_register_field_refs,
@@ -9731,6 +9794,11 @@ struct HttpServiceMethodProperties {
 struct StyleBodyItem {
     name: String,
     standard_order: Option<usize>,
+    /// The style item's own metadata uuid, for the items the body names by
+    /// identifier rather than by standard code. The configuration's child
+    /// order is the platform's order for those, and only the uuid can ask
+    /// for it.
+    uuid: Option<String>,
     value_xml: String,
 }
 
@@ -34008,9 +34076,29 @@ const STYLE_BODY_FONT_TAG: &str = "7";
 /// need their own member layout, and neither appears on the stand.
 const STYLE_BODY_FONT_STYLE_ITEM_KIND: &str = "2";
 
+/// The order a style writes its items in: the standard items first, in the
+/// platform's own fixed order, then the configuration's style items in the
+/// configuration's child order.
+///
+/// A style body stores its members in no order the export can use -- ERP УХ
+/// 3.3.3.3 stores its 202 configuration style items in almost exactly reverse
+/// name order -- so the writer has always had to impose one, and it imposed
+/// the name order. That is right for all but three of those 202: the platform
+/// writes `ТекстСправочнойНадписи` before `ТекстПодобранногоЗначенияЦвет` and
+/// `ТекстПредопределенногоЗначения`, and `ЦветСводнойСерииДиаграммы` before
+/// `ЦветРамкиПоля`, none of which any name order produces.
+///
+/// The configuration's own child order does produce them: the 202 items of
+/// `Styles/Основной/Ext/Style.xml`, in the order the platform writes them, are
+/// exactly the configuration's 538 `<StyleItem>` children filtered to the 202
+/// the style carries -- character for character, with no exception. Name order
+/// stays the tiebreaker for an item the configuration's child index does not
+/// carry, so a style read without that index writes exactly what it wrote
+/// before.
 fn extract_style_body_xml(
     bytes: &[u8],
     object_refs: &BTreeMap<String, String>,
+    configuration_root_child_order: &BTreeMap<String, usize>,
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<String> {
     let inflated = inflate_raw_deflate(bytes)?;
@@ -34018,9 +34106,17 @@ fn extract_style_body_xml(
     let mut items = parse_style_body_items(text.trim_start_matches('\u{feff}'), object_refs)
         .context("failed to parse style body")?;
     items.sort_by(|left, right| {
+        let configuration_order = |item: &StyleBodyItem| {
+            item.uuid
+                .as_ref()
+                .and_then(|uuid| configuration_root_child_order.get(uuid))
+                .copied()
+                .unwrap_or(usize::MAX)
+        };
         left.standard_order
             .unwrap_or(usize::MAX)
             .cmp(&right.standard_order.unwrap_or(usize::MAX))
+            .then_with(|| configuration_order(left).cmp(&configuration_order(right)))
             .then_with(|| left.name.to_lowercase().cmp(&right.name.to_lowercase()))
             .then_with(|| left.name.cmp(&right.name))
     });
@@ -34042,7 +34138,7 @@ fn parse_style_body_items(
     let mut items = Vec::new();
     for field in fields.iter().skip(2) {
         let entry = split_1c_braced_fields(field, 0)?;
-        let (name, standard_order) = style_body_item_name(entry.first()?, object_refs)?;
+        let (name, standard_order, uuid) = style_body_item_name(entry.first()?, object_refs)?;
         let value = entry.get(2)?;
         let value_xml = match entry.get(1)?.trim() {
             "0" => format!(
@@ -34056,6 +34152,7 @@ fn parse_style_body_items(
         items.push(StyleBodyItem {
             name,
             standard_order,
+            uuid,
             value_xml,
         });
     }
@@ -34068,12 +34165,12 @@ fn parse_style_body_items(
 fn style_body_item_name(
     key: &str,
     object_refs: &BTreeMap<String, String>,
-) -> Option<(String, Option<usize>)> {
+) -> Option<(String, Option<usize>, Option<String>)> {
     let fields = split_1c_braced_fields(key, 0)?;
     if fields.len() == 1 {
         let code = fields.first()?.trim().parse::<i32>().ok()?;
         let (order, name) = standard_style_item_for_code(code)?;
-        return Some((name.to_string(), Some(order)));
+        return Some((name.to_string(), Some(order), None));
     }
     if fields.first()?.trim() == "0" {
         let uuid = parse_uuid_field(fields.get(1)?.trim())?;
@@ -34081,7 +34178,7 @@ fn style_body_item_name(
             .get(&uuid)
             .cloned()
             .unwrap_or_else(|| format!("StyleItem.{uuid}"));
-        return Some((name, None));
+        return Some((name, None, Some(uuid)));
     }
     None
 }
@@ -34393,6 +34490,10 @@ fn style_web_color_name(code: i32) -> Option<&'static str> {
         69 => Some("web:LightGoldenRodYellow"),
         71 => Some("web:LightGray"),
         72 => Some("web:LightPink"),
+        // `uh` `StyleItems/ЦветКритичногоНедостаткаСредств` stores code 73 and
+        // the platform writes `web:LightSalmon` for it; one unmapped code
+        // refuses the whole StyleItem, which is why that object was missing.
+        73 => Some("web:LightSalmon"),
         77 => Some("web:LightSlateGray"),
         78 => Some("web:LightSteelBlue"),
         79 => Some("web:LightYellow"),
@@ -42933,6 +43034,24 @@ fn selected_file_names_from_args(
         );
     }
     Ok(expand_selected_file_names(&combined))
+}
+
+/// Every uuid that owns at least one storage row, read off the row ids.
+///
+/// A row id is either the record uuid or `<uuid>.<suffix>`, so the leading
+/// segment names the record either way.
+fn storage_record_uuids_from_file_names<'a>(
+    file_names: impl IntoIterator<Item = &'a str>,
+) -> BTreeSet<String> {
+    file_names
+        .into_iter()
+        .map(|file_name| {
+            file_name
+                .split_once('.')
+                .map_or(file_name, |(uuid, _)| uuid)
+                .to_owned()
+        })
+        .collect()
 }
 
 /// The exact set of storage identities a selected-row export may read.
