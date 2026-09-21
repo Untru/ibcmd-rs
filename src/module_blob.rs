@@ -6084,10 +6084,13 @@ const fn native_flag(value: Option<bool>) -> Option<bool> {
 ///
 /// Fail-closed: a tag the writers have not measured, or a property whose
 /// spelling they cannot place, refuses the whole form.
+#[allow(clippy::too_many_arguments)]
 fn format_native_child_item(
     item: &FormXmlChildItem,
     attribute_ids: &BTreeMap<String, String>,
     command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
 ) -> Result<(&'static str, String)> {
     use crate::compiler::bodies::form_native as native;
@@ -6118,7 +6121,14 @@ fn format_native_child_item(
     if let Some(kind) = native::native_group_kind(&item.tag) {
         let mut records = Vec::new();
         for child in item.child_items.iter() {
-            records.push(format_native_child_item(child, attribute_ids, command_ids, source)?);
+            records.push(format_native_child_item(
+                child,
+                attribute_ids,
+                command_ids,
+                items,
+                main_attribute_class,
+                source,
+            )?);
         }
         let payload = native_container_payload(item, attribute_ids, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
@@ -6190,27 +6200,7 @@ fn format_native_child_item(
     if item.tag == "Button" {
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
-        // A button names its command by path. `Form.Command.X` is the form's
-        // own command, and the record carries that command's id in the
-        // command namespace; every other path names a configuration object,
-        // whose uuid only the configuration can give.
-        let command = match item.command_name.as_deref() {
-            None => "{0}".to_string(),
-            Some(path) => match path.strip_prefix("Form.Command.") {
-                Some(name) => {
-                    let id = command_ids.get(name).ok_or_else(|| {
-                        anyhow!("a button runs {path}, which the form does not declare")
-                    })?;
-                    format!(
-                        "{{{id},{}}}",
-                        crate::compiler::bodies::form_native::FORM_COMMAND_NAMESPACE_UUID
-                    )
-                }
-                None => {
-                    return Err(anyhow!("a button's command names a configuration object"));
-                }
-            },
-        };
+        let command = native_button_command(item, command_ids, items, main_attribute_class)?;
         let record = native::format_button_item(&native::NativeButtonItem {
             id: &item.id,
             name: &item.name,
@@ -6475,6 +6465,56 @@ fn native_container_payload(
     }
 }
 
+/// What a `<Button>` stores for its `<CommandName>`.
+///
+/// Always `{<target>,<uuid>}`: the target is 0 for a form standard command
+/// and the target item's own id for an item standard command -- true in all
+/// 15 692 standard-command buttons of ERP УХ -- and the command's own id for
+/// a form command. The uuid is fixed per scope and name, and the tables that
+/// carry it were read from the corpus.
+fn native_button_command(
+    item: &FormXmlChildItem,
+    command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    let Some(path) = item.command_name.as_deref() else {
+        return Ok("{0}".to_string());
+    };
+    if let Some(name) = path.strip_prefix("Form.Command.") {
+        let id = command_ids
+            .get(name)
+            .ok_or_else(|| anyhow!("a button runs {path}, which the form does not declare"))?;
+        return Ok(format!("{{{id},{}}}", native::FORM_COMMAND_NAMESPACE_UUID));
+    }
+    if let Some(name) = path.strip_prefix("Form.StandardCommand.") {
+        let uuid = native::form_standard_command_uuid(main_attribute_class, name)
+            .ok_or_else(|| anyhow!("no measured uuid for {path} on {main_attribute_class}"))?;
+        return Ok(format!("{{0,{uuid}}}"));
+    }
+    if let Some(rest) = path.strip_prefix("Form.Item.")
+        && let Some((target, name)) = rest.rsplit_once(".StandardCommand.")
+    {
+        let target = items
+            .get(target)
+            .ok_or_else(|| anyhow!("a button runs {path}, whose item the form does not declare"))?;
+        let uuid = native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
+            .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
+        return Ok(format!("{{{},{uuid}}}", target.id));
+    }
+    Err(anyhow!("a button's command names a configuration object"))
+}
+
+/// What a standard command needs to know about the item it acts on.
+struct NativeItemTarget {
+    tag: String,
+    id: String,
+    /// Whether the item is bound to an attribute of type `cfg:DynamicList`,
+    /// which is what tells two uuids of the same command name apart.
+    dynamic_list: bool,
+}
+
 /// `<CommandSource>`, which names a configuration object the writer has not
 /// measured; a container that names none carries `{0}`.
 fn native_command_source(item: &FormXmlChildItem) -> Result<String> {
@@ -6720,10 +6760,57 @@ fn format_native_form_body(
         .iter()
         .map(|command| (command.name.clone(), command.id.clone()))
         .collect::<BTreeMap<_, _>>();
+    // Every named child item, by name, so a standard command can name its
+    // target, and the class of the form's main attribute, which tells two
+    // uuids of the same command name apart.
+    let mut items = BTreeMap::new();
+    let mut stack = properties
+        .child_items
+        .iter()
+        .chain(
+            properties
+                .auto_command_bar
+                .iter()
+                .flat_map(|bar| bar.child_items.iter()),
+        )
+        .collect::<Vec<_>>();
+    while let Some(item) = stack.pop() {
+        let dynamic_list = item.data_path.as_deref().is_some_and(|path| {
+            properties.attributes.iter().any(|attribute| {
+                attribute.name == path.split('.').next().unwrap_or(path)
+                    && attribute.types.len() == 1
+                    && attribute.types[0].trim() == "cfg:DynamicList"
+            })
+        });
+        items.insert(
+            item.name.clone(),
+            NativeItemTarget {
+                tag: item.tag.clone(),
+                id: item.id.clone(),
+                dynamic_list,
+            },
+        );
+        stack.extend(item.child_items.iter());
+    }
+    let main_attribute_class = properties
+        .attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute == Some(true))
+        .and_then(|attribute| attribute.types.first())
+        .map(|value| value.split('.').next().unwrap_or(value).to_string())
+        .unwrap_or_default();
+
     let mut bar_children = Vec::new();
     if let Some(bar) = &properties.auto_command_bar {
         for item in &bar.child_items {
-            let (uuid, record) = format_native_child_item(item, &attribute_ids, &command_ids, source)?;
+            let (uuid, record) = format_native_child_item(
+            item,
+            &attribute_ids,
+            &command_ids,
+            &items,
+            &main_attribute_class,
+            source,
+        )?;
             bar_children.push((uuid, record));
         }
     }
@@ -6785,7 +6872,14 @@ fn format_native_form_body(
     // The form's own children, each written by the record writer for its kind.
     let mut children = Vec::new();
     for item in properties.child_items.iter().filter(|item| item.depth == 0) {
-        children.push(format_native_child_item(item, &attribute_ids, &command_ids, source)?);
+        children.push(format_native_child_item(
+            item,
+            &attribute_ids,
+            &command_ids,
+            &items,
+            &main_attribute_class,
+            source,
+        )?);
     }
     let children = children
         .iter()
