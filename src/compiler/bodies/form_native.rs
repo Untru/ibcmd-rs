@@ -121,6 +121,78 @@ pub(crate) fn format_standard_command_button(
     )
 }
 
+/// The `{12,…}` record of an item's `<ExtendedTooltip>` in the shape the
+/// platform writes when the owning item carries the visibility tuple.
+///
+/// The same record as [`format_extended_tooltip`] with `1,{0,{0,{"B",1},0}}`
+/// inserted after the id -- the common `UserVisible` prefix the reader already
+/// normalises away. 49 of the 1 602 tooltip records read for this module carry
+/// it; the other 1 475 do not.
+pub(crate) fn format_visible_extended_tooltip(id: &str, name: &str) -> String {
+    format!(
+        "{{12,{{{id},{ns}}},0,0,1,{{0,{{0,{{\"B\",1}},0}}}},0,{name},{{1,0}},{{1,0}},1,0,0,2,2,\
+         {{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{{5,0,0,3,0,{{0,1,0}},{{3,4,{{0}}}},\
+         {{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}}}},0,1,2,{{1,{{1,0}},0}},0,0,1,0,0,1,0,3,3,0,0}}",
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(name),
+        appearance = DEFAULT_APPEARANCE_UUID,
+    )
+}
+
+/// A `<Title>` that declares one Russian line, in the shape a body stores it.
+/// An empty title is `{1,0}`.
+pub(crate) fn format_russian_title(text: &str) -> String {
+    if text.is_empty() {
+        return "{1,0}".to_string();
+    }
+    format!("{{1,1,{{\"ru\",{}}}}}", quoted(text))
+}
+
+/// What a `<LabelDecoration>` record needs beyond its own name.
+pub(crate) struct NativeLabelDecoration<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) name: &'a str,
+    /// Already formatted -- see [`format_russian_title`].
+    pub(crate) title: &'a str,
+    /// The picture the decoration shows, when it shows one.
+    pub(crate) picture_uuid: Option<&'a str>,
+    pub(crate) context_menu_id: &'a str,
+    pub(crate) context_menu_name: &'a str,
+    pub(crate) extended_tooltip_id: &'a str,
+    pub(crate) extended_tooltip_name: &'a str,
+}
+
+/// The `{12,…}` record of a `<LabelDecoration>` that carries its name, its
+/// title and its two default children.
+///
+/// Measured against `Catalogs/ШаблонЦепочкиПлатежей/Forms/ПомощникСозданияШаблонов`,
+/// whose decorations are exactly this shape.
+pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) -> String {
+    let picture = match decoration.picture_uuid {
+        Some(uuid) => format!("{{4,1,{{0,{uuid}}},\"\",-1,-1,0,0,\"\"}}"),
+        None => "{4,0,{0},\"\",-1,-1,1,0,\"\"}".to_string(),
+    };
+    format!(
+        "{{12,{{{id},{ns}}},0,0,0,1,{name},{title},{{1,0}},1,0,0,2,2,{{3,4,{{0}}}},\
+         {{7,3,0,1,100}},{{0,0,0}},1,{{4,{picture},0,0,0,{{1,0}},{{3,4,{{0}}}},\
+         {{3,0,{{0}},0,1,0,{appearance}}},0,0,{{0,1,0}},0,100}},1,{context_menu},1,2,\
+         {{1,{title},0}},0,1,{tooltip},1,0,0,1,0,3,3,0,0}}",
+        id = decoration.id,
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(decoration.name),
+        title = decoration.title,
+        appearance = DEFAULT_APPEARANCE_UUID,
+        context_menu = format_field_context_menu(
+            decoration.context_menu_id,
+            decoration.context_menu_name
+        ),
+        tooltip = format_extended_tooltip(
+            decoration.extended_tooltip_id,
+            decoration.extended_tooltip_name
+        ),
+    )
+}
+
 /// The `{22,…}` record of an empty `<AutoCommandBar>`.
 ///
 /// The one slot that separates it from a context menu is the marker `9`, and
@@ -218,6 +290,35 @@ mod tests {
             format_empty_auto_command_bar("3", "СписокКоманднаяПанель"),
             "{22,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"СписокКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}"
         );
+    }
+
+    /// Two decorations of
+    /// `Catalogs/ШаблонЦепочкиПлатежей/Forms/ПомощникСозданияШаблонов`, and the
+    /// tooltip shape an item with a visibility tuple carries, exactly as those
+    /// bodies store them.
+    #[test]
+    fn writes_the_decoration_records_the_platform_stores() {
+        assert_eq!(
+            format_label_decoration(&NativeLabelDecoration {
+                id: "1195",
+                name: "ДекорацияВниманиеТолькоПросмотр",
+                title: &format_russian_title("Внимание"),
+                picture_uuid: Some("188d8f0e-94da-44bb-8ed3-21aa01e973b9"),
+                context_menu_id: "1196",
+                context_menu_name: "ДекорацияВниманиеТолькоПросмотрКонтекстноеМеню",
+                extended_tooltip_id: "1197",
+                extended_tooltip_name: "ДекорацияВниманиеТолькоПросмотрРасширеннаяПодсказка",
+            }),
+            "{12,{1195,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,1,\"ДекорацияВниманиеТолькоПросмотр\",{1,1,{\"ru\",\"Внимание\"}},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{4,{4,1,{0,188d8f0e-94da-44bb-8ed3-21aa01e973b9},\"\",-1,-1,0,0,\"\"},0,0,0,{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,{0,1,0},0,100},1,{22,{1196,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,\"ДекорацияВниманиеТолькоПросмотрКонтекстноеМеню\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,2,{1,{1,1,{\"ru\",\"Внимание\"}},0},0,1,{12,{1197,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ДекорацияВниманиеТолькоПросмотрРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},1,0,0,1,0,3,3,0,0}"
+        );
+
+        assert_eq!(
+            format_visible_extended_tooltip("6", "СценарийРасширеннаяПодсказка"),
+            "{12,{6,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},0,\"СценарийРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}"
+        );
+
+        assert_eq!(format_russian_title(""), "{1,0}");
+        assert_eq!(format_russian_title("Внимание"), "{1,1,{\"ru\",\"Внимание\"}}");
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
