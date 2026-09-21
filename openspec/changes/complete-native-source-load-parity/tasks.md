@@ -36,8 +36,8 @@ rather than defaulting it.
 - [x] **The `{31,…}` button record**: 76 913 / 77 127 (99.72%), the rest
       differing only in a member the element does not carry.
       *(button-record-20260921.md)*
-- [x] **The `{12,…}` decoration record** in its tooltip shape, the commonest
-      record in a body: 421 844 / 421 849 (100.00%).
+- [x] **The `{12,…}` decoration record**, one layout for tooltips, labels and
+      pictures: 464 526 / 464 539 (100.00%).
       *(decoration-record-20260921.md)*
 - [x] **Colours** and **fonts** an item can carry.
 - [x] The item payloads: label, input, check box, radio button, picture,
@@ -50,8 +50,7 @@ rather than defaulting it.
       read; what each key holds is not. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The `{12,…}` label and picture decorations**, which are the tooltip's
-      record two members longer, and the `{55,…}` table record.
+- [ ] **The `{55,…}` table record.**
 - [ ] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the

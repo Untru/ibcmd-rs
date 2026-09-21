@@ -1234,9 +1234,11 @@ pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33
 /// **421 844 rebuild byte for byte**: five differ in two members the element
 /// does not carry.
 ///
-/// A `<LabelDecoration>` and a `<PictureDecoration>` are the same record two
-/// members longer, and those two members are not yet read; this writer serves
-/// the tooltip shape.
+/// A `<LabelDecoration>` and a `<PictureDecoration>` are the **same record**:
+/// what makes them longer is two children a tooltip does not carry, each
+/// behind its own flag -- a context menu after the payload, and an extended
+/// tooltip of their own after the content. Read as one layout, the writer
+/// rebuilds **464 526 of the 464 539** decoration records of ERP УХ.
 pub(crate) struct NativeDecorationItem<'a> {
     pub(crate) id: &'a str,
     /// The functional-options block, when the decoration restricts itself.
@@ -1259,6 +1261,18 @@ pub(crate) struct NativeDecorationItem<'a> {
     pub(crate) payload: &'a str,
     /// The `{1,…}` block that carries what the decoration shows.
     pub(crate) content: &'a str,
+    /// `<Enabled>`, on unless the decoration turns it off.
+    pub(crate) enabled: bool,
+    /// The decoration's context menu, which a tooltip never has.
+    pub(crate) context_menu: Option<&'a str>,
+    /// `<Visible>`, on unless the decoration turns it off.
+    pub(crate) visible: bool,
+    /// `<SkipOnInput>`: 2 when the decoration names neither value.
+    pub(crate) skip_on_input: Option<bool>,
+    /// `<ToolTipRepresentation>`.
+    pub(crate) tooltip_representation: Option<&'a str>,
+    /// The decoration's own extended tooltip, which a tooltip never has.
+    pub(crate) extended_tooltip: Option<&'a str>,
     pub(crate) auto_max_width: bool,
     pub(crate) max_width: Option<&'a str>,
     pub(crate) auto_max_height: bool,
@@ -1288,6 +1302,12 @@ impl Default for NativeDecorationItem<'_> {
                 "{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
             ),
             content: "{1,{1,0},0}",
+            enabled: true,
+            context_menu: None,
+            visible: true,
+            skip_on_input: None,
+            tooltip_representation: None,
+            extended_tooltip: None,
             auto_max_width: true,
             max_width: None,
             auto_max_height: true,
@@ -1314,11 +1334,38 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
         "3",
     )?;
+    let menu = match decoration.context_menu {
+        Some(record) => format!("1,{record}"),
+        None => "0".to_string(),
+    };
+    let tooltip = match decoration.extended_tooltip {
+        Some(record) => format!("1,{record}"),
+        None => "0".to_string(),
+    };
+    let tooltip_representation = root_code(
+        decoration.tooltip_representation,
+        &[
+            ("Auto", "0"),
+            ("None", "1"),
+            ("Balloon", "2"),
+            ("Button", "3"),
+            ("ShowAuto", "4"),
+            ("ShowTop", "5"),
+            ("ShowLeft", "6"),
+            ("ShowBottom", "7"),
+            ("ShowRight", "8"),
+        ],
+        "0",
+    )?;
     Some(format!(
-        "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},1,{width},\
-         {height},{horizontal_stretch},{vertical_stretch},{back_color},{font},{{0,0,0}},1,\
-         {payload},0,1,2,{content},0,0,{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{horizontal},{vertical},0,0}}",
+        "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},{enabled},\
+         {width},{height},{horizontal_stretch},{vertical_stretch},{back_color},{font},\
+         {{0,0,0}},1,{payload},{menu},{visible},{skip_on_input},{content},\
+         {tooltip_representation},{tooltip},{auto_max_width},{max_width},0,\
+         {auto_max_height},{max_height},{horizontal},{vertical},0,0}}",
+        enabled = u8::from(decoration.enabled),
+        visible = u8::from(decoration.visible),
+        skip_on_input = native_tristate(decoration.skip_on_input),
         id = decoration.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = decoration.kind,
@@ -2974,6 +3021,24 @@ mod tests {
             "{12,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},0,\"Подсказка\",{1,0},{1,0},1,40,0,0,2,"
         ));
         assert!(restricted.ends_with(",0,0,60,0,1,0,3,3,0,0}"));
+
+        // A label decoration is the same record carrying two children a
+        // tooltip never has, each behind its own flag.
+        let labelled = format_decoration_item(&NativeDecorationItem {
+            id: "8",
+            name: "Надпись",
+            context_menu: Some("{22,{9,x},0}"),
+            visible: false,
+            skip_on_input: Some(true),
+            tooltip_representation: Some("ShowBottom"),
+            extended_tooltip: Some("{12,{10,x},0}"),
+            enabled: false,
+            ..NativeDecorationItem::default()
+        })
+        .expect("a decoration record");
+        assert!(labelled.contains(",\"Надпись\",{1,0},{1,0},0,0,0,2,2,"));
+        assert!(labelled.contains(",1,{22,{9,x},0},0,1,{1,{1,0},0},7,1,{12,{10,x},0},1,0,0,1,0,3,3,0,0}"));
+        assert_eq!(top_level_members(&labelled).len(), 36);
 
         // A picture decoration is the same record with kind 1.
         let picture = format_decoration_item(&NativeDecorationItem {

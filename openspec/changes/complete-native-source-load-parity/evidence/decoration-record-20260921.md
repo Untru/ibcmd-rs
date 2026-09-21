@@ -57,9 +57,29 @@ the narrow `format_extended_tooltip` writes -- and that shape was read off the
 bodies independently, earlier in this work. As with the button, two readings
 taken from different directions agree.
 
-## What is left
+## One layout for all three
 
-A `<LabelDecoration>` and a `<PictureDecoration>` are the same record **two
-members longer**, 36 in all 35 468 and 7 222 of them, and the two extra members
-sit from member 19 on. Their layout is not yet read; the writer serves the
-tooltip shape, which is 91% of all decoration records.
+```
+@all | records 464551 | parsed 464539 | exact 464526 (100.00%)
+```
+
+A `<LabelDecoration>` and a `<PictureDecoration>` are not a different record.
+What makes them longer is two **children** a tooltip does not carry, each
+behind its own flag:
+
+```text
+…,<payload>,<menu flag>[,<context menu>],<visible>,<skip on input>,
+   <content>,<tooltip representation>,<tooltip flag>[,<extended tooltip>],
+   <auto max width>,…
+```
+
+A tooltip writes both flags as 0 and is 34 members; a label decoration writes
+both as 1 and is 36. Read that way, one layout rebuilds **464 526 of the
+464 539** decoration records of the corpus -- every tooltip, label and picture
+decoration alike -- with 13 left over.
+
+Member 9, which the tooltip reading took for a constant 1, is `<Enabled>`.
+
+The four lengths the corpus stores are exactly the four the model predicts:
+34 (417 518 records), 35 (4 331, with the options block), 36 (41 341, with
+both children) and 37 (1 349, with all three).
