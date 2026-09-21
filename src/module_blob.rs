@@ -6670,6 +6670,13 @@ fn format_native_child_item(
             representation: item.button_representation.map(native_button_representation),
             default_button: item.default_button.unwrap_or(false),
             default_item: item.default_item.unwrap_or(false),
+            location_in_command_bar: item.location_in_command_bar.map(|value| match value {
+                FormXmlButtonLocationInCommandBar::InCommandBar => "InCommandBar",
+                FormXmlButtonLocationInCommandBar::InAdditionalSubmenu => "InAdditionalSubmenu",
+                FormXmlButtonLocationInCommandBar::InCommandBarAndInAdditionalSubmenu => {
+                    "InCommandBarAndInAdditionalSubmenu"
+                }
+            }),
             width: item.width.as_deref(),
             height: item.height.as_deref(),
             visible: item.visible.unwrap_or(true),
