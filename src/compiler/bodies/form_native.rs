@@ -1393,6 +1393,171 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
 /// in every one; the eight below are not. A root that carries children appends
 /// them after the command bar, which this writer does not do yet because the
 /// count encoding there is not measured.
+/// What a form says about itself after its children -- the root record's tail.
+///
+/// The tail opens with two empty strings and an optional navigator group, and
+/// what follows is exactly 21 members: the form's own property bag. Measured
+/// over the 12 410 ERP УХ forms that do not carry a
+/// `<MobileDeviceCommandBarContent>`, all 12 410 tails rebuild byte for byte
+/// from the source alone.
+///
+/// The one refusal is that mobile command bar: its content reaches the tail as
+/// `{50,1,"",{"N",<n>}}`, a reference into the body's own value table, which
+/// the source alone cannot resolve. All 78 forms that differed carried it, and
+/// no other form did.
+pub(crate) struct NativeRootTail<'a> {
+    /// `<AutoURL>`, which is on unless the form turns it off.
+    pub(crate) auto_url: bool,
+    /// `<VerticalScroll>`: `useIfNecessary` or `useWithoutStretch`. It is read
+    /// twice, and not the same way both times -- `useWithoutStretch` writes 0
+    /// in the first place and 3 in the second.
+    pub(crate) vertical_scroll: Option<&'a str>,
+    /// `<ScalingMode>`: `Normal` or `Compact`.
+    pub(crate) scaling_mode: Option<&'a str>,
+    /// `<HorizontalSpacing>` and `<VerticalSpacing>`: `None`, `Half`,
+    /// `OneAndHalf` or `Double`.
+    pub(crate) horizontal_spacing: Option<&'a str>,
+    pub(crate) vertical_spacing: Option<&'a str>,
+    /// `<HorizontalAlign>`: `Left`, `Center` or `Right`.
+    pub(crate) horizontal_align: Option<&'a str>,
+    /// `<VerticalAlign>`: `Top`, `Center` or `Bottom`.
+    pub(crate) vertical_align: Option<&'a str>,
+    /// `<ChildrenAlign>`, of which only `None` is ever stored.
+    pub(crate) children_align: Option<&'a str>,
+    /// `<Group>`, read twice and again not the same way: `AlwaysHorizontal`
+    /// writes 1 in the first place and 3 in the second.
+    pub(crate) group: Option<&'a str>,
+    /// `<ShowTitle>` and `<ShowCloseButton>`, both on unless turned off.
+    pub(crate) show_title: bool,
+    pub(crate) show_close_button: bool,
+    /// `<ConversationsRepresentation>`: `Show` or `DontShow`.
+    pub(crate) conversations_representation: Option<&'a str>,
+    /// `<CollapseItemsByImportanceVariant>`: `Use` or `DontUse`.
+    pub(crate) collapse_items_by_importance: Option<&'a str>,
+    /// `<SaveWindowSettings>`, on unless turned off.
+    pub(crate) save_window_settings: bool,
+    /// The navigator group's record, when the form has one.
+    pub(crate) navigator: Option<&'a str>,
+}
+
+impl Default for NativeRootTail<'_> {
+    fn default() -> Self {
+        Self {
+            auto_url: true,
+            vertical_scroll: None,
+            scaling_mode: None,
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            horizontal_align: None,
+            vertical_align: None,
+            children_align: None,
+            group: None,
+            show_title: true,
+            show_close_button: true,
+            conversations_representation: None,
+            collapse_items_by_importance: None,
+            save_window_settings: true,
+            navigator: None,
+        }
+    }
+}
+
+/// Reads one spelling of a property, refusing any the corpus never showed.
+fn root_code(value: Option<&str>, table: &[(&str, &str)], absent: &'static str) -> Option<String> {
+    match value {
+        None => Some(absent.to_string()),
+        Some(value) => table
+            .iter()
+            .find(|(candidate, _)| *candidate == value)
+            .map(|(_, code)| (*code).to_string()),
+    }
+}
+
+const ROOT_SPACING: &[(&str, &str)] = &[
+    ("None", "1"),
+    ("Half", "2"),
+    ("OneAndHalf", "4"),
+    ("Double", "5"),
+];
+
+/// The root record's tail, from `"",""` to the last member of the record.
+pub(crate) fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
+    let scroll = root_code(
+        tail.vertical_scroll,
+        &[("useIfNecessary", "2"), ("useWithoutStretch", "0")],
+        "0",
+    )?;
+    let scroll_again = root_code(
+        tail.vertical_scroll,
+        &[("useIfNecessary", "2"), ("useWithoutStretch", "3")],
+        "0",
+    )?;
+    let group = root_code(
+        tail.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "1"),
+            ("HorizontalIfPossible", "2"),
+        ],
+        "0",
+    )?;
+    let group_again = root_code(
+        tail.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "3"),
+            ("HorizontalIfPossible", "2"),
+        ],
+        "0",
+    )?;
+    let members = [
+        u8::from(tail.auto_url).to_string(),
+        "\"\"".to_string(),
+        scroll,
+        root_code(tail.scaling_mode, &[("Normal", "1"), ("Compact", "2")], "0")?,
+        "0".to_string(),
+        "0".to_string(),
+        root_code(tail.horizontal_spacing, ROOT_SPACING, "0")?,
+        root_code(tail.vertical_spacing, ROOT_SPACING, "0")?,
+        root_code(
+            tail.horizontal_align,
+            &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+            "3",
+        )?,
+        root_code(
+            tail.vertical_align,
+            &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+            "3",
+        )?,
+        root_code(tail.children_align, &[("None", "1")], "0")?,
+        group,
+        scroll_again,
+        "100".to_string(),
+        u8::from(tail.show_title).to_string(),
+        u8::from(tail.show_close_button).to_string(),
+        root_code(
+            tail.conversations_representation,
+            &[("Show", "1"), ("DontShow", "2")],
+            "0",
+        )?,
+        root_code(
+            tail.collapse_items_by_importance,
+            &[("Use", "1"), ("DontUse", "2")],
+            "0",
+        )?,
+        group_again,
+        "{50,0}".to_string(),
+        u8::from(tail.save_window_settings).to_string(),
+    ];
+    let head = match tail.navigator {
+        Some(navigator) => format!("\"\",\"\",1,{navigator}"),
+        None => "\"\",\"\",0".to_string(),
+    };
+    Some(format!("{head},{}", members.join(",")))
+}
+
 pub(crate) struct NativeRootLayout<'a> {
     /// Slot 9, which is `1` on a form that names no title and `0` on one that
     /// does.
@@ -1410,10 +1575,8 @@ pub(crate) struct NativeRootLayout<'a> {
     /// The form's own child items, as `(kind uuid, record)` -- the same
     /// encoding a group uses, with the count first. See [`child_kind_uuid`].
     pub(crate) children: &'a [(&'a str, String)],
-    /// Slot 29 of a childless root.
-    pub(crate) twenty_ninth: u32,
-    /// Slot 39 of a childless root.
-    pub(crate) thirty_ninth: u32,
+    /// Everything after the children, from [`format_root_tail`].
+    pub(crate) tail: &'a str,
 }
 
 /// The `{50,…}` root layout of a form body.
@@ -1427,8 +1590,7 @@ pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
     }
     format!(
         "{{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,{auto_title},{title},0,0,1,1,1,\
-         0,{seventeenth},0,{events},{command_set},1,{command_bar},{count}{children},\"\",\"\",0,1,\
-         \"\",{twenty_ninth},0,0,0,0,0,3,3,0,0,{thirty_ninth},100,1,1,0,0,0,{{50,0}},1}}",
+         0,{seventeenth},0,{events},{command_set},1,{command_bar},{count}{children},{tail}}}",
         auto_title = u8::from(root.auto_title),
         title = root.title,
         seventeenth = root.seventeenth,
@@ -1436,8 +1598,7 @@ pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
         command_set = root.command_set,
         command_bar = root.command_bar,
         count = root.children.len(),
-        twenty_ninth = root.twenty_ninth,
-        thirty_ninth = root.thirty_ninth,
+        tail = root.tail,
     )
 }
 
@@ -1992,6 +2153,11 @@ mod tests {
     #[test]
     fn writes_the_root_layouts_the_platform_stores() {
         let bar = format_empty_auto_command_bar("-1", "ФормаКоманднаяПанель");
+        let scrolling_tail = format_root_tail(&NativeRootTail {
+            vertical_scroll: Some("useIfNecessary"),
+            ..NativeRootTail::default()
+        })
+        .unwrap();
 
         assert_eq!(
             format_root_layout(&NativeRootLayout {
@@ -2002,8 +2168,7 @@ mod tests {
                 command_set: "{0}",
                 command_bar: &bar,
                 children: &[],
-                twenty_ninth: 2,
-                thirty_ninth: 2,
+                tail: &scrolling_tail,
             }),
             "{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,2,{\"ru\",\"Заявление на подключение\"},{\"en\",\"Заявление на подключение\"}},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"ФормаКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,\"\",\"\",0,1,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1}"
         );
@@ -2017,8 +2182,7 @@ mod tests {
                 command_set: "{0}",
                 command_bar: &bar,
                 children: &[],
-                twenty_ninth: 2,
-                thirty_ninth: 2,
+                tail: &scrolling_tail,
             }),
             "{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"ФормаКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,\"\",\"\",0,1,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1}"
         );
@@ -2059,8 +2223,7 @@ mod tests {
             command_set: "{0}",
             command_bar: &bar,
             children: &[(child_kind_uuid(37).expect("a field has a kind uuid"), field.clone())],
-            twenty_ninth: 0,
-            thirty_ninth: 0,
+            tail: &format_root_tail(&NativeRootTail::default()).expect("a default tail"),
         });
 
         assert!(root.contains(&format!(
@@ -2329,6 +2492,79 @@ mod tests {
         assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
         assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
         assert_eq!(format_native_color(Some("#12345"), none), None);
+    }
+
+    /// The root record's tail, with the bytes ERP УХ stores.
+    #[test]
+    fn writes_the_root_tails_the_platform_stores() {
+        // The smallest form of the corpus: it turns AutoURL off and scrolls
+        // vertically if necessary, and names nothing else.
+        assert_eq!(
+            format_root_tail(&NativeRootTail {
+                auto_url: false,
+                vertical_scroll: Some("useIfNecessary"),
+                ..NativeRootTail::default()
+            })
+            .as_deref(),
+            Some("\"\",\"\",0,0,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1")
+        );
+
+        // The same form with a navigator: the flag turns on and the record
+        // follows it, which is the one member that makes a tail 25 long.
+        let navigator = format_root_tail(&NativeRootTail {
+            auto_url: false,
+            vertical_scroll: Some("useIfNecessary"),
+            navigator: Some("{22,{0},0}"),
+            ..NativeRootTail::default()
+        })
+        .expect("a navigator tail");
+        assert!(navigator.starts_with("\"\",\"\",1,{22,{0},0},0,"));
+
+        // useWithoutStretch is not the same code in both places it is read.
+        let stretch = format_root_tail(&NativeRootTail {
+            vertical_scroll: Some("useWithoutStretch"),
+            ..NativeRootTail::default()
+        })
+        .expect("a stretch tail");
+        assert!(stretch.starts_with("\"\",\"\",0,1,\"\",0,"));
+        assert!(stretch.contains(",3,3,0,0,3,100,"));
+
+        // AlwaysHorizontal is not the same code in both places either.
+        let group = format_root_tail(&NativeRootTail {
+            group: Some("AlwaysHorizontal"),
+            ..NativeRootTail::default()
+        })
+        .expect("a grouped tail");
+        assert!(group.contains(",3,3,0,1,0,100,"));
+        assert!(group.ends_with(",0,0,3,{50,0},1"));
+
+        // Every switch the tail carries, off.
+        let off = format_root_tail(&NativeRootTail {
+            auto_url: false,
+            show_title: false,
+            show_close_button: false,
+            save_window_settings: false,
+            ..NativeRootTail::default()
+        })
+        .expect("a tail with its switches off");
+        assert!(off.contains(",100,0,0,"));
+        assert!(off.ends_with(",{50,0},0"));
+
+        // A spelling the corpus never showed is refused rather than defaulted.
+        assert_eq!(
+            format_root_tail(&NativeRootTail {
+                group: Some("InCell"),
+                ..NativeRootTail::default()
+            }),
+            None
+        );
+        assert_eq!(
+            format_root_tail(&NativeRootTail {
+                vertical_align: Some("Stretch"),
+                ..NativeRootTail::default()
+            }),
+            None
+        );
     }
 
     /// Every event-binding shape the corpus stores, with the exact bytes.
