@@ -2487,7 +2487,9 @@ pub(crate) fn format_popup_payload(
 pub(crate) fn format_column_group_payload(
     group: Option<&str>,
     second: &str,
-    third: &str,
+    // `<ShowInHeader>`, off unless the column group turns it on -- the one
+    // slot of this payload the partition test could name.
+    show_in_header: bool,
     fourth: &str,
     picture: &str,
     back_color: &str,
@@ -2499,7 +2501,8 @@ pub(crate) fn format_column_group_payload(
         _ => "1",
     };
     format!(
-        "{{2,{group},{second},{third},{fourth},{picture},{back_color},{{0}},{{\"Pattern\"}},\"\",{title},0}}"
+        "{{2,{group},{second},{third},{fourth},{picture},{back_color},{{0}},{{\"Pattern\"}},\"\",{title},0}}",
+        third = u8::from(show_in_header)
     )
 }
 
@@ -4339,7 +4342,7 @@ mod tests {
             format_column_group_payload(
                 None,
                 "1",
-                "0",
+                false,
                 "3",
                 "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
                 "{3,4,{0}}",
