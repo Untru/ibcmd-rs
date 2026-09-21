@@ -5,6 +5,9 @@ which XML property. That does not have to be guessed either.
 
 ## The method
 
+`map-payload-slots.py` runs the second pass over any join, so reading a new
+kind costs one command rather than a new script.
+
 `F:\ibcmd\lab\tools\join-items.py` joins every stored item record to the XML
 item of the same id: it reads a form's `Form.xml`, finds the body row of that
 form's uuid in the inflated dump, and writes one line per item with the item's
@@ -40,6 +43,21 @@ meaning has been read, not inferred.
 
 Slots 8, 9 and 10 of the label payload carry the text colour, the background
 colour and the font; slot 1 of the input payload carries its choice list.
+
+`UsualGroup`, payload `{29,…}`, 29 members, 1 357 records -- the most common
+payload in the corpus. Twenty of its twenty-nine slots were read in one pass:
+
+| slot | property | mapping |
+|---|---|---|
+| 3 | `Representation` | `None` → 0, `StrongSeparation` → 1, `NormalSeparation` → 3 |
+| 9 | `BackColor` | the colour tuple itself |
+| 10 | `Behavior` | `Usual` → 0, `Collapsible` and `PopUp` → 1 |
+| 19 | `ThroughAlign` | `Use` → 0, `DontUse` → 1, absent → 2 |
+| 22, 27 | `Group` | `Vertical` → 0, `Horizontal` → 1, `AlwaysHorizontal` → 1 and 3 |
+| 24, 28 | `Behavior` | `Usual` → 0, `Collapsible` → 1, `PopUp` → 2 |
+
+`Page`, payload `{18,…}`, 20 members: slot 2 and slot 4 answer to `Group`,
+slot 1 carries the page picture.
 
 ## Why this matters for the estimate
 
