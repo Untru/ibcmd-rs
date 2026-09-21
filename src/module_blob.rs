@@ -512,6 +512,15 @@ struct FormXmlChildItem {
     /// `<Representation>` of a container the typed fields do not cover.
     container_representation: Option<String>,
     picture_present: bool,
+    /// `<Picture>`'s own contents, when the item names one. The flag above
+    /// still says whether the element is there at all, for the items whose
+    /// picture slot is unmeasured.
+    picture: Option<FormXmlItemPicture>,
+    /// Whether the item carries a `<NonselectedPictureText>`, which member 5
+    /// of a picture decoration's payload holds as a localized string. The
+    /// parser does not collect the string itself, so an item that names one
+    /// is refused rather than written with the empty `{1,0}`.
+    nonselected_picture_text_present: bool,
     font_present: bool,
     /// `<Font>`'s own XML attributes, when the item names one. Read by the
     /// writers that can place a font; the flag above still says whether the
@@ -535,6 +544,21 @@ struct FormXmlControlBorder {
     style: Option<FormControlBorderStyle>,
     style_seen: bool,
     valid: bool,
+}
+
+/// A `<Picture>` a form item names, as the XML spells it.
+///
+/// Read for the `{4,…}` reference member 1 of a picture decoration's payload
+/// carries. Everything inside `<Picture>` that the measurement did not name
+/// lands in `unwritable` and refuses the item: a `<xr:Abs>` base64 image, of
+/// which the two corpora hold 156, above all.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlItemPicture {
+    reference: Option<String>,
+    load_transparent: Option<String>,
+    transparent_x: Option<String>,
+    transparent_y: Option<String>,
+    unwritable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -6715,11 +6739,21 @@ fn format_native_child_item(
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a decoration with no extended tooltip is not measured"))?;
         let text_color = native_scalar_color(item, "TextColor", source)?;
+        // Member 14 is `<TextColor>` and member 15 is `<Font>`; the payload at
+        // member 18 carries neither. Both were measured on the two corpora --
+        // `<TextColor>` maps each spelling to one stored colour over all
+        // 38 218 label decorations, and `<Font>` to one stored font, with the
+        // 375 that name a configuration style item storing exactly the
+        // `{7,2,0,{0,<uuid>},1,100}` `format_native_font` writes.
+        let font = native_item_font(item, source)?;
+        let payload = native_decoration_payload(item, main_attribute_class, source)?;
         let record = native::format_decoration_item(&native::NativeDecorationItem {
             id: &item.id,
             kind: u8::from(item.tag == "PictureDecoration"),
             name: &item.name,
             text_color: &text_color,
+            font: &font,
+            payload: &payload,
             title: &title,
             tooltip_title: &tooltip_title,
             width: item.width.as_deref(),
@@ -7965,6 +7999,211 @@ fn native_field_payload(
         }
         _ => Err(anyhow!("<{}> has no payload writer yet", item.tag)),
     }
+}
+
+/// The `{5,…}` or `{4,…}` payload a decoration carries at member 18.
+///
+/// A `<LabelDecoration>` and a `<PictureDecoration>` are the same `{12,…}`
+/// record, and the writer used to give both of them the same hard-coded
+/// payload -- `{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,…}}`.
+/// The corpus says otherwise. Over the two corpora that constant is the right
+/// answer for 23 380 of the 35 477 ERP УХ label decorations and for **not one
+/// of the 7 222 picture decorations**, whose payload is a different shape
+/// entirely: thirteen members beginning with `4`, not nine beginning with `5`.
+///
+/// Which member reads which property is in the two writers this calls. What is
+/// refused here, rather than defaulted:
+///
+/// - a `<Picture>` the reference writer cannot spell -- a `StdPicture`, whose
+///   uuid is the platform's and is not in the source, a `<xr:Abs>` base64
+///   image, or a `<Ref>` that does not resolve;
+/// - a `<NonselectedPictureText>`, which member 5 of a picture's payload holds
+///   as a localized string the parser does not collect;
+/// - a `<Border>` outside the measured shape -- `width` other than 1, or one
+///   that names a style item instead of a style, which stores a six-member
+///   tuple of its own;
+/// - `<HorizontalAlign>Left`, `<VerticalAlign>Auto` and `<PictureSize>RealSize`,
+///   none of which either corpus stores anywhere;
+/// - an `<Event>` whose name the event table does not hold.
+fn native_decoration_payload(
+    item: &FormXmlChildItem,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    let border = native_item_control_border(item)?;
+    let border_color = native_scalar_color(item, "BorderColor", source)?;
+    let events = native_item_events(item, main_attribute_class)?;
+    // `<Hyperlink>` reaches the typed field only for a picture decoration; a
+    // label's lands in the item's own scalar bag.
+    let hyperlink = item
+        .hyperlink
+        .unwrap_or_else(|| native_scalar_flag(item, "Hyperlink", false));
+
+    if item.tag == "PictureDecoration" {
+        if item.nonselected_picture_text_present {
+            return Err(anyhow!(
+                "<PictureDecoration> names a <NonselectedPictureText>, which member 5 of its \
+                 payload holds and the parser does not collect"
+            ));
+        }
+        let picture = native_item_picture(item, source)?;
+        return native::format_picture_decoration_payload(
+            &native::NativePictureDecorationPayload {
+                picture: &picture,
+                hyperlink,
+                picture_size: item.scalars.get("PictureSize").map(String::as_str),
+                zoomable: native_scalar_flag(item, "Zoomable", false),
+                border_color: &border_color,
+                border: &border,
+                enable_start_drag: native_scalar_flag(item, "EnableStartDrag", false),
+                enable_drag: native_scalar_flag(item, "EnableDrag", false),
+                events: &events,
+                file_drag_mode: item.scalars.get("FileDragMode").map(String::as_str),
+                image_scale: Some(native_decoration_number(item, "ImageScale", "100")?),
+                ..native::NativePictureDecorationPayload::default()
+            },
+        )
+        .ok_or_else(|| {
+            anyhow!("<PictureDecoration> names a spelling the payload writer cannot place")
+        });
+    }
+
+    if item.picture_present {
+        return Err(anyhow!("<LabelDecoration> names a picture"));
+    }
+    let back_color = native_item_color(item.back_color.as_deref(), source)
+        .ok_or_else(|| anyhow!("<LabelDecoration> names a background colour it cannot place"))?;
+    native::format_label_decoration_payload(&native::NativeLabelDecorationPayload {
+        hyperlink,
+        horizontal_align: item.scalars.get("HorizontalAlign").map(String::as_str),
+        vertical_align: item.scalars.get("VerticalAlign").map(String::as_str),
+        title_height: Some(native_decoration_number(item, "TitleHeight", "0")?),
+        events: &events,
+        back_color: &back_color,
+        border_color: &border_color,
+        border: &border,
+    })
+    .ok_or_else(|| anyhow!("<LabelDecoration> names a spelling the payload writer cannot place"))
+}
+
+/// One numeric scalar of a decoration, refused rather than copied through when
+/// it is not a number -- the member it feeds is written bare.
+fn native_decoration_number<'a>(
+    item: &'a FormXmlChildItem,
+    name: &str,
+    absent: &'a str,
+) -> Result<&'a str> {
+    let Some(value) = item.scalars.get(name) else {
+        return Ok(absent);
+    };
+    let value = value.trim();
+    if value.is_empty() || !value.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(anyhow!("<{}> names <{name}>{value}", item.tag));
+    }
+    Ok(value)
+}
+
+/// The `<Border>` of an item, in the shape its payload stores it.
+///
+/// `parse_form_xml_control_border` already keeps only the shape the corpus
+/// stores -- `<Border width="1">` with one `<v8ui:style
+/// xsi:type="v8ui:ControlBorderType">` inside and nothing else -- and drops
+/// the element to `None` otherwise. That is the guard: an item whose
+/// `<Border>` is there but did not survive the parse is refused, because the
+/// eight records of the two corpora with another width store that width at
+/// member 4 and the two that name a style item store a tuple of a different
+/// shape.
+fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
+    if !item.control_border_seen {
+        return crate::compiler::bodies::form_native::format_native_control_border(None)
+            .ok_or_else(|| anyhow!("<{}> cannot place its default border", item.tag));
+    }
+    let border = item
+        .control_border
+        .as_ref()
+        .filter(|border| border.valid)
+        .ok_or_else(|| anyhow!("<{}> names a <Border> the writer cannot place", item.tag))?;
+    let style = border
+        .style
+        .ok_or_else(|| anyhow!("<{}> names a <Border> with no style", item.tag))?;
+    crate::compiler::bodies::form_native::format_native_control_border(Some(style.xml_value()))
+        .ok_or_else(|| anyhow!("<{}> names a border style the writer cannot place", item.tag))
+}
+
+/// The `{4,…}` picture reference an item's `<Picture>` stores.
+///
+/// Only a `CommonPicture` is written: its uuid is the configuration's own and
+/// `resolve_common_picture_uuid` reads it out of the source. A `StdPicture`
+/// names a uuid the platform owns and the source does not carry -- the two
+/// corpora hold 860 of them, agreeing on every name they share, which is a
+/// table worth measuring on its own rather than guessing here -- and a
+/// `<xr:Abs>` holds a base64 image. Both refuse.
+fn native_item_picture(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    let Some(picture) = item.picture.as_ref() else {
+        if item.picture_present {
+            return Err(anyhow!("<{}> names a <Picture> the parser lost", item.tag));
+        }
+        return Ok(native::format_native_item_picture(None, false, None, None));
+    };
+    if let Some(part) = picture.unwritable.first() {
+        return Err(anyhow!("<{}> names a <Picture><{part}>", item.tag));
+    }
+    let reference = picture
+        .reference
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| anyhow!("<{}> names a <Picture> with no <Ref>", item.tag))?;
+    if !reference.starts_with("CommonPicture.") {
+        return Err(anyhow!(
+            "<{}> names a <Picture> reference the writer cannot place: {reference}",
+            item.tag
+        ));
+    }
+    let load_transparent = match picture.load_transparent.as_deref().map(str::trim) {
+        Some("true") => true,
+        Some("false") => false,
+        _ => {
+            return Err(anyhow!(
+                "<{}> names a <Picture> with no <LoadTransparent>",
+                item.tag
+            ));
+        }
+    };
+    let source = source.ok_or_else(|| {
+        anyhow!("<{}> names {reference}, which needs --source-root", item.tag)
+    })?;
+    let uuid = source.resolve_common_picture_uuid(reference)?;
+    Ok(native::format_native_item_picture(
+        Some(&uuid),
+        load_transparent,
+        picture.transparent_x.as_deref(),
+        picture.transparent_y.as_deref(),
+    ))
+}
+
+/// The event block of one form item, refused when the table has no uuid for a
+/// name the item binds.
+fn native_item_events(item: &FormXmlChildItem, main_attribute_class: &str) -> Result<String> {
+    let events = item
+        .events
+        .iter()
+        .map(|event| crate::compiler::bodies::form_native::NativeEvent {
+            name: &event.name,
+            handler: &event.handler,
+        })
+        .collect::<Vec<_>>();
+    crate::compiler::bodies::form_native::format_native_events(
+        &item.tag,
+        main_attribute_class,
+        &events,
+    )
+    .ok_or_else(|| anyhow!("<{}> names an event the writer cannot place", item.tag))
 }
 
 /// One scalar property of an item, or `"0"` when it names none -- what every
@@ -9253,6 +9492,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Format"
                         | "CollapsedRepresentationTitle"
                         | "Picture"
+                        | "NonselectedPictureText"
                         | "Font"
                         | "ChoiceList"
                         | "RowFilter"
@@ -9264,7 +9504,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     match local.as_str() {
                         "Format" => item.format_present = true,
-                        "Picture" => item.picture_present = true,
+                        "Picture" => {
+                            item.picture_present = true;
+                            match item.picture.as_mut() {
+                                // A second `<Picture>` says nothing about which
+                                // one the body holds, so it refuses the item.
+                                Some(picture) => picture.unwritable.push("Picture".to_string()),
+                                None => item.picture = Some(FormXmlItemPicture::default()),
+                            }
+                        }
+                        "NonselectedPictureText" => item.nonselected_picture_text_present = true,
                         "Font" => {
                             item.font_present = true;
                             item.font = Some(xml_attrs_map(&event));
@@ -9463,6 +9712,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                } else if path_ends_with_for_child_picture(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.picture.as_mut()
+                {
+                    // `<xr:Ref>` and `<xr:LoadTransparent>` carry text and are
+                    // read in the text arm below. Anything else inside
+                    // `<Picture>` is a shape the measurement did not name, so
+                    // it refuses the item rather than being dropped.
+                    if !matches!(local.as_str(), "Ref" | "LoadTransparent") {
+                        picture.unwritable.push(local.clone());
+                    }
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
                     && path_ends_with(&path, &["Form", "Commands", "Command"])
                 {
@@ -9512,6 +9772,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "Format"
                         | "CollapsedRepresentationTitle"
                         | "Picture"
+                        | "NonselectedPictureText"
                         | "Font"
                         | "ChoiceList"
                         | "RowFilter"
@@ -9523,7 +9784,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     match local.as_str() {
                         "Format" => item.format_present = true,
-                        "Picture" => item.picture_present = true,
+                        "Picture" => {
+                            item.picture_present = true;
+                            match item.picture.as_mut() {
+                                // A second `<Picture>` says nothing about which
+                                // one the body holds, so it refuses the item.
+                                Some(picture) => picture.unwritable.push("Picture".to_string()),
+                                None => item.picture = Some(FormXmlItemPicture::default()),
+                            }
+                        }
+                        "NonselectedPictureText" => item.nonselected_picture_text_present = true,
                         "Font" => {
                             item.font_present = true;
                             item.font = Some(xml_attrs_map(&event));
@@ -9673,6 +9943,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                } else if path_ends_with_for_child_picture(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.picture.as_mut()
+                {
+                    // `<xr:TransparentPixel x="…" y="…"/>` is members 4 and 5
+                    // of the stored reference; twenty pictures of ERP УХ carry
+                    // one and none of them names only half of it.
+                    if local == "TransparentPixel" {
+                        picture.transparent_x = xml_attribute_value(&event, "x")?;
+                        picture.transparent_y = xml_attribute_value(&event, "y")?;
+                        if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                            picture.unwritable.push(local.clone());
+                        }
+                    } else if !matches!(local.as_str(), "Ref" | "LoadTransparent") {
+                        picture.unwritable.push(local.clone());
+                    }
                 } else if local == "RowFilter"
                     && path_ends_with_for_child_row_filter(&path, &current_child_items)
                     && xml_event_is_nil(&event)?
@@ -9716,6 +10002,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                }
+                // `<Picture><xr:Ref>` and `<xr:LoadTransparent>`. Read here
+                // rather than through `text_value`, which is a whitelist of
+                // element names shared with every other owner in the file: a
+                // `Ref` is not the item's own property and must not reach it.
+                if let Some(part) = child_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.picture.as_mut()
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = if part == "Ref" {
+                        &mut picture.reference
+                    } else {
+                        &mut picture.load_transparent
+                    };
+                    slot.get_or_insert_with(String::new)
+                        .push_str(chunk.as_ref());
                 }
                 if form_nested_text_element(&path) {
                     nested_text.push_str(text.xml_content()?.as_ref());
@@ -10251,6 +10555,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                }
+                // `<Picture><xr:Ref>` and `<xr:LoadTransparent>`. Read here
+                // rather than through `text_value`, which is a whitelist of
+                // element names shared with every other owner in the file: a
+                // `Ref` is not the item's own property and must not reach it.
+                if let Some(part) = child_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.picture.as_mut()
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = if part == "Ref" {
+                        &mut picture.reference
+                    } else {
+                        &mut picture.load_transparent
+                    };
+                    slot.get_or_insert_with(String::new)
+                        .push_str(chunk.as_ref());
                 }
                 if form_nested_text_element(&path) {
                     nested_text.push_str(text.xml_content()?.as_ref());
@@ -13676,6 +13998,8 @@ fn parse_form_child_item_xml(
         pages_representation: None,
         container_representation: None,
         picture_present: false,
+        picture: None,
+        nonselected_picture_text_present: false,
         font_present: false,
         font: None,
         choice_list_present: false,
@@ -14063,6 +14387,26 @@ fn path_ends_with_for_child_control_border_style(
     };
     form_child_item_supports_control_border(&item.tag)
         && path_ends_with(path, &[item.tag.as_str(), "Border", "style"])
+}
+
+/// Whether the parser sits directly inside the current item's `<Picture>`.
+fn path_ends_with_for_child_picture(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "Picture"])
+}
+
+/// The name of the `<Picture>` child whose text the parser is reading.
+fn child_picture_part<'a>(path: &'a [String], items: &[FormXmlChildItem]) -> Option<&'a str> {
+    let item = items.last()?;
+    if path.len() < 3 {
+        return None;
+    }
+    if path[path.len() - 3] != item.tag || path[path.len() - 2] != "Picture" {
+        return None;
+    }
+    Some(path[path.len() - 1].as_str())
 }
 
 fn path_ends_with_root_auto_command_bar_child_items(path: &[String]) -> bool {
@@ -30582,6 +30926,108 @@ mod tests {
                 r#"74f03c35-5da0-406e-a938-e8e5d49975ef,{1,1,{"ru","вводится вручную"}}}}"#,
             )),
             "the reference's two uuids are not the ones the platform stores: {body}"
+        );
+        Ok(())
+    }
+
+    /// The payload at member 18 of a decoration record, end to end from the
+    /// XML: nine members beginning with `5` for a label and thirteen beginning
+    /// with `4` for a picture.
+    ///
+    /// Both payloads are pinned to bodies of the ERP УХ tree:
+    /// `Catalogs/ПоказателиМонитораКлючевыхПоказателей/Forms/ФормаЭлемента`
+    /// item 246 for the `#C0DCC0` background and the `Single` border,
+    /// `BusinessProcesses/ТиповаяПродажа/Forms/Взаимодействия` item 183 for the
+    /// hyperlink and the `Click`, `Catalogs/НастройкиОнлайнОплат/Forms/
+    /// ФормаЭлемента` item 280 for `<VerticalAlign>` and `<TitleHeight>`, and
+    /// `Catalogs/БланкиОтчетов/Forms/МастерСозданияНовыхСтрок` item 85 for the
+    /// common picture, `<PictureSize>Stretch</>` and `<FileDragMode>AsFile</>`.
+    ///
+    /// The writer used to give every decoration one constant, which is the
+    /// right answer for neither of these.
+    #[test]
+    fn writes_the_decoration_payload_the_platform_stores() -> anyhow::Result<()> {
+        const HEAD: &str = concat!(
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" "#,
+            r#"xmlns:v8="http://v8.1c.ru/8.1/data/core" "#,
+            r#"xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" "#,
+            r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" "#,
+            r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
+            r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
+        );
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-decoration-payload-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("CommonPictures"))?;
+        std::fs::write(
+            root.join("CommonPictures").join("СтрелкаВниз.xml"),
+            r#"<MetaDataObject><CommonPicture uuid="ce463861-92df-47f2-bd0f-4a2dbf72aacc">
+<Properties><Name>СтрелкаВниз</Name></Properties></CommonPicture></MetaDataObject>"#
+                .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let form = |picture_ref: &str| {
+            format!(
+                concat!(
+                    "{head}",
+                    r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/><ChildItems>"#,
+                    r#"<LabelDecoration name="Надпись" id="2">"#,
+                    "<BackColor>#C0DCC0</BackColor>",
+                    r#"<Border width="1"><v8ui:style xsi:type="v8ui:ControlBorderType">"#,
+                    "Single</v8ui:style></Border>",
+                    "<Hyperlink>true</Hyperlink><HorizontalAlign>Right</HorizontalAlign>",
+                    "<VerticalAlign>Center</VerticalAlign><TitleHeight>1</TitleHeight>",
+                    r#"<ContextMenu name="НадписьКонтекстноеМеню" id="3"/>"#,
+                    r#"<ExtendedTooltip name="НадписьРасширеннаяПодсказка" id="4"/>"#,
+                    r#"<Events><Event name="Click">ДекорацияНажатие</Event></Events>"#,
+                    "</LabelDecoration>",
+                    r#"<PictureDecoration name="Картинка" id="5">"#,
+                    "<Picture><xr:Ref>{picture_ref}</xr:Ref>",
+                    "<xr:LoadTransparent>false</xr:LoadTransparent></Picture>",
+                    "<PictureSize>Stretch</PictureSize><FileDragMode>AsFile</FileDragMode>",
+                    r#"<ContextMenu name="КартинкаКонтекстноеМеню" id="6"/>"#,
+                    r#"<ExtendedTooltip name="КартинкаРасширеннаяПодсказка" id="7"/>"#,
+                    "</PictureDecoration></ChildItems></Form>",
+                ),
+                head = HEAD,
+                picture_ref = picture_ref,
+            )
+        };
+
+        let body =
+            super::compile_native_form_body(form("CommonPicture.СтрелкаВниз").as_bytes(), None, Some(&source))?;
+        assert!(
+            body.contains(concat!(
+                "{5,1,2,1,1,{1,11707a99-4eb9-4373-bc8c-84891483a034,\"ДекорацияНажатие\",1,0,",
+                "11707a99-4eb9-4373-bc8c-84891483a034,0,1},{3,0,{12639424}},{3,4,{0}},",
+                "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}",
+            )),
+            "the label decoration payload is not the one the platform stores: {body}"
+        );
+        assert!(
+            body.contains(concat!(
+                "{4,{4,1,{0,ce463861-92df-47f2-bd0f-4a2dbf72aacc},\"\",-1,-1,0,0,\"\"},0,1,0,",
+                "{1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,",
+                "{0,1,0},0,100}",
+            )),
+            "the picture decoration payload is not the one the platform stores: {body}"
+        );
+
+        // A `StdPicture` names a uuid the platform owns and the source does not
+        // carry, so the form is refused rather than written with a picture the
+        // measurement could not resolve.
+        let error = super::compile_native_form_body(
+            form("StdPicture.Information").as_bytes(),
+            None,
+            Some(&source),
+        )
+        .expect_err("a StdPicture reference must refuse the form");
+        let error = format!("{error:#}");
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            error.contains("reference the writer cannot place"),
+            "a StdPicture picture decoration was written instead of refused: {error}"
         );
         Ok(())
     }

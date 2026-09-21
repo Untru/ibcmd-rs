@@ -2715,7 +2715,12 @@ pub(crate) struct NativeDecorationItem<'a> {
     /// `{3,2,{44}}` and `style:SpecialTextColor` as `{3,3,{-16}}`.
     pub(crate) text_color: &'a str,
     pub(crate) font: &'a str,
-    /// The `{5,…}` payload that carries the decoration's own properties.
+    /// Member 18: the payload that carries the decoration's own properties.
+    /// A label and a tooltip carry a nine-member `{5,…}` -- see
+    /// `format_label_decoration_payload` -- and a picture a thirteen-member
+    /// `{4,…}`, which `format_picture_decoration_payload` writes. The default
+    /// below is the `{5,…}` a tooltip carries; a caller that writes a picture
+    /// and leaves it would store a payload of the wrong shape.
     pub(crate) payload: &'a str,
     /// The `{1,…}` block that carries what the decoration shows.
     pub(crate) content: &'a str,
@@ -2842,6 +2847,268 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         max_width = decoration.max_width.unwrap_or("0"),
         auto_max_height = u8::from(decoration.auto_max_height),
         max_height = decoration.max_height.unwrap_or("0"),
+    ))
+}
+
+/// The `{3,0,{0},…}` control border member 8 of a label decoration's payload
+/// and member 7 of a picture decoration's carry.
+///
+/// Read by the partition test over all 38 218 label decorations and 8 250
+/// picture decorations of both corpora: `<Border>` maps each of its spellings,
+/// and its absence, to exactly one stored tuple, with **no impure spelling**.
+/// Member 3 is the style code -- `WithoutBorder` 0, `Single` 1, `Embossed` 2,
+/// `Indented` 3, `Underline` 4, `Overline` 7, `Double` 200, the same seven
+/// `FormControlBorderStyle` already spells -- and member 4 is the `width`
+/// attribute, which is `1` in all but eight records of the two corpora.
+///
+/// Those eight, and the two whose `<Border>` names neither a width nor a style
+/// and stores `{3,1,{-18},1,1,0}` -- a six-member tuple of a different shape
+/// entirely -- are refused by the caller rather than written with width 1.
+pub(crate) fn format_native_control_border(style: Option<&str>) -> Option<String> {
+    let code = root_code(
+        style,
+        &[
+            ("WithoutBorder", "0"),
+            ("Single", "1"),
+            ("Embossed", "2"),
+            ("Indented", "3"),
+            ("Underline", "4"),
+            ("Overline", "7"),
+            ("Double", "200"),
+        ],
+        "0",
+    )?;
+    Some(format!(
+        "{{3,0,{{0}},{code},1,0,{DEFAULT_APPEARANCE_UUID}}}"
+    ))
+}
+
+/// The `{4,…}` picture reference member 1 of a picture decoration's payload
+/// carries.
+///
+/// Nine members, measured over all 8 094 picture decorations of both corpora
+/// whose reference has that arity: member 1 is 1 when the item names a
+/// `<Picture>` and 0 when it does not; member 2 is `{0,<the common picture's
+/// uuid>}` or `{0}`; members 4 and 5 are the `x` and `y` of
+/// `<xr:TransparentPixel>`, `-1` each when the element is absent; and member 6
+/// is `<xr:LoadTransparent>`, 0 for `false`, 1 for `true` -- and **1** when
+/// there is no picture at all. Members 3, 7 and 8 are `""`, `0` and `""` in
+/// every record.
+///
+/// The 156 references that are ten members hold a `<Picture><Abs>` base64
+/// image; the caller refuses them.
+pub(crate) fn format_native_item_picture(
+    uuid: Option<&str>,
+    load_transparent: bool,
+    transparent_x: Option<&str>,
+    transparent_y: Option<&str>,
+) -> String {
+    let (present, reference) = match uuid {
+        Some(uuid) => ("1", format!("{{0,{uuid}}}")),
+        None => ("0", "{0}".to_string()),
+    };
+    format!(
+        "{{4,{present},{reference},\"\",{x},{y},{transparent},0,\"\"}}",
+        x = transparent_x.unwrap_or("-1"),
+        y = transparent_y.unwrap_or("-1"),
+        transparent = u8::from(uuid.is_none() || load_transparent),
+    )
+}
+
+/// The `{5,…}` payload a `<LabelDecoration>` -- and an `<ExtendedTooltip>`,
+/// which is the same record -- carries at member 18.
+///
+/// Nine members, every one of them named by the partition test over all
+/// 38 218 label decorations of the two corpora, each property mapping every
+/// spelling **and its absence** to exactly one stored value:
+///
+/// | member | property | absent | spellings |
+/// |---|---|---|---|
+/// | 1 | `<Hyperlink>` | 0 | `true` 1 |
+/// | 2 | `<HorizontalAlign>` | 0 | `Center` 1, `Right` 2, `Auto` 3 |
+/// | 3 | `<VerticalAlign>` | 3 | `Top` 0, `Center` 1, `Bottom` 2 |
+/// | 4 | `<TitleHeight>` | 0 | the number itself |
+/// | 5 | `<Events>` | `{0,1,0}` | the event block |
+/// | 6 | `<BackColor>` | `{3,4,{0}}` | the colour |
+/// | 7 | `<BorderColor>` | `{3,4,{0}}` | the colour |
+/// | 8 | `<Border>` | style 0, width 1 | see `format_native_control_border` |
+///
+/// `<HorizontalAlign>Left` and `<VerticalAlign>Auto` are refused: neither is
+/// stored anywhere in either corpus, so nothing says what they would write.
+///
+/// The payload carries **no font**. A decoration's `<Font>` is member 15 of
+/// the record, beside `<TextColor>` at member 14; member 5 here, which reads
+/// like a reference, is the event block, and the uuid in it is the event's --
+/// `11707a99-…` is `Click`, `d710ea07-…` is `URLProcessing`.
+///
+/// Rebuilt from the source alone, these rules write **36 336 of 36 342** ERP
+/// УХ payloads and **1 866 of 1 866** BSP ones byte for byte. The six that
+/// differ are stored state the element does not carry: four bind `Click` to an
+/// empty handler with no `<Events>` at all, and two store a second event group
+/// the source does not name.
+pub(crate) struct NativeLabelDecorationPayload<'a> {
+    pub(crate) hyperlink: bool,
+    pub(crate) horizontal_align: Option<&'a str>,
+    pub(crate) vertical_align: Option<&'a str>,
+    pub(crate) title_height: Option<&'a str>,
+    /// Already formatted -- the event block, the two colours and the border.
+    pub(crate) events: &'a str,
+    pub(crate) back_color: &'a str,
+    pub(crate) border_color: &'a str,
+    pub(crate) border: &'a str,
+}
+
+impl Default for NativeLabelDecorationPayload<'_> {
+    fn default() -> Self {
+        Self {
+            hyperlink: false,
+            horizontal_align: None,
+            vertical_align: None,
+            title_height: None,
+            events: "{0,1,0}",
+            back_color: "{3,4,{0}}",
+            border_color: "{3,4,{0}}",
+            border: concat!(
+                "{3,0,{0},0,1,0,",
+                "48312c09-257f-4b29-b280-284dd89efc1e}"
+            ),
+        }
+    }
+}
+
+pub(crate) fn format_label_decoration_payload(
+    payload: &NativeLabelDecorationPayload<'_>,
+) -> Option<String> {
+    let horizontal = root_code(
+        payload.horizontal_align,
+        &[("Center", "1"), ("Right", "2"), ("Auto", "3")],
+        "0",
+    )?;
+    let vertical = root_code(
+        payload.vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    Some(format!(
+        "{{5,{hyperlink},{horizontal},{vertical},{title_height},{events},{back_color},\
+         {border_color},{border}}}",
+        hyperlink = u8::from(payload.hyperlink),
+        title_height = payload.title_height.unwrap_or("0"),
+        events = payload.events,
+        back_color = payload.back_color,
+        border_color = payload.border_color,
+        border = payload.border,
+    ))
+}
+
+/// The `{4,…}` payload a `<PictureDecoration>` carries at member 18.
+///
+/// A picture decoration is the **same `{12,…}` record** as a label decoration
+/// -- what tells them apart is member 5 of the record and the shape of this
+/// payload, which is thirteen members and begins with `4`, not nine beginning
+/// with `5`. Writing the label's constant into a picture, which is what this
+/// writer did for all 7 222 of ERP УХ, cannot be right for any of them.
+///
+/// Every member named by the partition test over all 8 250 picture decorations
+/// of the two corpora:
+///
+/// | member | property | absent | spellings |
+/// |---|---|---|---|
+/// | 1 | `<Picture>` | `{4,0,{0},"",-1,-1,1,0,""}` | see `format_native_item_picture` |
+/// | 2 | `<Hyperlink>` | 0 | `true` 1 |
+/// | 3 | `<PictureSize>` | 0 | `Stretch` 1, `Proportionally` 2, `AutoSize` 4, `RealSizeIgnoreScale` 5, `AutoSizeIgnoreScale` 6, `ByFontSize` 7 |
+/// | 4 | `<Zoomable>` | 0 | `true` 1 |
+/// | 5 | `<NonselectedPictureText>` | `{1,0}` | the localized string |
+/// | 6 | `<BorderColor>` | `{3,4,{0}}` | the colour |
+/// | 7 | `<Border>` | style 0, width 1 | see `format_native_control_border` |
+/// | 8 | `<EnableStartDrag>` | 0 | `true` 1 |
+/// | 9 | `<EnableDrag>` | 0 | `true` 1 |
+/// | 10 | `<Events>` | `{0,1,0}` | the event block |
+/// | 11 | `<FileDragMode>` | **1** | `AsFile` **0** |
+/// | 12 | `<ImageScale>` | 100 | the number itself |
+///
+/// `<PictureSize>RealSize` is refused: it is never stored, and although 0 is
+/// what an absent `<PictureSize>` writes, nothing says the spelling writes it.
+/// Member 11 is inverted the same way the table tail's `<FileDragMode>` is.
+///
+/// Rebuilt from the source alone these rules write **6 690 of the 6 694** ERP
+/// УХ payloads the rules accept and **535 of 535** BSP ones byte for byte. The
+/// four that differ are both artefacts of the measurement probe, not of the
+/// grammar: it had sorted the three events of those items by name instead of
+/// keeping the source's order, and the body reader it used strips newlines,
+/// which three of the four carry inside a `<NonselectedPictureText>`. The
+/// caller refuses that element anyway, so the writer never reaches them.
+pub(crate) struct NativePictureDecorationPayload<'a> {
+    /// Already formatted -- the picture, the text, the colour, the border and
+    /// the event block.
+    pub(crate) picture: &'a str,
+    pub(crate) hyperlink: bool,
+    pub(crate) picture_size: Option<&'a str>,
+    pub(crate) zoomable: bool,
+    pub(crate) nonselected_picture_text: &'a str,
+    pub(crate) border_color: &'a str,
+    pub(crate) border: &'a str,
+    pub(crate) enable_start_drag: bool,
+    pub(crate) enable_drag: bool,
+    pub(crate) events: &'a str,
+    /// `<FileDragMode>`, of which only `AsFile` is ever stored, and which
+    /// writes 0 where naming nothing writes 1.
+    pub(crate) file_drag_mode: Option<&'a str>,
+    pub(crate) image_scale: Option<&'a str>,
+}
+
+impl Default for NativePictureDecorationPayload<'_> {
+    fn default() -> Self {
+        Self {
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            hyperlink: false,
+            picture_size: None,
+            zoomable: false,
+            nonselected_picture_text: "{1,0}",
+            border_color: "{3,4,{0}}",
+            border: concat!(
+                "{3,0,{0},0,1,0,",
+                "48312c09-257f-4b29-b280-284dd89efc1e}"
+            ),
+            enable_start_drag: false,
+            enable_drag: false,
+            events: "{0,1,0}",
+            file_drag_mode: None,
+            image_scale: None,
+        }
+    }
+}
+
+pub(crate) fn format_picture_decoration_payload(
+    payload: &NativePictureDecorationPayload<'_>,
+) -> Option<String> {
+    let size = root_code(
+        payload.picture_size,
+        &[
+            ("Stretch", "1"),
+            ("Proportionally", "2"),
+            ("AutoSize", "4"),
+            ("RealSizeIgnoreScale", "5"),
+            ("AutoSizeIgnoreScale", "6"),
+            ("ByFontSize", "7"),
+        ],
+        "0",
+    )?;
+    // A decoration that names no drag mode writes 1, not 0.
+    let drag = root_code(payload.file_drag_mode, &[("AsFile", "0")], "1")?;
+    Some(format!(
+        "{{4,{picture},{hyperlink},{size},{zoomable},{text},{border_color},{border},\
+         {start_drag},{drag_enabled},{events},{drag},{scale}}}",
+        picture = payload.picture,
+        hyperlink = u8::from(payload.hyperlink),
+        zoomable = u8::from(payload.zoomable),
+        text = payload.nonselected_picture_text,
+        border_color = payload.border_color,
+        border = payload.border,
+        start_drag = u8::from(payload.enable_start_drag),
+        drag_enabled = u8::from(payload.enable_drag),
+        events = payload.events,
+        scale = payload.image_scale.unwrap_or("100"),
     ))
 }
 
@@ -5836,6 +6103,193 @@ mod tests {
             format_decoration_item(&NativeDecorationItem {
                 group_vertical_align: Some("Stretch"),
                 ..NativeDecorationItem::default()
+            }),
+            None
+        );
+    }
+
+    /// The `{5,…}` payload of a label decoration, against four payloads read
+    /// out of stored ERP УХ bodies.
+    #[test]
+    fn writes_the_label_decoration_payload_the_corpus_stores() {
+        // The default is what a tooltip and 23 380 of the 35 477 ERP УХ label
+        // decorations carry -- and what the writer used to give all of them.
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload::default()).as_deref(),
+            Some(
+                "{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},\
+                 {3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
+            )
+        );
+
+        // `BusinessProcesses/ТиповаяПродажа/Forms/Взаимодействия` item 183:
+        // `<Hyperlink>true</>`, `<HorizontalAlign>Right</>` and one `Click`.
+        let events = format_native_events(
+            "LabelDecoration",
+            "",
+            &[NativeEvent {
+                name: "Click",
+                handler: "ДекорацияВзаимодействияНажатие",
+            }],
+        )
+        .expect("the click of a label decoration");
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload {
+                hyperlink: true,
+                horizontal_align: Some("Right"),
+                events: &events,
+                ..NativeLabelDecorationPayload::default()
+            })
+            .as_deref(),
+            Some(
+                "{5,1,2,3,0,{1,11707a99-4eb9-4373-bc8c-84891483a034,\
+                 \"ДекорацияВзаимодействияНажатие\",1,0,11707a99-4eb9-4373-bc8c-84891483a034,0,1},\
+                 {3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
+            )
+        );
+
+        // `Catalogs/ПоказателиМонитораКлючевыхПоказателей/Forms/ФормаЭлемента`
+        // item 246: `<BackColor>#C0DCC0</>` at member 6 and a `Single`
+        // `<Border>` at member 8.
+        let border = format_native_control_border(Some("Single")).expect("a single border");
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload {
+                back_color: "{3,0,{12639424}}",
+                border: &border,
+                ..NativeLabelDecorationPayload::default()
+            })
+            .as_deref(),
+            Some(
+                "{5,0,0,3,0,{0,1,0},{3,0,{12639424}},{3,4,{0}},\
+                 {3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
+            )
+        );
+
+        // `Catalogs/НастройкиОнлайнОплат/Forms/ФормаЭлемента` item 280:
+        // `<VerticalAlign>Center</>` at member 3 and `<TitleHeight>1</>` at 4.
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload {
+                vertical_align: Some("Center"),
+                title_height: Some("1"),
+                ..NativeLabelDecorationPayload::default()
+            })
+            .as_deref(),
+            Some(
+                "{5,0,0,1,1,{0,1,0},{3,4,{0}},{3,4,{0}},\
+                 {3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
+            )
+        );
+
+        // Neither corpus stores `<HorizontalAlign>Left` or `<VerticalAlign>Auto`
+        // anywhere, so nothing says what they would write.
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload {
+                horizontal_align: Some("Left"),
+                ..NativeLabelDecorationPayload::default()
+            }),
+            None
+        );
+        assert_eq!(
+            format_label_decoration_payload(&NativeLabelDecorationPayload {
+                vertical_align: Some("Auto"),
+                ..NativeLabelDecorationPayload::default()
+            }),
+            None
+        );
+        assert_eq!(format_native_control_border(Some("Dotted")), None);
+    }
+
+    /// The `{4,…}` payload of a picture decoration, against three payloads read
+    /// out of stored ERP УХ bodies. It is a **different shape** from the
+    /// label's, which is why the constant the writer used to emit was wrong for
+    /// all 7 222 picture decorations of that corpus.
+    #[test]
+    fn writes_the_picture_decoration_payload_the_corpus_stores() {
+        // `Catalogs/БланкиОтчетов/Forms/МастерСозданияНовыхСтрок` item 85:
+        // a common picture loaded transparent, `<PictureSize>Stretch</>` and
+        // `<FileDragMode>AsFile</>`, which writes **0** where naming nothing
+        // writes 1.
+        assert_eq!(
+            format_picture_decoration_payload(&NativePictureDecorationPayload {
+                picture: &format_native_item_picture(
+                    Some("408c0202-799d-4e99-9e0f-b81c69f64b5a"),
+                    true,
+                    None,
+                    None,
+                ),
+                picture_size: Some("Stretch"),
+                file_drag_mode: Some("AsFile"),
+                ..NativePictureDecorationPayload::default()
+            })
+            .as_deref(),
+            Some(
+                "{4,{4,1,{0,408c0202-799d-4e99-9e0f-b81c69f64b5a},\"\",-1,-1,1,0,\"\"},0,1,0,\
+                 {1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,\
+                 {0,1,0},0,100}"
+            )
+        );
+
+        // `Catalogs/БланкиОтчетов/Forms/СопоставлениеАналитике` item 60:
+        // `<xr:TransparentPixel x="12" y="3"/>` is members 4 and 5 of the
+        // reference, where absent writes -1.
+        assert_eq!(
+            format_native_item_picture(
+                Some("fcb2acfb-de4e-4c67-ac6f-c386ed317b5f"),
+                true,
+                Some("12"),
+                Some("3"),
+            ),
+            "{4,1,{0,fcb2acfb-de4e-4c67-ac6f-c386ed317b5f},\"\",12,3,1,0,\"\"}"
+        );
+        // No picture at all still writes 1 at member 6.
+        assert_eq!(
+            format_native_item_picture(None, false, None, None),
+            "{4,0,{0},\"\",-1,-1,1,0,\"\"}"
+        );
+
+        // `Catalogs/РесурсныеСпецификации/Forms/ФормаЭлемента` item 1712:
+        // `<Hyperlink>`, a `Single` `<Border>` and a `Click`, whose uuid is the
+        // picture decoration's own and not the label decoration's.
+        let events = format_native_events(
+            "PictureDecoration",
+            "",
+            &[NativeEvent {
+                name: "Click",
+                handler: "ГиперссылкаНадписьОсновноеИзделиеНажатие",
+            }],
+        )
+        .expect("the click of a picture decoration");
+        let border = format_native_control_border(Some("Single")).expect("a single border");
+        assert_eq!(
+            format_picture_decoration_payload(&NativePictureDecorationPayload {
+                picture: &format_native_item_picture(
+                    Some("ce463861-92df-47f2-bd0f-4a2dbf72aacc"),
+                    false,
+                    None,
+                    None,
+                ),
+                hyperlink: true,
+                border: &border,
+                events: &events,
+                file_drag_mode: Some("AsFile"),
+                ..NativePictureDecorationPayload::default()
+            })
+            .as_deref(),
+            Some(
+                "{4,{4,1,{0,ce463861-92df-47f2-bd0f-4a2dbf72aacc},\"\",-1,-1,0,0,\"\"},1,0,0,\
+                 {1,0},{3,4,{0}},{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e},0,0,\
+                 {1,9874537f-454c-40ae-83e9-3b9cefbc6d08,\
+                 \"ГиперссылкаНадписьОсновноеИзделиеНажатие\",1,0,\
+                 9874537f-454c-40ae-83e9-3b9cefbc6d08,0,1},0,100}"
+            )
+        );
+
+        // `<PictureSize>RealSize` is never stored, so it is refused rather than
+        // taking the 0 an absent `<PictureSize>` writes.
+        assert_eq!(
+            format_picture_decoration_payload(&NativePictureDecorationPayload {
+                picture_size: Some("RealSize"),
+                ..NativePictureDecorationPayload::default()
             }),
             None
         );
