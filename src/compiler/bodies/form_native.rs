@@ -193,6 +193,83 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
     )
 }
 
+/// What a `{22,…}` group record needs beyond the frame every group shares.
+///
+/// `kind` is the marker that says which group this is -- 0 command-bar group,
+/// 1 submenu, 2 ordinary group, 3 pages, 4 page, 5 usual group, 6 button
+/// group, 7 navigator -- and it decides the shape of `payload`. Censused over
+/// all 12 515 ERP УХ form bodies: each kind has exactly one payload structure
+/// with a fixed member count (29 for kind 5, 20 for kind 4, 4 for kind 6, and
+/// so on), varying only in a handful of scalar slots. The payload arrives
+/// already formatted for the same reason a field's data path does: the slot
+/// that carries an XML property is named where that property is read, not
+/// here.
+pub(crate) struct NativeGroupItem<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) kind: u8,
+    pub(crate) name: &'a str,
+    /// Already formatted -- see [`format_russian_title`].
+    pub(crate) title: &'a str,
+    pub(crate) tooltip_title: &'a str,
+    /// The frame's four varying members, in the order they appear.
+    pub(crate) frame: NativeGroupFrame,
+    pub(crate) payload: &'a str,
+    /// `(group uuid, child record)` in the order the body stores them.
+    pub(crate) children: &'a [(&'a str, String)],
+    /// Already formatted -- see [`format_extended_tooltip`].
+    pub(crate) extended_tooltip: &'a str,
+}
+
+/// The four members of the group frame that are not constant.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct NativeGroupFrame {
+    pub(crate) first: u32,
+    pub(crate) second: u32,
+    pub(crate) third: u32,
+    pub(crate) fourth: u32,
+}
+
+impl NativeGroupFrame {
+    /// The values 68 645 of the 68 836 kind-5 records carry.
+    pub(crate) const fn usual() -> Self {
+        Self {
+            first: 0,
+            second: 0,
+            third: 2,
+            fourth: 2,
+        }
+    }
+}
+
+/// The `{22,…}` record of a group, with its children in place.
+pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
+    let mut children = String::new();
+    for (group_uuid, record) in group.children {
+        children.push(',');
+        children.push_str(group_uuid);
+        children.push(',');
+        children.push_str(record);
+    }
+    format!(
+        "{{22,{{{id},{ns}}},0,0,0,{kind},{name},{title},{tooltip_title},{first},1,0,{second},0,\
+         {third},{fourth},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{payload},{count}{children},\
+         1,0,1,{tooltip},0,3,3,0}}",
+        id = group.id,
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        kind = group.kind,
+        name = quoted(group.name),
+        title = group.title,
+        tooltip_title = group.tooltip_title,
+        first = group.frame.first,
+        second = group.frame.second,
+        third = group.frame.third,
+        fourth = group.frame.fourth,
+        payload = group.payload,
+        count = group.children.len(),
+        tooltip = group.extended_tooltip,
+    )
+}
+
 /// The `{22,…}` record of an empty `<AutoCommandBar>`.
 ///
 /// The one slot that separates it from a context menu is the marker `9`, and
@@ -319,6 +396,127 @@ mod tests {
 
         assert_eq!(format_russian_title(""), "{1,0}");
         assert_eq!(format_russian_title("Внимание"), "{1,1,{\"ru\",\"Внимание\"}}");
+    }
+
+    /// One childless record of each group kind, exactly as an ERP УХ form
+    /// body stores it. The six together prove the frame: everything outside
+    /// the payload is the same in all of them.
+    #[test]
+    fn writes_one_record_of_every_group_kind() {
+        let cases: [(u8, &str, &str, &str, &str, &str, &str, &str); 6] = [
+            (
+                0,
+                "76",
+                "ГруппаКоманднаяПанель",
+                "Командная панель",
+                "{1,0,{0,02023637-7868-4a5f-8576-835a76e0c9ba}}",
+                "77",
+                "ГруппаКоманднаяПанельРасширеннаяПодсказка",
+                "{22,{76,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ГруппаКоманднаяПанель\",{1,1,{\"ru\",\"Командная панель\"}},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,0,{0,02023637-7868-4a5f-8576-835a76e0c9ba}},0,1,0,1,",
+            ),
+            (
+                2,
+                "461",
+                "ГруппаВидКвоты",
+                "",
+                "{2,2,1,0,3,{4,0,{0},\"\",-1,-1,1,0,\"\"},{3,4,{0}},{0},{\"Pattern\"},\"\",{1,0},0}",
+                "462",
+                "ГруппаВидКвотыРасширеннаяПодсказка",
+                "{22,{461,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"ГруппаВидКвоты\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{2,2,1,0,3,{4,0,{0},\"\",-1,-1,1,0,\"\"},{3,4,{0}},{0},{\"Pattern\"},\"\",{1,0},0},0,1,0,1,",
+            ),
+            (
+                5,
+                "11",
+                "ГруппаШапка",
+                "",
+                "{29,1,0,2,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,0}",
+                "50",
+                "ГруппаШапкаРасширеннаяПодсказка",
+                "{22,{11,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,\"ГруппаШапка\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{29,1,0,2,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,0},0,1,0,1,",
+            ),
+            (
+                6,
+                "193",
+                "ГруппаКнопокДляПрисоединенныхФайлов",
+                "",
+                "{2,{0},2,0}",
+                "194",
+                "ГруппаКнопокДляПрисоединенныхФайловРасширеннаяПодсказка",
+                "{22,{193,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,\"ГруппаКнопокДляПрисоединенныхФайлов\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{2,{0},2,0},0,1,0,1,",
+            ),
+            (
+                1,
+                "482",
+                "ПодменюПечать",
+                "",
+                "{7,{4,1,{-13},\"\",-1,-1,1,0,\"\"},{0},2,3,0,0,{3,4,{0}},{3,4,{0}}}",
+                "483",
+                "ПодменюПечатьРасширеннаяПодсказка",
+                "",
+            ),
+            (
+                4,
+                "375",
+                "ШаблоныСтраница",
+                "",
+                "{18,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,{0},{1,0},1,{\"Pattern\"},\"\",{3,4,{0}},0,0,3,3,0,0,0,0,{3,4,{0}},{7,3,0,1,100}}",
+                "376",
+                "ШаблоныСтраницаРасширеннаяПодсказка",
+                "",
+            ),
+        ];
+
+        for (kind, id, name, title, payload, tooltip_id, tooltip_name, expected_head) in cases {
+            let tooltip = format_extended_tooltip(tooltip_id, tooltip_name);
+            let record = format_group_item(&NativeGroupItem {
+                id,
+                kind,
+                name,
+                title: &format_russian_title(title),
+                tooltip_title: "{1,0}",
+                frame: NativeGroupFrame::usual(),
+                payload,
+                children: &[],
+                extended_tooltip: &tooltip,
+            });
+            if !expected_head.is_empty() {
+                assert!(
+                    record.starts_with(expected_head),
+                    "kind {kind} head differs:\n{record}"
+                );
+            }
+            assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
+        }
+    }
+
+    /// A group writes its children as `(group uuid, record)` pairs after their
+    /// count, which is what the list command bar of
+    /// `Documents/Лот/Forms/ВыигранныеЛоты` stores.
+    #[test]
+    fn writes_a_group_with_its_children() {
+        let tooltip = format_extended_tooltip("9", "ГруппаРасширеннаяПодсказка");
+        let child = format_standard_command_button(
+            "26",
+            "ФормаНайти",
+            "c0519548-2a9a-44de-a25e-faf01e089d4d",
+            "27",
+            "ФормаНайтиРасширеннаяПодсказка",
+        );
+        let record = format_group_item(&NativeGroupItem {
+            id: "8",
+            kind: 0,
+            name: "Группа",
+            title: "{1,0}",
+            tooltip_title: "{1,0}",
+            frame: NativeGroupFrame::usual(),
+            payload: "{1,0,{0}}",
+            children: &[("a9f3b1ac-f51b-431e-b102-55a69acdecad", child.clone())],
+            extended_tooltip: &tooltip,
+        });
+
+        assert!(record.contains(&format!(
+            ",1,a9f3b1ac-f51b-431e-b102-55a69acdecad,{child},1,0,1,"
+        )));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
