@@ -778,10 +778,16 @@ pub(crate) struct NativeLabelPayload<'a> {
     pub(crate) height: &'a str,
     /// Slot 3: `false` -> 0, `true` -> 1, absent -> 2.
     pub(crate) horizontal_stretch: Option<bool>,
+    /// Slot 4, `<VerticalStretch>`, read the same way.
+    pub(crate) vertical_stretch: Option<bool>,
+    /// Slot 5, `<MarkNegatives>`, read the same way.
+    pub(crate) mark_negatives: Option<bool>,
     /// Slot 6, `{1,0}` when the item names no format.
     pub(crate) format: &'a str,
-    /// Slot 7: whether the field is one the user edits.
-    pub(crate) editable: bool,
+    /// Slot 7 is `<Hiperlink>` -- the corpus spells it with one `p` -- on when
+    /// the item says so and off otherwise. The partition test named it over
+    /// all 37 005 label payloads; it was a guess before.
+    pub(crate) hyperlink: bool,
     /// Slot 8, the text colour.
     pub(crate) text_color: &'a str,
     /// Slot 9, the background colour.
@@ -794,41 +800,54 @@ pub(crate) struct NativeLabelPayload<'a> {
     pub(crate) auto_max_width: bool,
     /// Slot 16, `0` when the item names no maximum width.
     pub(crate) max_width: &'a str,
+    /// Slot 18 and slot 19, the height's pair of the two above.
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
 }
 
 impl NativeLabelPayload<'_> {
     /// What a label that names no property of its own carries.
-    pub(crate) const fn plain(editable: bool) -> Self {
+    pub(crate) const fn plain(hyperlink: bool) -> Self {
         Self {
             width: "0",
             height: "0",
             horizontal_stretch: None,
+            vertical_stretch: None,
+            mark_negatives: None,
             format: "{1,0}",
-            editable,
+            hyperlink,
             text_color: "{3,4,{0}}",
             back_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
             events: "{0,1,0}",
             auto_max_width: true,
             max_width: "0",
+            auto_max_height: true,
+            max_height: "0",
         }
     }
 }
 
 pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
-    let stretch = match payload.horizontal_stretch {
+    let tristate = |value: Option<bool>| match value {
         Some(true) => "1",
         Some(false) => "0",
         None => "2",
     };
     format!(
-        "{{11,{width},{height},{stretch},2,2,{format},{editable},{text_color},{back_color},\
-         {font},2,{events},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}},{auto_max_width},\
-         {max_width},0,1,0}}",
+        "{{11,{width},{height},{stretch},{vertical},{mark_negatives},{format},{hyperlink},\
+         {text_color},{back_color},{font},2,{events},{{3,4,{{0}}}},\
+         {{3,0,{{0}},0,1,0,{appearance}}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {max_height}}}",
         width = payload.width,
         height = payload.height,
+        stretch = tristate(payload.horizontal_stretch),
+        vertical = tristate(payload.vertical_stretch),
+        mark_negatives = tristate(payload.mark_negatives),
         format = payload.format,
-        editable = u8::from(payload.editable),
+        hyperlink = u8::from(payload.hyperlink),
+        auto_max_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
         text_color = payload.text_color,
         back_color = payload.back_color,
         font = payload.font,
@@ -4179,6 +4198,29 @@ mod tests {
             ",1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{field},\"\",\"\",0,1,"
         )));
         assert!(root.ends_with(",0,0,0,{50,0},1}"));
+    }
+
+    /// The four slots of the label payload the partition test named, which
+    /// were constants or a guess before: <VerticalStretch>, <MarkNegatives>,
+    /// <Hiperlink> and the height's pair of auto-max slots.
+    #[test]
+    fn writes_the_label_slots_the_partition_test_named() {
+        let quiet = format_label_payload(&NativeLabelPayload::plain(false));
+        // A label that names none of them carries 2, 2 and 0, and the height
+        // pair carries 1 and 0.
+        assert!(quiet.starts_with("{11,0,0,2,2,2,{1,0},0,"));
+        assert!(quiet.ends_with(",1,0,0,1,0}"));
+
+        let spoken = format_label_payload(&NativeLabelPayload {
+            vertical_stretch: Some(true),
+            mark_negatives: Some(true),
+            hyperlink: true,
+            auto_max_height: false,
+            max_height: "4",
+            ..NativeLabelPayload::plain(false)
+        });
+        assert!(spoken.starts_with("{11,0,0,2,1,1,{1,0},1,"));
+        assert!(spoken.ends_with(",1,0,0,0,4}"));
     }
 
     /// Four label payloads of ERP УХ form bodies, each carrying a different
