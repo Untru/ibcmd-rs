@@ -8406,29 +8406,11 @@ pub(super) fn parse_moxel_format_table(
             continue;
         }
         let mut formats = Vec::with_capacity(count);
-        if std::env::var_os("IBCMD_DEBUG_MOXEL").is_some() {
-            eprintln!(
-                "[moxel] format table count={count} kinds={:?}",
-                drawing_format_indices
-            );
-        }
         for (format_offset, field) in fields[index + 1..=index + count].iter().enumerate() {
             let Some(mut format) = parse_moxel_format(field, style_refs, number_format_refs) else {
                 formats.clear();
                 break;
             };
-            if std::env::var_os("IBCMD_DEBUG_MOXEL").is_some() && format_offset + 1 >= 12 {
-                eprintln!(
-                    "[moxel] #{} kind={:?} width={:?} back={:?} border={:?} text={:?} raw={}",
-                    format_offset + 1,
-                    drawing_format_indices.get(&(format_offset + 1)),
-                    format.width,
-                    format.back_color,
-                    format.border_color,
-                    format.text_color,
-                    &field[..field.len().min(160)]
-                );
-            }
             if let Some(kind) = drawing_format_indices.get(&(format_offset + 1))
                 && format.width.is_none()
             {
@@ -10016,6 +9998,14 @@ fn parse_moxel_windows_color(value: &str) -> Option<String> {
 /// slot makes the whole palette unusable rather than being guessed at.
 pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
     let name = match value.parse::<u32>().ok()? {
+        // `1` is pinned by a palette with one kind-2 slot and one published
+        // web colour: ERP УХ 3.3.3.3 `DataProcessors/
+        // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`
+        // carries `-1`, `-3`, a configuration style item and `1`, and its
+        // whole published pool holds one `d3p1:AliceBlue` and thirteen
+        // `style:СерыйФонШапкиОтчета`. Leaving it unnamed refused the whole
+        // palette, so that template published none of its colours or borders.
+        1 => "AliceBlue",
         2 => "AntiqueWhite",
         5 => "Azure",
         6 => "Beige",
@@ -10072,6 +10062,17 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         // `LightSalmon`.
         73 => "LightSalmon",
         75 => "LightSkyBlue",
+        // `77` is pinned the same way, by a palette that leaves it alone:
+        // ERP УХ 3.3.3.3
+        // `Catalogs/ШаблоныНазначенийПлатежей/Templates/МакетТегов` carries
+        // the eight slots `-1, -3, -7, -10, 55, 77, -15, -14`, of which `55`
+        // is the already-known `HoneyDew` and `77` the only other kind-2 one,
+        // and the published pool holds exactly two `d3p1:HoneyDew` and one
+        // `d3p1:LightSlateGray`. Leaving it unnamed refused the whole palette
+        // -- a slot this table cannot name makes the candidate span
+        // unparseable -- so that template published none of its eight colours
+        // at all.
+        77 => "LightSlateGray",
         79 => "LightYellow",
         84 => "Maroon",
         86 => "MediumBlue",
