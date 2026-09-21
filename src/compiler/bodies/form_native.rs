@@ -1106,8 +1106,15 @@ pub(crate) struct NativeTableItem<'a> {
     /// The twelve members between the command bar and the tooltip's flag.
     pub(crate) middle: &'a str,
     pub(crate) extended_tooltip: &'a str,
-    /// The three members between the tooltip and the first addition's flag.
-    pub(crate) before_additions: &'a str,
+    /// Where the table says what it shows -- the search string, the view
+    /// status and the search control -- which is exactly the three members
+    /// between the tooltip and the first addition's flag. Measured over all
+    /// 7 183 table records of the ERP УХ corpus: a candidate filling these
+    /// three, with `<Representation>` and `<SkipOnInput>` which live in the
+    /// head and the middle, reproduces every one of them exactly.
+    pub(crate) search_string_location: Option<&'a str>,
+    pub(crate) view_status_location: Option<&'a str>,
+    pub(crate) search_control_location: Option<&'a str>,
     pub(crate) search_string_addition: &'a str,
     pub(crate) view_status_addition: &'a str,
     pub(crate) search_control_addition: &'a str,
@@ -1115,17 +1122,53 @@ pub(crate) struct NativeTableItem<'a> {
     pub(crate) tail: &'a str,
 }
 
+/// The codes a table writes for where it shows its search string.
+const TABLE_SEARCH_STRING_CODES: &[(&str, &str)] = &[
+    ("None", "1"),
+    ("CommandBar", "2"),
+    ("Top", "3"),
+    ("Bottom", "4"),
+    ("FormCaption", "5"),
+    ("PullFromTop", "6"),
+];
+
+/// The codes for where it shows its view status.
+const TABLE_VIEW_STATUS_CODES: &[(&str, &str)] = &[("None", "1"), ("Top", "2"), ("Bottom", "3")];
+
+/// The codes for where it shows its search control.
+const TABLE_SEARCH_CONTROL_CODES: &[(&str, &str)] = &[("None", "1"), ("CommandBar", "2")];
+
+/// The code a table writes for one of those three; a table that names none
+/// writes `0`.
+fn table_location_code(
+    location: Option<&str>,
+    codes: &[(&'static str, &'static str)],
+) -> &'static str {
+    let Some(location) = location else {
+        return "0";
+    };
+    codes
+        .iter()
+        .find_map(|(name, code)| (*name == location).then_some(*code))
+        .unwrap_or("0")
+}
+
 /// The `{55,…}` record of a table, with its six children in place.
 pub(crate) fn format_table_item(table: &NativeTableItem<'_>) -> String {
     format!(
-        "{{{head},1,{context_menu},1,{command_bar},{middle},1,{tooltip},{before_additions},\
+        "{{{head},1,{context_menu},1,{command_bar},{middle},1,{tooltip},{search_string_location},{view_status_location},{search_control_location},\
          1,{search_string},1,{view_status},1,{search_control},{tail}}}",
         head = table.head,
         context_menu = table.context_menu,
         command_bar = table.command_bar,
         middle = table.middle,
         tooltip = table.extended_tooltip,
-        before_additions = table.before_additions,
+        search_string_location =
+            table_location_code(table.search_string_location, TABLE_SEARCH_STRING_CODES),
+        view_status_location =
+            table_location_code(table.view_status_location, TABLE_VIEW_STATUS_CODES),
+        search_control_location =
+            table_location_code(table.search_control_location, TABLE_SEARCH_CONTROL_CODES),
         search_string = table.search_string_addition,
         view_status = table.view_status_addition,
         search_control = table.search_control_addition,
@@ -1473,7 +1516,9 @@ mod tests {
             command_bar: &command_bar,
             middle: "0,2,2,1,0,{\"Pattern\"},\"\",\"\",2,2,0",
             extended_tooltip: &tooltip,
-            before_additions: "0,0,0",
+            search_string_location: None,
+            view_status_location: None,
+            search_control_location: None,
             search_string_addition: "{5,{60,x},0}",
             view_status_addition: "{5,{63,x},1}",
             search_control_addition: "{5,{66,x},2}",
@@ -1505,6 +1550,26 @@ mod tests {
         assert_eq!(members[members.len() - 19], "{5,{63,x},1}");
         assert_eq!(members[members.len() - 17], "{5,{66,x},2}");
         assert_eq!(members.len() - (members.len() - 17) - 1, 16);
+
+        // A table that names none of the three writes 0 for each; one that
+        // names them writes the codes the corpus gives.
+        assert_eq!(&members[members.len() - 25..members.len() - 22], &["0", "0", "0"]);
+        let shown = format_table_item(&NativeTableItem {
+            head: "55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,2,0,\"Отбор\",{0}",
+            context_menu: &context_menu,
+            command_bar: &command_bar,
+            middle: "0,2,2,1,0,{\"Pattern\"},\"\",\"\",2,2,0",
+            extended_tooltip: &tooltip,
+            search_string_location: Some("PullFromTop"),
+            view_status_location: Some("None"),
+            search_control_location: Some("CommandBar"),
+            search_string_addition: "{5,{60,x},0}",
+            view_status_addition: "{5,{63,x},1}",
+            search_control_addition: "{5,{66,x},2}",
+            tail: "0,1,0,0,1,0,3,3,0,1,0,0,0,0,0,0",
+        });
+        let shown = top_level_members(&shown);
+        assert_eq!(&shown[shown.len() - 25..shown.len() - 22], &["6", "1", "2"]);
     }
 
     /// The three additions of the `Отбор` table of an ERP УХ form body, each
