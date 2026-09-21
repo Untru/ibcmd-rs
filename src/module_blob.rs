@@ -31086,20 +31086,32 @@ mod tests {
             "the picture decoration payload is not the one the platform stores: {body}"
         );
 
-        // A `StdPicture` names a uuid the platform owns and the source does not
-        // carry, so the form is refused rather than written with a picture the
-        // measurement could not resolve.
-        let error = super::compile_native_form_body(
+        // A `StdPicture` names the platform's own picture, which no file of
+        // the source declares. Its value comes from a table measured over both
+        // corpora, and its reference carries 1 at member 6 where a common
+        // picture carries 0.
+        let body = super::compile_native_form_body(
             form("StdPicture.Information").as_bytes(),
             None,
             Some(&source),
+        )?;
+        assert!(
+            body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,1,0,\"\"}"),
+            "the StdPicture reference is not the one the platform stores: {body}"
+        );
+
+        // A name the table does not know is still refused.
+        let error = super::compile_native_form_body(
+            form("StdPicture.NoSuchPictureInAnyCorpus").as_bytes(),
+            None,
+            Some(&source),
         )
-        .expect_err("a StdPicture reference must refuse the form");
+        .expect_err("an unmeasured StdPicture name must refuse the form");
         let error = format!("{error:#}");
         let _ = std::fs::remove_dir_all(&root);
         assert!(
-            error.contains("reference the writer cannot place"),
-            "a StdPicture picture decoration was written instead of refused: {error}"
+            error.contains("no measured value for StdPicture."),
+            "an unmeasured StdPicture name was written instead of refused: {error}"
         );
         Ok(())
     }
