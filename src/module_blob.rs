@@ -6007,6 +6007,210 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
     })
 }
 
+
+/// The settings composer a form with no composer settings carries.
+///
+/// The blob is not in the source at all: two spellings account for 11 842 of
+/// the 12 507 ERP УХ bodies and nothing in the XML separates them, so the
+/// writer picks the self-closed one -- what a newly created form carries --
+/// and the round trip closes on the second export rather than on the original
+/// database. See evidence/body-frame-20260921.md.
+const NATIVE_EMPTY_SETTINGS: &str = "{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxTZXR0aW5ncyB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6ZGNzY29yPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEtY29tcG9zaXRpb24tc3lzdGVtL2NvcmUiIHhtbG5zOnN0eWxlPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEvdWkvc3R5bGUiIHhtbG5zOnN5cz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2ZvbnRzL3N5c3RlbSIgeG1sbnM6djg9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS9jb3JlIiB4bWxuczp2OHVpPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEvdWkiIHhtbG5zOndlYj0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2NvbG9ycy93ZWIiIHhtbG5zOndpbj0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2NvbG9ycy93aW5kb3dzIiB4bWxuczp4cz0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEiIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiLz4=}";
+
+/// What stops a form from being written in the shape the platform stores.
+///
+/// Fail-closed: every part the native writers have not measured refuses the
+/// whole form, so a body is either what the platform would have written or is
+/// not written at all.
+fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> {
+    let mut blockers = Vec::new();
+    if !properties.child_items.is_empty() {
+        blockers.push("child items: the item writers are not wired yet".to_string());
+    }
+    if !properties.attributes.is_empty() {
+        blockers.push("attributes".to_string());
+    }
+    if !properties.parameters.is_empty() {
+        blockers.push("parameters".to_string());
+    }
+    if !properties.commands.is_empty() {
+        blockers.push("commands".to_string());
+    }
+    if !properties.command_interface_items.is_empty() {
+        blockers.push("a command interface".to_string());
+    }
+    if properties.attributes_conditional_appearance.is_some() {
+        blockers.push("a conditional appearance".to_string());
+    }
+    if let Some(command_bar) = &properties.auto_command_bar {
+        if !command_bar.child_items.is_empty() {
+            blockers.push("an auto command bar with children".to_string());
+        }
+    }
+    // Everything below puts an entry in the root's keyed property bag, and
+    // what each key holds is not read yet.
+    for (present, name) in [
+        (properties.auto_time.is_some(), "AutoTime"),
+        (properties.use_posting_mode.is_some(), "UsePostingMode"),
+        (properties.repost_on_write.is_some(), "RepostOnWrite"),
+        (
+            properties.use_for_folders_and_items.is_some(),
+            "UseForFoldersAndItems",
+        ),
+        (properties.report_result.is_some(), "ReportResult"),
+        (properties.details_data.is_some(), "DetailsData"),
+        (properties.report_form_type.is_some(), "ReportFormType"),
+        (properties.auto_show_state.is_some(), "AutoShowState"),
+        (
+            properties.report_result_view_mode.is_some(),
+            "ReportResultViewMode",
+        ),
+        (
+            properties.view_mode_application_on_set_report_result.is_some(),
+            "ViewModeApplicationOnSetReportResult",
+        ),
+    ] {
+        if present {
+            blockers.push(format!("<{name}> needs the root property bag"));
+        }
+    }
+    blockers
+}
+
+/// The whole body of a form, in the shape the platform stores it.
+fn format_native_form_body(
+    properties: &FormXmlBodyProperties,
+    module_text: &str,
+) -> Result<String> {
+    let blockers = native_form_body_blockers(properties);
+    if !blockers.is_empty() {
+        return Err(anyhow!("{}", blockers.join("; ")));
+    }
+
+    let title = format_form_title_value(&properties.title);
+    let root_head = crate::compiler::bodies::form_native::format_root_head(&crate::compiler::bodies::form_native::NativeRootHead {
+        window_opening_mode: properties.window_opening_mode.map(|mode| match mode {
+            FormXmlWindowOpeningMode::DontBlock => "DontUse",
+            FormXmlWindowOpeningMode::LockOwner => "LockOwnerWindow",
+            FormXmlWindowOpeningMode::LockWholeInterface => "LockWholeInterface",
+        }),
+        width: properties.width.as_deref(),
+        height: properties.height.as_deref(),
+        enter_key_behavior: properties
+            .enter_key_behavior
+            .map(|_| "DefaultButton"),
+        save_data_in_settings: properties.save_data_in_settings.map(|_| "UseList"),
+        auto_save_data_in_settings: properties.auto_save_data_in_settings.map(|_| "Use"),
+        settings_storage: None,
+        auto_title: properties.auto_title.unwrap_or(true),
+        title: &title,
+        group: properties.group.map(|_| "Vertical"),
+        child_items_width: None,
+        auto_fill_check: properties.auto_fill_check.unwrap_or(true),
+        customizable: properties.customizable.unwrap_or(true),
+        enabled: true,
+        command_bar_location: properties.command_bar_location.map(|location| match location {
+            FormXmlCommandBarLocation::None => "None",
+            FormXmlCommandBarLocation::Top => "Top",
+            FormXmlCommandBarLocation::Bottom => "Bottom",
+        }),
+    })
+    .ok_or_else(|| anyhow!("the form's head names something the writer cannot place"))?;
+
+    let events = properties
+        .events
+        .iter()
+        .map(|event| crate::compiler::bodies::form_native::NativeEvent {
+            name: &event.name,
+            handler: &event.handler,
+        })
+        .collect::<Vec<_>>();
+    let events = crate::compiler::bodies::form_native::format_native_events("Form", "", &events)
+        .ok_or_else(|| anyhow!("the form names an event the writer cannot place"))?;
+
+    let command_set = format_form_command_set(&properties.command_set_excluded_commands);
+    let command_bar = match &properties.auto_command_bar {
+        Some(bar) => crate::compiler::bodies::form_native::format_group_item(&crate::compiler::bodies::form_native::NativeGroupItem {
+            id: &bar.id,
+            kind: 9,
+            name: &bar.name,
+            payload: "{0,0,0}",
+            ..crate::compiler::bodies::form_native::NativeGroupItem::default()
+        })
+        .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?,
+        None => return Err(anyhow!("a form with no auto command bar is not measured")),
+    };
+
+    let tail = crate::compiler::bodies::form_native::format_root_tail(&crate::compiler::bodies::form_native::NativeRootTail {
+        auto_url: properties.auto_url.unwrap_or(true),
+        vertical_scroll: properties.vertical_scroll.map(|_| "useIfNecessary"),
+        scaling_mode: properties.scaling_mode.map(|mode| match mode {
+            FormXmlScalingMode::Normal => "Normal",
+            FormXmlScalingMode::Compact => "Compact",
+        }),
+        horizontal_spacing: None,
+        vertical_spacing: None,
+        horizontal_align: properties.horizontal_align.map(|align| match align {
+            FormXmlHorizontalAlign::Left => "Left",
+            FormXmlHorizontalAlign::Center => "Center",
+            FormXmlHorizontalAlign::Right => "Right",
+            FormXmlHorizontalAlign::Auto => "Auto",
+        }),
+        vertical_align: properties.vertical_align.map(|align| match align {
+            FormRootVerticalAlign::Top => "Top",
+            FormRootVerticalAlign::Center => "Center",
+            FormRootVerticalAlign::Bottom => "Bottom",
+        }),
+        children_align: None,
+        group: properties.group.map(|group| match group {
+            FormXmlGroup::Vertical => "Vertical",
+            FormXmlGroup::Horizontal => "Horizontal",
+            FormXmlGroup::AlwaysHorizontal => "AlwaysHorizontal",
+            FormXmlGroup::HorizontalIfPossible => "HorizontalIfPossible",
+            FormXmlGroup::InCell => "InCell",
+        }),
+        show_title: properties.show_title.unwrap_or(true),
+        show_close_button: properties.show_close_button.unwrap_or(true),
+        conversations_representation: properties
+            .conversations_representation
+            .map(|_| "Show"),
+        collapse_items_by_importance: None,
+        save_window_settings: properties.save_window_settings.unwrap_or(true),
+        navigator: None,
+    })
+    .ok_or_else(|| anyhow!("the form's tail names something the writer cannot place"))?;
+
+    let root = crate::compiler::bodies::form_native::format_root_layout(&crate::compiler::bodies::form_native::NativeRootLayout {
+        head: &root_head,
+        properties: &[],
+        events: &events,
+        command_set: &command_set,
+        command_bar: &command_bar,
+        children: &[],
+        tail: &tail,
+    });
+
+    Ok(format!(
+        "{{4,{root},{module},{{4,0,0,0,{settings}}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},0,0}}",
+        module = format_1c_string(module_text),
+        settings = NATIVE_EMPTY_SETTINGS,
+    ))
+}
+
+/// Builds the body text of one Form.xml in the shape the platform stores it.
+pub fn compile_native_form_body(form_xml: &[u8], module_text: Option<&[u8]>) -> Result<String> {
+    validate_form_xml_document(form_xml)?;
+    let properties = parse_form_xml_body_properties(form_xml)?;
+    let module = match module_text {
+        Some(text) => std::str::from_utf8(text)
+            .context("Form module text is not valid UTF-8")?
+            .trim_start_matches('\u{feff}')
+            .to_string(),
+        None => String::new(),
+    };
+    format_native_form_body(&properties, &module)
+}
+
 /// Builds a managed Form body from source XML and a profile-known empty
 /// marker-50 container. No external/base artifact participates in this path.
 pub fn pack_form_body_blob_from_form_xml_base_free(

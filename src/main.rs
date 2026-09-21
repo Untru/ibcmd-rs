@@ -138,6 +138,15 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::AuditNativeFormWriter(args) => {
+            let report =
+                ibcmd_rs::source_audit::audit_native_form_writer(&args.root, &args.bodies)?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::AuditFormBodyBlockers(args) => {
             let report = ibcmd_rs::source_audit::audit_form_body_blockers(&args.root)?;
             if let Some(output) = args.output {

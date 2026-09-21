@@ -47,6 +47,8 @@ pub enum Commands {
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
     /// Census every Form.xml of a source tree against the base-free body model.
     AuditFormBodyBlockers(AuditFormBodyBlockersArgs),
+    /// Measure the native form-body writer against the bodies the platform stored.
+    AuditNativeFormWriter(AuditNativeFormWriterArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -910,6 +912,17 @@ pub struct FormContextSummaryArgs {
 pub struct AuditSourceLoadCoverageArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditNativeFormWriterArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated form bodies of the same database.
+    pub bodies: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,

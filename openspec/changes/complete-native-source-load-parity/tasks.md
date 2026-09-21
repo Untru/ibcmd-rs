@@ -60,9 +60,18 @@ rather than defaulting it.
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
       writer picks the canonical empty one and the round trip closes on the
       second export, not on the original database.
-- [ ] **Wire the writer into compilation.** Nothing is wired yet: the base-free
-      path still builds a seven-member frame and the blocker model still
-      refuses.
+- [x] **A path from `Form.xml` to a body, and a way to measure it.**
+      `compile_native_form_body` writes the frame, the root record and the
+      auto command bar; `ibcmd-rs audit-native-form-writer` compares what it
+      writes to what the platform stored, for every form of a tree. Load
+      parity is measurable end to end for the first time.
+      *(native-writer-wired-20260921.md)*
+- [ ] **Call the item writers from it.** 10 171 of the 13 044 forms of ERP УХ
+      -- 78% -- are refused for this one reason. The records themselves are
+      written and measured; nothing calls them.
+- [ ] **The parser's own gaps**, which hold up 2 620 forms before the writer
+      ever sees them: `<ExcludedCommand>` spellings (1 455), conditional
+      appearance (569), list settings (401), DCS children (195).
 - [ ] **Close the round trip**: export → load into an empty database → export,
       byte-identical.
 

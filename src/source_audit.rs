@@ -1416,6 +1416,137 @@ fn form_blocker_reason_shape(message: &str) -> String {
     shaped
 }
 
+
+/// How many forms the native body writer reproduces, and why the rest are not.
+///
+/// This is the end-to-end load-parity measurement: it reads each `Form.xml` of
+/// a source tree, writes the body the platform would store, and compares it to
+/// the body the platform actually stored -- the inflated dump of the same
+/// database. A form the writer refuses is counted as refused, never as wrong.
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterReport {
+    pub root: PathBuf,
+    pub bodies: PathBuf,
+    pub forms: usize,
+    /// Forms whose stored body was found in the dump.
+    pub compared: usize,
+    /// Forms the writer reproduced byte for byte.
+    pub exact: usize,
+    /// Forms the writer refused, by reason.
+    pub refused: BTreeMap<String, usize>,
+    /// Forms the writer wrote but got wrong, with one example each.
+    pub different: usize,
+    pub examples: Vec<NativeFormWriterDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterDifference {
+    pub form: String,
+    pub wrote: String,
+    pub stored: String,
+}
+
+/// The uuid a holder's XML gives the form beside it.
+fn form_uuid_of(form_path: &Path) -> Option<String> {
+    let holder = form_path.parent()?.parent()?.parent()?;
+    let holder = holder.with_extension("xml");
+    let text = fs::read_to_string(&holder).ok()?;
+    let marker = text.find("<Form uuid=\"")?;
+    let rest = &text[marker + 12..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+/// Text as the comparison sees it: the dump wraps long base64, the writer does
+/// not, and neither difference is in the body the platform stores.
+fn native_body_for_comparison(text: &str) -> String {
+    text.replace('\r', "").replace('\n', "")
+}
+
+pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeFormWriterReport> {
+    let mut form_paths = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file() && entry.file_name() == "Form.xml" {
+            form_paths.push(entry.into_path());
+        }
+    }
+    form_paths.sort();
+
+    let outcomes = parallel::install(|| {
+        form_paths
+            .par_iter()
+            .map(|path| {
+                let relative = relative_path_string(root, path);
+                let form_xml = match fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => return (relative, Err(error.to_string()), None),
+                };
+                let module_path = path.with_file_name("Form").join("Module.bsl");
+                let module = fs::read(&module_path).ok();
+                let stored = form_uuid_of(path).and_then(|uuid| {
+                    fs::read_to_string(bodies.join(format!("{uuid}.0__part0.txt"))).ok()
+                });
+                let wrote = crate::module_blob::compile_native_form_body(
+                    &form_xml,
+                    module.as_deref(),
+                )
+                .map_err(|error| error.to_string());
+                (relative, wrote, stored)
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = NativeFormWriterReport {
+        root: root.to_path_buf(),
+        bodies: bodies.to_path_buf(),
+        forms: form_paths.len(),
+        compared: 0,
+        exact: 0,
+        refused: BTreeMap::new(),
+        different: 0,
+        examples: Vec::new(),
+    };
+    for (form, wrote, stored) in outcomes {
+        match wrote {
+            Err(reason) => {
+                let reason = reason
+                    .split(';')
+                    .next()
+                    .unwrap_or(&reason)
+                    .trim()
+                    .to_string();
+                *report.refused.entry(reason).or_insert(0) += 1;
+            }
+            Ok(wrote) => {
+                let Some(stored) = stored else {
+                    *report
+                        .refused
+                        .entry("no stored body in the dump".to_string())
+                        .or_insert(0) += 1;
+                    continue;
+                };
+                report.compared += 1;
+                let stored = native_body_for_comparison(stored.trim_start_matches('\u{feff}'));
+                let candidate = native_body_for_comparison(&wrote);
+                if candidate == stored.trim() {
+                    report.exact += 1;
+                } else {
+                    report.different += 1;
+                    if report.examples.len() < 5 {
+                        report.examples.push(NativeFormWriterDifference {
+                            form,
+                            wrote: candidate.chars().take(400).collect(),
+                            stored: stored.trim().chars().take(400).collect(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
 /// Audits every `Form.xml` of a source tree against the base-free form body
 /// model, and reports what stands between the tree and a load.
 pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {
