@@ -407,6 +407,20 @@ impl MetadataFieldDeclarationIndex {
     }
 
     #[cfg(test)]
+    pub(super) fn with_field_reference_owner(
+        mut self,
+        table: &str,
+        field: &str,
+        owner: &str,
+    ) -> Self {
+        self.field_types
+            .entry(table.to_string())
+            .or_default()
+            .insert(field.to_lowercase(), owner.to_string());
+        self
+    }
+
+    #[cfg(test)]
     pub(super) fn with_document_journal_documents(
         mut self,
         journal: &str,

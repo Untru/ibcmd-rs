@@ -12583,6 +12583,41 @@ fn register_moment_in_time_is_a_query_field_without_a_metadata_child() {
     assert_eq!(attribute.use_always, vec!["Список.Known".to_string()]);
 }
 
+/// A manual query that dereferences a member through a field whose one declared
+/// reference owner no longer declares it does not compile, so the platform
+/// builds no available-field list for the whole list and marks every path onto
+/// it. The reference sits in the `ГДЕ` clause rather than the selection list,
+/// which is where the one ERP УХ 3.2.12.6 observation carries it.
+#[test]
+fn a_query_dereferencing_a_renamed_member_loses_its_whole_field_universe() {
+    const RECORD: &str = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"QueryText",{"S","ВЫБРАТЬ Source.Known КАК Known ИЗ РегистрСведений.TestSource КАК Source ГДЕ Source.Ключ.Этап = 1"},"ManualQuery",{"B",1},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Known"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Known"},"ReqMapFieldId0",{"N",1}},{0,0}}"##;
+    let object_refs = BTreeMap::from([(
+        "5b1477a3-2be9-4f71-90bf-58775552ee37".to_string(),
+        "InformationRegister.TestSource".to_string(),
+    )]);
+
+    let renamed = MetadataFieldDeclarationIndex::default()
+        .with_data_fields("InformationRegister.TestSource", &["Known", "Ключ"])
+        .with_field_reference_owner("InformationRegister.TestSource", "Ключ", "Catalog.Keys")
+        // The catalog renamed the attribute the query still reads.
+        .with_data_fields("Catalog.Keys", &["Удалить_Этап"]);
+    let attribute =
+        parse_form_attribute_with_declarations(RECORD, &BTreeMap::new(), &object_refs, &renamed)
+            .unwrap();
+    assert_eq!(attribute.use_always, vec!["~Список.Known".to_string()]);
+
+    // The same query against a configuration that still declares the member
+    // resolves, and the one remembered field is written plain.
+    let intact = MetadataFieldDeclarationIndex::default()
+        .with_data_fields("InformationRegister.TestSource", &["Known", "Ключ"])
+        .with_field_reference_owner("InformationRegister.TestSource", "Ключ", "Catalog.Keys")
+        .with_data_fields("Catalog.Keys", &["Этап"]);
+    let attribute =
+        parse_form_attribute_with_declarations(RECORD, &BTreeMap::new(), &object_refs, &intact)
+            .unwrap();
+    assert_eq!(attribute.use_always, vec!["Список.Known".to_string()]);
+}
+
 #[test]
 fn marks_use_always_standard_attributes_the_main_table_does_not_declare() {
     let record = r##"{9,{3},0,"Список",{1,0},{"Pattern",{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,14,"MainTable",{"#",fc01b5df-97fe-449b-83d4-218a090e681e,5b1477a3-2be9-4f71-90bf-58775552ee37},"FieldsMapItemId0",{"N",1},"FieldsMapItemName0",{"S","Code"},"FiledsMapItemId0",{"N",1},"FiledsMapItemName0",{"S","Code"},"FieldsMapItemId1",{"N",2},"FieldsMapItemName1",{"S","Owner"},"FiledsMapItemId1",{"N",2},"FiledsMapItemName1",{"S","Owner"},"FieldsMapItemId2",{"N",3},"FieldsMapItemName2",{"S","Общий"},"FiledsMapItemId2",{"N",3},"FiledsMapItemName2",{"S","Общий"},"ReqMapFieldId0",{"N",1},"ReqMapFieldId1",{"N",2},"ReqMapFieldId2",{"N",3}},{0,0}}"##;

@@ -6872,7 +6872,9 @@ pub(super) fn form_dynamic_list_use_always_universe(
     let mut universe;
     if settings.manual_query {
         let query_text = settings.query_text.as_deref()?;
-        if form_dynamic_list_query_names_undeclared_metadata(query_text, declarations) {
+        if form_dynamic_list_query_names_undeclared_metadata(query_text, declarations)
+            || form_dynamic_list_query_dereferences_undeclared_member(query_text, declarations)
+        {
             universe = BTreeSet::new();
         } else {
             let selection = parse_form_dynamic_list_query_selection(query_text)?;
@@ -7224,6 +7226,107 @@ fn form_dynamic_list_query_names_undeclared_metadata(
             continue;
         }
         if declarations.declares_table(&format!("{kind}.{}", window[4])) == Some(false) {
+            return true;
+        }
+    }
+    false
+}
+
+/// The metadata table each `<kind>.<name> КАК <alias>` source of a query names,
+/// keyed by the alias lowercased.
+///
+/// Only a two-segment source participates: a tabular-section source
+/// (`<kind>.<name>.<section>`) names a table whose own fields this index does
+/// not carry, so its alias is left out rather than resolved against the owner.
+fn form_query_source_tables_by_alias(tokens: &[String]) -> BTreeMap<String, String> {
+    let mut sources = BTreeMap::new();
+    for (index, token) in tokens.iter().enumerate() {
+        if !is_1c_query_keyword(token, Q_AS) {
+            continue;
+        }
+        let Some(alias) = tokens.get(index + 1) else {
+            continue;
+        };
+        if !is_1c_query_ident(alias) {
+            continue;
+        }
+        // Walk the dotted reference backwards: `<name>`, `.`, `<kind>`.
+        let (Some(name), Some(dot), Some(kind)) = (
+            index.checked_sub(1).and_then(|at| tokens.get(at)),
+            index.checked_sub(2).and_then(|at| tokens.get(at)),
+            index.checked_sub(3).and_then(|at| tokens.get(at)),
+        ) else {
+            continue;
+        };
+        if dot != "." || !is_1c_query_ident(name) || !is_1c_query_ident(kind) {
+            continue;
+        }
+        if index.checked_sub(4).and_then(|at| tokens.get(at)).map(String::as_str) == Some(".") {
+            continue;
+        }
+        let kind_upper = kind.to_uppercase();
+        let Some(kind) = Q_RU_SOURCE_KINDS
+            .iter()
+            .find_map(|(ru, en)| (*ru == kind_upper).then_some(*en))
+        else {
+            continue;
+        };
+        sources.insert(alias.to_lowercase(), format!("{kind}.{name}"));
+    }
+    sources
+}
+
+/// Whether the query dereferences a member through a field whose one declared
+/// reference owner does not declare that member -- a field the configuration
+/// has since renamed or dropped.
+///
+/// Such a query no longer compiles, so the platform builds no available-field
+/// list for it at all and marks every data path onto the list with `~`. The
+/// test reads the whole query text rather than the final select, because the
+/// reference that breaks it may sit in a join condition of any union part.
+///
+/// Measured over all 2 229 manual-query dynamic lists of the native ERP УХ
+/// 3.2.12.6 export that carry at least one data path: exactly one list has such
+/// a dereference (`Documents/Лот/Forms/ВыигранныеЛоты`, whose query reads
+/// `ПланированиеПотребностей.АналитикаПланирования.Этап` after the key catalog
+/// renamed the attribute to `Удалить_Этап`), and every one of its data paths
+/// carries the marker. No list without one has all of its paths marked for this
+/// reason.
+fn form_dynamic_list_query_dereferences_undeclared_member(
+    query_text: &str,
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> bool {
+    let Some(declarations) = declarations else {
+        return false;
+    };
+    let tokens = tokenize_1c_query(query_text);
+    let sources = form_query_source_tables_by_alias(&tokens);
+    if sources.is_empty() {
+        return false;
+    }
+    for (index, window) in tokens.windows(5).enumerate() {
+        if window[1] != "." || window[3] != "." {
+            continue;
+        }
+        if index.checked_sub(1).and_then(|at| tokens.get(at)).map(String::as_str) == Some(".") {
+            continue;
+        }
+        if !is_1c_query_ident(&window[0])
+            || !is_1c_query_ident(&window[2])
+            || !is_1c_query_ident(&window[4])
+        {
+            continue;
+        }
+        let Some(table) = sources.get(&window[0].to_lowercase()) else {
+            continue;
+        };
+        let Some(owner) = declarations.field_reference_owner(table, &window[2]) else {
+            continue;
+        };
+        let owner = owner.to_string();
+        if form_metadata_owner_declares_direct_member(&owner, &window[4], Some(declarations))
+            == Some(false)
+        {
             return true;
         }
     }
