@@ -360,9 +360,6 @@ struct FormXmlChildItem {
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
     extended_tooltip: Option<FormXmlExtendedTooltip>,
-    /// The item's own `<ContextMenu>`, which every field and container may
-    /// carry and which the body stores as a `{22,…}` record of its own.
-    context_menu: Option<FormXmlExtendedTooltip>,
     /// `<Visible>`, `<Enabled>` and `<EnableContentChange>`, which the record
     /// writers read directly.
     visible: Option<bool>,
@@ -7225,11 +7222,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
-                } else if local == "ContextMenu"
-                    && path_ends_with_for_current_child_item(&path, &current_child_items)
-                    && let Some(item) = current_child_items.last_mut()
-                {
-                    item.context_menu = parse_form_extended_tooltip_xml(&event)?;
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -7332,11 +7324,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
-                } else if local == "ContextMenu"
-                    && path_ends_with_for_current_child_item(&path, &current_child_items)
-                    && let Some(item) = current_child_items.last_mut()
-                {
-                    item.context_menu = parse_form_extended_tooltip_xml(&event)?;
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -10722,7 +10709,6 @@ fn parse_form_child_item_xml(
         title: Vec::new(),
         tooltip: Vec::new(),
         extended_tooltip: None,
-        context_menu: None,
         visible: None,
         enabled: None,
         enable_content_change: None,
