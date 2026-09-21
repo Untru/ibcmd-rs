@@ -678,6 +678,176 @@ pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) 
     )
 }
 
+/// The `{2,…}` payload of a button group.
+///
+/// Four members, one of which carries `<Representation>`. All 21 651 of the
+/// corpus are reproduced exactly.
+pub(crate) fn format_button_group_payload(command_source: &str, representation: Option<&str>) -> String {
+    let representation = match representation {
+        Some("Usual") => "1",
+        Some("Compact") => "2",
+        _ => "0",
+    };
+    format!("{{2,{command_source},2,{representation}}}")
+}
+
+/// The `{1,…}` payload of a command bar.
+///
+/// Three members, one of which carries `<HorizontalLocation>`. All 3 233 of
+/// the corpus are reproduced exactly.
+pub(crate) fn format_command_bar_payload(horizontal_location: Option<&str>, command_source: &str) -> String {
+    let location = match horizontal_location {
+        Some("Auto") => "3",
+        Some("Right") => "2",
+        Some("Center") => "1",
+        _ => "0",
+    };
+    format!("{{1,{location},{command_source}}}")
+}
+
+/// The `{4,…}` payload of a `<Pages>` group.
+///
+/// Six members, two of which carry `<PagesRepresentation>` -- the same value
+/// in both, except that a group naming none carries 1 in the first and 6 in
+/// the second. All 4 329 of the corpus are reproduced exactly.
+pub(crate) fn format_pages_payload(representation: Option<&str>, events: &str, fourth: &str) -> String {
+    let code = |value: Option<&str>| match value {
+        Some("None") => "0",
+        Some("TabsOnTop") => "1",
+        Some("TabsOnBottom") => "2",
+        Some("TabsOnLeftHorizontal") => "3",
+        Some("Swipe") => "5",
+        _ => "",
+    };
+    let first = match code(representation) {
+        "" => "1",
+        value => value,
+    };
+    let second = match code(representation) {
+        "" => "6",
+        value => value,
+    };
+    format!("{{4,{first},{events},2,{fourth},{second}}}")
+}
+
+/// The `{7,…}` payload of a `<Popup>`.
+///
+/// Nine members, one of which carries `<Representation>`; a popup that names
+/// none carries 3. All 10 642 of the corpus are reproduced exactly.
+pub(crate) fn format_popup_payload(
+    picture: &str,
+    command_source: &str,
+    representation: Option<&str>,
+    back_color: &str,
+    border_color: &str,
+) -> String {
+    let representation = match representation {
+        Some("Text") => "0",
+        Some("Picture") => "1",
+        Some("PictureAndText") => "2",
+        _ => "3",
+    };
+    format!("{{7,{picture},{command_source},2,{representation},0,0,{back_color},{border_color}}}")
+}
+
+/// The `{2,…}` payload of a `<ColumnGroup>` -- the same wrapper a button group
+/// carries, with twelve members instead of four.
+///
+/// One of them carries `<Group>`: `Horizontal` is 0, `InCell` is 2, and a
+/// group naming none carries 1. All 7 076 of the corpus are reproduced
+/// exactly.
+pub(crate) fn format_column_group_payload(
+    group: Option<&str>,
+    second: &str,
+    third: &str,
+    fourth: &str,
+    picture: &str,
+    back_color: &str,
+    title: &str,
+) -> String {
+    let group = match group {
+        Some("Horizontal") => "0",
+        Some("InCell") => "2",
+        _ => "1",
+    };
+    format!(
+        "{{2,{group},{second},{third},{fourth},{picture},{back_color},{{0}},{{\"Pattern\"}},\"\",{title},0}}"
+    )
+}
+
+/// What a `{18,…}` page payload carries.
+///
+/// Three of its twenty members carry `<Group>`: one says whether the page
+/// names an arrangement at all, and two carry which one, differing on
+/// `AlwaysHorizontal`. All 11 804 of the corpus are reproduced exactly.
+pub(crate) struct NativePagePayload<'a> {
+    pub(crate) group: Option<&'a str>,
+    pub(crate) picture: &'a str,
+    pub(crate) third: &'a str,
+    pub(crate) data_path: &'a str,
+    pub(crate) title: &'a str,
+    pub(crate) sixth: &'a str,
+    pub(crate) back_color: &'a str,
+    pub(crate) tenth: &'a str,
+    pub(crate) eleventh: &'a str,
+    pub(crate) twelfth: &'a str,
+    pub(crate) thirteenth: &'a str,
+    pub(crate) fourteenth: &'a str,
+    pub(crate) fifteenth: &'a str,
+    pub(crate) border_color: &'a str,
+    pub(crate) font: &'a str,
+}
+
+impl NativePagePayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            group: None,
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            third: "0",
+            data_path: "{0}",
+            title: "{1,0}",
+            sixth: "1",
+            back_color: "{3,4,{0}}",
+            tenth: "0",
+            eleventh: "0",
+            twelfth: "3",
+            thirteenth: "3",
+            fourteenth: "0",
+            fifteenth: "0",
+            border_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+        }
+    }
+}
+
+pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> String {
+    let named = u8::from(payload.group.is_some());
+    let (horizontal, horizontal_tail) = match payload.group {
+        Some("Horizontal") => ("1", "1"),
+        Some("AlwaysHorizontal") => ("1", "3"),
+        Some("HorizontalIfPossible") => ("2", "2"),
+        Some("Vertical") | None => ("0", "0"),
+        Some(_) => ("0", "0"),
+    };
+    format!(
+        "{{18,{picture},{named},{third},{data_path},{title},{sixth},{{\"Pattern\"}},\"\",{back_color},{tenth},{eleventh},{twelfth},{thirteenth},{fourteenth},{fifteenth},{horizontal},{horizontal_tail},{border_color},{font}}}",
+        picture = payload.picture,
+        third = payload.third,
+        data_path = payload.data_path,
+        title = payload.title,
+        sixth = payload.sixth,
+        back_color = payload.back_color,
+        tenth = payload.tenth,
+        eleventh = payload.eleventh,
+        twelfth = payload.twelfth,
+        thirteenth = payload.thirteenth,
+        fourteenth = payload.fourteenth,
+        fifteenth = payload.fifteenth,
+        border_color = payload.border_color,
+        font = payload.font,
+    )
+}
+
 /// What a `{22,…}` group record needs beyond the frame every group shares.
 ///
 /// `kind` is the marker that says which group this is -- 0 command-bar group,
@@ -1497,6 +1667,59 @@ mod tests {
             ..NativeRadioButtonPayload::plain()
         })
         .starts_with("{8,{3,0},3,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,2,"));
+    }
+
+    /// The default payload of each of the six group kinds the corpus closed
+    /// in one pass, exactly as those bodies store them.
+    #[test]
+    fn writes_the_remaining_group_payloads_the_platform_stores() {
+        assert_eq!(format_button_group_payload("{0}", None), "{2,{0},2,0}");
+        assert_eq!(format_button_group_payload("{0}", Some("Compact")), "{2,{0},2,2}");
+        assert_eq!(format_command_bar_payload(None, "{0}"), "{1,0,{0}}");
+        assert_eq!(format_command_bar_payload(Some("Auto"), "{0}"), "{1,3,{0}}");
+        assert_eq!(format_pages_payload(None, "{0,1,0}", "0"), "{4,1,{0,1,0},2,0,6}");
+        assert_eq!(
+            format_pages_payload(Some("None"), "{0,1,0}", "0"),
+            "{4,0,{0,1,0},2,0,0}"
+        );
+        assert_eq!(
+            format_popup_payload(
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "{0}",
+                None,
+                "{3,4,{0}}",
+                "{3,4,{0}}"
+            ),
+            "{7,{4,0,{0},\"\",-1,-1,1,0,\"\"},{0},2,3,0,0,{3,4,{0}},{3,4,{0}}}"
+        );
+        assert_eq!(
+            format_column_group_payload(
+                None,
+                "1",
+                "0",
+                "3",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "{3,4,{0}}",
+                "{1,0}"
+            ),
+            "{2,1,1,0,3,{4,0,{0},\"\",-1,-1,1,0,\"\"},{3,4,{0}},{0},{\"Pattern\"},\"\",{1,0},0}"
+        );
+        assert_eq!(
+            format_page_payload(&NativePagePayload::plain()),
+            "{18,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,{0},{1,0},1,{\"Pattern\"},\"\",{3,4,{0}},0,0,3,3,0,0,0,0,{3,4,{0}},{7,3,0,1,100}}"
+        );
+        // `AlwaysHorizontal` and `Horizontal` differ in the second of the two
+        // slots that carry the arrangement.
+        assert!(format_page_payload(&NativePagePayload {
+            group: Some("AlwaysHorizontal"),
+            ..NativePagePayload::plain()
+        })
+        .contains(",0,0,1,3,{3,4,{0}},"));
+        assert!(format_page_payload(&NativePagePayload {
+            group: Some("Horizontal"),
+            ..NativePagePayload::plain()
+        })
+        .contains(",0,0,1,1,{3,4,{0}},"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
