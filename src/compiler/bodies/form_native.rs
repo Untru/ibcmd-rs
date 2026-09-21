@@ -23,6 +23,23 @@ pub(crate) const FORM_ITEM_NAMESPACE_UUID: &str = "02023637-7868-4a5f-8576-835a7
 /// The palette reference every default appearance slot carries.
 const DEFAULT_APPEARANCE_UUID: &str = "48312c09-257f-4b29-b280-284dd89efc1e";
 
+/// The uuid a parent writes before a child to say what kind of child it is.
+///
+/// One uuid per record wrapper, with no overlap, over the child lists of the
+/// first 400 ERP УХ form bodies: 2 353 fields, 2 198 groups, 1 309 buttons,
+/// 677 decorations, 180 tables and 8 search additions.
+pub(crate) const fn child_kind_uuid(wrapper: u8) -> Option<&'static str> {
+    Some(match wrapper {
+        37 => "77ffcc29-7f2d-4223-b22f-19666e7250ba",
+        22 => "cd5394d0-7dda-4b56-8927-93ccbe967a01",
+        31 => "a9f3b1ac-f51b-431e-b102-55a69acdecad",
+        12 => "3d3cb80c-508b-41fa-8a18-680cdf5f1712",
+        55 => "143c00f7-a42d-4cd7-9189-88e4467dc768",
+        5 => "c5259a1d-518a-4afd-b98d-0176027e4feb",
+        _ => return None,
+    })
+}
+
 /// A 1C string literal: quoted, with `"` doubled.
 fn quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
@@ -368,24 +385,35 @@ pub(crate) struct NativeRootLayout<'a> {
     pub(crate) command_set: &'a str,
     /// Slot 22.
     pub(crate) command_bar: &'a str,
-    /// Slot 29.
+    /// The form's own child items, as `(kind uuid, record)` -- the same
+    /// encoding a group uses, with the count first. See [`child_kind_uuid`].
+    pub(crate) children: &'a [(&'a str, String)],
+    /// Slot 29 of a childless root.
     pub(crate) twenty_ninth: u32,
-    /// Slot 39.
+    /// Slot 39 of a childless root.
     pub(crate) thirty_ninth: u32,
 }
 
-/// The `{50,…}` root layout of a form body that carries no child item.
+/// The `{50,…}` root layout of a form body.
 pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
+    let mut children = String::new();
+    for (kind_uuid, record) in root.children {
+        children.push(',');
+        children.push_str(kind_uuid);
+        children.push(',');
+        children.push_str(record);
+    }
     format!(
         "{{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,{auto_title},{title},0,0,1,1,1,\
-         0,{seventeenth},0,{events},{command_set},1,{command_bar},0,\"\",\"\",0,1,\"\",\
-         {twenty_ninth},0,0,0,0,0,3,3,0,0,{thirty_ninth},100,1,1,0,0,0,{{50,0}},1}}",
+         0,{seventeenth},0,{events},{command_set},1,{command_bar},{count}{children},\"\",\"\",0,1,\
+         \"\",{twenty_ninth},0,0,0,0,0,3,3,0,0,{thirty_ninth},100,1,1,0,0,0,{{50,0}},1}}",
         auto_title = u8::from(root.auto_title),
         title = root.title,
         seventeenth = root.seventeenth,
         events = root.events,
         command_set = root.command_set,
         command_bar = root.command_bar,
+        count = root.children.len(),
         twenty_ninth = root.twenty_ninth,
         thirty_ninth = root.thirty_ninth,
     )
@@ -886,6 +914,7 @@ mod tests {
                 events: "{0,1,0}",
                 command_set: "{0}",
                 command_bar: &bar,
+                children: &[],
                 twenty_ninth: 2,
                 thirty_ninth: 2,
             }),
@@ -900,11 +929,57 @@ mod tests {
                 events: "{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1}",
                 command_set: "{0}",
                 command_bar: &bar,
+                children: &[],
                 twenty_ninth: 2,
                 thirty_ninth: 2,
             }),
             "{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"ФормаКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,\"\",\"\",0,1,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1}"
         );
+    }
+
+    /// A root writes its children the way a group does: the count, then a
+    /// `(kind uuid, record)` pair each. The kind uuid says what the record is,
+    /// one per wrapper with no overlap.
+    #[test]
+    fn writes_a_root_with_its_children() {
+        assert_eq!(child_kind_uuid(37), Some("77ffcc29-7f2d-4223-b22f-19666e7250ba"));
+        assert_eq!(child_kind_uuid(22), Some("cd5394d0-7dda-4b56-8927-93ccbe967a01"));
+        assert_eq!(child_kind_uuid(31), Some("a9f3b1ac-f51b-431e-b102-55a69acdecad"));
+        assert_eq!(child_kind_uuid(12), Some("3d3cb80c-508b-41fa-8a18-680cdf5f1712"));
+        assert_eq!(child_kind_uuid(55), Some("143c00f7-a42d-4cd7-9189-88e4467dc768"));
+        assert_eq!(child_kind_uuid(5), Some("c5259a1d-518a-4afd-b98d-0176027e4feb"));
+        assert_eq!(child_kind_uuid(50), None);
+
+        let bar = format_empty_auto_command_bar("-1", "FormCommandBar");
+        let field = format_field_item(&NativeFieldItem {
+            id: "1",
+            kind: 2,
+            name: "A",
+            visible_tuple: false,
+            after_name: "1,0",
+            data_path: "{1,{2}}",
+            payload: &format_plain_field_payload(true),
+            context_menu_id: "2",
+            context_menu_name: "AM",
+            extended_tooltip_id: "3",
+            extended_tooltip_name: "AT",
+        });
+        let root = format_root_layout(&NativeRootLayout {
+            auto_title: true,
+            title: "{1,0}",
+            seventeenth: 0,
+            events: "{0,1,0}",
+            command_set: "{0}",
+            command_bar: &bar,
+            children: &[(child_kind_uuid(37).expect("a field has a kind uuid"), field.clone())],
+            twenty_ninth: 0,
+            thirty_ninth: 0,
+        });
+
+        assert!(root.contains(&format!(
+            ",1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{field},\"\",\"\",0,1,"
+        )));
+        assert!(root.ends_with(",0,0,0,{50,0},1}"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
