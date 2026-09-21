@@ -41,6 +41,9 @@ rather than defaulting it.
       *(decoration-record-20260921.md)*
 - [x] **The `{55,…}` table record's tail** -- the 37 members after its
       columns: 6 890 / 6 903 (99.81%). *(table-tail-20260921.md)*
+- [x] **The `{55,…}` table record's head** -- the 54 members before its bag:
+      6 900 / 6 903 (99.96%). With this every item record of a form body is
+      read. *(table-head-20260921.md)*
 - [x] **Colours** and **fonts** an item can carry.
 - [x] The item payloads: label, input, check box, radio button, picture,
       spreadsheet, HTML, text and formatted document, usual group, button group,
@@ -52,9 +55,6 @@ rather than defaulting it.
       read; what each key holds is not. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The `{55,…}` table record's head**, from `{55` to the column count:
-      61 to 87 members with the context menu, the command bar and the three
-      additions inline behind flags. *(table-tail-20260921.md)*
 - [ ] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
@@ -65,6 +65,16 @@ rather than defaulting it.
       refuses.
 - [ ] **Close the round trip**: export → load into an empty database → export,
       byte-identical.
+
+## The tool that turned out to matter
+
+`partition-table-head.py` asks, for one member, **which property maps each of
+its spellings and its absence to exactly one stored value over every record** --
+not which property explains the records that differ. The witness search is
+misled by any property that is merely common, and it sent one reading from 57%
+down to 31%. The partition search named fifteen members of the table head in a
+single pass, four of them with an absent value that is not 0 and that a witness
+search could never have shown. Reach for it first on any member that resists.
 
 ## What the measurements keep turning up
 
