@@ -45,6 +45,93 @@ fn quoted(value: &str) -> String {
     format!("\"{}\"", value.replace('"', "\"\""))
 }
 
+/// A colour a form item names, in the shape a body stores it.
+///
+/// Four shapes, each read off the corpus and then measured against it:
+///
+/// - a colour the item does not name is `{3,4,{0}}`;
+/// - `#RRGGBB` is `{3,0,{n}}` where `n` is the same three bytes in the other
+///   order, blue first -- 276 of 276 absolute colours of the corpus agree,
+///   with none left over;
+/// - `style:<one of the platform's own>` is `{3,3,{-n}}`, with the code below;
+/// - `style:<one the configuration declares>` is `{3,3,{0,<its uuid>}}`, which
+///   the caller resolves because only the configuration knows it;
+/// - `web:<name>` is `{3,2,{n}}`.
+///
+/// A spelling this cannot place is refused rather than defaulted: writing the
+/// wrong colour would load a body the export reads back differently.
+pub(crate) fn format_native_color(
+    value: Option<&str>,
+    style_item_uuid: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    let Some(value) = value else {
+        return Some("{3,4,{0}}".to_string());
+    };
+    if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() != 6 {
+            return None;
+        }
+        let red = u32::from_str_radix(&hex[0..2], 16).ok()?;
+        let green = u32::from_str_radix(&hex[2..4], 16).ok()?;
+        let blue = u32::from_str_radix(&hex[4..6], 16).ok()?;
+        return Some(format!("{{3,0,{{{}}}}}", (blue << 16) | (green << 8) | red));
+    }
+    if let Some(name) = value.strip_prefix("web:") {
+        let code = WEB_COLOR_CODES
+            .iter()
+            .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
+        return Some(format!("{{3,2,{{{code}}}}}"));
+    }
+    let name = value.strip_prefix("style:")?;
+    if let Some(code) = PLATFORM_STYLE_COLOR_CODES
+        .iter()
+        .find_map(|(candidate, code)| (*candidate == name).then_some(*code))
+    {
+        return Some(format!("{{3,3,{{{code}}}}}"));
+    }
+    style_item_uuid(name).map(|uuid| format!("{{3,3,{{0,{uuid}}}}}"))
+}
+
+/// The codes the platform's own style colours carry, as the corpus spells
+/// them.
+const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
+    ("AccentColor", "-46"),
+    ("AuxiliaryNavigationColor", "-43"),
+    ("ButtonBackColor", "-7"),
+    ("FieldAlternativeBackColor", "-13"),
+    ("FieldBackColor", "-10"),
+    ("FieldSelectedTextColor", "-15"),
+    ("FieldSelectionBackColor", "-14"),
+    ("FieldTextColor", "-11"),
+    ("FormBackColor", "-1"),
+    ("FormTextColor", "-3"),
+    ("ImportantColor", "-47"),
+    ("NavigationColor", "-42"),
+    ("NegativeTextColor", "-17"),
+    ("ReportGroup1BackColor", "-26"),
+    ("ReportGroup2BackColor", "-27"),
+    ("ReportHeaderBackColor", "-25"),
+    ("SpecialTextColor", "-16"),
+    ("TableFooterBackColor", "-37"),
+    ("TableHeaderBackColor", "-35"),
+    ("ToolTipBackColor", "-23"),
+    ("ToolTipTextColor", "-24"),
+];
+
+/// The web colours the corpus names, with the index a body stores.
+const WEB_COLOR_CODES: &[(&str, &str)] = &[
+    ("FireBrick", "44"),
+    ("ForestGreen", "46"),
+    ("Gray", "52"),
+    ("HoneyDew", "55"),
+    ("IndianRed", "57"),
+    ("LightGreen", "70"),
+    ("LightYellow", "79"),
+    ("MistyRose", "98"),
+    ("Red", "119"),
+    ("WhiteSmoke", "144"),
+];
+
 /// The `{12,…}` record of an item's `<ExtendedTooltip>`, as the platform
 /// stores it when the tooltip carries nothing but its own name.
 ///
@@ -1907,6 +1994,47 @@ mod tests {
         };
         assert!(sheet(None, None).ends_with(",2,2,1,2}"));
         assert!(sheet(Some(true), Some(false)).ends_with(",1,0,1,2}"));
+    }
+
+    /// Every colour shape an ERP УХ body stores, with the exact values the
+    /// corpus gives.
+    #[test]
+    fn writes_the_colours_the_platform_stores() {
+        let none = |_: &str| None;
+        assert_eq!(format_native_color(None, none).as_deref(), Some("{3,4,{0}}"));
+        // The three bytes in the other order: blue first.
+        assert_eq!(
+            format_native_color(Some("#0000FF"), none).as_deref(),
+            Some("{3,0,{16711680}}")
+        );
+        assert_eq!(
+            format_native_color(Some("#800000"), none).as_deref(),
+            Some("{3,0,{128}}")
+        );
+        assert_eq!(
+            format_native_color(Some("#FFFFFF"), none).as_deref(),
+            Some("{3,0,{16777215}}")
+        );
+        assert_eq!(
+            format_native_color(Some("style:ToolTipBackColor"), none).as_deref(),
+            Some("{3,3,{-23}}")
+        );
+        assert_eq!(
+            format_native_color(Some("web:MistyRose"), none).as_deref(),
+            Some("{3,2,{98}}")
+        );
+        assert_eq!(
+            format_native_color(Some("style:ГиперссылкаЦвет"), |name| {
+                (name == "ГиперссылкаЦвет")
+                    .then(|| "757b547b-b79c-459a-a64a-eef19a09a38f".to_string())
+            })
+            .as_deref(),
+            Some("{3,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f}}")
+        );
+        // A spelling the writer cannot place is refused, not defaulted.
+        assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
+        assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
+        assert_eq!(format_native_color(Some("#12345"), none), None);
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
