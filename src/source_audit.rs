@@ -1461,14 +1461,27 @@ fn divergence_window(text: &str, at: usize, before: usize, after: usize) -> Stri
 }
 
 /// The uuid a holder's XML gives the form beside it.
+///
+/// A form a metadata object owns is declared `<Form uuid="…">`, but a common
+/// form is `<CommonForm uuid="…">`. Looking only for the first spelling left
+/// every common form without a uuid, and the audit counted those as "no
+/// stored body in the dump" although the dump holds one for all 121 of BSP's.
 fn form_uuid_of(form_path: &Path) -> Option<String> {
-    // .../Forms/<name>/Ext/Form.xml, and the holder is .../Forms/<name>.xml.
+    // .../Forms/<name>/Ext/Form.xml, and the holder is .../Forms/<name>.xml;
+    // .../CommonForms/<name>/Ext/Form.xml beside .../CommonForms/<name>.xml
+    // is the same shape.
     let holder = form_path.parent()?.parent()?.with_extension("xml");
     let text = fs::read_to_string(&holder).ok()?;
-    let marker = text.find("<Form uuid=\"")?;
-    let rest = &text[marker + 12..];
-    let end = rest.find('"')?;
-    Some(rest[..end].to_string())
+    for marker in ["<Form uuid=\"", "<CommonForm uuid=\""] {
+        let Some(at) = text.find(marker) else {
+            continue;
+        };
+        let rest = &text[at + marker.len()..];
+        if let Some(end) = rest.find('"') {
+            return Some(rest[..end].to_string());
+        }
+    }
+    None
 }
 
 /// Text as the comparison sees it: the dump wraps long base64, the writer does

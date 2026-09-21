@@ -13,6 +13,9 @@
 //! this module cannot yet write is not defaulted: the caller keeps refusing
 //! the item, which is what the blocker model already does.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 /// The namespace every form *item* id lives in.
 ///
 /// One uuid across all 3 971 item records of the four ERP УХ 3.3.3.3 form
@@ -4369,6 +4372,845 @@ pub(crate) fn format_empty_auto_command_bar(id: &str, name: &str) -> String {
     )
 }
 
+// ---------------------------------------------------------------------------
+// `<DataPath>` -- member 11 of a `{37,…}` field record, and the same member of
+// a table, a group title and a page title.
+// ---------------------------------------------------------------------------
+//
+// A data path is walked left to right, carrying the type the previous segment
+// resolved to; every segment is looked up in that context. The rule is the one
+// measured in `lab/findings/data-path-resolution.md`, which places 135 232 of
+// the 135 393 stored records of ERP УХ (99.88 %) and 265 388 of the 265 554
+// stored segments, computed forwards from the form and the configuration with
+// no reference to the stored value.
+//
+// Fail-closed throughout: a part the rule cannot name returns `None`, and the
+// caller refuses the form rather than writing a binding that would load wrong.
+
+/// The marker a `[<i>]` subscript is stored under.
+///
+/// 1 932 uses across 56 forms, the first member always the literal index, so
+/// `[0]` looks exactly like `{0,<uuid>}` and only the uuid tells them apart.
+const DATA_PATH_INDEX_UUID: &str = "e67e2953-cebe-4d97-bb93-12b17e6384f8";
+
+/// The marker a column of a `<Columns><AdditionalColumns table="…">` block
+/// carries; 3 835 segments of the corpus need it.
+const DATA_PATH_ADDITIONAL_COLUMN_UUID: &str = "5bdad865-f2c5-434b-8041-ba4aad3b6687";
+
+/// `<Object>.SettingsComposer` -- a platform uuid, not a configuration one.
+const DATA_PATH_SETTINGS_COMPOSER_UUID: &str = "b9754f01-29e9-11d6-a3c7-0050bae0a776";
+
+/// `Total<Field>` on a tabular section, `RowsCount` on one, and a dynamic
+/// list's `DefaultPicture`.
+const DATA_PATH_TOTAL_MARKER: &str = "101000000";
+const DATA_PATH_ROWS_COUNT_MARKER: &str = "100000000";
+const DATA_PATH_DEFAULT_PICTURE_MARKER: &str = "10000000";
+
+/// The members of the builtin (non-configuration) attribute types. Each is a
+/// fixed small table; every name maps to one number over every record.
+const DATA_PATH_VALUE_LIST_MEMBERS: &[(&str, &str)] = &[
+    ("Value", "0"),
+    ("Presentation", "1"),
+    ("Check", "2"),
+    ("Picture", "3"),
+];
+const DATA_PATH_STANDARD_PERIOD_MEMBERS: &[(&str, &str)] =
+    &[("Variant", "0"), ("StartDate", "1"), ("EndDate", "2")];
+const DATA_PATH_COMPOSER_MEMBERS: &[(&str, &str)] = &[("Settings", "0"), ("UserSettings", "1")];
+const DATA_PATH_GANTT_CHART_MEMBERS: &[(&str, &str)] = &[("Point", "0"), ("Text", "1")];
+
+/// A dynamic list's own members, ahead of its query fields.
+const DATA_PATH_DYNAMIC_LIST_MEMBERS: &[(&str, &str)] =
+    &[("Order", "-1"), ("Filter", "-2"), ("SettingsComposer", "-6")];
+
+/// The settings-composer sub-tree. The numbering is **per parent collection**:
+/// `Presentation` is 10010 under a filter item and 10004 under a
+/// conditional-appearance item, and splitting by parent removes every
+/// ambiguity.
+const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
+    ("Filter", "1"),
+    ("Selection", "2"),
+    ("Order", "3"),
+    ("ConditionalAppearance", "4"),
+    ("Use", "10000"),
+    ("ReportStructure", "10001"),
+    ("HasSelection", "10002"),
+    ("HasFilter", "10003"),
+    ("HasOrder", "10004"),
+    ("HasConditionalAppearance", "10005"),
+    ("HasOutputParameters", "10006"),
+    ("ItemFilter", "10008"),
+    ("ItemSelection", "10010"),
+    ("ItemOrder", "10011"),
+    ("ItemConditionalAppearance", "10012"),
+    ("ReportStructurePicture", "10015"),
+];
+const DATA_PATH_DCS_FILTER: &[(&str, &str)] = &[
+    ("FilterAvailableFields", "0"),
+    ("Use", "10000"),
+    ("LeftValuePicture", "10001"),
+    ("LeftValue", "10002"),
+    ("ComparisonType", "10003"),
+    ("RightValuePicture", "10004"),
+    ("RightValue", "10005"),
+    ("Date", "10006"),
+    ("GroupType", "10007"),
+    ("Application", "10008"),
+    ("ViewMode", "10009"),
+    ("Presentation", "10010"),
+];
+const DATA_PATH_DCS_CONDITIONAL_APPEARANCE: &[(&str, &str)] = &[
+    ("Use", "10000"),
+    ("Appearance", "10001"),
+    ("Filter", "10002"),
+    ("Fields", "10003"),
+    ("Presentation", "10004"),
+];
+const DATA_PATH_DCS_ORDER: &[(&str, &str)] =
+    &[("Use", "10000"), ("Field", "10002"), ("OrderType", "10003")];
+const DATA_PATH_DCS_USER_SETTINGS: &[(&str, &str)] = &[
+    ("Use", "10000"),
+    ("SettingPicture", "10001"),
+    ("Setting", "10002"),
+    ("ComparisonType", "10003"),
+    ("ValuePicture", "10004"),
+    ("Value", "10005"),
+    ("EditInReportForm", "10006"),
+];
+const DATA_PATH_DCS_APPEARANCE: &[(&str, &str)] = &[
+    ("Use", "10000"),
+    ("Parameter", "10001"),
+    ("ValuePicture", "10002"),
+    ("Value", "10003"),
+];
+const DATA_PATH_DCS_FILTER_AVAILABLE_FIELDS: &[(&str, &str)] =
+    &[("FieldPicture", "10000"), ("Title", "10001")];
+const DATA_PATH_DCS_FIELDS: &[(&str, &str)] = &[("Use", "10000"), ("Field", "10002")];
+
+/// The standard-attribute table: `(scope, name)` to the negative number the
+/// body stores.
+///
+/// Measured over the corpus; each pair maps to exactly one number over every
+/// record that uses it, and **0 pairs take more than one value**. The number is
+/// not an ordinal into the object's `<StandardAttributes>` and is not derivable
+/// from the source tree -- it is a platform constant, and it differs per class
+/// (`Description` is −3 on a catalog, −8 on a chart of accounts, −9 on a chart
+/// of characteristic types and on a task).
+///
+/// This is the table the corpus exercises, not the platform's whole table:
+/// names this configuration never binds -- `DeletionMark`, `IsFolder`,
+/// `Presentation`, `DataVersion` and more -- are simply absent, and a name the
+/// table does not know refuses rather than taking a default. 17 of the 64 pairs
+/// rest on a single record; the other 47 are each confirmed 2 to 901 times.
+const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
+    ("<TabularSection>", "LineNumber", "-2"),
+    ("AccountingRegister", "Period", "-2"),
+    ("AccountingRegister", "Recorder", "-3"),
+    ("AccountingRegister", "LineNumber", "-4"),
+    ("AccountingRegister", "Active", "-5"),
+    ("AccountingRegister", "AccountDr", "-6"),
+    ("AccountingRegister", "AccountCr", "-7"),
+    ("AccountingRegister", "Account", "-10"),
+    ("AccountingRegister", "PeriodAdjustment", "-30"),
+    ("AccumulationRegister", "Period", "-2"),
+    ("AccumulationRegister", "LineNumber", "-4"),
+    ("AccumulationRegister", "RecordType", "-9"),
+    ("BusinessProcess", "Number", "-2"),
+    ("BusinessProcess", "Date", "-3"),
+    ("Catalog", "Code", "-2"),
+    ("Catalog", "Description", "-3"),
+    ("Catalog", "Parent", "-4"),
+    ("Catalog", "Owner", "-5"),
+    ("Catalog", "Ref", "-8"),
+    ("Catalog", "Predefined", "-10"),
+    ("Catalog", "PredefinedDataName", "-13"),
+    ("ChartOfAccounts", "Parent", "-6"),
+    ("ChartOfAccounts", "Code", "-7"),
+    ("ChartOfAccounts", "Description", "-8"),
+    ("ChartOfAccounts", "Type", "-10"),
+    ("ChartOfAccounts", "OffBalance", "-11"),
+    ("ChartOfAccounts", "ExtDimensionTypes", "-12"),
+    ("ChartOfAccounts", "Order", "-17"),
+    ("ChartOfAccounts/ExtDimensionTypes", "ExtDimensionType", "-13"),
+    ("ChartOfAccounts/ExtDimensionTypes", "TurnoversOnly", "-15"),
+    ("ChartOfCalculationTypes", "Code", "-2"),
+    ("ChartOfCalculationTypes", "Description", "-3"),
+    ("ChartOfCalculationTypes", "ActionPeriodIsBasic", "-4"),
+    ("ChartOfCalculationTypes", "BaseCalculationTypes", "-10"),
+    ("ChartOfCalculationTypes", "DisplacingCalculationTypes", "-20"),
+    ("ChartOfCalculationTypes", "LeadingCalculationTypes", "-30"),
+    (
+        "ChartOfCalculationTypes/BaseCalculationTypes",
+        "CalculationType",
+        "-101",
+    ),
+    (
+        "ChartOfCalculationTypes/DisplacingCalculationTypes",
+        "CalculationType",
+        "-101",
+    ),
+    (
+        "ChartOfCalculationTypes/LeadingCalculationTypes",
+        "CalculationType",
+        "-101",
+    ),
+    ("ChartOfCharacteristicTypes", "Parent", "-6"),
+    ("ChartOfCharacteristicTypes", "Code", "-8"),
+    ("ChartOfCharacteristicTypes", "Description", "-9"),
+    ("ChartOfCharacteristicTypes", "ValueType", "-11"),
+    ("ChartOfCharacteristicTypes", "PredefinedDataName", "-14"),
+    ("Document", "Number", "-2"),
+    ("Document", "Date", "-3"),
+    ("Document", "Ref", "-5"),
+    ("Document", "Posted", "-7"),
+    ("Document", "RegisterRecords", "-8"),
+    ("ExchangePlan", "Code", "-2"),
+    ("ExchangePlan", "Description", "-3"),
+    ("ExchangePlan", "SentNo", "-9"),
+    ("ExchangePlan", "ReceivedNo", "-10"),
+    ("ExchangePlan", "ThisNode", "-13"),
+    ("ExchangePlan", "ExchangeDate", "-14"),
+    ("InformationRegister", "Period", "-2"),
+    ("InformationRegister", "Recorder", "-3"),
+    ("InformationRegister", "LineNumber", "-4"),
+    ("Task", "Number", "-2"),
+    ("Task", "Date", "-3"),
+    ("Task", "BusinessProcess", "-7"),
+    ("Task", "RoutePoint", "-8"),
+    ("Task", "Description", "-9"),
+    ("Task", "Executed", "-10"),
+];
+
+/// The standard attributes that do not end the walk, and where they lead.
+const DATA_PATH_STANDARD_SECTIONS: [&str; 4] = [
+    "ExtDimensionTypes",
+    "BaseCalculationTypes",
+    "LeadingCalculationTypes",
+    "DisplacingCalculationTypes",
+];
+
+/// The families a `<Object>.RegisterRecords.<name>` part can name.
+const DATA_PATH_REGISTER_FAMILIES: [&str; 4] = [
+    "AccountingRegister",
+    "AccumulationRegister",
+    "InformationRegister",
+    "CalculationRegister",
+];
+
+/// One field of a metadata object, as the configuration source declares it.
+///
+/// `uuid` is the field's own `uuid=` attribute, verbatim: a field id is never
+/// an ordinal and never a number the object's XML carries anywhere else.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct ConfigurationField {
+    pub(crate) uuid: String,
+    /// The XML tag the field is declared with -- `Attribute`, `Dimension`,
+    /// `TabularSection`, `AccountingFlag` and the rest. Part of the key: all
+    /// three charts of accounts name an `<AccountingFlag>` and an
+    /// `<ExtDimensionAccountingFlag>` alike.
+    pub(crate) tag: String,
+    /// The `<Properties><Type>` entries, which say what the next segment
+    /// resolves against.
+    pub(crate) types: Vec<String>,
+}
+
+/// One metadata object of the configuration source tree: its own uuid and the
+/// fields it declares, keyed by name.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct ConfigurationObject {
+    /// `<MetaDataObject>/<Class uuid=>`.
+    pub(crate) uuid: String,
+    /// The singular class name, `Catalog`, `Document`, `AccountingRegister`…
+    pub(crate) class: String,
+    /// `<Properties><Owners>`, for the `Owner` standard attribute.
+    pub(crate) owners: Vec<String>,
+    /// Every field, keyed by name; a name that two tags share keeps both.
+    pub(crate) fields: BTreeMap<String, Vec<ConfigurationField>>,
+    /// Each tabular section's own fields.
+    pub(crate) sections: BTreeMap<String, BTreeMap<String, Vec<ConfigurationField>>>,
+}
+
+/// The configuration source tree, as the data-path walk asks it questions.
+///
+/// One method: give me the object `"Catalog.Валюты"`, `"CommonAttribute.X"` or
+/// `"Constant.X"`. The implementation reads it from the tree and memoises it,
+/// so an object is parsed once per run however many paths name it.
+pub(crate) trait ConfigurationObjects {
+    fn object(&self, key: &str) -> Option<Arc<ConfigurationObject>>;
+}
+
+/// A `<Columns><Column>` or one column of an `<AdditionalColumns>` block.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct DataPathColumn {
+    pub(crate) id: String,
+    pub(crate) types: Vec<String>,
+}
+
+/// A form `<Attribute>`, with the two column tables a data path walks into.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct DataPathAttribute {
+    pub(crate) id: String,
+    pub(crate) types: Vec<String>,
+    /// `<Columns><Column name= id=>`.
+    pub(crate) columns: BTreeMap<String, DataPathColumn>,
+    /// `<Columns><AdditionalColumns table="…">`, keyed by that `table=` path --
+    /// a dotted path with no subscripts, rooted at the attribute's own name.
+    pub(crate) additional_columns: BTreeMap<String, BTreeMap<String, DataPathColumn>>,
+}
+
+/// A form item, for an `Items.<item>` head.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct DataPathItem {
+    pub(crate) id: String,
+    pub(crate) data_path: Option<String>,
+}
+
+/// Everything a data path needs from the form's own `Form.xml`.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+pub(crate) struct DataPathForm {
+    pub(crate) attributes: BTreeMap<String, DataPathAttribute>,
+    pub(crate) items: BTreeMap<String, DataPathItem>,
+}
+
+/// The context the walk carries: the type the previous segment resolved to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DataPathContext {
+    /// Segment 1: the path has not left the form yet.
+    Form,
+    /// Nothing more resolves here; a further part refuses the path.
+    Stop,
+    /// A value table or a value tree -- every part is a `<Column id=>`.
+    Columns,
+    /// A `cfg:DynamicList`.
+    DynamicList,
+    /// `cfg:ConstantsSet`.
+    Constants,
+    /// A builtin type and its fixed member table.
+    Builtin {
+        members: &'static [(&'static str, &'static str)],
+        /// Whether it is the settings composer, whose members open the DCS
+        /// sub-tree rather than ending the walk.
+        composer: bool,
+    },
+    /// Inside a settings composer, under one parent collection.
+    Dcs(&'static [(&'static str, &'static str)]),
+    /// A metadata object: the first of `keys` the configuration has, and the
+    /// section of it the walk stands in -- a tabular section's name, or
+    /// `@std.<Name>` for a standard section such as `ExtDimensionTypes`.
+    Meta {
+        keys: Vec<String>,
+        section: Option<String>,
+    },
+    /// `<Object>.RegisterRecords`: the next part names a register.
+    Registers,
+}
+
+/// One part of a `<DataPath>`: its name and the `[<i>]` subscript it carried.
+type DataPathToken = (String, Option<String>);
+
+/// Split a `<DataPath>` into parts.
+///
+/// A leading `~` is dropped -- `~Список` is the attribute `Список` -- and a
+/// trailing `[<i>]` is peeled off the part it follows; the walk then emits an
+/// extra index segment for it. 2 089 records of the corpus store a different
+/// number of segments than the path has parts, and these two spellings plus
+/// `Items.…` account for exactly those.
+fn parse_data_path_tokens(data_path: &str) -> Vec<DataPathToken> {
+    data_path
+        .split('.')
+        .map(|raw| {
+            let raw = raw.trim_start_matches('~');
+            match raw.strip_suffix(']').and_then(|head| head.rsplit_once('[')) {
+                Some((name, index))
+                    if !index.is_empty() && index.bytes().all(|byte| byte.is_ascii_digit()) =>
+                {
+                    (name.to_string(), Some(index.to_string()))
+                }
+                _ => (raw.to_string(), None),
+            }
+        })
+        .collect()
+}
+
+/// The members of a builtin attribute type, and whether it is the composer.
+fn data_path_builtin_members(
+    declared_type: &str,
+) -> Option<(&'static [(&'static str, &'static str)], bool)> {
+    Some(match declared_type {
+        "v8:ValueListType" => (DATA_PATH_VALUE_LIST_MEMBERS, false),
+        "v8:StandardPeriod" => (DATA_PATH_STANDARD_PERIOD_MEMBERS, false),
+        "dcsset:SettingsComposer" => (DATA_PATH_COMPOSER_MEMBERS, true),
+        "d4p1:GanttChart" | "d5p1:GanttChart" => (DATA_PATH_GANTT_CHART_MEMBERS, false),
+        _ => return None,
+    })
+}
+
+/// The member table of one settings-composer parent collection.
+fn data_path_dcs_members(parent: &str) -> &'static [(&'static str, &'static str)] {
+    match parent {
+        "Settings" => DATA_PATH_DCS_SETTINGS,
+        "Filter" | "ItemFilter" => DATA_PATH_DCS_FILTER,
+        "ConditionalAppearance" | "ItemConditionalAppearance" => {
+            DATA_PATH_DCS_CONDITIONAL_APPEARANCE
+        }
+        "Order" | "ItemOrder" => DATA_PATH_DCS_ORDER,
+        "UserSettings" => DATA_PATH_DCS_USER_SETTINGS,
+        "Appearance" => DATA_PATH_DCS_APPEARANCE,
+        "FilterAvailableFields" => DATA_PATH_DCS_FILTER_AVAILABLE_FIELDS,
+        "Fields" => DATA_PATH_DCS_FIELDS,
+        _ => &[],
+    }
+}
+
+/// A name in a member table.
+fn data_path_member(members: &[(&'static str, &'static str)], name: &str) -> Option<&'static str> {
+    members
+        .iter()
+        .find_map(|(member, value)| (*member == name).then_some(*value))
+}
+
+/// The standard attributes of an object and of its tabular sections are two
+/// tables; a standard section such as `ExtDimensionTypes` is a third.
+fn data_path_standard_scope(class: &str, section: Option<&str>) -> String {
+    match section {
+        None => class.to_string(),
+        Some(section) => match section.strip_prefix("@std.") {
+            Some(name) => format!("{class}/{name}"),
+            None => "<TabularSection>".to_string(),
+        },
+    }
+}
+
+/// The number a standard attribute stores, or `None` when the measured table
+/// does not know the name -- which refuses the path rather than defaulting.
+fn data_path_standard_attribute(scope: &str, name: &str) -> Option<&'static str> {
+    DATA_PATH_STANDARD_ATTRIBUTES
+        .iter()
+        .find_map(|(entry, member, value)| (*entry == scope && *member == name).then_some(*value))
+}
+
+/// The metadata object a declared type names, as `"<Class>.<Name>"`.
+fn data_path_object_key(declared_type: &str) -> Option<String> {
+    let (head, name) = declared_type.strip_prefix("cfg:")?.split_once('.')?;
+    if name.is_empty() {
+        return None;
+    }
+    let class = match head {
+        "CatalogObject" | "CatalogRef" | "CatalogList" => "Catalog",
+        "DocumentObject" | "DocumentRef" | "DocumentList" => "Document",
+        "DataProcessorObject" => "DataProcessor",
+        "ReportObject" => "Report",
+        "TaskObject" | "TaskRef" => "Task",
+        "BusinessProcessObject" | "BusinessProcessRef" => "BusinessProcess",
+        "ChartOfCharacteristicTypesObject" | "ChartOfCharacteristicTypesRef" => {
+            "ChartOfCharacteristicTypes"
+        }
+        "ChartOfCalculationTypesObject" | "ChartOfCalculationTypesRef" => "ChartOfCalculationTypes",
+        "ChartOfAccountsObject" | "ChartOfAccountsRef" => "ChartOfAccounts",
+        "ExchangePlanObject" | "ExchangePlanRef" => "ExchangePlan",
+        "InformationRegisterRecordManager"
+        | "InformationRegisterRecordSet"
+        | "InformationRegisterRecordKey" => "InformationRegister",
+        "AccumulationRegisterRecordSet" => "AccumulationRegister",
+        "AccountingRegisterRecordSet" => "AccountingRegister",
+        "CalculationRegisterRecordSet" => "CalculationRegister",
+        "EnumRef" => "Enum",
+        "ConstantValueManager" => "Constant",
+        _ => return None,
+    };
+    Some(format!("{class}.{name}"))
+}
+
+/// The context a declared type opens.
+fn data_path_context_for_types(types: &[String]) -> DataPathContext {
+    let Some(first) = types.first().map(String::as_str) else {
+        return DataPathContext::Stop;
+    };
+    match first {
+        "v8:ValueTable" | "v8:ValueTree" => return DataPathContext::Columns,
+        "cfg:DynamicList" => return DataPathContext::DynamicList,
+        "cfg:ConstantsSet" => return DataPathContext::Constants,
+        _ => {}
+    }
+    if let Some((members, composer)) = data_path_builtin_members(first) {
+        return DataPathContext::Builtin { members, composer };
+    }
+    let keys = types
+        .iter()
+        .filter_map(|declared| data_path_object_key(declared))
+        .collect::<Vec<_>>();
+    if keys.is_empty() {
+        DataPathContext::Stop
+    } else {
+        DataPathContext::Meta { keys, section: None }
+    }
+}
+
+/// What an `Items.<item>` head learns from the item's own `<DataPath>`.
+struct DataPathHead<'a> {
+    context: DataPathContext,
+    attribute: Option<&'a DataPathAttribute>,
+}
+
+/// Walk a data path only to learn the context it ends in.
+///
+/// Used for the head of an `Items.<item>[.CurrentData]` path: the walk carries
+/// on in the context of the *item's own* binding.
+fn walk_data_path_context<'a>(
+    form: &'a DataPathForm,
+    configuration: Option<&dyn ConfigurationObjects>,
+    tokens: &[DataPathToken],
+) -> Option<DataPathHead<'a>> {
+    let mut context = DataPathContext::Form;
+    let mut attribute: Option<&DataPathAttribute> = None;
+    let mut depth = 0usize;
+    for (name, _subscript) in tokens {
+        if context == DataPathContext::Form {
+            let entry = form.attributes.get(name)?;
+            attribute = Some(entry);
+            context = data_path_context_for_types(&entry.types);
+            depth = 1;
+            continue;
+        }
+        let column = if depth == 1 {
+            attribute.and_then(|entry| entry.columns.get(name))
+        } else {
+            None
+        };
+        if let Some(column) = column {
+            context = data_path_context_for_types(&column.types);
+            depth += 1;
+            continue;
+        }
+        let next = match &context {
+            DataPathContext::Meta { keys, section } => {
+                let source = configuration?;
+                let object = keys.iter().find_map(|key| source.object(key))?;
+                let fields = section
+                    .as_deref()
+                    .and_then(|section| object.sections.get(section))
+                    .unwrap_or(&object.fields);
+                let found = fields.get(name)?.first()?;
+                Some(if found.tag == "TabularSection" {
+                    DataPathContext::Meta {
+                        keys: keys.clone(),
+                        section: Some(name.clone()),
+                    }
+                } else {
+                    data_path_context_for_types(&found.types)
+                })
+            }
+            _ => None,
+        };
+        let Some(next) = next else { break };
+        context = next;
+        depth += 1;
+    }
+    Some(DataPathHead { context, attribute })
+}
+
+/// Member 11 of a field record: what a `<DataPath>` resolves to.
+///
+/// Returns the whole `{<count>,<segment>,…}` member, or `None` when a part
+/// names something the rule cannot place -- an `ExtDimension<N>` of an
+/// accounting register, whose uuid appears nowhere in the configuration, or a
+/// dynamic list's query field, whose number is the form's own
+/// `FieldsMapItemId` and is in no source file.
+pub(crate) fn resolve_form_data_path(
+    form: &DataPathForm,
+    configuration: Option<&dyn ConfigurationObjects>,
+    data_path: &str,
+) -> Option<String> {
+    let tokens = parse_data_path_tokens(data_path.trim());
+    if tokens.is_empty() || tokens[0].0.is_empty() {
+        return None;
+    }
+    let mut emitted = Vec::<String>::new();
+    let mut context = DataPathContext::Form;
+    let mut attribute: Option<&DataPathAttribute> = None;
+    let mut prefix = Vec::<String>::new();
+    let mut index = 0usize;
+    let mut dynamic_list_start = 1usize;
+
+    while index < tokens.len() {
+        let (name, subscript) = (tokens[index].0.as_str(), tokens[index].1.as_deref());
+        // The context is taken by value so an arm can install the next one;
+        // `Stop` is only a placeholder until it does.
+        let current = std::mem::replace(&mut context, DataPathContext::Stop);
+        let was_dynamic_list = current == DataPathContext::DynamicList;
+
+        if current == DataPathContext::Form {
+            if name == "Items" {
+                let next = tokens.get(index + 1)?.0.as_str();
+                let item = form.items.get(next)?;
+                emitted.push(format!("{{{},{FORM_ITEM_NAMESPACE_UUID}}}", item.id));
+                index += 2;
+                if tokens.get(index).is_some_and(|token| token.0 == "CurrentData") {
+                    index += 1;
+                }
+                let inner = parse_data_path_tokens(item.data_path.as_deref()?);
+                let head = walk_data_path_context(form, configuration, &inner)?;
+                context = head.context;
+                attribute = head.attribute;
+                prefix = inner.into_iter().map(|token| token.0).collect();
+                dynamic_list_start = index;
+                continue;
+            }
+            match form.attributes.get(name) {
+                Some(entry) => {
+                    attribute = Some(entry);
+                    emitted.push(format!("{{{}}}", entry.id));
+                    context = data_path_context_for_types(&entry.types);
+                }
+                // A handful of items carry the attribute's id where the name
+                // should be; the body stores that number unchanged.
+                None if !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()) => {
+                    emitted.push(format!("{{{name}}}"));
+                    context = DataPathContext::Stop;
+                    prefix.push(name.to_string());
+                    index += 1;
+                    continue;
+                }
+                None => return None,
+            }
+        } else {
+            let column = if prefix.len() == 1 {
+                attribute.and_then(|entry| entry.columns.get(name))
+            } else {
+                None
+            };
+            let extra = attribute
+                .and_then(|entry| entry.additional_columns.get(&prefix.join(".")))
+                .and_then(|columns| columns.get(name));
+
+            if let Some(column) = column {
+                emitted.push(format!("{{{}}}", column.id));
+                context = data_path_context_for_types(&column.types);
+            } else if let Some(extra) = extra.filter(|_| {
+                !matches!(
+                    current,
+                    DataPathContext::Meta { .. } | DataPathContext::DynamicList
+                )
+            }) {
+                emitted.push(format!(
+                    "{{{},{DATA_PATH_ADDITIONAL_COLUMN_UUID}}}",
+                    extra.id
+                ));
+                context = data_path_context_for_types(&extra.types);
+            } else {
+                match current {
+                    DataPathContext::DynamicList => {
+                        // A dynamic list's own three members are platform
+                        // constants; its query fields are not. The number
+                        // stored for one is the same form's own
+                        // `FieldsMapItemId`, which no `Form.xml` of the corpus
+                        // carries -- 0 of 12 507 contain the string at all --
+                        // so the path and the FieldsMap are one unknown, not
+                        // two, and a writer that cannot produce the one cannot
+                        // place the other.
+                        let own = (index == dynamic_list_start)
+                            .then(|| data_path_member(DATA_PATH_DYNAMIC_LIST_MEMBERS, name))
+                            .flatten();
+                        if let Some(own) = own {
+                            emitted.push(format!("{{{own}}}"));
+                            context = if name == "SettingsComposer" {
+                                DataPathContext::Builtin {
+                                    members: DATA_PATH_COMPOSER_MEMBERS,
+                                    composer: true,
+                                }
+                            } else {
+                                DataPathContext::Dcs(data_path_dcs_members(name))
+                            };
+                            prefix.push(name.to_string());
+                            if let Some(subscript) = subscript {
+                                emitted.push(format!("{{{subscript},{DATA_PATH_INDEX_UUID}}}"));
+                            }
+                            index += 1;
+                            continue;
+                        }
+                        if name != "DefaultPicture" {
+                            return None;
+                        }
+                        emitted.push(format!("{{{DATA_PATH_DEFAULT_PICTURE_MARKER}}}"));
+                    }
+                    DataPathContext::Builtin { members, composer } => {
+                        let member = data_path_member(members, name)?;
+                        emitted.push(format!("{{{member}}}"));
+                        context = if composer {
+                            DataPathContext::Dcs(data_path_dcs_members(name))
+                        } else {
+                            DataPathContext::Stop
+                        };
+                    }
+                    DataPathContext::Dcs(members) => {
+                        let member = data_path_member(members, name)?;
+                        emitted.push(format!("{{{member}}}"));
+                        context = DataPathContext::Dcs(data_path_dcs_members(name));
+                    }
+                    DataPathContext::Constants => {
+                        let object = configuration?.object(&format!("Constant.{name}"))?;
+                        emitted.push(format!("{{0,{}}}", object.uuid));
+                        context = DataPathContext::Stop;
+                    }
+                    DataPathContext::Registers => {
+                        let source = configuration?;
+                        let (key, object) = DATA_PATH_REGISTER_FAMILIES
+                            .iter()
+                            .map(|family| format!("{family}.{name}"))
+                            .find_map(|key| source.object(&key).map(|object| (key, object)))?;
+                        emitted.push(format!("{{0,{}}}", object.uuid));
+                        context = DataPathContext::Meta {
+                            keys: vec![key],
+                            section: None,
+                        };
+                    }
+                    DataPathContext::Meta { keys, section } => {
+                        let source = configuration?;
+                        let object = keys.iter().find_map(|key| source.object(key))?;
+                        let (segment, next) = resolve_metadata_data_path_part(
+                            source, &object, &keys, &section, name, extra,
+                        )?;
+                        emitted.push(segment);
+                        context = next;
+                    }
+                    DataPathContext::Form | DataPathContext::Stop | DataPathContext::Columns => {
+                        return None;
+                    }
+                }
+            }
+        }
+
+        if context == DataPathContext::DynamicList && !was_dynamic_list {
+            dynamic_list_start = index + 1;
+        }
+        if let Some(subscript) = subscript {
+            emitted.push(format!("{{{subscript},{DATA_PATH_INDEX_UUID}}}"));
+        }
+        prefix.push(name.to_string());
+        index += 1;
+    }
+
+    Some(format!("{{{},{}}}", emitted.len(), emitted.join(",")))
+}
+
+/// One segment resolved against a metadata object, and the context it opens.
+///
+/// `{0,<uuid>}` is emitted exactly when the segment names something the
+/// configuration declares with a `uuid=` attribute, and the uuid is that
+/// attribute, verbatim.
+fn resolve_metadata_data_path_part(
+    configuration: &dyn ConfigurationObjects,
+    object: &ConfigurationObject,
+    keys: &[String],
+    section: &Option<String>,
+    name: &str,
+    extra: Option<&DataPathColumn>,
+) -> Option<(String, DataPathContext)> {
+    let fields = section
+        .as_deref()
+        .and_then(|section| object.sections.get(section))
+        .unwrap_or(&object.fields);
+    if let Some(found) = fields.get(name) {
+        // A chart of accounts names its `<AccountingFlag>` and its
+        // `<ExtDimensionAccountingFlag>` alike; `Объект.<name>` is the
+        // account's own flag, and the ext-dimension one is reached only
+        // through `Объект.ExtDimensionTypes.<name>`.
+        let wanted = if section.as_deref() == Some("@std.ExtDimensionTypes") {
+            "ExtDimensionAccountingFlag"
+        } else {
+            "AccountingFlag"
+        };
+        let pick = if found.len() > 1 {
+            found
+                .iter()
+                .find(|field| field.tag == wanted)
+                .or_else(|| found.first())?
+        } else {
+            found.first()?
+        };
+        let context = if pick.tag == "TabularSection" {
+            DataPathContext::Meta {
+                keys: keys.to_vec(),
+                section: Some(name.to_string()),
+            }
+        } else {
+            data_path_context_for_types(&pick.types)
+        };
+        return Some((format!("{{0,{}}}", pick.uuid), context));
+    }
+    if let Some(total) = name
+        .strip_prefix("Total")
+        .and_then(|field| fields.get(field))
+        .and_then(|found| found.first())
+    {
+        return Some((
+            format!("{{{DATA_PATH_TOTAL_MARKER},{}}}", total.uuid),
+            DataPathContext::Stop,
+        ));
+    }
+    if name == "RowsCount" && section.is_some() {
+        return Some((
+            format!("{{{DATA_PATH_ROWS_COUNT_MARKER}}}"),
+            DataPathContext::Stop,
+        ));
+    }
+    // `<Dimension>Dr` / `<Dimension>Cr` on an accounting register: the same
+    // dimension's uuid, with the side in the first member.
+    if object.class == "AccountingRegister"
+        && let Some(side) = name
+            .strip_suffix("Dr")
+            .map(|base| ("2", base))
+            .or_else(|| name.strip_suffix("Cr").map(|base| ("3", base)))
+        && let Some(base) = fields.get(side.1).and_then(|found| found.first())
+    {
+        return Some((
+            format!("{{{},{}}}", side.0, base.uuid),
+            DataPathContext::Stop,
+        ));
+    }
+    if let Some(extra) = extra {
+        return Some((
+            format!("{{{},{DATA_PATH_ADDITIONAL_COLUMN_UUID}}}", extra.id),
+            data_path_context_for_types(&extra.types),
+        ));
+    }
+    if name == "SettingsComposer" {
+        return Some((
+            format!("{{0,{DATA_PATH_SETTINGS_COMPOSER_UUID}}}"),
+            DataPathContext::Builtin {
+                members: DATA_PATH_COMPOSER_MEMBERS,
+                composer: true,
+            },
+        ));
+    }
+    if let Some(common) = configuration.object(&format!("CommonAttribute.{name}")) {
+        return Some((format!("{{0,{}}}", common.uuid), DataPathContext::Stop));
+    }
+    // A standard attribute is a platform constant, and normally ends the walk.
+    // Three do not: `Parent` and `Ref` stay on the same object, `Owner` moves
+    // to the object's `<Owners>`, and `RegisterRecords` hands the next part to
+    // the register it names.
+    let scope = data_path_standard_scope(&object.class, section.as_deref());
+    let number = data_path_standard_attribute(&scope, name)?;
+    let context = match name {
+        "RegisterRecords" => DataPathContext::Registers,
+        "Parent" | "Ref" => DataPathContext::Meta {
+            keys: keys.to_vec(),
+            section: None,
+        },
+        "Owner" if !object.owners.is_empty() => DataPathContext::Meta {
+            keys: object.owners.clone(),
+            section: None,
+        },
+        _ if DATA_PATH_STANDARD_SECTIONS.contains(&name) => DataPathContext::Meta {
+            keys: keys.to_vec(),
+            section: Some(format!("@std.{name}")),
+        },
+        _ => DataPathContext::Stop,
+    };
+    Some((format!("{{{number}}}"), context))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -6089,5 +6931,296 @@ mod tests {
     #[test]
     fn escapes_a_quoted_name() {
         assert!(format_extended_tooltip("1", "a\"b").contains("\"a\"\"b\""));
+    }
+
+    // -----------------------------------------------------------------------
+    // `<DataPath>`
+    //
+    // Every expectation below is a stored member, read out of an ERP УХ body
+    // together with the form and the configuration facts it was computed from.
+    // -----------------------------------------------------------------------
+
+    /// The configuration source tree, as a test spells it.
+    struct TestConfiguration(BTreeMap<String, Arc<ConfigurationObject>>);
+
+    impl ConfigurationObjects for TestConfiguration {
+        fn object(&self, key: &str) -> Option<Arc<ConfigurationObject>> {
+            self.0.get(key).cloned()
+        }
+    }
+
+    impl TestConfiguration {
+        fn new(objects: Vec<(&str, ConfigurationObject)>) -> Self {
+            Self(
+                objects
+                    .into_iter()
+                    .map(|(key, object)| (key.to_string(), Arc::new(object)))
+                    .collect(),
+            )
+        }
+    }
+
+    fn strings(values: &[&str]) -> Vec<String> {
+        values.iter().map(|value| (*value).to_string()).collect()
+    }
+
+    fn attribute(id: &str, types: &[&str]) -> DataPathAttribute {
+        DataPathAttribute {
+            id: id.to_string(),
+            types: strings(types),
+            ..DataPathAttribute::default()
+        }
+    }
+
+    fn field(uuid: &str, tag: &str, types: &[&str]) -> Vec<ConfigurationField> {
+        vec![ConfigurationField {
+            uuid: uuid.to_string(),
+            tag: tag.to_string(),
+            types: strings(types),
+        }]
+    }
+
+    fn form_with(attributes: Vec<(&str, DataPathAttribute)>) -> DataPathForm {
+        DataPathForm {
+            attributes: attributes
+                .into_iter()
+                .map(|(name, entry)| (name.to_string(), entry))
+                .collect(),
+            items: BTreeMap::new(),
+        }
+    }
+
+    /// `Catalogs/КлассификаторПолномочийМЧД003/Forms/ФормаПодбораСоставныхПолномочий`
+    /// binds a field to `Объект`, whose `<Attribute id="13">` is the whole of
+    /// the answer.
+    #[test]
+    fn writes_a_dot_free_data_path_as_the_attribute_id() {
+        let form = form_with(vec![("Объект", attribute("13", &["xs:string"]))]);
+        assert_eq!(
+            resolve_form_data_path(&form, None, "Объект").as_deref(),
+            Some("{1,{13}}")
+        );
+        // A leading `~` is not part of the name.
+        assert_eq!(
+            resolve_form_data_path(&form, None, "~Объект").as_deref(),
+            Some("{1,{13}}")
+        );
+        // A name the form does not declare refuses.
+        assert_eq!(resolve_form_data_path(&form, None, "Запись"), None);
+    }
+
+    /// `Documents/ЗаявлениеАбонентаСпецоператораСвязи/Forms/…ФормаДокумента`
+    /// binds to `Объект.Получатели.ТипПолучателя`: the tabular section's own
+    /// `uuid=` and then the section field's own `uuid=`, neither of them an
+    /// ordinal.
+    #[test]
+    fn writes_a_tabular_section_field_by_its_own_uuid() {
+        let form = form_with(vec![(
+            "Объект",
+            attribute(
+                "1",
+                &["cfg:DocumentObject.ЗаявлениеАбонентаСпецоператораСвязи"],
+            ),
+        )]);
+        let configuration = TestConfiguration::new(vec![(
+            "Document.ЗаявлениеАбонентаСпецоператораСвязи",
+            ConfigurationObject {
+                uuid: "f87d43ef-51a7-4023-8420-68cb17e482c2".to_string(),
+                class: "Document".to_string(),
+                owners: Vec::new(),
+                fields: BTreeMap::from([(
+                    "Получатели".to_string(),
+                    field(
+                        "1788182c-430d-40f4-bd47-fd59b6eaa3e0",
+                        "TabularSection",
+                        &[],
+                    ),
+                )]),
+                sections: BTreeMap::from([(
+                    "Получатели".to_string(),
+                    BTreeMap::from([(
+                        "ТипПолучателя".to_string(),
+                        field("058ce803-cc68-45f4-a266-3fe076e3e96e", "Attribute", &[]),
+                    )]),
+                )]),
+            },
+        )]);
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                Some(&configuration),
+                "Объект.Получатели.ТипПолучателя"
+            )
+            .as_deref(),
+            Some(
+                "{3,{1},{0,1788182c-430d-40f4-bd47-fd59b6eaa3e0},\
+                 {0,058ce803-cc68-45f4-a266-3fe076e3e96e}}"
+            )
+        );
+        // `LineNumber` on the same section is the tabular-section table's −2,
+        // not anything the catalog's own table holds.
+        assert_eq!(
+            resolve_form_data_path(&form, Some(&configuration), "Объект.Получатели.LineNumber")
+                .as_deref(),
+            Some("{3,{1},{0,1788182c-430d-40f4-bd47-fd59b6eaa3e0},{-2}}")
+        );
+    }
+
+    /// `Catalogs/АлгоритмыСбораДанныхБухОтчетности/Forms/ФормаЭлемента` stores
+    /// `{2,{1},{-3}}` for `Объект.Description`. The number is a platform
+    /// constant and differs per class, so the same name on a chart of accounts
+    /// is −8; a name the measured table does not know refuses.
+    #[test]
+    fn writes_a_standard_attribute_as_its_platform_number() {
+        let catalog = form_with(vec![(
+            "Объект",
+            attribute(
+                "1",
+                &["cfg:CatalogObject.АлгоритмыСбораДанныхБухОтчетности"],
+            ),
+        )]);
+        let configuration = TestConfiguration::new(vec![
+            (
+                "Catalog.АлгоритмыСбораДанныхБухОтчетности",
+                ConfigurationObject {
+                    uuid: "47e8bdc9-1704-4e36-bf2d-4123aa2387ca".to_string(),
+                    class: "Catalog".to_string(),
+                    ..ConfigurationObject::default()
+                },
+            ),
+            (
+                "ChartOfAccounts.Хозрасчетный",
+                ConfigurationObject {
+                    uuid: "1c1d0b1b-0000-4000-8000-000000000001".to_string(),
+                    class: "ChartOfAccounts".to_string(),
+                    ..ConfigurationObject::default()
+                },
+            ),
+        ]);
+        assert_eq!(
+            resolve_form_data_path(&catalog, Some(&configuration), "Объект.Description").as_deref(),
+            Some("{2,{1},{-3}}")
+        );
+
+        let accounts = form_with(vec![(
+            "Объект",
+            attribute("1", &["cfg:ChartOfAccountsObject.Хозрасчетный"]),
+        )]);
+        assert_eq!(
+            resolve_form_data_path(&accounts, Some(&configuration), "Объект.Description")
+                .as_deref(),
+            Some("{2,{1},{-8}}")
+        );
+
+        // `DeletionMark` is a standard attribute of every catalog, but no form
+        // of the corpus binds one, so its number was never measured. Writing
+        // a guess would load wrong; refusing is the whole point of the table.
+        assert_eq!(
+            resolve_form_data_path(&catalog, Some(&configuration), "Объект.DeletionMark"),
+            None
+        );
+    }
+
+    /// `AccumulationRegisters/ПланыПроизводства/Forms/ФормаРедактированияПолуфабриката`
+    /// binds to `Items.СписокКорректировок.CurrentData.Спецификация`: three
+    /// parts collapse into the item's own pair, and the walk carries on in the
+    /// context of the *item's* `<DataPath>`.
+    #[test]
+    fn collapses_an_items_current_data_head() {
+        let form = DataPathForm {
+            attributes: BTreeMap::from([(
+                "СписокКорректировок".to_string(),
+                attribute("1", &["cfg:AccumulationRegisterRecordSet.ПланыПроизводства"]),
+            )]),
+            items: BTreeMap::from([(
+                "СписокКорректировок".to_string(),
+                DataPathItem {
+                    id: "64".to_string(),
+                    data_path: Some("СписокКорректировок".to_string()),
+                },
+            )]),
+        };
+        let configuration = TestConfiguration::new(vec![(
+            "AccumulationRegister.ПланыПроизводства",
+            ConfigurationObject {
+                uuid: "8d0ad0b0-0000-4000-8000-000000000002".to_string(),
+                class: "AccumulationRegister".to_string(),
+                fields: BTreeMap::from([(
+                    "Спецификация".to_string(),
+                    field("5c4b51c2-0d7a-41b6-b7a0-7437a78c9147", "Dimension", &[]),
+                )]),
+                ..ConfigurationObject::default()
+            },
+        )]);
+        assert_eq!(
+            resolve_form_data_path(
+                &form,
+                Some(&configuration),
+                "Items.СписокКорректировок.CurrentData.Спецификация"
+            )
+            .as_deref(),
+            Some(
+                "{2,{64,02023637-7868-4a5f-8576-835a76e0c9ba},\
+                 {0,5c4b51c2-0d7a-41b6-b7a0-7437a78c9147}}"
+            )
+        );
+        // The head alone is one segment, `CurrentData` or not.
+        assert_eq!(
+            resolve_form_data_path(&form, Some(&configuration), "Items.СписокКорректировок")
+                .as_deref(),
+            Some("{1,{64,02023637-7868-4a5f-8576-835a76e0c9ba}}")
+        );
+    }
+
+    /// The two things the rule does not place, and refuses rather than guess.
+    ///
+    /// A dynamic list's query field stores the number the same form's own
+    /// `FieldsMap` carries, and no `Form.xml` of the corpus holds one -- 0 of
+    /// 12 507 contain the string. An `ExtDimension<N>` of an accounting
+    /// register stores a uuid that is in neither the register's file nor its
+    /// chart of accounts.
+    #[test]
+    fn refuses_the_two_numbers_no_source_file_holds() {
+        let list = form_with(vec![("Список", attribute("1", &["cfg:DynamicList"]))]);
+        assert_eq!(
+            resolve_form_data_path(&list, None, "Список.ExtDimensionDr1"),
+            None
+        );
+        assert_eq!(resolve_form_data_path(&list, None, "Список.Организация"), None);
+        // The list's own three members are platform constants and do place.
+        assert_eq!(
+            resolve_form_data_path(&list, None, "Список.Order").as_deref(),
+            Some("{2,{1},{-1}}")
+        );
+        assert_eq!(
+            resolve_form_data_path(&list, None, "Список.Filter").as_deref(),
+            Some("{2,{1},{-2}}")
+        );
+
+        let records = form_with(vec![(
+            "ПроводкиСКорреспонденцией",
+            attribute("3", &["cfg:AccountingRegisterRecordSet.Международный"]),
+        )]);
+        let configuration = TestConfiguration::new(vec![(
+            "AccountingRegister.Международный",
+            ConfigurationObject {
+                uuid: "3f1ab7cc-0000-4000-8000-000000000003".to_string(),
+                class: "AccountingRegister".to_string(),
+                ..ConfigurationObject::default()
+            },
+        )]);
+        assert_eq!(
+            resolve_form_data_path(
+                &records,
+                Some(&configuration),
+                "ПроводкиСКорреспонденцией.ExtDimensionDr1"
+            ),
+            None
+        );
+        // Without a configuration to read, a dotted path refuses too.
+        assert_eq!(
+            resolve_form_data_path(&records, None, "ПроводкиСКорреспонденцией.Период"),
+            None
+        );
     }
 }

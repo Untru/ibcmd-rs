@@ -3,6 +3,7 @@ use std::fs;
 use std::io::{Read, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex};
 
 use crate::form_schema::form_text_document_context_menu_child_is_valid;
 use anyhow::{Context, Result, anyhow};
@@ -33,6 +34,10 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
+use crate::compiler::bodies::form_native::{
+    ConfigurationField, ConfigurationObject, ConfigurationObjects, DataPathAttribute,
+    DataPathColumn, DataPathForm, DataPathItem,
+};
 use crate::form_schema::{
     FormCheckBoxFieldSchema, FormColumnGroupSchema, FormConditionalTableSchema,
     FormControlBorderSchema, FormControlBorderStyle, FormFieldGroupHorizontalAlign,
@@ -214,6 +219,11 @@ struct FormXmlAttribute {
     /// `<Columns><Column>`, which only a value table, a value tree or a
     /// register record set carries.
     columns: Vec<FormXmlAttributeColumn>,
+    /// `<Columns><AdditionalColumns table="…">`: the extra columns a form adds
+    /// to a tabular section or a nested structure the attribute reaches. They
+    /// are not the attribute's own columns and do not count in member 13 --
+    /// only a `<DataPath>` walks into them.
+    additional_columns: Vec<FormXmlAdditionalColumns>,
     /// `<Title>`, which 71% of the corpus's form attributes carry.
     title: Vec<LocalizedString>,
     /// `<SavedData>` and `<FillCheck>`, which the `{9,…}` record reads
@@ -257,6 +267,17 @@ struct FormXmlAttributeColumn {
     spec: FormXmlTypeSpec,
     fill_check: Option<String>,
     unwritable: Vec<String>,
+}
+
+/// One `<Columns><AdditionalColumns table="…">` block of a form attribute.
+///
+/// `table` is the dotted path, with no subscripts, that the block's columns
+/// hang off -- rooted at the attribute's own name, which is how a `<DataPath>`
+/// finds them.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlAdditionalColumns {
+    table: String,
+    columns: Vec<FormXmlAttributeColumn>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -843,11 +864,50 @@ struct FlowchartXmlItem {
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
+    /// Every metadata object a `<DataPath>` has asked for, parsed once.
+    ///
+    /// A field id is the field's own `uuid=`, so placing a dotted data path
+    /// means reading the object's XML; a form names the same object from many
+    /// paths and a run names it from many forms, so the answer is memoised
+    /// here rather than re-read per field. A miss is memoised too, as `None`.
+    /// Shared between clones and across the threads an audit runs on.
+    configuration_objects: Arc<Mutex<BTreeMap<String, Option<Arc<ConfigurationObject>>>>>,
 }
 
 impl MetadataSourceContext {
     pub fn new(source_root: PathBuf) -> Self {
-        Self { source_root }
+        Self {
+            source_root,
+            configuration_objects: Arc::new(Mutex::new(BTreeMap::new())),
+        }
+    }
+
+    /// One metadata object of the source tree, by `"<Class>.<Name>"`.
+    ///
+    /// Read from `<root>/<Family>/<Name>.xml` and memoised, hit and miss
+    /// alike. A file that will not parse, or that holds a different class than
+    /// the key names, is a miss: the caller then refuses the data path rather
+    /// than writing a binding from a guess.
+    fn configuration_object(&self, key: &str) -> Option<Arc<ConfigurationObject>> {
+        if let Ok(cache) = self.configuration_objects.lock()
+            && let Some(found) = cache.get(key)
+        {
+            return found.clone();
+        }
+        let built = self.read_configuration_object(key);
+        if let Ok(mut cache) = self.configuration_objects.lock() {
+            cache.insert(key.to_string(), built.clone());
+        }
+        built
+    }
+
+    fn read_configuration_object(&self, key: &str) -> Option<Arc<ConfigurationObject>> {
+        let (class, name) = key.split_once('.')?;
+        let folder = configuration_object_source_folder(class)?;
+        let path = self.source_root.join(folder).join(format!("{name}.xml"));
+        let xml = fs::read(&path).ok()?;
+        let object = parse_configuration_object_xml(&xml).ok().flatten()?;
+        (object.class == class).then(|| Arc::new(object))
     }
 
     pub fn moxel_object_refs(&self) -> Result<BTreeMap<String, String>> {
@@ -6145,6 +6205,104 @@ const fn native_flag(value: Option<bool>) -> Option<bool> {
     value
 }
 
+/// What the native writer needs to place a `<DataPath>`: the form's own
+/// attribute, column and item tables, and the configuration source tree a
+/// dotted path walks into.
+///
+/// Built once per form; the configuration objects behind it are parsed once
+/// per run, however many paths name them.
+struct NativeDataPaths<'a> {
+    form: DataPathForm,
+    source: Option<&'a MetadataSourceContext>,
+}
+
+impl NativeDataPaths<'_> {
+    /// Member 11 of the record, or `None` when the path names something the
+    /// measured rule cannot place -- which refuses the form.
+    fn resolve(&self, data_path: &str) -> Option<String> {
+        crate::compiler::bodies::form_native::resolve_form_data_path(
+            &self.form,
+            self.source
+                .map(|source| source as &dyn ConfigurationObjects),
+            data_path,
+        )
+    }
+}
+
+/// The form's own half of the data-path tables, read off `Form.xml`.
+fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
+    let mut form = DataPathForm::default();
+    for attribute in &properties.attributes {
+        let columns = attribute
+            .columns
+            .iter()
+            .map(|column| {
+                (
+                    column.name.clone(),
+                    DataPathColumn {
+                        id: column.id.clone(),
+                        types: column.spec.types.clone(),
+                    },
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+        let mut additional_columns = BTreeMap::<String, BTreeMap<String, DataPathColumn>>::new();
+        for block in &attribute.additional_columns {
+            let table = additional_columns.entry(block.table.clone()).or_default();
+            for column in &block.columns {
+                // An additional column's own `<Type>` is not read, so a path
+                // that walks *past* one into a typed context refuses instead
+                // of guessing. A path that walks into another additional
+                // column still places: those are found by the dotted prefix,
+                // not by the type.
+                table.insert(
+                    column.name.clone(),
+                    DataPathColumn {
+                        id: column.id.clone(),
+                        types: Vec::new(),
+                    },
+                );
+            }
+        }
+        form.attributes.insert(
+            attribute.name.clone(),
+            DataPathAttribute {
+                id: attribute.id.clone(),
+                types: attribute.types.clone(),
+                columns,
+                additional_columns,
+            },
+        );
+    }
+    // `properties.child_items` is flat and carries every item, but in the
+    // order each one *closed*; walking the tree from the roots is document
+    // order, which is the order the first of two items of one name wins in.
+    let roots = properties
+        .child_items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    collect_native_data_path_items(roots.into_iter(), &mut form.items);
+    if let Some(bar) = &properties.auto_command_bar {
+        collect_native_data_path_items(bar.child_items.iter(), &mut form.items);
+    }
+    form
+}
+
+/// Every named item of the form, by name, with its id and its `<DataPath>`.
+fn collect_native_data_path_items<'a>(
+    items: impl Iterator<Item = &'a FormXmlChildItem>,
+    out: &mut BTreeMap<String, DataPathItem>,
+) {
+    for item in items {
+        out.entry(item.name.clone()).or_insert_with(|| DataPathItem {
+            id: item.id.clone(),
+            data_path: item.data_path.clone(),
+        });
+        collect_native_data_path_items(item.child_items.iter(), out);
+    }
+}
+
 /// One child item, as the `(kind uuid, record)` pair its parent files it under.
 ///
 /// Fail-closed: a tag the writers have not measured, or a property whose
@@ -6152,7 +6310,7 @@ const fn native_flag(value: Option<bool>) -> Option<bool> {
 #[allow(clippy::too_many_arguments)]
 fn format_native_child_item(
     item: &FormXmlChildItem,
-    attribute_ids: &BTreeMap<String, String>,
+    data_paths: &NativeDataPaths<'_>,
     command_ids: &BTreeMap<String, String>,
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
@@ -6188,14 +6346,14 @@ fn format_native_child_item(
         for child in item.child_items.iter() {
             records.push(format_native_child_item(
                 child,
-                attribute_ids,
+                data_paths,
                 command_ids,
                 items,
                 main_attribute_class,
                 source,
             )?);
         }
-        let payload = native_container_payload(item, attribute_ids, source)?;
+        let payload = native_container_payload(item, data_paths, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
             kind,
@@ -6223,15 +6381,16 @@ fn format_native_child_item(
     }
 
     if item.tag == "Table" {
-        let record = format_native_table(item, attribute_ids, command_ids, items, main_attribute_class, source)?;
+        let record = format_native_table(item, data_paths, command_ids, items, main_attribute_class, source)?;
         return Ok((kind_uuid, record));
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
         let payload = native_field_payload(item, source)?;
         let data_path = match item.data_path.as_deref() {
-            Some(path) => format_form_attribute_data_path(path, attribute_ids)
-                .ok_or_else(|| anyhow!("<{}> binds to {path}, which is not a form attribute", item.tag))?,
+            Some(path) => data_paths
+                .resolve(path)
+                .ok_or_else(|| anyhow!("<{}> binds to {path}, which the writer cannot place", item.tag))?,
             None => "{0}".to_string(),
         };
         let menu = match context_menu {
@@ -6390,7 +6549,7 @@ fn native_command_bar_payload(
 #[allow(clippy::too_many_arguments)]
 fn format_native_table(
     item: &FormXmlChildItem,
-    attribute_ids: &BTreeMap<String, String>,
+    data_paths: &NativeDataPaths<'_>,
     command_ids: &BTreeMap<String, String>,
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
@@ -6405,8 +6564,9 @@ fn format_native_table(
         return Err(anyhow!("a table that binds to nothing is not measured"));
     }
     let data_path = match item.data_path.as_deref() {
-        Some(path) => format_form_attribute_data_path(path, attribute_ids)
-            .ok_or_else(|| anyhow!("a table binds to {path}, which is not a form attribute"))?,
+        Some(path) => data_paths
+            .resolve(path)
+            .ok_or_else(|| anyhow!("a table binds to {path}, which the writer cannot place"))?,
         None => "{0}".to_string(),
     };
 
@@ -6452,7 +6612,7 @@ fn format_native_table(
     for column in columns {
         column_records.push(format_native_child_item(
             column,
-            attribute_ids,
+            data_paths,
             command_ids,
             items,
             main_attribute_class,
@@ -6899,7 +7059,7 @@ fn native_table_property_bag(
 /// default that would load wrong.
 fn native_container_payload(
     item: &FormXmlChildItem,
-    attribute_ids: &BTreeMap<String, String>,
+    data_paths: &NativeDataPaths<'_>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
@@ -6915,9 +7075,9 @@ fn native_container_payload(
                 return Err(anyhow!("a group names an associated table element"));
             }
             let title_data_path = match item.title_data_path.as_deref() {
-                Some(path) => format_form_attribute_data_path(path, attribute_ids).ok_or_else(
-                    || anyhow!("a group titles itself from {path}, which is not a form attribute"),
-                )?,
+                Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                    anyhow!("a group titles itself from {path}, which the writer cannot place")
+                })?,
                 None => "{0}".to_string(),
             };
             let back_color = native_item_color(item.back_color.as_deref(), source)
@@ -7020,9 +7180,9 @@ fn native_container_payload(
                 return Err(anyhow!("a page names a format"));
             }
             let title_data_path = match item.title_data_path.as_deref() {
-                Some(path) => format_form_attribute_data_path(path, attribute_ids).ok_or_else(
-                    || anyhow!("a page titles itself from {path}, which is not a form attribute"),
-                )?,
+                Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                    anyhow!("a page titles itself from {path}, which the writer cannot place")
+                })?,
                 None => "{0}".to_string(),
             };
             let back_color = native_item_color(item.back_color.as_deref(), source)
@@ -7457,11 +7617,10 @@ fn format_native_form_body(
         &properties.command_set_excluded_commands,
         &form_main_attribute_class(properties),
     )?;
-    let attribute_ids = properties
-        .attributes
-        .iter()
-        .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
-        .collect::<BTreeMap<_, _>>();
+    let data_paths = NativeDataPaths {
+        form: native_data_path_form(properties),
+        source,
+    };
     let command_ids = properties
         .commands
         .iter()
@@ -7506,7 +7665,7 @@ fn format_native_form_body(
         for item in &bar.child_items {
             let (uuid, record) = format_native_child_item(
             item,
-            &attribute_ids,
+            &data_paths,
             &command_ids,
             &items,
             &main_attribute_class,
@@ -7575,7 +7734,7 @@ fn format_native_form_body(
     for item in properties.child_items.iter().filter(|item| item.depth == 0) {
         children.push(format_native_child_item(
             item,
-            &attribute_ids,
+            &data_paths,
             &command_ids,
             &items,
             &main_attribute_class,
@@ -8409,6 +8568,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
     let mut current_column = None::<FormXmlAttributeColumn>;
+    // `<Columns><AdditionalColumns>` and the column inside one. Kept apart
+    // from `current_column` so none of the handlers that read a declared
+    // column's title, type or `<FillCheck>` can reach them: an additional
+    // column is not written into the attribute record, and only a
+    // `<DataPath>` asks for its id.
+    let mut current_additional_columns = None::<FormXmlAdditionalColumns>;
+    let mut current_additional_column = None::<FormXmlAttributeColumn>;
     let mut current_parameter = None::<FormXmlParameter>;
     let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
@@ -8648,6 +8814,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if !attribute.unwritable.contains(&name) {
                         attribute.unwritable.push(name);
                     }
+                } else if local == "AdditionalColumns"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
+                {
+                    current_additional_columns = Some(FormXmlAdditionalColumns {
+                        table: xml_attribute_value(&event, "table")?.unwrap_or_default(),
+                        columns: Vec::new(),
+                    });
+                } else if local == "Column" && path_ends_with(&path, &FORM_ADDITIONAL_COLUMNS_PATH) {
+                    current_additional_column = parse_form_attribute_column_xml(&event)?;
                 } else if local == "Column"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
                 {
@@ -8863,6 +9038,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     if !attribute.unwritable.contains(&name) {
                         attribute.unwritable.push(name);
+                    }
+                } else if local == "AdditionalColumns"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
+                {
+                    if let Some(attribute) = current_attribute.as_mut() {
+                        attribute.additional_columns.push(FormXmlAdditionalColumns {
+                            table: xml_attribute_value(&event, "table")?.unwrap_or_default(),
+                            columns: Vec::new(),
+                        });
+                    }
+                } else if local == "Column" && path_ends_with(&path, &FORM_ADDITIONAL_COLUMNS_PATH) {
+                    if let Some(column) = parse_form_attribute_column_xml(&event)?
+                        && let Some(block) = current_additional_columns.as_mut()
+                    {
+                        block.columns.push(column);
                     }
                 } else if local == "Column"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
@@ -10019,6 +10209,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "FillCheck" if path_is(&path, &FORM_COLUMN_PATH, &["FillCheck"]) => {
                         if let Some(column) = current_column.as_mut() {
                             column.fill_check = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Column" if path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_PATH) => {
+                        if let Some(column) = current_additional_column.take()
+                            && let Some(block) = current_additional_columns.as_mut()
+                        {
+                            block.columns.push(column);
+                        }
+                    }
+                    "AdditionalColumns" if path_ends_with(&path, &FORM_ADDITIONAL_COLUMNS_PATH) => {
+                        if let Some(block) = current_additional_columns.take()
+                            && let Some(attribute) = current_attribute.as_mut()
+                        {
+                            attribute.additional_columns.push(block);
                         }
                     }
                     "Column"
@@ -12639,6 +12843,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         settings: None,
         element_type: None,
         columns: Vec::new(),
+        additional_columns: Vec::new(),
         title: Vec::new(),
         saved_data: None,
         fill_check: None,
@@ -28297,6 +28502,228 @@ fn defined_type_name_from_reference(reference: &str) -> Result<&str> {
     }
 }
 
+impl ConfigurationObjects for MetadataSourceContext {
+    fn object(&self, key: &str) -> Option<Arc<ConfigurationObject>> {
+        self.configuration_object(key)
+    }
+}
+
+/// The folder one metadata class's own XML file lives in.
+///
+/// Only the top-level `<Family>/<Name>.xml` files matter here: forms,
+/// templates and commands live in their own files and carry no field ids.
+fn configuration_object_source_folder(class: &str) -> Option<&'static str> {
+    Some(match class {
+        "AccountingRegister" => "AccountingRegisters",
+        "AccumulationRegister" => "AccumulationRegisters",
+        "BusinessProcess" => "BusinessProcesses",
+        "CalculationRegister" => "CalculationRegisters",
+        "Catalog" => "Catalogs",
+        "ChartOfAccounts" => "ChartsOfAccounts",
+        "ChartOfCalculationTypes" => "ChartsOfCalculationTypes",
+        "ChartOfCharacteristicTypes" => "ChartsOfCharacteristicTypes",
+        "CommonAttribute" => "CommonAttributes",
+        "Constant" => "Constants",
+        "DataProcessor" => "DataProcessors",
+        "DefinedType" => "DefinedTypes",
+        "Document" => "Documents",
+        "DocumentJournal" => "DocumentJournals",
+        "Enum" => "Enums",
+        "ExchangePlan" => "ExchangePlans",
+        "ExternalDataSource" => "ExternalDataSources",
+        "FilterCriterion" => "FilterCriteria",
+        "InformationRegister" => "InformationRegisters",
+        "Report" => "Reports",
+        "Sequence" => "Sequences",
+        "SettingsStorage" => "SettingsStorages",
+        "Task" => "Tasks",
+        _ => return None,
+    })
+}
+
+/// The tags a metadata object declares its fields with.
+fn is_configuration_field_tag(local: &str) -> bool {
+    matches!(
+        local,
+        "Attribute"
+            | "Dimension"
+            | "Resource"
+            | "AccountingFlag"
+            | "ExtDimensionAccountingFlag"
+            | "AddressingAttribute"
+            | "Column"
+            | "EnumValue"
+            | "Recalculation"
+            | "TabularSection"
+            | "Cube"
+            | "DimensionTable"
+    )
+}
+
+/// A field being read: its name and types arrive after its `uuid=`.
+#[derive(Debug, Default)]
+struct PendingConfigurationField {
+    uuid: String,
+    tag: String,
+    name: Option<String>,
+    types: Vec<String>,
+}
+
+impl PendingConfigurationField {
+    fn finish(self) -> Option<(String, ConfigurationField)> {
+        let name = self.name.filter(|name| !name.is_empty())?;
+        Some((
+            name,
+            ConfigurationField {
+                uuid: self.uuid,
+                tag: self.tag,
+                types: self.types,
+            },
+        ))
+    }
+}
+
+/// The field index of one metadata object's own XML file.
+///
+/// `<MetaDataObject>/<Class uuid=>` is the object's uuid, and every
+/// `<ChildObjects>` entry carries the `uuid=` a `<DataPath>` stores for it --
+/// verbatim, never an ordinal. A tabular section's nested `<ChildObjects>` is
+/// read the same way, into a table of its own, because a section's fields and
+/// the object's own share a namespace only by accident.
+fn parse_configuration_object_xml(xml: &[u8]) -> Result<Option<ConfigurationObject>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut text_value = String::new();
+    let mut object = ConfigurationObject::default();
+    let mut current = None::<PendingConfigurationField>;
+    let mut nested = None::<PendingConfigurationField>;
+    let mut section = BTreeMap::<String, Vec<ConfigurationField>>::new();
+
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path.len() == 1 && path[0] == "MetaDataObject" && object.class.is_empty() {
+                    object.class = local.clone();
+                    object.uuid = xml_attr_value(&event, "uuid").unwrap_or_default();
+                } else if path.len() == 3
+                    && path[2] == "ChildObjects"
+                    && is_configuration_field_tag(&local)
+                {
+                    current = Some(PendingConfigurationField {
+                        uuid: xml_attr_value(&event, "uuid").unwrap_or_default(),
+                        tag: local.clone(),
+                        ..PendingConfigurationField::default()
+                    });
+                    if local == "TabularSection" {
+                        section = BTreeMap::new();
+                    }
+                } else if path.len() == 5
+                    && path[2] == "ChildObjects"
+                    && path[4] == "ChildObjects"
+                    && is_configuration_field_tag(&local)
+                {
+                    nested = Some(PendingConfigurationField {
+                        uuid: xml_attr_value(&event, "uuid").unwrap_or_default(),
+                        tag: local.clone(),
+                        ..PendingConfigurationField::default()
+                    });
+                }
+                path.push(local);
+                text_value.clear();
+            }
+            Ok(Event::Text(text)) => {
+                let value = text.xml_content()?;
+                text_value.push_str(unescape(value.as_ref())?.as_ref());
+            }
+            Ok(Event::CData(text)) => {
+                text_value.push_str(text.xml_content()?.as_ref());
+            }
+            Ok(Event::End(_)) => {
+                let value = text_value.trim().to_string();
+                let depth = path.len();
+                if depth == 5 && path[2] == "Properties" && path[3] == "Owners" {
+                    if !value.is_empty() {
+                        object.owners.push(value);
+                    }
+                } else if depth == 6
+                    && path[2] == "ChildObjects"
+                    && path[4] == "Properties"
+                    && path[5] == "Name"
+                {
+                    if let Some(field) = current.as_mut() {
+                        field.name = Some(value);
+                    }
+                } else if depth == 7
+                    && path[2] == "ChildObjects"
+                    && path[4] == "Properties"
+                    && path[5] == "Type"
+                    && matches!(path[6].as_str(), "Type" | "TypeSet")
+                {
+                    if let Some(field) = current.as_mut()
+                        && !value.is_empty()
+                    {
+                        field.types.push(value);
+                    }
+                } else if depth == 8
+                    && path[4] == "ChildObjects"
+                    && path[6] == "Properties"
+                    && path[7] == "Name"
+                {
+                    if let Some(field) = nested.as_mut() {
+                        field.name = Some(value);
+                    }
+                } else if depth == 9
+                    && path[4] == "ChildObjects"
+                    && path[6] == "Properties"
+                    && path[7] == "Type"
+                    && matches!(path[8].as_str(), "Type" | "TypeSet")
+                {
+                    if let Some(field) = nested.as_mut()
+                        && !value.is_empty()
+                    {
+                        field.types.push(value);
+                    }
+                } else if depth == 4
+                    && path[2] == "ChildObjects"
+                    && is_configuration_field_tag(&path[3])
+                {
+                    let tabular = path[3] == "TabularSection";
+                    if let Some((name, field)) = current.take().and_then(|field| field.finish()) {
+                        if tabular {
+                            object
+                                .sections
+                                .insert(name.clone(), std::mem::take(&mut section));
+                        }
+                        object.fields.entry(name).or_default().push(field);
+                    } else if tabular {
+                        section = BTreeMap::new();
+                    }
+                } else if depth == 6
+                    && path[2] == "ChildObjects"
+                    && path[4] == "ChildObjects"
+                    && is_configuration_field_tag(&path[5])
+                    && let Some((name, field)) = nested.take().and_then(|field| field.finish())
+                {
+                    section.entry(name).or_default().push(field);
+                }
+                path.pop();
+                text_value.clear();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+
+    if object.class.is_empty() || object.uuid.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(object))
+}
+
 fn metadata_type_source_folder(generated_type_name: &str) -> Option<&'static str> {
     let prefix = generated_type_name.split_once('.')?.0;
     match prefix {
@@ -28544,6 +28971,21 @@ fn path_is(path: &[String], owner: &[&str], tail: &[&str]) -> bool {
 const FORM_ATTRIBUTE_PATH: [&str; 3] = ["Form", "Attributes", "Attribute"];
 const FORM_PARAMETER_PATH: [&str; 3] = ["Form", "Parameters", "Parameter"];
 const FORM_COLUMN_PATH: [&str; 5] = ["Form", "Attributes", "Attribute", "Columns", "Column"];
+const FORM_ADDITIONAL_COLUMNS_PATH: [&str; 5] = [
+    "Form",
+    "Attributes",
+    "Attribute",
+    "Columns",
+    "AdditionalColumns",
+];
+const FORM_ADDITIONAL_COLUMN_PATH: [&str; 6] = [
+    "Form",
+    "Attributes",
+    "Attribute",
+    "Columns",
+    "AdditionalColumns",
+    "Column",
+];
 const FORM_ELEMENT_TYPE_PATH: [&str; 4] = ["Form", "Attributes", "Attribute", "Settings"];
 
 /// Every text node of a `<Type>` block, under the element that wraps it.
@@ -28629,20 +29071,32 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 
 /// The parts of an `<Attribute>` the `{9,…}` record cannot write.
 ///
-/// `<Columns>` is off this list because the column records are written now,
-/// and `<UseAlways>` because it turns out to reach no member of the record at
-/// all. Over the 134 616 attribute records of ERP УХ, an attribute that names
-/// `<UseAlways>` and none of `<FunctionalOptions>`, `<View>`, `<Edit>` or
-/// `<Save>` stores the default pair in members 6 and 7 in **4 009 of 4 009**,
-/// without exception. The two attributes that looked like counter-examples
-/// each carry `<Edit>`, which refuses on its own.
+/// `<Columns>` is off this list because the column records are written now.
+/// `<UseAlways>` was taken off it too, on a measurement that asked the wrong
+/// members: 6 and 7 were read as carrying it, they do not, and the conclusion
+/// drawn was that it reaches no member at all. **It reaches member 8**, which
+/// that measurement never looked at. Over the 135 039 attribute records of
+/// ERP УХ joined to the `<Attribute>` that declares them:
 ///
-/// What is left does land in a member: members 6 and 7 carry an adjustable
-/// block that names a configuration object, members 8 and 9 the `<View>` and
-/// `<Edit>` restrictions, and the trailing bag the functional options. For
-/// `<Save>`, no member anyone has found.
+/// ```text
+/// <UseAlways> absent   n=130 948   member 8 is {0,0} in all 130 948
+/// <UseAlways> present  n=4 091     152 distinct values; {0,0} in only 2 824
+///                                  {0,1,{1,{-8}}} 1 097, {0,3,{1,{-1}},…} 7, …
+/// ```
+///
+/// So 1 267 attributes would be written with `{0,0}` where the source says
+/// something else, and what member 8 holds when `<UseAlways>` is present is
+/// not measured. The refusal is back, and it costs forms that would otherwise
+/// compare: a fail-closed refusal in place of a body that loads wrong.
+///
+/// The writer's field names for this run of members are shifted by two --
+/// `use_always[0]`/`use_always[1]` at members 6 and 7 are the `<View>` and
+/// `<Edit>` restrictions, member 8 is `<UseAlways>` and member 9 is `<Save>`.
+/// Renaming them is a separate change; the refusals below are keyed by the
+/// XML element, which is unambiguous.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
     match local {
+        "UseAlways" => Some("UseAlways"),
         "FunctionalOptions" => Some("FunctionalOptions"),
         "View" => Some("View"),
         "Edit" => Some("Edit"),
