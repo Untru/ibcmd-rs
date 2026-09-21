@@ -1097,6 +1097,9 @@ pub(crate) use form_body::{
     FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context,
 };
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
+/// The one table that names a form standard command uuid, shared with the
+/// source compiler so both directions read the same fact.
+pub(crate) use form_body::form_standard_command_suffix;
 
 pub(crate) fn extract_standalone_metadata_source_xml(
     blob: &[u8],

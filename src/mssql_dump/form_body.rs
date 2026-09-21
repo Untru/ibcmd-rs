@@ -27287,7 +27287,7 @@ fn form_command_interface_target_use_standard_commands(
 /// `45bea91e-…` is new to every table: the same button join names it
 /// `Form.StandardCommand.CompactViewMode` on one record, and three ERP УХ
 /// report forms carry it in an excluded-command list.
-fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+pub(crate) fn form_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some("CustomizeForm"),
         "0ce53bd5-a3c5-43e0-b051-54c835a87be5" => Some("CreateByParameter"),

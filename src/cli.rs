@@ -45,6 +45,8 @@ pub enum Commands {
     FormContextSummary(FormContextSummaryArgs),
     /// Audit source-tree files that current SQL loader can or cannot consume.
     AuditSourceLoadCoverage(AuditSourceLoadCoverageArgs),
+    /// Census every Form.xml of a source tree against the base-free body model.
+    AuditFormBodyBlockers(AuditFormBodyBlockersArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -906,6 +908,15 @@ pub struct FormContextSummaryArgs {
 
 #[derive(Debug, Args)]
 pub struct AuditSourceLoadCoverageArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditFormBodyBlockersArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.

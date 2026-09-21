@@ -1359,6 +1359,183 @@ fn push_roundtrip_error(
     });
 }
 
+/// Why one `Form.xml` of a source tree cannot be compiled back into the body
+/// blob the platform stores.
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerEntry {
+    pub path: String,
+    pub bytes: u64,
+    /// The blocker the model reports, or the error the reader raised.
+    pub reason: String,
+    /// `parse` when the Form XML reader itself refused, `model` when it read
+    /// the document and the base-free model refused the shape.
+    pub phase: &'static str,
+}
+
+/// What a whole source tree's form bodies would cost to load.
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerAuditReport {
+    pub root: PathBuf,
+    pub form_xml_files: usize,
+    pub compilable_form_xml_files: usize,
+    pub blocked_form_xml_files: usize,
+    pub blocked_form_xml_bytes: u64,
+    /// Every distinct reason with the number of forms that raise it. A form
+    /// raising several reasons counts once per distinct reason.
+    pub reasons: Vec<FormBodyBlockerReason>,
+    /// The first forms of each reason, for a starting point.
+    pub examples: Vec<FormBodyBlockerEntry>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FormBodyBlockerReason {
+    pub reason: String,
+    pub phase: &'static str,
+    pub forms: usize,
+    pub bytes: u64,
+}
+
+/// Collapses a blocker message to the shape it shares with every other form
+/// that raises it: the object names a message quotes are evidence, not a
+/// category, so they are replaced by a placeholder.
+fn form_blocker_reason_shape(message: &str) -> String {
+    let mut shaped = String::with_capacity(message.len());
+    let mut chars = message.chars();
+    while let Some(ch) = chars.next() {
+        if ch != '`' {
+            shaped.push(ch);
+            continue;
+        }
+        shaped.push_str("`…`");
+        for inner in chars.by_ref() {
+            if inner == '`' {
+                break;
+            }
+        }
+    }
+    shaped
+}
+
+/// Audits every `Form.xml` of a source tree against the base-free form body
+/// model, and reports what stands between the tree and a load.
+pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {
+    let mut form_paths = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file() && entry.file_name() == "Form.xml" {
+            form_paths.push(entry.into_path());
+        }
+    }
+    form_paths.sort();
+
+    let audited = parallel::install(|| {
+        form_paths
+            .par_iter()
+            .map(|path| {
+                let bytes = fs::metadata(path).map(|meta| meta.len()).unwrap_or(0);
+                let relative = relative_path_string(root, path);
+                let form_xml = match fs::read(path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        return (
+                            relative,
+                            bytes,
+                            vec![(error.to_string(), "read")],
+                        );
+                    }
+                };
+                let module_path = path.with_file_name("Form").join("Module.bsl");
+                let asset_files =
+                    count_form_item_asset_files(&path.with_file_name("Form").join("Items"))
+                        .unwrap_or(0);
+                match crate::module_blob::form_body_base_free_blockers(
+                    &form_xml,
+                    module_path.exists(),
+                    asset_files,
+                ) {
+                    Ok(blockers) => (
+                        relative,
+                        bytes,
+                        blockers
+                            .into_iter()
+                            .map(|blocker| (blocker, "model"))
+                            .collect(),
+                    ),
+                    Err(error) => (relative, bytes, vec![(format!("{error:#}"), "parse")]),
+                }
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut reasons = BTreeMap::<(String, &'static str), (usize, u64)>::new();
+    let mut examples = BTreeMap::<(String, &'static str), FormBodyBlockerEntry>::new();
+    let mut blocked_form_xml_files = 0usize;
+    let mut blocked_form_xml_bytes = 0u64;
+    for (path, bytes, blockers) in &audited {
+        if blockers.is_empty() {
+            continue;
+        }
+        blocked_form_xml_files += 1;
+        blocked_form_xml_bytes += bytes;
+        let mut seen = BTreeMap::<(String, &'static str), ()>::new();
+        for (message, phase) in blockers {
+            let key = (form_blocker_reason_shape(message), *phase);
+            if seen.insert(key.clone(), ()).is_some() {
+                continue;
+            }
+            let entry = reasons.entry(key.clone()).or_default();
+            entry.0 += 1;
+            entry.1 += bytes;
+            examples.entry(key).or_insert_with(|| FormBodyBlockerEntry {
+                path: path.clone(),
+                bytes: *bytes,
+                reason: message.clone(),
+                phase: *phase,
+            });
+        }
+    }
+
+    let mut reasons = reasons
+        .into_iter()
+        .map(|((reason, phase), (forms, bytes))| FormBodyBlockerReason {
+            reason,
+            phase,
+            forms,
+            bytes,
+        })
+        .collect::<Vec<_>>();
+    reasons.sort_by(|left, right| {
+        right
+            .forms
+            .cmp(&left.forms)
+            .then_with(|| left.reason.cmp(&right.reason))
+    });
+
+    Ok(FormBodyBlockerAuditReport {
+        root: root.to_path_buf(),
+        form_xml_files: audited.len(),
+        compilable_form_xml_files: audited.len() - blocked_form_xml_files,
+        blocked_form_xml_files,
+        blocked_form_xml_bytes,
+        reasons,
+        examples: examples.into_values().collect(),
+    })
+}
+
+fn count_form_item_asset_files(path: &Path) -> Result<usize> {
+    if !path.is_dir() {
+        return Ok(0);
+    }
+    let mut count = 0usize;
+    for entry in WalkDir::new(path).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", path.display()))?;
+        if entry.file_type().is_file() {
+            count += 1;
+        }
+    }
+    Ok(count)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

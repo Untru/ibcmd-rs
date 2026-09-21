@@ -431,13 +431,10 @@ enum FormXmlUsePostingMode {
     Auto,
 }
 
-#[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum FormXmlExcludedCommand {
-    Change,
-    Copy,
-    Create,
-    CustomizeForm,
-}
+/// One `<ExcludedCommand>` of the form root's `<CommandSet>`, held as the uuid
+/// the body stores for it.
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
+struct FormXmlExcludedCommand(&'static str);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlUseForFoldersAndItems {
@@ -11513,14 +11510,97 @@ fn parse_form_update_on_data_change_xml(value: &str) -> Result<FormXmlUpdateOnDa
 }
 
 fn parse_form_excluded_command_xml(value: &str) -> Result<FormXmlExcludedCommand> {
-    match value {
-        "Change" => Ok(FormXmlExcludedCommand::Change),
-        "Copy" => Ok(FormXmlExcludedCommand::Copy),
-        "Create" => Ok(FormXmlExcludedCommand::Create),
-        "CustomizeForm" => Ok(FormXmlExcludedCommand::CustomizeForm),
-        other => Err(anyhow!("unsupported Form ExcludedCommand: {other}")),
-    }
+    form_standard_excluded_command_uuid(value)
+        .map(FormXmlExcludedCommand)
+        .ok_or_else(|| anyhow!("unsupported Form ExcludedCommand: {value}"))
 }
+
+/// The uuid the body stores for an `<ExcludedCommand>` name.
+///
+/// This is the inverse of the export's own
+/// `mssql_dump::form_body::form_standard_command_suffix`, restricted to the
+/// names that table maps to exactly one uuid. Nine names -- `ChangeHistory`,
+/// `Copy`, `CreateInitialImage`, `Delete`, `Post`, `ReadChanges`,
+/// `SetDeletionMark`, `UndoPosting` and `WriteChanges` -- are spelled the same
+/// for two or three different uuids, so the name alone does not say which the
+/// body stores and a form that excludes one of them stays outside this cohort
+/// rather than being packed with a guess. `ExecuteAndClose` is the
+/// business-process spelling of `WriteAndClose`'s uuid and is left out for the
+/// same reason, from the other side.
+///
+/// `form_standard_excluded_command_uuid_round_trips` keeps this table and the
+/// export's in step.
+fn form_standard_excluded_command_uuid(name: &str) -> Option<&'static str> {
+    FORM_STANDARD_EXCLUDED_COMMAND_UUIDS
+        .iter()
+        .find_map(|(candidate, uuid)| (*candidate == name).then_some(*uuid))
+}
+
+const FORM_STANDARD_EXCLUDED_COMMAND_UUIDS: &[(&str, &str)] = &[
+    ("Abort", "3f01ed62-97f8-465b-b4f7-6517ac2bc994"),
+    ("Activate", "6f959e83-23ec-4991-901d-575d7ea98868"),
+    ("Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
+    ("CancelEdit", "8149a06a-dbf3-4d4d-a275-5385a4196fc7"),
+    ("CancelSearch", "96e0bc70-f8ff-4732-8119-060923203629"),
+    ("Change", "6886601d-276c-4d3f-af0a-05c586025608"),
+    ("ChangeSettingsStructure", "3ea8bf45-5f33-4545-a3bb-29f80666b627"),
+    ("ChangeVariant", "fb9d7977-258a-440a-9b59-0a650c86f6a2"),
+    ("Choose", "8e2b82cf-d1ea-46b2-afdf-a8d64e66ea2b"),
+    ("ClearChartAppearance", "77fe7401-0b78-44e2-be82-9a5b2b760070"),
+    ("Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
+    ("CompactViewMode", "45bea91e-d9e5-4756-b5e6-375ab84b6903"),
+    ("Create", "4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
+    ("CreateByParameter", "0ce53bd5-a3c5-43e0-b051-54c835a87be5"),
+    ("CreateFolder", "d8772fd1-a3bf-417d-8334-c49968dbb45e"),
+    ("CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
+    ("DynamicListStandardSettings", "d603a249-6eb3-4e38-bb2d-a8a86a8ab156"),
+    ("EndEdit", "74c1abd6-b274-4654-baf0-7b8418b792ea"),
+    ("Execute", "2cacadf7-8fb3-4ec6-ae2b-0ca3fd311c9e"),
+    ("Find", "bdefa701-6685-453e-a02a-3683d0cc16d3"),
+    ("FindByCurrentValue", "b520ca45-d8db-4982-b128-bb42a6afd911"),
+    ("Generate", "b5e6da6b-cec4-450c-876a-6a5f0837f6cc"),
+    ("GetURL", "9885f4b6-d830-435f-a0e3-6b70ffe0f85c"),
+    ("Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+    ("HierarchicalList", "ffc5e8d5-40a7-4893-a590-49bd588f9466"),
+    ("Ignore", "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7"),
+    ("LevelDown", "aa042316-63ba-4f10-8d39-3935474562d0"),
+    ("LevelUp", "e44f9b41-bf53-4837-b4d4-f0ff9cdf0feb"),
+    ("List", "a2b927a1-35af-43e3-af73-4af22ac2c0fa"),
+    ("ListSettings", "1c00edb8-a826-4855-9bde-94dbc5f620e5"),
+    ("LoadDynamicListSettings", "952c2984-9955-415a-8235-5c710aabe732"),
+    ("LoadReportSettings", "b0c9afb6-320c-4e36-be21-8f6d48116415"),
+    ("LoadVariant", "b08b7a35-583a-4756-b814-0436ff9139c0"),
+    ("MoveItem", "39c6a2fb-45cc-41b1-853f-967fb68aa1df"),
+    ("NewWindow", "03df6ee5-883c-4cc6-b319-d886d1a9b2c8"),
+    ("No", "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d"),
+    ("OK", "f3613d5c-20c6-46e5-b4d5-7d712ece1296"),
+    ("OpenFromMainServer", "573e81b7-57eb-45f0-ba4d-ada7c2537a2d"),
+    ("OpenFromStandaloneServer", "0ea1a92b-3477-44dd-b152-ea7d411f1c5d"),
+    ("OutputList", "9758d344-4b1d-4dc9-80bd-81060bc18b2a"),
+    ("PostAndClose", "87317f86-057f-477e-9045-2da4e4980199"),
+    ("Print", "a11fe36e-0b45-4c07-80b3-2346b660a51e"),
+    ("Refresh", "fd8f031f-c168-4e1b-8b0c-15eb3057e688"),
+    ("ReportSettings", "0fb774df-ec1c-4e23-9ed1-e089974f74bf"),
+    ("Reread", "1f317795-c420-4a30-b594-c492abc55f7a"),
+    ("RestoreValues", "71e0226e-ebb2-4e33-8745-0a94a01bbf15"),
+    ("Retry", "5174ad3f-0569-42fd-8adf-011d8206db6c"),
+    ("Save", "a6d73055-3730-42e7-8934-3145ee987141"),
+    ("SaveDynamicListSettings", "d5c3842d-7252-4370-9174-756a6cc553e5"),
+    ("SaveReportSettings", "7910bb04-ddcc-4e5d-89f0-104c6ad0f187"),
+    ("SaveValues", "239f0103-8de9-4fdf-b485-eb5531da7e51"),
+    ("SaveVariant", "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29"),
+    ("SetDateInterval", "eb880cb2-a91f-4ad6-afb7-f0e6d7a1b111"),
+    ("ShowInList", "3a17e914-ec6a-4280-b4df-78914f40522b"),
+    ("ShowMultipleSelection", "9fea4ba9-7d33-47d4-a271-cb54df4a9b74"),
+    ("StandardSettings", "c8f1bd8c-b4d1-46d5-97b3-929b5606b6c3"),
+    ("Start", "8d7bcd38-1bbb-4dc1-a9ad-cc9d5966ca8e"),
+    ("StartAndClose", "e6a9041f-4d43-4f06-8e17-e95753531565"),
+    ("SwitchActivity", "f4613f71-5449-48ed-aea5-de005b272a1d"),
+    ("Tree", "0b83270d-7f95-4cdd-93c3-342d7991fed5"),
+    ("Write", "fe558fde-99b3-45d0-a060-9fc2905309f6"),
+    ("WriteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
+    ("Yes", "5d41082e-9619-42ec-b96f-98b082b3a2f0"),
+];
 
 fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseForFoldersAndItems> {
     match value {
@@ -12388,7 +12468,7 @@ fn form_root_command_set_range(layout: &str, fields: &[Range<usize>]) -> Option<
         if nested
             .iter()
             .skip(1)
-            .all(|range| form_excluded_command_from_uuid(layout[range.clone()].trim()).is_some())
+            .all(|range| is_form_standard_command_uuid(layout[range.clone()].trim()))
         {
             return Some(range.clone());
         }
@@ -12592,23 +12672,20 @@ fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
     output
 }
 
-fn form_excluded_command_uuid(command: FormXmlExcludedCommand) -> &'static str {
-    match command {
-        FormXmlExcludedCommand::Change => FORM_COMMAND_CHANGE_UUID,
-        FormXmlExcludedCommand::Copy => FORM_COMMAND_COPY_UUID,
-        FormXmlExcludedCommand::Create => FORM_COMMAND_CREATE_UUID,
-        FormXmlExcludedCommand::CustomizeForm => FORM_COMMAND_CUSTOMIZE_FORM_UUID,
-    }
+const fn form_excluded_command_uuid(command: FormXmlExcludedCommand) -> &'static str {
+    command.0
 }
 
-fn form_excluded_command_from_uuid(uuid: &str) -> Option<FormXmlExcludedCommand> {
-    match uuid {
-        FORM_COMMAND_CHANGE_UUID => Some(FormXmlExcludedCommand::Change),
-        FORM_COMMAND_COPY_UUID => Some(FormXmlExcludedCommand::Copy),
-        FORM_COMMAND_CREATE_UUID => Some(FormXmlExcludedCommand::Create),
-        FORM_COMMAND_CUSTOMIZE_FORM_UUID => Some(FormXmlExcludedCommand::CustomizeForm),
-        _ => None,
-    }
+/// Whether a uuid in a stored layout is a form standard command.
+///
+/// This only has to recognise a command uuid, because its one caller --
+/// `form_root_command_set_range` -- uses it to find which nested field of the
+/// template layout *is* the root command set. The set a form actually excludes
+/// comes from the source XML, so a uuid this recognises but
+/// [`form_standard_excluded_command_uuid`] cannot spell is still no guess:
+/// such a form is refused before it reaches the template.
+fn is_form_standard_command_uuid(uuid: &str) -> bool {
+    crate::mssql_dump::form_standard_command_suffix(uuid).is_some()
 }
 
 fn form_conversations_representation_code(
@@ -25958,6 +26035,52 @@ mod tests {
     };
     use crate::v8_container::{V8Element, make_v8_element_header, parse_v8_container};
 
+    /// Every `<ExcludedCommand>` name the compiler accepts must be the name the
+    /// export writes for the uuid it packs, and no accepted name may share its
+    /// uuid with another accepted name -- otherwise a form would be packed with
+    /// a command the export would then read back under a different name.
+    #[test]
+    fn form_standard_excluded_command_uuid_round_trips() {
+        use std::collections::BTreeMap;
+
+        let mut names_by_uuid = BTreeMap::<&str, &str>::new();
+        for (name, uuid) in super::FORM_STANDARD_EXCLUDED_COMMAND_UUIDS {
+            assert_eq!(
+                crate::mssql_dump::form_standard_command_suffix(uuid),
+                Some(*name),
+                "the export names {uuid} differently from the compiler's {name}"
+            );
+            assert!(
+                names_by_uuid.insert(uuid, name).is_none(),
+                "{uuid} is spelled by more than one accepted name"
+            );
+        }
+        assert_eq!(
+            super::form_standard_excluded_command_uuid("Abort"),
+            Some("3f01ed62-97f8-465b-b4f7-6517ac2bc994")
+        );
+        // A name the export spells for several uuids stays out, so the compiler
+        // refuses the form instead of guessing which one the body stores.
+        for ambiguous in [
+            "ChangeHistory",
+            "Copy",
+            "CreateInitialImage",
+            "Delete",
+            "Post",
+            "ReadChanges",
+            "SetDeletionMark",
+            "UndoPosting",
+            "WriteChanges",
+            "ExecuteAndClose",
+        ] {
+            assert_eq!(
+                super::form_standard_excluded_command_uuid(ambiguous),
+                None,
+                "{ambiguous} must not be packed from its name alone"
+            );
+        }
+    }
+
     #[test]
     fn resolves_cancel_as_a_platform_standard_form_command() {
         assert_eq!(
@@ -30718,7 +30841,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 <Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
 	<CommandSet>
 		<ExcludedCommand>Change</ExcludedCommand>
-		<ExcludedCommand>Copy</ExcludedCommand>
+		<ExcludedCommand>CustomizeForm</ExcludedCommand>
 		<ExcludedCommand>Create</ExcludedCommand>
 	</CommandSet>
 </Form>
@@ -30730,11 +30853,46 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             &parsed.layout[fields[22].clone()],
-            "{3,342c531d-dc73-458a-8ac4-6a746916a33b,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608}"
+            "{3,198ea630-fda2-4cda-8a23-f999f4c67ee6,4f834c38-add1-45e4-a9f3-cefe3efac5c9,6886601d-276c-4d3f-af0a-05c586025608}"
         );
         assert_eq!(parsed.module_text, "Old module");
 
         Ok(())
+    }
+
+    /// `Copy` is spelled for two different root uuids, so it can no longer be
+    /// packed from the name alone.
+    ///
+    /// This fixture used to pack it as `342c531d-…`, which is what an ordinary
+    /// list form stores. A business-process form stores `68baa1bc-…` for the
+    /// same `<ExcludedCommand>Copy>`: both
+    /// `BusinessProcesses/Задание/Forms/ДействиеВыполнить` and
+    /// `BusinessProcesses/Задание/Forms/ДействиеПроверить` of ERP УХ 3.3.3.3
+    /// carry `68baa1bc-…` in their stored root command set. Packing one uuid
+    /// for both would write a body the export then reads back as a different
+    /// command, so the compiler refuses the name until a family-resolved table
+    /// says which uuid the form stores.
+    #[test]
+    fn refuses_an_excluded_command_whose_name_two_uuids_share() {
+        let base = super::deflate_raw(
+            b"{4,{59,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,1,1,1,{\"N\",0},{0,1,0},{1,198ea630-fda2-4cda-8a23-f999f4c67ee6},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"FormCommandBar\",{1,0}}},\"Old module\",{0}}",
+        )
+        .expect("fixture deflates");
+        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
+<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" version="2.20">
+	<CommandSet>
+		<ExcludedCommand>Copy</ExcludedCommand>
+	</CommandSet>
+</Form>
+"#;
+
+        let error = super::pack_form_body_blob_from_form_xml(&base, xml, None)
+            .expect_err("an ambiguous command name is refused");
+
+        assert!(
+            format!("{error:#}").contains("unsupported Form ExcludedCommand: Copy"),
+            "unexpected error: {error:#}"
+        );
     }
 
     #[test]
