@@ -8424,13 +8424,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     current_command = parse_form_command_xml(&event)?;
                 } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
                     current_attribute = parse_form_attribute_xml(&event)?;
+                // At `Event::Start` the path does not yet carry the element
+                // being opened -- it is pushed further down -- so the parent
+                // is what this has to match. Asking for the element itself
+                // made the guard unreachable, and a value table's `<Columns>`,
+                // an attribute's `<FunctionalOptions>` and three more parts
+                // were dropped in silence instead of refusing the form.
                 } else if matches!(
                     local.as_str(),
                     "Columns" | "UseAlways" | "FunctionalOptions" | "View" | "Edit" | "Save"
-                ) && path_ends_with(
-                    &path,
-                    &["Form", "Attributes", "Attribute", local.as_str()],
-                ) && let Some(attribute) = current_attribute.as_mut()
+                ) && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
                 {
                     let name: &'static str = match local.as_str() {
                         "Columns" => "Columns",
@@ -26669,7 +26673,12 @@ fn parse_metadata_type_pattern_elements(
     source: Option<&MetadataSourceContext>,
     allow_multiple: bool,
 ) -> Result<Vec<MetadataTypePatternElement>> {
-    if types.is_empty() {
+    // A form attribute, a parameter or a column may declare no type at all:
+    // 26 199 attributes of ERP УХ carry an empty `<Type/>`, and each stores
+    // the same `{"Pattern"}` an empty element list renders. A value that must
+    // have exactly one type -- a constant -- still refuses an empty list, and
+    // that is the same callers `allow_multiple` already tells apart.
+    if types.is_empty() && !allow_multiple {
         return Err(anyhow!("{kind} Properties/Type has no Type entries"));
     }
     if !allow_multiple && types.len() != 1 {
@@ -26744,9 +26753,16 @@ fn parse_metadata_type_pattern_element(
     }
 }
 
+/// The uuid a platform type is stored under.
+///
+/// Each of the three below was measured over every attribute of ERP УХ that
+/// declares it, with one uuid each and no exception.
 fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
     match type_name.trim() {
         "v8:ValueStorage" => Some("e199ca70-93cf-46ce-a54b-6edc88c3a296"),
+        "v8:ValueTable" => Some("acf6192e-81ca-46ef-93a6-5a6968b78663"),
+        "v8:ValueTree" => Some("e603c0f2-92fb-4d47-8f38-a44a381cf235"),
+        "v8:ValueListType" => Some("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3"),
         _ => None,
     }
 }
