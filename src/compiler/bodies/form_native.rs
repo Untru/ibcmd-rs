@@ -985,22 +985,88 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
 /// The namespace a form *command* id lives in, which is not the item one.
 pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 
-/// The `{9,…}` record of a form attribute.
+/// A form attribute, as the body stores it.
 ///
-/// The sixteen-member shape, which 7 073 of the 11 700 wrapper-9 records of
-/// the first 1 500 ERP УХ form bodies carry. `type_pattern` arrives already
-/// formatted -- `{"Pattern"}` for an attribute the form does not type, and the
-/// pattern with its reference list for one it does.
-pub(crate) fn format_form_attribute(
-    id: &str,
-    name: &str,
-    title: &str,
-    type_pattern: &str,
-) -> String {
+/// The record is fourteen members, then the attribute's columns, then two more
+/// blocks -- so it is `16 + <column count>` members long and member 13 is that
+/// count. Measured over the 102 895 attribute records of ERP УХ: the shape
+/// holds in 100 740 of them, and in all 94 031 whose last two blocks are empty
+/// the fourteen fixed members rebuild byte for byte.
+///
+/// Six members name configuration objects rather than spellings of a property,
+/// so the caller supplies them already formatted: the title, the type pattern,
+/// the two `<UseAlways>` blocks and the two that carry the `<View>` and
+/// `<Edit>` restrictions. Everything else is read from the source:
+///
+/// - member 10 is `<MainAttribute>`;
+/// - member 11 is `<SavedData>`;
+/// - member 12 is `<FillCheck>`, 1 for `ShowError`.
+pub(crate) struct NativeFormAttribute<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) name: &'a str,
+    /// Already formatted -- `{1,0}` for an attribute with no title.
+    pub(crate) title: &'a str,
+    /// Already formatted -- `{"Pattern"}` for an attribute the form does not
+    /// type, and the pattern with its reference list for one it does.
+    pub(crate) type_pattern: &'a str,
+    /// The two `<UseAlways>` blocks, `{0,{0,{"B",1},0}}` when the attribute
+    /// restricts nothing.
+    pub(crate) use_always: [&'a str; 2],
+    /// The `<View>` and `<Edit>` restrictions, `{0,0}` when there are none.
+    pub(crate) restrictions: [&'a str; 2],
+    pub(crate) main_attribute: bool,
+    pub(crate) saved_data: bool,
+    /// `<FillCheck>`: true for `ShowError`.
+    pub(crate) fill_check: bool,
+    /// The attribute's columns, each a `{5,…}` record, already formatted.
+    pub(crate) columns: &'a [String],
+    /// The two blocks that close the record, `{0,0}` in 94 031 of the 100 740
+    /// records whose shape holds; the rest name a type or an object.
+    pub(crate) trailing: [&'a str; 2],
+}
+
+impl Default for NativeFormAttribute<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            name: "",
+            title: "{1,0}",
+            type_pattern: "{\"Pattern\"}",
+            use_always: ["{0,{0,{\"B\",1},0}}", "{0,{0,{\"B\",1},0}}"],
+            restrictions: ["{0,0}", "{0,0}"],
+            main_attribute: false,
+            saved_data: false,
+            fill_check: false,
+            columns: &[],
+            trailing: ["{0,0}", "{0,0}"],
+        }
+    }
+}
+
+/// The `{9,…}` record of a form attribute.
+pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> String {
+    let mut columns = String::new();
+    for column in attribute.columns {
+        columns.push(',');
+        columns.push_str(column);
+    }
     format!(
-        "{{9,{{{id}}},0,{name},{title},{type_pattern},{{0,{{0,{{\"B\",1}},0}}}},\
-         {{0,{{0,{{\"B\",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}},{{0,0}}}}",
-        name = quoted(name),
+        "{{9,{{{id}}},0,{name},{title},{type_pattern},{use_always_one},{use_always_two},\
+         {view},{edit},{main},{saved},{fill_check},{count}{columns},{first},{second}}}",
+        id = attribute.id,
+        name = quoted(attribute.name),
+        title = attribute.title,
+        type_pattern = attribute.type_pattern,
+        use_always_one = attribute.use_always[0],
+        use_always_two = attribute.use_always[1],
+        view = attribute.restrictions[0],
+        edit = attribute.restrictions[1],
+        main = u8::from(attribute.main_attribute),
+        saved = u8::from(attribute.saved_data),
+        fill_check = u8::from(attribute.fill_check),
+        count = attribute.columns.len(),
+        first = attribute.trailing[0],
+        second = attribute.trailing[1],
     )
 }
 
@@ -2121,9 +2187,34 @@ mod tests {
     #[test]
     fn writes_the_attribute_and_command_records_the_platform_stores() {
         assert_eq!(
-            format_form_attribute("9", "ЦветаФона", "{1,0}", "{\"Pattern\"}"),
+            format_form_attribute(&NativeFormAttribute {
+                id: "9",
+                name: "ЦветаФона",
+                ..NativeFormAttribute::default()
+            }),
             "{9,{9},0,\"ЦветаФона\",{1,0},{\"Pattern\"},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"
         );
+
+        // The form's main attribute, saved and fill-checked, with two columns:
+        // member 13 counts them and the record grows by exactly that many.
+        let columns = [
+            "{5,1,0,\"Представление\",{1,0},{\"Pattern\",{\"S\",100,1}},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},0}"
+                .to_string(),
+            "{5,2,0,\"Графа\",{1,0},{\"Pattern\",{\"S\"}},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},0}"
+                .to_string(),
+        ];
+        let record = format_form_attribute(&NativeFormAttribute {
+            id: "1",
+            name: "Объект",
+            main_attribute: true,
+            saved_data: true,
+            fill_check: true,
+            columns: &columns,
+            ..NativeFormAttribute::default()
+        });
+        assert!(record.contains(",{0,0},{0,0},1,1,1,2,{5,1,0,"));
+        assert_eq!(top_level_members(&record).len(), 16 + columns.len());
+        assert!(record.ends_with(",{0,0},{0,0}}"));
         assert_eq!(
             format_form_command(
                 "10",
