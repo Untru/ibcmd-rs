@@ -1448,8 +1448,8 @@ pub struct NativeFormWriterDifference {
 
 /// The uuid a holder's XML gives the form beside it.
 fn form_uuid_of(form_path: &Path) -> Option<String> {
-    let holder = form_path.parent()?.parent()?.parent()?;
-    let holder = holder.with_extension("xml");
+    // .../Forms/<name>/Ext/Form.xml, and the holder is .../Forms/<name>.xml.
+    let holder = form_path.parent()?.parent()?.with_extension("xml");
     let text = fs::read_to_string(&holder).ok()?;
     let marker = text.find("<Form uuid=\"")?;
     let rest = &text[marker + 12..];
@@ -1473,6 +1473,9 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
     }
     form_paths.sort();
 
+    // The writer resolves configuration types and pictures against the tree it
+    // is reading, the way the loader does.
+    let source = MetadataSourceContext::new(root.to_path_buf());
     let outcomes = parallel::install(|| {
         form_paths
             .par_iter()
@@ -1490,6 +1493,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                 let wrote = crate::module_blob::compile_native_form_body(
                     &form_xml,
                     module.as_deref(),
+                    Some(&source),
                 )
                 .map_err(|error| error.to_string());
                 (relative, wrote, stored)

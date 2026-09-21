@@ -199,6 +199,16 @@ struct FormXmlAttribute {
     number_allowed_sign: Option<String>,
     main_attribute: Option<bool>,
     settings: Option<FormXmlDynamicListSettings>,
+    /// `<Title>`, which 71% of the corpus's form attributes carry.
+    title: Vec<LocalizedString>,
+    /// `<SavedData>` and `<FillCheck>`, which the `{9,…}` record reads
+    /// directly.
+    saved_data: Option<bool>,
+    fill_check: Option<String>,
+    /// The parts of an attribute that name configuration objects, and so
+    /// cannot be written from the source alone. Naming any of them refuses
+    /// the form.
+    unwritable: Vec<&'static str>,
 }
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
@@ -350,6 +360,14 @@ struct FormXmlChildItem {
     title: Vec<LocalizedString>,
     tooltip: Vec<LocalizedString>,
     extended_tooltip: Option<FormXmlExtendedTooltip>,
+    /// The item's own `<ContextMenu>`, which every field and container may
+    /// carry and which the body stores as a `{22,…}` record of its own.
+    context_menu: Option<FormXmlExtendedTooltip>,
+    /// `<Visible>`, `<Enabled>` and `<EnableContentChange>`, which the record
+    /// writers read directly.
+    visible: Option<bool>,
+    enabled: Option<bool>,
+    enable_content_change: Option<bool>,
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
@@ -6027,8 +6045,13 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
     if !properties.child_items.is_empty() {
         blockers.push("child items: the item writers are not wired yet".to_string());
     }
-    if !properties.attributes.is_empty() {
-        blockers.push("attributes".to_string());
+    for attribute in &properties.attributes {
+        if let Some(part) = attribute.unwritable.first() {
+            blockers.push(format!("an attribute names <{part}>"));
+        }
+        if attribute.settings.is_some() {
+            blockers.push("an attribute carries dynamic-list settings".to_string());
+        }
     }
     if !properties.parameters.is_empty() {
         blockers.push("parameters".to_string());
@@ -6081,6 +6104,7 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
 fn format_native_form_body(
     properties: &FormXmlBodyProperties,
     module_text: &str,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let blockers = native_form_body_blockers(properties);
     if !blockers.is_empty() {
@@ -6134,7 +6158,13 @@ fn format_native_form_body(
             id: &bar.id,
             kind: 9,
             name: &bar.name,
-            payload: "{0,0,0}",
+            // The bar's payload carries <Autofill>, which is on unless the
+            // form turns it off.
+            payload: if bar.autofill == Some(false) {
+                "{0,0,0}"
+            } else {
+                "{0,0,1}"
+            },
             ..crate::compiler::bodies::form_native::NativeGroupItem::default()
         })
         .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?,
@@ -6190,15 +6220,41 @@ fn format_native_form_body(
         tail: &tail,
     });
 
+    // The attributes section, with the form's settings composer at its end.
+    let mut attributes = String::new();
+    for attribute in &properties.attributes {
+        let pattern = format_form_attribute_type_pattern(attribute, source)?;
+        let title = format_form_title_value(&attribute.title);
+        attributes.push(',');
+        attributes.push_str(&crate::compiler::bodies::form_native::format_form_attribute(
+            &crate::compiler::bodies::form_native::NativeFormAttribute {
+                id: &attribute.id,
+                name: &attribute.name,
+                title: &title,
+                type_pattern: &pattern,
+                main_attribute: attribute.main_attribute.unwrap_or(false),
+                saved_data: attribute.saved_data.unwrap_or(false),
+                fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
+                ..crate::compiler::bodies::form_native::NativeFormAttribute::default()
+            },
+        ));
+    }
+
     Ok(format!(
-        "{{4,{root},{module},{{4,0,0,0,{settings}}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},0,0}}",
+        "{{4,{root},{module},{{4,{count}{attributes},0,0,{settings}}},{{0,0}},{{0,0}},{{0,0}},\
+         {{0,0}},0,0}}",
         module = format_1c_string(module_text),
+        count = properties.attributes.len(),
         settings = NATIVE_EMPTY_SETTINGS,
     ))
 }
 
 /// Builds the body text of one Form.xml in the shape the platform stores it.
-pub fn compile_native_form_body(form_xml: &[u8], module_text: Option<&[u8]>) -> Result<String> {
+pub fn compile_native_form_body(
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     validate_form_xml_document(form_xml)?;
     let properties = parse_form_xml_body_properties(form_xml)?;
     let module = match module_text {
@@ -6208,7 +6264,7 @@ pub fn compile_native_form_body(form_xml: &[u8], module_text: Option<&[u8]>) -> 
             .to_string(),
         None => String::new(),
     };
-    format_native_form_body(&properties, &module)
+    format_native_form_body(&properties, &module, source)
 }
 
 /// Builds a managed Form body from source XML and a profile-known empty
@@ -7085,6 +7141,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     current_command = parse_form_command_xml(&event)?;
                 } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
                     current_attribute = parse_form_attribute_xml(&event)?;
+                } else if matches!(
+                    local.as_str(),
+                    "Columns" | "UseAlways" | "FunctionalOptions" | "View" | "Edit" | "Save"
+                ) && path_ends_with(
+                    &path,
+                    &["Form", "Attributes", "Attribute", local.as_str()],
+                ) && let Some(attribute) = current_attribute.as_mut()
+                {
+                    let name: &'static str = match local.as_str() {
+                        "Columns" => "Columns",
+                        "UseAlways" => "UseAlways",
+                        "FunctionalOptions" => "FunctionalOptions",
+                        "View" => "View",
+                        "Edit" => "Edit",
+                        _ => "Save",
+                    };
+                    if !attribute.unwritable.contains(&name) {
+                        attribute.unwritable.push(name);
+                    }
                 } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
                     current_parameter = parse_form_parameter_xml(&event)?;
                 } else if local == "Settings"
@@ -7150,6 +7225,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if local == "ContextMenu"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.context_menu = parse_form_extended_tooltip_xml(&event)?;
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -7252,6 +7332,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                } else if local == "ContextMenu"
+                    && path_ends_with_for_current_child_item(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.context_menu = parse_form_extended_tooltip_xml(&event)?;
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -8463,6 +8548,61 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         ) || path_ends_with(&path, &["Form", "Title", "item", "content"]) =>
                     {
                         current_localized_content = Some(text_value.to_string());
+                    }
+                    "lang"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Title", "item", "lang"],
+                        ) =>
+                    {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Title", "item", "content"],
+                        ) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Title", "item"],
+                        ) =>
+                    {
+                        if let (Some(attribute), Some(lang), Some(content)) = (
+                            current_attribute.as_mut(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            attribute.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "SavedData"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "SavedData"],
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(attribute) = current_attribute.as_mut()
+                        {
+                            attribute.saved_data = Some(parse_form_xml_bool(
+                                "Attribute/SavedData",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "FillCheck"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "FillCheck"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.fill_check = Some(text_value.trim().to_string());
+                        }
                     }
                     "item" if path_ends_with(&path, &["Form", "Title", "item"]) => {
                         if let (Some(lang), Some(content)) = (
@@ -10137,6 +10277,60 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "Visible"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "Visible",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.visible = Some(parse_form_xml_bool(
+                                "ChildItem/Visible",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "Enabled"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "Enabled",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.enabled = Some(parse_form_xml_bool(
+                                "ChildItem/Enabled",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "EnableContentChange"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "EnableContentChange",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.enable_content_change = Some(parse_form_xml_bool(
+                                "ChildItem/EnableContentChange",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
                     "ShowInHeader"
                         if path_ends_with_for_child_show_in_header(&path, &current_child_items) =>
                     {
@@ -10406,6 +10600,10 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         number_allowed_sign: None,
         main_attribute: None,
         settings: None,
+        title: Vec::new(),
+        saved_data: None,
+        fill_check: None,
+        unwritable: Vec::new(),
     }))
 }
 
@@ -10524,6 +10722,10 @@ fn parse_form_child_item_xml(
         title: Vec::new(),
         tooltip: Vec::new(),
         extended_tooltip: None,
+        context_menu: None,
+        visible: None,
+        enabled: None,
+        enable_content_change: None,
         events: Vec::new(),
         command_name: None,
         data_path: None,
@@ -11264,6 +11466,19 @@ fn path_ends_with_for_child_choice_button_representation(
     };
     item.tag == "InputField"
         && path_ends_with(path, &[item.tag.as_str(), "ChoiceButtonRepresentation"])
+}
+
+/// Whether the path ends at `<name>` inside the item being read, whatever the
+/// item's own element is called.
+fn path_ends_with_for_child_property(
+    path: &[String],
+    items: &[FormXmlChildItem],
+    name: &str,
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), name])
 }
 
 fn path_ends_with_for_child_show_title(path: &[String], items: &[FormXmlChildItem]) -> bool {

@@ -66,9 +66,18 @@ rather than defaulting it.
       writes to what the platform stored, for every form of a tree. Load
       parity is measurable end to end for the first time.
       *(native-writer-wired-20260921.md)*
-- [ ] **Call the item writers from it.** 10 171 of the 13 044 forms of ERP УХ
-      -- 78% -- are refused for this one reason. The records themselves are
-      written and measured; nothing calls them.
+- [x] **The attributes section**, with every attribute's type pattern resolved
+      against the configuration. 41 whole bodies now rebuild byte for byte.
+      *(first-bodies-written-20260921.md)*
+- [ ] **Call the item writers.** 10 152 of the 13 044 forms of ERP УХ -- 78% --
+      are refused for this one reason. The records themselves are written and
+      measured; nothing calls them.
+- [ ] **The navigator.** 5 458 root records carry one and 7 030 do not, and
+      nothing in the form's XML partitions the two -- not a scalar property,
+      not the main attribute's class. This is the open question that blocks
+      most of the 42 bodies that still differ.
+- [ ] **The form's own `<Enabled>`**, member 15 of the root head, which the
+      parser does not read.
 - [ ] **The parser's own gaps**, which hold up 2 620 forms before the writer
       ever sees them: `<ExcludedCommand>` spellings (1 455), conditional
       appearance (569), list settings (401), DCS children (195).
