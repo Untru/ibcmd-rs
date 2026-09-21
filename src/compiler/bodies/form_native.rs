@@ -2349,9 +2349,10 @@ pub(crate) struct NativeUsualGroupPayload<'a> {
     pub(crate) back_color: &'a str,
     /// Slot 14, the group's title, `{1,0}` by default.
     pub(crate) title: &'a str,
-    /// Slot 4, which varies 0/1 over the corpus and whose property is not read
-    /// yet, so the caller supplies it.
-    pub(crate) fourth: &'a str,
+    /// Slot 4 is `<ShowTitle>` and slot 21 is `<United>`, each on unless the
+    /// group turns it off. Both partition the whole column of the corpus.
+    pub(crate) show_title: bool,
+    pub(crate) united: bool,
 }
 
 impl NativeUsualGroupPayload<'_> {
@@ -2365,7 +2366,8 @@ impl NativeUsualGroupPayload<'_> {
             picture: "{0}",
             back_color: "{3,4,{0}}",
             title: "{1,0}",
-            fourth: "0",
+            show_title: true,
+            united: true,
         }
     }
 }
@@ -2395,8 +2397,9 @@ pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) 
         NativeGroupArrangement::HorizontalIfPossible => ("2", "2"),
     };
     format!(
-        "{{29,{arrangement},0,{separation},{fourth},{picture},{{1,0}},{{\"Pattern\"}},\"\",{back_color},{collapsible},0,0,1,{title},0,0,3,3,{through_align},0,1,{arrangement},{{3,4,{{0}}}},{behavior},2,0,{arrangement_tail},{behavior_tail}}}",
-        fourth = payload.fourth,
+        "{{29,{arrangement},0,{separation},{show_title},{picture},{{1,0}},{{\"Pattern\"}},\"\",{back_color},{collapsible},0,0,1,{title},0,0,3,3,{through_align},0,{united},{arrangement},{{3,4,{{0}}}},{behavior},2,0,{arrangement_tail},{behavior_tail}}}",
+        show_title = u8::from(payload.show_title),
+        united = u8::from(payload.united),
         picture = payload.picture,
         back_color = payload.back_color,
         title = payload.title,
@@ -4250,7 +4253,6 @@ mod tests {
                 behavior: NativeGroupBehavior::Usual,
                 arrangement: NativeGroupArrangement::HorizontalIfPossible,
                 separation: NativeGroupSeparation::Weak,
-                fourth: "1",
                 ..NativeUsualGroupPayload::plain()
             }),
             "{29,2,0,2,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,0}"
@@ -4258,14 +4260,23 @@ mod tests {
         // A group that names no arrangement carries what `HorizontalIfPossible`
         // carries, and one that names no behaviour carries what `Usual` does
         // not.
+        // A group that names neither <ShowTitle> nor <United> carries 1 in
+        // both places: slot 4 and slot 21.
         let plain = format_usual_group_payload(&NativeUsualGroupPayload::plain());
-        assert!(plain.starts_with("{29,2,0,2,0,"));
+        assert!(plain.starts_with("{29,2,0,2,1,"));
         assert!(plain.ends_with(",1,2,{3,4,{0}},0,2,0,2,3}"));
+        let quiet = format_usual_group_payload(&NativeUsualGroupPayload {
+            show_title: false,
+            united: false,
+            ..NativeUsualGroupPayload::plain()
+        });
+        assert!(quiet.starts_with("{29,2,0,2,0,"));
+        assert!(quiet.contains(",3,3,2,0,0,2,"));
         let vertical = format_usual_group_payload(&NativeUsualGroupPayload {
             arrangement: NativeGroupArrangement::Vertical,
             ..NativeUsualGroupPayload::plain()
         });
-        assert!(vertical.starts_with("{29,0,0,2,0,"));
+        assert!(vertical.starts_with("{29,0,0,2,1,"));
         assert!(vertical.ends_with(",0,3}"));
     }
 
