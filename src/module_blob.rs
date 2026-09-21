@@ -27197,6 +27197,17 @@ fn parse_metadata_type_pattern_element(
                 type_id: type_id.to_string(),
             })
         }
+        // `cfg:CatalogRef` with nothing after it is a reference to *any*
+        // catalog -- a platform type with a uuid of its own, which no
+        // configuration object resolves. Ten of these are measured, each with
+        // one uuid over every single-typed attribute that declares it.
+        other if other.starts_with("cfg:") && !other.contains('.') => {
+            let type_id = builtin_v8_type_id(other)
+                .ok_or_else(|| anyhow!("{kind} type is not supported yet: {other}"))?;
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: type_id.to_string(),
+            })
+        }
         other if other.starts_with("cfg:") => {
             let source = source.ok_or_else(|| {
                 anyhow!("{kind} type {other} requires --source-root to resolve TypeId")
@@ -27229,6 +27240,18 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
         "v8:StandardPeriod" => Some("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88"),
         "v8:StandardBeginningDate" => Some("0387f3a2-7df5-4804-948b-4580a51e4a15"),
         "v8:TypeDescription" => Some("f5c65050-3bbb-11d5-b988-0050bae0a95d"),
+        // `cfg:` with nothing after it: a reference to any object of a kind,
+        // which is a platform type rather than one a configuration declares.
+        "cfg:DynamicList" => Some("65abad24-838b-4987-8b35-ed9e2bd4d9c8"),
+        "cfg:CatalogRef" => Some("e61ef7b8-f3e1-4f4b-8ac7-676e90524997"),
+        "cfg:DocumentRef" => Some("38bfd075-3e63-4aaa-a93e-94521380d579"),
+        "cfg:AnyIBRef" => Some("280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
+        "cfg:ConstantsSet" => Some("dcfc3784-a14f-4786-ac7b-c82db5ba275f"),
+        "cfg:ExchangePlanRef" => Some("0a52f9de-73ea-4507-81e8-66217bead73a"),
+        "cfg:EnumRef" => Some("474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
+        "cfg:ReportObject" => Some("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb"),
+        "cfg:ChartOfAccountsRef" => Some("ac606d60-0209-4159-8e4c-794bc091ce38"),
+        "cfg:BusinessProcessRef" => Some("214fa4d8-6ba4-4748-a5e1-6332b5887780"),
         _ => None,
     }
 }
