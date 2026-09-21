@@ -16,12 +16,16 @@ body stores. Every function below is proved against strings read out of
 | standard-command button | `{31,…}` | two buttons of the same form |
 | form attribute | `{9,…}` 16 members | 7 073 of 11 700 wrapper-9 records |
 | form command | `{9,…}` 19 members | 3 936 of the same |
+| table, around its six children | `{55,…}` | the offsets 344 table records agree on |
+
+The table has no fixed member count -- its head grows with what it shows -- so
+what is written is its structure: the command bar two members after the context
+menu, the tooltip 26 members from the end, the three `{5,…}` additions 21, 19
+and 17 from the end, and sixteen scalars closing the record. The head and the
+scalar runs come from the caller until the slots that carry them are named.
 
 ## What is not written yet
 
-- The table, `{55,…}`: 103 members in its smallest form, growing in pairs to
-  131, with a context menu, a command bar, a tooltip and three `{5,…}` search
-  and status additions nested inside it.
 - The `{5,…}` search string, view status and search control additions on their
   own.
 - Picture, spreadsheet, HTML, formatted-document, calendar and radio-button
