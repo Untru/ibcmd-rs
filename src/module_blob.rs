@@ -27073,7 +27073,15 @@ fn parse_metadata_type_pattern_element(
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime {
             fractions: parse_date_fractions_mark(date_fractions)?,
         }),
-        other if other.starts_with("v8:") => {
+        // A platform type, whichever namespace spells it: `v8:` is the common
+        // one, but a spreadsheet document is `mxl:`, a colour or a font
+        // `v8ui:`, a settings composer `dcsset:`.
+        other
+            if other.starts_with("v8:")
+                || other.starts_with("v8ui:")
+                || other.starts_with("mxl:")
+                || other.starts_with("dcsset:") =>
+        {
             let type_id = builtin_v8_type_id(other)
                 .ok_or_else(|| anyhow!("{kind} type is not supported yet: {other}"))?;
             Ok(MetadataTypePatternElement::Reference {
@@ -28489,13 +28497,20 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 
 /// The parts of an `<Attribute>` the `{9,…}` record cannot write.
 ///
-/// `<Columns>` is off this list now: the column records are written. The rest
-/// land in members that name a configuration object -- the two `<UseAlways>`
-/// blocks, the `<View>` and `<Edit>` restrictions and the trailing functional
-/// options bag -- or, for `<Save>`, in no member anyone has found.
+/// `<Columns>` is off this list because the column records are written now,
+/// and `<UseAlways>` because it turns out to reach no member of the record at
+/// all. Over the 134 616 attribute records of ERP УХ, an attribute that names
+/// `<UseAlways>` and none of `<FunctionalOptions>`, `<View>`, `<Edit>` or
+/// `<Save>` stores the default pair in members 6 and 7 in **4 009 of 4 009**,
+/// without exception. The two attributes that looked like counter-examples
+/// each carry `<Edit>`, which refuses on its own.
+///
+/// What is left does land in a member: members 6 and 7 carry an adjustable
+/// block that names a configuration object, members 8 and 9 the `<View>` and
+/// `<Edit>` restrictions, and the trailing bag the functional options. For
+/// `<Save>`, no member anyone has found.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
     match local {
-        "UseAlways" => Some("UseAlways"),
         "FunctionalOptions" => Some("FunctionalOptions"),
         "View" => Some("View"),
         "Edit" => Some("Edit"),
