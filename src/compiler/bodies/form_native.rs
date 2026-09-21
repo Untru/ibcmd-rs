@@ -60,41 +60,74 @@ pub(crate) fn format_field_context_menu(id: &str, name: &str) -> String {
 /// What a field record needs from the source beyond its own name.
 pub(crate) struct NativeFieldItem<'a> {
     pub(crate) id: &'a str,
+    /// Which field this is: 1 a label, 2 an input, 3 a check box, 4 a picture,
+    /// 5 a radio-button group, 6 a spreadsheet document, 7 an HTML document,
+    /// 9 an indicator, 15 a formatted document. Censused over the `{37,…}`
+    /// records of the first 800 ERP УХ form bodies: all of them share this one
+    /// frame of 59 members -- 60 when the item carries the visibility tuple --
+    /// and differ only in this slot, in `after_name`, in the data path and in
+    /// the payload.
+    pub(crate) kind: u8,
     pub(crate) name: &'a str,
+    /// Whether the item carries the common `UserVisible` tuple before its
+    /// kind, as 527 of the 2 836 kind-2 records do.
+    pub(crate) visible_tuple: bool,
+    /// The two members that follow the name -- `1,0` for a label or an input,
+    /// `4,0` for a check box, `0,0` for a spreadsheet document.
+    pub(crate) after_name: &'a str,
     /// The binding the item's `<DataPath>` resolves to, already formatted --
     /// `{1,{2}}` for a form attribute, `{2,{1},{3}}` for a dynamic-list column.
     pub(crate) data_path: &'a str,
+    /// The tuple that carries this kind's own properties: `{11,…}` for a
+    /// label, `{36,…}` for an input, `{13,…}` for a spreadsheet document,
+    /// `{10,…}` for a picture, and so on -- one structure per kind.
+    pub(crate) payload: &'a str,
     pub(crate) context_menu_id: &'a str,
     pub(crate) context_menu_name: &'a str,
     pub(crate) extended_tooltip_id: &'a str,
     pub(crate) extended_tooltip_name: &'a str,
-    /// The slot that separates a field the user edits from one that only
-    /// shows: `1` for an input field, `0` for a label.
-    pub(crate) editable: bool,
 }
 
-/// The `{37,…}` record of a `<LabelField>` or `<InputField>` that carries only
-/// its name, its data path and its two default children.
+/// The `{37,…}` record of a field of any kind that carries only its name, its
+/// data path, its kind payload and its two default children.
 ///
 /// Measured against `Documents/Лот/Forms/ВыигранныеЛоты`, whose three label
-/// fields and one input field are exactly this shape.
+/// fields and one input field are exactly this shape, and against the census
+/// of every field kind in the corpus.
 pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> String {
+    let visibility = if item.visible_tuple {
+        "1,{0,{0,{\"B\",1},0}}"
+    } else {
+        "0"
+    };
     format!(
-        "{{37,{{{id},{ns}}},0,0,1,{{0,{{0,{{\"B\",1}},0}}}},1,{name},1,0,{{1,0}},{{1,0}},\
+        "{{37,{{{id},{ns}}},0,0,{visibility},{kind},{name},{after_name},{{1,0}},{{1,0}},\
          {data_path},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,1,3,0,\
          {{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{{3,4,{{0}}}},\
          {{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,\
-         {{11,0,0,2,2,2,{{1,0}},{editable},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},2,\
-         {{0,1,0}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}},1,0,0,1,0}},{{0,1,0}},1,\
+         {payload},{{0,1,0}},1,\
          {context_menu},1,{{\"Pattern\"}},{{\"Pattern\"}},\"\",\"\",{{0}},0,0,1,{tooltip},3,3,0,0,0,0}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
+        kind = item.kind,
         name = quoted(item.name),
+        after_name = item.after_name,
         data_path = item.data_path,
-        editable = u8::from(item.editable),
-        appearance = DEFAULT_APPEARANCE_UUID,
+        payload = item.payload,
         context_menu = format_field_context_menu(item.context_menu_id, item.context_menu_name),
         tooltip = format_extended_tooltip(item.extended_tooltip_id, item.extended_tooltip_name),
+    )
+}
+
+/// The `{11,…}` payload of a label or input field that carries no appearance
+/// of its own, with the one slot that separates a field the user edits from
+/// one that only shows.
+pub(crate) fn format_plain_field_payload(editable: bool) -> String {
+    format!(
+        "{{11,0,0,2,2,2,{{1,0}},{editable},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},2,\
+         {{0,1,0}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}},1,0,0,1,0}}",
+        editable = u8::from(editable),
+        appearance = DEFAULT_APPEARANCE_UUID,
     )
 }
 
@@ -410,13 +443,16 @@ mod tests {
     fn writes_the_field_records_the_platform_stores() {
         let period = format_field_item(&NativeFieldItem {
             id: "20",
+            kind: 1,
             name: "ПериодЗакупок",
+            visible_tuple: true,
+            after_name: "1,0",
             data_path: "{2,{1},{3}}",
+            payload: &format_plain_field_payload(false),
             context_menu_id: "21",
             context_menu_name: "ПериодЗакупокКонтекстноеМеню",
             extended_tooltip_id: "22",
             extended_tooltip_name: "ПериодЗакупокРасширеннаяПодсказка",
-            editable: false,
         });
         assert_eq!(
             period,
@@ -425,13 +461,16 @@ mod tests {
 
         let supplier = format_field_item(&NativeFieldItem {
             id: "46",
+            kind: 1,
             name: "АнкетаПоставщика",
+            visible_tuple: true,
+            after_name: "1,0",
             data_path: "{1,{2}}",
+            payload: &format_plain_field_payload(true),
             context_menu_id: "47",
             context_menu_name: "АнкетаПоставщикаКонтекстноеМеню",
             extended_tooltip_id: "48",
             extended_tooltip_name: "АнкетаПоставщикаРасширеннаяПодсказка",
-            editable: true,
         });
         assert!(
             supplier.contains("{11,0,0,2,2,2,{1,0},1,"),
@@ -441,6 +480,29 @@ mod tests {
             "{37,{46,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},1,\"АнкетаПоставщика\",1,0,{1,0},{1,0},{1,{2}},"
         ));
         assert!(supplier.ends_with(",3,3,0,0,0,0}"));
+
+        // A field of another kind is the same frame with another kind slot and
+        // another payload: the shortest spreadsheet document field of the
+        // corpus, without the visibility tuple.
+        let result = format_field_item(&NativeFieldItem {
+            id: "9",
+            kind: 6,
+            name: "Результат",
+            visible_tuple: false,
+            after_name: "0,0",
+            data_path: "{1,{3}}",
+            payload: "{13,100,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{0,1,0},0,1,0,0,1,0,0,0,0,1,1,1,2}",
+            context_menu_id: "10",
+            context_menu_name: "РезультатКонтекстноеМеню",
+            extended_tooltip_id: "12",
+            extended_tooltip_name: "РезультатРасширеннаяПодсказка",
+        });
+        assert!(result.starts_with(
+            "{37,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,\"Результат\",0,0,{1,0},{1,0},{1,{3}},{0},1,0,2,"
+        ));
+        assert!(result.contains(
+            ",{13,100,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{0,1,0},0,1,0,0,1,0,0,0,0,1,1,1,2},{0,1,0},1,"
+        ));
     }
 
     #[test]
