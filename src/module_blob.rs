@@ -6609,9 +6609,12 @@ fn format_native_child_item(
             )?);
         }
         let payload = native_container_payload(item, data_paths, source)?;
+        let group_font = native_item_font(item, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
             kind,
+            font: &group_font,
+            tooltip_representation: item.tooltip_representation.map(native_tooltip_representation),
             name: &item.name,
             title: &title,
             tooltip_title: &tooltip_title,
@@ -6654,8 +6657,10 @@ fn format_native_child_item(
         };
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a field with no extended tooltip is not measured"))?;
+        let events = native_item_events(item, main_attribute_class)?;
         let record = native::format_field_item(&native::NativeFieldItem {
             id: &item.id,
+            events: &events,
             kind,
             name: &item.name,
             title_location: item.title_location.map(native_title_location),
