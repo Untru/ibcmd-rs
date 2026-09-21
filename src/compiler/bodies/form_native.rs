@@ -1230,41 +1230,103 @@ pub(crate) fn format_radio_button_payload(payload: &NativeRadioButtonPayload<'_>
 
 /// The `{10,…}` payload of a picture field.
 ///
-/// Five of its twenty-four members carry an XML property. All 2 202 records of
-/// the corpus are reproduced exactly; the second round added the two
-/// `<PictureSize>` spellings the first did not know, `AutoSizeIgnoreScale` and
-/// `ByFontSize`.
-#[allow(clippy::too_many_arguments)]
-pub(crate) fn format_picture_payload(
-    width: &str,
-    height: &str,
-    picture_size: Option<&str>,
-    max_width: &str,
-    max_height: &str,
-    picture: &str,
-    title: &str,
-    text_color: &str,
-    back_color: &str,
-    font: &str,
-    border: &str,
-    events: &str,
-    third: &str,
-    fourth: &str,
-    seventeenth: &str,
-    twentieth: &str,
-    twenty_second: &str,
-) -> String {
-    let size = match picture_size {
-        Some("Stretch") => "1",
-        Some("Proportionally") => "2",
-        Some("AutoSize") => "4",
-        Some("AutoSizeIgnoreScale") => "6",
-        Some("ByFontSize") => "7",
-        _ => "0",
-    };
-    format!(
-        "{{10,{width},{height},{third},{fourth},{picture},{size},0,0,{title},{text_color},{back_color},{font},{border},0,{events},{seventeenth},{max_width},0,{twentieth},{max_height},{twenty_second},0,100}}"
-    )
+/// Eleven of its twenty-four members carry an XML property. The partition test
+/// over all 2 201 of the corpus named six the writer had been taking from its
+/// caller: `<HorizontalStretch>` and `<VerticalStretch>` at slots 3 and 4,
+/// `<Hiperlink>` at slot 8, `<AutoMaxWidth>` and `<AutoMaxHeight>` at 17 and
+/// 20, and `<FileDragMode>` at 22.
+///
+/// Two of those read unlike their namesakes elsewhere. A picture's stretches
+/// are **two**-valued, not three: absent writes 1, the same as `true`, where a
+/// label's absent stretch writes 2. And `<FileDragMode>` is inverted the way
+/// the table tail's is -- 1 when the field names none, 0 for `AsFile`.
+pub(crate) struct NativePicturePayload<'a> {
+    pub(crate) width: &'a str,
+    pub(crate) height: &'a str,
+    pub(crate) horizontal_stretch: bool,
+    pub(crate) vertical_stretch: bool,
+    /// `<PictureSize>`: `Stretch` 1, `Proportionally` 2, `AutoSize` 4,
+    /// `AutoSizeIgnoreScale` 6, `ByFontSize` 7.
+    pub(crate) picture_size: Option<&'a str>,
+    pub(crate) hyperlink: bool,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: &'a str,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
+    /// `<FileDragMode>`, of which only `AsFile` is ever stored.
+    pub(crate) file_drag_mode: Option<&'a str>,
+    /// Already formatted -- the picture, the title, the colours, the font,
+    /// the border and the events.
+    pub(crate) picture: &'a str,
+    pub(crate) title: &'a str,
+    pub(crate) text_color: &'a str,
+    pub(crate) back_color: &'a str,
+    pub(crate) font: &'a str,
+    pub(crate) border: &'a str,
+    pub(crate) events: &'a str,
+}
+
+impl Default for NativePicturePayload<'_> {
+    fn default() -> Self {
+        Self {
+            width: "0",
+            height: "0",
+            horizontal_stretch: true,
+            vertical_stretch: true,
+            picture_size: None,
+            hyperlink: false,
+            auto_max_width: true,
+            max_width: "0",
+            auto_max_height: true,
+            max_height: "0",
+            file_drag_mode: None,
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            title: "{1,0}",
+            text_color: "{3,4,{0}}",
+            back_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+            border: "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}",
+            events: "{0,1,0}",
+        }
+    }
+}
+
+pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Option<String> {
+    let size = root_code(
+        payload.picture_size,
+        &[
+            ("RealSize", "0"),
+            ("Stretch", "1"),
+            ("Proportionally", "2"),
+            ("AutoSize", "4"),
+            ("AutoSizeIgnoreScale", "6"),
+            ("ByFontSize", "7"),
+        ],
+        "0",
+    )?;
+    // A picture that names no drag mode writes 1, not 0.
+    let drag = root_code(payload.file_drag_mode, &[("AsFile", "0")], "1")?;
+    Some(format!(
+        "{{10,{width},{height},{horizontal},{vertical},{picture},{size},0,{hyperlink},{title},\
+         {text_color},{back_color},{font},{border},0,{events},{auto_max_width},{max_width},0,\
+         {auto_max_height},{max_height},{drag},0,100}}",
+        width = payload.width,
+        height = payload.height,
+        horizontal = u8::from(payload.horizontal_stretch),
+        vertical = u8::from(payload.vertical_stretch),
+        picture = payload.picture,
+        hyperlink = u8::from(payload.hyperlink),
+        title = payload.title,
+        text_color = payload.text_color,
+        back_color = payload.back_color,
+        font = payload.font,
+        border = payload.border,
+        events = payload.events,
+        auto_max_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
+        auto_max_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
+    ))
 }
 
 /// The `{13,…}` payload of a spreadsheet document field.
@@ -4639,16 +4701,40 @@ mod tests {
 
         // The picture size spellings the second round added.
         let picture = |size: Option<&str>| {
-            format_picture_payload(
-                "2", "0", size, "0", "0",
-                "{4,0,{0},\"\",-1,-1,1,0,\"\"}", "{1,0}", "{3,4,{0}}", "{3,4,{0}}",
-                "{7,3,0,1,100}", "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}",
-                "{0,1,0}", "1", "1", "1", "1", "0",
-            )
+            format_picture_payload(&NativePicturePayload {
+                width: "2",
+                picture_size: size,
+                file_drag_mode: Some("AsFile"),
+                ..NativePicturePayload::default()
+            })
+            .expect("a picture payload")
         };
         assert!(picture(None).contains("-1,-1,1,0,\"\"},0,0,0,{1,0},"));
         assert!(picture(Some("ByFontSize")).contains("-1,-1,1,0,\"\"},7,0,0,{1,0},"));
         assert!(picture(Some("AutoSizeIgnoreScale")).contains("-1,-1,1,0,\"\"},6,0,0,{1,0},"));
+        // The six slots the partition test named: the two stretches read
+        // two-valued, the drag mode is 1 when the field names none.
+        let spoken = format_picture_payload(&NativePicturePayload {
+            horizontal_stretch: false,
+            vertical_stretch: false,
+            hyperlink: true,
+            auto_max_width: false,
+            max_width: "6",
+            auto_max_height: false,
+            max_height: "3",
+            ..NativePicturePayload::default()
+        })
+        .expect("a picture payload");
+        assert!(spoken.starts_with("{10,0,0,0,0,"));
+        assert!(spoken.contains(",0,0,1,{1,0},"));
+        assert!(spoken.ends_with(",0,6,0,0,3,1,0,100}"));
+        assert_eq!(
+            format_picture_payload(&NativePicturePayload {
+                picture_size: Some("Tile"),
+                ..NativePicturePayload::default()
+            }),
+            None
+        );
 
         // A spreadsheet field that names neither scroll bar carries 2 in both
         // of the slots that hold them.
