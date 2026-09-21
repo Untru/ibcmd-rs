@@ -1844,6 +1844,14 @@ pub(crate) fn item_standard_command_uuid(
         })
 }
 
+/// Whether any form's class stores a uuid for a standard command of this
+/// name, which is what tells a spelling the corpus knows from one it does not.
+pub(crate) fn is_form_standard_command(name: &str) -> bool {
+    FORM_STANDARD_COMMAND_UUIDS
+        .iter()
+        .any(|(_, command, _)| *command == name)
+}
+
 /// The uuid of `Form.StandardCommand.<name>` for a form whose main attribute
 /// is of this class.
 pub(crate) fn form_standard_command_uuid(

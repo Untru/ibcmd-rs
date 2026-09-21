@@ -480,10 +480,18 @@ enum FormXmlUsePostingMode {
     Auto,
 }
 
-/// One `<ExcludedCommand>` of the form root's `<CommandSet>`, held as the uuid
-/// the body stores for it.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Ord, PartialOrd)]
-struct FormXmlExcludedCommand(&'static str);
+/// One `<ExcludedCommand>` of the form root's `<CommandSet>`, held as its
+/// name.
+///
+/// The uuid cannot be resolved here: `Copy`, `Delete`, `Post` and
+/// `UndoPosting` are spelled for different uuids depending on the class of the
+/// form's main attribute, and the class is not known until the whole form is
+/// parsed. Over 3 313 forms of ERP УХ whose excluded commands pair one for
+/// one with the uuids their body stores, the class-keyed table that a button's
+/// `Form.StandardCommand.X` uses resolves every one of them, and agrees with
+/// the name-only table in all thirteen keys they share.
+#[derive(Debug, Clone, Eq, PartialEq, Ord, PartialOrd)]
+struct FormXmlExcludedCommand(String);
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlUseForFoldersAndItems {
@@ -6884,7 +6892,10 @@ fn format_native_form_body(
     let events = crate::compiler::bodies::form_native::format_native_events("Form", "", &events)
         .ok_or_else(|| anyhow!("the form names an event the writer cannot place"))?;
 
-    let command_set = format_form_command_set(&properties.command_set_excluded_commands);
+    let command_set = format_form_command_set(
+        &properties.command_set_excluded_commands,
+        &form_main_attribute_class(properties),
+    )?;
     let attribute_ids = properties
         .attributes
         .iter()
@@ -6927,13 +6938,7 @@ fn format_native_form_body(
         );
         stack.extend(item.child_items.iter());
     }
-    let main_attribute_class = properties
-        .attributes
-        .iter()
-        .find(|attribute| attribute.main_attribute == Some(true))
-        .and_then(|attribute| attribute.types.first())
-        .map(|value| value.split('.').next().unwrap_or(value).to_string())
-        .unwrap_or_default();
+    let main_attribute_class = form_main_attribute_class(properties);
 
     let mut bar_children = Vec::new();
     if let Some(bar) = &properties.auto_command_bar {
@@ -7423,7 +7428,10 @@ fn collect_form_item_blockers(
 
 fn format_form_base_free_template(properties: &FormXmlBodyProperties) -> Result<String> {
     let events = format_form_root_events(&properties.events)?;
-    let command_set = format_form_command_set(&properties.command_set_excluded_commands);
+    let command_set = format_form_command_set(
+        &properties.command_set_excluded_commands,
+        &form_main_attribute_class(properties),
+    )?;
     let mut fields = vec![
         "50".to_string(),
         "0".to_string(),
@@ -13168,9 +13176,14 @@ fn parse_form_update_on_data_change_xml(value: &str) -> Result<FormXmlUpdateOnDa
 }
 
 fn parse_form_excluded_command_xml(value: &str) -> Result<FormXmlExcludedCommand> {
-    form_standard_excluded_command_uuid(value)
-        .map(FormXmlExcludedCommand)
-        .ok_or_else(|| anyhow!("unsupported Form ExcludedCommand: {value}"))
+    // Fail-closed: a name neither table knows is refused here, so a body is
+    // never written with a command the export would read back as another one.
+    if form_standard_excluded_command_uuid(value).is_none()
+        && !crate::compiler::bodies::form_native::is_form_standard_command(value)
+    {
+        return Err(anyhow!("unsupported Form ExcludedCommand: {value}"));
+    }
+    Ok(FormXmlExcludedCommand(value.to_string()))
 }
 
 /// The uuid the body stores for an `<ExcludedCommand>` name.
@@ -13536,7 +13549,11 @@ fn patch_form_layout_properties(
         replace_form_auto_fill_check(layout, auto_fill_check)?;
     }
     if !properties.command_set_excluded_commands.is_empty() {
-        replace_form_command_set(layout, &properties.command_set_excluded_commands)?;
+        replace_form_command_set(
+            layout,
+            &properties.command_set_excluded_commands,
+            &form_main_attribute_class(properties),
+        )?;
     }
     if let Some(value) = properties.use_for_folders_and_items {
         replace_form_use_for_folders_and_items(layout, value)?;
@@ -13817,12 +13834,13 @@ fn replace_form_use_for_folders_and_items(
 fn replace_form_command_set(
     layout: &mut String,
     commands: &[FormXmlExcludedCommand],
+    main_attribute_class: &str,
 ) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     let Some(range) = form_root_command_set_range(layout, &fields) else {
         return Ok(());
     };
-    layout.replace_range(range, &format_form_command_set(commands));
+    layout.replace_range(range, &format_form_command_set(commands, main_attribute_class)?);
     Ok(())
 }
 
@@ -14313,13 +14331,16 @@ fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
     }
 }
 
-fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
+fn format_form_command_set(
+    commands: &[FormXmlExcludedCommand],
+    main_attribute_class: &str,
+) -> Result<String> {
     // The platform stores standard command identifiers in UUID order, not in
     // the source XML element order.  This keeps a re-packed layout canonical.
     let mut command_uuids = commands
         .iter()
-        .map(|command| form_excluded_command_uuid(*command))
-        .collect::<Vec<_>>();
+        .map(|command| form_excluded_command_uuid(command, main_attribute_class))
+        .collect::<Result<Vec<_>>>()?;
     command_uuids.sort_unstable();
     let mut output = format!("{{{}", command_uuids.len());
     for command in command_uuids {
@@ -14327,11 +14348,39 @@ fn format_form_command_set(commands: &[FormXmlExcludedCommand]) -> String {
         output.push_str(command);
     }
     output.push('}');
-    output
+    Ok(output)
 }
 
-const fn form_excluded_command_uuid(command: FormXmlExcludedCommand) -> &'static str {
-    command.0
+/// The uuid an `<ExcludedCommand>` stores: the name alone when it decides,
+/// and otherwise the name together with the form's main attribute class.
+fn form_excluded_command_uuid<'a>(
+    command: &'a FormXmlExcludedCommand,
+    main_attribute_class: &str,
+) -> Result<&'a str> {
+    if let Some(uuid) = form_standard_excluded_command_uuid(&command.0) {
+        return Ok(uuid);
+    }
+    crate::compiler::bodies::form_native::form_standard_command_uuid(
+        main_attribute_class,
+        &command.0,
+    )
+    .ok_or_else(|| {
+        anyhow!(
+            "no measured uuid for <ExcludedCommand>{}</ExcludedCommand> on {main_attribute_class}",
+            command.0
+        )
+    })
+}
+
+/// The class of the form's main attribute, which several uuids are keyed by.
+fn form_main_attribute_class(properties: &FormXmlBodyProperties) -> String {
+    properties
+        .attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute == Some(true))
+        .and_then(|attribute| attribute.types.first())
+        .map(|value| value.split('.').next().unwrap_or(value).to_string())
+        .unwrap_or_default()
 }
 
 /// Whether a uuid in a stored layout is a form standard command.
@@ -32518,18 +32567,21 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         Ok(())
     }
 
-    /// `Copy` is spelled for two different root uuids, so it can no longer be
-    /// packed from the name alone.
+    /// `Copy` is spelled for two different root uuids, so it cannot be packed
+    /// from the name alone.
     ///
     /// This fixture used to pack it as `342c531d-…`, which is what an ordinary
     /// list form stores. A business-process form stores `68baa1bc-…` for the
-    /// same `<ExcludedCommand>Copy>`: both
+    /// same `<ExcludedCommand>Copy</ExcludedCommand>`: both
     /// `BusinessProcesses/Задание/Forms/ДействиеВыполнить` and
     /// `BusinessProcesses/Задание/Forms/ДействиеПроверить` of ERP УХ 3.3.3.3
-    /// carry `68baa1bc-…` in their stored root command set. Packing one uuid
-    /// for both would write a body the export then reads back as a different
-    /// command, so the compiler refuses the name until a family-resolved table
-    /// says which uuid the form stores.
+    /// carry `68baa1bc-…` in their stored root command set.
+    ///
+    /// The class of the form's main attribute now decides, measured over the
+    /// 3 313 forms whose excluded commands pair one for one with the uuids
+    /// their body stores. This form names no main attribute, so nothing
+    /// decides, and it is still refused rather than packed with one of the
+    /// two.
     #[test]
     fn refuses_an_excluded_command_whose_name_two_uuids_share() {
         let base = super::deflate_raw(
@@ -32548,7 +32600,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .expect_err("an ambiguous command name is refused");
 
         assert!(
-            format!("{error:#}").contains("unsupported Form ExcludedCommand: Copy"),
+            format!("{error:#}").contains("no measured uuid for <ExcludedCommand>Copy"),
             "unexpected error: {error:#}"
         );
     }
