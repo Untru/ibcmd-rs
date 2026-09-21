@@ -10660,6 +10660,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // A scalar child of a child item collects into `child_text`,
+                // because the text event only fills `text_value` for a named
+                // allow-list. An arm that reads such a property still reads
+                // `text_value`, so hand it over here -- only when
+                // `text_value` is empty, or an element on both lists would
+                // have its text twice.
+                if text_value.trim().is_empty() && !child_text.trim().is_empty() {
+                    text_value.push_str(&child_text);
+                }
                 match local.as_str() {
                     // One `<xr:Item>` of `<MobileDeviceCommandBarContent>`.
                     "Presentation" | "CheckState" | "Value"
