@@ -314,6 +314,32 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
     )
 }
 
+/// The `{5,…}` record of a table's search string, view status or search
+/// control addition.
+///
+/// `kind` is `0` for the search string, `1` for the view status and `2` for
+/// the search control, and the record closes by naming the table it belongs to
+/// as `{<table id>,<kind>}`. The payload differs per kind -- the view status
+/// carries five appearance blocks where the search string carries three -- so
+/// it arrives already formatted, like every other slot whose XML property is
+/// not yet named.
+pub(crate) fn format_search_addition(
+    id: &str,
+    kind: u8,
+    name: &str,
+    payload: &str,
+    context_menu: &str,
+    extended_tooltip: &str,
+    table_id: &str,
+) -> String {
+    format!(
+        "{{5,{{{id},{ns}}},0,0,0,{kind},{name},{{1,0}},{{1,0}},1,1,0,1,{payload},1,\
+         {context_menu},1,{extended_tooltip},2,{{{table_id},{kind}}},0,3,3,0}}",
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(name),
+    )
+}
+
 /// What a `{55,…}` table record carries around its six nested children.
 ///
 /// The head grows with what the table shows, but the tail does not. Measured
@@ -704,6 +730,39 @@ mod tests {
         assert_eq!(members[members.len() - 19], "{5,{63,x},1}");
         assert_eq!(members[members.len() - 17], "{5,{66,x},2}");
         assert_eq!(members.len() - (members.len() - 17) - 1, 16);
+    }
+
+    /// The three additions of the `Отбор` table of an ERP УХ form body, each
+    /// exactly as that body stores it.
+    #[test]
+    fn writes_the_search_additions_the_platform_stores() {
+        let search_string = format_search_addition(
+            "60",
+            0,
+            "ОтборСтрокаПоиска",
+            "{1,0,2,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0}",
+            &format_field_context_menu("61", "ОтборСтрокаПоискаКонтекстноеМеню"),
+            &format_extended_tooltip("62", "ОтборСтрокаПоискаРасширеннаяПодсказка"),
+            "56",
+        );
+        assert_eq!(
+            search_string,
+            "{5,{60,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ОтборСтрокаПоиска\",{1,0},{1,0},1,1,0,1,{1,0,2,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0},1,{22,{61,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,\"ОтборСтрокаПоискаКонтекстноеМеню\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{12,{62,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ОтборСтрокаПоискаРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},2,{56,0},0,3,3,0}"
+        );
+
+        let search_control = format_search_addition(
+            "66",
+            2,
+            "ОтборУправлениеПоиском",
+            "{1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,2}",
+            &format_field_context_menu("67", "ОтборУправлениеПоискомКонтекстноеМеню"),
+            &format_extended_tooltip("68", "ОтборУправлениеПоискомРасширеннаяПодсказка"),
+            "56",
+        );
+        assert!(search_control.starts_with(
+            "{5,{66,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"ОтборУправлениеПоиском\",{1,0},{1,0},1,1,0,1,"
+        ));
+        assert!(search_control.ends_with(",2,{56,2},0,3,3,0}"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
