@@ -1469,54 +1469,119 @@ pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> String {
 
 /// What a `{22,…}` group record needs beyond the frame every group shares.
 ///
-/// `kind` is the marker that says which group this is -- 0 command-bar group,
-/// 1 submenu, 2 ordinary group, 3 pages, 4 page, 5 usual group, 6 button
-/// group, 7 navigator -- and it decides the shape of `payload`. Censused over
-/// all 12 515 ERP УХ form bodies: each kind has exactly one payload structure
-/// with a fixed member count (29 for kind 5, 20 for kind 4, 4 for kind 6, and
-/// so on), varying only in a handful of scalar slots. The payload arrives
-/// already formatted for the same reason a field's data path does: the slot
-/// that carries an XML property is named where that property is read, not
-/// here.
+/// A container a form can hold, as the body stores it.
+///
+/// Every container is a `{22,…}` record and one member tells them apart:
+/// member 5 is the kind, and the correspondence is exact -- command bar 0,
+/// popup 1, column group 2, pages 3, page 4, usual group 5, button group 6,
+/// navigator 7, context menu 8, auto command bar 9, with no kind sharing a
+/// number.
+///
+/// The head is **not** fixed-length: member 4 is a flag, and when it is 1 a
+/// functional-options block follows before the kind. Lifting that block out is
+/// what makes every member past 3 line up; reading the head as fixed leaves
+/// 6.5% of the records unaligned.
+///
+/// Measured over the 9 357 container records of `join-22.tsv`, across all nine
+/// kinds: the head rebuilds byte for byte in **all 9 357**, and the tail in
+/// 9 354. The three that differ are column groups that both sit in a cell and
+/// carry an extended tooltip, and they write 1 where every other column group
+/// writes 0.
 pub(crate) struct NativeGroupItem<'a> {
     pub(crate) id: &'a str,
+    /// Member 5 -- see [`native_group_kind`].
     pub(crate) kind: u8,
+    /// The functional-options block, when the group restricts itself.
+    pub(crate) functional_options: Option<&'a str>,
     pub(crate) name: &'a str,
     /// Already formatted -- see [`format_russian_title`].
     pub(crate) title: &'a str,
     pub(crate) tooltip_title: &'a str,
-    /// The frame's four varying members, in the order they appear.
-    pub(crate) frame: NativeGroupFrame,
+    /// `<EnableContentChange>`, `<Enabled>` and `<ReadOnly>`.
+    pub(crate) enable_content_change: bool,
+    pub(crate) enabled: bool,
+    pub(crate) read_only: bool,
+    /// `<Width>` and `<Height>`, 0 when the group names neither.
+    pub(crate) width: Option<&'a str>,
+    pub(crate) height: Option<&'a str>,
+    /// `<HorizontalStretch>` and `<VerticalStretch>`: 2 when unnamed.
+    pub(crate) horizontal_stretch: Option<bool>,
+    pub(crate) vertical_stretch: Option<bool>,
+    /// Already formatted -- see [`format_native_color`] and
+    /// [`format_native_font`].
+    pub(crate) back_color: &'a str,
+    pub(crate) font: &'a str,
     pub(crate) payload: &'a str,
     /// `(group uuid, child record)` in the order the body stores them.
     pub(crate) children: &'a [(&'a str, String)],
+    /// `<Visible>`, on unless the group turns it off.
+    pub(crate) visible: bool,
+    /// `<ToolTipRepresentation>`: `None`, `Button`, `ShowTop`, `ShowBottom`
+    /// or `Auto`.
+    pub(crate) tooltip_representation: Option<&'a str>,
     /// Already formatted -- see [`format_extended_tooltip`].
-    pub(crate) extended_tooltip: &'a str,
+    pub(crate) extended_tooltip: Option<&'a str>,
+    /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
+    pub(crate) horizontal_align: Option<&'a str>,
+    pub(crate) vertical_align: Option<&'a str>,
 }
 
-/// The four members of the group frame that are not constant.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct NativeGroupFrame {
-    pub(crate) first: u32,
-    pub(crate) second: u32,
-    pub(crate) third: u32,
-    pub(crate) fourth: u32,
-}
-
-impl NativeGroupFrame {
-    /// The values 68 645 of the 68 836 kind-5 records carry.
-    pub(crate) const fn usual() -> Self {
+impl Default for NativeGroupItem<'_> {
+    fn default() -> Self {
         Self {
-            first: 0,
-            second: 0,
-            third: 2,
-            fourth: 2,
+            id: "0",
+            kind: 5,
+            functional_options: None,
+            name: "",
+            title: "{1,0}",
+            tooltip_title: "{1,0}",
+            enable_content_change: false,
+            enabled: true,
+            read_only: false,
+            width: None,
+            height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            back_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+            payload: "",
+            children: &[],
+            visible: true,
+            tooltip_representation: None,
+            extended_tooltip: None,
+            horizontal_align: None,
+            vertical_align: None,
         }
     }
 }
 
-/// The `{22,…}` record of a group, with its children in place.
-pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
+/// Member 5 of a `{22,…}` record, by the element that names the container.
+pub(crate) fn native_group_kind(tag: &str) -> Option<u8> {
+    Some(match tag {
+        "CommandBar" => 0,
+        "Popup" => 1,
+        "ColumnGroup" => 2,
+        "Pages" => 3,
+        "Page" => 4,
+        "UsualGroup" => 5,
+        "ButtonGroup" => 6,
+        "ContextMenu" => 8,
+        "AutoCommandBar" => 9,
+        _ => return None,
+    })
+}
+
+/// How a stretch reads: 2 when the item names neither value.
+fn native_stretch(value: Option<bool>) -> &'static str {
+    match value {
+        None => "2",
+        Some(true) => "1",
+        Some(false) => "0",
+    }
+}
+
+/// The `{22,…}` record of a container, with its children in place.
+pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
     let mut children = String::new();
     for (group_uuid, record) in group.children {
         children.push(',');
@@ -1524,33 +1589,61 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
         children.push(',');
         children.push_str(record);
     }
-    format!(
-        "{{22,{{{id},{ns}}},0,0,0,{kind},{name},{title},{tooltip_title},{first},1,0,{second},0,\
-         {third},{fourth},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,{payload},{count}{children},\
-         1,0,1,{tooltip},0,3,3,0}}",
+    let options = match group.functional_options {
+        Some(block) => format!("1,{block}"),
+        None => "0".to_string(),
+    };
+    let tooltip = match group.extended_tooltip {
+        Some(record) => format!("1,{record}"),
+        None => "0".to_string(),
+    };
+    let tooltip_representation = root_code(
+        group.tooltip_representation,
+        &[
+            ("Auto", "0"),
+            ("None", "1"),
+            ("Button", "3"),
+            ("ShowTop", "5"),
+            ("ShowBottom", "7"),
+        ],
+        "0",
+    )?;
+    let horizontal = root_code(
+        group.horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let vertical = root_code(
+        group.vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    Some(format!(
+        "{{22,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},\
+         {content_change},{enabled},{read_only},{width},{height},{horizontal_stretch},\
+         {vertical_stretch},{back_color},{font},{{0,0,0}},1,{payload},{count}{children},\
+         {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},0}}",
         id = group.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = group.kind,
         name = quoted(group.name),
         title = group.title,
         tooltip_title = group.tooltip_title,
-        first = group.frame.first,
-        second = group.frame.second,
-        third = group.frame.third,
-        fourth = group.frame.fourth,
+        content_change = u8::from(group.enable_content_change),
+        enabled = u8::from(group.enabled),
+        read_only = u8::from(group.read_only),
+        width = group.width.unwrap_or("0"),
+        height = group.height.unwrap_or("0"),
+        horizontal_stretch = native_stretch(group.horizontal_stretch),
+        vertical_stretch = native_stretch(group.vertical_stretch),
+        back_color = group.back_color,
+        font = group.font,
         payload = group.payload,
         count = group.children.len(),
-        tooltip = group.extended_tooltip,
-    )
+        visible = u8::from(group.visible),
+    ))
 }
 
-/// What the `{50,…}` root layout of a form body carries.
-///
-/// The childless root is 48 members. Over the roots of the first 600 ERP УХ
-/// form bodies that carry no child item, forty of those members are the same
-/// in every one; the eight below are not. A root that carries children appends
-/// them after the command bar, which this writer does not do yet because the
-/// count encoding there is not measured.
 /// What a form says about itself before its property bag -- the root record's
 /// head, the first 18 members of the `{50,…}` record.
 ///
@@ -2228,11 +2321,12 @@ mod tests {
                 name,
                 title: &format_russian_title(title),
                 tooltip_title: "{1,0}",
-                frame: NativeGroupFrame::usual(),
                 payload,
                 children: &[],
-                extended_tooltip: &tooltip,
-            });
+                extended_tooltip: Some(&tooltip),
+                ..NativeGroupItem::default()
+            })
+            .expect("a group record");
             if !expected_head.is_empty() {
                 assert!(
                     record.starts_with(expected_head),
@@ -2241,6 +2335,80 @@ mod tests {
             }
             assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
         }
+    }
+
+    /// What a container says about itself, read off the 9 357 `{22,…}` records
+    /// of the corpus.
+    #[test]
+    fn writes_what_a_container_says_about_itself() {
+        // Every kind, by the element that names it.
+        assert_eq!(native_group_kind("CommandBar"), Some(0));
+        assert_eq!(native_group_kind("Popup"), Some(1));
+        assert_eq!(native_group_kind("ColumnGroup"), Some(2));
+        assert_eq!(native_group_kind("Pages"), Some(3));
+        assert_eq!(native_group_kind("Page"), Some(4));
+        assert_eq!(native_group_kind("UsualGroup"), Some(5));
+        assert_eq!(native_group_kind("ButtonGroup"), Some(6));
+        assert_eq!(native_group_kind("ContextMenu"), Some(8));
+        assert_eq!(native_group_kind("AutoCommandBar"), Some(9));
+        assert_eq!(native_group_kind("InputField"), None);
+
+        // A group that says nothing: member 4 is the flag with nothing after
+        // it, the stretches are 2, and the tail closes 1,0,0,0,3,3,0.
+        let plain = format_group_item(&NativeGroupItem {
+            id: "7",
+            name: "Группа",
+            payload: "{1,0,{0}}",
+            ..NativeGroupItem::default()
+        })
+        .expect("a group record");
+        assert!(plain.starts_with("{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,\"Группа\",{1,0},{1,0},0,1,0,0,0,2,2,"));
+        assert!(plain.ends_with(",1,{1,0,{0}},0,1,0,0,0,3,3,0}"));
+
+        // The functional-options block goes inline after the flag, before the
+        // kind -- which is what makes the head variable-length.
+        let restricted = format_group_item(&NativeGroupItem {
+            id: "7",
+            name: "Группа",
+            functional_options: Some("{0,{0,{\"B\",1},0}}"),
+            payload: "{1,0,{0}}",
+            ..NativeGroupItem::default()
+        })
+        .expect("a group record");
+        assert!(restricted.starts_with(
+            "{22,{7,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},5,\"Группа\","
+        ));
+
+        // What the source decides, one by one.
+        let spoken = format_group_item(&NativeGroupItem {
+            id: "7",
+            name: "Группа",
+            enable_content_change: true,
+            enabled: false,
+            read_only: true,
+            width: Some("40"),
+            height: Some("12"),
+            horizontal_stretch: Some(true),
+            vertical_stretch: Some(false),
+            payload: "{1,0,{0}}",
+            visible: false,
+            tooltip_representation: Some("ShowBottom"),
+            horizontal_align: Some("Right"),
+            vertical_align: Some("Top"),
+            ..NativeGroupItem::default()
+        })
+        .expect("a group record");
+        assert!(spoken.contains(",\"Группа\",{1,0},{1,0},1,0,1,40,12,1,0,"));
+        assert!(spoken.ends_with(",0,7,0,0,2,0,0}"));
+
+        // A spelling the corpus never showed is refused rather than defaulted.
+        assert_eq!(
+            format_group_item(&NativeGroupItem {
+                tooltip_representation: Some("Flyover"),
+                ..NativeGroupItem::default()
+            }),
+            None
+        );
     }
 
     /// A group writes its children as `(group uuid, record)` pairs after their
@@ -2262,11 +2430,12 @@ mod tests {
             name: "Группа",
             title: "{1,0}",
             tooltip_title: "{1,0}",
-            frame: NativeGroupFrame::usual(),
             payload: "{1,0,{0}}",
             children: &[("a9f3b1ac-f51b-431e-b102-55a69acdecad", child.clone())],
-            extended_tooltip: &tooltip,
-        });
+            extended_tooltip: Some(&tooltip),
+            ..NativeGroupItem::default()
+        })
+        .expect("a group record");
 
         assert!(record.contains(&format!(
             ",1,a9f3b1ac-f51b-431e-b102-55a69acdecad,{child},1,0,1,"
