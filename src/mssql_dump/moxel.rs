@@ -4416,6 +4416,9 @@ const MOXEL_LINE_TABLE_FIELD: usize = 5;
 /// Line-kind identities carried by every line descriptor.
 const MOXEL_CELL_LINE_KIND: &str = "f527dc88-1d39-40b3-bcbb-d98b690ead68";
 const MOXEL_DRAWING_LINE_KIND: &str = "b7438842-27cc-42a3-846f-2250cd9c1bc3";
+/// The kind an empty placeholder slot carries: it names no line kind because
+/// it names no line.
+const MOXEL_NIL_LINE_KIND: &str = "00000000-0000-0000-0000-000000000000";
 /// A shared line table is a document-level resource, not per-cell data.
 const MAX_MOXEL_LINE_TABLE_ENTRIES: usize = 2048;
 const MAX_MOXEL_LINE_WIDTH: usize = 1024;
@@ -4476,11 +4479,30 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
         // third line and renumbered every border reference.
         descriptor.get(5)?.trim().parse::<i64>().ok()?;
         let kind = descriptor.get(6)?.trim();
+        // A table can carry an empty placeholder slot: kind nil, style `0`,
+        // width `0`. It names no line kind because it names no line -- nothing
+        // cites it, and the platform publishes it nowhere -- but refusing it
+        // refused the whole table, which sent the document down the
+        // reconstruction path and cost it every line its formats do cite.
+        //
+        // Evidence, ERP УХ 3.3.3.3 `DataProcessors/
+        // РасшифровкаРассчитанныхЗначений/Templates/МакетРасшифровкиУсловийОплаты`:
+        // its eight-slot table stores `{4,0,{0},0,0,0,00000000-…,0}` at slot 6
+        // among seven ordinary cell descriptors, and the platform publishes
+        // four lines -- `Solid`, `Double`, `None` and `Dotted`, all width 1 --
+        // which are exactly the four cell descriptors its formats cite. The
+        // placeholder is read as the cell enumeration's own `None` so it can
+        // be dropped with the other uncited entries rather than guessed at.
+        let placeholder = kind == MOXEL_NIL_LINE_KIND
+            && descriptor.get(3)?.trim() == "0"
+            && width == 0;
         let line_type = match kind {
             MOXEL_CELL_LINE_KIND => "v8ui:SpreadsheetDocumentCellLineType",
             MOXEL_DRAWING_LINE_KIND => "v8ui:SpreadsheetDocumentDrawingLineType",
+            _ if placeholder => "v8ui:SpreadsheetDocumentCellLineType",
             _ => return None,
         };
+        let kind = if placeholder { MOXEL_CELL_LINE_KIND } else { kind };
         let style = match (kind, descriptor.get(3)?.trim()) {
             (MOXEL_CELL_LINE_KIND, "0") => "None",
             (MOXEL_CELL_LINE_KIND, "1") => "Solid",
