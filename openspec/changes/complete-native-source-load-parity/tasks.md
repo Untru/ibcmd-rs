@@ -42,7 +42,11 @@ rather than defaulting it.
       22 with 27 and 29.
 - [ ] **The item records themselves** -- what surrounds the payloads: the
       `{22,…}` group, `{37,…}` field, `{31,…}` button, `{12,…}` decoration and
-      `{55,…}` table records, member by member against the source.
+      `{55,…}` table records, member by member against the source. The group
+      record's *shape* is read -- member 5 is the kind, member 4 flags an
+      optional functional-options block, and the tail is `1,0,<flag>[,<tooltip>],0,3,3,0`
+      -- but its members 9 to 15 and 18 to 19 are not.
+      *(group-record-shape-20260921.md)*
 - [ ] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
