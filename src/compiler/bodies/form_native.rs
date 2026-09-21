@@ -132,6 +132,44 @@ const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("WhiteSmoke", "144"),
 ];
 
+/// The font a form item names, in the shape a body stores it.
+///
+/// Measured over the label fields of 1 501 ERP УХ forms, where a `<Font>` is
+/// either absent or one of three kinds:
+///
+/// - absent is `{7,3,0,1,100}` -- 4 968 records, with nothing else;
+/// - `<Font kind="StyleItem" ref="style:<name>"/>` and nothing more is
+///   `{7,2,0,{0,<its uuid>},1,100}`;
+/// - a font that also sets `bold`, `italic` or a size grows a mask and a
+///   weight -- `{7,2,60,{-31},700,0,0,0,1,100}` for a bold
+///   `style:NormalTextFont` -- and a `WindowsFont` writes kind 1 with `{0}`.
+///
+/// Only the first two are written. The third is refused rather than guessed:
+/// 33 records of that corpus carry it, which is not enough to say what the
+/// mask counts.
+pub(crate) fn format_native_font(
+    kind: Option<&str>,
+    reference: Option<&str>,
+    has_other_attributes: bool,
+    style_item_uuid: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    if kind.is_none() && reference.is_none() {
+        return Some("{7,3,0,1,100}".to_string());
+    }
+    if has_other_attributes || kind != Some("StyleItem") {
+        return None;
+    }
+    let name = reference?.strip_prefix("style:")?;
+    // A platform style font is a negative code this writer has not measured.
+    if PLATFORM_STYLE_COLOR_CODES
+        .iter()
+        .any(|(candidate, _)| *candidate == name)
+    {
+        return None;
+    }
+    style_item_uuid(name).map(|uuid| format!("{{7,2,0,{{0,{uuid}}},1,100}}"))
+}
+
 /// The `{12,…}` record of an item's `<ExtendedTooltip>`, as the platform
 /// stores it when the tooltip carries nothing but its own name.
 ///
@@ -2035,6 +2073,43 @@ mod tests {
         assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
         assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
         assert_eq!(format_native_color(Some("#12345"), none), None);
+    }
+
+    /// The two font shapes the corpus pins down, and the refusal of the one
+    /// it does not.
+    #[test]
+    fn writes_the_fonts_the_platform_stores() {
+        let none = |_: &str| None;
+        assert_eq!(
+            format_native_font(None, None, false, none).as_deref(),
+            Some("{7,3,0,1,100}")
+        );
+        assert_eq!(
+            format_native_font(Some("StyleItem"), Some("style:ШрифтНовостей"), false, |name| {
+                (name == "ШрифтНовостей")
+                    .then(|| "db43d980-40e2-4f50-b17b-fac3bd9e2773".to_string())
+            })
+            .as_deref(),
+            Some("{7,2,0,{0,db43d980-40e2-4f50-b17b-fac3bd9e2773},1,100}")
+        );
+        // A font that also sets bold or a size, a Windows font, and a platform
+        // style font are all refused rather than guessed.
+        assert_eq!(
+            format_native_font(Some("StyleItem"), Some("style:ШрифтНовостей"), true, |_| Some(
+                "db43d980-40e2-4f50-b17b-fac3bd9e2773".to_string()
+            )),
+            None
+        );
+        assert_eq!(
+            format_native_font(Some("WindowsFont"), Some("sys:DefaultGUIFont"), false, none),
+            None
+        );
+        assert_eq!(
+            format_native_font(Some("StyleItem"), Some("style:FormBackColor"), false, |_| Some(
+                "x".to_string()
+            )),
+            None
+        );
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
