@@ -2915,6 +2915,24 @@ pub(crate) fn format_native_item_picture(
     )
 }
 
+/// A picture reference to one of the platform's own pictures.
+///
+/// `value` is what the name stores -- `{0,<uuid>}` for most of them, a bare
+/// negative code for a few. The rest of the reference holds one shape over
+/// all 666 of the corpus: present, the transparent pixel when the source
+/// names one, and member 6 is **1**, not the 0 a common picture takes.
+pub(crate) fn format_native_std_picture(
+    value: &str,
+    transparent_x: Option<&str>,
+    transparent_y: Option<&str>,
+) -> String {
+    format!(
+        "{{4,1,{value},\"\",{x},{y},1,0,\"\"}}",
+        x = transparent_x.unwrap_or("-1"),
+        y = transparent_y.unwrap_or("-1"),
+    )
+}
+
 /// The `{5,…}` payload a `<LabelDecoration>` -- and an `<ExtendedTooltip>`,
 /// which is the same record -- carries at member 18.
 ///

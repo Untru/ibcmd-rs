@@ -8139,6 +8139,65 @@ fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
 /// corpora hold 860 of them, agreeing on every name they share, which is a
 /// table worth measuring on its own rather than guessing here -- and a
 /// `<xr:Abs>` holds a base64 image. Both refuse.
+/// What a `StdPicture.<name>` stores in a picture reference.
+///
+/// The name is the platform's, not the configuration's, so no file of the
+/// source declares it and the value has to come from a table. Measured over
+/// both corpora; every name each corpus knows takes one value, and the two
+/// agree on every name they share.
+const STD_PICTURE_VALUES: &[(&str, &str)] = &[
+    ("AppearanceCheckBox", "{0,7a9cd2fd-6372-4342-9a9e-3ebbd754fd83}"),
+    ("AppearanceCheckIcon", "{0,85998f14-805b-4e2b-ba19-9d79b0464042}"),
+    ("AppearanceCircleEmpty", "{0,2721abfb-fbff-4a3a-98ac-b7c9eb29cd85}"),
+    ("AppearanceCircleFilled", "{0,788667db-61c9-45f3-9c4f-5f660ecdf3e1}"),
+    ("AppearanceCircleGreen", "{0,71cbcb5c-f3f0-4ffd-a4d0-19b802b5ed6b}"),
+    ("AppearanceCircleOneFourthFilled", "{0,fc058833-e57f-4f93-ba7a-803992a65c3e}"),
+    ("AppearanceCircleRed", "{0,c1a61df2-f280-49d0-a8b3-7e5fc6f56ff7}"),
+    ("AppearanceCircleYellow", "{0,8d7e5026-9c1c-4542-bec0-2b729c84e139}"),
+    ("AppearanceCross", "{0,b2202798-23e0-4165-9982-24878f432488}"),
+    ("AppearanceCrossIcon", "{0,9ef73565-2250-4a35-9fb3-470bd19ca9ca}"),
+    ("AppearanceDownInclineArrowGray", "{0,a30ab2ef-6076-457d-9293-44edc7c6767e}"),
+    ("AppearanceExclamationMark", "{0,501b8c1d-8062-408e-bde8-b6549324713e}"),
+    ("AppearanceExclamationMarkIcon", "{0,b39aa431-a32f-4447-984a-45606474c82d}"),
+    ("AppearanceRightArrowGray", "{0,20b82e97-5fcc-4c68-8e0d-d01060847520}"),
+    ("AppearanceUpArrowGreen", "{0,87d032df-0956-47e9-bead-4e15330f1983}"),
+    ("AppearanceUpInclineArrowGray", "{0,92e24ce1-3917-4ee4-bbde-adce48b6c96b}"),
+    ("Attribute", "{0,0c1f7756-6143-4903-a94c-8f22c85e44de}"),
+    ("BusinessProcessStart", "{0,9fecbaff-2a05-4da6-9ef1-807e754b928d}"),
+    ("Change", "{0,97b2cc97-d5c6-45fb-9824-9d6d73db21fe}"),
+    ("Clear", "{-200}"),
+    ("Close", "{0,1377931c-5744-4948-bade-cb35117b5f63}"),
+    ("CreateListItem", "{0,977e831a-0e73-4d60-af51-091a6fa8612e}"),
+    ("DataSearch", "{0,35bc8caa-f7ce-4158-87da-d9bf785afa39}"),
+    ("Delete", "{0,08a45a70-c221-4339-b3b1-9f11cb22147d}"),
+    ("DialogExclamation", "{0,5289d9a4-b012-4d54-9bce-50473fe29b57}"),
+    ("DialogInformation", "{0,8bdf1079-8fad-4d21-ad7f-4b2e4ecdce3d}"),
+    ("DialogQuestion", "{0,ef27ae9e-7040-4374-b93c-0d276de2ea23}"),
+    ("DialogStop", "{0,83db1f8a-41bd-4016-bdb2-a28e3a8d6dcc}"),
+    ("Document", "{0,894afc03-9904-465d-b671-f555ffb9b21c}"),
+    ("ExecuteTask", "{0,003024ed-fa25-42ac-9f53-f5014e383801}"),
+    ("FilterCriterion", "{0,2ef82795-06fe-4365-bd0c-44b486264620}"),
+    ("Find", "{0,ffab30f1-da11-44b5-b34c-24da22badcf4}"),
+    ("GeographicalSchema", "{0,a9152be7-62cf-4523-be34-a23f018f497e}"),
+    ("GoForward", "{0,7562cef7-0e57-4f63-a754-b61128a4f3ae}"),
+    ("GotoExternalURL", "{0,31bf709f-3b50-4137-9b51-ebc7fb802a7c}"),
+    ("History", "{0,c283cd1c-3187-451d-8ef2-7df55daeef06}"),
+    ("Information", "{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9}"),
+    ("InputFieldClear", "{-2}"),
+    ("InputFieldOpen", "{-7}"),
+    ("MarkToDelete", "{0,18492a87-2fe4-44af-b218-304897fed020}"),
+    ("MoveRight", "{-9}"),
+    ("Notifications", "{0,928075d1-b90b-416c-b0b2-c3104cf084aa}"),
+    ("Picture", "{0,64837726-d2a2-4682-a788-737423e80013}"),
+    ("Post", "{0,20ebc47b-f4d9-439c-acd3-fdc624fbac2a}"),
+    ("Refresh", "{0,fc4f29e0-d168-4fe0-8e64-e982fabf2595}"),
+    ("RestoreValues", "{0,a7707ed1-39b0-418f-974d-4d500d27a9c6}"),
+    ("ScheduledJob", "{0,1970a480-9b38-405e-9d9e-8209f3fad5f1}"),
+    ("ShowData", "{0,a064544f-6037-48ca-b19f-8ad63e43af23}"),
+    ("Stop", "{0,1cd7b762-ec6a-4e92-ac9a-1832be228ec3}"),
+    ("UserWithAuthentication", "{0,75a40cc4-c719-4c3f-91ea-fc5787bc34ca}"),
+];
+
 fn native_item_picture(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
@@ -8159,6 +8218,19 @@ fn native_item_picture(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .ok_or_else(|| anyhow!("<{}> names a <Picture> with no <Ref>", item.tag))?;
+    // A `StdPicture` names the platform's own picture, which no file of the
+    // source declares, so its stored value has to come from a table.
+    if let Some(name) = reference.strip_prefix("StdPicture.") {
+        let value = STD_PICTURE_VALUES
+            .iter()
+            .find_map(|(candidate, value)| (*candidate == name).then_some(*value))
+            .ok_or_else(|| anyhow!("no measured value for StdPicture.{name}"))?;
+        return Ok(native::format_native_std_picture(
+            value,
+            picture.transparent_x.as_deref(),
+            picture.transparent_y.as_deref(),
+        ));
+    }
     if !reference.starts_with("CommonPicture.") {
         return Err(anyhow!(
             "<{}> names a <Picture> reference the writer cannot place: {reference}",
