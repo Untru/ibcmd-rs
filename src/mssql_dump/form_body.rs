@@ -13144,7 +13144,20 @@ fn parse_form_child_item_with_metadata_owners(
             let names_row_set_commands =
                 !(table_schema.and_then(|schema| schema.change_row_set(&fields)) == Some(false)
                     && table_bound_to_dynamic_list);
-            let commands = table_schema
+            // The search history is a command of the search string, so a table
+            // that shows neither a search string nor a search control does not
+            // own it and the platform names it in no command set. A dynamic
+            // list keeps its own search history whatever the table shows, so it
+            // owns the command with both switched off. Measured over all 3 140
+            // native ERP УХ 3.2.12.6 tables that carry a command set: 162 name
+            // the command and every one of them passes this test, 624 fail it
+            // and none of them names it.
+            let names_search_history = table_bound_to_dynamic_list
+                || table_schema.and_then(|schema| schema.search_string_location(&fields))
+                    != Some(FormTableSearchStringLocation::None)
+                || table_schema.and_then(|schema| schema.search_control_location(&fields))
+                    != Some(FormTableSearchControlLocation::None);
+            let mut commands = table_schema
                 .map(|schema| {
                     parse_form_table_command_set_excluded_commands_for_table(
                         schema,
@@ -13155,6 +13168,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .unwrap_or_else(|| {
                     parse_form_field_command_set_excluded_commands(wrapper, tag, &fields)
                 });
+            if !names_search_history {
+                commands.retain(|command| *command != "SearchHistory");
+            }
             commands
         },
         table_behavior_on_horizontal_compression: table_schema

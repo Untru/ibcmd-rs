@@ -16269,6 +16269,72 @@ fn extracts_ordinary_wrapper55_table_rows_picture_and_command_set() {
     assert!(!xml.contains("<ShowRoot>true</ShowRoot>"));
 }
 
+/// The search history belongs to the search string, so a table showing neither
+/// a search string nor a search control does not own the command and the
+/// platform leaves it out of `<CommandSet>` even though the record remembers
+/// it. Switching the search control back to `Auto` is enough to own it again.
+///
+/// Both records are the fixture above with the same two slots moved and
+/// `SearchHistory` added to its remembered list, so nothing but the two
+/// locations differs between them.
+#[test]
+fn a_table_hiding_both_search_controls_drops_the_search_history_command() {
+    let hidden = parse_form_child_item_with_attrs(
+            r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{9,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,d96b0c03-b209-4d01-a3fc-17a14f873b64,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0,0,0,0,0,0,0,0,0,0,0,0,1,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(
+        hidden.table_search_string_location,
+        Some(crate::form_schema::FormTableSearchStringLocation::None)
+    );
+    assert_eq!(
+        hidden.table_search_control_location,
+        Some(crate::form_schema::FormTableSearchControlLocation::None)
+    );
+    assert!(
+        !hidden
+            .command_set_excluded_commands
+            .contains(&"SearchHistory"),
+        "a table with both search locations off does not own the command: {:?}",
+        hidden.command_set_excluded_commands
+    );
+    // The rest of the remembered list is untouched.
+    assert!(hidden.command_set_excluded_commands.contains(&"SortListAsc"));
+
+    let with_control = parse_form_child_item_with_attrs(
+            r#"{55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,"Rows",0,0,1,{1,1,{"ru","Rows"}},{1,0},{1,{2}},0,0,0,0,0,0,0,0,0,2,0,0,1,0,1,1,0,1,2,2,1,1,0,0,1,1,2,0,0,1,1,{1,{8}},{4,1,{0,e112dfa4-4cb7-402d-85b9-f0234915989b},"",-1,-1,0,0,""},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,1,2,13,{"U"},19,{"S",""},{1,1282f000-23b6-4887-87f4-9e8e79db3d32,"RowsSelection",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1},{9,0ae4bea5-23be-42a7-b69e-97b11b29c453,2bbe4e12-06d2-409b-a972-eea585125d83,37740564-9e86-44a0-bea9-3f485a5a3f91,58b2a785-23f6-4b0e-a324-9a1323285595,8d772f97-c0ef-47c0-9cb0-efea28c61341,9ef79140-3de6-436a-8dda-610bb963f5db,b0016a68-ec64-4e6d-b905-c71fd62efc4c,d96b0c03-b209-4d01-a3fc-17a14f873b64,fa51b106-eae6-44c7-8054-76cbb3100603},1,{22,{57,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,"RowsContext",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{22,{58,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,"RowsBar",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,0},0,1,0,0,0,3,3,0},0,3,3,0,0,0,0,0,0,0,0,0,0,0,0,1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0}"#,
+            None,
+            None,
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
+            &BTreeMap::from([("2".to_string(), "Rows".to_string())]),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &BTreeMap::new(),
+            &[],
+            &BTreeMap::new(),
+        )
+        .unwrap();
+
+    assert_eq!(with_control.table_search_control_location, None);
+    assert!(
+        with_control
+            .command_set_excluded_commands
+            .contains(&"SearchHistory"),
+        "a table whose search control is still automatic owns the command: {:?}",
+        with_control.command_set_excluded_commands
+    );
+}
+
 #[test]
 fn extracts_button_width_and_command_bar_source_from_extended_layout() {
     let button = parse_form_child_item(
