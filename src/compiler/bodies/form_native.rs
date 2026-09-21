@@ -1393,6 +1393,119 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
 /// in every one; the eight below are not. A root that carries children appends
 /// them after the command bar, which this writer does not do yet because the
 /// count encoding there is not measured.
+/// What a form says about itself before its property bag -- the root record's
+/// head, the first 18 members of the `{50,…}` record.
+///
+/// Measured over the 12 469 ERP УХ forms that do not name a
+/// `<SettingsStorage>`: all 12 469 heads rebuild byte for byte from the source
+/// alone. A form that names one is refused, because member 8 is then that
+/// storage object's uuid, which only the configuration can resolve.
+pub(crate) struct NativeRootHead<'a> {
+    /// `<WindowOpeningMode>`: `LockOwnerWindow`, `LockWholeInterface` or
+    /// `DontUse`.
+    pub(crate) window_opening_mode: Option<&'a str>,
+    /// `<Width>` and `<Height>`, in characters.
+    pub(crate) width: Option<&'a str>,
+    pub(crate) height: Option<&'a str>,
+    /// `<EnterKeyBehavior>`, of which only `DefaultButton` is ever stored.
+    pub(crate) enter_key_behavior: Option<&'a str>,
+    /// `<SaveDataInSettings>`, of which only `UseList` is ever stored.
+    pub(crate) save_data_in_settings: Option<&'a str>,
+    /// `<AutoSaveDataInSettings>`, of which only `Use` is ever stored.
+    pub(crate) auto_save_data_in_settings: Option<&'a str>,
+    /// `<SettingsStorage>`. Naming one refuses the head.
+    pub(crate) settings_storage: Option<&'a str>,
+    /// `<AutoTitle>`, on unless the form turns it off.
+    pub(crate) auto_title: bool,
+    /// Already formatted -- see [`format_russian_title`]. A form that names no
+    /// title writes `{1,0}`.
+    pub(crate) title: &'a str,
+    /// `<Group>`: member 11 only says whether the form names one at all.
+    pub(crate) group: Option<&'a str>,
+    /// `<ChildItemsWidth>`: `Equal`, `LeftWide`, `LeftWidest`, `LeftNarrow` or
+    /// `LeftNarrowest`.
+    pub(crate) child_items_width: Option<&'a str>,
+    /// `<AutoFillCheck>`, `<Customizable>` and `<Enabled>`, all on unless the
+    /// form turns them off.
+    pub(crate) auto_fill_check: bool,
+    pub(crate) customizable: bool,
+    pub(crate) enabled: bool,
+    /// `<CommandBarLocation>`: `None`, `Top`, `Bottom` or `Auto`.
+    pub(crate) command_bar_location: Option<&'a str>,
+}
+
+impl Default for NativeRootHead<'_> {
+    fn default() -> Self {
+        Self {
+            window_opening_mode: None,
+            width: None,
+            height: None,
+            enter_key_behavior: None,
+            save_data_in_settings: None,
+            auto_save_data_in_settings: None,
+            settings_storage: None,
+            auto_title: true,
+            title: "{1,0}",
+            group: None,
+            child_items_width: None,
+            auto_fill_check: true,
+            customizable: true,
+            enabled: true,
+            command_bar_location: None,
+        }
+    }
+}
+
+/// The root record's head, from `50` to the command bar's location.
+pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
+    if head.settings_storage.is_some() {
+        return None;
+    }
+    let members = [
+        "50".to_string(),
+        "0".to_string(),
+        root_code(
+            head.window_opening_mode,
+            &[
+                ("DontUse", "0"),
+                ("LockOwnerWindow", "1"),
+                ("LockWholeInterface", "2"),
+            ],
+            "0",
+        )?,
+        head.width.unwrap_or("0").to_string(),
+        head.height.unwrap_or("0").to_string(),
+        root_code(head.enter_key_behavior, &[("DefaultButton", "0")], "1")?,
+        root_code(head.save_data_in_settings, &[("UseList", "1")], "0")?,
+        root_code(head.auto_save_data_in_settings, &[("Use", "1")], "0")?,
+        "00000000-0000-0000-0000-000000000000".to_string(),
+        u8::from(head.auto_title).to_string(),
+        head.title.to_string(),
+        u8::from(head.group.is_some()).to_string(),
+        root_code(
+            head.child_items_width,
+            &[
+                ("Equal", "1"),
+                ("LeftWide", "2"),
+                ("LeftWidest", "3"),
+                ("LeftNarrow", "4"),
+                ("LeftNarrowest", "5"),
+            ],
+            "0",
+        )?,
+        u8::from(head.auto_fill_check).to_string(),
+        u8::from(head.customizable).to_string(),
+        u8::from(head.enabled).to_string(),
+        "0".to_string(),
+        root_code(
+            head.command_bar_location,
+            &[("None", "0"), ("Auto", "1"), ("Top", "2"), ("Bottom", "3")],
+            "1",
+        )?,
+    ];
+    Some(members.join(","))
+}
+
 /// What a form says about itself after its children -- the root record's tail.
 ///
 /// The tail opens with two empty strings and an optional navigator group, and
@@ -1559,18 +1672,18 @@ pub(crate) fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
 }
 
 pub(crate) struct NativeRootLayout<'a> {
-    /// Slot 9, which is `1` on a form that names no title and `0` on one that
-    /// does.
-    pub(crate) auto_title: bool,
-    /// Already formatted -- see [`format_russian_title`].
-    pub(crate) title: &'a str,
-    /// Slot 17.
-    pub(crate) seventeenth: u32,
-    /// Slot 19: the form's own event bindings, or `{0,1,0}` when it has none.
+    /// The first 18 members, from [`format_root_head`].
+    pub(crate) head: &'a str,
+    /// The keyed property bag: a count, then that many `(key, value)` pairs.
+    /// Its shape holds in all 12 488 records of the corpus that split, and
+    /// exactly four members follow it -- the events, the command set, the
+    /// command bar's flag and the bar.
+    pub(crate) properties: &'a [(&'a str, String)],
+    /// The form's own event bindings, or `{0,1,0}` when it has none.
     pub(crate) events: &'a str,
-    /// Slot 20: the root `<CommandSet>`, `{0}` when the form excludes nothing.
+    /// The root `<CommandSet>`, `{0}` when the form excludes nothing.
     pub(crate) command_set: &'a str,
-    /// Slot 22.
+    /// The auto command bar's record.
     pub(crate) command_bar: &'a str,
     /// The form's own child items, as `(kind uuid, record)` -- the same
     /// encoding a group uses, with the count first. See [`child_kind_uuid`].
@@ -1588,12 +1701,18 @@ pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
         children.push(',');
         children.push_str(record);
     }
+    let mut properties = String::new();
+    for (key, value) in root.properties {
+        properties.push(',');
+        properties.push_str(key);
+        properties.push(',');
+        properties.push_str(value);
+    }
     format!(
-        "{{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,{auto_title},{title},0,0,1,1,1,\
-         0,{seventeenth},0,{events},{command_set},1,{command_bar},{count}{children},{tail}}}",
-        auto_title = u8::from(root.auto_title),
-        title = root.title,
-        seventeenth = root.seventeenth,
+        "{{{head},{bag}{properties},{events},{command_set},1,{command_bar},\
+         {count}{children},{tail}}}",
+        head = root.head,
+        bag = root.properties.len(),
         events = root.events,
         command_set = root.command_set,
         command_bar = root.command_bar,
@@ -2161,9 +2280,13 @@ mod tests {
 
         assert_eq!(
             format_root_layout(&NativeRootLayout {
-                auto_title: false,
-                title: "{1,2,{\"ru\",\"Заявление на подключение\"},{\"en\",\"Заявление на подключение\"}}",
-                seventeenth: 1,
+                head: &format_root_head(&NativeRootHead {
+                    auto_title: false,
+                    title: "{1,2,{\"ru\",\"Заявление на подключение\"},{\"en\",\"Заявление на подключение\"}}",
+                    ..NativeRootHead::default()
+                })
+                .expect("a head"),
+                properties: &[],
                 events: "{0,1,0}",
                 command_set: "{0}",
                 command_bar: &bar,
@@ -2175,9 +2298,12 @@ mod tests {
 
         assert_eq!(
             format_root_layout(&NativeRootLayout {
-                auto_title: true,
-                title: "{1,0}",
-                seventeenth: 0,
+                head: &format_root_head(&NativeRootHead {
+                    command_bar_location: Some("None"),
+                    ..NativeRootHead::default()
+                })
+                .expect("a head"),
+                properties: &[],
                 events: "{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1}",
                 command_set: "{0}",
                 command_bar: &bar,
@@ -2216,9 +2342,12 @@ mod tests {
             extended_tooltip_name: "AT",
         });
         let root = format_root_layout(&NativeRootLayout {
-            auto_title: true,
-            title: "{1,0}",
-            seventeenth: 0,
+            head: &format_root_head(&NativeRootHead {
+                command_bar_location: Some("None"),
+                ..NativeRootHead::default()
+            })
+            .expect("a head"),
+            properties: &[],
             events: "{0,1,0}",
             command_set: "{0}",
             command_bar: &bar,
@@ -2492,6 +2621,73 @@ mod tests {
         assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
         assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
         assert_eq!(format_native_color(Some("#12345"), none), None);
+    }
+
+    /// The root record's head, with the bytes ERP УХ stores.
+    #[test]
+    fn writes_the_root_heads_the_platform_stores() {
+        // The smallest form of the corpus turns AutoTitle off and names
+        // nothing else, so every other member takes its absent value.
+        assert_eq!(
+            format_root_head(&NativeRootHead {
+                auto_title: false,
+                ..NativeRootHead::default()
+            })
+            .as_deref(),
+            Some("50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,0},0,0,1,1,1,0,1")
+        );
+
+        // A form that opens locking its owner, sizes itself, and puts its
+        // command bar at the bottom.
+        assert_eq!(
+            format_root_head(&NativeRootHead {
+                window_opening_mode: Some("LockOwnerWindow"),
+                width: Some("45"),
+                height: Some("30"),
+                command_bar_location: Some("Bottom"),
+                ..NativeRootHead::default()
+            })
+            .as_deref(),
+            Some("50,0,1,45,30,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,3")
+        );
+
+        // Every switch the head carries, off, and the three settings it reads
+        // as codes.
+        assert_eq!(
+            format_root_head(&NativeRootHead {
+                enter_key_behavior: Some("DefaultButton"),
+                save_data_in_settings: Some("UseList"),
+                auto_save_data_in_settings: Some("Use"),
+                group: Some("Horizontal"),
+                child_items_width: Some("LeftNarrowest"),
+                auto_fill_check: false,
+                customizable: false,
+                enabled: false,
+                command_bar_location: Some("None"),
+                ..NativeRootHead::default()
+            })
+            .as_deref(),
+            Some("50,0,0,0,0,0,1,1,00000000-0000-0000-0000-000000000000,1,{1,0},1,5,0,0,0,0,0")
+        );
+
+        // A form that names a settings storage is refused: the head would have
+        // to carry that object's uuid, which only the configuration knows.
+        assert_eq!(
+            format_root_head(&NativeRootHead {
+                settings_storage: Some("SettingsStorage.Общие"),
+                ..NativeRootHead::default()
+            }),
+            None
+        );
+
+        // So is a spelling the corpus never showed.
+        assert_eq!(
+            format_root_head(&NativeRootHead {
+                command_bar_location: Some("Nowhere"),
+                ..NativeRootHead::default()
+            }),
+            None
+        );
     }
 
     /// The root record's tail, with the bytes ERP УХ stores.
