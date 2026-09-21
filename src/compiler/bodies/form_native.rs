@@ -455,66 +455,284 @@ pub(crate) fn format_field_context_menu(id: &str, name: &str) -> String {
     )
 }
 
-/// What a field record needs from the source beyond its own name.
+/// A field, as the body stores it.
+///
+/// Member 4 is the same flag a container carries: when it is 1 a
+/// functional-options block follows before the kind. With that block lifted
+/// the record is **fixed-length, 59 members**, in 69 521 of the 69 526 input
+/// fields of ERP УХ.
+///
+/// Measured over those 69 521: **69 456 rebuild byte for byte (99.91%)** once
+/// the members that name a configuration object come from the caller -- the
+/// id, the name, the titles, the data paths, the pictures, the colours, the
+/// font, the payload, the events, the context menu and the extended tooltip.
 pub(crate) struct NativeFieldItem<'a> {
     pub(crate) id: &'a str,
     /// Which field this is: 1 a label, 2 an input, 3 a check box, 4 a picture,
     /// 5 a radio-button group, 6 a spreadsheet document, 7 an HTML document,
-    /// 9 an indicator, 15 a formatted document. Censused over the `{37,…}`
-    /// records of the first 800 ERP УХ form bodies: all of them share this one
-    /// frame of 59 members -- 60 when the item carries the visibility tuple --
-    /// and differ only in this slot, in `after_name`, in the data path and in
-    /// the payload.
+    /// 9 an indicator, 15 a formatted document.
     pub(crate) kind: u8,
+    /// The functional-options block, when the field restricts itself.
+    pub(crate) functional_options: Option<&'a str>,
     pub(crate) name: &'a str,
-    /// Whether the item carries the common `UserVisible` tuple before its
-    /// kind, as 527 of the 2 836 kind-2 records do.
-    pub(crate) visible_tuple: bool,
-    /// The two members that follow the name -- `1,0` for a label or an input,
-    /// `4,0` for a check box, `0,0` for a spreadsheet document.
-    pub(crate) after_name: &'a str,
+    /// `<TitleLocation>`: `None`, `Left`, `Top`, `Right` or `Bottom`.
+    pub(crate) title_location: Option<&'a str>,
+    /// `<TitleHeight>`.
+    pub(crate) title_height: Option<&'a str>,
+    /// Already formatted -- the title and the tooltip title.
+    pub(crate) title: &'a str,
+    pub(crate) tooltip_title: &'a str,
     /// The binding the item's `<DataPath>` resolves to, already formatted --
     /// `{1,{2}}` for a form attribute, `{2,{1},{3}}` for a dynamic-list column.
     pub(crate) data_path: &'a str,
+    /// `<FooterDataPath>`, `{0}` when the field has none.
+    pub(crate) footer_data_path: &'a str,
+    pub(crate) enabled: bool,
+    pub(crate) read_only: bool,
+    /// `<SkipOnInput>`: 2 when the field names neither value.
+    pub(crate) skip_on_input: Option<bool>,
+    pub(crate) default_item: bool,
+    /// `<WarningOnEditRepresentation>`: `Show` or `DontShow`.
+    pub(crate) warning_on_edit: Option<&'a str>,
+    /// The header's and the footer's titles, already formatted.
+    pub(crate) header_title: &'a str,
+    pub(crate) footer_title: &'a str,
+    pub(crate) show_in_header: bool,
+    pub(crate) show_in_footer: bool,
+    pub(crate) cell_hyperlink: bool,
+    /// `<HorizontalAlign>`, `<HeaderHorizontalAlign>`, `<FooterHorizontalAlign>`
+    /// and `<VerticalAlign>`.
+    pub(crate) horizontal_align: Option<&'a str>,
+    pub(crate) header_horizontal_align: Option<&'a str>,
+    pub(crate) footer_horizontal_align: Option<&'a str>,
+    pub(crate) vertical_align: Option<&'a str>,
+    /// `<EditMode>`: `Directly`, `EnterOnInput` or `Enter`.
+    pub(crate) edit_mode: Option<&'a str>,
+    pub(crate) auto_cell_height: bool,
+    /// The header's and footer's pictures, already formatted.
+    pub(crate) header_picture: &'a str,
+    pub(crate) footer_picture: &'a str,
+    /// The five appearance blocks and two fonts the field carries, already
+    /// formatted -- see [`format_native_color`] and [`format_native_font`] --
+    /// and last the block that closes the field's formats, `{0}` when it
+    /// names none.
+    pub(crate) appearance: [&'a str; 7],
+    /// The picture index tuple, `{0,0,0}` when the field names none.
+    pub(crate) picture_index: &'a str,
     /// The tuple that carries this kind's own properties: `{11,…}` for a
     /// label, `{36,…}` for an input, `{13,…}` for a spreadsheet document,
     /// `{10,…}` for a picture, and so on -- one structure per kind.
     pub(crate) payload: &'a str,
-    pub(crate) context_menu_id: &'a str,
-    pub(crate) context_menu_name: &'a str,
-    pub(crate) extended_tooltip_id: &'a str,
-    pub(crate) extended_tooltip_name: &'a str,
+    /// The field's own event bindings -- see [`format_native_events`].
+    pub(crate) events: &'a str,
+    pub(crate) context_menu: &'a str,
+    /// `<Visible>`, on unless the field turns it off.
+    pub(crate) visible: bool,
+    /// The two format patterns and the two format strings.
+    pub(crate) formats: [&'a str; 2],
+    pub(crate) format_strings: [&'a str; 2],
+    /// `<FixingInTable>`: `Left` or `Right`.
+    pub(crate) fixing_in_table: Option<&'a str>,
+    /// `<ToolTipRepresentation>`.
+    pub(crate) tooltip_representation: Option<&'a str>,
+    pub(crate) extended_tooltip: &'a str,
+    /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub(crate) group_vertical_align: Option<&'a str>,
 }
 
-/// The `{37,…}` record of a field of any kind that carries only its name, its
-/// data path, its kind payload and its two default children.
-///
-/// Measured against `Documents/Лот/Forms/ВыигранныеЛоты`, whose three label
-/// fields and one input field are exactly this shape, and against the census
-/// of every field kind in the corpus.
-pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> String {
-    let visibility = if item.visible_tuple {
-        "1,{0,{0,{\"B\",1},0}}"
-    } else {
-        "0"
+impl Default for NativeFieldItem<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            kind: 2,
+            functional_options: None,
+            name: "",
+            title_location: None,
+            title_height: None,
+            title: "{1,0}",
+            tooltip_title: "{1,0}",
+            data_path: "{0}",
+            footer_data_path: "{0}",
+            enabled: true,
+            read_only: false,
+            skip_on_input: None,
+            default_item: false,
+            warning_on_edit: None,
+            header_title: "{1,0}",
+            footer_title: "{1,0}",
+            show_in_header: true,
+            show_in_footer: true,
+            cell_hyperlink: false,
+            horizontal_align: None,
+            header_horizontal_align: None,
+            footer_horizontal_align: None,
+            vertical_align: None,
+            edit_mode: None,
+            auto_cell_height: false,
+            header_picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            footer_picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            appearance: [
+                "{3,4,{0}}",
+                "{7,3,0,1,100}",
+                "{3,4,{0}}",
+                "{3,4,{0}}",
+                "{3,4,{0}}",
+                "{7,3,0,1,100}",
+                "{0}",
+            ],
+            picture_index: "{0,0,0}",
+            payload: "",
+            events: "{0,1,0}",
+            context_menu: "",
+            visible: true,
+            formats: ["{\"Pattern\"}", "{\"Pattern\"}"],
+            format_strings: ["\"\"", "\"\""],
+            fixing_in_table: None,
+            tooltip_representation: None,
+            extended_tooltip: "",
+            group_horizontal_align: None,
+            group_vertical_align: None,
+        }
+    }
+}
+
+/// How a tri-state boolean reads: 2 when the item names neither value.
+fn native_tristate(value: Option<bool>) -> &'static str {
+    match value {
+        None => "2",
+        Some(true) => "1",
+        Some(false) => "0",
+    }
+}
+
+/// The `{37,…}` record of a field.
+pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
+    let options = match item.functional_options {
+        Some(block) => format!("1,{block}"),
+        None => "0".to_string(),
     };
-    format!(
-        "{{37,{{{id},{ns}}},0,0,{visibility},{kind},{name},{after_name},{{1,0}},{{1,0}},\
-         {data_path},{{0}},1,0,2,0,2,{{1,0}},{{1,0}},1,1,0,3,0,3,1,3,0,\
-         {{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{{3,4,{{0}}}},\
-         {{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,0,0}},1,\
-         {payload},{{0,1,0}},1,\
-         {context_menu},1,{{\"Pattern\"}},{{\"Pattern\"}},\"\",\"\",{{0}},0,0,1,{tooltip},3,3,0,0,0,0}}",
+    let title_location = root_code(
+        item.title_location,
+        &[
+            ("None", "0"),
+            ("Auto", "1"),
+            ("Left", "2"),
+            ("Top", "3"),
+            ("Right", "4"),
+            ("Bottom", "5"),
+        ],
+        "1",
+    )?;
+    let horizontal = root_code(
+        item.horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let header_horizontal = root_code(
+        item.header_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2"), ("Auto", "3")],
+        "0",
+    )?;
+    let footer_horizontal = root_code(
+        item.footer_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let vertical = root_code(
+        item.vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    let edit_mode = root_code(
+        item.edit_mode,
+        &[("Directly", "0"), ("Enter", "1"), ("EnterOnInput", "2")],
+        "1",
+    )?;
+    let warning = root_code(
+        item.warning_on_edit,
+        &[("Show", "0"), ("DontShow", "1")],
+        "2",
+    )?;
+    let fixing = root_code(
+        item.fixing_in_table,
+        &[("None", "0"), ("Left", "1"), ("Right", "2")],
+        "0",
+    )?;
+    let tooltip_representation = root_code(
+        item.tooltip_representation,
+        &[
+            ("Auto", "0"),
+            ("None", "1"),
+            ("Balloon", "2"),
+            ("Button", "3"),
+            ("ShowAuto", "4"),
+            ("ShowTop", "5"),
+            ("ShowLeft", "6"),
+            ("ShowBottom", "7"),
+            ("ShowRight", "8"),
+        ],
+        "0",
+    )?;
+    let group_horizontal = root_code(
+        item.group_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let group_vertical = root_code(
+        item.group_vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    Some(format!(
+        "{{37,{{{id},{ns}}},0,0,{options},{kind},{name},{title_location},{title_height},\
+         {title},{tooltip_title},{data_path},{footer_data_path},{enabled},{read_only},\
+         {skip_on_input},{default_item},{warning},{header_title},{footer_title},\
+         {show_in_header},{show_in_footer},{cell_hyperlink},{horizontal},{header_horizontal},\
+         {footer_horizontal},{edit_mode},{vertical},{auto_cell_height},{header_picture},\
+         {footer_picture},{a0},{a1},{a2},{a3},{a4},{a5},{picture_index},1,{payload},{events},1,\
+         {context_menu},{visible},{format_one},{format_two},{string_one},{string_two},\
+         {appearance_tail},{fixing},{tooltip_representation},1,{extended_tooltip},\
+         {group_horizontal},{group_vertical},0,0,0,0}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = item.kind,
         name = quoted(item.name),
-        after_name = item.after_name,
+        title_height = item.title_height.unwrap_or("0"),
+        title = item.title,
+        tooltip_title = item.tooltip_title,
         data_path = item.data_path,
+        footer_data_path = item.footer_data_path,
+        enabled = u8::from(item.enabled),
+        read_only = u8::from(item.read_only),
+        skip_on_input = native_tristate(item.skip_on_input),
+        default_item = u8::from(item.default_item),
+        header_title = item.header_title,
+        footer_title = item.footer_title,
+        show_in_header = u8::from(item.show_in_header),
+        show_in_footer = u8::from(item.show_in_footer),
+        cell_hyperlink = u8::from(item.cell_hyperlink),
+        auto_cell_height = u8::from(item.auto_cell_height),
+        header_picture = item.header_picture,
+        footer_picture = item.footer_picture,
+        a0 = item.appearance[0],
+        a1 = item.appearance[1],
+        a2 = item.appearance[2],
+        a3 = item.appearance[3],
+        a4 = item.appearance[4],
+        a5 = item.appearance[5],
+        appearance_tail = item.appearance[6],
+        picture_index = item.picture_index,
         payload = item.payload,
-        context_menu = format_field_context_menu(item.context_menu_id, item.context_menu_name),
-        tooltip = format_extended_tooltip(item.extended_tooltip_id, item.extended_tooltip_name),
-    )
+        events = item.events,
+        context_menu = item.context_menu,
+        visible = u8::from(item.visible),
+        format_one = item.formats[0],
+        format_two = item.formats[1],
+        string_one = item.format_strings[0],
+        string_two = item.format_strings[1],
+        extended_tooltip = item.extended_tooltip,
+    ))
 }
 
 /// The `{11,…}` payload of a label or input field that carries no appearance
@@ -2113,15 +2331,14 @@ mod tests {
             id: "20",
             kind: 1,
             name: "ПериодЗакупок",
-            visible_tuple: true,
-            after_name: "1,0",
+            functional_options: Some("{0,{0,{\"B\",1},0}}"),
             data_path: "{2,{1},{3}}",
             payload: &format_plain_field_payload(false),
-            context_menu_id: "21",
-            context_menu_name: "ПериодЗакупокКонтекстноеМеню",
-            extended_tooltip_id: "22",
-            extended_tooltip_name: "ПериодЗакупокРасширеннаяПодсказка",
-        });
+            context_menu: &format_field_context_menu("21", "ПериодЗакупокКонтекстноеМеню"),
+            extended_tooltip: &format_extended_tooltip("22", "ПериодЗакупокРасширеннаяПодсказка"),
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
         assert_eq!(
             period,
             "{37,{20,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},1,\"ПериодЗакупок\",1,0,{1,0},{1,0},{2,{1},{3}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,{4,0,{0},\"\",-1,-1,1,0,\"\"},{4,0,{0},\"\",-1,-1,1,0,\"\"},{3,4,{0}},{7,3,0,1,100},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{11,0,0,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0},{0,1,0},1,{22,{21,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,\"ПериодЗакупокКонтекстноеМеню\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0},1,{\"Pattern\"},{\"Pattern\"},\"\",\"\",{0},0,0,1,{12,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ПериодЗакупокРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},3,3,0,0,0,0}"
@@ -2131,15 +2348,14 @@ mod tests {
             id: "46",
             kind: 1,
             name: "АнкетаПоставщика",
-            visible_tuple: true,
-            after_name: "1,0",
+            functional_options: Some("{0,{0,{\"B\",1},0}}"),
             data_path: "{1,{2}}",
             payload: &format_plain_field_payload(true),
-            context_menu_id: "47",
-            context_menu_name: "АнкетаПоставщикаКонтекстноеМеню",
-            extended_tooltip_id: "48",
-            extended_tooltip_name: "АнкетаПоставщикаРасширеннаяПодсказка",
-        });
+            context_menu: &format_field_context_menu("47", "АнкетаПоставщикаКонтекстноеМеню"),
+            extended_tooltip: &format_extended_tooltip("48", "АнкетаПоставщикаРасширеннаяПодсказка"),
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
         assert!(
             supplier.contains("{11,0,0,2,2,2,{1,0},1,"),
             "an editable field carries 1 in the slot a label carries 0"
@@ -2156,15 +2372,14 @@ mod tests {
             id: "9",
             kind: 6,
             name: "Результат",
-            visible_tuple: false,
-            after_name: "0,0",
+            title_location: Some("None"),
             data_path: "{1,{3}}",
             payload: "{13,100,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{0,1,0},0,1,0,0,1,0,0,0,0,1,1,1,2}",
-            context_menu_id: "10",
-            context_menu_name: "РезультатКонтекстноеМеню",
-            extended_tooltip_id: "12",
-            extended_tooltip_name: "РезультатРасширеннаяПодсказка",
-        });
+            context_menu: &format_field_context_menu("10", "РезультатКонтекстноеМеню"),
+            extended_tooltip: &format_extended_tooltip("12", "РезультатРасширеннаяПодсказка"),
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
         assert!(result.starts_with(
             "{37,{9,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,6,\"Результат\",0,0,{1,0},{1,0},{1,{3}},{0},1,0,2,"
         ));
@@ -2335,6 +2550,81 @@ mod tests {
             }
             assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
         }
+    }
+
+    /// What a field says about itself, read off the 69 521 `{37,…}` input
+    /// field records of ERP УХ.
+    #[test]
+    fn writes_what_a_field_says_about_itself() {
+        // A field that says nothing takes every absent value: the title
+        // location is 1, the two tri-states are 2, the aligns are 3 except the
+        // header's, which is 0.
+        let plain = format_field_item(&NativeFieldItem {
+            id: "4",
+            name: "Поле",
+            data_path: "{1,{2}}",
+            payload: "{36,{3,0}}",
+            context_menu: "{22,{5,x},0}",
+            extended_tooltip: "{12,{6,x},0}",
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
+        assert!(plain.starts_with(
+            "{37,{4,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"Поле\",1,0,{1,0},{1,0},{1,{2}},{0},1,0,2,0,2,{1,0},{1,0},1,1,0,3,0,3,1,3,0,"
+        ));
+        assert!(plain.ends_with(",1,{12,{6,x},0},3,3,0,0,0,0}"));
+
+        // Every member the source decides, spoken.
+        let spoken = format_field_item(&NativeFieldItem {
+            id: "4",
+            name: "Поле",
+            title_location: Some("Right"),
+            title_height: Some("2"),
+            data_path: "{1,{2}}",
+            enabled: false,
+            read_only: true,
+            skip_on_input: Some(true),
+            default_item: true,
+            warning_on_edit: Some("DontShow"),
+            show_in_header: false,
+            show_in_footer: false,
+            cell_hyperlink: true,
+            horizontal_align: Some("Right"),
+            header_horizontal_align: Some("Center"),
+            footer_horizontal_align: Some("Left"),
+            vertical_align: Some("Bottom"),
+            edit_mode: Some("EnterOnInput"),
+            auto_cell_height: true,
+            payload: "{36,{3,0}}",
+            context_menu: "{22,{5,x},0}",
+            visible: false,
+            fixing_in_table: Some("Left"),
+            tooltip_representation: Some("ShowRight"),
+            extended_tooltip: "{12,{6,x},0}",
+            group_horizontal_align: Some("Center"),
+            group_vertical_align: Some("Top"),
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
+        assert!(spoken.contains(",\"Поле\",4,2,{1,0},{1,0},{1,{2}},{0},0,1,1,1,1,{1,0},{1,0},0,0,1,2,1,0,2,2,1,"));
+        assert!(spoken.contains(",{0},1,8,1,{12,{6,x},0},1,0,0,0,0,0}"));
+        assert!(spoken.contains(",{22,{5,x},0},0,"));
+
+        // A spelling the corpus never showed is refused rather than defaulted.
+        assert_eq!(
+            format_field_item(&NativeFieldItem {
+                title_location: Some("Inline"),
+                ..NativeFieldItem::default()
+            }),
+            None
+        );
+        assert_eq!(
+            format_field_item(&NativeFieldItem {
+                fixing_in_table: Some("Both"),
+                ..NativeFieldItem::default()
+            }),
+            None
+        );
     }
 
     /// What a container says about itself, read off the 9 357 `{22,…}` records
@@ -2716,15 +3006,13 @@ mod tests {
             id: "1",
             kind: 2,
             name: "A",
-            visible_tuple: false,
-            after_name: "1,0",
             data_path: "{1,{2}}",
             payload: &format_plain_field_payload(true),
-            context_menu_id: "2",
-            context_menu_name: "AM",
-            extended_tooltip_id: "3",
-            extended_tooltip_name: "AT",
-        });
+            context_menu: &format_field_context_menu("2", "AM"),
+            extended_tooltip: &format_extended_tooltip("3", "AT"),
+            ..NativeFieldItem::default()
+        })
+        .expect("a field record");
         let root = format_root_layout(&NativeRootLayout {
             head: &format_root_head(&NativeRootHead {
                 command_bar_location: Some("None"),
