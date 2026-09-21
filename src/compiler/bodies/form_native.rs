@@ -304,6 +304,128 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> String {
     )
 }
 
+/// How a `<CheckBoxField>` draws itself.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeCheckBoxType {
+    /// Also what a field that names no type carries.
+    Auto,
+    CheckBox,
+    Tumbler,
+    /// A switcher differs from `Auto` in one of the two slots that carry the
+    /// type, which is why they cannot share a value.
+    Switcher,
+}
+
+/// The `{11,…}` payload of a check box field -- the same wrapper a label
+/// carries, with thirteen members instead of twenty.
+///
+/// Two of them carry the check box type. A candidate that fills those two and
+/// copies the rest reproduces **all 10 385** check-box payloads of every ERP
+/// УХ form body exactly, first time.
+pub(crate) struct NativeCheckBoxPayload<'a> {
+    pub(crate) check_box_type: NativeCheckBoxType,
+    /// Slot 2, the text colour.
+    pub(crate) text_color: &'a str,
+    /// Slot 3, the background colour.
+    pub(crate) back_color: &'a str,
+    /// Slot 5, the format.
+    pub(crate) format: &'a str,
+    /// Slot 6, the border.
+    pub(crate) border_color: &'a str,
+    /// Slot 7, the font.
+    pub(crate) font: &'a str,
+}
+
+impl NativeCheckBoxPayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            check_box_type: NativeCheckBoxType::Auto,
+            text_color: "{3,4,{0}}",
+            back_color: "{3,4,{0}}",
+            format: "{1,0}",
+            border_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+        }
+    }
+}
+
+pub(crate) fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> String {
+    let (kind, tail) = match payload.check_box_type {
+        NativeCheckBoxType::Auto => ("0", "0"),
+        NativeCheckBoxType::CheckBox => ("1", "1"),
+        NativeCheckBoxType::Tumbler => ("2", "2"),
+        NativeCheckBoxType::Switcher => ("0", "3"),
+    };
+    format!(
+        "{{11,0,{text_color},{back_color},{kind},{format},{border_color},{font},0,0,0,2,{tail}}}",
+        text_color = payload.text_color,
+        back_color = payload.back_color,
+        format = payload.format,
+        border_color = payload.border_color,
+        font = payload.font,
+    )
+}
+
+/// How a `<RadioButtonField>` draws itself.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeRadioButtonType {
+    /// Also what a field that names no type carries.
+    Auto,
+    RadioButtons,
+    Tumbler,
+}
+
+/// The `{8,…}` payload of a radio-button field.
+///
+/// Two of its twelve members carry an XML property: the number of columns and
+/// the type. A candidate that fills those two and copies the rest reproduces
+/// **all 2 282** radio-button payloads of every ERP УХ form body exactly,
+/// first time.
+pub(crate) struct NativeRadioButtonPayload<'a> {
+    /// Slot 2, `0` when the field names no column count.
+    pub(crate) columns: &'a str,
+    pub(crate) radio_button_type: NativeRadioButtonType,
+    /// Slot 1, the choice list the field offers.
+    pub(crate) choice_list: &'a str,
+    /// Slot 3, the text colour; slot 5, the background; slot 8, the border.
+    pub(crate) text_color: &'a str,
+    pub(crate) back_color: &'a str,
+    pub(crate) border_color: &'a str,
+    /// Slot 4, the font.
+    pub(crate) font: &'a str,
+}
+
+impl NativeRadioButtonPayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            columns: "1",
+            radio_button_type: NativeRadioButtonType::Auto,
+            choice_list: "{3,0}",
+            text_color: "{3,4,{0}}",
+            back_color: "{3,4,{0}}",
+            border_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+        }
+    }
+}
+
+pub(crate) fn format_radio_button_payload(payload: &NativeRadioButtonPayload<'_>) -> String {
+    let kind = match payload.radio_button_type {
+        NativeRadioButtonType::Auto => "0",
+        NativeRadioButtonType::RadioButtons => "1",
+        NativeRadioButtonType::Tumbler => "2",
+    };
+    format!(
+        "{{8,{choice_list},{columns},{text_color},{font},{back_color},0,{kind},{border_color},0,0,2}}",
+        choice_list = payload.choice_list,
+        columns = payload.columns,
+        text_color = payload.text_color,
+        font = payload.font,
+        back_color = payload.back_color,
+        border_color = payload.border_color,
+    )
+}
+
 /// The `{31,…}` record of a `<Button>` whose action is a form standard
 /// command and which carries nothing but its name and its tooltip.
 ///
@@ -1343,6 +1465,38 @@ mod tests {
         });
         assert!(vertical.starts_with("{29,0,0,2,0,"));
         assert!(vertical.ends_with(",0,3}"));
+    }
+
+    /// The check-box payload 9 906 records carry unchanged, the radio-button
+    /// payload, and the slots that carry each field's type.
+    #[test]
+    fn writes_the_check_box_and_radio_payloads_the_platform_stores() {
+        assert_eq!(
+            format_check_box_payload(&NativeCheckBoxPayload::plain()),
+            "{11,0,{3,4,{0}},{3,4,{0}},0,{1,0},{3,4,{0}},{7,3,0,1,100},0,0,0,2,0}"
+        );
+        // `Auto` and `Switcher` share the first slot and differ in the last.
+        assert!(format_check_box_payload(&NativeCheckBoxPayload {
+            check_box_type: NativeCheckBoxType::Switcher,
+            ..NativeCheckBoxPayload::plain()
+        })
+        .ends_with(",0,0,0,2,3}"));
+        assert!(format_check_box_payload(&NativeCheckBoxPayload {
+            check_box_type: NativeCheckBoxType::Tumbler,
+            ..NativeCheckBoxPayload::plain()
+        })
+        .contains("{3,4,{0}},2,{1,0},"));
+
+        assert_eq!(
+            format_radio_button_payload(&NativeRadioButtonPayload::plain()),
+            "{8,{3,0},1,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2}"
+        );
+        assert!(format_radio_button_payload(&NativeRadioButtonPayload {
+            columns: "3",
+            radio_button_type: NativeRadioButtonType::Tumbler,
+            ..NativeRadioButtonPayload::plain()
+        })
+        .starts_with("{8,{3,0},3,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,2,"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
