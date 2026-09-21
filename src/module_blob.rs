@@ -165,6 +165,47 @@ struct FormXmlBodyProperties {
     command_interface_items: Vec<FormXmlCommandInterfaceItem>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
+    /// `<MobileDeviceCommandBarContent>`, `None` when the form does not carry
+    /// the element -- which is 13 443 of the 13 603 forms of both corpora.
+    mobile_device_command_bar_content: Option<Vec<FormXmlMobileCommandBarItem>>,
+}
+
+/// One `<xr:Item>` of `<MobileDeviceCommandBarContent>`.
+///
+/// All 214 items of both corpora spell `<xr:Presentation/>` empty and
+/// `<xr:CheckState>0</xr:CheckState>`; the tuple carries exactly two members
+/// per item, so neither reaches a member of the record and a form that spells
+/// either otherwise is refused rather than written with the measured shape.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlMobileCommandBarItem {
+    presentation: Option<String>,
+    check_state: Option<String>,
+    /// `<xr:Value>` -- the name of a form item, or `None` for `<xr:Value/>`.
+    value: Option<String>,
+}
+
+/// One `<xr:Item>` of a field's `<ChoiceList>`.
+///
+/// The outer `<xr:Presentation>` and `<xr:CheckState>` are empty and `0` in
+/// all 4 769 items of both corpora, and no item carries a `<Picture>`, so the
+/// members those would feed are unmeasured and an item that spells one is
+/// refused.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlChoiceListItem {
+    /// The outer `<xr:Presentation>`.
+    presentation: Option<String>,
+    /// The outer `<xr:CheckState>`.
+    check_state: Option<String>,
+    /// The `xsi:type` of the outer `<xr:Value>` -- always
+    /// `FormChoiceListDesTimeValue`.
+    value_type: Option<String>,
+    /// The inner `<Presentation>`, the item's title.
+    title: Vec<LocalizedString>,
+    /// The `xsi:type` of the inner `<Value>`, and its text.
+    literal_type: Option<String>,
+    literal: Option<String>,
+    /// Anything inside the item the writer has not measured.
+    unwritable: Vec<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -230,6 +271,10 @@ struct FormXmlAttribute {
     /// directly.
     saved_data: Option<bool>,
     fill_check: Option<String>,
+    /// `<Save>`, as the list of `<Field>` paths it spells, in XML order.
+    /// `None` when the attribute does not carry the element -- which is
+    /// 138 968 of the 141 723 attributes of both corpora.
+    save: Option<Vec<String>>,
     /// The parts of an attribute that name configuration objects, and so
     /// cannot be written from the source alone. Naming any of them refuses
     /// the form.
@@ -468,7 +513,13 @@ struct FormXmlChildItem {
     container_representation: Option<String>,
     picture_present: bool,
     font_present: bool,
+    /// `<Font>`'s own XML attributes, when the item names one. Read by the
+    /// writers that can place a font; the flag above still says whether the
+    /// element is there at all, for the items whose font slot is unmeasured.
+    font: Option<BTreeMap<String, String>>,
     choice_list_present: bool,
+    /// `<ChoiceList>`, `None` when the item does not carry the element.
+    choice_list: Option<Vec<FormXmlChoiceListItem>>,
     row_filter_present: bool,
     /// The `DisplayImportance` XML attribute a table addition may carry.
     display_importance: Option<String>,
@@ -966,6 +1017,34 @@ impl MetadataSourceContext {
             ));
         }
         Ok(properties.uuid)
+    }
+
+    /// The `<Item id="…">` a metadata object's `Ext/Predefined.xml` gives one
+    /// of its predefined items, by name.
+    ///
+    /// The tree nests -- a folder carries `<ChildItems>` -- and a name is
+    /// looked up over the whole tree, which is how a design-time reference
+    /// such as `Catalog.<X>.<Y>` resolves to the number the body stores.
+    fn resolve_predefined_item_id(&self, owner_reference: &str, item_name: &str) -> Result<String> {
+        let (prefix, folder) =
+            metadata_reference_source_folder(owner_reference).ok_or_else(|| {
+                anyhow!("unsupported predefined owner reference: {owner_reference}")
+            })?;
+        let owner_name = owner_reference
+            .strip_prefix(&format!("{prefix}."))
+            .ok_or_else(|| anyhow!("invalid predefined owner reference: {owner_reference}"))?;
+        let path = self
+            .source_root
+            .join(folder)
+            .join(owner_name)
+            .join("Ext")
+            .join("Predefined.xml");
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read Predefined XML {}", path.display()))?;
+        let items = parse_predefined_data_xml(&xml)?;
+        find_predefined_item_id(&items, item_name).ok_or_else(|| {
+            anyhow!("{owner_reference} declares no predefined item named {item_name}")
+        })
     }
 
     fn resolve_defined_type_type_id(&self, reference: &str) -> Result<String> {
@@ -6303,6 +6382,158 @@ fn collect_native_data_path_items<'a>(
     }
 }
 
+/// `<MobileDeviceCommandBarContent>` as the root trailer stores it.
+///
+/// An `<xr:Value>` names a form **item**, never a `<Command>`: in the ten
+/// forms of the two corpora where the two share a name, all ten store the
+/// item's id. The lookup therefore runs over the item tree -- which includes a
+/// table's own `<AutoCommandBar>` and a field's `<ExtendedTooltip>` -- and a
+/// name it does not answer refuses the form.
+fn native_mobile_device_command_bar_content(
+    properties: &FormXmlBodyProperties,
+    items: &BTreeMap<String, DataPathItem>,
+) -> Result<String> {
+    let Some(content) = properties.mobile_device_command_bar_content.as_deref() else {
+        return Ok("{50,0}".to_string());
+    };
+    if content.is_empty() {
+        return Err(anyhow!(
+            "an empty <MobileDeviceCommandBarContent> is not measured"
+        ));
+    }
+    let mut tooltips = BTreeMap::new();
+    for item in &properties.child_items {
+        if let Some(tooltip) = &item.extended_tooltip {
+            tooltips
+                .entry(tooltip.name.clone())
+                .or_insert_with(|| tooltip.id.clone());
+        }
+    }
+    let mut ids = Vec::with_capacity(content.len());
+    for item in content {
+        // All 214 items of both corpora spell the presentation empty and the
+        // check state `0`, and the record holds exactly two members each, so
+        // neither reaches it. A form that spells one otherwise is refused.
+        if item
+            .presentation
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        {
+            return Err(anyhow!(
+                "<MobileDeviceCommandBarContent> names a presentation"
+            ));
+        }
+        if item
+            .check_state
+            .as_deref()
+            .is_some_and(|value| !matches!(value, "" | "0"))
+        {
+            return Err(anyhow!("<MobileDeviceCommandBarContent> names a check state"));
+        }
+        let Some(name) = item
+            .value
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        else {
+            ids.push("0".to_string());
+            continue;
+        };
+        let found = items
+            .get(name)
+            .map(|item| item.id.clone())
+            .or_else(|| tooltips.get(name).cloned());
+        match found {
+            Some(id) => ids.push(id),
+            None => {
+                return Err(anyhow!(
+                    "<MobileDeviceCommandBarContent> names {name}, which is not a form item"
+                ));
+            }
+        }
+    }
+    Ok(
+        crate::compiler::bodies::form_native::format_mobile_device_command_bar_content(
+            &ids.iter().map(String::as_str).collect::<Vec<_>>(),
+        ),
+    )
+}
+
+/// Member 9 of a form attribute's record: its `<Save>`.
+///
+/// Each `<Field>` is a data path rooted at the attribute's own name, and the
+/// stored path is that path with its leading segment removed -- `{0}` for a
+/// field that is the attribute's own name, `{1,{0,<uuid>}}` for one that
+/// walks one step into the object the attribute is typed as.
+///
+/// Two things are refused rather than guessed:
+///
+/// * a `<Field>` that does not start with the attribute's name -- 19 entries
+///   of ERP УХ and none of BSP, each storing a one-segment path whose id the
+///   attribute's own type does not answer;
+/// * a segment that is not `{0,<uuid>}`, which is the numeric sub-field code
+///   of a builtin type such as `v8:StandardPeriod`. The code is an ordinal
+///   inside that type's own field list rather than a name-to-number table --
+///   `Variant` is `2` under one type and `0` under another -- so 88 ERP УХ
+///   entries and 0 BSP entries stay outside this writer.
+fn native_form_attribute_save(
+    attribute: &FormXmlAttribute,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<String> {
+    let Some(fields) = attribute.save.as_deref() else {
+        return Ok("{0,0}".to_string());
+    };
+    if fields.is_empty() {
+        return Err(anyhow!("an empty <Save> is not measured"));
+    }
+    let mut paths = Vec::with_capacity(fields.len());
+    for field in fields {
+        let field = field.trim();
+        if field == attribute.name {
+            paths.push("{0}".to_string());
+            continue;
+        }
+        if !field.starts_with(&format!("{}.", attribute.name)) {
+            return Err(anyhow!(
+                "<Save> names {field}, which is not rooted at the attribute"
+            ));
+        }
+        let resolved = data_paths
+            .resolve(field)
+            .ok_or_else(|| anyhow!("<Save> names {field}, which the writer cannot place"))?;
+        // `{<count>,<segment>…}`, the attribute's own segment first.
+        let ranges = scan_braced_fields(&resolved, 0)?;
+        let Some(tail) = ranges.get(2..) else {
+            return Err(anyhow!("<Save> names {field}, which resolved to no segment"));
+        };
+        let segments = tail
+            .iter()
+            .map(|range| resolved[range.clone()].trim().to_string())
+            .collect::<Vec<_>>();
+        if !segments.iter().all(|segment| {
+            form_attribute_save_segment_uuid(segment).is_some()
+        }) {
+            return Err(anyhow!(
+                "<Save> names {field}, whose sub-field code is not measured"
+            ));
+        }
+        paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
+    }
+    Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
+}
+
+/// The uuid of a resolved `<Save>` segment, when it is the `{0,<uuid>}` the
+/// measurement read -- the uuid of an attribute of the metadata object the
+/// form attribute is typed as.
+fn form_attribute_save_segment_uuid(segment: &str) -> Option<&str> {
+    let rest = segment.strip_prefix("{0,")?.strip_suffix('}')?;
+    (rest.len() == 36
+        && rest
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() || byte == b'-'))
+    .then_some(rest)
+}
+
 /// One child item, as the `(kind uuid, record)` pair its parent files it under.
 ///
 /// Fail-closed: a tag the writers have not measured, or a property whose
@@ -7285,6 +7516,193 @@ fn native_item_color(value: Option<&str>, source: Option<&MetadataSourceContext>
     })
 }
 
+/// A font a form item names, with the configuration's own style items
+/// resolved when the caller can reach them.
+fn native_item_font(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let attributes = item.font.clone().unwrap_or_default();
+    crate::compiler::bodies::form_native::format_native_font(
+        attributes.get("kind").map(String::as_str),
+        attributes.get("ref").map(String::as_str),
+        attributes
+            .keys()
+            .any(|key| !matches!(key.as_str(), "kind" | "ref")),
+        |name| {
+            source?
+                .resolve_style_item_uuid(&format!("StyleItem.{name}"))
+                .ok()
+        },
+    )
+    .ok_or_else(|| anyhow!("<{}> names a font the writer cannot place", item.tag))
+}
+
+/// The zero uuid, which a choice-list literal stores for both of its ids.
+const NATIVE_ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
+
+/// One predefined item's id, by name, over the whole nested tree.
+fn find_predefined_item_id(items: &[PredefinedDataXmlItem], name: &str) -> Option<String> {
+    for item in items {
+        if item.name == name {
+            return Some(item.id.clone());
+        }
+        if let Some(found) = find_predefined_item_id(&item.children, name) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Slot 1 of a field's payload: the `<ChoiceList>` it offers.
+fn native_choice_list(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(choices) = item.choice_list.as_deref() else {
+        return Ok("{3,0}".to_string());
+    };
+    let mut values = Vec::with_capacity(choices.len());
+    for choice in choices {
+        values.push(native_choice_list_value(choice, source)?);
+    }
+    Ok(crate::compiler::bodies::form_native::format_native_choice_list(&values))
+}
+
+/// One `<xr:Item>` of a `<ChoiceList>`, as the body stores its value.
+///
+/// Refused rather than guessed: an outer `<xr:Presentation>` with text and a
+/// non-zero `<xr:CheckState>`, which all 4 769 items of both corpora spell
+/// empty and `0` so the members they would feed are unmeasured; a
+/// `<Picture>`, which no item carries; and any `xsi:type` outside the four
+/// the measurement read.
+fn native_choice_list_value(
+    choice: &FormXmlChoiceListItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    if let Some(part) = choice.unwritable.first() {
+        return Err(anyhow!("a <ChoiceList> item names <{part}>"));
+    }
+    if choice
+        .presentation
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        return Err(anyhow!("a <ChoiceList> item names a presentation"));
+    }
+    if choice
+        .check_state
+        .as_deref()
+        .is_some_and(|value| !matches!(value, "" | "0"))
+    {
+        return Err(anyhow!("a <ChoiceList> item names a check state"));
+    }
+    if choice.value_type.as_deref() != Some("FormChoiceListDesTimeValue") {
+        return Err(anyhow!(
+            "a <ChoiceList> item spells a value the writer has not measured"
+        ));
+    }
+    let title = format_form_title_value(&choice.title);
+    let text = choice.literal.as_deref().unwrap_or("").trim();
+    match choice.literal_type.as_deref() {
+        // An empty `<Value/>` with no type at all -- four items of ERP УХ,
+        // each storing `{"U"}` with both ids zero.
+        None if text.is_empty() => Ok(native::format_native_choice_list_value(
+            false,
+            &native::NativeChoiceListLiteral::Undefined,
+            NATIVE_ZERO_UUID,
+            NATIVE_ZERO_UUID,
+            &title,
+        )),
+        Some("xs:decimal") if native_choice_list_number(text) => {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Number(text),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        Some("xs:string") => Ok(native::format_native_choice_list_value(
+            false,
+            &native::NativeChoiceListLiteral::Text(text),
+            NATIVE_ZERO_UUID,
+            NATIVE_ZERO_UUID,
+            &title,
+        )),
+        Some("ent:AccountType") => {
+            let ordinal = match text {
+                "Active" => 0,
+                "Passive" => 1,
+                "ActivePassive" => 2,
+                other => {
+                    return Err(anyhow!("a <ChoiceList> item names account type {other}"));
+                }
+            };
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::AccountType(ordinal),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        Some("xr:DesignTimeRef") => {
+            let (type_id, value_id) = native_choice_list_reference(text, source)?;
+            Ok(native::format_native_choice_list_value(
+                true,
+                &native::NativeChoiceListLiteral::Undefined,
+                &type_id,
+                &value_id,
+                &title,
+            ))
+        }
+        Some(other) => Err(anyhow!("a <ChoiceList> item is typed {other}")),
+        None => Err(anyhow!("a <ChoiceList> item has a value with no type")),
+    }
+}
+
+/// Whether an `xs:decimal` is spelled the way the corpus spells one, which is
+/// what the `{"N",…}` member holds verbatim.
+fn native_choice_list_number(text: &str) -> bool {
+    !text.is_empty()
+        && text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || byte == b'-' || byte == b'.')
+}
+
+/// The two uuids an `xr:DesignTimeRef` stores: the owner's Ref
+/// `<xr:TypeId>`, and the referenced value's own id.
+///
+/// Three shapes were measured, all of them keyed on the owner's kind and
+/// name: `Enum.<X>.EnumValue.<Y>` stores the `<EnumValue uuid>` of `Y`
+/// (1 166 items), `<Kind>.<X>.<Y>` naming a predefined item stores its
+/// `Ext/Predefined.xml` `<Item id>` (20), and `<Kind>.<X>.EmptyRef` stores
+/// the zero uuid (24). Anything else refuses the form.
+fn native_choice_list_reference(
+    reference: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<(String, String)> {
+    let source =
+        source.ok_or_else(|| anyhow!("a <ChoiceList> names {reference} with no source tree"))?;
+    let mut parts = reference.splitn(3, '.');
+    let (Some(kind), Some(name), Some(rest)) = (parts.next(), parts.next(), parts.next()) else {
+        return Err(anyhow!("a <ChoiceList> names {reference}, which is not an object"));
+    };
+    let type_id = source.resolve_metadata_type_id(&format!("{kind}Ref.{name}"))?;
+    let owner = format!("{kind}.{name}");
+    let value_id = match rest.split_once('.') {
+        Some(("EnumValue", value)) => source.resolve_metadata_child_uuid(&owner, "EnumValue", value)?,
+        Some(_) => {
+            return Err(anyhow!("a <ChoiceList> names {reference}, which is not measured"));
+        }
+        None if rest == "EmptyRef" => NATIVE_ZERO_UUID.to_string(),
+        None => source.resolve_predefined_item_id(&owner, rest)?,
+    };
+    Ok((type_id, value_id))
+}
+
 /// `<Group>` as the payload writers spell it.
 const fn native_group_spelling(group: FormXmlGroup) -> &'static str {
     match group {
@@ -7405,18 +7823,25 @@ fn native_field_payload(
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
         }
         "RadioButtonField" => {
-            if item.font_present || item.choice_list_present {
-                return Err(anyhow!("a radio button names a font or a choice list"));
-            }
+            // The font and the choice list used to refuse together, which
+            // put 114 BSP forms behind a condition none of them meets: not
+            // one radio button of that tree names a `<Font>`. They are two
+            // slots and two conditions -- `format_native_font` places the
+            // font it has measured and refuses the rest, and slot 1 is
+            // written from the list.
             let text_color = native_scalar_color(item, "TextColor", source)?;
             let back_color = native_scalar_color(item, "BackColor", source)?;
             let border_color = native_scalar_color(item, "BorderColor", source)?;
+            let font = native_item_font(item, source)?;
+            let choice_list = native_choice_list(item, source)?;
             native::format_radio_button_payload(&native::NativeRadioButtonPayload {
                 columns: native_scalar(item, "ColumnsCount"),
                 radio_button_type: item.scalars.get("RadioButtonType").map(String::as_str),
                 text_color: &text_color,
                 back_color: &back_color,
                 border_color: &border_color,
+                font: &font,
+                choice_list: &choice_list,
                 item_height: native_scalar(item, "ItemHeight"),
                 item_title_height: native_scalar(item, "ItemTitleHeight"),
                 item_width: native_scalar(item, "ItemWidth"),
@@ -7616,6 +8041,7 @@ fn format_native_form_body(
     let command_set = format_form_command_set(
         &properties.command_set_excluded_commands,
         &form_main_attribute_class(properties),
+        form_main_table_kind(properties).as_deref(),
     )?;
     let data_paths = NativeDataPaths {
         form: native_data_path_form(properties),
@@ -7690,6 +8116,8 @@ fn format_native_form_body(
         None => return Err(anyhow!("a form with no auto command bar is not measured")),
     };
 
+    let mobile_device_command_bar_content =
+        native_mobile_device_command_bar_content(properties, &data_paths.form.items)?;
     let tail = crate::compiler::bodies::form_native::format_root_tail(&crate::compiler::bodies::form_native::NativeRootTail {
         auto_url: properties.auto_url.unwrap_or(true),
         vertical_scroll: properties.vertical_scroll.map(|_| "useIfNecessary"),
@@ -7726,6 +8154,7 @@ fn format_native_form_body(
         collapse_items_by_importance: None,
         save_window_settings: properties.save_window_settings.unwrap_or(true),
         navigator: None,
+        mobile_device_command_bar_content: &mobile_device_command_bar_content,
     })
     .ok_or_else(|| anyhow!("the form's tail names something the writer cannot place"))?;
 
@@ -7801,6 +8230,7 @@ fn format_native_form_body(
                 )
             })
             .transpose()?;
+        let save = native_form_attribute_save(attribute, &data_paths)?;
         attributes.push(',');
         attributes.push_str(&crate::compiler::bodies::form_native::format_form_attribute(
             &crate::compiler::bodies::form_native::NativeFormAttribute {
@@ -7808,6 +8238,7 @@ fn format_native_form_body(
                 name: &attribute.name,
                 title: &title,
                 type_pattern: &pattern,
+                save: &save,
                 main_attribute: attribute.main_attribute.unwrap_or(false),
                 saved_data: attribute.saved_data.unwrap_or(false),
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
@@ -7927,11 +8358,6 @@ fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
                     }
                     root_seen = true;
                 }
-                if local == "MobileDeviceCommandBarContent" {
-                    return Err(anyhow!(
-                        "Form MobileDeviceCommandBarContent has no evidenced base-free layout"
-                    ));
-                }
                 depth += 1;
             }
             Ok(Event::Empty(event)) => {
@@ -7942,11 +8368,6 @@ fn validate_form_xml_document(xml: &[u8]) -> Result<()> {
                     }
                     root_seen = true;
                     root_closed = true;
-                }
-                if local == "MobileDeviceCommandBarContent" {
-                    return Err(anyhow!(
-                        "Form MobileDeviceCommandBarContent has no evidenced base-free layout"
-                    ));
                 }
             }
             Ok(Event::End(_)) => {
@@ -8193,6 +8614,7 @@ fn format_form_base_free_template(properties: &FormXmlBodyProperties) -> Result<
     let command_set = format_form_command_set(
         &properties.command_set_excluded_commands,
         &form_main_attribute_class(properties),
+        form_main_table_kind(properties).as_deref(),
     )?;
     let mut fields = vec![
         "50".to_string(),
@@ -8583,6 +9005,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_child_title_lang = None::<String>;
     let mut current_child_title_content = None::<String>;
     let mut current_child_event_name = None::<String>;
+    // The three nested constructs read below -- a mobile command bar item, a
+    // choice-list item and an attribute's `<Save>` -- keep their own text
+    // buffer. `text_value` is cleared only for a fixed list of element names
+    // and collected only for a fixed list of paths, so reading these out of it
+    // would mean touching both lists; `nested_text` is cleared on every
+    // element and collected for the handful of names they spell.
+    let mut nested_text = String::new();
+    let mut current_mobile_item = None::<FormXmlMobileCommandBarItem>;
+    let mut current_choice_item = None::<FormXmlChoiceListItem>;
+    let mut current_choice_lang = None::<String>;
+    let mut current_choice_content = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -8733,6 +9166,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     text_value.clear();
                 }
                 child_text.clear();
+                nested_text.clear();
                 if local == "Event"
                     && path_ends_with(&path, &["Form", "Events"])
                     && let Some(name) = xml_attribute_value(&event, "name")?
@@ -8780,8 +9214,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     match local.as_str() {
                         "Format" => item.format_present = true,
                         "Picture" => item.picture_present = true,
-                        "Font" => item.font_present = true,
-                        "ChoiceList" => item.choice_list_present = true,
+                        "Font" => {
+                            item.font_present = true;
+                            item.font = Some(xml_attrs_map(&event));
+                        }
+                        "ChoiceList" => {
+                            item.choice_list_present = true;
+                            item.choice_list = Some(Vec::new());
+                        }
                         "RowFilter" => item.row_filter_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
@@ -8796,6 +9236,36 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
+                }
+                // The three nested constructs: a mobile command bar item, a
+                // choice-list item and an attribute's `<Save>`. Each opens
+                // here and closes in the `End` arm below.
+                if local == "MobileDeviceCommandBarContent" && path_ends_with(&path, &["Form"]) {
+                    properties.mobile_device_command_bar_content = Some(Vec::new());
+                }
+                if local == "Item"
+                    && path_ends_with(&path, &["Form", "MobileDeviceCommandBarContent"])
+                {
+                    current_mobile_item = Some(FormXmlMobileCommandBarItem::default());
+                }
+                if local == "Item" && path_ends_with_for_choice_list(&path, &current_child_items) {
+                    current_choice_item = Some(FormXmlChoiceListItem::default());
+                    current_choice_lang = None;
+                    current_choice_content = None;
+                } else if let Some(choice) = current_choice_item.as_mut() {
+                    apply_form_choice_list_part(
+                        choice,
+                        &path,
+                        &current_child_items,
+                        &local,
+                        &event,
+                    )?;
+                }
+                if local == "Save"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    attribute.save = Some(Vec::new());
                 }
                 if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
                     current_command = parse_form_command_xml(&event)?;
@@ -9003,8 +9473,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     match local.as_str() {
                         "Format" => item.format_present = true,
                         "Picture" => item.picture_present = true,
-                        "Font" => item.font_present = true,
-                        "ChoiceList" => item.choice_list_present = true,
+                        "Font" => {
+                            item.font_present = true;
+                            item.font = Some(xml_attrs_map(&event));
+                        }
+                        "ChoiceList" => {
+                            item.choice_list_present = true;
+                            item.choice_list = Some(Vec::new());
+                        }
                         "RowFilter" => item.row_filter_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
@@ -9016,6 +9492,51 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.child_items_present = true;
+                }
+                // `<xr:Presentation/>`, `<xr:Value/>` and `<Save/>` arrive
+                // here rather than at `Event::Start`: an item whose value is
+                // empty is exactly how `{"N",0}` is spelled, so dropping the
+                // empty form would write the previous item's id.
+                if local == "MobileDeviceCommandBarContent" && path_ends_with(&path, &["Form"]) {
+                    properties.mobile_device_command_bar_content = Some(Vec::new());
+                }
+                if local == "Item"
+                    && path_ends_with(&path, &["Form", "MobileDeviceCommandBarContent"])
+                    && let Some(list) = properties.mobile_device_command_bar_content.as_mut()
+                {
+                    list.push(FormXmlMobileCommandBarItem::default());
+                }
+                if local == "Item" && path_ends_with_for_choice_list(&path, &current_child_items) {
+                    if let Some(list) = current_child_items
+                        .last_mut()
+                        .and_then(|item| item.choice_list.as_mut())
+                    {
+                        list.push(FormXmlChoiceListItem::default());
+                    }
+                } else if let Some(choice) = current_choice_item.as_mut() {
+                    apply_form_choice_list_part(
+                        choice,
+                        &path,
+                        &current_child_items,
+                        &local,
+                        &event,
+                    )?;
+                }
+                if let Some(mobile) = current_mobile_item.as_mut()
+                    && path_ends_with(&path, &["Form", "MobileDeviceCommandBarContent", "Item"])
+                {
+                    match local.as_str() {
+                        "Presentation" => mobile.presentation = Some(String::new()),
+                        "CheckState" => mobile.check_state = Some(String::new()),
+                        "Value" => mobile.value = None,
+                        _ => {}
+                    }
+                }
+                if local == "Save"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    attribute.save = Some(Vec::new());
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
@@ -9144,6 +9665,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                }
+                if form_nested_text_element(&path) {
+                    nested_text.push_str(text.xml_content()?.as_ref());
                 }
                 // A scalar child of a child item -- `<LabelDecoration><TextColor>`
                 // and its like. The record writers read these from the item's
@@ -9677,6 +10201,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     border.valid = false;
                 }
+                if form_nested_text_element(&path) {
+                    nested_text.push_str(text.xml_content()?.as_ref());
+                }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
                     || path_ends_with(&path, &["Form", "SaveWindowSettings"])
@@ -10114,6 +10641,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "QueryText"],
                     )
+                    || form_nested_text_element(&path)
                 {
                     let value = if let Some(ch) = reference.resolve_char_ref()? {
                         ch.to_string()
@@ -10123,12 +10651,102 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
                             .to_string()
                     };
-                    text_value.push_str(&value);
+                    if form_nested_text_element(&path) {
+                        nested_text.push_str(&value);
+                    } else {
+                        text_value.push_str(&value);
+                    }
                 }
             }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 match local.as_str() {
+                    // One `<xr:Item>` of `<MobileDeviceCommandBarContent>`.
+                    "Presentation" | "CheckState" | "Value"
+                        if current_mobile_item.is_some()
+                            && path_ends_with(
+                                &path[..path.len().saturating_sub(1)],
+                                &["Form", "MobileDeviceCommandBarContent", "Item"],
+                            ) =>
+                    {
+                        if let Some(mobile) = current_mobile_item.as_mut() {
+                            let value = nested_text.trim().to_string();
+                            match local.as_str() {
+                                "Presentation" => mobile.presentation = Some(value),
+                                "CheckState" => mobile.check_state = Some(value),
+                                _ => mobile.value = Some(value),
+                            }
+                        }
+                    }
+                    "Item" if path_ends_with(
+                        &path,
+                        &["Form", "MobileDeviceCommandBarContent", "Item"],
+                    ) =>
+                    {
+                        if let (Some(item), Some(list)) = (
+                            current_mobile_item.take(),
+                            properties.mobile_device_command_bar_content.as_mut(),
+                        ) {
+                            list.push(item);
+                        }
+                    }
+                    // One `<xr:Item>` of a field's `<ChoiceList>`.
+                    _ if current_choice_item.is_some()
+                        && form_choice_list_part(&path, &current_child_items, &local).is_some() =>
+                    {
+                        let part = form_choice_list_part(&path, &current_child_items, &local)
+                            .unwrap_or(FormChoiceListPart::Close);
+                        if let Some(choice) = current_choice_item.as_mut() {
+                            match part {
+                                FormChoiceListPart::Presentation => {
+                                    choice.presentation = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::CheckState => {
+                                    choice.check_state = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::Literal => {
+                                    choice.literal = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::TitleLang => {
+                                    current_choice_lang = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::TitleContent => {
+                                    current_choice_content = Some(nested_text.to_string());
+                                }
+                                FormChoiceListPart::TitleItem => {
+                                    if let (Some(lang), Some(content)) = (
+                                        current_choice_lang.take(),
+                                        current_choice_content.take(),
+                                    ) {
+                                        choice.title.push(LocalizedString { lang, content });
+                                    }
+                                }
+                                FormChoiceListPart::Close => {}
+                            }
+                        }
+                        if part == FormChoiceListPart::Close
+                            && let Some(choice) = current_choice_item.take()
+                            && let Some(list) = current_child_items
+                                .last_mut()
+                                .and_then(|item| item.choice_list.as_mut())
+                        {
+                            list.push(choice);
+                        }
+                    }
+                    // One `<Field>` of an attribute's `<Save>`.
+                    "Field"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Save", "Field"],
+                        ) =>
+                    {
+                        if let Some(list) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.save.as_mut())
+                        {
+                            list.push(nested_text.trim().to_string());
+                        }
+                    }
                     // A `<v8:TypeSet>` is one entry of the type pattern, and
                     // `<DateFractions>` is the second member of a `{"D"}`
                     // element. Both go beside `<v8:Type>` in XML order.
@@ -12847,6 +13465,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         title: Vec::new(),
         saved_data: None,
         fill_check: None,
+        save: None,
         unwritable: Vec::new(),
     }))
 }
@@ -12998,7 +13617,9 @@ fn parse_form_child_item_xml(
         container_representation: None,
         picture_present: false,
         font_present: false,
+        font: None,
         choice_list_present: false,
+        choice_list: None,
         row_filter_present: false,
         display_importance: xml_attribute_value(event, "DisplayImportance")?,
         scalars: BTreeMap::new(),
@@ -13225,6 +13846,130 @@ fn path_ends_with_for_current_child_item(path: &[String], items: &[FormXmlChildI
         return false;
     };
     path.last().map(String::as_str) == Some(item.tag.as_str())
+}
+
+/// `<ChoiceList>` of the child item currently being read.
+fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "ChoiceList"])
+}
+
+/// Whether a text node belongs to one of the three nested constructs the
+/// `nested_text` buffer serves -- an `<xr:Item>` of a mobile command bar or a
+/// choice list, and a `<Field>` of an attribute's `<Save>`.
+///
+/// `Item` with a capital I is spelled by only three things in a `Form.xml`:
+/// these two, the navigation panel's `<Item>` and a command's
+/// `<FunctionalOptions><Item>`. Neither of the last two carries a
+/// `<Presentation>`, a `<CheckState>` or a `<Value>`.
+fn form_nested_text_element(path: &[String]) -> bool {
+    if path_ends_with(path, &["Attribute", "Save", "Field"]) {
+        return true;
+    }
+    if path.len() >= 2
+        && path[path.len() - 2] == "Item"
+        && matches!(
+            path[path.len() - 1].as_str(),
+            "Presentation" | "CheckState" | "Value"
+        )
+    {
+        return true;
+    }
+    path_ends_with(path, &["Item", "Value", "Value"])
+        || path_ends_with(path, &["Item", "Value", "Presentation", "item", "lang"])
+        || path_ends_with(path, &["Item", "Value", "Presentation", "item", "content"])
+}
+
+/// The part of a `<ChoiceList>` item a closing element is, if it is one.
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+enum FormChoiceListPart {
+    /// The outer `<xr:Presentation>`.
+    Presentation,
+    /// The outer `<xr:CheckState>`.
+    CheckState,
+    /// The inner `<Value>`, which carries the literal.
+    Literal,
+    TitleLang,
+    TitleContent,
+    TitleItem,
+    /// `</xr:Item>` itself.
+    Close,
+}
+
+fn form_choice_list_part(
+    path: &[String],
+    items: &[FormXmlChildItem],
+    local: &str,
+) -> Option<FormChoiceListPart> {
+    let tag = items.last()?.tag.as_str();
+    let ends = |tail: &[&str]| {
+        let mut suffix = vec![tag, "ChoiceList", "Item"];
+        suffix.extend_from_slice(tail);
+        path_ends_with(path, &suffix)
+    };
+    match local {
+        "Presentation" if ends(&["Presentation"]) => Some(FormChoiceListPart::Presentation),
+        "CheckState" if ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
+        "Value" if ends(&["Value", "Value"]) => Some(FormChoiceListPart::Literal),
+        "lang" if ends(&["Value", "Presentation", "item", "lang"]) => {
+            Some(FormChoiceListPart::TitleLang)
+        }
+        "content" if ends(&["Value", "Presentation", "item", "content"]) => {
+            Some(FormChoiceListPart::TitleContent)
+        }
+        "item" if ends(&["Value", "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
+        "Item" if ends(&[]) => Some(FormChoiceListPart::Close),
+        _ => None,
+    }
+}
+
+/// One opening element inside a `<ChoiceList>` item.
+///
+/// The two `xsi:type`s are read here -- the outer `<xr:Value>`'s, which is
+/// `FormChoiceListDesTimeValue` in all 4 769 items of both corpora, and the
+/// inner `<Value>`'s, which says how the literal is spelled. Everything the
+/// measurement never saw inside an item lands in `unwritable` and refuses the
+/// form rather than being dropped.
+fn apply_form_choice_list_part(
+    choice: &mut FormXmlChoiceListItem,
+    path: &[String],
+    items: &[FormXmlChildItem],
+    local: &str,
+    event: &BytesStart<'_>,
+) -> Result<()> {
+    let Some(tag) = items.last().map(|item| item.tag.as_str()) else {
+        return Ok(());
+    };
+    let opens = |tail: &[&str]| {
+        let mut suffix = vec![tag, "ChoiceList", "Item"];
+        suffix.extend_from_slice(tail);
+        path_ends_with(path, &suffix)
+    };
+    if opens(&[]) {
+        match local {
+            "Presentation" | "CheckState" => {}
+            "Value" => choice.value_type = xml_attribute_value(event, "type")?,
+            other => choice.unwritable.push(other.to_string()),
+        }
+        return Ok(());
+    }
+    if opens(&["Value"]) {
+        match local {
+            "Presentation" => {}
+            "Value" => choice.literal_type = xml_attribute_value(event, "type")?,
+            other => choice.unwritable.push(other.to_string()),
+        }
+        return Ok(());
+    }
+    if (opens(&["Value", "Presentation"]) && local == "item")
+        || (opens(&["Value", "Presentation", "item"]) && matches!(local, "lang" | "content"))
+    {
+        return Ok(());
+    }
+    choice.unwritable.push(local.to_string());
+    Ok(())
 }
 
 fn form_child_item_supports_control_border(tag: &str) -> bool {
@@ -14590,6 +15335,7 @@ fn patch_form_layout_properties(
             layout,
             &properties.command_set_excluded_commands,
             &form_main_attribute_class(properties),
+            form_main_table_kind(properties).as_deref(),
         )?;
     }
     if let Some(value) = properties.use_for_folders_and_items {
@@ -14872,12 +15618,16 @@ fn replace_form_command_set(
     layout: &mut String,
     commands: &[FormXmlExcludedCommand],
     main_attribute_class: &str,
+    main_table_kind: Option<&str>,
 ) -> Result<()> {
     let fields = scan_braced_fields(layout, 0)?;
     let Some(range) = form_root_command_set_range(layout, &fields) else {
         return Ok(());
     };
-    layout.replace_range(range, &format_form_command_set(commands, main_attribute_class)?);
+    layout.replace_range(
+        range,
+        &format_form_command_set(commands, main_attribute_class, main_table_kind)?,
+    );
     Ok(())
 }
 
@@ -15371,12 +16121,13 @@ fn form_scaling_mode_code(value: FormXmlScalingMode) -> &'static str {
 fn format_form_command_set(
     commands: &[FormXmlExcludedCommand],
     main_attribute_class: &str,
+    main_table_kind: Option<&str>,
 ) -> Result<String> {
     // The platform stores standard command identifiers in UUID order, not in
     // the source XML element order.  This keeps a re-packed layout canonical.
     let mut command_uuids = commands
         .iter()
-        .map(|command| form_excluded_command_uuid(command, main_attribute_class))
+        .map(|command| form_excluded_command_uuid(command, main_attribute_class, main_table_kind))
         .collect::<Result<Vec<_>>>()?;
     command_uuids.sort_unstable();
     let mut output = format!("{{{}", command_uuids.len());
@@ -15390,10 +16141,26 @@ fn format_form_command_set(
 
 /// The uuid an `<ExcludedCommand>` stores: the name alone when it decides,
 /// and otherwise the name together with the form's main attribute class.
+///
+/// One key needs a third thing. `Delete` on a `cfg:DynamicList` is answered
+/// by two uuids and the list's `<MainTable>` decides between them, so the
+/// kind of that table is asked for before the class-keyed table is.
 fn form_excluded_command_uuid<'a>(
     command: &'a FormXmlExcludedCommand,
     main_attribute_class: &str,
+    main_table_kind: Option<&str>,
 ) -> Result<&'a str> {
+    if main_attribute_class == "cfg:DynamicList" && command.0 == "Delete" {
+        return crate::compiler::bodies::form_native::dynamic_list_delete_command_uuid(
+            main_table_kind,
+        )
+        .ok_or_else(|| {
+            anyhow!(
+                "no measured uuid for <ExcludedCommand>Delete</ExcludedCommand> on a dynamic list over {}",
+                main_table_kind.unwrap_or("nothing")
+            )
+        });
+    }
     if let Some(uuid) = form_standard_excluded_command_uuid(&command.0) {
         return Ok(uuid);
     }
@@ -15407,6 +16174,19 @@ fn form_excluded_command_uuid<'a>(
             command.0
         )
     })
+}
+
+/// The kind of the `<MainTable>` the form's main attribute reads, when that
+/// attribute is a dynamic list -- `InformationRegister` for
+/// `InformationRegister.<X>`.
+fn form_main_table_kind(properties: &FormXmlBodyProperties) -> Option<String> {
+    properties
+        .attributes
+        .iter()
+        .find(|attribute| attribute.main_attribute == Some(true))
+        .and_then(|attribute| attribute.settings.as_ref())
+        .and_then(|settings| settings.main_table.as_deref())
+        .map(|table| table.split('.').next().unwrap_or(table).to_string())
 }
 
 /// The class of the form's main attribute, which several uuids are keyed by.
@@ -29094,13 +29874,19 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 /// `<Edit>` restrictions, member 8 is `<UseAlways>` and member 9 is `<Save>`.
 /// Renaming them is a separate change; the refusals below are keyed by the
 /// XML element, which is unambiguous.
+/// The parts of a form `<Attribute>` whose member of the `{9,…}` record the
+/// writer cannot fill.
+///
+/// `<Save>` is not among them: it is member 9, and
+/// [`format_form_attribute_save`] writes it. `<UseAlways>` is member 8 and
+/// `<View>`/`<Edit>` are 6 and 7; what those hold when the element is present
+/// was not measured, so naming one still refuses the form.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
     match local {
         "UseAlways" => Some("UseAlways"),
         "FunctionalOptions" => Some("FunctionalOptions"),
         "View" => Some("View"),
         "Edit" => Some("Edit"),
-        "Save" => Some("Save"),
         _ => None,
     }
 }
@@ -29484,6 +30270,409 @@ mod tests {
             "the parameter's date fractions are not stored: {body}"
         );
         Ok(())
+    }
+
+    /// The head of a `Form.xml` the tests below build on.
+    const FORM_XML_HEAD: &str = concat!(
+        r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" "#,
+        r#"xmlns:v8="http://v8.1c.ru/8.1/data/core" "#,
+        r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" "#,
+        r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
+        r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
+    );
+
+    /// `<MobileDeviceCommandBarContent>` reaches root trailer slot 22, and
+    /// what it stores there is the id of the form **item** its `<xr:Value>`
+    /// names.
+    ///
+    /// Pinned to `BusinessProcesses/_ДемоЗаданиеСРолевойАдресацией/Forms/
+    /// ФормаСписка` of the BSP tree, whose body holds `{50,1,"",{"N",46}}`
+    /// for the `<CommandBar name="КоманднаяПанель" id="46">` it names. The
+    /// second form here adds a `<Command>` of that same name: in all ten
+    /// forms of the two corpora where the two collide the item's id is what
+    /// the body holds, never the command's.
+    #[test]
+    fn writes_the_mobile_device_command_bar_content_from_the_item_it_names()
+    -> anyhow::Result<()> {
+        let form = |extra_command: &str, content: &str| {
+            format!(
+                concat!(
+                    "{head}",
+                    "{content}",
+                    r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                    "{extra_command}",
+                    r#"<ChildItems><CommandBar name="КоманднаяПанель" id="46"/>"#,
+                    r#"</ChildItems></Form>"#,
+                ),
+                head = FORM_XML_HEAD,
+                content = content,
+                extra_command = extra_command,
+            )
+        };
+        let named = form(
+            "",
+            concat!(
+                "<MobileDeviceCommandBarContent><xr:Item>",
+                "<xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="xs:string">КоманднаяПанель</xr:Value>"#,
+                "</xr:Item></MobileDeviceCommandBarContent>",
+            ),
+        );
+        let body = super::compile_native_form_body(named.as_bytes(), None, None)?;
+        assert!(
+            body.contains(r#"{50,1,"",{"N",46}}"#),
+            "the mobile command bar does not name the item's id: {body}"
+        );
+
+        // The item wins over a `<Command>` of the same name.
+        let clashing = form(
+            r#"<Commands><Command name="КоманднаяПанель" id="7"/></Commands>"#,
+            concat!(
+                "<MobileDeviceCommandBarContent><xr:Item>",
+                "<xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="xs:string">КоманднаяПанель</xr:Value>"#,
+                "</xr:Item></MobileDeviceCommandBarContent>",
+            ),
+        );
+        let body = super::compile_native_form_body(clashing.as_bytes(), None, None)?;
+        assert!(
+            body.contains(r#"{50,1,"",{"N",46}}"#),
+            "the command's id was written instead of the item's: {body}"
+        );
+
+        // An empty `<xr:Value/>` is `{"N",0}` -- 6 items of the two corpora,
+        // among them `SettingsStorages/ХранилищеВариантовОтчетов/Forms/
+        // СохранениеВариантаОтчета`, which stores three of them in a row.
+        let empty = form(
+            "",
+            concat!(
+                "<MobileDeviceCommandBarContent><xr:Item>",
+                "<xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="xs:string"/>"#,
+                "</xr:Item></MobileDeviceCommandBarContent>",
+            ),
+        );
+        let body = super::compile_native_form_body(empty.as_bytes(), None, None)?;
+        assert!(
+            body.contains(r#"{50,1,"",{"N",0}}"#),
+            "an empty value is not zero: {body}"
+        );
+
+        // Absent is the literal the other 13 443 forms store.
+        let absent = form("", "");
+        let body = super::compile_native_form_body(absent.as_bytes(), None, None)?;
+        assert!(
+            body.contains("{50,0}"),
+            "a form with no mobile command bar lost its literal: {body}"
+        );
+
+        // A name no item of the form answers refuses rather than writing 0.
+        let unknown = form(
+            "",
+            concat!(
+                "<MobileDeviceCommandBarContent><xr:Item>",
+                "<xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="xs:string">НетТакого</xr:Value>"#,
+                "</xr:Item></MobileDeviceCommandBarContent>",
+            ),
+        );
+        let error = super::compile_native_form_body(unknown.as_bytes(), None, None)
+            .expect_err("a name no item answers must refuse the form")
+            .to_string();
+        assert!(
+            error.contains("which is not a form item"),
+            "the unknown name was written instead of refused: {error}"
+        );
+        Ok(())
+    }
+
+    /// A radio button's `<ChoiceList>` is slot 1 of its `{8,…}` payload, and
+    /// its `<Font>` is slot 4 -- two slots and two conditions, where the
+    /// writer used to refuse on either.
+    ///
+    /// Pinned to `Catalogs/_ДемоБанковскиеСчета/Forms/ФормаЭлемента` of the
+    /// BSP tree, whose body holds this payload whole for `МестоОткрытия`.
+    #[test]
+    fn writes_a_radio_buttons_choice_list_of_string_literals() -> anyhow::Result<()> {
+        let xml = format!(
+            concat!(
+                "{head}",
+                r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                r#"<Attributes><Attribute name="МестоОткрытия" id="1">"#,
+                r#"<Type><v8:Type>xs:string</v8:Type></Type></Attribute></Attributes>"#,
+                r#"<ChildItems><RadioButtonField name="МестоОткрытия" id="167">"#,
+                "<DataPath>МестоОткрытия</DataPath>",
+                "<RadioButtonType>Auto</RadioButtonType><ChoiceList>",
+                "<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="FormChoiceListDesTimeValue"><Presentation>"#,
+                "<v8:item><v8:lang>ru</v8:lang>",
+                "<v8:content>в Российской Федерации</v8:content></v8:item></Presentation>",
+                r#"<Value xsi:type="xs:string">РФ</Value></xr:Value></xr:Item>"#,
+                "<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="FormChoiceListDesTimeValue"><Presentation>"#,
+                "<v8:item><v8:lang>ru</v8:lang>",
+                "<v8:content>за рубежом</v8:content></v8:item></Presentation>",
+                r#"<Value xsi:type="xs:string">ЗаРубежом</Value></xr:Value></xr:Item>"#,
+                "</ChoiceList>",
+                r#"<ContextMenu name="МестоОткрытияКонтекстноеМеню" id="168"/>"#,
+                r#"<ExtendedTooltip name="МестоОткрытияРасширеннаяПодсказка" id="169"/>"#,
+                "</RadioButtonField></ChildItems></Form>",
+            ),
+            head = FORM_XML_HEAD,
+        );
+        let body = super::compile_native_form_body(xml.as_bytes(), None, None)?;
+        assert!(
+            body.contains(concat!(
+                r##"{8,{3,2,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,"##,
+                r##"{0,1,{"S","РФ"},00000000-0000-0000-0000-000000000000,"##,
+                r##"00000000-0000-0000-0000-000000000000,"##,
+                r##"{1,1,{"ru","в Российской Федерации"}}}},"##,
+                r##""",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,"##,
+                r##"{0,1,{"S","ЗаРубежом"},00000000-0000-0000-0000-000000000000,"##,
+                r##"00000000-0000-0000-0000-000000000000,{1,1,{"ru","за рубежом"}}}},"##,
+                r##"{0,{4,0,{0},"",-1,-1,1,0,""}},{0,{4,0,{0},"",-1,-1,1,0,""}}},"##,
+                r##"0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2}"##,
+            )),
+            "the radio button's payload is not the one the platform stores: {body}"
+        );
+
+        // Splitting the two conditions did not open the font: a platform
+        // style font grows a negative code this writer has not measured, and
+        // naming one still refuses the form.
+        let with_font = xml.replace(
+            "<RadioButtonType>Auto</RadioButtonType>",
+            r#"<RadioButtonType>Auto</RadioButtonType><Font ref="style:LargeTextFont" kind="StyleItem"/>"#,
+        );
+        let error = super::compile_native_form_body(with_font.as_bytes(), None, None)
+            .expect_err("a platform style font must still refuse the form")
+            .to_string();
+        assert!(
+            error.contains("names a font the writer cannot place"),
+            "the platform style font was written instead of refused: {error}"
+        );
+        Ok(())
+    }
+
+    /// A `<ChoiceList>` item whose value is a design-time reference stores
+    /// `{"U"}` with the owner's Ref `<xr:TypeId>` and the referenced value's
+    /// own id beside it.
+    ///
+    /// Pinned to `Catalogs/Валюты/Forms/ФормаЭлемента` of the BSP tree, whose
+    /// body holds this value for `СпособУстановкиКурса`; the two uuids are
+    /// `Enums/СпособыУстановкиКурсаВалюты.xml`'s `EnumRef` type id and the
+    /// `<EnumValue uuid>` of `РучнойВвод`.
+    #[test]
+    fn writes_a_choice_list_reference_from_the_enum_it_names() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-choice-list-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("Enums"))?;
+        std::fs::write(
+            root.join("Enums/СпособыУстановкиКурсаВалюты.xml"),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+                r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" "#,
+                r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">"#,
+                r#"<Enum uuid="ec11342f-594f-416f-a10f-bd1bfa695c08"><InternalInfo>"#,
+                r#"<xr:GeneratedType name="EnumRef.СпособыУстановкиКурсаВалюты" category="Ref">"#,
+                "<xr:TypeId>a01d58fd-ca5c-43b1-ad9c-8e39ce91beba</xr:TypeId>",
+                "</xr:GeneratedType></InternalInfo><Properties>",
+                "<Name>СпособыУстановкиКурсаВалюты</Name></Properties><ChildObjects>",
+                r#"<EnumValue uuid="74f03c35-5da0-406e-a938-e8e5d49975ef"><Properties>"#,
+                "<Name>РучнойВвод</Name></Properties></EnumValue>",
+                "</ChildObjects></Enum></MetaDataObject>",
+            )
+            .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let xml = format!(
+            concat!(
+                "{head}",
+                r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                r#"<Attributes><Attribute name="Способ" id="1">"#,
+                r#"<Type><v8:Type>xs:string</v8:Type></Type></Attribute></Attributes>"#,
+                r#"<ChildItems><RadioButtonField name="Способ" id="2">"#,
+                "<DataPath>Способ</DataPath><ChoiceList>",
+                "<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState>",
+                r#"<xr:Value xsi:type="FormChoiceListDesTimeValue"><Presentation>"#,
+                "<v8:item><v8:lang>ru</v8:lang>",
+                "<v8:content>вводится вручную</v8:content></v8:item></Presentation>",
+                r#"<Value xsi:type="xr:DesignTimeRef">"#,
+                "Enum.СпособыУстановкиКурсаВалюты.EnumValue.РучнойВвод",
+                "</Value></xr:Value></xr:Item></ChoiceList>",
+                r#"<ContextMenu name="СпособКонтекстноеМеню" id="3"/>"#,
+                r#"<ExtendedTooltip name="СпособРасширеннаяПодсказка" id="4"/>"#,
+                "</RadioButtonField></ChildItems></Form>",
+            ),
+            head = FORM_XML_HEAD,
+        );
+        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source))?;
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            body.contains(concat!(
+                r##"{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,{0,0,{"U"},"##,
+                "a01d58fd-ca5c-43b1-ad9c-8e39ce91beba,",
+                r#"74f03c35-5da0-406e-a938-e8e5d49975ef,{1,1,{"ru","вводится вручную"}}}}"#,
+            )),
+            "the reference's two uuids are not the ones the platform stores: {body}"
+        );
+        Ok(())
+    }
+
+    /// An attribute's `<Save>` is member 9 of its `{9,…}` record, and the
+    /// paths it lists are **sorted**, not in XML order.
+    ///
+    /// Pinned to `DataProcessors/ГрупповоеИзменениеРеквизитов/Forms/
+    /// РедактированиеФормулы` of the BSP tree. Its `<Save>` spells
+    /// `ИзменятьВТранзакции` first and `ПрерыватьПриОшибке` second, and the
+    /// body stores their uuids the other way round -- pairing the nth
+    /// `<Field>` with the nth entry agrees on the set and swaps the uuids.
+    #[test]
+    fn writes_an_attributes_save_with_its_paths_sorted() -> anyhow::Result<()> {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-attribute-save-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        std::fs::create_dir_all(root.join("DataProcessors"))?;
+        std::fs::write(
+            root.join("DataProcessors/ГрупповоеИзменениеРеквизитов.xml"),
+            concat!(
+                r#"<?xml version="1.0" encoding="UTF-8"?>"#,
+                r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" "#,
+                r#"xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">"#,
+                r#"<DataProcessor uuid="e1b94dcf-ec37-4b2d-a7af-120eeee40944"><InternalInfo>"#,
+                r#"<xr:GeneratedType name="DataProcessorObject.ГрупповоеИзменениеРеквизитов" "#,
+                r#"category="Object">"#,
+                "<xr:TypeId>f06540d8-044b-4f8c-99c2-22070273fd43</xr:TypeId>",
+                "</xr:GeneratedType></InternalInfo><Properties>",
+                "<Name>ГрупповоеИзменениеРеквизитов</Name></Properties><ChildObjects>",
+                r#"<Attribute uuid="7d2a37b1-a1a0-435a-846a-95e255655044"><Properties>"#,
+                "<Name>ИзменятьВТранзакции</Name></Properties></Attribute>",
+                r#"<Attribute uuid="109db64c-00dc-490e-99a5-4430d9344e99"><Properties>"#,
+                "<Name>ПрерыватьПриОшибке</Name></Properties></Attribute>",
+                "</ChildObjects></DataProcessor></MetaDataObject>",
+            )
+            .as_bytes(),
+        )?;
+        let source = super::MetadataSourceContext::new(root.clone());
+        let xml = format!(
+            concat!(
+                "{head}",
+                r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                r#"<Attributes><Attribute name="Объект" id="18"><Type><v8:Type>"#,
+                "cfg:DataProcessorObject.ГрупповоеИзменениеРеквизитов</v8:Type></Type>",
+                "<MainAttribute>true</MainAttribute><Save>",
+                "<Field>Объект.ИзменятьВТранзакции</Field>",
+                "<Field>Объект.ПрерыватьПриОшибке</Field>",
+                "</Save></Attribute></Attributes></Form>",
+            ),
+            head = FORM_XML_HEAD,
+        );
+        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source))?;
+        let _ = std::fs::remove_dir_all(&root);
+        assert!(
+            body.contains(concat!(
+                "{0,2,{1,{0,109db64c-00dc-490e-99a5-4430d9344e99}},",
+                "{1,{0,7d2a37b1-a1a0-435a-846a-95e255655044}}}",
+            )),
+            "the <Save> paths are not sorted the way the body stores them: {body}"
+        );
+
+        // A `<Field>` that is the attribute's own name is `{0}`, which is
+        // every one of the 303 BSP entries but eight forms' worth.
+        let own = format!(
+            concat!(
+                "{head}",
+                r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                r#"<Attributes><Attribute name="СтрокаПоиска" id="1">"#,
+                "<Type><v8:Type>xs:string</v8:Type></Type>",
+                "<Save><Field>СтрокаПоиска</Field></Save>",
+                "</Attribute></Attributes></Form>",
+            ),
+            head = FORM_XML_HEAD,
+        );
+        let body = super::compile_native_form_body(own.as_bytes(), None, None)?;
+        assert!(
+            body.contains("{0,1,{0}}"),
+            "a <Save> of the attribute's own name is not {{0}}: {body}"
+        );
+
+        // An attribute that names no `<Save>` keeps the `{0,0}` that 138 968
+        // of the 141 723 attributes of both corpora store.
+        let absent = own.replace("<Save><Field>СтрокаПоиска</Field></Save>", "");
+        let body = super::compile_native_form_body(absent.as_bytes(), None, None)?;
+        assert!(
+            body.contains(r#"{9,{1},0,"СтрокаПоиска",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"#),
+            "an attribute with no <Save> lost its defaults: {body}"
+        );
+        Ok(())
+    }
+
+    /// The `<ExcludedCommand>` keys §4 of `bsp-refusal-tail.md` added, each
+    /// read back through the export's own table, plus the one key that needs
+    /// the dynamic list's `<MainTable>` to decide.
+    #[test]
+    fn keys_the_excluded_commands_the_corpora_evidence() {
+        for (class, name, uuid) in [
+            ("cfg:BusinessProcessObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
+            ("cfg:CatalogObject", "ChangeHistory", "174e58ce-82ad-4787-b956-9367937f7971"),
+            ("cfg:ChartOfCharacteristicTypesObject", "SetDeletionMark", "827b541d-30c1-4f06-aecf-92aa496a0835"),
+            ("cfg:DocumentObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
+            ("cfg:DynamicList", "ReadChanges", "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf"),
+            ("cfg:DynamicList", "WriteChanges", "a29c4f3a-3b41-480a-a31e-5f9f73aa3216"),
+            ("cfg:ExchangePlanObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
+            ("cfg:ExchangePlanObject", "CreateInitialImage", "d82e191e-f052-40ee-8691-00cac5b34629"),
+            ("cfg:ExchangePlanObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
+            ("cfg:ExchangePlanObject", "ReadChanges", "3328a951-c3c8-4f22-b99e-814f7cea6b82"),
+            ("cfg:ExchangePlanObject", "SetDeletionMark", "827b541d-30c1-4f06-aecf-92aa496a0835"),
+            ("cfg:ExchangePlanObject", "WriteChanges", "8b81add7-25af-4df7-a69c-144e3e3e4c8e"),
+            ("cfg:InformationRegisterRecordManager", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
+            ("cfg:TaskObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
+            ("cfg:TaskObject", "ExecuteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
+        ] {
+            let command = super::FormXmlExcludedCommand(name.to_string());
+            assert_eq!(
+                super::form_excluded_command_uuid(&command, class, None).ok(),
+                Some(uuid),
+                "{class} {name} is not keyed"
+            );
+            // The export reads the same uuid back as the same name -- except
+            // `ExecuteAndClose`, which is the task-object spelling of the
+            // uuid the export calls `WriteAndClose`.
+            let expected = if name == "ExecuteAndClose" {
+                "WriteAndClose"
+            } else {
+                name
+            };
+            assert_eq!(
+                crate::mssql_dump::form_standard_command_suffix(uuid),
+                Some(expected),
+                "{class} {name} does not read back through the export's table"
+            );
+        }
+
+        // `Delete` on a dynamic list is two uuids, and the list's
+        // `<MainTable>` decides: 62 of 62 forms over a register store the
+        // first and 546 of 546 over everything else store the second.
+        let delete = super::FormXmlExcludedCommand("Delete".to_string());
+        assert_eq!(
+            super::form_excluded_command_uuid(&delete, "cfg:DynamicList", Some("InformationRegister")).ok(),
+            Some("1cc781aa-f32b-4dc7-996a-6c38c3deda5c")
+        );
+        for kind in [None, Some("Document"), Some("Catalog"), Some("ExchangePlan")] {
+            assert_eq!(
+                super::form_excluded_command_uuid(&delete, "cfg:DynamicList", kind).ok(),
+                Some("3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2"),
+                "a dynamic list over {kind:?} is not the direct-delete arm"
+            );
+        }
+        // A kind outside the seven the corpora show is unmeasured.
+        assert!(
+            super::form_excluded_command_uuid(&delete, "cfg:DynamicList", Some("AccumulationRegister"))
+                .is_err(),
+            "an unmeasured <MainTable> kind must refuse the form"
+        );
     }
 
     /// Fail-closed: a column's `<View>`, `<Edit>` and `<FunctionalOptions>`

@@ -1242,6 +1242,95 @@ impl NativeRadioButtonPayload<'_> {
     }
 }
 
+/// The value member of every design-time choice-list item, constant in all
+/// 4 769 items of both corpora.
+const CHOICE_LIST_VALUE_UUID: &str = "0e704aa2-07bd-48b9-8223-a0212c4d5fc2";
+
+/// The picture member of a choice-list item -- one constant, because no item
+/// of either corpus carries a `<Picture>`.
+const CHOICE_LIST_PICTURE: &str = "{0,{4,0,{0},\"\",-1,-1,1,0,\"\"}}";
+
+/// `ent:AccountType`, whose three spellings are an ordinal under this uuid:
+/// `Active` 0, `Passive` 1, `ActivePassive` 2, identical in both corpora.
+const CHOICE_LIST_ACCOUNT_TYPE_UUID: &str = "872f7198-7083-4e3e-b57e-a2a9802c769e";
+
+/// The `{3,…}` choice list a field offers.
+///
+/// ```text
+/// {3, N, <presentation>, <value>, … , <picture>, <picture>, …}
+/// ```
+///
+/// `2 + 3N` members: N presentation/value pairs and then N pictures. Measured
+/// over the 2 637 fields of both corpora that carry a `<ChoiceList>` and the
+/// 4 769 items in them -- the outer `<xr:Presentation>` is `""` in every one,
+/// and the picture is the same constant in every one. Absence is a pure
+/// partition: a field with no `<ChoiceList>` stores `{3,0}` in all 110
+/// records that lack one, and no record with a list stores it.
+pub(crate) fn format_native_choice_list(values: &[String]) -> String {
+    if values.is_empty() {
+        return "{3,0}".to_string();
+    }
+    let mut out = format!("{{3,{}", values.len());
+    for value in values {
+        out.push_str(",\"\",");
+        out.push_str(value);
+    }
+    for _ in values {
+        out.push(',');
+        out.push_str(CHOICE_LIST_PICTURE);
+    }
+    out.push('}');
+    out
+}
+
+/// The literal a choice-list item stores, by the `xsi:type` of its inner
+/// `<Value>`.
+pub(crate) enum NativeChoiceListLiteral<'a> {
+    /// `xs:decimal` -- 2 280 items.
+    Number(&'a str),
+    /// `xs:string` -- 1 047 items.
+    Text(&'a str),
+    /// `ent:AccountType` -- 6 items, the ordinal of its three spellings.
+    AccountType(u8),
+    /// `xr:DesignTimeRef`, and an empty `<Value/>` with no type at all.
+    Undefined,
+}
+
+impl NativeChoiceListLiteral<'_> {
+    fn spelled(&self) -> String {
+        match self {
+            Self::Number(value) => format!("{{\"N\",{value}}}"),
+            Self::Text(value) => format!("{{\"S\",{}}}", quoted(value)),
+            Self::AccountType(ordinal) => {
+                format!("{{\"#\",{CHOICE_LIST_ACCOUNT_TYPE_UUID},{ordinal}}}")
+            }
+            Self::Undefined => "{\"U\"}".to_string(),
+        }
+    }
+}
+
+/// One item's value:
+/// `{"#",0e704aa2-…,{0,B,<literal>,<type id>,<value id>,<title>}}`.
+///
+/// `B` is a pure partition over all 4 769 items: an `xsi:type` of
+/// `xr:DesignTimeRef` writes 0 and every other spelling writes 1. The two
+/// uuids are the owner's Ref `<xr:TypeId>` and the referenced value's id for
+/// a reference, and zero for a literal; the title is the item's **inner**
+/// `<Presentation>`, not its outer one.
+pub(crate) fn format_native_choice_list_value(
+    design_time_ref: bool,
+    literal: &NativeChoiceListLiteral<'_>,
+    type_id: &str,
+    value_id: &str,
+    title: &str,
+) -> String {
+    format!(
+        "{{\"#\",{CHOICE_LIST_VALUE_UUID},{{0,{flag},{literal},{type_id},{value_id},{title}}}}}",
+        flag = u8::from(!design_time_ref),
+        literal = literal.spelled(),
+    )
+}
+
 pub(crate) fn format_radio_button_payload(
     payload: &NativeRadioButtonPayload<'_>,
 ) -> Option<String> {
@@ -1684,6 +1773,22 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
 
 /// The uuid a `<Button>` stores for `Form.StandardCommand.<name>`, by the
 /// form's main attribute class and the command's name.
+///
+/// The table was first built from `<Button>` occurrences alone, so a name a
+/// form only ever *excludes* was missing from it. The fifteen rows added for
+/// those -- every one of the nine names the class-free table deliberately
+/// omits, plus `ExecuteAndClose` -- were derived by reading each form's
+/// stored command set (root trailer member `20 + 2 × <bag count>`) back
+/// through the export's own `form_standard_command_suffix` and pairing it
+/// with that form's own `<CommandSet>`: 4 249 of 4 276 ERP УХ forms and 257
+/// of 261 BSP forms read back exactly, which forces the pairing. Of the 241
+/// keys that gives, 124 were already here and all 124 agree -- 0
+/// disagreements. The other 102 new keys are names the class-free table
+/// already answers, so they are left out.
+///
+/// One key is not answered by this table: `(cfg:DynamicList, "Delete")` is
+/// two uuids, and the list's `<MainTable>` decides. See
+/// [`form_excluded_command_uuid`](crate::module_blob).
 const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("", "Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
     ("", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
@@ -1698,6 +1803,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:AccountingRegisterRecordSet", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:AccountingRegisterRecordSet", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("cfg:AccountingRegisterRecordSet", "Write", "fe558fde-99b3-45d0-a060-9fc2905309f6"),
+    ("cfg:BusinessProcessObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
     ("cfg:BusinessProcessObject", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:BusinessProcessObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("cfg:BusinessProcessObject", "OK", "f3613d5c-20c6-46e5-b4d5-7d712ece1296"),
@@ -1705,6 +1811,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:BusinessProcessObject", "StartAndClose", "e6a9041f-4d43-4f06-8e17-e95753531565"),
     ("cfg:BusinessProcessObject", "Write", "fe558fde-99b3-45d0-a060-9fc2905309f6"),
     ("cfg:CatalogObject", "Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
+    ("cfg:CatalogObject", "ChangeHistory", "174e58ce-82ad-4787-b956-9367937f7971"),
     ("cfg:CatalogObject", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
     ("cfg:CatalogObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
     ("cfg:CatalogObject", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
@@ -1719,6 +1826,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:CatalogObject", "WriteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
     ("cfg:ChartOfCalculationTypesObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("cfg:ChartOfCharacteristicTypesObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+    ("cfg:ChartOfCharacteristicTypesObject", "SetDeletionMark", "827b541d-30c1-4f06-aecf-92aa496a0835"),
     ("cfg:ChartOfCharacteristicTypesObject", "Write", "fe558fde-99b3-45d0-a060-9fc2905309f6"),
     ("cfg:ChartOfCharacteristicTypesObject", "WriteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
     ("cfg:ConstantsSet", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
@@ -1739,6 +1847,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:DocumentObject", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
     ("cfg:DocumentObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
     ("cfg:DocumentObject", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
+    ("cfg:DocumentObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
     ("cfg:DocumentObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("cfg:DocumentObject", "Post", "3b8cedbc-8e74-4017-b901-d14b09f32f7a"),
     ("cfg:DocumentObject", "PostAndClose", "87317f86-057f-477e-9045-2da4e4980199"),
@@ -1773,6 +1882,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:DynamicList", "No", "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d"),
     ("cfg:DynamicList", "OutputList", "9758d344-4b1d-4dc9-80bd-81060bc18b2a"),
     ("cfg:DynamicList", "Post", "4c569466-1af5-4fc1-9b63-7bf6493097bf"),
+    ("cfg:DynamicList", "ReadChanges", "e7ae2a27-60a2-44ae-ab1d-f307d11c85bf"),
     ("cfg:DynamicList", "Refresh", "fd8f031f-c168-4e1b-8b0c-15eb3057e688"),
     ("cfg:DynamicList", "RestoreValues", "71e0226e-ebb2-4e33-8745-0a94a01bbf15"),
     ("cfg:DynamicList", "SaveDynamicListSettings", "d5c3842d-7252-4370-9174-756a6cc553e5"),
@@ -1782,12 +1892,20 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:DynamicList", "ShowMultipleSelection", "9fea4ba9-7d33-47d4-a271-cb54df4a9b74"),
     ("cfg:DynamicList", "Tree", "0b83270d-7f95-4cdd-93c3-342d7991fed5"),
     ("cfg:DynamicList", "UndoPosting", "441362c1-0c86-4f73-bf50-6e1048a2db73"),
+    ("cfg:DynamicList", "WriteChanges", "a29c4f3a-3b41-480a-a31e-5f9f73aa3216"),
     ("cfg:ExchangePlanObject", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
+    ("cfg:ExchangePlanObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
+    ("cfg:ExchangePlanObject", "CreateInitialImage", "d82e191e-f052-40ee-8691-00cac5b34629"),
     ("cfg:ExchangePlanObject", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
+    ("cfg:ExchangePlanObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
     ("cfg:ExchangePlanObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+    ("cfg:ExchangePlanObject", "ReadChanges", "3328a951-c3c8-4f22-b99e-814f7cea6b82"),
+    ("cfg:ExchangePlanObject", "SetDeletionMark", "827b541d-30c1-4f06-aecf-92aa496a0835"),
     ("cfg:ExchangePlanObject", "WriteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
+    ("cfg:ExchangePlanObject", "WriteChanges", "8b81add7-25af-4df7-a69c-144e3e3e4c8e"),
     ("cfg:InformationRegisterRecordManager", "ChangeHistory", "174e58ce-82ad-4787-b956-9367937f7971"),
     ("cfg:InformationRegisterRecordManager", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
+    ("cfg:InformationRegisterRecordManager", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
     ("cfg:InformationRegisterRecordManager", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:InformationRegisterRecordManager", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
     ("cfg:InformationRegisterRecordManager", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
@@ -1822,6 +1940,10 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:ReportObject", "SaveVariant", "9bffcf73-7b1d-4a8d-bf23-5e051af3ee29"),
     ("cfg:TaskObject", "Copy", "68baa1bc-edd1-4d9b-ad80-1d53fb8a7988"),
     ("cfg:TaskObject", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
+    ("cfg:TaskObject", "Delete", "c32d43de-b820-49d0-bf7a-d70829f48f40"),
+    // The task-object spelling of `WriteAndClose`'s uuid. 17 ERP УХ and 3 BSP
+    // forms exclude it, and no form ever excludes both spellings.
+    ("cfg:TaskObject", "ExecuteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
     ("cfg:TaskObject", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("cfg:TaskObject", "Reread", "1f317795-c420-4a30-b594-c492abc55f7a"),
     ("cfg:TaskObject", "SetDeletionMark", "827b541d-30c1-4f06-aecf-92aa496a0835"),
@@ -1845,6 +1967,33 @@ pub(crate) fn item_standard_command_uuid(
         .find_map(|(candidate, dynamic, command, uuid)| {
             (*candidate == tag && *dynamic == dynamic_list && *command == name).then_some(*uuid)
         })
+}
+
+/// `Delete` on a dynamic list, which two uuids answer.
+///
+/// The list's `<Settings><MainTable>` decides, and it is a clean partition
+/// over all 608 forms of both corpora that exclude it: a table of kind
+/// `InformationRegister` stores `1cc781aa-…` in 62 of 62, and the seven other
+/// kinds seen -- `Document`, `Catalog`, `DocumentJournal`, `BusinessProcess`,
+/// `ChartOfCharacteristicTypes`, `ExchangePlan` and no table at all -- store
+/// `3dd3bd8a-…` in 546 of 546. A register has no deletion mark, so its list's
+/// `Delete` is the direct-delete command.
+///
+/// A kind outside those seven is unmeasured and gets no answer.
+pub(crate) fn dynamic_list_delete_command_uuid(main_table_kind: Option<&str>) -> Option<&'static str> {
+    match main_table_kind {
+        Some("InformationRegister") => Some("1cc781aa-f32b-4dc7-996a-6c38c3deda5c"),
+        None
+        | Some(
+            "Document"
+            | "Catalog"
+            | "DocumentJournal"
+            | "BusinessProcess"
+            | "ChartOfCharacteristicTypes"
+            | "ExchangePlan",
+        ) => Some("3dd3bd8a-ac1e-44d6-ac83-e7802642a5e2"),
+        Some(_) => None,
+    }
 }
 
 /// Whether any form's class stores a uuid for a standard command of this
@@ -2958,12 +3107,20 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
 ///
 /// Six members name configuration objects rather than spellings of a property,
 /// so the caller supplies them already formatted: the title, the type pattern,
-/// the two `<UseAlways>` blocks and the two that carry the `<View>` and
-/// `<Edit>` restrictions. Everything else is read from the source:
+/// and members 6 to 9. Everything else is read from the source:
 ///
 /// - member 10 is `<MainAttribute>`;
 /// - member 11 is `<SavedData>`;
 /// - member 12 is `<FillCheck>`, 1 for `ShowError`.
+///
+/// Members 6 to 9 used to be named two apart from what they hold -- 6 and 7
+/// were called the `<UseAlways>` pair and 8 and 9 the `<View>`/`<Edit>` one.
+/// Joined over the 141 723 attributes of both corpora, each of the four is a
+/// pure partition on the absence of one element: 6 is `<View>`, 7 is
+/// `<Edit>`, 8 is `<UseAlways>` and 9 is `<Save>`. The defaults below are
+/// what an attribute that names none of them stores -- 141 493, 141 431,
+/// 137 363 and 138 968 records with no exception -- so the values were right
+/// all along and only the names were out of step.
 pub(crate) struct NativeFormAttribute<'a> {
     pub(crate) id: &'a str,
     pub(crate) name: &'a str,
@@ -2972,11 +3129,15 @@ pub(crate) struct NativeFormAttribute<'a> {
     /// Already formatted -- `{"Pattern"}` for an attribute the form does not
     /// type, and the pattern with its reference list for one it does.
     pub(crate) type_pattern: &'a str,
-    /// The two `<UseAlways>` blocks, `{0,{0,{"B",1},0}}` when the attribute
-    /// restricts nothing.
-    pub(crate) use_always: [&'a str; 2],
-    /// The `<View>` and `<Edit>` restrictions, `{0,0}` when there are none.
-    pub(crate) restrictions: [&'a str; 2],
+    /// Member 6, `<View>`, and member 7, `<Edit>` -- `{0,{0,{"B",1},0}}` when
+    /// the attribute restricts nothing.
+    pub(crate) view: &'a str,
+    pub(crate) edit: &'a str,
+    /// Member 8, `<UseAlways>`, `{0,0}` when the attribute names none.
+    pub(crate) use_always: &'a str,
+    /// Member 9, `<Save>`, `{0,0}` when the attribute names none. See
+    /// [`format_form_attribute_save`].
+    pub(crate) save: &'a str,
     pub(crate) main_attribute: bool,
     pub(crate) saved_data: bool,
     /// `<FillCheck>`: true for `ShowError`.
@@ -2995,8 +3156,10 @@ impl Default for NativeFormAttribute<'_> {
             name: "",
             title: "{1,0}",
             type_pattern: "{\"Pattern\"}",
-            use_always: ["{0,{0,{\"B\",1},0}}", "{0,{0,{\"B\",1},0}}"],
-            restrictions: ["{0,0}", "{0,0}"],
+            view: "{0,{0,{\"B\",1},0}}",
+            edit: "{0,{0,{\"B\",1},0}}",
+            use_always: "{0,0}",
+            save: "{0,0}",
             main_attribute: false,
             saved_data: false,
             fill_check: false,
@@ -3014,16 +3177,16 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
         columns.push_str(column);
     }
     format!(
-        "{{9,{{{id}}},0,{name},{title},{type_pattern},{use_always_one},{use_always_two},\
-         {view},{edit},{main},{saved},{fill_check},{count}{columns},{first},{second}}}",
+        "{{9,{{{id}}},0,{name},{title},{type_pattern},{view},{edit},\
+         {use_always},{save},{main},{saved},{fill_check},{count}{columns},{first},{second}}}",
         id = attribute.id,
         name = quoted(attribute.name),
         title = attribute.title,
         type_pattern = attribute.type_pattern,
-        use_always_one = attribute.use_always[0],
-        use_always_two = attribute.use_always[1],
-        view = attribute.restrictions[0],
-        edit = attribute.restrictions[1],
+        view = attribute.view,
+        edit = attribute.edit,
+        use_always = attribute.use_always,
+        save = attribute.save,
         main = u8::from(attribute.main_attribute),
         saved = u8::from(attribute.saved_data),
         fill_check = u8::from(attribute.fill_check),
@@ -3031,6 +3194,34 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
         first = attribute.trailing[0],
         second = attribute.trailing[1],
     )
+}
+
+/// Member 9 of the `{9,…}` record: an attribute's `<Save>`.
+///
+/// ```text
+/// {0, N, <path>, <path>, …}
+/// ```
+///
+/// `N` is the number of `<Field>` children -- 2 755 of 2 755 over both
+/// corpora, from 1 to 55 -- and each path follows the `<DataPath>` grammar
+/// with the attribute's own leading segment removed: `{0}` for a field that
+/// is the attribute's own name, `{1,{0,<uuid>}}` for one further segment.
+///
+/// **The list is sorted, not in XML order.** Every one of the 99 multi-entry
+/// lists of both corpora is ordered by segment count and then by the segment
+/// text, and the 65 that are all uuid are in ascending uuid order with no
+/// exception. Pairing the nth `<Field>` with the nth entry agrees on the set
+/// and silently swaps the uuids.
+pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
+    let mut sorted = paths.to_vec();
+    sorted.sort();
+    let mut out = format!("{{0,{}", sorted.len());
+    for path in sorted {
+        out.push(',');
+        out.push_str(&path);
+    }
+    out.push('}');
+    out
 }
 
 /// One `<Column>` of a value table or a value tree, as the body stores it.
@@ -4036,10 +4227,10 @@ pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
 /// `<MobileDeviceCommandBarContent>`, all 12 410 tails rebuild byte for byte
 /// from the source alone.
 ///
-/// The one refusal is that mobile command bar: its content reaches the tail as
-/// `{50,1,"",{"N",<n>}}`, a reference into the body's own value table, which
-/// the source alone cannot resolve. All 78 forms that differed carried it, and
-/// no other form did.
+/// That mobile command bar reaches the tail as `{50,1,"",{"N",<n>}}`, and the
+/// `<n>` is the id of the form **item** its `<xr:Value>` names -- so the
+/// source does resolve it. See [`format_mobile_device_command_bar_content`],
+/// which the caller fills this field from.
 pub(crate) struct NativeRootTail<'a> {
     /// `<AutoURL>`, which is on unless the form turns it off.
     pub(crate) auto_url: bool,
@@ -4073,6 +4264,10 @@ pub(crate) struct NativeRootTail<'a> {
     pub(crate) save_window_settings: bool,
     /// The navigator group's record, when the form has one.
     pub(crate) navigator: Option<&'a str>,
+    /// `<MobileDeviceCommandBarContent>`, already formatted by
+    /// [`format_mobile_device_command_bar_content`] -- `{50,0}` for the
+    /// 13 443 forms of both corpora that do not carry the element.
+    pub(crate) mobile_device_command_bar_content: &'a str,
 }
 
 impl Default for NativeRootTail<'_> {
@@ -4093,8 +4288,43 @@ impl Default for NativeRootTail<'_> {
             collapse_items_by_importance: None,
             save_window_settings: true,
             navigator: None,
+            mobile_device_command_bar_content: "{50,0}",
         }
     }
+}
+
+/// `<MobileDeviceCommandBarContent>`, in the shape trailer slot `22 + blocks`
+/// stores it.
+///
+/// ```text
+/// {<root>, N, <presentation>, <value>, <presentation>, <value>, …}
+/// ```
+///
+/// `2 + 2N` members, one pair per `<xr:Item>` in XML order: the item's
+/// `<xr:Presentation>`, which is `""` in all 214 items of both corpora, and
+/// its `<xr:Value>` as `{"N",<the named item's id>}`, or `{"N",0}` when the
+/// element is empty.
+///
+/// The partition is pure over every form of both corpora with a readable root
+/// trailer (12 500 ERP УХ + 1 103 BSP): the element absent stores `{50,0}` in
+/// 13 443 of 13 443, and present stores `{50,N,…}` with N the `<xr:Item>`
+/// count in 160 of 160.
+///
+/// The caller resolves the name, over the form's items and never its
+/// `<Command>`s -- in all ten forms where an item and a command share a name
+/// the item's id is what the body holds.
+pub(crate) fn format_mobile_device_command_bar_content(item_ids: &[&str]) -> String {
+    if item_ids.is_empty() {
+        return "{50,0}".to_string();
+    }
+    let mut out = format!("{{50,{}", item_ids.len());
+    for id in item_ids {
+        out.push_str(",\"\",{\"N\",");
+        out.push_str(id);
+        out.push('}');
+    }
+    out.push('}');
+    out
 }
 
 /// Reads one spelling of a property, refusing any the corpus never showed.
@@ -4183,7 +4413,7 @@ pub(crate) fn format_root_tail(tail: &NativeRootTail<'_>) -> Option<String> {
             "0",
         )?,
         group_again,
-        "{50,0}".to_string(),
+        tail.mobile_device_command_bar_content.to_string(),
         u8::from(tail.save_window_settings).to_string(),
     ];
     let head = match tail.navigator {
