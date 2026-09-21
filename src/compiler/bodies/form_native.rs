@@ -314,6 +314,53 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
     )
 }
 
+/// What a `{55,…}` table record carries around its six nested children.
+///
+/// The head grows with what the table shows, but the tail does not. Measured
+/// over the `{55,…}` records of the first 800 ERP УХ form bodies: the command
+/// bar sits exactly two members after the context menu in all 344 of them, the
+/// extended tooltip exactly 26 members from the end in 342, and the first
+/// `{5,…}` addition exactly 21 from the end in 335. The three additions follow
+/// each other two members apart and sixteen scalars close the record.
+///
+/// So the parts a caller supplies are the head and the scalar runs; this
+/// writer owns the structure between them.
+pub(crate) struct NativeTableItem<'a> {
+    /// Everything from `55` up to the member before the context menu's flag,
+    /// already joined with commas.
+    pub(crate) head: &'a str,
+    pub(crate) context_menu: &'a str,
+    pub(crate) command_bar: &'a str,
+    /// The twelve members between the command bar and the tooltip's flag.
+    pub(crate) middle: &'a str,
+    pub(crate) extended_tooltip: &'a str,
+    /// The three members between the tooltip and the first addition's flag.
+    pub(crate) before_additions: &'a str,
+    pub(crate) search_string_addition: &'a str,
+    pub(crate) view_status_addition: &'a str,
+    pub(crate) search_control_addition: &'a str,
+    /// The sixteen members that close the record.
+    pub(crate) tail: &'a str,
+}
+
+/// The `{55,…}` record of a table, with its six children in place.
+pub(crate) fn format_table_item(table: &NativeTableItem<'_>) -> String {
+    format!(
+        "{{{head},1,{context_menu},1,{command_bar},{middle},1,{tooltip},{before_additions},\
+         1,{search_string},1,{view_status},1,{search_control},{tail}}}",
+        head = table.head,
+        context_menu = table.context_menu,
+        command_bar = table.command_bar,
+        middle = table.middle,
+        tooltip = table.extended_tooltip,
+        before_additions = table.before_additions,
+        search_string = table.search_string_addition,
+        view_status = table.view_status_addition,
+        search_control = table.search_control_addition,
+        tail = table.tail,
+    )
+}
+
 /// The `{22,…}` record of an empty `<AutoCommandBar>`.
 ///
 /// The one slot that separates it from a context menu is the marker `9`, and
@@ -584,6 +631,79 @@ mod tests {
             ),
             "{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},\"Команда9\",{1,0},{1,0},{0,{0,{\"B\",1},0}},{0,57,0},{4,0,{0},\"\",-1,-1,1,0,\"\"},\"Команда9\",3,0,0,{0,0},1,0,1,0,0,1}"
         );
+    }
+
+    /// Splits a record into its top-level members the way the body grammar
+    /// does, so a test can say where a child sits.
+    fn top_level_members(record: &str) -> Vec<String> {
+        let inner = &record[1..record.len() - 1];
+        let mut members = Vec::new();
+        let mut depth = 0usize;
+        let mut start = 0usize;
+        let mut in_string = false;
+        for (index, ch) in inner.char_indices() {
+            match ch {
+                '"' => in_string = !in_string,
+                _ if in_string => {}
+                '{' => depth += 1,
+                '}' => depth -= 1,
+                ',' if depth == 0 => {
+                    members.push(inner[start..index].to_string());
+                    start = index + ch.len_utf8();
+                }
+                _ => {}
+            }
+        }
+        members.push(inner[start..].to_string());
+        members
+    }
+
+    /// The table record keeps its six children where every ERP УХ table keeps
+    /// them: the command bar two members after the context menu, the tooltip
+    /// 26 from the end, and the three additions 21, 19 and 17 from the end.
+    #[test]
+    fn writes_a_table_record_with_its_children_where_the_platform_keeps_them() {
+        let context_menu = format_field_context_menu("57", "ОтборКонтекстноеМеню");
+        let command_bar = format_empty_auto_command_bar("58", "ОтборКоманднаяПанель");
+        let tooltip = format_extended_tooltip("59", "ОтборРасширеннаяПодсказка");
+        let record = format_table_item(&NativeTableItem {
+            head: "55,{56,02023637-7868-4a5f-8576-835a76e0c9ba},0,2,0,\"Отбор\",{0}",
+            context_menu: &context_menu,
+            command_bar: &command_bar,
+            middle: "0,2,2,1,0,{\"Pattern\"},\"\",\"\",2,2,0",
+            extended_tooltip: &tooltip,
+            before_additions: "0,0,0",
+            search_string_addition: "{5,{60,x},0}",
+            view_status_addition: "{5,{63,x},1}",
+            search_control_addition: "{5,{66,x},2}",
+            tail: "0,1,0,0,1,0,3,3,0,1,0,0,0,0,0,0",
+        });
+
+        let members = top_level_members(&record);
+        let context_at = members
+            .iter()
+            .position(|member| member == &context_menu)
+            .expect("the context menu is a member");
+        let command_at = members
+            .iter()
+            .position(|member| member == &command_bar)
+            .expect("the command bar is a member");
+        let tooltip_at = members
+            .iter()
+            .position(|member| member == &tooltip)
+            .expect("the tooltip is a member");
+        let addition_at = members
+            .iter()
+            .position(|member| member == "{5,{60,x},0}")
+            .expect("the search string addition is a member");
+
+        assert_eq!(command_at - context_at, 2);
+        assert_eq!(members.len() - tooltip_at, 26);
+        assert_eq!(members.len() - addition_at, 21);
+        assert_eq!(members[addition_at - 1], "1");
+        assert_eq!(members[members.len() - 19], "{5,{63,x},1}");
+        assert_eq!(members[members.len() - 17], "{5,{66,x},2}");
+        assert_eq!(members.len() - (members.len() - 17) - 1, 16);
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
