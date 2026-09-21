@@ -194,14 +194,26 @@ struct FormXmlCommand {
 struct FormXmlAttribute {
     id: String,
     name: String,
+    /// Every entry of `<Type>`, in XML order: `<v8:Type>` and `<v8:TypeSet>`
+    /// alike. A type set is a type -- 3 224 attributes of ERP УХ declare one
+    /// and each stores the referenced object's `<xr:TypeId>`, which is what
+    /// `resolve_metadata_type_id` already returns for a `cfg:` name.
     types: Vec<String>,
     string_length: Option<String>,
     string_allowed_length: Option<String>,
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
     main_attribute: Option<bool>,
     settings: Option<FormXmlDynamicListSettings>,
+    /// `<Settings xsi:type="v8:TypeDescription">`: the element type of a
+    /// `v8:ValueListType`, which is not a dynamic list's settings and does
+    /// not refuse the form.
+    element_type: Option<FormXmlTypeSpec>,
+    /// `<Columns><Column>`, which only a value table, a value tree or a
+    /// register record set carries.
+    columns: Vec<FormXmlAttributeColumn>,
     /// `<Title>`, which 71% of the corpus's form attributes carry.
     title: Vec<LocalizedString>,
     /// `<SavedData>` and `<FillCheck>`, which the `{9,…}` record reads
@@ -214,6 +226,39 @@ struct FormXmlAttribute {
     unwritable: Vec<&'static str>,
 }
 
+/// A declared type and the qualifiers that go with it.
+///
+/// `<Columns><Column><Type>` and a value list's `<Settings>` spell a type the
+/// same way `<Attribute><Type>` does, so both read into this and then through
+/// the one grammar in `format_form_type_spec_pattern`.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlTypeSpec {
+    types: Vec<String>,
+    string_length: Option<String>,
+    string_allowed_length: Option<String>,
+    number_digits: Option<String>,
+    number_fraction_digits: Option<String>,
+    number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
+}
+
+/// One `<Column>` of a value table or a value tree.
+///
+/// The ten-member `{5,…}` record reads exactly three things out of it -- the
+/// title, the type and `<FillCheck>` -- beside the `id` and `name` of the
+/// element itself. Everything else a column can name goes to `unwritable`
+/// and refuses the form, because members 6, 7 and 8 then hold something the
+/// source does not carry.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlAttributeColumn {
+    id: String,
+    name: String,
+    title: Vec<LocalizedString>,
+    spec: FormXmlTypeSpec,
+    fill_check: Option<String>,
+    unwritable: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlParameter {
     name: String,
@@ -223,6 +268,7 @@ struct FormXmlParameter {
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
     key_parameter: Option<bool>,
 }
 
@@ -7219,6 +7265,17 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         if attribute.settings.is_some() {
             blockers.push("an attribute carries dynamic-list settings".to_string());
         }
+        // A column's `<View>`, `<Edit>` and `<FunctionalOptions>` land in
+        // members 6, 7 and 8 of its record, and what they hold when the
+        // column names one was never measured -- member 8's bag carries a
+        // functional-option uuid the source does not have. Writing the
+        // default those members hold in 142 594 of 143 454 columns would be
+        // the same silent loss the guard above was closed for.
+        for column in &attribute.columns {
+            if let Some(part) = column.unwritable.first() {
+                blockers.push(format!("an attribute column names <{part}>"));
+            }
+        }
     }
     if !properties.command_interface_items.is_empty() {
         blockers.push("a command interface".to_string());
@@ -7441,6 +7498,42 @@ fn format_native_form_body(
     for attribute in &properties.attributes {
         let pattern = format_form_attribute_type_pattern(attribute, source)?;
         let title = format_form_title_value(&attribute.title);
+        // Member 13 is the column count and members 14.. the column records;
+        // `format_form_attribute` reads both off this vector.
+        let mut columns = Vec::with_capacity(attribute.columns.len());
+        for column in &attribute.columns {
+            let column_title = format_form_title_value(&column.title);
+            let column_pattern =
+                format_form_type_spec_pattern("Form Attribute Column", &column.spec, source)?;
+            columns.push(
+                crate::compiler::bodies::form_native::format_form_attribute_column(
+                    &crate::compiler::bodies::form_native::NativeFormAttributeColumn {
+                        id: &column.id,
+                        name: &column.name,
+                        title: &column_title,
+                        type_pattern: &column_pattern,
+                        fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                        ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
+                    },
+                ),
+            );
+        }
+        // trailing[0] is a value list's element type and `{0,0}` for every
+        // other kind of attribute; trailing[1] is `<FunctionalOptions>`,
+        // whose presence refuses the form above, so `{0,0}` is right here.
+        let element_type = attribute
+            .element_type
+            .as_ref()
+            .map(|spec| {
+                format_form_type_spec_pattern("Form Attribute ElementType", spec, source).map(
+                    |pattern| {
+                        crate::compiler::bodies::form_native::format_form_value_list_element_type(
+                            &pattern,
+                        )
+                    },
+                )
+            })
+            .transpose()?;
         attributes.push(',');
         attributes.push_str(&crate::compiler::bodies::form_native::format_form_attribute(
             &crate::compiler::bodies::form_native::NativeFormAttribute {
@@ -7451,6 +7544,8 @@ fn format_native_form_body(
                 main_attribute: attribute.main_attribute.unwrap_or(false),
                 saved_data: attribute.saved_data.unwrap_or(false),
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
+                columns: &columns,
+                trailing: [element_type.as_deref().unwrap_or("{0,0}"), "{0,0}"],
                 ..crate::compiler::bodies::form_native::NativeFormAttribute::default()
             },
         ));
@@ -8205,6 +8300,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_localized_lang = None::<String>;
     let mut current_localized_content = None::<String>;
     let mut current_attribute = None::<FormXmlAttribute>;
+    let mut current_column = None::<FormXmlAttributeColumn>;
     let mut current_parameter = None::<FormXmlParameter>;
     let mut current_dynamic_list_field = None::<FormXmlDynamicListField>;
     let mut current_command_interface_item = None::<FormXmlCommandInterfaceItem>;
@@ -8345,11 +8441,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         | "TitleTextColor"
                         | "KeyParameter"
                         | "Type"
+                        | "TypeSet"
                         | "Length"
                         | "AllowedLength"
                         | "Digits"
                         | "FractionDigits"
                         | "AllowedSign"
+                        | "DateFractions"
+                        // Without these two the buffer still held the text of
+                        // the element before them, and an attribute's
+                        // `<SavedData>` read its `<MainAttribute>`.
+                        | "SavedData"
+                        | "FillCheck"
                         | "lang"
                         | "content"
                 ) {
@@ -8430,33 +8533,51 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 // made the guard unreachable, and a value table's `<Columns>`,
                 // an attribute's `<FunctionalOptions>` and three more parts
                 // were dropped in silence instead of refusing the form.
-                } else if matches!(
-                    local.as_str(),
-                    "Columns" | "UseAlways" | "FunctionalOptions" | "View" | "Edit" | "Save"
-                ) && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                } else if let Some(name) = form_attribute_unwritable_part(&local)
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
                     && let Some(attribute) = current_attribute.as_mut()
                 {
-                    let name: &'static str = match local.as_str() {
-                        "Columns" => "Columns",
-                        "UseAlways" => "UseAlways",
-                        "FunctionalOptions" => "FunctionalOptions",
-                        "View" => "View",
-                        "Edit" => "Edit",
-                        _ => "Save",
-                    };
                     if !attribute.unwritable.contains(&name) {
                         attribute.unwritable.push(name);
+                    }
+                } else if local == "Column"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
+                {
+                    current_column = parse_form_attribute_column_xml(&event)?;
+                } else if path_ends_with(
+                    &path,
+                    &["Form", "Attributes", "Attribute", "Columns", "Column"],
+                ) && !matches!(local.as_str(), "Type" | "Title" | "FillCheck")
+                    && let Some(column) = current_column.as_mut()
+                {
+                    // The ten-member column record reads the title, the type
+                    // and `<FillCheck>` out of the source; `<View>`, `<Edit>`
+                    // and `<FunctionalOptions>` land in members the source
+                    // does not carry -- member 8's bag names a functional
+                    // option by a uuid only the configuration knows -- so
+                    // naming one refuses the form instead of taking the
+                    // default those members hold in 142 594 columns and more.
+                    if !column.unwritable.contains(&local) {
+                        column.unwritable.push(local.clone());
                     }
                 } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
                     current_parameter = parse_form_parameter_xml(&event)?;
                 } else if local == "Settings"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
-                    && current_attribute
-                        .as_ref()
-                        .and_then(|attribute| attribute.settings.as_ref())
-                        .is_none()
+                    && let Some(attribute) = current_attribute.as_mut()
                 {
-                    if let Some(attribute) = current_attribute.as_mut() {
+                    // Two unrelated things are spelled `<Settings>`. A value
+                    // list's is a `v8:TypeDescription` naming its element
+                    // type, and it belongs in the trailing bag: 2 141 of them
+                    // in the corpus, every one on a `v8:ValueListType`. The
+                    // blocker that refuses a dynamic list's settings was
+                    // swallowing all of them.
+                    if xml_attribute_value(&event, "type")?.as_deref() == Some("v8:TypeDescription")
+                    {
+                        if attribute.element_type.is_none() {
+                            attribute.element_type = Some(FormXmlTypeSpec::default());
+                        }
+                    } else if attribute.settings.is_none() {
                         attribute.settings = Some(FormXmlDynamicListSettings::default());
                     }
                 } else if local == "Field"
@@ -8623,6 +8744,35 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     if let Some(attribute) = parse_form_attribute_xml(&event)? {
                         properties.attributes.push(attribute);
                     }
+                // An element that carries nothing arrives here instead of at
+                // `Event::Start`, and a guard that only watches the one is
+                // half a guard: `<UseAlways/>` would be dropped in silence
+                // and a `<Column/>` would leave member 13 counting one fewer
+                // column than the attribute declares.
+                } else if let Some(name) = form_attribute_unwritable_part(&local)
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    if !attribute.unwritable.contains(&name) {
+                        attribute.unwritable.push(name);
+                    }
+                } else if local == "Column"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
+                {
+                    if let Some(column) = parse_form_attribute_column_xml(&event)?
+                        && let Some(attribute) = current_attribute.as_mut()
+                    {
+                        attribute.columns.push(column);
+                    }
+                } else if path_ends_with(
+                    &path,
+                    &["Form", "Attributes", "Attribute", "Columns", "Column"],
+                ) && !matches!(local.as_str(), "Type" | "Title" | "FillCheck")
+                    && let Some(column) = current_column.as_mut()
+                {
+                    if !column.unwritable.contains(&local) {
+                        column.unwritable.push(local.clone());
+                    }
                 } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
                     if let Some(parameter) = parse_form_parameter_xml(&event)? {
                         properties.parameters.push(parameter);
@@ -8763,6 +8913,23 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
                     )
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    // Members 4, 11 and 12 of the `{9,…}` record read these
+                    // three, and none of them was collected: the `<Title>` of
+                    // 95 899 attributes reached the body as `{1,1,{"",""}}`,
+                    // and `<SavedData>` and `<FillCheck>` read whatever the
+                    // element before them had left in the buffer -- which, in
+                    // the order `Form.xml` writes an attribute, is
+                    // `<MainAttribute>`.
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Title", "item", "content"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "SavedData"])
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "FillCheck"])
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
@@ -9199,6 +9366,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "AllowedSign",
                         ],
                     )
+                    || path_ends_with_for_form_type_text(&path)
                 {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
@@ -9262,6 +9430,23 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
                     )
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
+                    // Members 4, 11 and 12 of the `{9,…}` record read these
+                    // three, and none of them was collected: the `<Title>` of
+                    // 95 899 attributes reached the body as `{1,1,{"",""}}`,
+                    // and `<SavedData>` and `<FillCheck>` read whatever the
+                    // element before them had left in the buffer -- which, in
+                    // the order `Form.xml` writes an attribute, is
+                    // `<MainAttribute>`.
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Title", "item", "lang"],
+                    )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "Title", "item", "content"],
+                    )
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "SavedData"])
+                    || path_ends_with(&path, &["Form", "Attributes", "Attribute", "FillCheck"])
                     || path_ends_with(
                         &path,
                         &["Form", "Attributes", "Attribute", "Settings", "ManualQuery"],
@@ -9646,6 +9831,100 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 match local.as_str() {
+                    // A `<v8:TypeSet>` is one entry of the type pattern, and
+                    // `<DateFractions>` is the second member of a `{"D"}`
+                    // element. Both go beside `<v8:Type>` in XML order.
+                    "TypeSet" | "DateFractions"
+                        if path_is(&path, &FORM_ATTRIBUTE_PATH, &["Type", "TypeSet"])
+                            || path_is(
+                                &path,
+                                &FORM_ATTRIBUTE_PATH,
+                                &["Type", "DateQualifiers", "DateFractions"],
+                            ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let value = text_value.trim();
+                            if local == "TypeSet" {
+                                if !value.is_empty() {
+                                    attribute.types.push(value.to_string());
+                                }
+                            } else {
+                                attribute.date_fractions = Some(value.to_string());
+                            }
+                        }
+                    }
+                    "TypeSet" | "DateFractions"
+                        if path_is(&path, &FORM_PARAMETER_PATH, &["Type", "TypeSet"])
+                            || path_is(
+                                &path,
+                                &FORM_PARAMETER_PATH,
+                                &["Type", "DateQualifiers", "DateFractions"],
+                            ) =>
+                    {
+                        if let Some(parameter) = current_parameter.as_mut() {
+                            let value = text_value.trim();
+                            if local == "TypeSet" {
+                                if !value.is_empty() {
+                                    parameter.types.push(value.to_string());
+                                }
+                            } else {
+                                parameter.date_fractions = Some(value.to_string());
+                            }
+                        }
+                    }
+                    // A value list's element type, which `<Settings>` spells
+                    // with the type's parts and no `<Type>` around them.
+                    _ if form_type_spec_part(&path, &FORM_ELEMENT_TYPE_PATH, false).is_some() => {
+                        if let Some(part) = form_type_spec_part(&path, &FORM_ELEMENT_TYPE_PATH, false)
+                            && let Some(spec) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.element_type.as_mut())
+                        {
+                            apply_form_type_spec_part(spec, part, text_value.trim());
+                        }
+                    }
+                    // A column's own declared type.
+                    _ if form_type_spec_part(&path, &FORM_COLUMN_PATH, true).is_some() => {
+                        if let Some(part) = form_type_spec_part(&path, &FORM_COLUMN_PATH, true)
+                            && let Some(column) = current_column.as_mut()
+                        {
+                            apply_form_type_spec_part(&mut column.spec, part, text_value.trim());
+                        }
+                    }
+                    "lang" if path_is(&path, &FORM_COLUMN_PATH, &["Title", "item", "lang"]) => {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_is(&path, &FORM_COLUMN_PATH, &["Title", "item", "content"]) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item" if path_is(&path, &FORM_COLUMN_PATH, &["Title", "item"]) => {
+                        if let (Some(column), Some(lang), Some(content)) = (
+                            current_column.as_mut(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            column.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "FillCheck" if path_is(&path, &FORM_COLUMN_PATH, &["FillCheck"]) => {
+                        if let Some(column) = current_column.as_mut() {
+                            column.fill_check = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Column"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "Columns", "Column"],
+                        ) =>
+                    {
+                        if let Some(column) = current_column.take()
+                            && let Some(attribute) = current_attribute.as_mut()
+                        {
+                            attribute.columns.push(column);
+                        }
+                    }
                     "WindowOpeningMode"
                         if path_ends_with(&path, &["Form", "WindowOpeningMode"]) =>
                     {
@@ -12247,8 +12526,11 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         number_digits: None,
         number_fraction_digits: None,
         number_allowed_sign: None,
+        date_fractions: None,
         main_attribute: None,
         settings: None,
+        element_type: None,
+        columns: Vec::new(),
         title: Vec::new(),
         saved_data: None,
         fill_check: None,
@@ -20224,6 +20506,8 @@ fn format_form_parameter_type_pattern(
         parameter.number_digits.clone(),
         parameter.number_fraction_digits.clone(),
         parameter.number_allowed_sign.clone(),
+        parameter.date_fractions.clone(),
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         true,
     )?;
@@ -20829,6 +21113,34 @@ fn format_form_attribute_type_pattern(
         attribute.number_digits.clone(),
         attribute.number_fraction_digits.clone(),
         attribute.number_allowed_sign.clone(),
+        attribute.date_fractions.clone(),
+        StringAllowedLengthCoding::VariableIsOne,
+        source,
+        true,
+    )?;
+    Ok(format_metadata_type_pattern(&value_types))
+}
+
+/// The `{"Pattern",…}` of a declared type that is not an attribute's own.
+///
+/// A column's `<Type>` and a value list's `<Settings>` spell a type the same
+/// way an attribute does, so they share the grammar rather than a second
+/// reading of it.
+fn format_form_type_spec_pattern(
+    kind: &str,
+    spec: &FormXmlTypeSpec,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let value_types = parse_metadata_type_pattern_elements(
+        kind,
+        &spec.types,
+        spec.string_length.clone(),
+        spec.string_allowed_length.clone(),
+        spec.number_digits.clone(),
+        spec.number_fraction_digits.clone(),
+        spec.number_allowed_sign.clone(),
+        spec.date_fractions.clone(),
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         true,
     )?;
@@ -25266,7 +25578,16 @@ enum MetadataTypePatternElement {
         fraction_digits: u32,
         allowed_sign_flag: u8,
     },
-    DateTime,
+    DateTime {
+        /// `<DateQualifiers><DateFractions>`, as a second member of the
+        /// `{"D"}` element: `Date` adds `"D"` and `Time` adds `"T"`, while
+        /// `DateTime` -- and no qualifier at all -- adds nothing.
+        ///
+        /// A pure partition wherever it was measured over ERP УХ: 3 621
+        /// value-table columns, 4 161 form attributes and 345 form
+        /// parameters, with no exception in any of the three.
+        fractions: Option<&'static str>,
+    },
     Reference {
         type_id: String,
     },
@@ -25536,6 +25857,9 @@ fn parse_defined_type_xml_properties(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        // Unread here, as it always was; see `parse_date_fractions_mark`.
+        None,
+        StringAllowedLengthCoding::VariableIsZero,
         source,
         true,
     )?;
@@ -26588,7 +26912,7 @@ fn metadata_type_pattern_matches_existing(
         .iter()
         .zip(fields.iter().skip(1))
         .all(|(expected, range)| match expected {
-            MetadataTypePatternElement::DateTime => {
+            MetadataTypePatternElement::DateTime { .. } => {
                 let compact = compact_1c_value(&existing[range.clone()]);
                 compact == r#"{"D"}"# || compact.starts_with(r#"{"D","#)
             }
@@ -26654,6 +26978,10 @@ fn parse_constant_value_type(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        // A constant's `<DateQualifiers>` is unread here, as it always was:
+        // only the form shapes above were measured against stored bodies.
+        None,
+        StringAllowedLengthCoding::VariableIsZero,
         source,
         false,
     )?;
@@ -26662,6 +26990,7 @@ fn parse_constant_value_type(
         .ok_or_else(|| anyhow!("Constant Properties/Type is empty"))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_metadata_type_pattern_elements(
     kind: &str,
     types: &[String],
@@ -26670,6 +26999,8 @@ fn parse_metadata_type_pattern_elements(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
+    allowed_length_coding: StringAllowedLengthCoding,
     source: Option<&MetadataSourceContext>,
     allow_multiple: bool,
 ) -> Result<Vec<MetadataTypePatternElement>> {
@@ -26699,12 +27030,15 @@ fn parse_metadata_type_pattern_elements(
                 number_digits.as_deref(),
                 number_fraction_digits.as_deref(),
                 number_allowed_sign.as_deref(),
+                date_fractions.as_deref(),
+                allowed_length_coding,
                 source,
             )
         })
         .collect()
 }
 
+#[allow(clippy::too_many_arguments)]
 fn parse_metadata_type_pattern_element(
     kind: &str,
     type_name: &str,
@@ -26713,13 +27047,16 @@ fn parse_metadata_type_pattern_element(
     number_digits: Option<&str>,
     number_fraction_digits: Option<&str>,
     number_allowed_sign: Option<&str>,
+    date_fractions: Option<&str>,
+    allowed_length_coding: StringAllowedLengthCoding,
     source: Option<&MetadataSourceContext>,
 ) -> Result<MetadataTypePatternElement> {
     match type_name.trim() {
         "xs:boolean" => Ok(MetadataTypePatternElement::Boolean),
         "xs:string" => {
             let length = parse_optional_u32("StringQualifiers/Length", string_length)?;
-            let allowed_length_flag = parse_string_allowed_length_flag(string_allowed_length)?;
+            let allowed_length_flag =
+                parse_string_allowed_length_flag(string_allowed_length, allowed_length_coding)?;
             Ok(MetadataTypePatternElement::String {
                 length: length.filter(|value| *value > 0),
                 allowed_length_flag,
@@ -26733,7 +27070,9 @@ fn parse_metadata_type_pattern_element(
             )?,
             allowed_sign_flag: parse_number_allowed_sign_flag(number_allowed_sign)?,
         }),
-        "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime),
+        "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime {
+            fractions: parse_date_fractions_mark(date_fractions)?,
+        }),
         other if other.starts_with("v8:") => {
             let type_id = builtin_v8_type_id(other)
                 .ok_or_else(|| anyhow!("{kind} type is not supported yet: {other}"))?;
@@ -27094,12 +27433,66 @@ fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
         .with_context(|| format!("invalid metadata {name}"))
 }
 
-fn parse_string_allowed_length_flag(value: Option<&str>) -> Result<u8> {
-    match value.map(str::trim).unwrap_or("Variable") {
-        "Variable" => Ok(0),
-        "Fixed" => Ok(1),
-        other => Err(anyhow!(
-            "unsupported metadata StringQualifiers/AllowedLength: {other}"
+/// Which way `<StringQualifiers><AllowedLength>` is coded in the third member
+/// of `{"S",<length>,…}`.
+///
+/// The two readings are opposites and this module has only ever written one of
+/// them, so the caller says which it means rather than one of them being
+/// silently applied to the other's artifacts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StringAllowedLengthCoding {
+    /// `Variable` is 0. What the constant and defined-type callers of this
+    /// module have always written; unmeasured here, and left alone.
+    VariableIsZero,
+    /// `Variable` is 1 and `Fixed` is 0, which is what a form body stores.
+    ///
+    /// A pure partition over the 34 164 value-table columns of ERP УХ whose
+    /// `<Type>` is a lone `xs:string` with a non-zero `<Length>`: 33 782
+    /// `Variable` to 1 and 382 `Fixed` to 0, with no exception. Form
+    /// attributes agree. A `<Length>` of 0 stores the bare `{"S"}` and no
+    /// flag at all, which is why this went unnoticed -- 44 553 of the
+    /// columns, and most of the attributes, take that branch.
+    ///
+    /// The session-parameter and defined-type writers in
+    /// `compiler/families/simple.rs` already write 1 for `Variable`; only
+    /// this module's constant path writes 0, and whether that one is right
+    /// is not measured here.
+    VariableIsOne,
+}
+
+fn parse_string_allowed_length_flag(
+    value: Option<&str>,
+    coding: StringAllowedLengthCoding,
+) -> Result<u8> {
+    let variable = match value.map(str::trim).unwrap_or("Variable") {
+        "Variable" => true,
+        "Fixed" => false,
+        other => {
+            return Err(anyhow!(
+                "unsupported metadata StringQualifiers/AllowedLength: {other}"
+            ));
+        }
+    };
+    Ok(match coding {
+        StringAllowedLengthCoding::VariableIsZero => u8::from(!variable),
+        StringAllowedLengthCoding::VariableIsOne => u8::from(variable),
+    })
+}
+
+/// What `<DateQualifiers><DateFractions>` adds to the `{"D"}` element.
+///
+/// Measured as a pure partition three times over ERP УХ -- 3 621 value-table
+/// columns, 4 161 form attributes and 345 form parameters whose `<Type>` is a
+/// lone `xs:dateTime` -- with the same three values each time: `Date` stores
+/// `{"D","D"}`, `Time` stores `{"D","T"}`, and `DateTime` stores the bare
+/// `{"D"}` that a type with no qualifier stores.
+fn parse_date_fractions_mark(value: Option<&str>) -> Result<Option<&'static str>> {
+    match value.map(str::trim) {
+        None | Some("") | Some("DateTime") => Ok(None),
+        Some("Date") => Ok(Some("D")),
+        Some("Time") => Ok(Some("T")),
+        Some(other) => Err(anyhow!(
+            "unsupported metadata DateQualifiers/DateFractions: {other}"
         )),
     }
 }
@@ -27136,12 +27529,26 @@ fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElement)
             allowed_length_flag,
         } => format!(r#"{{"S",{length},{allowed_length_flag}}}"#),
         MetadataTypePatternElement::String { length: None, .. } => r#"{"S"}"#.to_string(),
+        // A number with nothing to say drops its members, the same way a
+        // string of unbounded length drops its length: `Digits 0`,
+        // `FractionDigits 0` and `Any` is the bare `{"N"}` in all 182 form
+        // attributes and value-table columns of ERP УХ that declare it, while
+        // the 9 that are `Nonnegative` keep the whole `{"N",0,0,1}`. The
+        // export in `mssql_dump::moxel` already reads it this way.
+        MetadataTypePatternElement::Number {
+            digits: 0,
+            fraction_digits: 0,
+            allowed_sign_flag: 0,
+        } => r#"{"N"}"#.to_string(),
         MetadataTypePatternElement::Number {
             digits,
             fraction_digits,
             allowed_sign_flag,
         } => format!(r#"{{"N",{digits},{fraction_digits},{allowed_sign_flag}}}"#),
-        MetadataTypePatternElement::DateTime => r#"{"D"}"#.to_string(),
+        MetadataTypePatternElement::DateTime { fractions: None } => r#"{"D"}"#.to_string(),
+        MetadataTypePatternElement::DateTime {
+            fractions: Some(mark),
+        } => format!(r#"{{"D","{mark}"}}"#),
         MetadataTypePatternElement::Reference { type_id } => format!("{{\"#\",{type_id}}}"),
     }
 }
@@ -27964,6 +28371,145 @@ fn path_ends_with(path: &[String], suffix: &[&str]) -> bool {
         .all(|(left, right)| left == right)
 }
 
+/// Whether `path` ends with `owner` and then `tail`.
+///
+/// The same thing `path_ends_with` does, with the owning element named apart
+/// from the part under it, so the four places that spell a `<Type>` can share
+/// one list of its parts.
+fn path_is(path: &[String], owner: &[&str], tail: &[&str]) -> bool {
+    if path.len() < owner.len() + tail.len() {
+        return false;
+    }
+    let cut = path.len() - tail.len();
+    path[cut..]
+        .iter()
+        .zip(tail)
+        .all(|(left, right)| left == right)
+        && path[cut - owner.len()..cut]
+            .iter()
+            .zip(owner)
+            .all(|(left, right)| left == right)
+}
+
+const FORM_ATTRIBUTE_PATH: [&str; 3] = ["Form", "Attributes", "Attribute"];
+const FORM_PARAMETER_PATH: [&str; 3] = ["Form", "Parameters", "Parameter"];
+const FORM_COLUMN_PATH: [&str; 5] = ["Form", "Attributes", "Attribute", "Columns", "Column"];
+const FORM_ELEMENT_TYPE_PATH: [&str; 4] = ["Form", "Attributes", "Attribute", "Settings"];
+
+/// Every text node of a `<Type>` block, under the element that wraps it.
+///
+/// A value list's `<Settings>` carries the same parts with no `<Type>` around
+/// them, so it matches on the tail of each of these.
+const FORM_TYPE_SPEC_TAILS: [&[&str]; 8] = [
+    &["Type", "Type"],
+    &["Type", "TypeSet"],
+    &["Type", "StringQualifiers", "Length"],
+    &["Type", "StringQualifiers", "AllowedLength"],
+    &["Type", "NumberQualifiers", "Digits"],
+    &["Type", "NumberQualifiers", "FractionDigits"],
+    &["Type", "NumberQualifiers", "AllowedSign"],
+    &["Type", "DateQualifiers", "DateFractions"],
+];
+
+/// The part of `owner`'s declared type this path names, if it names one.
+///
+/// `wrapped` tells the two spellings apart: an attribute, a parameter and a
+/// column put the parts inside a `<Type>` element, and a value list's
+/// `<Settings>` carries them directly.
+fn form_type_spec_part<'a>(
+    path: &'a [String],
+    owner: &[&str],
+    wrapped: bool,
+) -> Option<&'a str> {
+    for tail in FORM_TYPE_SPEC_TAILS {
+        let tail = if wrapped { tail } else { &tail[1..] };
+        if path_is(path, owner, tail) {
+            return path.last().map(String::as_str);
+        }
+    }
+    None
+}
+
+/// Every text node a form's declared types read, in all four places.
+///
+/// Two spellings were unread wherever a type is declared: `<v8:TypeSet>`,
+/// which is a type like any other, and `<DateQualifiers><DateFractions>`,
+/// which decides whether `xs:dateTime` stores `{"D"}`, `{"D","D"}` or
+/// `{"D","T"}`. A column's own type, its title and its `<FillCheck>`, and a
+/// value list's element type, were not read at all.
+fn path_ends_with_for_form_type_text(path: &[String]) -> bool {
+    path_is(path, &FORM_ATTRIBUTE_PATH, &["Type", "TypeSet"])
+        || path_is(
+            path,
+            &FORM_ATTRIBUTE_PATH,
+            &["Type", "DateQualifiers", "DateFractions"],
+        )
+        || path_is(path, &FORM_PARAMETER_PATH, &["Type", "TypeSet"])
+        || path_is(
+            path,
+            &FORM_PARAMETER_PATH,
+            &["Type", "DateQualifiers", "DateFractions"],
+        )
+        || form_type_spec_part(path, &FORM_COLUMN_PATH, true).is_some()
+        || form_type_spec_part(path, &FORM_ELEMENT_TYPE_PATH, false).is_some()
+        || path_is(path, &FORM_COLUMN_PATH, &["FillCheck"])
+        || path_is(path, &FORM_COLUMN_PATH, &["Title", "item", "lang"])
+        || path_is(path, &FORM_COLUMN_PATH, &["Title", "item", "content"])
+}
+
+/// One text node of a `<Type>` block, stored where it belongs.
+fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str) {
+    match part {
+        // A type set is one entry of the pattern like any other, and pushing
+        // it here is what keeps the list in XML order.
+        "Type" | "TypeSet" => {
+            if !value.is_empty() {
+                spec.types.push(value.to_string());
+            }
+        }
+        "Length" => spec.string_length = Some(value.to_string()),
+        "AllowedLength" => spec.string_allowed_length = Some(value.to_string()),
+        "Digits" => spec.number_digits = Some(value.to_string()),
+        "FractionDigits" => spec.number_fraction_digits = Some(value.to_string()),
+        "AllowedSign" => spec.number_allowed_sign = Some(value.to_string()),
+        "DateFractions" => spec.date_fractions = Some(value.to_string()),
+        _ => {}
+    }
+}
+
+/// The parts of an `<Attribute>` the `{9,…}` record cannot write.
+///
+/// `<Columns>` is off this list now: the column records are written. The rest
+/// land in members that name a configuration object -- the two `<UseAlways>`
+/// blocks, the `<View>` and `<Edit>` restrictions and the trailing functional
+/// options bag -- or, for `<Save>`, in no member anyone has found.
+fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
+    match local {
+        "UseAlways" => Some("UseAlways"),
+        "FunctionalOptions" => Some("FunctionalOptions"),
+        "View" => Some("View"),
+        "Edit" => Some("Edit"),
+        "Save" => Some("Save"),
+        _ => None,
+    }
+}
+
+fn parse_form_attribute_column_xml(
+    event: &BytesStart<'_>,
+) -> Result<Option<FormXmlAttributeColumn>> {
+    let Some(name) = xml_attribute_value(event, "name")? else {
+        return Ok(None);
+    };
+    let Some(id) = xml_attribute_value(event, "id")? else {
+        return Ok(None);
+    };
+    Ok(Some(FormXmlAttributeColumn {
+        id,
+        name,
+        ..FormXmlAttributeColumn::default()
+    }))
+}
+
 fn xml_attr_value(event: &BytesStart<'_>, name: &str) -> Option<String> {
     event
         .attributes()
@@ -28247,6 +28793,123 @@ mod tests {
             super::form_standard_command_uuid("Form.StandardCommand.Cancel"),
             Some("679b62d9-ff72-4329-bf3a-c0c32b311dd2")
         );
+    }
+
+    /// One `Form.xml` carrying every part of an attribute this change reads:
+    /// a value table with three columns, a value list with an element type,
+    /// and a date parameter. The strings are the shapes ERP УХ bodies store.
+    #[test]
+    fn writes_the_columns_and_the_value_list_element_type() -> anyhow::Result<()> {
+        let xml = concat!(
+            r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" "#,
+            r#"xmlns:v8="http://v8.1c.ru/8.1/data/core" "#,
+            r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
+            r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
+            r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+            r#"<Attributes><Attribute name="Таблица" id="1">"#,
+            r#"<Title><item><lang>ru</lang><content>Таблица</content></item></Title>"#,
+            r#"<Type><v8:Type>v8:ValueTable</v8:Type></Type><Columns>"#,
+            r#"<Column name="Дата" id="2">"#,
+            r#"<Title><item><lang>ru</lang><content>Дата</content></item></Title>"#,
+            r#"<Type><v8:Type>xs:dateTime</v8:Type>"#,
+            r#"<v8:DateQualifiers><v8:DateFractions>Date</v8:DateFractions>"#,
+            r#"</v8:DateQualifiers></Type></Column>"#,
+            r#"<Column name="Пусто" id="3"><Type/></Column>"#,
+            r#"<Column name="Строка" id="4"><Type><v8:Type>xs:string</v8:Type>"#,
+            r#"<v8:StringQualifiers><v8:Length>50</v8:Length>"#,
+            r#"<v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers></Type>"#,
+            r#"<FillCheck>ShowError</FillCheck></Column>"#,
+            r#"</Columns></Attribute>"#,
+            r#"<Attribute name="Список" id="5">"#,
+            r#"<Type><v8:Type>v8:ValueListType</v8:Type></Type>"#,
+            r#"<Settings xsi:type="v8:TypeDescription"><v8:Type>xs:string</v8:Type>"#,
+            r#"<v8:StringQualifiers><v8:Length>50</v8:Length>"#,
+            r#"<v8:AllowedLength>Fixed</v8:AllowedLength></v8:StringQualifiers></Settings>"#,
+            r#"</Attribute></Attributes>"#,
+            r#"<Parameters><Parameter name="Период"><Type><v8:Type>xs:dateTime</v8:Type>"#,
+            r#"<v8:DateQualifiers><v8:DateFractions>Time</v8:DateFractions>"#,
+            r#"</v8:DateQualifiers></Type></Parameter></Parameters>"#,
+            "</Form>",
+        );
+        let body = super::compile_native_form_body(xml.as_bytes(), None, None)?;
+
+        // Member 13 counts the columns and members 14.. are their records;
+        // an empty `<Type/>` is `{"Pattern"}`, `DateFractions` is the second
+        // member of the `{"D"}` element, `ShowError` is the only spelling
+        // that makes a column's last member 1, and a `Variable` length is a
+        // 1 in the string element -- the element type below is `Fixed` and
+        // writes the 0.
+        assert!(
+            body.contains(concat!(
+                r#"{9,{1},0,"Таблица",{1,1,{"ru","Таблица"}},"#,
+                r##"{"Pattern",{"#",acf6192e-81ca-46ef-93a6-5a6968b78663}},"##,
+                r#"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,3,"#,
+                r#"{5,2,0,"Дата",{1,1,{"ru","Дата"}},{"Pattern",{"D","D"}},"#,
+                r#"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},"#,
+                r#"{5,3,0,"Пусто",{1,0},{"Pattern"},"#,
+                r#"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},0},"#,
+                r#"{5,4,0,"Строка",{1,0},{"Pattern",{"S",50,1}},"#,
+                r#"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},1},"#,
+                r#"{0,0},{0,0}}"#,
+            )),
+            "the value table's record is not the one the platform stores: {body}"
+        );
+
+        // A value list's `<Settings>` is its element type, not a dynamic
+        // list's settings, and it is written into the first trailing block.
+        assert!(
+            body.contains(concat!(
+                r#"{9,{5},0,"Список",{1,0},"#,
+                r##"{"Pattern",{"#",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3}},"##,
+                r#"{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,"#,
+                r##"{0,1,"ElementType",{"#",f5c65050-3bbb-11d5-b988-0050bae0a95d,"##,
+                r#"{"Pattern",{"S",50,0}}}},{0,0}}"#,
+            )),
+            "the value list's element type is not stored: {body}"
+        );
+
+        assert!(
+            body.contains(r#"{0,"Период",{"Pattern",{"D","T"}},0}"#),
+            "the parameter's date fractions are not stored: {body}"
+        );
+        Ok(())
+    }
+
+    /// Fail-closed: a column's `<View>`, `<Edit>` and `<FunctionalOptions>`
+    /// land in members the measurement does not give, so naming one refuses
+    /// the form rather than writing the default the other 142 594 store.
+    #[test]
+    fn refuses_a_column_that_names_a_part_the_writer_cannot_place() {
+        for (part, body) in [
+            ("View", "<View><Common>false</Common></View>"),
+            ("Edit", "<Edit><Common>false</Common></Edit>"),
+            (
+                "FunctionalOptions",
+                "<FunctionalOptions><Item>cfg:FunctionalOption.Опция</Item></FunctionalOptions>",
+            ),
+        ] {
+            let xml = format!(
+                concat!(
+                    r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" "#,
+                    r#"xmlns:v8="http://v8.1c.ru/8.1/data/core" "#,
+                    r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
+                    r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
+                    r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                    r#"<Attributes><Attribute name="Таблица" id="1">"#,
+                    r#"<Type><v8:Type>v8:ValueTable</v8:Type></Type><Columns>"#,
+                    r#"<Column name="Графа" id="2"><Type/>{part_body}</Column>"#,
+                    r#"</Columns></Attribute></Attributes></Form>"#,
+                ),
+                part_body = body,
+            );
+            let error = super::compile_native_form_body(xml.as_bytes(), None, None)
+                .expect_err("a column that names {part} must refuse the form")
+                .to_string();
+            assert!(
+                error.contains(&format!("an attribute column names <{part}>")),
+                "{part} was written instead of refused: {error}"
+            );
+        }
     }
 
     #[test]
@@ -34477,8 +35140,14 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         let packed = super::pack_form_body_blob_from_form_xml(&base, xml, None)?;
         let parsed = super::parse_form_body_blob(&packed.blob)?;
 
+        // `Fixed` is the 0 and `Variable` the 1, not the other way round:
+        // measured over every form of ERP УХ whose `<Type>` is a lone
+        // `xs:string` with a non-zero `<Length>` -- 283 parameters, 5 343
+        // attributes and 34 164 value-table columns -- with no exception in
+        // any of the three. This assertion used to hold the reading the code
+        // had, which the corpus contradicts.
         assert!(
-            parsed.trailing[1].contains(r#""Text",{"Pattern",{"S",30,1}},1"#),
+            parsed.trailing[1].contains(r#""Text",{"Pattern",{"S",30,0}},1"#),
             "{}",
             parsed.trailing[1]
         );

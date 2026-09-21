@@ -2917,6 +2917,91 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
     )
 }
 
+/// One `<Column>` of a value table or a value tree, as the body stores it.
+///
+/// Ten members in all 143 454 columns of ERP УХ -- the record never recurses,
+/// because a column carries no columns of its own:
+///
+/// ```text
+/// {5,<id>,0,<"name">,<title>,<type pattern>,<view>,<edit>,<functional options>,<fill check>}
+/// ```
+///
+/// Member 1 is the `<Column id="…">` attribute verbatim and member 2 the
+/// literal 0; members 4 and 5 follow the attribute's own grammar, the title
+/// down to `{1,0}` when there is none and the type pattern down to
+/// `{"Pattern"}` for the 1 464 columns whose `<Type>` is empty.
+///
+/// Members 6, 7 and 8 name configuration objects when the column says
+/// something -- member 8's bag carries a functional-option uuid only the
+/// configuration knows -- so the caller supplies them, and a column that names
+/// `<View>`, `<Edit>` or `<FunctionalOptions>` refuses the form rather than
+/// take the default. The defaults here are what the column stores when it
+/// says nothing, which is 143 448, 143 446 and 142 594 of the 143 454.
+///
+/// Member 9 is `<FillCheck>`: a pure partition, 143 448 absent to 0 and the
+/// six `ShowError` to 1.
+pub(crate) struct NativeFormAttributeColumn<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) name: &'a str,
+    /// Already formatted -- `{1,0}` for a column with no title.
+    pub(crate) title: &'a str,
+    /// Already formatted -- `{"Pattern"}` for a column the form does not type.
+    pub(crate) type_pattern: &'a str,
+    /// The `<View>` and `<Edit>` restrictions.
+    pub(crate) restrictions: [&'a str; 2],
+    /// `<FunctionalOptions>`, `{0,0}` when the column names none.
+    pub(crate) functional_options: &'a str,
+    /// `<FillCheck>`: true for `ShowError`.
+    pub(crate) fill_check: bool,
+}
+
+impl Default for NativeFormAttributeColumn<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            name: "",
+            title: "{1,0}",
+            type_pattern: "{\"Pattern\"}",
+            restrictions: ["{0,{0,{\"B\",1},0}}", "{0,{0,{\"B\",1},0}}"],
+            functional_options: "{0,0}",
+            fill_check: false,
+        }
+    }
+}
+
+/// The `{5,…}` record of one column of a form attribute.
+pub(crate) fn format_form_attribute_column(column: &NativeFormAttributeColumn<'_>) -> String {
+    format!(
+        "{{5,{id},0,{name},{title},{type_pattern},{view},{edit},{functional_options},{fill_check}}}",
+        id = column.id,
+        name = quoted(column.name),
+        title = column.title,
+        type_pattern = column.type_pattern,
+        view = column.restrictions[0],
+        edit = column.restrictions[1],
+        functional_options = column.functional_options,
+        fill_check = u8::from(column.fill_check),
+    )
+}
+
+/// The uuid a `v8:TypeDescription` value is stored under.
+///
+/// Constant in all 2 140 value-list attributes of ERP УХ that carry a
+/// `<Settings>` element type.
+const FORM_TYPE_DESCRIPTION_TYPE_UUID: &str = "f5c65050-3bbb-11d5-b988-0050bae0a95d";
+
+/// A value list's element type, as `NativeFormAttribute::trailing[0]`.
+///
+/// `v8:ValueListType` spells its element type as
+/// `<Settings xsi:type="v8:TypeDescription">`, and the body writes it as a
+/// one-key bag whose value is a TypeDescription carrying the same
+/// `{"Pattern",…}` grammar an attribute's own `<Type>` uses. All 2 140 share
+/// this prefix; the 238 value lists with no `<Settings>` store `{0,0}`
+/// instead, which is the field's default.
+pub(crate) fn format_form_value_list_element_type(type_pattern: &str) -> String {
+    format!("{{0,1,\"ElementType\",{{\"#\",{FORM_TYPE_DESCRIPTION_TYPE_UUID},{type_pattern}}}}}")
+}
+
 /// A form command, as the body stores it.
 ///
 /// Nineteen members, told apart from an attribute by the namespace in its id
@@ -4883,6 +4968,61 @@ mod tests {
             })
             .as_deref(),
             Some("{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},\"Команда9\",{1,0},{1,0},{0,{0,{\"B\",1},0}},{0,57,0},{4,0,{0},\"\",-1,-1,1,0,\"\"},\"Команда9\",3,0,0,{0,0},1,0,1,0,0,1}")
+        );
+
+        // A value table's own columns, verbatim out of
+        // `AccumulationRegisters\ОстаткиПартийЗЕРНО\Forms\ФормаВыбораЗначений`,
+        // and one that names a functional option out of
+        // `…\РНПТМатериаловВПроизводстве\Forms\ПодборПоСпецификации`.
+        assert_eq!(
+            format_form_attribute_column(&NativeFormAttributeColumn {
+                id: "4",
+                name: "ОрганизацияКонтрагентСтрокой",
+                title: "{1,2,{\"ru\",\"Организация / Контрагент\"},\
+                        {\"en\",\"Организация / Контрагент\"}}",
+                type_pattern: "{\"Pattern\",{\"S\"}}",
+                ..NativeFormAttributeColumn::default()
+            }),
+            "{5,4,0,\"ОрганизацияКонтрагентСтрокой\",{1,2,{\"ru\",\"Организация / Контрагент\"},\
+             {\"en\",\"Организация / Контрагент\"}},{\"Pattern\",{\"S\"}},\
+             {0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},0}"
+        );
+        assert_eq!(
+            format_form_attribute_column(&NativeFormAttributeColumn {
+                id: "5",
+                name: "Характеристика",
+                title: "{1,2,{\"ru\",\"Характеристика\"},{\"en\",\"Variant\"}}",
+                type_pattern: "{\"Pattern\",{\"#\",89c162bd-68ef-4693-a4a8-19238fa23c62}}",
+                functional_options: "{0,1,6c8550bb-f6df-4d47-bbea-cfbc7c362006}",
+                ..NativeFormAttributeColumn::default()
+            }),
+            "{5,5,0,\"Характеристика\",{1,2,{\"ru\",\"Характеристика\"},{\"en\",\"Variant\"}},\
+             {\"Pattern\",{\"#\",89c162bd-68ef-4693-a4a8-19238fa23c62}},\
+             {0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},\
+             {0,1,6c8550bb-f6df-4d47-bbea-cfbc7c362006},0}"
+        );
+        // A column that says nothing is ten members, and `ShowError` is the
+        // only spelling that makes the last one 1.
+        let bare = format_form_attribute_column(&NativeFormAttributeColumn::default());
+        assert_eq!(top_level_members(&bare).len(), 10);
+        assert!(bare.ends_with(",{0,0},0}"));
+        assert!(
+            format_form_attribute_column(&NativeFormAttributeColumn {
+                fill_check: true,
+                ..NativeFormAttributeColumn::default()
+            })
+            .ends_with(",{0,0},1}")
+        );
+
+        // A value list's element type, the two ends of the 2 140 measured.
+        assert_eq!(
+            format_form_value_list_element_type("{\"Pattern\"}"),
+            "{0,1,\"ElementType\",{\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,{\"Pattern\"}}}"
+        );
+        assert_eq!(
+            format_form_value_list_element_type("{\"Pattern\",{\"S\",50,1}}"),
+            "{0,1,\"ElementType\",\
+             {\"#\",f5c65050-3bbb-11d5-b988-0050bae0a95d,{\"Pattern\",{\"S\",50,1}}}}"
         );
 
         // <CurrentRowUse> is written twice and the two do not agree: Use is 0
