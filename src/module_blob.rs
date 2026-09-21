@@ -399,6 +399,7 @@ struct FormXmlChildItem {
     picture_present: bool,
     font_present: bool,
     choice_list_present: bool,
+    row_filter_present: bool,
     /// Every other scalar property, by element name, as the XML spells it.
     /// The payload writers read from here rather than growing a field each.
     scalars: BTreeMap<String, String>,
@@ -6170,6 +6171,11 @@ fn format_native_child_item(
         return Ok((kind_uuid, record));
     }
 
+    if item.tag == "Table" {
+        let record = format_native_table(item, attribute_ids, command_ids, items, main_attribute_class, source)?;
+        return Ok((kind_uuid, record));
+    }
+
     if let Some(kind) = native::native_field_kind(&item.tag) {
         let payload = native_field_payload(item, source)?;
         let data_path = match item.data_path.as_deref() {
@@ -6320,6 +6326,283 @@ fn native_command_bar_payload(
         "{{0,{align},{}}}",
         u8::from(autofill != Some(false))
     ))
+}
+
+/// The `{55,…}` record of a `<Table>`.
+///
+/// Head, keyed property bag, events, the table's own excluded commands,
+/// context menu, command bar, columns and tail. The head and the tail were
+/// measured earlier; the bag is read here.
+#[allow(clippy::too_many_arguments)]
+fn format_native_table(
+    item: &FormXmlChildItem,
+    attribute_ids: &BTreeMap<String, String>,
+    command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+
+    if item.picture_present || item.font_present {
+        return Err(anyhow!("a table names a picture or a font"));
+    }
+    if !item.scalars.contains_key("DataPath") && item.data_path.is_none() {
+        return Err(anyhow!("a table that binds to nothing is not measured"));
+    }
+    let data_path = match item.data_path.as_deref() {
+        Some(path) => format_form_attribute_data_path(path, attribute_ids)
+            .ok_or_else(|| anyhow!("a table binds to {path}, which is not a form attribute"))?,
+        None => "{0}".to_string(),
+    };
+
+    // A <ContextMenu> is a child item; a table keeps it in a member of its
+    // own, as a field does, and its columns are ordinary records.
+    let mut context_menu = None;
+    let mut command_bar = None;
+    let mut columns = Vec::new();
+    for child in &item.child_items {
+        match child.tag.as_str() {
+            "ContextMenu" if context_menu.is_none() => context_menu = Some(child),
+            "AutoCommandBar" if command_bar.is_none() => command_bar = Some(child),
+            _ => columns.push(child),
+        }
+    }
+    let context_menu = match context_menu {
+        Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+        None => return Err(anyhow!("a table with no context menu is not measured")),
+    };
+    let command_bar = match command_bar {
+        Some(bar) => {
+            let payload = native_command_bar_payload(
+                bar.horizontal_align,
+                bar.autofill,
+            )?;
+            native::format_group_item(&native::NativeGroupItem {
+                id: &bar.id,
+                kind: 9,
+                name: &bar.name,
+                payload: &payload,
+                ..native::NativeGroupItem::default()
+            })
+            .ok_or_else(|| anyhow!("a table's command bar names something unplaceable"))?
+        }
+        None => return Err(anyhow!("a table with no command bar is not measured")),
+    };
+    let mut column_records = Vec::new();
+    for column in columns {
+        column_records.push(format_native_child_item(
+            column,
+            attribute_ids,
+            command_ids,
+            items,
+            main_attribute_class,
+            source,
+        )?);
+    }
+    let column_records = column_records
+        .iter()
+        .map(|(uuid, record)| (*uuid, record.clone()))
+        .collect::<Vec<_>>();
+
+    let title = format_form_title_value(&item.title);
+    let tooltip_title = format_form_title_value(&item.tooltip);
+    let extended_tooltip = match &item.extended_tooltip {
+        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
+        None => return Err(anyhow!("a table with no extended tooltip is not measured")),
+    };
+    let head = native::format_table_head(&native::NativeTableHead {
+        id: &item.id,
+        representation: item.table_representation.as_deref(),
+        name: &item.name,
+        title_location: item.title_location.map(native_title_location),
+        title_height: item.scalars.get("TitleHeight").map(String::as_str),
+        command_bar_location: item.table_command_bar_location.as_deref(),
+        title: &title,
+        tooltip_title: &tooltip_title,
+        data_path: &data_path,
+        autofill: item.autofill.unwrap_or(true),
+        enabled: item.enabled.unwrap_or(true),
+        read_only: item.read_only.unwrap_or(false),
+        default_item: item.default_item.unwrap_or(false),
+        change_row_set: native_scalar_flag(item, "ChangeRowSet", true),
+        change_row_order: native_scalar_flag(item, "ChangeRowOrder", true),
+        width: item.width.as_deref(),
+        height: item.height.as_deref(),
+        height_in_table_rows: item.height_in_table_rows.as_deref(),
+        choice_mode: native_scalar_flag(item, "ChoiceMode", false),
+        row_input_mode: item.scalars.get("RowInputMode").map(String::as_str),
+        selection_mode: item.scalars.get("SelectionMode").map(String::as_str),
+        row_selection_mode: item.row_selection_mode.as_deref(),
+        header: native_scalar_flag(item, "Header", true),
+        header_height: item.scalars.get("HeaderHeight").map(String::as_str),
+        footer: native_scalar_flag(item, "Footer", false),
+        footer_height: item.scalars.get("FooterHeight").map(String::as_str),
+        horizontal_scroll_bar: item.table_horizontal_scroll_bar.map(|value| match value {
+            FormTableHorizontalScrollBar::DontUse => "DontUse",
+            FormTableHorizontalScrollBar::UseAlways => "UseAlways",
+        }),
+        vertical_scroll_bar: item.scalars.get("VerticalScrollBar").map(String::as_str),
+        horizontal_lines: native_scalar_flag(item, "HorizontalLines", true),
+        vertical_lines: native_scalar_flag(item, "VerticalLines", true),
+        use_alternation_row_color: item.use_alternation_row_color.unwrap_or(true),
+        auto_insert_new_row: native_scalar_flag(item, "AutoInsertNewRow", false),
+        initial_list_view: item.table_initial_list_view.map(|value| match value {
+            FormTableInitialListView::Beginning => "Beginning",
+            FormTableInitialListView::End => "End",
+        }),
+        initial_tree_view: item.initial_tree_view.as_deref(),
+        output: item.scalars.get("Output").map(String::as_str),
+        horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
+        vertical_stretch: item.vertical_stretch.unwrap_or(true),
+        enable_start_drag: item.enable_start_drag.unwrap_or(true),
+        enable_drag: item.enable_drag.unwrap_or(true),
+        ..native::NativeTableHead::default()
+    })
+    .ok_or_else(|| anyhow!("<Table> names a spelling the head writer cannot place"))?;
+
+    let tail = native::format_table_tail(&native::NativeTableTail {
+        auto_mark_incomplete: item.auto_mark_incomplete,
+        visible: item.visible.unwrap_or(true),
+        multiple_choice: item.table_multiple_choice.unwrap_or(false),
+        skip_on_input: item.skip_on_input,
+        search_on_input: item.table_search_on_input.map(|value| match value {
+            FormTableSearchOnInput::Use => "Use",
+            FormTableSearchOnInput::DontUse => "DontUse",
+        }),
+        tooltip_representation: item.tooltip_representation.map(|value| match value {
+            FormTooltipRepresentation::Omit => "Auto",
+            FormTooltipRepresentation::None => "None",
+            FormTooltipRepresentation::Balloon => "Balloon",
+            FormTooltipRepresentation::Button => "Button",
+            FormTooltipRepresentation::ShowAuto => "ShowAuto",
+            FormTooltipRepresentation::ShowTop => "ShowTop",
+            FormTooltipRepresentation::ShowLeft => "ShowLeft",
+            FormTooltipRepresentation::ShowBottom => "ShowBottom",
+            FormTooltipRepresentation::ShowRight => "ShowRight",
+        }),
+        extended_tooltip: &extended_tooltip,
+        search_string_location: item.scalars.get("SearchStringLocation").map(String::as_str),
+        view_status_location: item.scalars.get("ViewStatusLocation").map(String::as_str),
+        search_control_location: item.scalars.get("SearchControlLocation").map(String::as_str),
+        refresh_request: item.scalars.get("RefreshRequest").map(String::as_str),
+        auto_max_width: item.auto_max_width.unwrap_or(true),
+        max_width: item.max_width.as_deref(),
+        auto_max_height: item.auto_max_height.unwrap_or(true),
+        max_height: item.max_height.as_deref(),
+        height_control_variant: item.scalars.get("HeightControlVariant").map(String::as_str),
+        auto_max_rows_count: native_scalar_flag(item, "AutoMaxRowsCount", true),
+        max_rows_count: item.scalars.get("MaxRowsCount").map(String::as_str),
+        current_row_use: item.table_current_row_use.map(|_| "DontUse"),
+        file_drag_mode: item.file_drag_mode.as_deref(),
+        ..native::NativeTableTail::default()
+    })
+    .ok_or_else(|| anyhow!("<Table> names a spelling the tail writer cannot place"))?;
+
+    let bag = native_table_property_bag(item, items, source)?;
+    let events = item
+        .events
+        .iter()
+        .map(|event| native::NativeEvent {
+            name: &event.name,
+            handler: &event.handler,
+        })
+        .collect::<Vec<_>>();
+    let events = native::format_native_events(&item.tag, main_attribute_class, &events)
+        .ok_or_else(|| anyhow!("a table names an event the writer cannot place"))?;
+
+    Ok(native::format_table_record(
+        &head,
+        &bag.iter()
+            .map(|(key, value)| (*key, value.clone()))
+            .collect::<Vec<_>>(),
+        &events,
+        &context_menu,
+        &command_bar,
+        &column_records,
+        &tail,
+    ))
+}
+
+/// The keyed property bag of a `{55,…}` table record.
+///
+/// Measured over all 10 738 tables of ERP УХ that split: every key that is not
+/// a constant carries one XML property, and each maps every spelling and its
+/// absence to exactly one stored value. A table bound to a dynamic list
+/// carries the whole set; one bound to anything else carries key 13 when it
+/// names a `<RowFilter>`, and key 19.
+fn native_table_property_bag(
+    item: &FormXmlChildItem,
+    items: &BTreeMap<String, NativeItemTarget>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<(&'static str, String)>> {
+    let _ = source;
+    let scalar = |name: &str| item.scalars.get(name).map(String::as_str);
+    let flag = |name: &str, default: bool| {
+        format!("{{\"B\",{}}}", u8::from(native_scalar_flag(item, name, default)))
+    };
+    let mut bag = Vec::new();
+    let dynamic_list = items.get(&item.name).is_some_and(|target| target.dynamic_list);
+    if dynamic_list {
+        bag.push(("5", flag("AutoRefresh", false)));
+        bag.push((
+            "6",
+            format!("{{\"N\",{}}}", scalar("AutoRefreshPeriod").unwrap_or("60")),
+        ));
+        bag.push(("7", "{\"#\",2fdc88ec-7c9b-43cd-8b0d-7d4dbbd0d1b3}".to_string()));
+        let folders = match scalar("ChoiceFoldersAndItems") {
+            None | Some("Items") => "0",
+            Some("Folders") => "1",
+            Some("FoldersAndItems") => "2",
+            Some(other) => {
+                return Err(anyhow!("a table's <ChoiceFoldersAndItems>{other} is not measured"));
+            }
+        };
+        bag.push((
+            "8",
+            format!("{{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,{folders}}}"),
+        ));
+        bag.push(("9", flag("RestoreCurrentRow", false)));
+        bag.push(("10", "{\"U\"}".to_string()));
+        bag.push(("11", flag("ShowRoot", true)));
+        bag.push(("12", flag("AllowRootChoice", false)));
+        let update = match scalar("UpdateOnDataChange") {
+            None | Some("Auto") => "0",
+            Some("DontUpdate") => "1",
+            Some(other) => {
+                return Err(anyhow!("a table's <UpdateOnDataChange>{other} is not measured"));
+            }
+        };
+        bag.push((
+            "14",
+            format!("{{\"#\",eac7bfa0-10b4-4369-996c-d258871ad519,{update}}}"),
+        ));
+        bag.push(("15", "{\"U\"}".to_string()));
+        let group = match item.user_settings_group.as_deref() {
+            None => "0".to_string(),
+            Some(name) => match items.get(name) {
+                Some(target) => target.id.clone(),
+                // The group is sometimes spelled as `<id>:<namespace>`.
+                None => match name.split_once(':') {
+                    Some((id, _)) if id.chars().all(|c| c.is_ascii_digit()) => id.to_string(),
+                    _ => {
+                        return Err(anyhow!(
+                            "a table settles into {name}, which the form does not declare"
+                        ));
+                    }
+                },
+            },
+        };
+        bag.push(("16", format!("{{\"N\",{group}}}")));
+        bag.push(("19", "{\"S\",\"\"}".to_string()));
+        bag.push(("20", flag("AllowGettingCurrentRowURL", true)));
+    } else {
+        if item.row_filter_present {
+            bag.push(("13", "{\"U\"}".to_string()));
+        }
+        bag.push(("19", "{\"S\",\"\"}".to_string()));
+    }
+    Ok(bag)
 }
 
 /// The payload a container carries, by its tag.
@@ -7984,7 +8267,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if matches!(
                     local.as_str(),
-                    "Format" | "CollapsedRepresentationTitle" | "Picture" | "Font" | "ChoiceList"
+                    "Format"
+                        | "CollapsedRepresentationTitle"
+                        | "Picture"
+                        | "Font"
+                        | "ChoiceList"
+                        | "RowFilter"
                 )
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -7996,6 +8284,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         "Picture" => item.picture_present = true,
                         "Font" => item.font_present = true,
                         "ChoiceList" => item.choice_list_present = true,
+                        "RowFilter" => item.row_filter_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
@@ -8170,7 +8459,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if matches!(
                     local.as_str(),
-                    "Format" | "CollapsedRepresentationTitle" | "Picture" | "Font" | "ChoiceList"
+                    "Format"
+                        | "CollapsedRepresentationTitle"
+                        | "Picture"
+                        | "Font"
+                        | "ChoiceList"
+                        | "RowFilter"
                 )
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -8182,6 +8476,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         "Picture" => item.picture_present = true,
                         "Font" => item.font_present = true,
                         "ChoiceList" => item.choice_list_present = true,
+                        "RowFilter" => item.row_filter_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
@@ -11964,6 +12259,7 @@ fn parse_form_child_item_xml(
         picture_present: false,
         font_present: false,
         choice_list_present: false,
+        row_filter_present: false,
         scalars: BTreeMap::new(),
         child_items_present: false,
         child_items: Vec::new(),

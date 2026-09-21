@@ -54,8 +54,10 @@ rather than defaulting it.
 
 ## Open
 
-- [ ] **The property bag's values, per main attribute class.** The shape is
-      read; what each key holds is not. A dynamic-list form writes key 1, a
+- [ ] **The root record's property bag values, per main attribute class.** The
+      shape is read; what each key holds is not. The table's own bag is read
+      -- see table-property-bag-20260921.md -- and the root's is the same kind
+      of store. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
 - [ ] **The two appearance sections** of the frame.
@@ -84,8 +86,15 @@ rather than defaulting it.
       target item's tag plus whether it is bound to a dynamic list; 146 of 147
       form keys and 156 of 158 item keys map to one uuid, and the rest are
       refused.
-- [ ] **A dynamic list's settings** (2 630 forms) and the `{55,…}` table
-      record (1 766), now the two largest refusals.
+- [x] **The `{55,…}` table record.** Head, keyed property bag, events, context
+      menu, command bar, columns and tail, all wired. The bag's key set is
+      decided by the type of the attribute the table binds to, and every
+      non-constant key carries one XML property, pure over the 10 738 records
+      that split. *(table-property-bag-20260921.md)*
+- [ ] **A dynamic list's settings** (3 204 forms), the largest refusal left.
+- [ ] **The `{5,…}` addition records** a table's `<SearchStringAddition>`,
+      `<ViewStatusAddition>` and `<SearchControlAddition>` carry -- 24 members
+      each, in tail slots 16, 18 and 20 (1 704 forms).
 - [x] **The navigator** is not a source property at all: it travels with the
       settings composer spelling, which is not in the source either. Of the
       11 842 forms carrying one of the two canonical blobs, 11 821 agree --
