@@ -6651,6 +6651,10 @@ fn format_native_child_item(
             horizontal_align: item.horizontal_align.map(native_horizontal_align_spelling),
             vertical_align: item.vertical_align.map(native_vertical_align_spelling),
             fixing_in_table: item.fixing_in_table.map(native_fixing_in_table_spelling),
+            edit_mode: item.edit_mode.map(|value| match value {
+                FormXmlEditMode::Directly => "Directly",
+                FormXmlEditMode::EnterOnInput => "EnterOnInput",
+            }),
             auto_cell_height: item.auto_cell_height.unwrap_or(false),
             payload: &payload,
             context_menu: &menu,
