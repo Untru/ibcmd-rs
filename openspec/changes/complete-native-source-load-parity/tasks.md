@@ -72,10 +72,13 @@ rather than defaulting it.
 - [ ] **Call the item writers.** 10 152 of the 13 044 forms of ERP УХ -- 78% --
       are refused for this one reason. The records themselves are written and
       measured; nothing calls them.
-- [ ] **The navigator.** 5 458 root records carry one and 7 030 do not, and
-      nothing in the form's XML partitions the two -- not a scalar property,
-      not the main attribute's class. This is the open question that blocks
-      most of the 42 bodies that still differ.
+- [x] **The navigator** is not a source property at all: it travels with the
+      settings composer spelling, which is not in the source either. Of the
+      11 842 forms carrying one of the two canonical blobs, 11 821 agree --
+      99.8%. Both come from what the platform wrote when the form was last
+      saved, so the writer pairs the empty settings with no navigator and the
+      round trip closes on the second export.
+      *(navigator-and-generation-20260921.md)*
 - [ ] **The form's own `<Enabled>`**, member 15 of the root head, which the
       parser does not read.
 - [ ] **The parser's own gaps**, which hold up 2 620 forms before the writer
