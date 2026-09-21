@@ -966,6 +966,7 @@ mod config_dump_info;
 mod config_rows;
 mod configuration_properties_evidence;
 mod dcs;
+mod dynamic_generation;
 mod fetch;
 mod form_body;
 mod forms;
@@ -2086,6 +2087,8 @@ fn dump_config_inner(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport
         &selected_file_names,
     )?;
     prepare_output_dir(&args.output_dir, args.overwrite)?;
+    // Each run resolves the dynamic generation of the database it was given.
+    dynamic_generation::clear_storage_generation_overlays();
 
     let mut table_roles = vec![MssqlConfigurationTableRole::Current];
     if args.include_config_save {
@@ -3680,6 +3683,12 @@ fn dump_table_rows_streamed(
         database,
         table,
         selected_file_names,
+    )?;
+    // Everything below reads the configuration an active dynamic generation
+    // publishes; without one this leaves the headers and every later query
+    // exactly as they were.
+    let headers = install_dynamic_generation_overlay(
+        sqlcmd, bcp, server, user, password, database, table, selected_file_names, headers,
     )?;
     let fetch_headers_ms = elapsed_ms(headers_started);
     let mut timings = MssqlDumpTimingReport {
@@ -43328,8 +43337,105 @@ fn quote_ident(value: &str) -> String {
     format!("[{}]", value.replace(']', "]]"))
 }
 
+/// Resolves the storage table's active dynamic generation, makes every later
+/// query on that table read the configuration it publishes, and returns the
+/// row headers under their published names.
+///
+/// A table with no `DynamicallyUpdated` row -- every parity corpus this
+/// project measures except a database an online update left mid-flight --
+/// installs nothing and gets its own headers back unchanged.
+///
+/// A marker this reader cannot read is an error rather than "no generation":
+/// reading it as absent would publish the previous configuration silently,
+/// which is the defect this exists to close.
+#[allow(clippy::too_many_arguments)]
+fn install_dynamic_generation_overlay(
+    sqlcmd: &Path,
+    bcp: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    selected_file_names: &BTreeSet<String>,
+    headers: Vec<ConfigRowHeader>,
+) -> Result<Vec<ConfigRowHeader>> {
+    // A full run already knows every row there is, so a table without the
+    // marker costs nothing at all.
+    if selected_file_names.is_empty()
+        && !headers
+            .iter()
+            .any(|row| row.file_name == DYNAMIC_UPDATE_MARKER_ROW)
+    {
+        return Ok(headers);
+    }
+    let marker_name = BTreeSet::from([DYNAMIC_UPDATE_MARKER_ROW.to_owned()]);
+    let marker = fetch_config_rows_bcp(
+        sqlcmd, bcp, server, user, password, database, table, &marker_name,
+    )?;
+    let Some(marker) = marker.into_iter().find(|row| row.part_no == 0) else {
+        return Ok(headers);
+    };
+    let history = dynamic_generation::dynamic_generation_history(&marker.binary_bytes()?)
+        .ok_or_else(|| anyhow!("{table}.{DYNAMIC_UPDATE_MARKER_ROW} is not a generation history"))?;
+
+    // The overlay is a property of the whole table, so a run that selected a
+    // few rows by name still resolves it against every row there is.
+    let inventory;
+    let names: &[ConfigRowHeader] = if selected_file_names.is_empty() {
+        &headers
+    } else {
+        inventory = fetch_row_headers(
+            sqlcmd,
+            server,
+            user,
+            password,
+            database,
+            table,
+            &BTreeSet::new(),
+        )?;
+        &inventory
+    };
+    let overlay = dynamic_generation::storage_generation_overlay(
+        &history,
+        names.iter().map(|row| row.file_name.as_str()),
+    );
+    if overlay.is_empty() {
+        return Ok(headers);
+    }
+    dynamic_generation::install_storage_generation_overlay(table, overlay.clone());
+
+    Ok(headers
+        .into_iter()
+        .filter_map(|mut row| {
+            if let Some(published) = overlay.published_name(&row.file_name) {
+                row.file_name = published.to_owned();
+                return Some(row);
+            }
+            if dynamic_generation::is_dynamic_generation_alias(&row.file_name)
+                || overlay.hides(&row.file_name)
+            {
+                return None;
+            }
+            Some(row)
+        })
+        .collect())
+}
+
+/// The storage row an online update records its generation history in.
+const DYNAMIC_UPDATE_MARKER_ROW: &str = "DynamicallyUpdated";
+
+/// The expression every storage query reads from.
+///
+/// Without an active dynamic generation this is the table itself, exactly as
+/// it always was. With one, it is a derived table that reads the configuration
+/// that generation publishes -- see [`dynamic_generation`].
 fn qualified_storage_table(database: &str, table: &str) -> String {
-    format!("{}.dbo.{}", quote_ident(database), quote_ident(table))
+    let qualified = format!("{}.dbo.{}", quote_ident(database), quote_ident(table));
+    dynamic_generation::storage_table_expression(
+        &qualified,
+        dynamic_generation::storage_generation_overlay_for(table).as_ref(),
+    )
 }
 
 fn quote_string(value: &str) -> String {
