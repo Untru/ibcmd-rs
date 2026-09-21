@@ -368,6 +368,35 @@ struct FormXmlChildItem {
     events: Vec<FormXmlEvent>,
     command_name: Option<String>,
     data_path: Option<String>,
+    /// What the `{29,…}` usual-group payload reads beyond the properties
+    /// every item shares.
+    child_items_width: Option<String>,
+    control_representation: Option<String>,
+    collapsed: Option<bool>,
+    show_left_margin: Option<bool>,
+    horizontal_spacing: Option<String>,
+    vertical_spacing: Option<String>,
+    through_align: Option<String>,
+    children_align: Option<String>,
+    united: Option<bool>,
+    current_row_use: Option<String>,
+    title_data_path: Option<String>,
+    back_color: Option<String>,
+    hidden_state_title_back_color: Option<String>,
+    format_present: bool,
+    collapsed_representation_title_present: bool,
+    associated_table_element_id: Option<String>,
+    /// What the other container payloads read.
+    header_horizontal_align: Option<String>,
+    shape: Option<String>,
+    shape_representation: Option<String>,
+    title_back_color: Option<String>,
+    popup_border_color: Option<String>,
+    command_source: Option<String>,
+    pages_representation: Option<String>,
+    /// `<Representation>` of a container the typed fields do not cover.
+    container_representation: Option<String>,
+    picture_present: bool,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
@@ -6058,6 +6087,8 @@ const fn native_flag(value: Option<bool>) -> Option<bool> {
 fn format_native_child_item(
     item: &FormXmlChildItem,
     attribute_ids: &BTreeMap<String, String>,
+    command_ids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<(&'static str, String)> {
     use crate::compiler::bodies::form_native as native;
 
@@ -6087,9 +6118,9 @@ fn format_native_child_item(
     if let Some(kind) = native::native_group_kind(&item.tag) {
         let mut records = Vec::new();
         for child in item.child_items.iter() {
-            records.push(format_native_child_item(child, attribute_ids)?);
+            records.push(format_native_child_item(child, attribute_ids, command_ids, source)?);
         }
-        let payload = native_container_payload(item)?;
+        let payload = native_container_payload(item, attribute_ids, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
             kind,
@@ -6159,13 +6190,26 @@ fn format_native_child_item(
     if item.tag == "Button" {
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
+        // A button names its command by path. `Form.Command.X` is the form's
+        // own command, and the record carries that command's id in the
+        // command namespace; every other path names a configuration object,
+        // whose uuid only the configuration can give.
         let command = match item.command_name.as_deref() {
-            Some(_) => {
-                return Err(anyhow!(
-                    "a button's command names a configuration object"
-                ));
-            }
             None => "{0}".to_string(),
+            Some(path) => match path.strip_prefix("Form.Command.") {
+                Some(name) => {
+                    let id = command_ids.get(name).ok_or_else(|| {
+                        anyhow!("a button runs {path}, which the form does not declare")
+                    })?;
+                    format!(
+                        "{{{id},{}}}",
+                        crate::compiler::bodies::form_native::FORM_COMMAND_NAMESPACE_UUID
+                    )
+                }
+                None => {
+                    return Err(anyhow!("a button's command names a configuration object"));
+                }
+            },
         };
         let record = native::format_button_item(&native::NativeButtonItem {
             id: &item.id,
@@ -6250,19 +6294,262 @@ const fn native_title_location(location: FormXmlTitleLocation) -> &'static str {
     }
 }
 
+/// The `{0,<align>,<autofill>}` payload every command bar carries.
+///
+/// Both members were read by the partition test over all 12 506 root bars of
+/// the corpus: `<HorizontalAlign>` maps absent to 0, `Center` to 1, `Right` to
+/// 2 and `Auto` to 3, and `<Autofill>` writes 0 when the bar turns it off and
+/// 1 when it says nothing. `Left` is never stored, so it is refused.
+fn native_command_bar_payload(
+    horizontal_align: Option<FormXmlHorizontalAlign>,
+    autofill: Option<bool>,
+) -> Result<String> {
+    let align = match horizontal_align {
+        None => "0",
+        Some(FormXmlHorizontalAlign::Center) => "1",
+        Some(FormXmlHorizontalAlign::Right) => "2",
+        Some(FormXmlHorizontalAlign::Auto) => "3",
+        Some(FormXmlHorizontalAlign::Left) => {
+            return Err(anyhow!("a command bar aligned Left is not measured"));
+        }
+    };
+    Ok(format!(
+        "{{0,{align},{}}}",
+        u8::from(autofill != Some(false))
+    ))
+}
+
 /// The payload a container carries, by its tag.
-fn native_container_payload(item: &FormXmlChildItem) -> Result<String> {
+///
+/// Fail-closed throughout: a property whose spelling the corpus never stored,
+/// and a member no measurement has named, refuse the form rather than take a
+/// default that would load wrong.
+fn native_container_payload(
+    item: &FormXmlChildItem,
+    attribute_ids: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     match item.tag.as_str() {
-        "UsualGroup" => Ok(native::format_usual_group_payload(
-            &native::NativeUsualGroupPayload {
+        "UsualGroup" => {
+            if item.format_present {
+                return Err(anyhow!("a group names a format"));
+            }
+            if item.collapsed_representation_title_present {
+                return Err(anyhow!("a group names a collapsed-representation title"));
+            }
+            if item.associated_table_element_id.is_some() {
+                return Err(anyhow!("a group names an associated table element"));
+            }
+            let title_data_path = match item.title_data_path.as_deref() {
+                Some(path) => format_form_attribute_data_path(path, attribute_ids).ok_or_else(
+                    || anyhow!("a group titles itself from {path}, which is not a form attribute"),
+                )?,
+                None => "{0}".to_string(),
+            };
+            let back_color = native_item_color(item.back_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a group names a background colour it cannot place"))?;
+            let hidden = native_item_color(item.hidden_state_title_back_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a group names a hidden-state colour it cannot place"))?;
+            native::format_usual_group_payload(&native::NativeUsualGroupPayload {
+                group: item.group.map(native_group_spelling),
+                behavior: item.behavior.map(native_group_behavior_spelling),
+                child_items_width: item.child_items_width.as_deref(),
+                representation: item.representation.map(native_group_representation_spelling),
                 show_title: item.show_title.unwrap_or(true),
-                title: "{1,0}",
+                title_data_path: &title_data_path,
+                back_color: &back_color,
+                control_representation: item.control_representation.as_deref(),
+                collapsed: item.collapsed.unwrap_or(false),
+                show_left_margin: item.show_left_margin.unwrap_or(true),
+                horizontal_spacing: item.horizontal_spacing.as_deref(),
+                vertical_spacing: item.vertical_spacing.as_deref(),
+                horizontal_align: item.horizontal_align.map(native_horizontal_align_spelling),
+                vertical_align: item.vertical_align.map(native_vertical_align_spelling),
+                through_align: item.through_align.as_deref(),
+                children_align: item.children_align.as_deref(),
+                united: item.united.unwrap_or(true),
+                hidden_state_title_back_color: &hidden,
+                current_row_use: item.current_row_use.as_deref(),
                 ..native::NativeUsualGroupPayload::plain()
-            },
-        )),
+            })
+            .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
+        }
+        "ButtonGroup" => {
+            let command_source = native_command_source(item)?;
+            native::format_button_group_payload(
+                &command_source,
+                item.container_representation.as_deref(),
+            )
+            .ok_or_else(|| anyhow!("<ButtonGroup> names a spelling the writer cannot place"))
+        }
+        "CommandBar" => {
+            let command_source = native_command_source(item)?;
+            native::format_command_bar_payload(
+                item.horizontal_align.map(native_horizontal_align_spelling),
+                &command_source,
+            )
+            .ok_or_else(|| anyhow!("<CommandBar> names a spelling the writer cannot place"))
+        }
+        "Pages" => {
+            if item.associated_table_element_id.is_some() {
+                return Err(anyhow!("a pages group names an associated table element"));
+            }
+            native::format_pages_payload(
+                item.pages_representation.as_deref(),
+                "{0,1,0}",
+                "0",
+            )
+            .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
+        }
+        "Popup" => {
+            if item.picture_present {
+                return Err(anyhow!("a popup names a picture"));
+            }
+            let command_source = native_command_source(item)?;
+            let back_color = native_item_color(item.back_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a popup names a background colour it cannot place"))?;
+            let border_color = native_item_color(item.popup_border_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a popup names a border colour it cannot place"))?;
+            native::format_popup_payload(&native::NativePopupPayload {
+                command_source: &command_source,
+                representation: item.container_representation.as_deref(),
+                shape: item.shape.as_deref(),
+                shape_representation: item.shape_representation.as_deref(),
+                back_color: &back_color,
+                border_color: &border_color,
+                ..native::NativePopupPayload::plain()
+            })
+            .ok_or_else(|| anyhow!("<Popup> names a spelling the writer cannot place"))
+        }
+        "ColumnGroup" => {
+            if item.picture_present {
+                return Err(anyhow!("a column group names a picture"));
+            }
+            let title_back_color = native_item_color(item.title_back_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a column group names a colour it cannot place"))?;
+            native::format_column_group_payload(&native::NativeColumnGroupPayload {
+                group: item.group.map(native_group_spelling),
+                show_title: item.show_title.unwrap_or(true),
+                show_in_header: item.show_in_header.unwrap_or(false),
+                header_horizontal_align: item.header_horizontal_align.as_deref(),
+                title_back_color: &title_back_color,
+                fixing_in_table: item.fixing_in_table.map(native_fixing_in_table_spelling),
+                ..native::NativeColumnGroupPayload::plain()
+            })
+            .ok_or_else(|| anyhow!("<ColumnGroup> names a spelling the writer cannot place"))
+        }
+        "Page" => {
+            if item.picture_present {
+                return Err(anyhow!("a page names a picture"));
+            }
+            if item.format_present {
+                return Err(anyhow!("a page names a format"));
+            }
+            let title_data_path = match item.title_data_path.as_deref() {
+                Some(path) => format_form_attribute_data_path(path, attribute_ids).ok_or_else(
+                    || anyhow!("a page titles itself from {path}, which is not a form attribute"),
+                )?,
+                None => "{0}".to_string(),
+            };
+            let back_color = native_item_color(item.back_color.as_deref(), source)
+                .ok_or_else(|| anyhow!("a page names a background colour it cannot place"))?;
+            native::format_page_payload(&native::NativePagePayload {
+                group: item.group.map(native_group_spelling),
+                child_items_width: item.child_items_width.as_deref(),
+                title_data_path: &title_data_path,
+                show_title: item.show_title.unwrap_or(true),
+                back_color: &back_color,
+                horizontal_spacing: item.horizontal_spacing.as_deref(),
+                vertical_spacing: item.vertical_spacing.as_deref(),
+                horizontal_align: item.horizontal_align.map(native_horizontal_align_spelling),
+                vertical_align: item.vertical_align.map(native_vertical_align_spelling),
+                children_align: item.children_align.as_deref(),
+                scroll_on_compress: item.scroll_on_compress.unwrap_or(false),
+                ..native::NativePagePayload::plain()
+            })
+            .ok_or_else(|| anyhow!("<Page> names a spelling the writer cannot place"))
+        }
         "ContextMenu" => Ok("{1,1}".to_string()),
         _ => Err(anyhow!("<{}> has no payload writer yet", item.tag)),
+    }
+}
+
+/// `<CommandSource>`, which names a configuration object the writer has not
+/// measured; a container that names none carries `{0}`.
+fn native_command_source(item: &FormXmlChildItem) -> Result<String> {
+    match item.command_source.as_deref() {
+        None => Ok("{0}".to_string()),
+        Some(_) => Err(anyhow!("a container names a command source")),
+    }
+}
+
+/// `<FixingInTable>` as the payload writers spell it.
+const fn native_fixing_in_table_spelling(fixing: FormFixingInTable) -> &'static str {
+    match fixing {
+        FormFixingInTable::Left => "Left",
+        FormFixingInTable::Right => "Right",
+    }
+}
+
+/// A colour the way every native payload writes one, with the configuration's
+/// own style items resolved when the caller can reach them.
+fn native_item_color(value: Option<&str>, source: Option<&MetadataSourceContext>) -> Option<String> {
+    crate::compiler::bodies::form_native::format_native_color(value, |name| {
+        source?
+            .resolve_style_item_uuid(&format!("StyleItem.{name}"))
+            .ok()
+    })
+}
+
+/// `<Group>` as the payload writers spell it.
+const fn native_group_spelling(group: FormXmlGroup) -> &'static str {
+    match group {
+        FormXmlGroup::Vertical => "Vertical",
+        FormXmlGroup::Horizontal => "Horizontal",
+        FormXmlGroup::AlwaysHorizontal => "AlwaysHorizontal",
+        FormXmlGroup::HorizontalIfPossible => "HorizontalIfPossible",
+        FormXmlGroup::InCell => "InCell",
+    }
+}
+
+/// `<Behavior>` as the payload writers spell it.
+const fn native_group_behavior_spelling(behavior: FormXmlGroupBehavior) -> &'static str {
+    match behavior {
+        FormXmlGroupBehavior::Usual => "Usual",
+        FormXmlGroupBehavior::Collapsible => "Collapsible",
+        FormXmlGroupBehavior::PopUp => "PopUp",
+    }
+}
+
+/// A group's `<Representation>` as the payload writers spell it.
+const fn native_group_representation_spelling(
+    representation: FormXmlGroupRepresentation,
+) -> &'static str {
+    match representation {
+        FormXmlGroupRepresentation::None => "None",
+        FormXmlGroupRepresentation::StrongSeparation => "StrongSeparation",
+        FormXmlGroupRepresentation::WeakSeparation => "WeakSeparation",
+        FormXmlGroupRepresentation::NormalSeparation => "NormalSeparation",
+    }
+}
+
+/// `<HorizontalAlign>` as the payload writers spell it.
+const fn native_horizontal_align_spelling(align: FormXmlHorizontalAlign) -> &'static str {
+    match align {
+        FormXmlHorizontalAlign::Left => "Left",
+        FormXmlHorizontalAlign::Center => "Center",
+        FormXmlHorizontalAlign::Right => "Right",
+        FormXmlHorizontalAlign::Auto => "Auto",
+    }
+}
+
+/// `<VerticalAlign>` as the payload writers spell it.
+const fn native_vertical_align_spelling(align: FormFieldVerticalAlign) -> &'static str {
+    match align {
+        FormFieldVerticalAlign::Top => "Top",
+        FormFieldVerticalAlign::Center => "Center",
+        FormFieldVerticalAlign::Bottom => "Bottom",
     }
 }
 
@@ -6428,29 +6715,31 @@ fn format_native_form_body(
         .iter()
         .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
         .collect::<BTreeMap<_, _>>();
+    let command_ids = properties
+        .commands
+        .iter()
+        .map(|command| (command.name.clone(), command.id.clone()))
+        .collect::<BTreeMap<_, _>>();
     let mut bar_children = Vec::new();
     if let Some(bar) = &properties.auto_command_bar {
         for item in &bar.child_items {
-            let (uuid, record) = format_native_child_item(item, &attribute_ids)?;
+            let (uuid, record) = format_native_child_item(item, &attribute_ids, &command_ids, source)?;
             bar_children.push((uuid, record));
         }
     }
     let command_bar = match &properties.auto_command_bar {
-        Some(bar) => crate::compiler::bodies::form_native::format_group_item(&crate::compiler::bodies::form_native::NativeGroupItem {
-            id: &bar.id,
-            kind: 9,
-            name: &bar.name,
-            children: &bar_children,
-            // The bar's payload carries <Autofill>, which is on unless the
-            // form turns it off.
-            payload: if bar.autofill == Some(false) {
-                "{0,0,0}"
-            } else {
-                "{0,0,1}"
-            },
-            ..crate::compiler::bodies::form_native::NativeGroupItem::default()
-        })
-        .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?,
+        Some(bar) => {
+            let payload = native_command_bar_payload(bar.horizontal_align, bar.autofill)?;
+            crate::compiler::bodies::form_native::format_group_item(&crate::compiler::bodies::form_native::NativeGroupItem {
+                id: &bar.id,
+                kind: 9,
+                name: &bar.name,
+                children: &bar_children,
+                payload: &payload,
+                ..crate::compiler::bodies::form_native::NativeGroupItem::default()
+            })
+            .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?
+        }
         None => return Err(anyhow!("a form with no auto command bar is not measured")),
     };
 
@@ -6496,7 +6785,7 @@ fn format_native_form_body(
     // The form's own children, each written by the record writer for its kind.
     let mut children = Vec::new();
     for item in properties.child_items.iter().filter(|item| item.depth == 0) {
-        children.push(format_native_child_item(item, &attribute_ids)?);
+        children.push(format_native_child_item(item, &attribute_ids, &command_ids, source)?);
     }
     let children = children
         .iter()
@@ -7456,6 +7745,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     command_bar.child_items_present = true;
                 }
+                if matches!(local.as_str(), "Format" | "CollapsedRepresentationTitle" | "Picture")
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    match local.as_str() {
+                        "Format" => item.format_present = true,
+                        "Picture" => item.picture_present = true,
+                        _ => item.collapsed_representation_title_present = true,
+                    }
+                }
                 if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -7624,6 +7925,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(command_bar) = properties.auto_command_bar.as_mut()
                 {
                     command_bar.child_items_present = true;
+                }
+                if matches!(local.as_str(), "Format" | "CollapsedRepresentationTitle" | "Picture")
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    match local.as_str() {
+                        "Format" => item.format_present = true,
+                        "Picture" => item.picture_present = true,
+                        _ => item.collapsed_representation_title_present = true,
+                    }
                 }
                 if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
@@ -10597,6 +10910,322 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
+                    "ChildItemsWidth"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ChildItemsWidth",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.child_items_width = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "ControlRepresentation"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ControlRepresentation",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.control_representation = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "HorizontalSpacing"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "HorizontalSpacing",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.horizontal_spacing = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "VerticalSpacing"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "VerticalSpacing",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.vertical_spacing = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "ThroughAlign"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ThroughAlign",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.through_align = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "ChildrenAlign"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ChildrenAlign",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.children_align = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CurrentRowUse"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "CurrentRowUse",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.current_row_use = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "TitleDataPath"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "TitleDataPath",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.title_data_path = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "BackColor"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "BackColor",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.back_color = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "HiddenStateTitleBackColor"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "HiddenStateTitleBackColor",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.hidden_state_title_back_color = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "AssociatedTableElementId"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "AssociatedTableElementId",
+                        ) =>
+                    {
+                        // The same element name appears inside settings and
+                        // appearance blocks, where it carries no text of its own.
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.associated_table_element_id = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Collapsed"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "Collapsed",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.collapsed = Some(parse_form_xml_bool(
+                                "ChildItem/Collapsed",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "ShowLeftMargin"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ShowLeftMargin",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.show_left_margin = Some(parse_form_xml_bool(
+                                "ChildItem/ShowLeftMargin",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "United"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "United",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.united = Some(parse_form_xml_bool(
+                                "ChildItem/United",
+                                text_value.trim(),
+                            )?);
+                        }
+                    }
+                    "HeaderHorizontalAlign"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "HeaderHorizontalAlign",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.header_horizontal_align = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Shape"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "Shape",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.shape = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "ShapeRepresentation"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "ShapeRepresentation",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.shape_representation = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "TitleBackColor"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "TitleBackColor",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.title_back_color = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "BorderColor"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "BorderColor",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.popup_border_color = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "CommandSource"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "CommandSource",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.command_source = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "PagesRepresentation"
+                        if path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            "PagesRepresentation",
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.pages_representation = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with_for_child_container_representation(
+                            &path,
+                            &current_child_items,
+                        ) =>
+                    {
+                        if !text_value.trim().is_empty()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.container_representation = Some(text_value.trim().to_string());
+                        }
+                    }
                     "Visible"
                         if path_ends_with_for_child_property(
                             &path,
@@ -11048,6 +11677,31 @@ fn parse_form_child_item_xml(
         events: Vec::new(),
         command_name: None,
         data_path: None,
+        child_items_width: None,
+        control_representation: None,
+        collapsed: None,
+        show_left_margin: None,
+        horizontal_spacing: None,
+        vertical_spacing: None,
+        through_align: None,
+        children_align: None,
+        united: None,
+        current_row_use: None,
+        title_data_path: None,
+        back_color: None,
+        hidden_state_title_back_color: None,
+        format_present: false,
+        collapsed_representation_title_present: false,
+        associated_table_element_id: None,
+        header_horizontal_align: None,
+        shape: None,
+        shape_representation: None,
+        title_back_color: None,
+        popup_border_color: None,
+        command_source: None,
+        pages_representation: None,
+        container_representation: None,
+        picture_present: false,
         child_items_present: false,
         child_items: Vec::new(),
     }))
@@ -11472,6 +12126,17 @@ fn path_ends_with_for_child_group_representation(
         return false;
     };
     item.tag == "UsualGroup" && path_ends_with(path, &[item.tag.as_str(), "Representation"])
+}
+
+fn path_ends_with_for_child_container_representation(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    matches!(item.tag.as_str(), "ButtonGroup" | "Popup")
+        && path_ends_with(path, &[item.tag.as_str(), "Representation"])
 }
 
 fn path_ends_with_for_child_button_representation(

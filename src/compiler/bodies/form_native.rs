@@ -2533,241 +2533,403 @@ pub(crate) fn format_form_parameter(name: &str, type_pattern: &str, key: bool) -
     )
 }
 
-/// How a `<UsualGroup>` arranges what it holds.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeGroupArrangement {
-    /// `<Group>Vertical</Group>`.
-    Vertical,
-    /// `<Group>Horizontal</Group>`.
-    Horizontal,
-    /// `<Group>AlwaysHorizontal</Group>`, which differs from `Horizontal` in
-    /// one of the two slots that carry it.
-    AlwaysHorizontal,
-    /// `<Group>HorizontalIfPossible</Group>`, which is also what a group that
-    /// names no arrangement at all carries.
-    HorizontalIfPossible,
-}
-
-/// How a `<UsualGroup>` behaves.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeGroupBehavior {
-    Usual,
-    Collapsible,
-    PopUp,
-    /// What a group that names no behaviour carries, which is not `Usual`.
-    Unnamed,
-}
-
-/// How a `<UsualGroup>` separates itself from what is around it.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeGroupSeparation {
-    None,
-    Strong,
-    /// Also what a group that names no representation carries.
-    Weak,
-    Normal,
-}
-
 /// The `{29,…}` payload of a usual group, member by member.
 ///
-/// Seven of its twenty-nine members carry an XML property. Measured the same
-/// way as the field payloads: a candidate that fills these seven and copies
-/// the rest reproduces **every one** of the usual-group payloads it was run
-/// against exactly.
+/// Twenty-four of its twenty-nine members carry an XML property, each named by
+/// the partition test over all 61 256 usual groups of ERP УХ: every spelling
+/// of the property, and its absence, maps to exactly one stored value.
 ///
-/// The refinement that got it there was about defaults, not about which slot
-/// is which: a group that names no `<Group>` carries what
-/// `HorizontalIfPossible` carries, a group that names no `<Representation>`
-/// carries what `WeakSeparation` carries, and a group that names no
-/// `<Behavior>` carries something that is *not* what `Usual` carries.
+/// Three properties are written more than once under different codings, and
+/// the later reading is always the finer one. `<Group>` is written three
+/// times -- slot 1 tells `Vertical` from the rest, slot 22 adds "the group
+/// names none", and slot 27 also tells `AlwaysHorizontal` from `Horizontal`.
+/// `<Behavior>` likewise: slot 10 tells `Usual` from the rest, slot 24 names
+/// which, and slot 28 also tells "names none" from `Usual`.
+///
+/// Five members carry something no scalar property gives -- the picture, the
+/// format, the two colours and the associated table element -- and the writer
+/// takes those from its caller.
 pub(crate) struct NativeUsualGroupPayload<'a> {
-    pub(crate) separation: NativeGroupSeparation,
-    pub(crate) behavior: NativeGroupBehavior,
-    /// Slot 19: `Use` -> 0, `DontUse` -> 1, absent -> 2.
-    pub(crate) through_align: Option<bool>,
-    pub(crate) arrangement: NativeGroupArrangement,
-    /// Slot 5, the group's own picture binding, `{0}` by default.
-    pub(crate) picture: &'a str,
-    /// Slot 9, the background colour, `{3,4,{0}}` by default.
-    pub(crate) back_color: &'a str,
-    /// Slot 14, the group's title, `{1,0}` by default.
-    pub(crate) title: &'a str,
-    /// Slot 4 is `<ShowTitle>` and slot 21 is `<United>`, each on unless the
-    /// group turns it off. Both partition the whole column of the corpus.
+    /// Slots 1, 22 and 27.
+    pub(crate) group: Option<&'a str>,
+    /// Slots 10, 24 and 28.
+    pub(crate) behavior: Option<&'a str>,
+    /// Slot 2, `<ChildItemsWidth>`.
+    pub(crate) child_items_width: Option<&'a str>,
+    /// Slot 3, `<Representation>`, of which "names none" is its own value.
+    pub(crate) representation: Option<&'a str>,
+    /// Slot 4, `<ShowTitle>`, on unless the group turns it off.
     pub(crate) show_title: bool,
+    /// Slot 5, `<TitleDataPath>`, `{0}` by default.
+    pub(crate) title_data_path: &'a str,
+    /// Slot 6, `<Format>`, `{1,0}` by default.
+    pub(crate) format: &'a str,
+    /// Slot 9, `<BackColor>`, `{3,4,{0}}` by default.
+    pub(crate) back_color: &'a str,
+    /// Slot 11, `<ControlRepresentation>`: `Picture` 1.
+    pub(crate) control_representation: Option<&'a str>,
+    /// Slot 12, `<Collapsed>`.
+    pub(crate) collapsed: bool,
+    /// Slot 13, `<ShowLeftMargin>`, on unless the group turns it off.
+    pub(crate) show_left_margin: bool,
+    /// Slot 14, `<CollapsedRepresentationTitle>`, `{1,0}` by default.
+    pub(crate) collapsed_representation_title: &'a str,
+    /// Slots 15 and 16, `<HorizontalSpacing>` and `<VerticalSpacing>`.
+    pub(crate) horizontal_spacing: Option<&'a str>,
+    pub(crate) vertical_spacing: Option<&'a str>,
+    /// Slots 17 and 18, `<HorizontalAlign>` and `<VerticalAlign>`, each 3 when
+    /// the group names none.
+    pub(crate) horizontal_align: Option<&'a str>,
+    pub(crate) vertical_align: Option<&'a str>,
+    /// Slot 19, `<ThroughAlign>`: `Use` 0, `DontUse` 1, absent 2.
+    pub(crate) through_align: Option<&'a str>,
+    /// Slot 20, `<ChildrenAlign>`.
+    pub(crate) children_align: Option<&'a str>,
+    /// Slot 21, `<United>`, on unless the group turns it off.
     pub(crate) united: bool,
+    /// Slot 23, `<HiddenStateTitleBackColor>`, `{3,4,{0}}` by default.
+    pub(crate) hidden_state_title_back_color: &'a str,
+    /// Slot 25, `<CurrentRowUse>`: `Use` 0, `DontUse` 1, absent 2.
+    pub(crate) current_row_use: Option<&'a str>,
+    /// Slot 26, the id of the item `<AssociatedTableElementId>` names, 0 when
+    /// the group names none.
+    pub(crate) associated_table_element_id: &'a str,
 }
 
 impl NativeUsualGroupPayload<'_> {
     /// What a group that names none of these carries.
     pub(crate) const fn plain() -> Self {
         Self {
-            separation: NativeGroupSeparation::Weak,
-            behavior: NativeGroupBehavior::Unnamed,
-            through_align: None,
-            arrangement: NativeGroupArrangement::HorizontalIfPossible,
-            picture: "{0}",
-            back_color: "{3,4,{0}}",
-            title: "{1,0}",
+            group: None,
+            behavior: None,
+            child_items_width: None,
+            representation: None,
             show_title: true,
+            title_data_path: "{0}",
+            format: "{1,0}",
+            back_color: "{3,4,{0}}",
+            control_representation: None,
+            collapsed: false,
+            show_left_margin: true,
+            collapsed_representation_title: "{1,0}",
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            horizontal_align: None,
+            vertical_align: None,
+            through_align: None,
+            children_align: None,
             united: true,
+            hidden_state_title_back_color: "{3,4,{0}}",
+            current_row_use: None,
+            associated_table_element_id: "0",
         }
     }
 }
 
-pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> String {
-    let separation = match payload.separation {
-        NativeGroupSeparation::None => "0",
-        NativeGroupSeparation::Strong => "1",
-        NativeGroupSeparation::Weak => "2",
-        NativeGroupSeparation::Normal => "3",
+pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> Option<String> {
+    // `<Group>` under its three codings.
+    let arrangement = root_code(
+        payload.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "1"),
+        ],
+        "1",
+    )?;
+    let arrangement_named = root_code(
+        payload.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "1"),
+        ],
+        "2",
+    )?;
+    let arrangement_tail = root_code(
+        payload.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "3"),
+        ],
+        "2",
+    )?;
+    // `<Behavior>` under its three codings.
+    let collapsible = root_code(
+        payload.behavior,
+        &[("Usual", "0"), ("Collapsible", "1"), ("PopUp", "1")],
+        "1",
+    )?;
+    let behavior = root_code(
+        payload.behavior,
+        &[("Usual", "0"), ("Collapsible", "1"), ("PopUp", "2")],
+        "0",
+    )?;
+    let behavior_tail = root_code(
+        payload.behavior,
+        &[("Usual", "0"), ("Collapsible", "1"), ("PopUp", "2")],
+        "3",
+    )?;
+    let child_items_width = root_code(
+        payload.child_items_width,
+        &[
+            ("Equal", "1"),
+            ("LeftWide", "2"),
+            ("LeftWidest", "3"),
+            ("LeftNarrow", "4"),
+            ("LeftNarrowest", "5"),
+        ],
+        "0",
+    )?;
+    let separation = root_code(
+        payload.representation,
+        &[
+            ("None", "0"),
+            ("StrongSeparation", "1"),
+            ("NormalSeparation", "3"),
+        ],
+        "2",
+    )?;
+    let control_representation =
+        root_code(payload.control_representation, &[("Picture", "1")], "0")?;
+    let spacing = |value| {
+        root_code(
+            value,
+            &[
+                ("None", "1"),
+                ("Half", "2"),
+                ("Single", "3"),
+                ("OneAndHalf", "4"),
+                ("Double", "5"),
+            ],
+            "0",
+        )
     };
-    let (collapsible, behavior, behavior_tail) = match payload.behavior {
-        NativeGroupBehavior::Usual => ("0", "0", "0"),
-        NativeGroupBehavior::Collapsible => ("1", "1", "1"),
-        NativeGroupBehavior::PopUp => ("1", "2", "2"),
-        NativeGroupBehavior::Unnamed => ("1", "0", "3"),
-    };
-    let through_align = match payload.through_align {
-        Some(true) => "0",
-        Some(false) => "1",
-        None => "2",
-    };
-    let (arrangement, arrangement_tail) = match payload.arrangement {
-        NativeGroupArrangement::Vertical => ("0", "0"),
-        NativeGroupArrangement::Horizontal => ("1", "1"),
-        NativeGroupArrangement::AlwaysHorizontal => ("1", "3"),
-        NativeGroupArrangement::HorizontalIfPossible => ("2", "2"),
-    };
-    format!(
-        "{{29,{arrangement},0,{separation},{show_title},{picture},{{1,0}},{{\"Pattern\"}},\"\",{back_color},{collapsible},0,0,1,{title},0,0,3,3,{through_align},0,{united},{arrangement},{{3,4,{{0}}}},{behavior},2,0,{arrangement_tail},{behavior_tail}}}",
+    let horizontal_spacing = spacing(payload.horizontal_spacing)?;
+    let vertical_spacing = spacing(payload.vertical_spacing)?;
+    let horizontal_align = root_code(
+        payload.horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let vertical_align = root_code(
+        payload.vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    let through_align = root_code(payload.through_align, &[("Use", "0"), ("DontUse", "1")], "2")?;
+    let children_align = root_code(
+        payload.children_align,
+        &[
+            ("None", "1"),
+            ("ItemsLeftTitlesLeft", "2"),
+            ("ItemsRightTitlesLeft", "3"),
+            ("ItemsLeftTitlesRight", "4"),
+            ("ItemsRightTitlesRight", "5"),
+            ("TitlesLeftDataAuto", "6"),
+        ],
+        "0",
+    )?;
+    let current_row_use = root_code(
+        payload.current_row_use,
+        &[("Use", "0"), ("DontUse", "1")],
+        "2",
+    )?;
+    Some(format!(
+        "{{29,{arrangement},{child_items_width},{separation},{show_title},{title_data_path},{format},{PATTERN},\"\",{back_color},{collapsible},{control_representation},{collapsed},{show_left_margin},{collapsed_representation_title},{horizontal_spacing},{vertical_spacing},{horizontal_align},{vertical_align},{through_align},{children_align},{united},{arrangement_named},{hidden},{behavior},{current_row_use},{associated},{arrangement_tail},{behavior_tail}}}",
+        PATTERN = "{\"Pattern\"}",
         show_title = u8::from(payload.show_title),
-        united = u8::from(payload.united),
-        picture = payload.picture,
+        title_data_path = payload.title_data_path,
+        format = payload.format,
         back_color = payload.back_color,
-        title = payload.title,
-    )
+        collapsed = u8::from(payload.collapsed),
+        show_left_margin = u8::from(payload.show_left_margin),
+        collapsed_representation_title = payload.collapsed_representation_title,
+        united = u8::from(payload.united),
+        hidden = payload.hidden_state_title_back_color,
+        associated = payload.associated_table_element_id,
+    ))
 }
 
 /// The `{2,…}` payload of a button group.
 ///
-/// Four members, one of which carries `<Representation>`. All 21 651 of the
-/// corpus are reproduced exactly.
-pub(crate) fn format_button_group_payload(command_source: &str, representation: Option<&str>) -> String {
-    let representation = match representation {
-        Some("Usual") => "1",
-        Some("Compact") => "2",
-        _ => "0",
-    };
-    format!("{{2,{command_source},2,{representation}}}")
+/// Four members, one of which carries `<Representation>`: `Usual` 1,
+/// `Compact` 2, and 0 when the group names none. All 21 651 of the corpus are
+/// reproduced exactly.
+pub(crate) fn format_button_group_payload(
+    command_source: &str,
+    representation: Option<&str>,
+) -> Option<String> {
+    let representation = root_code(representation, &[("Usual", "1"), ("Compact", "2")], "0")?;
+    Some(format!("{{2,{command_source},2,{representation}}}"))
 }
 
 /// The `{1,…}` payload of a command bar.
 ///
 /// Three members, one of which carries `<HorizontalLocation>`. All 3 233 of
 /// the corpus are reproduced exactly.
-pub(crate) fn format_command_bar_payload(horizontal_location: Option<&str>, command_source: &str) -> String {
-    let location = match horizontal_location {
-        Some("Auto") => "3",
-        Some("Right") => "2",
-        Some("Center") => "1",
-        _ => "0",
-    };
-    format!("{{1,{location},{command_source}}}")
+pub(crate) fn format_command_bar_payload(
+    horizontal_location: Option<&str>,
+    command_source: &str,
+) -> Option<String> {
+    let location = root_code(
+        horizontal_location,
+        &[("Center", "1"), ("Right", "2"), ("Auto", "3")],
+        "0",
+    )?;
+    Some(format!("{{1,{location},{command_source}}}"))
 }
 
 /// The `{4,…}` payload of a `<Pages>` group.
 ///
-/// Six members, two of which carry `<PagesRepresentation>` -- the same value
-/// in both, except that a group naming none carries 1 in the first and 6 in
-/// the second. All 4 329 of the corpus are reproduced exactly.
-pub(crate) fn format_pages_payload(representation: Option<&str>, events: &str, fourth: &str) -> String {
-    let code = |value: Option<&str>| match value {
-        Some("None") => "0",
-        Some("TabsOnTop") => "1",
-        Some("TabsOnBottom") => "2",
-        Some("TabsOnLeftHorizontal") => "3",
-        Some("Swipe") => "5",
-        _ => "",
-    };
-    let first = match code(representation) {
-        "" => "1",
-        value => value,
-    };
-    let second = match code(representation) {
-        "" => "6",
-        value => value,
-    };
-    format!("{{4,{first},{events},2,{fourth},{second}}}")
+/// Six members: two carry `<PagesRepresentation>` -- the same value in both,
+/// except that a group naming none carries 1 in the first and 6 in the second
+/// -- and one carries `<AssociatedTableElementId>`. All 4 329 of the corpus
+/// are reproduced exactly.
+pub(crate) fn format_pages_payload(
+    representation: Option<&str>,
+    events: &str,
+    associated_table_element_id: &str,
+) -> Option<String> {
+    const CODES: &[(&str, &str)] = &[
+        ("None", "0"),
+        ("TabsOnTop", "1"),
+        ("TabsOnBottom", "2"),
+        ("TabsOnLeftHorizontal", "3"),
+        ("Swipe", "5"),
+    ];
+    let first = root_code(representation, CODES, "1")?;
+    let second = root_code(representation, CODES, "6")?;
+    Some(format!(
+        "{{4,{first},{events},2,{associated_table_element_id},{second}}}"
+    ))
 }
 
 /// The `{7,…}` payload of a `<Popup>`.
 ///
-/// Nine members, one of which carries `<Representation>`; a popup that names
-/// none carries 3. All 10 642 of the corpus are reproduced exactly.
-pub(crate) fn format_popup_payload(
-    picture: &str,
-    command_source: &str,
-    representation: Option<&str>,
-    back_color: &str,
-    border_color: &str,
-) -> String {
-    let representation = match representation {
-        Some("Text") => "0",
-        Some("Picture") => "1",
-        Some("PictureAndText") => "2",
-        _ => "3",
-    };
-    format!("{{7,{picture},{command_source},2,{representation},0,0,{back_color},{border_color}}}")
+/// Nine members, four of which carry an XML property: `<Representation>`,
+/// which is 3 when the popup names none, `<Shape>`, `<ShapeRepresentation>`
+/// and the two colours. All 10 642 of the corpus are reproduced exactly.
+pub(crate) struct NativePopupPayload<'a> {
+    pub(crate) picture: &'a str,
+    pub(crate) command_source: &'a str,
+    pub(crate) representation: Option<&'a str>,
+    pub(crate) shape: Option<&'a str>,
+    pub(crate) shape_representation: Option<&'a str>,
+    pub(crate) back_color: &'a str,
+    pub(crate) border_color: &'a str,
+}
+
+impl NativePopupPayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            command_source: "{0}",
+            representation: None,
+            shape: None,
+            shape_representation: None,
+            back_color: "{3,4,{0}}",
+            border_color: "{3,4,{0}}",
+        }
+    }
+}
+
+pub(crate) fn format_popup_payload(payload: &NativePopupPayload<'_>) -> Option<String> {
+    let representation = root_code(
+        payload.representation,
+        &[("Text", "0"), ("Picture", "1"), ("PictureAndText", "2")],
+        "3",
+    )?;
+    let shape = root_code(payload.shape, &[("Usual", "1"), ("Oval", "2")], "0")?;
+    let shape_representation = root_code(
+        payload.shape_representation,
+        &[("Always", "1"), ("WhenActive", "2"), ("None", "3")],
+        "0",
+    )?;
+    Some(format!(
+        "{{7,{picture},{command_source},2,{representation},{shape},{shape_representation},{back_color},{border_color}}}",
+        picture = payload.picture,
+        command_source = payload.command_source,
+        back_color = payload.back_color,
+        border_color = payload.border_color,
+    ))
 }
 
 /// The `{2,…}` payload of a `<ColumnGroup>` -- the same wrapper a button group
 /// carries, with twelve members instead of four.
 ///
-/// One of them carries `<Group>`: `Horizontal` is 0, `InCell` is 2, and a
-/// group naming none carries 1. All 7 076 of the corpus are reproduced
-/// exactly.
+/// Six carry an XML property: `<Group>` (`Horizontal` 0, `InCell` 2, 1 when
+/// the group names none), `<ShowTitle>`, `<ShowInHeader>`,
+/// `<HeaderHorizontalAlign>`, the title background and `<FixingInTable>`. All
+/// 7 076 of the corpus are reproduced exactly.
+pub(crate) struct NativeColumnGroupPayload<'a> {
+    pub(crate) group: Option<&'a str>,
+    pub(crate) show_title: bool,
+    pub(crate) show_in_header: bool,
+    pub(crate) header_horizontal_align: Option<&'a str>,
+    pub(crate) picture: &'a str,
+    pub(crate) title_back_color: &'a str,
+    pub(crate) fixing_in_table: Option<&'a str>,
+}
+
+impl NativeColumnGroupPayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            group: None,
+            show_title: true,
+            show_in_header: false,
+            header_horizontal_align: None,
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            title_back_color: "{3,4,{0}}",
+            fixing_in_table: None,
+        }
+    }
+}
+
 pub(crate) fn format_column_group_payload(
-    group: Option<&str>,
-    second: &str,
-    // `<ShowInHeader>`, off unless the column group turns it on -- the one
-    // slot of this payload the partition test could name.
-    show_in_header: bool,
-    fourth: &str,
-    picture: &str,
-    back_color: &str,
-    title: &str,
-) -> String {
-    let group = match group {
-        Some("Horizontal") => "0",
-        Some("InCell") => "2",
-        _ => "1",
-    };
-    format!(
-        "{{2,{group},{second},{third},{fourth},{picture},{back_color},{{0}},{{\"Pattern\"}},\"\",{title},0}}",
-        third = u8::from(show_in_header)
-    )
+    payload: &NativeColumnGroupPayload<'_>,
+) -> Option<String> {
+    let group = root_code(payload.group, &[("Horizontal", "0"), ("InCell", "2")], "1")?;
+    let header_align = root_code(
+        payload.header_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let fixing = root_code(
+        payload.fixing_in_table,
+        &[("Left", "1"), ("Right", "2")],
+        "0",
+    )?;
+    Some(format!(
+        "{{2,{group},{show_title},{show_in_header},{header_align},{picture},{title_back_color},{{0}},{{\"Pattern\"}},\"\",{{1,0}},{fixing}}}",
+        show_title = u8::from(payload.show_title),
+        show_in_header = u8::from(payload.show_in_header),
+        picture = payload.picture,
+        title_back_color = payload.title_back_color,
+    ))
 }
 
 /// What a `{18,…}` page payload carries.
 ///
-/// Three of its twenty members carry `<Group>`: one says whether the page
-/// names an arrangement at all, and two carry which one, differing on
-/// `AlwaysHorizontal`. All 11 804 of the corpus are reproduced exactly.
+/// Fifteen of its twenty members carry an XML property, named by the partition
+/// test over all 11 804 pages of the corpus. `<Group>` is written three times:
+/// slot 2 says whether the page names one at all, and slots 16 and 17 carry
+/// which, differing on `AlwaysHorizontal` and `HorizontalIfPossible`.
 pub(crate) struct NativePagePayload<'a> {
     pub(crate) group: Option<&'a str>,
     pub(crate) picture: &'a str,
-    pub(crate) third: &'a str,
-    pub(crate) data_path: &'a str,
-    pub(crate) title: &'a str,
-    pub(crate) sixth: &'a str,
+    pub(crate) child_items_width: Option<&'a str>,
+    pub(crate) title_data_path: &'a str,
+    pub(crate) format: &'a str,
+    pub(crate) show_title: bool,
     pub(crate) back_color: &'a str,
-    pub(crate) tenth: &'a str,
-    pub(crate) eleventh: &'a str,
-    pub(crate) twelfth: &'a str,
-    pub(crate) thirteenth: &'a str,
-    pub(crate) fourteenth: &'a str,
-    pub(crate) fifteenth: &'a str,
+    pub(crate) horizontal_spacing: Option<&'a str>,
+    pub(crate) vertical_spacing: Option<&'a str>,
+    pub(crate) horizontal_align: Option<&'a str>,
+    pub(crate) vertical_align: Option<&'a str>,
+    pub(crate) children_align: Option<&'a str>,
+    pub(crate) scroll_on_compress: bool,
     pub(crate) border_color: &'a str,
     pub(crate) font: &'a str,
 }
@@ -2777,49 +2939,104 @@ impl NativePagePayload<'_> {
         Self {
             group: None,
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
-            third: "0",
-            data_path: "{0}",
-            title: "{1,0}",
-            sixth: "1",
+            child_items_width: None,
+            title_data_path: "{0}",
+            format: "{1,0}",
+            show_title: true,
             back_color: "{3,4,{0}}",
-            tenth: "0",
-            eleventh: "0",
-            twelfth: "3",
-            thirteenth: "3",
-            fourteenth: "0",
-            fifteenth: "0",
+            horizontal_spacing: None,
+            vertical_spacing: None,
+            horizontal_align: None,
+            vertical_align: None,
+            children_align: None,
+            scroll_on_compress: false,
             border_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
         }
     }
 }
 
-pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> String {
+pub(crate) fn format_page_payload(payload: &NativePagePayload<'_>) -> Option<String> {
     let named = u8::from(payload.group.is_some());
-    let (horizontal, horizontal_tail) = match payload.group {
-        Some("Horizontal") => ("1", "1"),
-        Some("AlwaysHorizontal") => ("1", "3"),
-        Some("HorizontalIfPossible") => ("2", "2"),
-        Some("Vertical") | None => ("0", "0"),
-        Some(_) => ("0", "0"),
+    let horizontal = root_code(
+        payload.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "1"),
+            ("HorizontalIfPossible", "2"),
+        ],
+        "0",
+    )?;
+    let horizontal_tail = root_code(
+        payload.group,
+        &[
+            ("Vertical", "0"),
+            ("Horizontal", "1"),
+            ("AlwaysHorizontal", "3"),
+            ("HorizontalIfPossible", "2"),
+        ],
+        "0",
+    )?;
+    let child_items_width = root_code(
+        payload.child_items_width,
+        &[
+            ("Equal", "1"),
+            ("LeftWide", "2"),
+            ("LeftWidest", "3"),
+            ("LeftNarrow", "4"),
+            ("LeftNarrowest", "5"),
+        ],
+        "0",
+    )?;
+    let spacing = |value| {
+        root_code(
+            value,
+            &[
+                ("None", "1"),
+                ("Half", "2"),
+                ("Single", "3"),
+                ("OneAndHalf", "4"),
+                ("Double", "5"),
+            ],
+            "0",
+        )
     };
-    format!(
-        "{{18,{picture},{named},{third},{data_path},{title},{sixth},{{\"Pattern\"}},\"\",{back_color},{tenth},{eleventh},{twelfth},{thirteenth},{fourteenth},{fifteenth},{horizontal},{horizontal_tail},{border_color},{font}}}",
+    let horizontal_spacing = spacing(payload.horizontal_spacing)?;
+    let vertical_spacing = spacing(payload.vertical_spacing)?;
+    let horizontal_align = root_code(
+        payload.horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let vertical_align = root_code(
+        payload.vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    let children_align = root_code(
+        payload.children_align,
+        &[
+            ("None", "1"),
+            ("ItemsLeftTitlesLeft", "2"),
+            ("ItemsRightTitlesLeft", "3"),
+            ("ItemsLeftTitlesRight", "4"),
+            ("ItemsRightTitlesRight", "5"),
+            ("TitlesLeftDataAuto", "6"),
+        ],
+        "0",
+    )?;
+    Some(format!(
+        "{{18,{picture},{named},{child_items_width},{title_data_path},{format},{show_title},{{\"Pattern\"}},\"\",{back_color},{horizontal_spacing},{vertical_spacing},{horizontal_align},{vertical_align},{children_align},{scroll_on_compress},{horizontal},{horizontal_tail},{border_color},{font}}}",
         picture = payload.picture,
-        third = payload.third,
-        data_path = payload.data_path,
-        title = payload.title,
-        sixth = payload.sixth,
+        title_data_path = payload.title_data_path,
+        format = payload.format,
+        show_title = u8::from(payload.show_title),
         back_color = payload.back_color,
-        tenth = payload.tenth,
-        eleventh = payload.eleventh,
-        twelfth = payload.twelfth,
-        thirteenth = payload.thirteenth,
-        fourteenth = payload.fourteenth,
-        fifteenth = payload.fifteenth,
+        scroll_on_compress = u8::from(payload.scroll_on_compress),
         border_color = payload.border_color,
         font = payload.font,
-    )
+    ))
 }
 
 /// What a `{22,…}` group record needs beyond the frame every group shares.
@@ -4565,36 +4782,49 @@ mod tests {
     /// nothing carries.
     #[test]
     fn writes_the_usual_group_payloads_the_platform_stores() {
+        // `ГруппаШапка`, a usual group of an ERP УХ form body, exactly as that
+        // body stores it.
         assert_eq!(
             format_usual_group_payload(&NativeUsualGroupPayload {
-                behavior: NativeGroupBehavior::Usual,
-                arrangement: NativeGroupArrangement::HorizontalIfPossible,
-                separation: NativeGroupSeparation::Weak,
+                behavior: Some("Usual"),
+                group: Some("Horizontal"),
+                representation: Some("None"),
                 ..NativeUsualGroupPayload::plain()
-            }),
-            "{29,2,0,2,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,0}"
+            })
+            .expect("a usual group payload"),
+            "{29,1,0,0,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,1,{3,4,{0}},0,2,0,1,0}"
         );
-        // A group that names no arrangement carries what `HorizontalIfPossible`
-        // carries, and one that names no behaviour carries what `Usual` does
-        // not.
-        // A group that names neither <ShowTitle> nor <United> carries 1 in
-        // both places: slot 4 and slot 21.
-        let plain = format_usual_group_payload(&NativeUsualGroupPayload::plain());
-        assert!(plain.starts_with("{29,2,0,2,1,"));
+        // A group that names no arrangement carries 1 in the first slot and 2
+        // in both of the others, and one that names no behaviour carries 1, 0
+        // and 3. A group that names neither <ShowTitle> nor <United> carries 1
+        // in slot 4 and slot 21.
+        let plain =
+            format_usual_group_payload(&NativeUsualGroupPayload::plain()).expect("a payload");
+        assert!(plain.starts_with("{29,1,0,2,1,"));
         assert!(plain.ends_with(",1,2,{3,4,{0}},0,2,0,2,3}"));
         let quiet = format_usual_group_payload(&NativeUsualGroupPayload {
             show_title: false,
             united: false,
             ..NativeUsualGroupPayload::plain()
-        });
-        assert!(quiet.starts_with("{29,2,0,2,0,"));
+        })
+        .expect("a payload");
+        assert!(quiet.starts_with("{29,1,0,2,0,"));
         assert!(quiet.contains(",3,3,2,0,0,2,"));
         let vertical = format_usual_group_payload(&NativeUsualGroupPayload {
-            arrangement: NativeGroupArrangement::Vertical,
+            group: Some("Vertical"),
             ..NativeUsualGroupPayload::plain()
-        });
+        })
+        .expect("a payload");
         assert!(vertical.starts_with("{29,0,0,2,1,"));
         assert!(vertical.ends_with(",0,3}"));
+        // A spelling the corpus never stores is refused, not defaulted.
+        assert!(
+            format_usual_group_payload(&NativeUsualGroupPayload {
+                group: Some("HorizontalIfPossible"),
+                ..NativeUsualGroupPayload::plain()
+            })
+            .is_none()
+        );
     }
 
     /// The check-box payload 9 906 records carry unchanged, the radio-button
@@ -4633,53 +4863,72 @@ mod tests {
     /// in one pass, exactly as those bodies store them.
     #[test]
     fn writes_the_remaining_group_payloads_the_platform_stores() {
-        assert_eq!(format_button_group_payload("{0}", None), "{2,{0},2,0}");
-        assert_eq!(format_button_group_payload("{0}", Some("Compact")), "{2,{0},2,2}");
-        assert_eq!(format_command_bar_payload(None, "{0}"), "{1,0,{0}}");
-        assert_eq!(format_command_bar_payload(Some("Auto"), "{0}"), "{1,3,{0}}");
-        assert_eq!(format_pages_payload(None, "{0,1,0}", "0"), "{4,1,{0,1,0},2,0,6}");
         assert_eq!(
-            format_pages_payload(Some("None"), "{0,1,0}", "0"),
+            format_button_group_payload("{0}", None).expect("a payload"),
+            "{2,{0},2,0}"
+        );
+        assert_eq!(
+            format_button_group_payload("{0}", Some("Compact")).expect("a payload"),
+            "{2,{0},2,2}"
+        );
+        assert_eq!(
+            format_command_bar_payload(None, "{0}").expect("a payload"),
+            "{1,0,{0}}"
+        );
+        assert_eq!(
+            format_command_bar_payload(Some("Auto"), "{0}").expect("a payload"),
+            "{1,3,{0}}"
+        );
+        assert_eq!(
+            format_pages_payload(None, "{0,1,0}", "0").expect("a payload"),
+            "{4,1,{0,1,0},2,0,6}"
+        );
+        assert_eq!(
+            format_pages_payload(Some("None"), "{0,1,0}", "0").expect("a payload"),
             "{4,0,{0,1,0},2,0,0}"
         );
         assert_eq!(
-            format_popup_payload(
-                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
-                "{0}",
-                None,
-                "{3,4,{0}}",
-                "{3,4,{0}}"
-            ),
+            format_popup_payload(&NativePopupPayload::plain()).expect("a payload"),
             "{7,{4,0,{0},\"\",-1,-1,1,0,\"\"},{0},2,3,0,0,{3,4,{0}},{3,4,{0}}}"
         );
         assert_eq!(
-            format_column_group_payload(
-                None,
-                "1",
-                false,
-                "3",
-                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
-                "{3,4,{0}}",
-                "{1,0}"
-            ),
+            format_popup_payload(&NativePopupPayload {
+                representation: Some("Picture"),
+                shape: Some("Oval"),
+                shape_representation: Some("None"),
+                ..NativePopupPayload::plain()
+            })
+            .expect("a payload"),
+            "{7,{4,0,{0},\"\",-1,-1,1,0,\"\"},{0},2,1,2,3,{3,4,{0}},{3,4,{0}}}"
+        );
+        assert_eq!(
+            format_column_group_payload(&NativeColumnGroupPayload::plain()).expect("a payload"),
             "{2,1,1,0,3,{4,0,{0},\"\",-1,-1,1,0,\"\"},{3,4,{0}},{0},{\"Pattern\"},\"\",{1,0},0}"
         );
         assert_eq!(
-            format_page_payload(&NativePagePayload::plain()),
+            format_page_payload(&NativePagePayload::plain()).expect("a payload"),
             "{18,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,{0},{1,0},1,{\"Pattern\"},\"\",{3,4,{0}},0,0,3,3,0,0,0,0,{3,4,{0}},{7,3,0,1,100}}"
         );
         // `AlwaysHorizontal` and `Horizontal` differ in the second of the two
         // slots that carry the arrangement.
-        assert!(format_page_payload(&NativePagePayload {
-            group: Some("AlwaysHorizontal"),
-            ..NativePagePayload::plain()
-        })
-        .contains(",0,0,1,3,{3,4,{0}},"));
-        assert!(format_page_payload(&NativePagePayload {
-            group: Some("Horizontal"),
-            ..NativePagePayload::plain()
-        })
-        .contains(",0,0,1,1,{3,4,{0}},"));
+        assert!(
+            format_page_payload(&NativePagePayload {
+                group: Some("AlwaysHorizontal"),
+                ..NativePagePayload::plain()
+            })
+            .expect("a payload")
+            .contains(",0,0,1,3,{3,4,{0}},")
+        );
+        assert!(
+            format_page_payload(&NativePagePayload {
+                group: Some("Horizontal"),
+                ..NativePagePayload::plain()
+            })
+            .expect("a payload")
+            .contains(",0,0,1,1,{3,4,{0}},")
+        );
+        // A spelling the corpus never stores is refused, not defaulted.
+        assert!(format_button_group_payload("{0}", Some("Auto")).is_none());
     }
 
     /// The document and picture payloads, exactly as ERP УХ bodies store

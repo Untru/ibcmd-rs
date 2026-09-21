@@ -1436,14 +1436,28 @@ pub struct NativeFormWriterReport {
     pub refused: BTreeMap<String, usize>,
     /// Forms the writer wrote but got wrong, with one example each.
     pub different: usize,
+    /// The differing forms clustered by what the divergence looks like, so a
+    /// systematic cause shows up as one large bucket rather than many
+    /// examples.
+    pub shapes: BTreeMap<String, usize>,
     pub examples: Vec<NativeFormWriterDifference>,
 }
 
 #[derive(Debug, Serialize)]
 pub struct NativeFormWriterDifference {
     pub form: String,
+    /// Where the two bodies first disagree.
+    pub at: usize,
     pub wrote: String,
     pub stored: String,
+}
+
+/// A window of `text` around `at`, as the audit prints a divergence.
+fn divergence_window(text: &str, at: usize, before: usize, after: usize) -> String {
+    let chars = text.chars().collect::<Vec<_>>();
+    let start = at.saturating_sub(before);
+    let end = (at + after).min(chars.len());
+    chars[start..end].iter().collect()
 }
 
 /// The uuid a holder's XML gives the form beside it.
@@ -1509,6 +1523,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         exact: 0,
         refused: BTreeMap::new(),
         different: 0,
+        shapes: BTreeMap::new(),
         examples: Vec::new(),
     };
     for (form, wrote, stored) in outcomes {
@@ -1536,12 +1551,25 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                 if candidate == stored.trim() {
                     report.exact += 1;
                 } else {
+                    let stored = stored.trim();
                     report.different += 1;
-                    if report.examples.len() < 5 {
+                    let at = candidate
+                        .chars()
+                        .zip(stored.chars())
+                        .position(|(left, right)| left != right)
+                        .unwrap_or_else(|| candidate.chars().count().min(stored.chars().count()));
+                    let shape = format!(
+                        "wrote {} | stored {}",
+                        divergence_window(&candidate, at, 0, 34),
+                        divergence_window(stored, at, 0, 34),
+                    );
+                    *report.shapes.entry(shape).or_insert(0) += 1;
+                    if report.examples.len() < 12 {
                         report.examples.push(NativeFormWriterDifference {
                             form,
-                            wrote: candidate.chars().take(400).collect(),
-                            stored: stored.trim().chars().take(400).collect(),
+                            at,
+                            wrote: divergence_window(&candidate, at, 110, 140),
+                            stored: divergence_window(stored, at, 110, 140),
                         });
                     }
                 }
