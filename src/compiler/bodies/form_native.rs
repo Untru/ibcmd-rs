@@ -193,6 +193,50 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
     )
 }
 
+/// The namespace a form *command* id lives in, which is not the item one.
+pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
+
+/// The `{9,…}` record of a form attribute.
+///
+/// The sixteen-member shape, which 7 073 of the 11 700 wrapper-9 records of
+/// the first 1 500 ERP УХ form bodies carry. `type_pattern` arrives already
+/// formatted -- `{"Pattern"}` for an attribute the form does not type, and the
+/// pattern with its reference list for one it does.
+pub(crate) fn format_form_attribute(
+    id: &str,
+    name: &str,
+    title: &str,
+    type_pattern: &str,
+) -> String {
+    format!(
+        "{{9,{{{id}}},0,{name},{title},{type_pattern},{{0,{{0,{{\"B\",1}},0}}}},\
+         {{0,{{0,{{\"B\",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,0}},{{0,0}}}}",
+        name = quoted(name),
+    )
+}
+
+/// The `{9,…}` record of a form command.
+///
+/// The nineteen-member shape, told apart from an attribute by the namespace in
+/// its id tuple. `action` is the tuple that names what the command runs.
+pub(crate) fn format_form_command(
+    id: &str,
+    name: &str,
+    title: &str,
+    tooltip_title: &str,
+    action: &str,
+    picture: &str,
+    handler: &str,
+) -> String {
+    format!(
+        "{{9,{{{id},{ns}}},{name},{title},{tooltip_title},{{0,{{0,{{\"B\",1}},0}}}},{action},\
+         {picture},{handler},3,0,0,{{0,0}},1,0,1,0,0,1}}",
+        ns = FORM_COMMAND_NAMESPACE_UUID,
+        name = quoted(name),
+        handler = quoted(handler),
+    )
+}
+
 /// What a `{22,…}` group record needs beyond the frame every group shares.
 ///
 /// `kind` is the marker that says which group this is -- 0 command-bar group,
@@ -517,6 +561,29 @@ mod tests {
         assert!(record.contains(&format!(
             ",1,a9f3b1ac-f51b-431e-b102-55a69acdecad,{child},1,0,1,"
         )));
+    }
+
+    /// An attribute and a command of ERP УХ form bodies, exactly as they are
+    /// stored. Both are wrapper 9; only the namespace in the id tuple, and the
+    /// member count that follows from it, tell them apart.
+    #[test]
+    fn writes_the_attribute_and_command_records_the_platform_stores() {
+        assert_eq!(
+            format_form_attribute("9", "ЦветаФона", "{1,0}", "{\"Pattern\"}"),
+            "{9,{9},0,\"ЦветаФона\",{1,0},{\"Pattern\"},{0,{0,{\"B\",1},0}},{0,{0,{\"B\",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"
+        );
+        assert_eq!(
+            format_form_command(
+                "10",
+                "Команда9",
+                "{1,0}",
+                "{1,0}",
+                "{0,57,0}",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+                "Команда9",
+            ),
+            "{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},\"Команда9\",{1,0},{1,0},{0,{0,{\"B\",1},0}},{0,57,0},{4,0,{0},\"\",-1,-1,1,0,\"\"},\"Команда9\",3,0,0,{0,0},1,0,1,0,0,1}"
+        );
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
