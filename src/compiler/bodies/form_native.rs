@@ -2415,6 +2415,119 @@ pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
     ))
 }
 
+/// One of the three additions a `<Table>` carries, as the body stores it.
+///
+/// `<SearchStringAddition>`, `<ViewStatusAddition>` and `<SearchControlAddition>`
+/// share one twenty-four member frame and differ in three places: member 5,
+/// the kind; member 13, the payload, which has its own layout per kind; and
+/// member 19's second element, the kind again. Measured over all 32 606
+/// additions of ERP УХ, where every own property of every addition is placed.
+///
+/// Member 4 is a flag that 38 records set, for a `UserVisible` tuple that no
+/// property of the source decides -- the same class of fact as the navigator
+/// record. It is written as 0, which is what the other 32 568 carry.
+pub(crate) struct NativeTableAddition<'a> {
+    pub(crate) id: &'a str,
+    /// Member 5: search string 0, view status 1, search control 2.
+    pub(crate) kind: u8,
+    pub(crate) name: &'a str,
+    /// Already formatted -- `{1,0}` when the addition names neither.
+    pub(crate) title: &'a str,
+    pub(crate) tooltip_title: &'a str,
+    /// `<Visible>` and `<Enabled>`, on unless the addition turns them off.
+    pub(crate) visible: bool,
+    pub(crate) enabled: bool,
+    /// `<ToolTipRepresentation>`: `None` 1, `Button` 3, `ShowTop` 5.
+    pub(crate) tooltip_representation: Option<&'a str>,
+    /// Member 13, by kind -- see [`format_search_string_addition_payload`] and
+    /// its two siblings.
+    pub(crate) payload: &'a str,
+    /// Members 15 and 17, the `<ContextMenu>` and the `<ExtendedTooltip>`.
+    pub(crate) context_menu: &'a str,
+    pub(crate) extended_tooltip: &'a str,
+    /// Member 19: the id of the item `<AdditionSource><Item>` names.
+    pub(crate) source_item: &'a str,
+    /// Member 21, `<GroupHorizontalAlign>`: `Left` 0, `Right` 2, absent 3.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    /// Member 23, the `DisplayImportance` **attribute** -- not a child
+    /// element, which is why no census of children finds it.
+    pub(crate) display_importance: Option<&'a str>,
+}
+
+pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Option<String> {
+    let tooltip_representation = root_code(
+        addition.tooltip_representation,
+        &[("None", "1"), ("Button", "3"), ("ShowTop", "5")],
+        "0",
+    )?;
+    let align = root_code(
+        addition.group_horizontal_align,
+        &[("Left", "0"), ("Right", "2")],
+        "3",
+    )?;
+    let importance = root_code(
+        addition.display_importance,
+        &[("VeryHigh", "1"), ("VeryLow", "5")],
+        "0",
+    )?;
+    Some(format!(
+        "{{5,{{{id},{ns}}},0,0,0,{kind},{name},{title},{tooltip_title},{visible},{enabled},\
+         {tooltip_representation},1,{payload},1,{context_menu},1,{extended_tooltip},2,\
+         {{{source},{kind}}},0,{align},3,{importance}}}",
+        id = addition.id,
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        kind = addition.kind,
+        name = quoted(addition.name),
+        title = addition.title,
+        tooltip_title = addition.tooltip_title,
+        visible = u8::from(addition.visible),
+        enabled = u8::from(addition.enabled),
+        payload = addition.payload,
+        context_menu = addition.context_menu,
+        extended_tooltip = addition.extended_tooltip,
+        source = addition.source_item,
+    ))
+}
+
+/// Member 13 of a `<SearchStringAddition>` -- eleven slots, four of them read.
+pub(crate) fn format_search_string_addition_payload(
+    width: &str,
+    horizontal_stretch: Option<bool>,
+    auto_max_width: bool,
+    max_width: &str,
+) -> String {
+    format!(
+        "{{1,{width},{stretch},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},\
+         {{0,1,0}},{auto_max_width},{max_width},0}}",
+        stretch = native_tristate(horizontal_stretch),
+        auto_max_width = u8::from(auto_max_width),
+    )
+}
+
+/// Member 13 of a `<SearchControlAddition>` -- eleven slots, one of them read.
+pub(crate) fn format_search_control_addition_payload(auto_max_width: bool) -> String {
+    format!(
+        "{{1,0,{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},{{0,1,0}},\
+         {auto_max_width},0,0,2}}",
+        auto_max_width = u8::from(auto_max_width),
+    )
+}
+
+/// Member 13 of a `<ViewStatusAddition>` -- sixteen slots, two of them read.
+pub(crate) fn format_view_status_addition_payload(
+    horizontal_location: Option<&str>,
+    auto_max_width: bool,
+) -> Option<String> {
+    let location = root_code(horizontal_location, &[("Left", "0")], "3")?;
+    Some(format!(
+        "{{1,0,2,{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
+         {{7,3,0,1,100}},{{7,3,0,1,100}},\
+         {{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},{location},{{0,1,0}},\
+         {auto_max_width},0,0}}",
+        auto_max_width = u8::from(auto_max_width),
+    ))
+}
+
 /// A decoration, as the body stores it.
 ///
 /// An `<ExtendedTooltip>` is the commonest record in a form body -- 421 852 of

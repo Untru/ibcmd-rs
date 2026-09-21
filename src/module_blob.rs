@@ -449,6 +449,8 @@ struct FormXmlChildItem {
     font_present: bool,
     choice_list_present: bool,
     row_filter_present: bool,
+    /// The `DisplayImportance` XML attribute a table addition may carry.
+    display_importance: Option<String>,
     /// Every other scalar property, by element name, as the XML spells it.
     /// The payload writers read from here rather than growing a field each.
     scalars: BTreeMap<String, String>,
@@ -6413,10 +6415,15 @@ fn format_native_table(
     let mut context_menu = None;
     let mut command_bar = None;
     let mut columns = Vec::new();
+    // The three additions sit in the tail, not among the columns.
+    let mut additions: [Option<&FormXmlChildItem>; 3] = [None, None, None];
     for child in &item.child_items {
         match child.tag.as_str() {
             "ContextMenu" if context_menu.is_none() => context_menu = Some(child),
             "AutoCommandBar" if command_bar.is_none() => command_bar = Some(child),
+            "SearchStringAddition" => additions[0] = Some(child),
+            "ViewStatusAddition" => additions[1] = Some(child),
+            "SearchControlAddition" => additions[2] = Some(child),
             _ => columns.push(child),
         }
     }
@@ -6513,7 +6520,20 @@ fn format_native_table(
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the head writer cannot place"))?;
 
+    let mut addition_records = Vec::new();
+    for (kind, child) in additions.iter().enumerate() {
+        let Some(child) = child else {
+            return Err(anyhow!("a table without all three additions is not measured"));
+        };
+        addition_records.push(native_table_addition(child, kind as u8, items, source)?);
+    }
+
     let tail = native::format_table_tail(&native::NativeTableTail {
+        additions: [
+            &addition_records[0],
+            &addition_records[1],
+            &addition_records[2],
+        ],
         auto_mark_incomplete: item.auto_mark_incomplete,
         visible: item.visible.unwrap_or(true),
         multiple_choice: item.table_multiple_choice.unwrap_or(false),
@@ -6701,6 +6721,94 @@ fn native_root_property_bag(
         }
     }
     Ok(bag)
+}
+
+/// One of the three `{5,…}` additions a table carries in its tail.
+fn native_table_addition(
+    item: &FormXmlChildItem,
+    kind: u8,
+    items: &BTreeMap<String, NativeItemTarget>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    let _ = source;
+
+    let mut context_menu = None;
+    let mut children = 0usize;
+    for child in &item.child_items {
+        match child.tag.as_str() {
+            "ContextMenu" if context_menu.is_none() => context_menu = Some(child),
+            _ => children += 1,
+        }
+    }
+    if children > 0 {
+        return Err(anyhow!("an addition with children is not measured"));
+    }
+    let context_menu = match context_menu {
+        Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+        None => return Err(anyhow!("an addition with no context menu is not measured")),
+    };
+    let extended_tooltip = match &item.extended_tooltip {
+        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
+        None => return Err(anyhow!("an addition with no extended tooltip is not measured")),
+    };
+    // Member 19 names the item the addition serves, which is not always the
+    // table it sits in: 392 of the corpus's additions live elsewhere.
+    let source_item = match item.addition_source_item.as_deref() {
+        Some(name) => match items.get(name) {
+            Some(target) => target.id.clone(),
+            None => {
+                return Err(anyhow!(
+                    "an addition serves {name}, which the form does not declare"
+                ));
+            }
+        },
+        None => return Err(anyhow!("an addition with no <AdditionSource> is not measured")),
+    };
+
+    let auto_max_width = item.auto_max_width.unwrap_or(true);
+    let payload = match kind {
+        0 => native::format_search_string_addition_payload(
+            item.width.as_deref().unwrap_or("0"),
+            item.horizontal_stretch,
+            auto_max_width,
+            item.max_width.as_deref().unwrap_or("0"),
+        ),
+        1 => native::format_view_status_addition_payload(
+            item.scalars.get("HorizontalLocation").map(String::as_str),
+            auto_max_width,
+        )
+        .ok_or_else(|| anyhow!("a view status addition names an unmeasured location"))?,
+        _ => native::format_search_control_addition_payload(auto_max_width),
+    };
+
+    native::format_table_addition(&native::NativeTableAddition {
+        id: &item.id,
+        kind,
+        name: &item.name,
+        title: &format_form_title_value(&item.title),
+        tooltip_title: &format_form_title_value(&item.tooltip),
+        visible: item.visible.unwrap_or(true),
+        enabled: item.enabled.unwrap_or(true),
+        tooltip_representation: item.tooltip_representation.map(|value| match value {
+            FormTooltipRepresentation::Omit => "Auto",
+            FormTooltipRepresentation::None => "None",
+            FormTooltipRepresentation::Balloon => "Balloon",
+            FormTooltipRepresentation::Button => "Button",
+            FormTooltipRepresentation::ShowAuto => "ShowAuto",
+            FormTooltipRepresentation::ShowTop => "ShowTop",
+            FormTooltipRepresentation::ShowLeft => "ShowLeft",
+            FormTooltipRepresentation::ShowBottom => "ShowBottom",
+            FormTooltipRepresentation::ShowRight => "ShowRight",
+        }),
+        payload: &payload,
+        context_menu: &context_menu,
+        extended_tooltip: &extended_tooltip,
+        source_item: &source_item,
+        group_horizontal_align: item.scalars.get("GroupHorizontalAlign").map(String::as_str),
+        display_importance: item.display_importance.as_deref(),
+    })
+    .ok_or_else(|| anyhow!("an addition names a spelling the writer cannot place"))
 }
 
 /// The keyed property bag of a `{55,…}` table record.
@@ -12687,6 +12795,7 @@ fn parse_form_child_item_xml(
         font_present: false,
         choice_list_present: false,
         row_filter_present: false,
+        display_importance: xml_attribute_value(event, "DisplayImportance")?,
         scalars: BTreeMap::new(),
         child_items_present: false,
         child_items: Vec::new(),
