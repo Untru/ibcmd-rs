@@ -1225,6 +1225,258 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
 /// The namespace a form *command* id lives in, which is not the item one.
 pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 
+/// A button, as the body stores it.
+///
+/// A button's optional functional-options block sits one member **earlier**
+/// than a field's: member 3 is the flag and member 4 the block. With it lifted
+/// the record is fixed-length, 52 members, in all 77 127 button records of
+/// ERP УХ -- and **76 913 of them rebuild byte for byte (99.72%)** from the
+/// source alone, the remaining 214 differing only in member 48, which the
+/// caller supplies.
+///
+/// Two properties are written **twice, under two different codings**:
+/// `<Type>` is coarse at member 4 (a command-bar hyperlink counts as a
+/// command-bar button) and fine at member 46, and `<LocationInCommandBar>` is
+/// coarse at member 15 and fine at member 49. Reading either one once leaves
+/// tens of thousands of records wrong.
+pub(crate) struct NativeButtonItem<'a> {
+    pub(crate) id: &'a str,
+    /// The functional-options block, when the button restricts itself.
+    pub(crate) functional_options: Option<&'a str>,
+    /// `<Type>`: `CommandBarButton`, `CommandBarHyperlink`, `UsualButton` or
+    /// `Hyperlink`.
+    pub(crate) button_type: Option<&'a str>,
+    pub(crate) name: &'a str,
+    /// Already formatted -- `{1,0}` when the button names no title.
+    pub(crate) title: &'a str,
+    pub(crate) enabled: bool,
+    /// The command the button runs, as `{<id>,<command namespace>}`.
+    pub(crate) command: &'a str,
+    /// The button's data path, `{0}` when it has none.
+    pub(crate) data_path: &'a str,
+    /// `<Representation>`: `Text`, `Picture` or `PictureAndText`.
+    pub(crate) representation: Option<&'a str>,
+    pub(crate) default_button: bool,
+    pub(crate) default_item: bool,
+    /// `<LocationInCommandBar>`: `InCommandBar`, `InAdditionalSubmenu` or
+    /// `InCommandBarAndInAdditionalSubmenu`.
+    pub(crate) location_in_command_bar: Option<&'a str>,
+    pub(crate) width: Option<&'a str>,
+    pub(crate) height: Option<&'a str>,
+    pub(crate) title_height: Option<&'a str>,
+    /// The back, text and border colours and the font, already formatted.
+    pub(crate) appearance: [&'a str; 4],
+    pub(crate) check: bool,
+    /// The picture, already formatted.
+    pub(crate) picture: &'a str,
+    pub(crate) visible: bool,
+    /// `<SkipOnInput>`: 2 when the button names neither value.
+    pub(crate) skip_on_input: Option<bool>,
+    /// `<ToolTipRepresentation>`.
+    pub(crate) tooltip_representation: Option<&'a str>,
+    pub(crate) extended_tooltip: &'a str,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: Option<&'a str>,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: Option<&'a str>,
+    pub(crate) horizontal_stretch: bool,
+    pub(crate) vertical_stretch: bool,
+    /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub(crate) group_vertical_align: Option<&'a str>,
+    /// `<RepresentationInContextMenu>`: `None`, `AdditionalInContextMenu` or
+    /// `OnlyInContextMenu`.
+    pub(crate) representation_in_context_menu: Option<&'a str>,
+    /// `<Shape>`: `Usual` or `Oval`.
+    pub(crate) shape: Option<&'a str>,
+    /// `<ShapeRepresentation>`: `Always`, `WhenActive` or `None`.
+    pub(crate) shape_representation: Option<&'a str>,
+    /// `<PictureLocation>`: `Left` or `Right`.
+    pub(crate) picture_location: Option<&'a str>,
+    /// Member 48, which the button's own element does not carry: 214 records
+    /// of the corpus name something there and the rest write 0.
+    pub(crate) forty_eighth: &'a str,
+    pub(crate) command_uniqueness: bool,
+}
+
+impl Default for NativeButtonItem<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            functional_options: None,
+            button_type: None,
+            name: "",
+            title: "{1,0}",
+            enabled: true,
+            command: "{0}",
+            data_path: "{0}",
+            representation: None,
+            default_button: false,
+            default_item: false,
+            location_in_command_bar: None,
+            width: None,
+            height: None,
+            title_height: None,
+            appearance: ["{3,4,{0}}", "{3,4,{0}}", "{3,4,{0}}", "{7,3,0,1,100}"],
+            check: false,
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            visible: true,
+            skip_on_input: None,
+            tooltip_representation: None,
+            extended_tooltip: "",
+            auto_max_width: true,
+            max_width: None,
+            auto_max_height: true,
+            max_height: None,
+            horizontal_stretch: false,
+            vertical_stretch: false,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            representation_in_context_menu: None,
+            shape: None,
+            shape_representation: None,
+            picture_location: None,
+            forty_eighth: "0",
+            command_uniqueness: true,
+        }
+    }
+}
+
+/// The `{31,…}` record of a button.
+pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String> {
+    let options = match button.functional_options {
+        Some(block) => format!("1,{block}"),
+        None => "0".to_string(),
+    };
+    let coarse_type = root_code(
+        button.button_type,
+        &[
+            ("CommandBarButton", "0"),
+            ("CommandBarHyperlink", "0"),
+            ("UsualButton", "1"),
+            ("Hyperlink", "2"),
+        ],
+        "0",
+    )?;
+    let fine_type = root_code(
+        button.button_type,
+        &[
+            ("CommandBarButton", "0"),
+            ("UsualButton", "1"),
+            ("Hyperlink", "2"),
+            ("CommandBarHyperlink", "3"),
+        ],
+        "0",
+    )?;
+    let coarse_location = root_code(
+        button.location_in_command_bar,
+        &[
+            ("InAdditionalSubmenu", "0"),
+            ("InCommandBar", "1"),
+            ("InCommandBarAndInAdditionalSubmenu", "1"),
+        ],
+        "2",
+    )?;
+    let fine_location = root_code(
+        button.location_in_command_bar,
+        &[
+            ("InAdditionalSubmenu", "1"),
+            ("InCommandBar", "2"),
+            ("InCommandBarAndInAdditionalSubmenu", "3"),
+        ],
+        "0",
+    )?;
+    let representation = root_code(
+        button.representation,
+        &[("Text", "0"), ("Picture", "1"), ("PictureAndText", "2")],
+        "3",
+    )?;
+    let tooltip_representation = root_code(
+        button.tooltip_representation,
+        &[
+            ("Auto", "0"),
+            ("None", "1"),
+            ("Balloon", "2"),
+            ("Button", "3"),
+            ("ShowAuto", "4"),
+            ("ShowTop", "5"),
+            ("ShowLeft", "6"),
+            ("ShowBottom", "7"),
+            ("ShowRight", "8"),
+        ],
+        "0",
+    )?;
+    let group_horizontal = root_code(
+        button.group_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let group_vertical = root_code(
+        button.group_vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    let in_context_menu = root_code(
+        button.representation_in_context_menu,
+        &[
+            ("None", "0"),
+            ("AdditionalInContextMenu", "1"),
+            ("OnlyInContextMenu", "2"),
+        ],
+        "3",
+    )?;
+    let shape = root_code(button.shape, &[("Usual", "1"), ("Oval", "2")], "0")?;
+    let shape_representation = root_code(
+        button.shape_representation,
+        &[("Always", "1"), ("WhenActive", "2"), ("None", "3")],
+        "0",
+    )?;
+    let picture_location = root_code(
+        button.picture_location,
+        &[("Left", "1"), ("Right", "2")],
+        "0",
+    )?;
+    Some(format!(
+        "{{31,{{{id},{ns}}},0,{options},{coarse_type},{name},{title},{enabled},{command},\
+         {data_path},{representation},{default_button},0,{default_item},2,{coarse_location},\
+         {width},{height},{title_height},{back},{text},{border},{font},{{0,0,0}},{check},\
+         {picture},{visible},{{\"Pattern\"}},\"\",{skip_on_input},{tooltip_representation},1,\
+         {extended_tooltip},{{\"U\"}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {max_height},{horizontal_stretch},{vertical_stretch},{group_horizontal},\
+         {group_vertical},{in_context_menu},{shape},{shape_representation},{fine_type},\
+         {picture_location},{forty_eighth},{fine_location},{command_uniqueness},0}}",
+        id = button.id,
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(button.name),
+        title = button.title,
+        enabled = u8::from(button.enabled),
+        command = button.command,
+        data_path = button.data_path,
+        default_button = u8::from(button.default_button),
+        default_item = u8::from(button.default_item),
+        width = button.width.unwrap_or("0"),
+        height = button.height.unwrap_or("0"),
+        title_height = button.title_height.unwrap_or("0"),
+        back = button.appearance[0],
+        text = button.appearance[1],
+        border = button.appearance[2],
+        font = button.appearance[3],
+        check = u8::from(button.check),
+        picture = button.picture,
+        visible = u8::from(button.visible),
+        skip_on_input = native_tristate(button.skip_on_input),
+        extended_tooltip = button.extended_tooltip,
+        auto_max_width = u8::from(button.auto_max_width),
+        max_width = button.max_width.unwrap_or("0"),
+        auto_max_height = u8::from(button.auto_max_height),
+        max_height = button.max_height.unwrap_or("0"),
+        horizontal_stretch = u8::from(button.horizontal_stretch),
+        vertical_stretch = u8::from(button.vertical_stretch),
+        forty_eighth = button.forty_eighth,
+        command_uniqueness = u8::from(button.command_uniqueness),
+    ))
+}
+
 /// A form attribute, as the body stores it.
 ///
 /// The record is fourteen members, then the attribute's columns, then two more
@@ -2572,6 +2824,79 @@ mod tests {
             }
             assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
         }
+    }
+
+    /// What a button says about itself, read off the 77 127 `{31,…}` records
+    /// of ERP УХ.
+    #[test]
+    fn writes_what_a_button_says_about_itself() {
+        // The shape the narrow writer produces for a standard-command button
+        // is what the full one produces from the same facts, member for
+        // member -- which is the sharpest check available on the defaults.
+        let tooltip = format_extended_tooltip("27", "ФормаНайтиРасширеннаяПодсказка");
+        assert_eq!(
+            format_button_item(&NativeButtonItem {
+                id: "26",
+                functional_options: Some("{0,{0,{\"B\",1},0}}"),
+                name: "ФормаНайти",
+                command: "{1,c0519548-2a9a-44de-a25e-faf01e089d4d}",
+                extended_tooltip: &tooltip,
+                ..NativeButtonItem::default()
+            })
+            .as_deref(),
+            Some(
+                format_standard_command_button(
+                    "26",
+                    "ФормаНайти",
+                    "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                    "27",
+                    "ФормаНайтиРасширеннаяПодсказка",
+                )
+                .as_str()
+            )
+        );
+
+        // <Type> and <LocationInCommandBar> are each written twice, and the
+        // second coding is finer than the first: a command-bar hyperlink is a
+        // command-bar button at member 4 and itself at member 46.
+        let members = |button: &NativeButtonItem<'_>| {
+            top_level_members(&format_button_item(button).expect("a button record"))
+        };
+        let hyperlink = members(&NativeButtonItem {
+            button_type: Some("CommandBarHyperlink"),
+            location_in_command_bar: Some("InCommandBarAndInAdditionalSubmenu"),
+            ..NativeButtonItem::default()
+        });
+        assert_eq!(hyperlink[4], "0");
+        assert_eq!(hyperlink[46], "3");
+        assert_eq!(hyperlink[15], "1");
+        assert_eq!(hyperlink[49], "3");
+
+        let submenu = members(&NativeButtonItem {
+            button_type: Some("UsualButton"),
+            location_in_command_bar: Some("InAdditionalSubmenu"),
+            ..NativeButtonItem::default()
+        });
+        assert_eq!(submenu[4], "1");
+        assert_eq!(submenu[46], "1");
+        assert_eq!(submenu[15], "0");
+        assert_eq!(submenu[49], "1");
+
+        // A spelling the corpus never showed is refused rather than defaulted.
+        assert_eq!(
+            format_button_item(&NativeButtonItem {
+                button_type: Some("Toggle"),
+                ..NativeButtonItem::default()
+            }),
+            None
+        );
+        assert_eq!(
+            format_button_item(&NativeButtonItem {
+                shape: Some("Round"),
+                ..NativeButtonItem::default()
+            }),
+            None
+        );
     }
 
     /// What a field says about itself, read off the 69 521 `{37,…}` input

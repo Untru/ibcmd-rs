@@ -33,6 +33,9 @@ rather than defaulting it.
       9 357 / 9 357, tail 9 354 / 9 357. *(group-record-20260921.md)*
 - [x] **The `{37,…}` field record**, across every field kind:
       122 630 / 122 767 (99.89%). *(field-record-20260921.md)*
+- [x] **The `{31,…}` button record**: 76 913 / 77 127 (99.72%), the rest
+      differing only in a member the element does not carry.
+      *(button-record-20260921.md)*
 - [x] **Colours** and **fonts** an item can carry.
 - [x] The item payloads: label, input, check box, radio button, picture,
       spreadsheet, HTML, text and formatted document, usual group, button group,
@@ -44,8 +47,8 @@ rather than defaulting it.
       read; what each key holds is not. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The remaining item records** -- the `{31,…}` button, `{12,…}`
-      decoration and `{55,…}` table records.
+- [ ] **The remaining item records** -- the `{12,…}` decoration and `{55,…}`
+      table records.
 - [ ] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
@@ -59,7 +62,10 @@ rather than defaulting it.
 
 ## What the measurements keep turning up
 
-Three properties are written **twice, under two different codings**:
-`<VerticalScroll>` and `<Group>` in the root tail, and `<CurrentRowUse>` in a
-command. Reading any of them consistently costs thousands of records. It is
-worth assuming a fourth exists whenever a candidate stalls just short.
+Five properties are written **twice, under two different codings**:
+`<VerticalScroll>` and `<Group>` in the root tail, `<CurrentRowUse>` in a
+command, and `<Type>` and `<LocationInCommandBar>` in a button. In every case
+the second reading is the finer one -- a command-bar hyperlink is a plain
+command-bar button at member 4 and itself at member 46. Reading any of them
+once costs thousands of records, so when a candidate stalls just short, look
+for the property that is written twice before looking for a new one.
