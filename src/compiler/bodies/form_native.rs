@@ -347,6 +347,50 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> String {
     )
 }
 
+/// What the `{50,…}` root layout of a form body carries.
+///
+/// The childless root is 48 members. Over the roots of the first 600 ERP УХ
+/// form bodies that carry no child item, forty of those members are the same
+/// in every one; the eight below are not. A root that carries children appends
+/// them after the command bar, which this writer does not do yet because the
+/// count encoding there is not measured.
+pub(crate) struct NativeRootLayout<'a> {
+    /// Slot 9, which is `1` on a form that names no title and `0` on one that
+    /// does.
+    pub(crate) auto_title: bool,
+    /// Already formatted -- see [`format_russian_title`].
+    pub(crate) title: &'a str,
+    /// Slot 17.
+    pub(crate) seventeenth: u32,
+    /// Slot 19: the form's own event bindings, or `{0,1,0}` when it has none.
+    pub(crate) events: &'a str,
+    /// Slot 20: the root `<CommandSet>`, `{0}` when the form excludes nothing.
+    pub(crate) command_set: &'a str,
+    /// Slot 22.
+    pub(crate) command_bar: &'a str,
+    /// Slot 29.
+    pub(crate) twenty_ninth: u32,
+    /// Slot 39.
+    pub(crate) thirty_ninth: u32,
+}
+
+/// The `{50,…}` root layout of a form body that carries no child item.
+pub(crate) fn format_root_layout(root: &NativeRootLayout<'_>) -> String {
+    format!(
+        "{{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,{auto_title},{title},0,0,1,1,1,\
+         0,{seventeenth},0,{events},{command_set},1,{command_bar},0,\"\",\"\",0,1,\"\",\
+         {twenty_ninth},0,0,0,0,0,3,3,0,0,{thirty_ninth},100,1,1,0,0,0,{{50,0}},1}}",
+        auto_title = u8::from(root.auto_title),
+        title = root.title,
+        seventeenth = root.seventeenth,
+        events = root.events,
+        command_set = root.command_set,
+        command_bar = root.command_bar,
+        twenty_ninth = root.twenty_ninth,
+        thirty_ninth = root.thirty_ninth,
+    )
+}
+
 /// The `{5,…}` record of a table's search string, view status or search
 /// control addition.
 ///
@@ -825,6 +869,42 @@ mod tests {
             "{5,{66,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,2,\"ОтборУправлениеПоиском\",{1,0},{1,0},1,1,0,1,"
         ));
         assert!(search_control.ends_with(",2,{56,2},0,3,3,0}"));
+    }
+
+    /// Two childless root layouts of ERP УХ form bodies -- one that names a
+    /// title and no event, one that names an event and no title -- exactly as
+    /// those bodies store them.
+    #[test]
+    fn writes_the_root_layouts_the_platform_stores() {
+        let bar = format_empty_auto_command_bar("-1", "ФормаКоманднаяПанель");
+
+        assert_eq!(
+            format_root_layout(&NativeRootLayout {
+                auto_title: false,
+                title: "{1,2,{\"ru\",\"Заявление на подключение\"},{\"en\",\"Заявление на подключение\"}}",
+                seventeenth: 1,
+                events: "{0,1,0}",
+                command_set: "{0}",
+                command_bar: &bar,
+                twenty_ninth: 2,
+                thirty_ninth: 2,
+            }),
+            "{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,0,{1,2,{\"ru\",\"Заявление на подключение\"},{\"en\",\"Заявление на подключение\"}},0,0,1,1,1,0,1,0,{0,1,0},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"ФормаКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,\"\",\"\",0,1,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1}"
+        );
+
+        assert_eq!(
+            format_root_layout(&NativeRootLayout {
+                auto_title: true,
+                title: "{1,0}",
+                seventeenth: 0,
+                events: "{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1}",
+                command_set: "{0}",
+                command_bar: &bar,
+                twenty_ninth: 2,
+                thirty_ninth: 2,
+            }),
+            "{50,0,0,0,0,1,0,0,00000000-0000-0000-0000-000000000000,1,{1,0},0,0,1,1,1,0,0,0,{1,3ccc650e-f631-4cae-8e33-3eaac610b5f9,\"ПриОткрытии\",1,0,3ccc650e-f631-4cae-8e33-3eaac610b5f9,0,1},{0},1,{22,{-1,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"ФормаКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0},0,\"\",\"\",0,1,\"\",2,0,0,0,0,0,3,3,0,0,2,100,1,1,0,0,0,{50,0},1}"
+        );
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in

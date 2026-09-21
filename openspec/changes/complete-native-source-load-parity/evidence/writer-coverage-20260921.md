@@ -17,6 +17,8 @@ body stores. Every function below is proved against strings read out of
 | form attribute | `{9,…}` 16 members | 7 073 of 11 700 wrapper-9 records |
 | form command | `{9,…}` 19 members | 3 936 of the same |
 | table, around its six children | `{55,…}` | the offsets 344 table records agree on |
+| search string, view status, search control | `{5,…}` | the three additions of one table |
+| root layout, childless | `{50,…}` | two 48-member roots, forty members constant |
 
 The table has no fixed member count -- its head grows with what it shows -- so
 what is written is its structure: the command bar two members after the context
@@ -24,13 +26,18 @@ menu, the tooltip 26 members from the end, the three `{5,…}` additions 21, 19
 and 17 from the end, and sixteen scalars closing the record. The head and the
 scalar runs come from the caller until the slots that carry them are named.
 
+Field kinds are not separate records: a picture, a spreadsheet document, an
+HTML document, a radio-button group, an indicator and a formatted document are
+the same 59-member `{37,…}` frame with another kind slot and another payload,
+which `format_field_item` now writes.
+
 ## What is not written yet
 
-- The `{5,…}` search string, view status and search control additions on their
-  own.
-- Picture, spreadsheet, HTML, formatted-document, calendar and radio-button
-  fields.
-- Form events, the root property bag and the DCS settings of a dynamic list.
+- The root's child list: a root that carries items appends them after the
+  command bar, and that count encoding is not measured.
+- The payload tuple of each field kind other than the plain `{11,…}`, and the
+  payload of each group kind.
+- The root property bag and the DCS settings of a dynamic list.
 - The scalar slots of each group payload, which decide which XML property each
   member carries.
 
