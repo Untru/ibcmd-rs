@@ -59,6 +59,34 @@ payload in the corpus. Twenty of its twenty-nine slots were read in one pass:
 `Page`, payload `{18,…}`, 20 members: slot 2 and slot 4 answer to `Group`,
 slot 1 carries the page picture.
 
+## Every payload kind, one run each
+
+Pointed at both joins with no kind filter, over 400 forms:
+
+| kind | payload members | records | slots that vary and were read |
+|---|---|---|---|
+| `InputField` | 66 | 1 784 | **49** |
+| `UsualGroup` | 29 | 1 357 | **20** |
+| `PictureField` | 24 | 41 | 16 |
+| `LabelField` | 20 | 2 424 | 15 |
+| `Page` | 20 | 224 | 7 |
+| `CheckBoxField` | 13 | 396 | 5 |
+| `RadioButtonField` | 12 | 71 | 3 |
+| `ColumnGroup` | 12 | 304 | 2 |
+| `Pages` | 6 | 75 | 2 |
+| `ButtonGroup` | 4 | 217 | 1 |
+| `AutoCommandBar` | 3 | 682 | 1 |
+| `ContextMenu` | 2 | 6 349 | 0 -- its payload does not vary |
+| `SpreadSheetDocumentField` | 32 | 9 | 0 -- too few records |
+| `TextDocumentField` | 16 | 6 | 0 -- too few records |
+| `FormattedDocumentField` | 16 | 3 | 0 -- too few records |
+
+The kinds that read nothing are of two sorts. A context menu's payload is the
+same two members everywhere, so there is nothing to read. A spreadsheet
+document field appears nine times in 400 forms, which is below the threshold
+the second pass needs to call a mapping proved -- those want a wider join, not
+a different method.
+
 ## Why this matters for the estimate
 
 Each payload kind has a fixed member count -- 20 for a label, 66 for an input,
