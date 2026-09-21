@@ -6032,6 +6032,288 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
 /// database. See evidence/body-frame-20260921.md.
 const NATIVE_EMPTY_SETTINGS: &str = "{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbmNvZGluZz0iVVRGLTgiPz4NCjxTZXR0aW5ncyB4bWxucz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhLWNvbXBvc2l0aW9uLXN5c3RlbS9zZXR0aW5ncyIgeG1sbnM6ZGNzY29yPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEtY29tcG9zaXRpb24tc3lzdGVtL2NvcmUiIHhtbG5zOnN0eWxlPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEvdWkvc3R5bGUiIHhtbG5zOnN5cz0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2ZvbnRzL3N5c3RlbSIgeG1sbnM6djg9Imh0dHA6Ly92OC4xYy5ydS84LjEvZGF0YS9jb3JlIiB4bWxuczp2OHVpPSJodHRwOi8vdjguMWMucnUvOC4xL2RhdGEvdWkiIHhtbG5zOndlYj0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2NvbG9ycy93ZWIiIHhtbG5zOndpbj0iaHR0cDovL3Y4LjFjLnJ1LzguMS9kYXRhL3VpL2NvbG9ycy93aW5kb3dzIiB4bWxuczp4cz0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEiIHhtbG5zOnhzaT0iaHR0cDovL3d3dy53My5vcmcvMjAwMS9YTUxTY2hlbWEtaW5zdGFuY2UiLz4=}";
 
+
+/// The `{22,…}` kind uuid a child of this tag is filed under.
+fn native_child_kind_uuid(tag: &str) -> Option<&'static str> {
+    use crate::compiler::bodies::form_native::child_kind_uuid;
+    Some(match tag {
+        "UsualGroup" | "Pages" | "Page" | "ButtonGroup" | "CommandBar" | "ContextMenu"
+        | "Popup" | "ColumnGroup" => child_kind_uuid(22)?,
+        "Button" => child_kind_uuid(31)?,
+        "LabelDecoration" | "PictureDecoration" => child_kind_uuid(12)?,
+        "Table" => child_kind_uuid(55)?,
+        _ => child_kind_uuid(37)?,
+    })
+}
+
+/// A tri-state the way every native record reads one.
+const fn native_flag(value: Option<bool>) -> Option<bool> {
+    value
+}
+
+/// One child item, as the `(kind uuid, record)` pair its parent files it under.
+///
+/// Fail-closed: a tag the writers have not measured, or a property whose
+/// spelling they cannot place, refuses the whole form.
+fn format_native_child_item(
+    item: &FormXmlChildItem,
+    attribute_ids: &BTreeMap<String, String>,
+) -> Result<(&'static str, String)> {
+    use crate::compiler::bodies::form_native as native;
+
+    let kind_uuid = native_child_kind_uuid(&item.tag)
+        .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
+    let title = format_form_title_value(&item.title);
+    let tooltip_title = format_form_title_value(&item.tooltip);
+    let extended_tooltip = item.extended_tooltip.as_ref().map(|tooltip| {
+        native::format_extended_tooltip(&tooltip.id, &tooltip.name)
+    });
+
+    // A <ContextMenu> is itself a child item; a field keeps it in a member of
+    // its own rather than among its children.
+    let (context_menu, children): (Option<&FormXmlChildItem>, Vec<&FormXmlChildItem>) = {
+        let mut menu = None;
+        let mut rest = Vec::new();
+        for child in &item.child_items {
+            if child.tag == "ContextMenu" && menu.is_none() {
+                menu = Some(child);
+            } else {
+                rest.push(child);
+            }
+        }
+        (menu, rest)
+    };
+
+    if let Some(kind) = native::native_group_kind(&item.tag) {
+        let mut records = Vec::new();
+        for child in item.child_items.iter() {
+            records.push(format_native_child_item(child, attribute_ids)?);
+        }
+        let payload = native_container_payload(item)?;
+        let record = native::format_group_item(&native::NativeGroupItem {
+            id: &item.id,
+            kind,
+            name: &item.name,
+            title: &title,
+            tooltip_title: &tooltip_title,
+            enable_content_change: item.enable_content_change.unwrap_or(false),
+            enabled: item.enabled.unwrap_or(true),
+            read_only: item.read_only.unwrap_or(false),
+            width: item.width.as_deref(),
+            height: item.height.as_deref(),
+            horizontal_stretch: native_flag(item.horizontal_stretch),
+            vertical_stretch: native_flag(item.vertical_stretch),
+            payload: &payload,
+            children: &records
+                .iter()
+                .map(|(uuid, record)| (*uuid, record.clone()))
+                .collect::<Vec<_>>(),
+            visible: item.visible.unwrap_or(true),
+            extended_tooltip: extended_tooltip.as_deref(),
+            ..native::NativeGroupItem::default()
+        })
+        .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
+        return Ok((kind_uuid, record));
+    }
+
+    if let Some(kind) = native::native_field_kind(&item.tag) {
+        let payload = native_field_payload(item)?;
+        let data_path = match item.data_path.as_deref() {
+            Some(path) => format_form_attribute_data_path(path, attribute_ids)
+                .ok_or_else(|| anyhow!("<{}> binds to {path}, which is not a form attribute", item.tag))?,
+            None => "{0}".to_string(),
+        };
+        let menu = match context_menu {
+            Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+            None => return Err(anyhow!("a field with no context menu is not measured")),
+        };
+        let tooltip = extended_tooltip
+            .ok_or_else(|| anyhow!("a field with no extended tooltip is not measured"))?;
+        let record = native::format_field_item(&native::NativeFieldItem {
+            id: &item.id,
+            kind,
+            name: &item.name,
+            title_location: item.title_location.map(native_title_location),
+            title: &title,
+            tooltip_title: &tooltip_title,
+            data_path: &data_path,
+            enabled: item.enabled.unwrap_or(true),
+            read_only: item.read_only.unwrap_or(false),
+            skip_on_input: native_flag(item.skip_on_input),
+            default_item: item.default_item.unwrap_or(false),
+            show_in_header: item.show_in_header.unwrap_or(true),
+            show_in_footer: item.show_in_footer.unwrap_or(true),
+            cell_hyperlink: item.cell_hyperlink.unwrap_or(false),
+            auto_cell_height: item.auto_cell_height.unwrap_or(false),
+            payload: &payload,
+            context_menu: &menu,
+            visible: item.visible.unwrap_or(true),
+            extended_tooltip: &tooltip,
+            ..native::NativeFieldItem::default()
+        })
+        .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
+        let _ = children;
+        return Ok((kind_uuid, record));
+    }
+
+    if item.tag == "Button" {
+        let tooltip = extended_tooltip
+            .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
+        let command = match item.command_name.as_deref() {
+            Some(_) => {
+                return Err(anyhow!(
+                    "a button's command names a configuration object"
+                ));
+            }
+            None => "{0}".to_string(),
+        };
+        let record = native::format_button_item(&native::NativeButtonItem {
+            id: &item.id,
+            name: &item.name,
+            title: &title,
+            enabled: item.enabled.unwrap_or(true),
+            command: &command,
+            representation: item.button_representation.map(native_button_representation),
+            default_button: item.default_button.unwrap_or(false),
+            width: item.width.as_deref(),
+            height: item.height.as_deref(),
+            visible: item.visible.unwrap_or(true),
+            skip_on_input: native_flag(item.skip_on_input),
+            extended_tooltip: &tooltip,
+            auto_max_width: item.auto_max_width.unwrap_or(true),
+            max_width: item.max_width.as_deref(),
+            auto_max_height: item.auto_max_height.unwrap_or(true),
+            max_height: item.max_height.as_deref(),
+            horizontal_stretch: item.horizontal_stretch.unwrap_or(false),
+            vertical_stretch: item.vertical_stretch.unwrap_or(false),
+            ..native::NativeButtonItem::default()
+        })
+        .ok_or_else(|| anyhow!("<Button> names something the writer cannot place"))?;
+        return Ok((kind_uuid, record));
+    }
+
+    if matches!(item.tag.as_str(), "LabelDecoration" | "PictureDecoration") {
+        let menu = match context_menu {
+            Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+            None => return Err(anyhow!("a decoration with no context menu is not measured")),
+        };
+        let tooltip = extended_tooltip
+            .ok_or_else(|| anyhow!("a decoration with no extended tooltip is not measured"))?;
+        let record = native::format_decoration_item(&native::NativeDecorationItem {
+            id: &item.id,
+            kind: u8::from(item.tag == "PictureDecoration"),
+            name: &item.name,
+            title: &title,
+            tooltip_title: &tooltip_title,
+            width: item.width.as_deref(),
+            height: item.height.as_deref(),
+            horizontal_stretch: native_flag(item.horizontal_stretch),
+            vertical_stretch: native_flag(item.vertical_stretch),
+            content: &format!("{{1,{title},0}}"),
+            enabled: item.enabled.unwrap_or(true),
+            context_menu: Some(&menu),
+            visible: item.visible.unwrap_or(true),
+            skip_on_input: native_flag(item.skip_on_input),
+            extended_tooltip: Some(&tooltip),
+            auto_max_width: item.auto_max_width.unwrap_or(true),
+            max_width: item.max_width.as_deref(),
+            auto_max_height: item.auto_max_height.unwrap_or(true),
+            max_height: item.max_height.as_deref(),
+            ..native::NativeDecorationItem::default()
+        })
+        .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
+        return Ok((kind_uuid, record));
+    }
+
+    Err(anyhow!("<{}> has no writer yet", item.tag))
+}
+
+/// `<Representation>` of a button as the record writer spells it.
+const fn native_button_representation(
+    representation: FormXmlButtonRepresentation,
+) -> &'static str {
+    match representation {
+        FormXmlButtonRepresentation::Text => "Text",
+        FormXmlButtonRepresentation::Picture => "Picture",
+        FormXmlButtonRepresentation::PictureAndText => "PictureAndText",
+        FormXmlButtonRepresentation::None => "None",
+    }
+}
+
+/// `<TitleLocation>` as the record writers spell it.
+const fn native_title_location(location: FormXmlTitleLocation) -> &'static str {
+    match location {
+        FormXmlTitleLocation::None => "None",
+        FormXmlTitleLocation::Left => "Left",
+        FormXmlTitleLocation::Top => "Top",
+        FormXmlTitleLocation::Right => "Right",
+    }
+}
+
+/// The payload a container carries, by its tag.
+fn native_container_payload(item: &FormXmlChildItem) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    match item.tag.as_str() {
+        "UsualGroup" => Ok(native::format_usual_group_payload(
+            &native::NativeUsualGroupPayload {
+                show_title: item.show_title.unwrap_or(true),
+                title: "{1,0}",
+                ..native::NativeUsualGroupPayload::plain()
+            },
+        )),
+        "ContextMenu" => Ok("{1,1}".to_string()),
+        _ => Err(anyhow!("<{}> has no payload writer yet", item.tag)),
+    }
+}
+
+/// The payload a field carries, by its kind.
+fn native_field_payload(item: &FormXmlChildItem) -> Result<String> {
+    use crate::compiler::bodies::form_native as native;
+    match item.tag.as_str() {
+        "LabelField" => Ok(native::format_label_payload(&native::NativeLabelPayload {
+            width: item.width.as_deref().unwrap_or("0"),
+            height: item.height.as_deref().unwrap_or("0"),
+            horizontal_stretch: item.horizontal_stretch,
+            vertical_stretch: item.vertical_stretch,
+            hyperlink: item.hyperlink.unwrap_or(false),
+            auto_max_width: item.auto_max_width.unwrap_or(true),
+            max_width: item.max_width.as_deref().unwrap_or("0"),
+            auto_max_height: item.auto_max_height.unwrap_or(true),
+            max_height: item.max_height.as_deref().unwrap_or("0"),
+            ..native::NativeLabelPayload::plain(false)
+        })),
+        "InputField" => native::format_input_payload(&native::NativeInputPayload {
+            width: item.width.as_deref().unwrap_or("0"),
+            height: item.height.as_deref().unwrap_or("0"),
+            horizontal_stretch: item.horizontal_stretch,
+            vertical_stretch: item.vertical_stretch,
+            wrap: item.wrap.unwrap_or(true),
+            password_mode: item.password_mode,
+            multi_line: item.multi_line,
+            clear_button: item.clear_button,
+            choice_button: item.choice_button,
+            choice_list_button: item.choice_list_button,
+            open_button: item.open_button,
+            create_button: item.create_button,
+            spin_button: item.spin_button,
+            drop_list_button: item.drop_list_button,
+            list_choice_mode: item.list_choice_mode.unwrap_or(false),
+            quick_choice: item.quick_choice,
+            choose_type: item.choose_type.unwrap_or(true),
+            auto_mark_incomplete: item.auto_mark_incomplete,
+            text_edit: item.text_edit.unwrap_or(true),
+            auto_max_width: item.auto_max_width.unwrap_or(true),
+            max_width: item.max_width.as_deref().unwrap_or("0"),
+            auto_max_height: item.auto_max_height.unwrap_or(true),
+            max_height: item.max_height.as_deref().unwrap_or("0"),
+            mask: item.item_type.as_deref().unwrap_or(""),
+            ..native::NativeInputPayload::plain()
+        })
+        .ok_or_else(|| anyhow!("the input field names something the writer cannot place")),
+        _ => Err(anyhow!("<{}> has no payload writer yet", item.tag)),
+    }
+}
+
 /// What stops a form from being written in the shape the platform stores.
 ///
 /// Fail-closed: every part the native writers have not measured refuses the
@@ -6039,8 +6321,10 @@ const NATIVE_EMPTY_SETTINGS: &str = "{#base64:77u/PD94bWwgdmVyc2lvbj0iMS4wIiBlbm
 /// not written at all.
 fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> {
     let mut blockers = Vec::new();
-    if !properties.child_items.is_empty() {
-        blockers.push("child items: the item writers are not wired yet".to_string());
+    for command in &properties.commands {
+        if !command.functional_options.is_empty() {
+            blockers.push("a command names functional options".to_string());
+        }
     }
     for attribute in &properties.attributes {
         if let Some(part) = attribute.unwritable.first() {
@@ -6050,22 +6334,11 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             blockers.push("an attribute carries dynamic-list settings".to_string());
         }
     }
-    if !properties.parameters.is_empty() {
-        blockers.push("parameters".to_string());
-    }
-    if !properties.commands.is_empty() {
-        blockers.push("commands".to_string());
-    }
     if !properties.command_interface_items.is_empty() {
         blockers.push("a command interface".to_string());
     }
     if properties.attributes_conditional_appearance.is_some() {
         blockers.push("a conditional appearance".to_string());
-    }
-    if let Some(command_bar) = &properties.auto_command_bar {
-        if !command_bar.child_items.is_empty() {
-            blockers.push("an auto command bar with children".to_string());
-        }
     }
     // Everything below puts an entry in the root's keyed property bag, and
     // what each key holds is not read yet.
@@ -6150,11 +6423,24 @@ fn format_native_form_body(
         .ok_or_else(|| anyhow!("the form names an event the writer cannot place"))?;
 
     let command_set = format_form_command_set(&properties.command_set_excluded_commands);
+    let attribute_ids = properties
+        .attributes
+        .iter()
+        .map(|attribute| (attribute.name.clone(), attribute.id.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut bar_children = Vec::new();
+    if let Some(bar) = &properties.auto_command_bar {
+        for item in &bar.child_items {
+            let (uuid, record) = format_native_child_item(item, &attribute_ids)?;
+            bar_children.push((uuid, record));
+        }
+    }
     let command_bar = match &properties.auto_command_bar {
         Some(bar) => crate::compiler::bodies::form_native::format_group_item(&crate::compiler::bodies::form_native::NativeGroupItem {
             id: &bar.id,
             kind: 9,
             name: &bar.name,
+            children: &bar_children,
             // The bar's payload carries <Autofill>, which is on unless the
             // form turns it off.
             payload: if bar.autofill == Some(false) {
@@ -6207,13 +6493,23 @@ fn format_native_form_body(
     })
     .ok_or_else(|| anyhow!("the form's tail names something the writer cannot place"))?;
 
+    // The form's own children, each written by the record writer for its kind.
+    let mut children = Vec::new();
+    for item in properties.child_items.iter().filter(|item| item.depth == 0) {
+        children.push(format_native_child_item(item, &attribute_ids)?);
+    }
+    let children = children
+        .iter()
+        .map(|(uuid, record)| (*uuid, record.clone()))
+        .collect::<Vec<_>>();
+
     let root = crate::compiler::bodies::form_native::format_root_layout(&crate::compiler::bodies::form_native::NativeRootLayout {
         head: &root_head,
         properties: &[],
         events: &events,
         command_set: &command_set,
         command_bar: &command_bar,
-        children: &[],
+        children: &children,
         tail: &tail,
     });
 
@@ -6237,9 +6533,46 @@ fn format_native_form_body(
         ));
     }
 
+    // The parameters and the commands, each a `{0,<count>,<record> x count}`
+    // section of its own.
+    let mut parameters = String::new();
+    for parameter in &properties.parameters {
+        let pattern = format_form_parameter_type_pattern(parameter, source)?;
+        parameters.push(',');
+        parameters.push_str(&crate::compiler::bodies::form_native::format_form_parameter(
+            &parameter.name,
+            &pattern,
+            parameter.key_parameter.unwrap_or(false),
+        ));
+    }
+    let mut commands = String::new();
+    for command in &properties.commands {
+        let title = format_form_title_value(&command.title);
+        let tooltip = format_form_title_value(&command.tooltip);
+        commands.push(',');
+        commands.push_str(
+            &crate::compiler::bodies::form_native::format_form_command(
+                &crate::compiler::bodies::form_native::NativeFormCommand {
+                    id: &command.id,
+                    name: &command.name,
+                    title: &title,
+                    tooltip: &tooltip,
+                    action: command.action.as_deref().unwrap_or(""),
+                    modifies_saved_data: command.modifies_saved_data.unwrap_or(false),
+                    current_row_use: command.current_row_use.map(|_| "DontUse"),
+                    ..crate::compiler::bodies::form_native::NativeFormCommand::default()
+                },
+            )
+            .ok_or_else(|| anyhow!("a command names something the writer cannot place"))?,
+        );
+    }
+
     Ok(format!(
-        "{{4,{root},{module},{{4,{count}{attributes},0,0,{settings}}},{{0,0}},{{0,0}},{{0,0}},\
+        "{{4,{root},{module},{{4,{count}{attributes},0,0,{settings}}},\
+         {{0,{parameter_count}{parameters}}},{{0,{command_count}{commands}}},{{0,0}},\
          {{0,0}},0,0}}",
+        parameter_count = properties.parameters.len(),
+        command_count = properties.commands.len(),
         module = format_1c_string(module_text),
         count = properties.attributes.len(),
         settings = NATIVE_EMPTY_SETTINGS,

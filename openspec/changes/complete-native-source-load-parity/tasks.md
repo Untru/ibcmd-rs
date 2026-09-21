@@ -69,9 +69,15 @@ rather than defaulting it.
 - [x] **The attributes section**, with every attribute's type pattern resolved
       against the configuration. 41 whole bodies now rebuild byte for byte.
       *(first-bodies-written-20260921.md)*
-- [ ] **Call the item writers.** 10 152 of the 13 044 forms of ERP УХ -- 78% --
-      are refused for this one reason. The records themselves are written and
-      measured; nothing calls them.
+- [x] **Call the item writers.** `format_native_child_item` dispatches on the
+      item's tag -- containers, fields, buttons and decorations -- and the
+      parameters and commands sections are written too. `child items` has left
+      the refusal list entirely: 126 forms now reach comparison, up from 83.
+- [ ] **Resolve a button's `<CommandName>`**, which now holds up 4 614 forms --
+      the largest single group. `Form.Command.X` is the form's own command id;
+      `Form.StandardCommand.X` is a known uuid.
+- [ ] **A dynamic list's settings** (2 630 forms) and the `{55,…}` table
+      dispatch (380).
 - [x] **The navigator** is not a source property at all: it travels with the
       settings composer spelling, which is not in the source either. Of the
       11 842 forms carrying one of the two canonical blobs, 11 821 agree --
