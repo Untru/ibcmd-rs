@@ -1225,6 +1225,121 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
 /// The namespace a form *command* id lives in, which is not the item one.
 pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 
+/// A decoration, as the body stores it.
+///
+/// An `<ExtendedTooltip>` is the commonest record in a form body -- 421 852 of
+/// them in ERP УХ -- and it is a decoration like any other, told apart only by
+/// where it sits. With the optional functional-options block at member 4
+/// lifted, a tooltip's record is **34 members in all 421 849** of them, and
+/// **421 844 rebuild byte for byte**: five differ in two members the element
+/// does not carry.
+///
+/// A `<LabelDecoration>` and a `<PictureDecoration>` are the same record two
+/// members longer, and those two members are not yet read; this writer serves
+/// the tooltip shape.
+pub(crate) struct NativeDecorationItem<'a> {
+    pub(crate) id: &'a str,
+    /// The functional-options block, when the decoration restricts itself.
+    pub(crate) functional_options: Option<&'a str>,
+    /// Member 5: 0 for a label or a tooltip, 1 for a picture.
+    pub(crate) kind: u8,
+    pub(crate) name: &'a str,
+    /// Already formatted -- the title and the tooltip title.
+    pub(crate) title: &'a str,
+    pub(crate) tooltip_title: &'a str,
+    pub(crate) width: Option<&'a str>,
+    pub(crate) height: Option<&'a str>,
+    /// `<HorizontalStretch>` and `<VerticalStretch>`: 2 when unnamed.
+    pub(crate) horizontal_stretch: Option<bool>,
+    pub(crate) vertical_stretch: Option<bool>,
+    /// The back colour and the font, already formatted.
+    pub(crate) back_color: &'a str,
+    pub(crate) font: &'a str,
+    /// The `{5,…}` payload that carries the decoration's own properties.
+    pub(crate) payload: &'a str,
+    /// The `{1,…}` block that carries what the decoration shows.
+    pub(crate) content: &'a str,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: Option<&'a str>,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: Option<&'a str>,
+    /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub(crate) group_vertical_align: Option<&'a str>,
+}
+
+impl Default for NativeDecorationItem<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            functional_options: None,
+            kind: 0,
+            name: "",
+            title: "{1,0}",
+            tooltip_title: "{1,0}",
+            width: None,
+            height: None,
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            back_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+            payload: concat!(
+                "{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},",
+                "{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}}"
+            ),
+            content: "{1,{1,0},0}",
+            auto_max_width: true,
+            max_width: None,
+            auto_max_height: true,
+            max_height: None,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+        }
+    }
+}
+
+/// The `{12,…}` record of a decoration.
+pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> Option<String> {
+    let options = match decoration.functional_options {
+        Some(block) => format!("1,{block}"),
+        None => "0".to_string(),
+    };
+    let horizontal = root_code(
+        decoration.group_horizontal_align,
+        &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+        "3",
+    )?;
+    let vertical = root_code(
+        decoration.group_vertical_align,
+        &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+        "3",
+    )?;
+    Some(format!(
+        "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},1,{width},\
+         {height},{horizontal_stretch},{vertical_stretch},{back_color},{font},{{0,0,0}},1,\
+         {payload},0,1,2,{content},0,0,{auto_max_width},{max_width},0,{auto_max_height},\
+         {max_height},{horizontal},{vertical},0,0}}",
+        id = decoration.id,
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        kind = decoration.kind,
+        name = quoted(decoration.name),
+        title = decoration.title,
+        tooltip_title = decoration.tooltip_title,
+        width = decoration.width.unwrap_or("0"),
+        height = decoration.height.unwrap_or("0"),
+        horizontal_stretch = native_tristate(decoration.horizontal_stretch),
+        vertical_stretch = native_tristate(decoration.vertical_stretch),
+        back_color = decoration.back_color,
+        font = decoration.font,
+        payload = decoration.payload,
+        content = decoration.content,
+        auto_max_width = u8::from(decoration.auto_max_width),
+        max_width = decoration.max_width.unwrap_or("0"),
+        auto_max_height = u8::from(decoration.auto_max_height),
+        max_height = decoration.max_height.unwrap_or("0"),
+    ))
+}
+
 /// A button, as the body stores it.
 ///
 /// A button's optional functional-options block sits one member **earlier**
@@ -2824,6 +2939,58 @@ mod tests {
             }
             assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
         }
+    }
+
+    /// What a decoration says about itself. The sharpest check: the full
+    /// writer with its defaults reproduces, member for member, what the narrow
+    /// `format_extended_tooltip` writes -- and that shape was read off the
+    /// bodies independently.
+    #[test]
+    fn writes_what_a_decoration_says_about_itself() {
+        assert_eq!(
+            format_decoration_item(&NativeDecorationItem {
+                id: "22",
+                name: "ПериодЗакупокРасширеннаяПодсказка",
+                ..NativeDecorationItem::default()
+            })
+            .as_deref(),
+            Some(format_extended_tooltip("22", "ПериодЗакупокРасширеннаяПодсказка").as_str())
+        );
+
+        // The functional-options block goes inline after the flag, and the
+        // two stretches read 2 when the decoration names neither value.
+        let restricted = format_decoration_item(&NativeDecorationItem {
+            id: "22",
+            functional_options: Some("{0,{0,{\"B\",1},0}}"),
+            name: "Подсказка",
+            horizontal_stretch: Some(false),
+            width: Some("40"),
+            auto_max_width: false,
+            max_width: Some("60"),
+            ..NativeDecorationItem::default()
+        })
+        .expect("a decoration record");
+        assert!(restricted.starts_with(
+            "{12,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,1,{0,{0,{\"B\",1},0}},0,\"Подсказка\",{1,0},{1,0},1,40,0,0,2,"
+        ));
+        assert!(restricted.ends_with(",0,0,60,0,1,0,3,3,0,0}"));
+
+        // A picture decoration is the same record with kind 1.
+        let picture = format_decoration_item(&NativeDecorationItem {
+            kind: 1,
+            ..NativeDecorationItem::default()
+        })
+        .expect("a decoration record");
+        assert!(picture.contains(",0,0,1,\"\","));
+
+        // A spelling the corpus never showed is refused.
+        assert_eq!(
+            format_decoration_item(&NativeDecorationItem {
+                group_vertical_align: Some("Stretch"),
+                ..NativeDecorationItem::default()
+            }),
+            None
+        );
     }
 
     /// What a button says about itself, read off the 77 127 `{31,…}` records
