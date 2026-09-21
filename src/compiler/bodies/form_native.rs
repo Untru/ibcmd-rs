@@ -875,6 +875,67 @@ pub(crate) struct NativeInputPayload<'a> {
     pub(crate) horizontal_stretch: Option<bool>,
     /// Slot 5, the same three ways for `VerticalStretch`.
     pub(crate) vertical_stretch: Option<bool>,
+    /// Slot 6, `<Wrap>`, on unless the item turns it off.
+    pub(crate) wrap: bool,
+    /// Slots 7 to 15, each a tri-state read the same way as the stretches:
+    /// `<PasswordMode>`, `<MultiLine>`, `<ExtendedEdit>`, `<MarkNegatives>`,
+    /// `<ChoiceListButton>`, `<ChoiceButton>`, `<ClearButton>`,
+    /// `<SpinButton>` and `<OpenButton>`.
+    pub(crate) password_mode: Option<bool>,
+    pub(crate) multi_line: Option<bool>,
+    pub(crate) extended_edit: Option<bool>,
+    pub(crate) mark_negatives: Option<bool>,
+    pub(crate) choice_list_button: Option<bool>,
+    pub(crate) choice_button: Option<bool>,
+    pub(crate) clear_button: Option<bool>,
+    pub(crate) spin_button: Option<bool>,
+    pub(crate) open_button: Option<bool>,
+    /// Slots 16 and 17, `<MinValue>` and `<MaxValue>` as typed values,
+    /// `{"U"}` when the item names neither.
+    pub(crate) min_value: &'a str,
+    pub(crate) max_value: &'a str,
+    /// Slot 19, `<ListChoiceMode>`.
+    pub(crate) list_choice_mode: bool,
+    /// Slot 20, the item's picture.
+    pub(crate) picture: &'a str,
+    /// Slots 21 and 22, `<ChoiceListHeight>` and `<DropListWidth>`.
+    pub(crate) choice_list_height: &'a str,
+    pub(crate) drop_list_width: &'a str,
+    /// Slot 23, `<QuickChoice>`.
+    pub(crate) quick_choice: Option<bool>,
+    /// Slot 24, `<ChoiceFoldersAndItems>`: `Items` 0, `Folders` 1,
+    /// `FoldersAndItems` 2, and 3 when the item names none.
+    pub(crate) choice_folders_and_items: Option<&'a str>,
+    /// Slot 25, the uuid of the `<ChoiceForm>`, which only the configuration
+    /// can give.
+    pub(crate) choice_form: &'a str,
+    /// Slot 28, `<AutoChoiceIncomplete>`.
+    pub(crate) auto_choice_incomplete: Option<bool>,
+    /// Slot 31, `<AutoMarkIncomplete>`.
+    pub(crate) auto_mark_incomplete: Option<bool>,
+    /// Slot 32, `<ChooseType>`, on unless the item turns it off.
+    pub(crate) choose_type: bool,
+    /// Slot 33, `<IncompleteChoiceMode>`: `OnActivate` 1.
+    pub(crate) incomplete_choice_mode: Option<&'a str>,
+    /// Slot 41, `<TextEdit>`, on unless the item turns it off.
+    pub(crate) text_edit: bool,
+    /// Slot 43, `<EditTextUpdate>`: `DontUse` 1, `OnValueChange` 2,
+    /// `Always` 3.
+    pub(crate) edit_text_update: Option<&'a str>,
+    /// Slot 45, `<CreateButton>`.
+    pub(crate) create_button: Option<bool>,
+    /// Slot 46, `<ChoiceButtonRepresentation>`: `ShowInDropList` 1,
+    /// `ShowInDropListAndInInputField` 2, `ShowInInputField` 3.
+    pub(crate) choice_button_representation: Option<&'a str>,
+    /// Slot 47, `<DropListButton>`.
+    pub(crate) drop_list_button: Option<bool>,
+    /// Slot 48, `<ChoiceHistoryOnInput>`: `DontUse` 1.
+    pub(crate) choice_history_on_input: Option<&'a str>,
+    /// Slots 52, 53 and 54: `<AutoMaxHeight>`, `<MaxHeight>` and
+    /// `<HeightControlVariant>`.
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
+    pub(crate) height_control_variant: Option<&'a str>,
     /// Slot 18, the input mask, `""` when the item names none.
     pub(crate) mask: &'a str,
     /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
@@ -905,6 +966,38 @@ impl NativeInputPayload<'_> {
             height: "0",
             horizontal_stretch: None,
             vertical_stretch: None,
+            wrap: true,
+            password_mode: None,
+            multi_line: None,
+            extended_edit: None,
+            mark_negatives: None,
+            choice_list_button: None,
+            choice_button: None,
+            clear_button: None,
+            spin_button: None,
+            open_button: None,
+            min_value: "{\"U\"}",
+            max_value: "{\"U\"}",
+            list_choice_mode: false,
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            choice_list_height: "0",
+            drop_list_width: "0",
+            quick_choice: None,
+            choice_folders_and_items: None,
+            choice_form: "00000000-0000-0000-0000-000000000000",
+            auto_choice_incomplete: None,
+            auto_mark_incomplete: None,
+            choose_type: true,
+            incomplete_choice_mode: None,
+            text_edit: true,
+            edit_text_update: None,
+            create_button: None,
+            choice_button_representation: None,
+            drop_list_button: None,
+            choice_history_on_input: None,
+            auto_max_height: true,
+            max_height: "0",
+            height_control_variant: None,
             mask: "",
             auto_max_width: true,
             max_width: "0",
@@ -919,29 +1012,98 @@ impl NativeInputPayload<'_> {
     }
 }
 
-pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> String {
-    let stretch = |value: Option<bool>| match value {
+pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<String> {
+    let tristate = |value: Option<bool>| match value {
         Some(true) => "1",
         Some(false) => "0",
         None => "2",
     };
-    format!(
-        "{{36,{{3,0}},{width},{height},{horizontal},{vertical},1,2,2,2,2,2,2,2,2,2,{{\"U\"}},{{\"U\"}},{mask},0,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},0,0,2,3,00000000-0000-0000-0000-000000000000,{{5006,0}},{{0,0}},2,{format},{edit_format},2,1,0,{{\"Pattern\"}},1,{events},{text_color},{back_color},{border_color},{font},1,{{3,0,0}},0,{{1,0}},2,0,2,0,{auto_max_width},{max_width},0,1,0,0,0,0,0,0,0,0,0,{{0}},0,{{5007,0}},0}}",
+    let folders = root_code(
+        payload.choice_folders_and_items,
+        &[("Items", "0"), ("Folders", "1"), ("FoldersAndItems", "2")],
+        "3",
+    )?;
+    let incomplete = root_code(
+        payload.incomplete_choice_mode,
+        &[("OnActivate", "1")],
+        "0",
+    )?;
+    let edit_text_update = root_code(
+        payload.edit_text_update,
+        &[("DontUse", "1"), ("OnValueChange", "2"), ("Always", "3")],
+        "0",
+    )?;
+    let choice_representation = root_code(
+        payload.choice_button_representation,
+        &[
+            ("ShowInDropList", "1"),
+            ("ShowInDropListAndInInputField", "2"),
+            ("ShowInInputField", "3"),
+        ],
+        "0",
+    )?;
+    let history = root_code(payload.choice_history_on_input, &[("DontUse", "1")], "0")?;
+    let height_variant = root_code(
+        payload.height_control_variant,
+        &[
+            ("UseHeightInFormRows", "1"),
+            ("UseContentHeight", "2"),
+            ("UseHeightInTableRows", "3"),
+        ],
+        "0",
+    )?;
+    Some(format!(
+        "{{36,{{3,0}},{width},{height},{horizontal},{vertical},{wrap},{password},{multi_line},\
+         {extended_edit},{mark_negatives},{choice_list_button},{choice_button},{clear_button},\
+         {spin_button},{open_button},{min_value},{max_value},{mask},{list_choice_mode},\
+         {picture},{choice_list_height},{drop_list_width},{quick_choice},{folders},\
+         {choice_form},{{5006,0}},{{0,0}},{auto_choice_incomplete},{format},{edit_format},\
+         {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},1,{events},\
+         {text_color},{back_color},{border_color},{font},{text_edit},{{3,0,0}},\
+         {edit_text_update},{{1,0}},{create_button},{choice_representation},\
+         {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
+         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{{5007,0}},0}}",
         width = payload.width,
         height = payload.height,
-        horizontal = stretch(payload.horizontal_stretch),
-        vertical = stretch(payload.vertical_stretch),
+        horizontal = tristate(payload.horizontal_stretch),
+        vertical = tristate(payload.vertical_stretch),
+        wrap = u8::from(payload.wrap),
+        password = tristate(payload.password_mode),
+        multi_line = tristate(payload.multi_line),
+        extended_edit = tristate(payload.extended_edit),
+        mark_negatives = tristate(payload.mark_negatives),
+        choice_list_button = tristate(payload.choice_list_button),
+        choice_button = tristate(payload.choice_button),
+        clear_button = tristate(payload.clear_button),
+        spin_button = tristate(payload.spin_button),
+        open_button = tristate(payload.open_button),
+        min_value = payload.min_value,
+        max_value = payload.max_value,
         mask = quoted(payload.mask),
+        list_choice_mode = u8::from(payload.list_choice_mode),
+        picture = payload.picture,
+        choice_list_height = payload.choice_list_height,
+        drop_list_width = payload.drop_list_width,
+        quick_choice = tristate(payload.quick_choice),
+        choice_form = payload.choice_form,
+        auto_choice_incomplete = tristate(payload.auto_choice_incomplete),
         format = payload.format,
         edit_format = payload.edit_format,
+        auto_mark_incomplete = tristate(payload.auto_mark_incomplete),
+        choose_type = u8::from(payload.choose_type),
         events = payload.events,
         text_color = payload.text_color,
         back_color = payload.back_color,
         border_color = payload.border_color,
         font = payload.font,
+        text_edit = u8::from(payload.text_edit),
+        create_button = tristate(payload.create_button),
+        drop_list_button = tristate(payload.drop_list_button),
         auto_max_width = u8::from(payload.auto_max_width),
         max_width = payload.max_width,
-    )
+        auto_max_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
+    ))
 }
 
 /// How a `<CheckBoxField>` draws itself.
@@ -4200,6 +4362,51 @@ mod tests {
         assert!(root.ends_with(",0,0,0,{50,0},1}"));
     }
 
+    /// The slots of the input payload the partition test named over all
+    /// 69 243 of them -- twenty-four of what the writer used to hold constant.
+    #[test]
+    fn writes_the_input_slots_the_partition_test_named() {
+        let spoken = format_input_payload(&NativeInputPayload {
+            wrap: false,
+            password_mode: Some(true),
+            multi_line: Some(true),
+            clear_button: Some(true),
+            open_button: Some(false),
+            list_choice_mode: true,
+            quick_choice: Some(false),
+            choice_folders_and_items: Some("Items"),
+            choose_type: false,
+            incomplete_choice_mode: Some("OnActivate"),
+            text_edit: false,
+            edit_text_update: Some("Always"),
+            choice_button_representation: Some("ShowInInputField"),
+            drop_list_button: Some(true),
+            choice_history_on_input: Some("DontUse"),
+            auto_max_height: false,
+            max_height: "4",
+            height_control_variant: Some("UseContentHeight"),
+            ..NativeInputPayload::plain()
+        })
+        .expect("an input payload");
+        // Wrap, the password and multi-line tri-states, then the buttons.
+        assert!(spoken.starts_with("{36,{3,0},0,0,2,2,0,1,1,2,2,2,2,1,2,0,"));
+        // The choice mode, the folders-and-items code and the two that follow
+        // the formats.
+        assert!(spoken.contains(",1,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,0,0,"));
+        assert!(spoken.contains(",{1,0},{1,0},2,0,1,{\"Pattern\"},1,"));
+        // The text edit flag, the update mode, and the tail's height trio.
+        assert!(spoken.contains(",0,{3,0,0},3,{1,0},2,3,1,1,1,0,0,0,4,2,"));
+
+        // A spelling the corpus never showed is refused.
+        assert_eq!(
+            format_input_payload(&NativeInputPayload {
+                edit_text_update: Some("Sometimes"),
+                ..NativeInputPayload::plain()
+            }),
+            None
+        );
+    }
+
     /// The four slots of the label payload the partition test named, which
     /// were constants or a guess before: <VerticalStretch>, <MarkNegatives>,
     /// <Hiperlink> and the height's pair of auto-max slots.
@@ -4267,24 +4474,27 @@ mod tests {
     #[test]
     fn writes_the_input_payloads_the_platform_stores() {
         assert_eq!(
-            format_input_payload(&NativeInputPayload::plain()),
-            "{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{\"U\"},{\"U\"},\"\",0,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{\"Pattern\"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0}"
+            format_input_payload(&NativeInputPayload::plain()).as_deref(),
+            Some("{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{\"U\"},{\"U\"},\"\",0,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{\"Pattern\"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0}")
         );
         assert!(format_input_payload(&NativeInputPayload {
             width: "25",
             ..NativeInputPayload::plain()
         })
+        .expect("an input payload")
         .starts_with("{36,{3,0},25,0,2,2,"));
         assert!(format_input_payload(&NativeInputPayload {
             auto_max_width: false,
             max_width: "28",
             ..NativeInputPayload::plain()
         })
+        .expect("an input payload")
         .contains(",2,0,2,0,0,28,0,1,0,"));
         assert!(format_input_payload(&NativeInputPayload {
             mask: "999-999-999 99",
             ..NativeInputPayload::plain()
         })
+        .expect("an input payload")
         .contains(",{\"U\"},\"999-999-999 99\",0,"));
     }
 
