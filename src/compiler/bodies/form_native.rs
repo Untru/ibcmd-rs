@@ -98,6 +98,42 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> String {
     )
 }
 
+/// The `{31,…}` record of a `<Button>` whose action is a form standard
+/// command and which carries nothing but its name and its tooltip.
+///
+/// One shape across every such button of the bodies read for this module: only
+/// the id, the name, the command uuid and the tooltip differ.
+pub(crate) fn format_standard_command_button(
+    id: &str,
+    name: &str,
+    command_uuid: &str,
+    extended_tooltip_id: &str,
+    extended_tooltip_name: &str,
+) -> String {
+    format!(
+        "{{31,{{{id},{ns}}},0,1,{{0,{{0,{{\"B\",1}},0}}}},0,{name},{{1,0}},1,{{1,{command_uuid}}},\
+         {{0}},3,0,0,0,2,2,0,0,0,{{3,4,{{0}}}},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},\
+         {{0,0,0}},0,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},1,{{\"Pattern\"}},\"\",2,0,1,{tooltip},\
+         {{\"U\"}},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}}",
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(name),
+        tooltip = format_extended_tooltip(extended_tooltip_id, extended_tooltip_name),
+    )
+}
+
+/// The `{22,…}` record of an empty `<AutoCommandBar>`.
+///
+/// The one slot that separates it from a context menu is the marker `9`, and
+/// the tail carries `{0,0,1}` where a context menu carries `{1,1}`.
+pub(crate) fn format_empty_auto_command_bar(id: &str, name: &str) -> String {
+    format!(
+        "{{22,{{{id},{ns}}},0,0,0,9,{name},{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},\
+         {{7,3,0,1,100}},{{0,0,0}},1,{{0,0,1}},0,1,0,0,0,3,3,0}}",
+        ns = FORM_ITEM_NAMESPACE_UUID,
+        name = quoted(name),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,6 +186,37 @@ mod tests {
         assert_eq!(
             format_field_context_menu("18", "ЛотКонтекстноеМеню"),
             "{22,{18,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,\"ЛотКонтекстноеМеню\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0}"
+        );
+    }
+
+    /// The two search buttons of
+    /// `Documents/Лот/Forms/ВыигранныеЛоты`'s list command bar, and the bar
+    /// itself, exactly as that body stores them.
+    #[test]
+    fn writes_the_command_bar_records_the_platform_stores() {
+        assert_eq!(
+            format_standard_command_button(
+                "26",
+                "ФормаНайти",
+                "c0519548-2a9a-44de-a25e-faf01e089d4d",
+                "27",
+                "ФормаНайтиРасширеннаяПодсказка",
+            ),
+            "{31,{26,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{\"B\",1},0}},0,\"ФормаНайти\",{1,0},1,{1,c0519548-2a9a-44de-a25e-faf01e089d4d},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},\"\",-1,-1,1,0,\"\"},1,{\"Pattern\"},\"\",2,0,1,{12,{27,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ФормаНайтиРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{\"U\"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}"
+        );
+        assert_eq!(
+            format_standard_command_button(
+                "28",
+                "ФормаОтменитьПоиск",
+                "44ad3ec9-f3c2-4913-9224-5f9fb6418743",
+                "29",
+                "ФормаОтменитьПоискРасширеннаяПодсказка",
+            ),
+            "{31,{28,02023637-7868-4a5f-8576-835a76e0c9ba},0,1,{0,{0,{\"B\",1},0}},0,\"ФормаОтменитьПоиск\",{1,0},1,{1,44ad3ec9-f3c2-4913-9224-5f9fb6418743},{0},3,0,0,0,2,2,0,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,0,0},0,{4,0,{0},\"\",-1,-1,1,0,\"\"},1,{\"Pattern\"},\"\",2,0,1,{12,{29,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ФормаОтменитьПоискРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0},{\"U\"},1,0,0,1,0,0,0,3,3,3,0,0,0,0,0,0,1,0}"
+        );
+        assert_eq!(
+            format_empty_auto_command_bar("3", "СписокКоманднаяПанель"),
+            "{22,{3,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,9,\"СписокКоманднаяПанель\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{0,0,1},0,1,0,0,0,3,3,0}"
         );
     }
 
