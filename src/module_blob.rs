@@ -7062,6 +7062,8 @@ fn native_root_property_bag(
                 ),
             ));
             bag.push(("24", "{\"B\",0}".to_string()));
+            bag.push(("25", "{\"U\"}".to_string()));
+            bag.push(("26", "{\"B\",1}".to_string()));
         }
         "cfg:CatalogObject" | "cfg:ChartOfCharacteristicTypesObject" => {
             if let Some(folders) = properties.use_for_folders_and_items {
@@ -7080,6 +7082,8 @@ fn native_root_property_bag(
                 ));
             }
             bag.push(("24", "{\"B\",0}".to_string()));
+            bag.push(("25", "{\"U\"}".to_string()));
+            bag.push(("26", "{\"B\",1}".to_string()));
         }
         "cfg:TaskObject"
         | "cfg:ExchangePlanObject"
@@ -14669,11 +14673,17 @@ fn path_ends_with_for_child_use_alternation_row_color(
     item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UseAlternationRowColor"])
 }
 
+/// `<DefaultItem>` of the child item currently open.
+///
+/// The guard used to accept it only on a `<Table>`, so a button's went to the
+/// generic bag and the record was written with 0: 47 forms of BSP alone say
+/// `<DefaultItem>true</DefaultItem>` on a button. It means the same thing
+/// wherever it is spelled.
 fn path_ends_with_for_child_default_item(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
+    path_ends_with(path, &[item.tag.as_str(), "DefaultItem"])
 }
 
 fn path_ends_with_for_child_initial_tree_view(path: &[String], items: &[FormXmlChildItem]) -> bool {
