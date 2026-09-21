@@ -6019,6 +6019,74 @@ fn does_not_treat_orphan_picture_suffix_as_configuration_splash() {
     assert!(!paths.contains_key(&format!("{uuid}.2")));
 }
 
+/// ERP УХ: three storage rows claim `Ext/ParentConfigurations.bin` -- the
+/// configuration root's plain `.4` row and one alias per superseded online
+/// update generation, because an alias keeps the root's own uuid. Only the
+/// plain row is the current configuration: verified 2026-09-21 by inflating
+/// all three (plain -> 16 bytes `{6,0,0,0,1,0}`, each alias -> 4 013 769
+/// bytes carrying an unrelated `2.0.9.x` support chain) and by re-running
+/// native `ibcmd`, which writes the plain row's 16 bytes byte-for-byte.
+///
+/// Two things must hold together, which is why one test pins both: the
+/// aliases are dropped, *and* dropping them leaves a single claimant so the
+/// collision rule does not withhold the file. Publishing an alias, or
+/// refusing the path, both regress a file this export currently gets right.
+#[test]
+fn publishes_the_plain_row_when_superseded_generations_claim_its_path() {
+    const ROOT: &str = "74cb37ec-41ca-4785-9d1e-9e13f1f4d2db";
+    const OLD: &str = "15bcc426-54ca-410a-9543-768987b832ac";
+    const NEW: &str = "17894f1a-0404-4132-9792-15816a396671";
+
+    let rows = [
+        format!("{ROOT}.4"),
+        format!("{ROOT}_dynupdate_{OLD}.4"),
+        format!("{ROOT}_dynupdate_{NEW}.4"),
+    ]
+    .into_iter()
+    .map(|file_name| ConfigRow {
+        file_name,
+        part_no: 0,
+        data_size: 1,
+        binary_hex: String::new(),
+    })
+    .collect::<Vec<_>>();
+
+    let paths = source_asset_paths_with_indexes(
+        &rows,
+        &[],
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    );
+
+    assert_eq!(
+        paths
+            .get(&format!("{ROOT}.4"))
+            .map(|asset| asset.primary_path.to_string_lossy().replace('\\', "/"))
+            .as_deref(),
+        Some("Ext/ParentConfigurations.bin"),
+        "the plain row is the active configuration and must be published"
+    );
+    assert!(
+        !paths.contains_key(&format!("{ROOT}_dynupdate_{OLD}.4")),
+        "a superseded generation's alias is a previous configuration, not a claimant"
+    );
+    assert!(
+        !paths.contains_key(&format!("{ROOT}_dynupdate_{NEW}.4")),
+        "a superseded generation's alias is a previous configuration, not a claimant"
+    );
+
+    assert!(
+        colliding_source_asset_paths(&paths, &BTreeMap::new()).is_empty(),
+        "one claimant remains, so the collision rule must not withhold the file"
+    );
+}
+
 #[test]
 fn extracts_home_page_work_area_with_form_references() {
     let form_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";

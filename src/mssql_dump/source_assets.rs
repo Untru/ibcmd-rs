@@ -880,7 +880,44 @@ pub(super) const fn is_collectible_source_refusal(class: MetadataSourceFailureCl
 /// `Ext/ParentConfigurations.bin` is named by the configuration root's own
 /// uuid, which both superseded generations also carry, so all three rows
 /// claimed the one path and the collision rule withheld the active row along
-/// with the two stale ones -- the file the native export does write.
+/// with the two stale ones -- the one file the 2026-09-19 native tree has and
+/// that export did not.
+///
+/// Re-verified 2026-09-21 against that same database, because the 14 643 450
+/// byte `Ext/ParentConfigurations.bin` in the 2026-09-19 native tree reads
+/// like a body only an aliased row could hold, which would make this filter
+/// the defect. It is not, on every axis checked:
+///
+/// * Inflating all three claimants (raw deflate) gives 16 bytes
+///   `{6,0,0,0,1,0}` -- zero parent configurations -- for the plain row, and
+///   4 013 769 bytes for each alias. The aliases carry a *different* support
+///   chain, versions `2.0.9.27` and `2.0.9.28`, where the native file carries
+///   one entry at `3.3.3.3`; neither alias's bytes occur anywhere inside it.
+///   Publishing an alias here would not reproduce that file even once.
+/// * No table in the database (`Config`, `ConfigSave`, `Params`, `Files`,
+///   `DepotFiles`, `ConfigCAS`, `ConfigCASSave`) holds a `DynamicallyUpdated`
+///   row, so no generation is active and `dynamic_generation`'s overlay is
+///   correctly inert. The 156 aliases were all written 2023-09-07.
+/// * The 14 MB body is simply gone. The native tree was captured 2026-09-19
+///   22:42; at 23:24 that day an `ibcmd-rs` load-parity run rewrote the plain
+///   `.4` row to the stub together with `root`, `version`, `versions` and two
+///   objects, leaving its marker in a synonym -- "(ibcmd-rs load parity
+///   2026-09-19 x1)". The configuration came off support *after* the
+///   baseline was taken.
+/// * Native `ibcmd` 8.3.27.2214 re-run against the live database on
+///   2026-09-21 writes those same 16 bytes, byte-identical to this export
+///   (sha256 `144e8c19…`). The baseline entry is stale, not a parity gap.
+/// * Diffed whole-tree, that re-run settles it: this export against the
+///   2026-09-21 native tree is 140 709 unchanged and 0 different, while the
+///   *native* re-run against its own 2026-09-19 tree reproduces the very same
+///   140 704 / 5 split -- the same five paths, the same hashes. All five are
+///   the 23:24 rows: the two objects, this `.4` row, and the three
+///   `configVersion` entries they move in `ConfigDumpInfo.xml`.
+///
+/// So this filter stays: it is what leaves the plain row the sole claimant on
+/// `Ext/ParentConfigurations.bin` instead of colliding it into a refusal.
+/// `publishes_the_plain_row_when_superseded_generations_claim_its_path` pins
+/// that.
 fn is_superseded_generation_owner(owner: &str) -> bool {
     let Some((base, generation)) = owner.split_once("_dynupdate_") else {
         return false;
