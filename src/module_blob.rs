@@ -129,6 +129,9 @@ struct FormXmlBodyProperties {
     auto_fill_check: Option<bool>,
     command_set_excluded_commands: Vec<FormXmlExcludedCommand>,
     use_for_folders_and_items: Option<FormXmlUseForFoldersAndItems>,
+    /// `<GroupList>`, which key 1 of the root property bag carries as the id
+    /// of the item it names.
+    group_list: Option<String>,
     customizable: Option<bool>,
     vertical_align: Option<FormRootVerticalAlign>,
     command_bar_location: Option<FormXmlCommandBarLocation>,
@@ -6228,6 +6231,7 @@ fn format_native_child_item(
             command: &command,
             representation: item.button_representation.map(native_button_representation),
             default_button: item.default_button.unwrap_or(false),
+            default_item: item.default_item.unwrap_or(false),
             width: item.width.as_deref(),
             height: item.height.as_deref(),
             visible: item.visible.unwrap_or(true),
@@ -6252,10 +6256,12 @@ fn format_native_child_item(
         };
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a decoration with no extended tooltip is not measured"))?;
+        let text_color = native_scalar_color(item, "TextColor", source)?;
         let record = native::format_decoration_item(&native::NativeDecorationItem {
             id: &item.id,
             kind: u8::from(item.tag == "PictureDecoration"),
             name: &item.name,
+            text_color: &text_color,
             title: &title,
             tooltip_title: &tooltip_title,
             width: item.width.as_deref(),
@@ -6522,6 +6528,133 @@ fn format_native_table(
         &column_records,
         &tail,
     ))
+}
+
+/// The keyed property bag of the form's `{50,…}` root record.
+///
+/// Which keys a form carries is decided by the class of its main attribute,
+/// the same rule the `{55,…}` table bag follows. Measured over all 12 507
+/// root records of ERP УХ: 6 966 carry an empty bag, 5 541 carry something,
+/// and the twenty-four keys below rebuild from the source with **no misses**
+/// over every record that carries them.
+///
+/// A report form is refused. Its bag holds eleven more keys -- the
+/// configuration's four default report forms, the default variant name, a
+/// whole composition-settings value and the name of the report the form was
+/// developed from -- and nothing in `Form.xml` decides any of them. The name
+/// alone disagrees with the main attribute in 26 of 207 forms, so it cannot
+/// be derived.
+///
+/// Keys 25 and 26 are constants that only 829 of 2 207 object forms carry,
+/// and no property says which. They are omitted, which is what the majority
+/// of the corpus does and what the export reads back either way.
+fn native_root_property_bag(
+    properties: &FormXmlBodyProperties,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+) -> Result<Vec<(&'static str, String)>> {
+    // The id of the item a property names, 0 when it names none -- the same
+    // shape the table bag's `<UserSettingsGroup>` carries.
+    let item_id = |name: Option<&str>| -> Result<String> {
+        let Some(name) = name else {
+            return Ok("0".to_string());
+        };
+        if let Some(target) = items.get(name) {
+            return Ok(target.id.clone());
+        }
+        match name.split_once(':') {
+            Some((id, _)) if id.chars().all(|c| c.is_ascii_digit()) => Ok(id.to_string()),
+            _ => Err(anyhow!(
+                "the form settles into {name}, which it does not declare"
+            )),
+        }
+    };
+    let mut bag: Vec<(&'static str, String)> = Vec::new();
+    match main_attribute_class {
+        "cfg:DynamicList" => {
+            bag.push((
+                "1",
+                format!(
+                    "{{\"N\",{}}}",
+                    item_id(properties.group_list.as_deref())?
+                ),
+            ));
+        }
+        "cfg:DocumentObject" => {
+            let auto_time = match properties.auto_time {
+                Some(FormXmlAutoTime::DontUse) => "0",
+                Some(FormXmlAutoTime::CurrentOrLast) | None => "3",
+            };
+            let posting = match properties.use_posting_mode {
+                Some(FormXmlUsePostingMode::Regular) => "0",
+                Some(FormXmlUsePostingMode::Auto) | None => "3",
+            };
+            bag.push((
+                "2",
+                format!("{{\"#\",adeb08a0-415c-11d6-b9d1-0050bae0a95d,{auto_time}}}"),
+            ));
+            bag.push((
+                "3",
+                format!("{{\"#\",20d89b09-bd04-4304-a8c7-4d07fac6338a,{posting}}}"),
+            ));
+            bag.push((
+                "4",
+                format!(
+                    "{{\"B\",{}}}",
+                    u8::from(properties.repost_on_write.unwrap_or(true))
+                ),
+            ));
+            bag.push(("24", "{\"B\",0}".to_string()));
+        }
+        "cfg:CatalogObject" | "cfg:ChartOfCharacteristicTypesObject" => {
+            if let Some(folders) = properties.use_for_folders_and_items {
+                let code = match folders {
+                    FormXmlUseForFoldersAndItems::Items => "0",
+                    FormXmlUseForFoldersAndItems::Folders => "1",
+                    FormXmlUseForFoldersAndItems::FoldersAndItems => {
+                        return Err(anyhow!(
+                            "<UseForFoldersAndItems>FoldersAndItems</UseForFoldersAndItems> is not measured"
+                        ));
+                    }
+                };
+                bag.push((
+                    "0",
+                    format!("{{\"#\",59ef2b80-c86b-11d5-a3c1-0050bae0a776,{code}}}"),
+                ));
+            }
+            bag.push(("24", "{\"B\",0}".to_string()));
+        }
+        "cfg:TaskObject"
+        | "cfg:ExchangePlanObject"
+        | "cfg:BusinessProcessObject"
+        | "cfg:ChartOfAccountsObject"
+        | "cfg:ChartOfCalculationTypesObject" => {
+            bag.push(("24", "{\"B\",0}".to_string()));
+        }
+        "cfg:ReportObject" => {
+            return Err(anyhow!(
+                "a report form's property bag names what the source does not carry"
+            ));
+        }
+        "dcsset:SettingsComposer" => {
+            return Err(anyhow!("a settings-composer form's property bag is not measured"));
+        }
+        ""
+        | "cfg:DataProcessorObject"
+        | "cfg:InformationRegisterRecordManager"
+        | "cfg:InformationRegisterRecordSet"
+        | "cfg:AccountingRegisterRecordSet"
+        | "cfg:AccumulationRegisterRecordSet"
+        | "cfg:CalculationRegisterRecordSet"
+        | "cfg:ConstantsSet"
+        | "xs:string" => {}
+        other => {
+            return Err(anyhow!(
+                "a form whose main attribute is {other} has no measured property bag"
+            ));
+        }
+    }
+    Ok(bag)
 }
 
 /// The keyed property bag of a `{55,…}` table record.
@@ -7093,33 +7226,13 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
     if properties.attributes_conditional_appearance.is_some() {
         blockers.push("a conditional appearance".to_string());
     }
-    // Everything below puts an entry in the root's keyed property bag, and
-    // what each key holds is not read yet.
-    for (present, name) in [
-        (properties.auto_time.is_some(), "AutoTime"),
-        (properties.use_posting_mode.is_some(), "UsePostingMode"),
-        (properties.repost_on_write.is_some(), "RepostOnWrite"),
-        (
-            properties.use_for_folders_and_items.is_some(),
-            "UseForFoldersAndItems",
-        ),
-        (properties.report_result.is_some(), "ReportResult"),
-        (properties.details_data.is_some(), "DetailsData"),
-        (properties.report_form_type.is_some(), "ReportFormType"),
-        (properties.auto_show_state.is_some(), "AutoShowState"),
-        (
-            properties.report_result_view_mode.is_some(),
-            "ReportResultViewMode",
-        ),
-        (
-            properties.view_mode_application_on_set_report_result.is_some(),
-            "ViewModeApplicationOnSetReportResult",
-        ),
-    ] {
-        if present {
-            blockers.push(format!("<{name}> needs the root property bag"));
-        }
-    }
+    // `<AutoTime>`, `<UsePostingMode>`, `<RepostOnWrite>` and
+    // `<UseForFoldersAndItems>` used to stop a form here because the root's
+    // keyed property bag was unread. It is read now -- see
+    // `native_root_property_bag` -- and the four keys that carry them rebuild
+    // from the source over every record that holds one. What is left of the
+    // bag belongs to report forms, which that writer refuses on its own,
+    // because eleven of their keys are not in the source at all.
     blockers
 }
 
@@ -7309,9 +7422,13 @@ fn format_native_form_body(
         .map(|(uuid, record)| (*uuid, record.clone()))
         .collect::<Vec<_>>();
 
+    let root_bag = native_root_property_bag(properties, &items, &main_attribute_class)?;
     let root = crate::compiler::bodies::form_native::format_root_layout(&crate::compiler::bodies::form_native::NativeRootLayout {
         head: &root_head,
-        properties: &[],
+        properties: &root_bag
+            .iter()
+            .map(|(key, value)| (*key, value.clone()))
+            .collect::<Vec<_>>(),
         events: &events,
         command_set: &command_set,
         command_bar: &command_bar,
@@ -8077,6 +8194,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut text_value = String::new();
+    // The text of a scalar child of a child item, kept apart from
+    // `text_value` so the arms that expect a named element are untouched.
+    let mut child_text = String::new();
     let mut properties = FormXmlBodyProperties::default();
     properties.attributes_conditional_appearance = attributes_conditional_appearance;
     let mut current_event_name = None::<String>;
@@ -8235,6 +8355,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 ) {
                     text_value.clear();
                 }
+                child_text.clear();
                 if local == "Event"
                     && path_ends_with(&path, &["Form", "Events"])
                     && let Some(name) = xml_attribute_value(&event, "name")?
@@ -8571,6 +8692,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(border) = item.control_border.as_mut()
                 {
                     border.valid = false;
+                }
+                // A scalar child of a child item -- `<LabelDecoration><TextColor>`
+                // and its like. The record writers read these from the item's
+                // own bag, so the text is collected for every one of them
+                // rather than for a list named here. Without this the bag is
+                // empty for all but a handful of items and a writer that reads
+                // from it falls back to a default without saying so: the label
+                // decorations of 2 897 forms carried a `<TextColor>` that never
+                // reached the body.
+                if path.len() >= 2
+                    && current_child_items
+                        .last()
+                        .is_some_and(|item| path[path.len() - 2] == item.tag)
+                {
+                    child_text.push_str(text.xml_content()?.as_ref());
                 }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
@@ -9587,6 +9723,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     {
                         properties.use_for_folders_and_items =
                             Some(parse_form_use_for_folders_and_items_xml(text_value.trim())?);
+                    }
+                    "GroupList" if path_ends_with(&path, &["Form", "GroupList"]) => {
+                        if !text_value.trim().is_empty() {
+                            properties.group_list = Some(text_value.trim().to_string());
+                        }
                     }
                     "Customizable" if path_ends_with(&path, &["Form", "Customizable"]) => {
                         properties.customizable =
@@ -11906,7 +12047,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
-                    name if !text_value.trim().is_empty()
+                    name if !child_text.trim().is_empty()
                         && path_ends_with_for_child_property(
                             &path,
                             &current_child_items,
@@ -11916,7 +12057,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(item) = current_child_items.last_mut() {
                             item.scalars
                                 .entry(name.to_string())
-                                .or_insert_with(|| text_value.trim().to_string());
+                                .or_insert_with(|| child_text.trim().to_string());
                         }
                     }
                     _ => {}

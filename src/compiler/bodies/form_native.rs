@@ -2444,8 +2444,11 @@ pub(crate) struct NativeDecorationItem<'a> {
     /// `<HorizontalStretch>` and `<VerticalStretch>`: 2 when unnamed.
     pub(crate) horizontal_stretch: Option<bool>,
     pub(crate) vertical_stretch: Option<bool>,
-    /// The back colour and the font, already formatted.
-    pub(crate) back_color: &'a str,
+    /// Member 14, `<TextColor>`, and the font, already formatted. The colour
+    /// is the text's, not the background's: over the 8 033 label decorations
+    /// of ERP УХ that carry one, `web:FireBrick` is stored there as
+    /// `{3,2,{44}}` and `style:SpecialTextColor` as `{3,3,{-16}}`.
+    pub(crate) text_color: &'a str,
     pub(crate) font: &'a str,
     /// The `{5,…}` payload that carries the decoration's own properties.
     pub(crate) payload: &'a str,
@@ -2485,7 +2488,7 @@ impl Default for NativeDecorationItem<'_> {
             height: None,
             horizontal_stretch: None,
             vertical_stretch: None,
-            back_color: "{3,4,{0}}",
+            text_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
             payload: concat!(
                 "{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},",
@@ -2549,7 +2552,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
     )?;
     Some(format!(
         "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},{enabled},\
-         {width},{height},{horizontal_stretch},{vertical_stretch},{back_color},{font},\
+         {width},{height},{horizontal_stretch},{vertical_stretch},{text_color},{font},\
          {{0,0,0}},1,{payload},{menu},{visible},{skip_on_input},{content},\
          {tooltip_representation},{tooltip},{auto_max_width},{max_width},0,\
          {auto_max_height},{max_height},{horizontal},{vertical},0,0}}",
@@ -2566,7 +2569,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         height = decoration.height.unwrap_or("0"),
         horizontal_stretch = native_tristate(decoration.horizontal_stretch),
         vertical_stretch = native_tristate(decoration.vertical_stretch),
-        back_color = decoration.back_color,
+        text_color = decoration.text_color,
         font = decoration.font,
         payload = decoration.payload,
         content = decoration.content,
