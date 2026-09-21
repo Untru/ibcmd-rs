@@ -87,6 +87,29 @@ document field appears nine times in 400 forms, which is below the threshold
 the second pass needs to call a mapping proved -- those want a wider join, not
 a different method.
 
+## A wider join reads more of the same payloads
+
+The same run over 3 000 forms -- 27 222 field records instead of 5 037:
+
+| kind | payload members | records | read at 400 forms | read at 3 000 |
+|---|---|---|---|---|
+| `InputField` | 66 | 12 582 | 49 | **57** |
+| `Command` | 66 | 639 | 16 | **37** |
+| `LabelField` | 20 | 8 588 | 15 | 15 |
+| `PictureField` | 24 | 253 | 16 | 13 |
+| `CheckBoxField` | 13 | 2 569 | 5 | 7 |
+| `RadioButtonField` | 12 | 669 | 3 | 6 |
+| `SpreadSheetDocumentField` | 32 | 35 | 0 | 6 |
+| `TextDocumentField` | 16 | 32 | 0 | 5 |
+| `HTMLDocumentField` | 13 | 21 | 0 | 5 |
+| `FormattedDocumentField` | 16 | 15 | 0 | 4 |
+
+So the threshold was the join's width, exactly as the note said. What stays at
+zero are the kinds that are genuinely rare -- a chart field, a calendar field,
+a track bar, a Gantt chart, a PDF document field and a graphical schema field
+appear once or twice in 3 000 forms. Those want the whole corpus and the BSP
+tree beside it.
+
 ## Why this matters for the estimate
 
 Each payload kind has a fixed member count -- 20 for a label, 66 for an input,
