@@ -1070,25 +1070,117 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
     )
 }
 
-/// The `{9,…}` record of a form command.
+/// A form command, as the body stores it.
 ///
-/// The nineteen-member shape, told apart from an attribute by the namespace in
-/// its id tuple. `action` is the tuple that names what the command runs.
-pub(crate) fn format_form_command(
-    id: &str,
-    name: &str,
-    title: &str,
-    tooltip_title: &str,
-    action: &str,
-    picture: &str,
-    handler: &str,
-) -> String {
-    format!(
-        "{{9,{{{id},{ns}}},{name},{title},{tooltip_title},{{0,{{0,{{\"B\",1}},0}}}},{action},\
-         {picture},{handler},3,0,0,{{0,0}},1,0,1,0,0,1}}",
+/// Nineteen members, told apart from an attribute by the namespace in its id
+/// tuple. Measured over the 61 228 command records of ERP УХ: 60 983 rebuild
+/// byte for byte (99.60%), with the action, the picture and the functional
+/// options supplied by the caller because they name configuration objects.
+///
+/// `<CurrentRowUse>` is written in **two** places and they do not agree:
+/// member 13 is 0 only for `Use`, while member 18 is 0 for `Use`, 1 for
+/// `DontUse` and 2 when the command says nothing. Reading either alone leaves
+/// 61 057 records wrong.
+///
+/// The 245 records still unaccounted for name something in member 14 that the
+/// command's own element does not carry -- values from 1 to 325, which look
+/// like a reference into the form. The caller can pass it; the default is the
+/// 0 that 60 983 records write.
+pub(crate) struct NativeFormCommand<'a> {
+    pub(crate) id: &'a str,
+    pub(crate) name: &'a str,
+    /// Already formatted -- `{1,0}` when the command names none.
+    pub(crate) title: &'a str,
+    pub(crate) tooltip: &'a str,
+    /// The `<UseAlways>` block, `{0,{0,{"B",1},0}}` when it restricts nothing.
+    pub(crate) use_always: &'a str,
+    /// The picture's index tuple and the picture itself.
+    pub(crate) picture_index: &'a str,
+    pub(crate) picture: &'a str,
+    /// `<Action>`: the procedure the command runs.
+    pub(crate) action: &'a str,
+    /// `<Representation>`: `Text`, `Picture`, `TextPicture` or `Auto`.
+    pub(crate) representation: Option<&'a str>,
+    pub(crate) modifies_saved_data: bool,
+    /// The functional options, `{0,0}` when there are none.
+    pub(crate) functional_options: &'a str,
+    /// `<CurrentRowUse>`: `Use`, `DontUse` or `Auto`.
+    pub(crate) current_row_use: Option<&'a str>,
+    /// Member 14, which the command's element does not carry.
+    pub(crate) fourteenth: &'a str,
+}
+
+impl Default for NativeFormCommand<'_> {
+    fn default() -> Self {
+        Self {
+            id: "0",
+            name: "",
+            title: "{1,0}",
+            tooltip: "{1,0}",
+            use_always: "{0,{0,{\"B\",1},0}}",
+            picture_index: "{0,0,0}",
+            picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
+            action: "",
+            representation: None,
+            modifies_saved_data: false,
+            functional_options: "{0,0}",
+            current_row_use: None,
+            fourteenth: "0",
+        }
+    }
+}
+
+/// The `{9,…}` record of a form command.
+pub(crate) fn format_form_command(command: &NativeFormCommand<'_>) -> Option<String> {
+    let representation = root_code(
+        command.representation,
+        &[
+            ("Text", "0"),
+            ("Picture", "1"),
+            ("TextPicture", "2"),
+            ("Auto", "3"),
+        ],
+        "3",
+    )?;
+    let row_use_early = match command.current_row_use {
+        Some("Use") => "0",
+        Some("DontUse") | Some("Auto") | None => "1",
+        Some(_) => return None,
+    };
+    let row_use_late = root_code(
+        command.current_row_use,
+        &[("Use", "0"), ("DontUse", "1"), ("Auto", "2")],
+        "2",
+    )?;
+    Some(format!(
+        "{{9,{{{id},{ns}}},{name},{title},{tooltip},{use_always},{picture_index},{picture},\
+         {action},{representation},{modifies},0,{options},{row_use_early},{fourteenth},1,0,0,\
+         {row_use_late}}}",
+        id = command.id,
         ns = FORM_COMMAND_NAMESPACE_UUID,
+        name = quoted(command.name),
+        title = command.title,
+        tooltip = command.tooltip,
+        use_always = command.use_always,
+        picture_index = command.picture_index,
+        picture = command.picture,
+        action = quoted(command.action),
+        modifies = u8::from(command.modifies_saved_data),
+        options = command.functional_options,
+        fourteenth = command.fourteenth,
+    ))
+}
+
+/// The `{0,…}` record of a form parameter.
+///
+/// Four members in all 24 863 parameter records of ERP УХ, and all 24 863
+/// rebuild byte for byte: the name, the type pattern the caller supplies, and
+/// whether `<KeyParameter>` is set.
+pub(crate) fn format_form_parameter(name: &str, type_pattern: &str, key: bool) -> String {
+    format!(
+        "{{0,{name},{type_pattern},{key}}}",
         name = quoted(name),
-        handler = quoted(handler),
+        key = u8::from(key),
     )
 }
 
@@ -2216,16 +2308,48 @@ mod tests {
         assert_eq!(top_level_members(&record).len(), 16 + columns.len());
         assert!(record.ends_with(",{0,0},{0,0}}"));
         assert_eq!(
-            format_form_command(
-                "10",
-                "Команда9",
-                "{1,0}",
-                "{1,0}",
-                "{0,57,0}",
-                "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
-                "Команда9",
-            ),
-            "{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},\"Команда9\",{1,0},{1,0},{0,{0,{\"B\",1},0}},{0,57,0},{4,0,{0},\"\",-1,-1,1,0,\"\"},\"Команда9\",3,0,0,{0,0},1,0,1,0,0,1}"
+            format_form_command(&NativeFormCommand {
+                id: "10",
+                name: "Команда9",
+                picture_index: "{0,57,0}",
+                action: "Команда9",
+                current_row_use: Some("DontUse"),
+                ..NativeFormCommand::default()
+            })
+            .as_deref(),
+            Some("{9,{10,409b9a53-7f7e-4178-86c1-33176c7c7a7a},\"Команда9\",{1,0},{1,0},{0,{0,{\"B\",1},0}},{0,57,0},{4,0,{0},\"\",-1,-1,1,0,\"\"},\"Команда9\",3,0,0,{0,0},1,0,1,0,0,1}")
+        );
+
+        // <CurrentRowUse> is written twice and the two do not agree: Use is 0
+        // in both places, saying nothing is 1 and 2, and DontUse is 1 and 1.
+        let row_use = |value| {
+            let record = format_form_command(&NativeFormCommand {
+                current_row_use: value,
+                ..NativeFormCommand::default()
+            })
+            .expect("a command");
+            let members = top_level_members(&record);
+            (members[13].clone(), members[18].clone())
+        };
+        assert_eq!(row_use(Some("Use")), ("0".to_string(), "0".to_string()));
+        assert_eq!(row_use(Some("DontUse")), ("1".to_string(), "1".to_string()));
+        assert_eq!(row_use(None), ("1".to_string(), "2".to_string()));
+        assert_eq!(
+            format_form_command(&NativeFormCommand {
+                current_row_use: Some("Sometimes"),
+                ..NativeFormCommand::default()
+            }),
+            None
+        );
+
+        // A parameter is four members, and the key flag is the last.
+        assert_eq!(
+            format_form_parameter("Отбор", "{\"Pattern\",{\"B\"}}", false),
+            "{0,\"Отбор\",{\"Pattern\",{\"B\"}},0}"
+        );
+        assert_eq!(
+            format_form_parameter("Ключ", "{\"Pattern\"}", true),
+            "{0,\"Ключ\",{\"Pattern\"},1}"
         );
     }
 
