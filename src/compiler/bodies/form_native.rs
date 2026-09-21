@@ -443,6 +443,119 @@ pub(crate) fn format_form_command(
     )
 }
 
+/// How a `<UsualGroup>` arranges what it holds.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeGroupArrangement {
+    /// `<Group>Vertical</Group>`.
+    Vertical,
+    /// `<Group>Horizontal</Group>`.
+    Horizontal,
+    /// `<Group>AlwaysHorizontal</Group>`, which differs from `Horizontal` in
+    /// one of the two slots that carry it.
+    AlwaysHorizontal,
+    /// `<Group>HorizontalIfPossible</Group>`, which is also what a group that
+    /// names no arrangement at all carries.
+    HorizontalIfPossible,
+}
+
+/// How a `<UsualGroup>` behaves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeGroupBehavior {
+    Usual,
+    Collapsible,
+    PopUp,
+    /// What a group that names no behaviour carries, which is not `Usual`.
+    Unnamed,
+}
+
+/// How a `<UsualGroup>` separates itself from what is around it.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NativeGroupSeparation {
+    None,
+    Strong,
+    /// Also what a group that names no representation carries.
+    Weak,
+    Normal,
+}
+
+/// The `{29,…}` payload of a usual group, member by member.
+///
+/// Seven of its twenty-nine members carry an XML property. Measured the same
+/// way as the field payloads: a candidate that fills these seven and copies
+/// the rest reproduces **every one** of the usual-group payloads it was run
+/// against exactly.
+///
+/// The refinement that got it there was about defaults, not about which slot
+/// is which: a group that names no `<Group>` carries what
+/// `HorizontalIfPossible` carries, a group that names no `<Representation>`
+/// carries what `WeakSeparation` carries, and a group that names no
+/// `<Behavior>` carries something that is *not* what `Usual` carries.
+pub(crate) struct NativeUsualGroupPayload<'a> {
+    pub(crate) separation: NativeGroupSeparation,
+    pub(crate) behavior: NativeGroupBehavior,
+    /// Slot 19: `Use` -> 0, `DontUse` -> 1, absent -> 2.
+    pub(crate) through_align: Option<bool>,
+    pub(crate) arrangement: NativeGroupArrangement,
+    /// Slot 5, the group's own picture binding, `{0}` by default.
+    pub(crate) picture: &'a str,
+    /// Slot 9, the background colour, `{3,4,{0}}` by default.
+    pub(crate) back_color: &'a str,
+    /// Slot 14, the group's title, `{1,0}` by default.
+    pub(crate) title: &'a str,
+    /// Slot 4, which varies 0/1 over the corpus and whose property is not read
+    /// yet, so the caller supplies it.
+    pub(crate) fourth: &'a str,
+}
+
+impl NativeUsualGroupPayload<'_> {
+    /// What a group that names none of these carries.
+    pub(crate) const fn plain() -> Self {
+        Self {
+            separation: NativeGroupSeparation::Weak,
+            behavior: NativeGroupBehavior::Unnamed,
+            through_align: None,
+            arrangement: NativeGroupArrangement::HorizontalIfPossible,
+            picture: "{0}",
+            back_color: "{3,4,{0}}",
+            title: "{1,0}",
+            fourth: "0",
+        }
+    }
+}
+
+pub(crate) fn format_usual_group_payload(payload: &NativeUsualGroupPayload<'_>) -> String {
+    let separation = match payload.separation {
+        NativeGroupSeparation::None => "0",
+        NativeGroupSeparation::Strong => "1",
+        NativeGroupSeparation::Weak => "2",
+        NativeGroupSeparation::Normal => "3",
+    };
+    let (collapsible, behavior, behavior_tail) = match payload.behavior {
+        NativeGroupBehavior::Usual => ("0", "0", "0"),
+        NativeGroupBehavior::Collapsible => ("1", "1", "1"),
+        NativeGroupBehavior::PopUp => ("1", "2", "2"),
+        NativeGroupBehavior::Unnamed => ("1", "0", "3"),
+    };
+    let through_align = match payload.through_align {
+        Some(true) => "0",
+        Some(false) => "1",
+        None => "2",
+    };
+    let (arrangement, arrangement_tail) = match payload.arrangement {
+        NativeGroupArrangement::Vertical => ("0", "0"),
+        NativeGroupArrangement::Horizontal => ("1", "1"),
+        NativeGroupArrangement::AlwaysHorizontal => ("1", "3"),
+        NativeGroupArrangement::HorizontalIfPossible => ("2", "2"),
+    };
+    format!(
+        "{{29,{arrangement},0,{separation},{fourth},{picture},{{1,0}},{{\"Pattern\"}},\"\",{back_color},{collapsible},0,0,1,{title},0,0,3,3,{through_align},0,1,{arrangement},{{3,4,{{0}}}},{behavior},2,0,{arrangement_tail},{behavior_tail}}}",
+        fourth = payload.fourth,
+        picture = payload.picture,
+        back_color = payload.back_color,
+        title = payload.title,
+    )
+}
+
 /// What a `{22,…}` group record needs beyond the frame every group shares.
 ///
 /// `kind` is the marker that says which group this is -- 0 command-bar group,
@@ -1201,6 +1314,35 @@ mod tests {
             ..NativeInputPayload::plain()
         })
         .contains(",{\"U\"},\"999-999-999 99\",0,"));
+    }
+
+    /// The payload of `ГруппаШапка`, a usual group of an ERP УХ form body,
+    /// exactly as that body stores it, and the defaults a group that names
+    /// nothing carries.
+    #[test]
+    fn writes_the_usual_group_payloads_the_platform_stores() {
+        assert_eq!(
+            format_usual_group_payload(&NativeUsualGroupPayload {
+                behavior: NativeGroupBehavior::Usual,
+                arrangement: NativeGroupArrangement::HorizontalIfPossible,
+                separation: NativeGroupSeparation::Weak,
+                fourth: "1",
+                ..NativeUsualGroupPayload::plain()
+            }),
+            "{29,2,0,2,1,{0},{1,0},{\"Pattern\"},\"\",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,2,{3,4,{0}},0,2,0,2,0}"
+        );
+        // A group that names no arrangement carries what `HorizontalIfPossible`
+        // carries, and one that names no behaviour carries what `Usual` does
+        // not.
+        let plain = format_usual_group_payload(&NativeUsualGroupPayload::plain());
+        assert!(plain.starts_with("{29,2,0,2,0,"));
+        assert!(plain.ends_with(",1,2,{3,4,{0}},0,2,0,2,3}"));
+        let vertical = format_usual_group_payload(&NativeUsualGroupPayload {
+            arrangement: NativeGroupArrangement::Vertical,
+            ..NativeUsualGroupPayload::plain()
+        });
+        assert!(vertical.starts_with("{29,0,0,2,0,"));
+        assert!(vertical.ends_with(",0,3}"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
