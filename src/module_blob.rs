@@ -27102,6 +27102,16 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
         "v8:ValueTable" => Some("acf6192e-81ca-46ef-93a6-5a6968b78663"),
         "v8:ValueTree" => Some("e603c0f2-92fb-4d47-8f38-a44a381cf235"),
         "v8:ValueListType" => Some("4772b3b4-f4a3-49c0-a1a5-8cb5961511a3"),
+        "mxl:SpreadsheetDocument" => Some("e603103e-a318-4edc-a014-b1c6cf94d49f"),
+        "v8:UUID" => Some("fc01b5df-97fe-449b-83d4-218a090e681e"),
+        "v8ui:FormattedString" => Some("140b5ff4-37b1-4df5-b5ec-a0bfd2b94f8f"),
+        "v8ui:Color" => Some("9cd510c7-abfc-11d4-9434-004095e12fc7"),
+        "v8ui:Font" => Some("9cd510c8-abfc-11d4-9434-004095e12fc7"),
+        "v8ui:Picture" => Some("e6f51714-91cb-4dce-94fe-90ae3e3e1ad1"),
+        "dcsset:SettingsComposer" => Some("cab0d12b-3c88-4993-8edc-8c3827cadc7d"),
+        "v8:StandardPeriod" => Some("2fdc88ec-7c9b-43cd-8ba5-873f043bdd88"),
+        "v8:StandardBeginningDate" => Some("0387f3a2-7df5-4804-948b-4580a51e4a15"),
+        "v8:TypeDescription" => Some("f5c65050-3bbb-11d5-b988-0050bae0a95d"),
         _ => None,
     }
 }
