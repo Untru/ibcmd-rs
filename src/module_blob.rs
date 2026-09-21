@@ -6712,6 +6712,16 @@ fn format_native_child_item(
             tooltip_representation: item.tooltip_representation.map(native_tooltip_representation),
             group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
             group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+            // `<Type>` is the kind of button -- member 4 coarsely and member
+            // 47 finely -- and it arrives through the scalar bag, because the
+            // typed `item_type` is an input field's mask.
+            button_type: item.scalars.get("Type").map(String::as_str),
+            representation_in_context_menu: item
+                .scalars
+                .get("RepresentationInContextMenu")
+                .map(String::as_str),
+            shape: item.shape.as_deref(),
+            shape_representation: item.shape_representation.as_deref(),
             location_in_command_bar: item.location_in_command_bar.map(|value| match value {
                 FormXmlButtonLocationInCommandBar::InCommandBar => "InCommandBar",
                 FormXmlButtonLocationInCommandBar::InAdditionalSubmenu => "InAdditionalSubmenu",
@@ -14696,16 +14706,14 @@ fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
-        && path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
+    path_ends_with(path, &[item.tag.as_str(), "ReadOnly"])
 }
 
 fn path_ends_with_for_child_skip_on_input(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "Button" | "InputField" | "Table")
-        && path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
+    path_ends_with(path, &[item.tag.as_str(), "SkipOnInput"])
 }
 
 fn path_ends_with_for_child_location_in_command_bar(
@@ -14722,8 +14730,7 @@ fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
-        && path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
+    path_ends_with(path, &[item.tag.as_str(), "TitleLocation"])
 }
 
 fn path_ends_with_for_child_warning_on_edit_representation(
@@ -14765,18 +14772,14 @@ fn path_ends_with_for_child_width(path: &[String], items: &[FormXmlChildItem]) -
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "InputField" | "TextDocumentField")
-        && path_ends_with(path, &[item.tag.as_str(), "Width"])
+    path_ends_with(path, &[item.tag.as_str(), "Width"])
 }
 
 fn path_ends_with_for_child_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(
-        item.tag.as_str(),
-        "InputField" | "TextDocumentField" | "Pages"
-    ) && path_ends_with(path, &[item.tag.as_str(), "Height"])
+    path_ends_with(path, &[item.tag.as_str(), "Height"])
 }
 
 fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -14863,18 +14866,14 @@ fn path_ends_with_for_child_cell_hyperlink(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "InputField" | "LabelField")
-        && path_ends_with(path, &[item.tag.as_str(), "CellHyperlink"])
+    path_ends_with(path, &[item.tag.as_str(), "CellHyperlink"])
 }
 
 fn path_ends_with_for_child_show_in_footer(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(
-        item.tag.as_str(),
-        "InputField" | "LabelField" | "PictureField"
-    ) && path_ends_with(path, &[item.tag.as_str(), "ShowInFooter"])
+    path_ends_with(path, &[item.tag.as_str(), "ShowInFooter"])
 }
 
 fn path_ends_with_for_child_hyperlink(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -15002,10 +15001,7 @@ fn path_ends_with_for_child_show_in_header(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(
-        item.tag.as_str(),
-        "InputField" | "LabelField" | "CheckBoxField" | "ColumnGroup"
-    ) && path_ends_with(path, &[item.tag.as_str(), "ShowInHeader"])
+    path_ends_with(path, &[item.tag.as_str(), "ShowInHeader"])
 }
 
 fn path_ends_with_for_child_addition_source_item(
@@ -15317,10 +15313,7 @@ fn path_ends_with_for_child_fixing_in_table(path: &[String], items: &[FormXmlChi
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(
-        item.tag.as_str(),
-        "InputField" | "LabelField" | "CheckBoxField" | "PictureField" | "ColumnGroup"
-    ) && path_ends_with(path, &[item.tag.as_str(), "FixingInTable"])
+    path_ends_with(path, &[item.tag.as_str(), "FixingInTable"])
 }
 
 fn path_ends_with_for_child_three_state(path: &[String], items: &[FormXmlChildItem]) -> bool {
