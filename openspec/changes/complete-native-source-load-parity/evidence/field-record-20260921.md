@@ -65,7 +65,22 @@ disagree: `<VerticalStretch>`, `<SkipOnInput>` and `<MaxWidth>` each fit some
 of them and none fits all. The writer leaves it at the 0 that the other 69 456
 write.
 
-Over **all** tags that use the `{37,…}` wrapper -- labels, check boxes,
-buttons and the rest, 136 025 records -- the same writer reaches 93.16%. The
-members that differ are 26, 7 and 14, which each kind reads its own way; those
-are the next thing to measure, one kind at a time.
+## Every kind, the same writer
+
+```
+@fields | records 122788 | fixed-length 122767 | exact 122630 (99.89%)
+```
+
+The same writer, unchanged, reaches **99.89% across every field kind of the
+corpus**: 99.91% for labels (37 045 / 37 079), check boxes (10 375 / 10 384),
+radio buttons (2 299 / 2 301) and pictures (2 201 / 2 203), and 98.20% for
+spreadsheet documents. Member 5 is the kind and the correspondence is exact:
+`LabelField` 1, `InputField` 2, `CheckBoxField` 3, `PictureField` 4,
+`RadioButtonField` 5, `SpreadSheetDocumentField` 6, `TextDocumentField` 7,
+`ProgressBarField` 9, `GanttChartField` 12, `HTMLDocumentField` 15,
+`FormattedDocumentField` 17.
+
+An earlier run over the join's 136 025 rows gave 93.16%, but that number was
+the join's fault, not the writer's: the join keys an XML element by id, so a
+form attribute or command that happens to share an id with a field shadows it.
+Counting only the elements that really are fields gives the 99.89% above.
