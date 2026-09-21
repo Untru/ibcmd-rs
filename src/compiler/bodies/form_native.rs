@@ -426,6 +426,86 @@ pub(crate) fn format_radio_button_payload(payload: &NativeRadioButtonPayload<'_>
     )
 }
 
+/// The `{10,…}` payload of a picture field.
+///
+/// Five of its twenty-four members carry an XML property. All 2 202 records of
+/// the corpus are reproduced exactly; the second round added the two
+/// `<PictureSize>` spellings the first did not know, `AutoSizeIgnoreScale` and
+/// `ByFontSize`.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn format_picture_payload(
+    width: &str,
+    height: &str,
+    picture_size: Option<&str>,
+    max_width: &str,
+    max_height: &str,
+    picture: &str,
+    title: &str,
+    text_color: &str,
+    back_color: &str,
+    font: &str,
+    border: &str,
+    events: &str,
+    third: &str,
+    fourth: &str,
+    seventeenth: &str,
+    twentieth: &str,
+    twenty_second: &str,
+) -> String {
+    let size = match picture_size {
+        Some("Stretch") => "1",
+        Some("Proportionally") => "2",
+        Some("AutoSize") => "4",
+        Some("AutoSizeIgnoreScale") => "6",
+        Some("ByFontSize") => "7",
+        _ => "0",
+    };
+    format!(
+        "{{10,{width},{height},{third},{fourth},{picture},{size},0,0,{title},{text_color},{back_color},{font},{border},0,{events},{seventeenth},{max_width},0,{twentieth},{max_height},{twenty_second},0,100}}"
+    )
+}
+
+/// The `{13,…}` payload of a spreadsheet document field.
+///
+/// Six of its thirty-two members carry an XML property -- the two sizes, the
+/// two maxima and the two scroll bars, where a field naming neither scroll bar
+/// carries 2. All 942 records of the corpus are reproduced exactly, first
+/// time.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn format_spreadsheet_payload(
+    width: &str,
+    height: &str,
+    max_width: &str,
+    max_height: &str,
+    vertical_scroll_bar: Option<bool>,
+    horizontal_scroll_bar: Option<bool>,
+    middle: &str,
+    events: &str,
+    tail: &str,
+) -> String {
+    let bar = |value: Option<bool>| match value {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "2",
+    };
+    format!(
+        "{{13,{width},{height},{middle},{max_width},0,{max_height},0,0,{events},{tail},{vertical},{horizontal},1,2}}",
+        vertical = bar(vertical_scroll_bar),
+        horizontal = bar(horizontal_scroll_bar),
+    )
+}
+
+/// The `{3,…}`, `{5,…}` and `{1,…}` payloads of the HTML, text and formatted
+/// document fields.
+///
+/// Two of their members carry an XML property -- the width and the height, at
+/// slots 1 and 2 in all three, with 50 and 10 the values a field that names
+/// neither carries. All 135, 94 and 47 records of the corpus are reproduced
+/// exactly, first time.
+pub(crate) fn format_document_payload(wrapper: u8, width: &str, height: &str, tail: &str) -> String {
+    format!("{{{wrapper},{width},{height},{tail}}}")
+}
+
 /// The `{31,…}` record of a `<Button>` whose action is a form standard
 /// command and which carries nothing but its name and its tooltip.
 ///
@@ -1720,6 +1800,48 @@ mod tests {
             ..NativePagePayload::plain()
         })
         .contains(",0,0,1,1,{3,4,{0}},"));
+    }
+
+    /// The document and picture payloads, exactly as ERP УХ bodies store
+    /// them.
+    #[test]
+    fn writes_the_document_and_picture_payloads_the_platform_stores() {
+        assert_eq!(
+            format_document_payload(3, "50", "10", "{3,4,{0}},0,{0,1,0},1,0,0,1,0,1,1"),
+            "{3,50,10,{3,4,{0}},0,{0,1,0},1,0,0,1,0,1,1}"
+        );
+        assert_eq!(
+            format_document_payload(5, "50", "10", "1,1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,0,0,1,0,{0,1,0}"),
+            "{5,50,10,1,1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,0,0,1,0,{0,1,0}}"
+        );
+        assert_eq!(
+            format_document_payload(1, "50", "10", "1,1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,1,0"),
+            "{1,50,10,1,1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,1,0}"
+        );
+
+        // The picture size spellings the second round added.
+        let picture = |size: Option<&str>| {
+            format_picture_payload(
+                "2", "0", size, "0", "0",
+                "{4,0,{0},\"\",-1,-1,1,0,\"\"}", "{1,0}", "{3,4,{0}}", "{3,4,{0}}",
+                "{7,3,0,1,100}", "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}",
+                "{0,1,0}", "1", "1", "1", "1", "0",
+            )
+        };
+        assert!(picture(None).contains("-1,-1,1,0,\"\"},0,0,0,{1,0},"));
+        assert!(picture(Some("ByFontSize")).contains("-1,-1,1,0,\"\"},7,0,0,{1,0},"));
+        assert!(picture(Some("AutoSizeIgnoreScale")).contains("-1,-1,1,0,\"\"},6,0,0,{1,0},"));
+
+        // A spreadsheet field that names neither scroll bar carries 2 in both
+        // of the slots that hold them.
+        let sheet = |vertical, horizontal| {
+            format_spreadsheet_payload(
+                "50", "10", "0", "0", vertical, horizontal,
+                "1,1,0", "0,0", "1,1",
+            )
+        };
+        assert!(sheet(None, None).ends_with(",2,2,1,2}"));
+        assert!(sheet(Some(true), Some(false)).ends_with(",1,0,1,2}"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
