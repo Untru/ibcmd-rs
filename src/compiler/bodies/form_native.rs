@@ -132,6 +132,262 @@ const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("WhiteSmoke", "144"),
 ];
 
+/// One `<Event>` of an item, as the source names it.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct NativeEvent<'a> {
+    /// The event's name, such as `OnChange`; a form the platform could not
+    /// spell writes the event's uuid here instead, and it stands for itself.
+    pub(crate) name: &'a str,
+    /// The procedure the event calls.
+    pub(crate) handler: &'a str,
+}
+
+/// The event bindings of one owner, in the shape a body stores them.
+///
+/// Measured over the 12 507 forms of ERP УХ: 63 161 of 63 161 stored tuples
+/// rebuild byte for byte from the source alone. The shape is
+///
+/// ```text
+/// { N, (<uuid>,"<handler>") x N, 1, 0, (<uuid>,0,<M>,("<handler>",1) x (M-1)) x N }
+/// ```
+///
+/// where `N` counts the distinct events and `M` counts the handlers one event
+/// carries: an extension adds its own handler beside the base one, and the two
+/// share the event's name, so the group -- not the `<Event>` -- is the unit.
+/// An owner with no events writes `{0,1,0}`.
+///
+/// The uuid is the event's identity, and it depends on who declares the event:
+/// `OnChange` of a field is not `OnChange` of a table. For a form-level event
+/// it depends further on the class of the form's main attribute, because that
+/// is what picks the form extension declaring it -- `BeforeWrite` of a document
+/// form and of every other form are two different events. A name the table does
+/// not hold is refused rather than guessed.
+pub(crate) fn format_native_events(
+    owner_tag: &str,
+    main_attribute_class: &str,
+    events: &[NativeEvent<'_>],
+) -> Option<String> {
+    if events.is_empty() {
+        return Some("{0,1,0}".to_string());
+    }
+    // Events group by name, in the order the source first names each one.
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for event in events {
+        match groups.iter_mut().find(|(name, _)| *name == event.name) {
+            Some((_, handlers)) => handlers.push(event.handler),
+            None => groups.push((event.name, vec![event.handler])),
+        }
+    }
+    let mut uuids = Vec::with_capacity(groups.len());
+    for (name, _) in &groups {
+        uuids.push(form_event_uuid(owner_tag, main_attribute_class, name)?);
+    }
+    let head = groups
+        .iter()
+        .zip(&uuids)
+        .map(|((_, handlers), uuid)| format!("{uuid},{}", quoted(handlers[0])))
+        .collect::<Vec<_>>()
+        .join(",");
+    let tail = groups
+        .iter()
+        .zip(&uuids)
+        .map(|((_, handlers), uuid)| {
+            let extra = handlers[1..]
+                .iter()
+                .map(|handler| format!(",{},1", quoted(handler)))
+                .collect::<String>();
+            format!("{uuid},0,{}{extra}", handlers.len())
+        })
+        .collect::<Vec<_>>()
+        .join(",");
+    Some(format!("{{{},{head},1,0,{tail}}}", groups.len()))
+}
+
+/// The uuid of one event, by the kind that declares it.
+fn form_event_uuid<'a>(owner_tag: &str, main_attribute_class: &str, name: &'a str) -> Option<&'a str> {
+    if is_uuid(name) {
+        return Some(name);
+    }
+    // The main attribute narrows a form-level event first; every other event,
+    // and every form whose main attribute the table does not single out, reads
+    // the entry that leaves the class open.
+    FORM_EVENT_UUIDS
+        .iter()
+        .find(|(tag, class, candidate, _)| {
+            *tag == owner_tag && *class == main_attribute_class && *candidate == name
+        })
+        .or_else(|| {
+            FORM_EVENT_UUIDS.iter().find(|(tag, class, candidate, _)| {
+                *tag == owner_tag && class.is_empty() && *candidate == name
+            })
+        })
+        .map(|(_, _, _, uuid)| *uuid)
+}
+
+/// Whether a name is already an event uuid, which the platform writes when it
+/// has no spelling for the event.
+fn is_uuid(value: &str) -> bool {
+    value.len() == 36
+        && value.as_bytes().iter().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                *byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// `(owner tag, main attribute class, event name, uuid)`, read off the corpus.
+/// An empty class matches any form; only `BeforeWrite` and `BeforeWriteAtServer`
+/// of a form need the class, and only a document form parts company there.
+const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
+    ("CalendarField", "", "OnPeriodOutput", "1490ede6-6f33-4c6d-b971-53b2541331ea"),
+    ("CalendarField", "", "Selection", "2feb1ee9-b750-4352-bb4c-67ba1c608dc6"),
+    ("ChartField", "", "DetailProcessing", "650da4af-3233-4ce0-a1ae-23f87a226eee"),
+    ("ChartField", "", "Selection", "515cd17b-dd4c-4181-bbbf-8676467acf49"),
+    ("CheckBoxField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("ExtendedTooltip", "", "Click", "11707a99-4eb9-4373-bc8c-84891483a034"),
+    ("ExtendedTooltip", "", "URLProcessing", "d710ea07-5c96-4c43-ab6e-e138d3653780"),
+    ("Form", "", "047d4d09-961c-4bdc-8519-eef10674c35b", "047d4d09-961c-4bdc-8519-eef10674c35b"),
+    ("Form", "", "213d1900-dcad-4616-9f20-3f077156a40f", "213d1900-dcad-4616-9f20-3f077156a40f"),
+    ("Form", "", "390d5e4b-e732-4c88-8748-9e211a416984", "390d5e4b-e732-4c88-8748-9e211a416984"),
+    ("Form", "", "8f42e083-be92-4102-b1f0-fa58452c1a63", "8f42e083-be92-4102-b1f0-fa58452c1a63"),
+    ("Form", "", "9cc34712-da5f-4faa-a653-343d2085fbe8", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "", "ActivationProcessing", "b47699e1-b5d8-4c8a-91e9-183dec5820f5"),
+    ("Form", "", "AfterWrite", "047d4d09-961c-4bdc-8519-eef10674c35b"),
+    ("Form", "", "AfterWriteAtServer", "213d1900-dcad-4616-9f20-3f077156a40f"),
+    ("Form", "", "BeforeClose", "52dbb775-1631-4fd5-8c55-1615b5881dac"),
+    ("Form", "", "BeforeLoadDataFromSettingsAtServer", "e773807c-0c0c-4689-a093-231ddcd6409f"),
+    ("Form", "", "BeforeLoadUserSettingsAtServer", "40925042-2517-455b-a600-d68282829334"),
+    ("Form", "", "BeforeLoadVariantAtServer", "1dd89674-8b50-4240-9899-e3426b79cb02"),
+    ("Form", "", "ChoiceProcessing", "1d632984-de3c-4b4b-ad9f-d69682a10182"),
+    ("Form", "", "ExternalEvent", "5426e344-5740-4f23-99c1-99179a200dc5"),
+    ("Form", "", "FillCheckProcessingAtServer", "e73d6384-49d2-4885-a752-a674d6ff7742"),
+    ("Form", "", "NavigationProcessing", "93dfba16-26db-46f8-acb5-4f92f50c855f"),
+    ("Form", "", "NewWriteProcessing", "3b644f4f-055f-4808-bdc6-a50ce895e4d9"),
+    ("Form", "", "NotificationProcessing", "3699f6a3-9a2a-4c82-a775-6ff4824a08ca"),
+    ("Form", "", "OnChangeDisplaySettings", "b98da5a8-349c-4159-a6a8-17a34ceb10ec"),
+    ("Form", "", "OnClose", "ca21cd18-35b2-4281-b5c8-016ecc8da8ac"),
+    ("Form", "", "OnCreateAtServer", "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b"),
+    ("Form", "", "OnLoadDataFromSettingsAtServer", "79cea13e-f6fb-4483-905d-713326405771"),
+    ("Form", "", "OnLoadUserSettingsAtServer", "7b15b3db-1cd0-4e1d-a74b-2c972c9e2226"),
+    ("Form", "", "OnLoadVariantAtServer", "87ce636e-9de6-4e42-9395-f0f189d08397"),
+    ("Form", "", "OnMainServerAvailabilityChange", "d6b86f20-722b-4fe6-83fa-85c6aa4c1fe5"),
+    ("Form", "", "OnOpen", "3ccc650e-f631-4cae-8e33-3eaac610b5f9"),
+    ("Form", "", "OnReadAtServer", "390d5e4b-e732-4c88-8748-9e211a416984"),
+    ("Form", "", "OnReopen", "6b3175a5-c143-4179-a670-ef231dc0a688"),
+    ("Form", "", "OnSaveDataInSettingsAtServer", "1952a54f-35ad-4928-902f-df212ab38ca3"),
+    ("Form", "", "OnSaveUserSettingsAtServer", "961ee7c6-0327-422b-adcb-97a90c46753d"),
+    ("Form", "", "OnSaveVariantAtServer", "499bb7af-6262-4de4-819f-ef264d1a20ec"),
+    ("Form", "", "OnUpdateUserSettingSetAtServer", "d817bccf-504e-4133-a79a-dd16e3a4df73"),
+    ("Form", "", "OnWriteAtServer", "c1bc0d3e-d35e-4207-a06b-ece68ed25314"),
+    ("Form", "", "URLGetProcessing", "674956b3-e469-4fdc-acf5-24ebf88cf7ab"),
+    ("Form", "", "URLListGetProcessing", "44498116-1641-4bfa-ae33-86e53c205797"),
+    ("Form", "", "URLProcessing", "e0cd9bdf-88fa-428c-9f1f-86f7f73b11e2"),
+    ("Form", "", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "", "c1bc0d3e-d35e-4207-a06b-ece68ed25314", "c1bc0d3e-d35e-4207-a06b-ece68ed25314"),
+    ("FormattedDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("GanttChartField", "", "DetailProcessing", "8724b8d4-140d-4357-8ac9-46e29ba7b168"),
+    ("GanttChartField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("GraphicalSchemaField", "", "Selection", "3c3da18f-fc18-4f77-8c2d-96c25bec40a5"),
+    ("HTMLDocumentField", "", "DocumentComplete", "53325f0c-b112-4c44-ab12-5d1ee0b1f07b"),
+    ("HTMLDocumentField", "", "OnClick", "da8dfb86-c5d1-4e35-a8a4-01b167a60ad3"),
+    ("InputField", "", "AutoComplete", "178a97c4-0ffe-4fcc-93e6-505369939da5"),
+    ("InputField", "", "ChoiceProcessing", "f72043b8-2d79-414e-bc4e-3972fe9dbca1"),
+    ("InputField", "", "Clearing", "b50dc41b-c15a-4ebe-a17f-d01e51c47de6"),
+    ("InputField", "", "Creating", "aeba313d-c467-44b3-b4a2-956340932c8f"),
+    ("InputField", "", "EditTextChange", "14256303-d2b7-4a58-bfab-e77493d10a59"),
+    ("InputField", "", "MultipleValuesDelete", "49ede602-af78-4a50-b821-ec81f6778f2d"),
+    ("InputField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("InputField", "", "Opening", "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1"),
+    ("InputField", "", "StartChoice", "1960479b-4d89-4eba-8b39-0aa802020558"),
+    ("InputField", "", "StartListChoice", "b3b65989-73ac-4db3-b6cb-398cb41a062f"),
+    ("InputField", "", "TextEditEnd", "c331eb1b-d32b-4533-844c-1276600b64e3"),
+    ("InputField", "", "Tuning", "70636369-514c-4662-977e-1c3976c9756c"),
+    ("LabelDecoration", "", "Click", "11707a99-4eb9-4373-bc8c-84891483a034"),
+    ("LabelDecoration", "", "URLProcessing", "d710ea07-5c96-4c43-ab6e-e138d3653780"),
+    ("LabelField", "", "Click", "eba5f295-c611-4dd9-84b5-22911ad60c53"),
+    ("LabelField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("LabelField", "", "URLProcessing", "509eca20-d6e4-4fef-a0f8-3a6b44c64178"),
+    ("Pages", "", "OnCurrentPageChange", "526c501f-ed3f-4db4-8731-fd0324707501"),
+    ("PictureDecoration", "", "Click", "9874537f-454c-40ae-83e9-3b9cefbc6d08"),
+    ("PictureDecoration", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
+    ("PictureDecoration", "", "DragCheck", "0d644ff6-443b-4390-86fa-7f9105e42711"),
+    ("PictureField", "", "Click", "996b8c30-7a89-4973-8d56-2c9ce2976695"),
+    ("PictureField", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
+    ("PictureField", "", "DragCheck", "0d644ff6-443b-4390-86fa-7f9105e42711"),
+    ("PictureField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("RadioButtonField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("SpreadSheetDocumentField", "", "AdditionalDetailProcessing", "0b8dc702-d001-4637-a215-9f35613e096c"),
+    ("SpreadSheetDocumentField", "", "BeforePrint", "61455593-0982-4415-bc2e-2e8722a7abd0"),
+    ("SpreadSheetDocumentField", "", "DetailProcessing", "2988b2a5-c887-4928-94ae-5d0c9c31e999"),
+    ("SpreadSheetDocumentField", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
+    ("SpreadSheetDocumentField", "", "DragCheck", "0d644ff6-443b-4390-86fa-7f9105e42711"),
+    ("SpreadSheetDocumentField", "", "DragEnd", "cb286ab3-3a1c-40d2-a232-6e64f624ccec"),
+    ("SpreadSheetDocumentField", "", "DragStart", "6d4d6747-a823-4f61-ab31-a426572f2c6c"),
+    ("SpreadSheetDocumentField", "", "OnActivate", "2042ec93-3108-4190-b767-ec6c10dd9ff4"),
+    ("SpreadSheetDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("SpreadSheetDocumentField", "", "OnChangeAreaContent", "411a4578-276c-4f4a-b56a-b3b01181c997"),
+    ("SpreadSheetDocumentField", "", "Selection", "22287505-97d8-4258-a318-209e2493f7eb"),
+    ("SpreadSheetDocumentField", "", "URLProcessing", "06d41ccc-4e8a-46f8-aeff-b3303cf753d2"),
+    ("Table", "", "2391e7b8-7235-45d7-ab7e-6ff3dc086396", "2391e7b8-7235-45d7-ab7e-6ff3dc086396"),
+    ("Table", "", "2ccfdec5-583d-4eca-8319-e55de492665a", "2ccfdec5-583d-4eca-8319-e55de492665a"),
+    ("Table", "", "4d88756d-bad4-4fde-92e1-c1f1402ac6b2", "4d88756d-bad4-4fde-92e1-c1f1402ac6b2"),
+    ("Table", "", "AfterDeleteRow", "de65638d-a806-4a76-bc10-f62bbc86e0e7"),
+    ("Table", "", "BeforeAddRow", "2391e7b8-7235-45d7-ab7e-6ff3dc086396"),
+    ("Table", "", "BeforeCollapse", "a7a9dc42-29b6-4c5b-8980-6d0b87149bdd"),
+    ("Table", "", "BeforeDeleteRow", "2ccfdec5-583d-4eca-8319-e55de492665a"),
+    ("Table", "", "BeforeEditEnd", "4d88756d-bad4-4fde-92e1-c1f1402ac6b2"),
+    ("Table", "", "BeforeExpand", "7c39b7bc-db0f-4410-9d98-8e5b7896995e"),
+    ("Table", "", "BeforeLoadUserSettingsAtServer", "c41e7b98-098c-433e-8ac3-56ec2a2c49e2"),
+    ("Table", "", "BeforeRowChange", "ab930362-ff94-4dcb-ad16-188805d23e3c"),
+    ("Table", "", "ChoiceProcessing", "8bfdb5eb-62dc-4851-8a2c-e983526356bf"),
+    ("Table", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
+    ("Table", "", "DragCheck", "0d644ff6-443b-4390-86fa-7f9105e42711"),
+    ("Table", "", "DragEnd", "cb286ab3-3a1c-40d2-a232-6e64f624ccec"),
+    ("Table", "", "DragStart", "6d4d6747-a823-4f61-ab31-a426572f2c6c"),
+    ("Table", "", "NewWriteProcessing", "ce67decf-16b8-4d61-b347-4e6a063580dc"),
+    ("Table", "", "OnActivateCell", "f228b12f-d892-4925-b338-695617357b32"),
+    ("Table", "", "OnActivateField", "6e973761-8683-47fa-a609-4e230950294d"),
+    ("Table", "", "OnActivateRow", "60edb81d-887b-478e-94ee-7fef2b13393d"),
+    ("Table", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("Table", "", "OnEditEnd", "01d80ddd-dce5-4db3-beb5-f63c97cb05b9"),
+    ("Table", "", "OnGetDataAtServer", "97365900-eadf-4dfd-a9aa-fbb9ecabd079"),
+    ("Table", "", "OnLoadUserSettingsAtServer", "336b3ee5-d67f-4651-b098-e2c53f8317e2"),
+    ("Table", "", "OnSaveUserSettingsAtServer", "a73dae96-734d-42e4-8ae7-b70249ecd233"),
+    ("Table", "", "OnStartEdit", "b3c10170-c5ff-4cba-b537-679e1c872b45"),
+    ("Table", "", "OnUpdateUserSettingSetAtServer", "e91128e6-621d-4dc8-b12e-bd65aeb37e2d"),
+    ("Table", "", "RefreshRequestProcessing", "ff33c4d6-a0db-4906-992e-37b3f44cd97a"),
+    ("Table", "", "Selection", "1282f000-23b6-4887-87f4-9e8e79db3d32"),
+    ("Table", "", "URLGetProcessing", "674956b3-e469-4fdc-acf5-24ebf88cf7ab"),
+    ("Table", "", "ValueChoice", "0d8cf5b0-55eb-4d1e-960a-22c160210945"),
+    ("Table", "", "ab930362-ff94-4dcb-ad16-188805d23e3c", "ab930362-ff94-4dcb-ad16-188805d23e3c"),
+    ("Table", "", "b3c10170-c5ff-4cba-b537-679e1c872b45", "b3c10170-c5ff-4cba-b537-679e1c872b45"),
+    ("Table", "", "de65638d-a806-4a76-bc10-f62bbc86e0e7", "de65638d-a806-4a76-bc10-f62bbc86e0e7"),
+    ("TextDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("TrackBarField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("Form", "AccountingRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "AccountingRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "BusinessProcessObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "CatalogObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "CatalogObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "ChartOfAccountsObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "ChartOfCalculationTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "ChartOfCalculationTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "ChartOfCharacteristicTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "ChartOfCharacteristicTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "ConstantsSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "DocumentObject", "BeforeWrite", "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc"),
+    ("Form", "DocumentObject", "BeforeWriteAtServer", "8f42e083-be92-4102-b1f0-fa58452c1a63"),
+    ("Form", "ExchangePlanObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "ExchangePlanObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "InformationRegisterRecordManager", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "InformationRegisterRecordManager", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "InformationRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "InformationRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "TaskObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+];
+
 /// The font a form item names, in the shape a body stores it.
 ///
 /// Measured over the label fields of 1 501 ERP УХ forms, where a `<Font>` is
@@ -2073,6 +2329,88 @@ mod tests {
         assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
         assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
         assert_eq!(format_native_color(Some("#12345"), none), None);
+    }
+
+    /// Every event-binding shape the corpus stores, with the exact bytes.
+    #[test]
+    fn writes_the_event_bindings_the_platform_stores() {
+        let event = |name, handler| NativeEvent { name, handler };
+
+        // An owner with no events.
+        assert_eq!(
+            format_native_events("InputField", "", &[]).as_deref(),
+            Some("{0,1,0}")
+        );
+
+        // One event of an input field.
+        assert_eq!(
+            format_native_events("InputField", "", &[event("OnChange", "ОтборСчетПриИзменении")])
+                .as_deref(),
+            Some("{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,\"ОтборСчетПриИзменении\",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,1}")
+        );
+
+        // Two events of a table: both pairs first, then both tails.
+        assert_eq!(
+            format_native_events(
+                "Table",
+                "",
+                &[
+                    event("Selection", "СписокВыбор"),
+                    event(
+                        "BeforeLoadUserSettingsAtServer",
+                        "СписокПередЗагрузкойПользовательскихНастроекНаСервере"
+                    ),
+                ]
+            )
+            .as_deref(),
+            Some("{2,1282f000-23b6-4887-87f4-9e8e79db3d32,\"СписокВыбор\",c41e7b98-098c-433e-8ac3-56ec2a2c49e2,\"СписокПередЗагрузкойПользовательскихНастроекНаСервере\",1,0,1282f000-23b6-4887-87f4-9e8e79db3d32,0,1,c41e7b98-098c-433e-8ac3-56ec2a2c49e2,0,1}")
+        );
+
+        // One event an extension gave a second handler: one pair, one tail, and
+        // the extension's handler inside that tail.
+        assert_eq!(
+            format_native_events(
+                "InputField",
+                "",
+                &[
+                    event("OnChange", "НаборДанныхБазыРаспределенияПриИзменении"),
+                    event("OnChange", "Расш1_НаборДанныхБазыРаспределенияПриИзмененииПосле"),
+                ]
+            )
+            .as_deref(),
+            Some("{1,fe115cc8-9e33-4684-a166-bd5136fe7a9f,\"НаборДанныхБазыРаспределенияПриИзменении\",1,0,fe115cc8-9e33-4684-a166-bd5136fe7a9f,0,2,\"Расш1_НаборДанныхБазыРаспределенияПриИзмененииПосле\",1}")
+        );
+
+        // A form-level event whose uuid the main attribute decides: a document
+        // form writes one, every other form that declares it the other, and a
+        // class the corpus never showed declaring it is refused.
+        let before_write = |class| {
+            format_native_events("Form", class, &[event("BeforeWrite", "ПередЗаписью")])
+        };
+        assert!(before_write("DocumentObject")
+            .unwrap()
+            .contains("8a5894c9-d2ff-4c1d-b433-89cc352bbfbc"));
+        assert!(before_write("CatalogObject")
+            .unwrap()
+            .contains("9cc34712-da5f-4faa-a653-343d2085fbe8"));
+        assert_eq!(before_write(""), None);
+
+        // An event the platform could not spell carries its uuid as its name.
+        assert_eq!(
+            format_native_events("Form", "", &[event("b3c10170-c5ff-4cba-b537-679e1c872b45", "Обработчик")]).as_deref(),
+            Some("{1,b3c10170-c5ff-4cba-b537-679e1c872b45,\"Обработчик\",1,0,b3c10170-c5ff-4cba-b537-679e1c872b45,0,1}")
+        );
+
+        // A name no kind declares is refused, and so is one another kind
+        // declares: a table's OnActivateRow is not an input field's.
+        assert_eq!(
+            format_native_events("InputField", "", &[event("NoSuchEvent", "X")]),
+            None
+        );
+        assert_eq!(
+            format_native_events("InputField", "", &[event("OnActivateRow", "X")]),
+            None
+        );
     }
 
     /// The two font shapes the corpus pins down, and the refusal of the one
