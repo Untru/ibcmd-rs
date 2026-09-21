@@ -397,6 +397,11 @@ struct FormXmlChildItem {
     /// `<Representation>` of a container the typed fields do not cover.
     container_representation: Option<String>,
     picture_present: bool,
+    font_present: bool,
+    choice_list_present: bool,
+    /// Every other scalar property, by element name, as the XML spells it.
+    /// The payload writers read from here rather than growing a field each.
+    scalars: BTreeMap<String, String>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
@@ -6158,7 +6163,7 @@ fn format_native_child_item(
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
-        let payload = native_field_payload(item)?;
+        let payload = native_field_payload(item, source)?;
         let data_path = match item.data_path.as_deref() {
             Some(path) => format_form_attribute_data_path(path, attribute_ids)
                 .ok_or_else(|| anyhow!("<{}> binds to {path}, which is not a form attribute", item.tag))?,
@@ -6594,7 +6599,10 @@ const fn native_vertical_align_spelling(align: FormFieldVerticalAlign) -> &'stat
 }
 
 /// The payload a field carries, by its kind.
-fn native_field_payload(item: &FormXmlChildItem) -> Result<String> {
+fn native_field_payload(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     match item.tag.as_str() {
         "LabelField" => Ok(native::format_label_payload(&native::NativeLabelPayload {
@@ -6637,8 +6645,135 @@ fn native_field_payload(item: &FormXmlChildItem) -> Result<String> {
             ..native::NativeInputPayload::plain()
         })
         .ok_or_else(|| anyhow!("the input field names something the writer cannot place")),
+        "CheckBoxField" => {
+            if item.format_present || item.font_present {
+                return Err(anyhow!("a check box names a format or a font"));
+            }
+            let text_color = native_scalar_color(item, "TextColor", source)?;
+            let back_color = native_scalar_color(item, "BackColor", source)?;
+            let border_color = native_scalar_color(item, "BorderColor", source)?;
+            native::format_check_box_payload(&native::NativeCheckBoxPayload {
+                three_state: item.three_state.unwrap_or(false),
+                check_box_type: item.scalars.get("CheckBoxType").map(String::as_str),
+                text_color: &text_color,
+                back_color: &back_color,
+                border_color: &border_color,
+                item_title_height: native_scalar(item, "ItemTitleHeight"),
+                item_width: native_scalar(item, "ItemWidth"),
+                item_height: native_scalar(item, "ItemHeight"),
+                equal_items_width: item.scalars.get("EqualItemsWidth").map(String::as_str),
+                ..native::NativeCheckBoxPayload::plain()
+            })
+            .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
+        }
+        "RadioButtonField" => {
+            if item.font_present || item.choice_list_present {
+                return Err(anyhow!("a radio button names a font or a choice list"));
+            }
+            let text_color = native_scalar_color(item, "TextColor", source)?;
+            let back_color = native_scalar_color(item, "BackColor", source)?;
+            let border_color = native_scalar_color(item, "BorderColor", source)?;
+            native::format_radio_button_payload(&native::NativeRadioButtonPayload {
+                columns: native_scalar(item, "ColumnsCount"),
+                radio_button_type: item.scalars.get("RadioButtonType").map(String::as_str),
+                text_color: &text_color,
+                back_color: &back_color,
+                border_color: &border_color,
+                item_height: native_scalar(item, "ItemHeight"),
+                item_title_height: native_scalar(item, "ItemTitleHeight"),
+                item_width: native_scalar(item, "ItemWidth"),
+                equal_columns_width: item.scalars.get("EqualColumnsWidth").map(String::as_str),
+                ..native::NativeRadioButtonPayload::plain()
+            })
+            .ok_or_else(|| anyhow!("<RadioButtonField> names a spelling the writer cannot place"))
+        }
+        "SpreadSheetDocumentField" => {
+            let border_color = native_scalar_color(item, "BorderColor", source)?;
+            native::format_spreadsheet_payload(&native::NativeSpreadsheetPayload {
+                width: item.width.as_deref().unwrap_or("50"),
+                height: item.height.as_deref().unwrap_or("10"),
+                horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
+                vertical_stretch: item.vertical_stretch.unwrap_or(true),
+                show_grid: native_scalar_flag(item, "ShowGrid", false),
+                show_headers: native_scalar_flag(item, "ShowHeaders", false),
+                vertical_scroll_bar: item.scalars.get("VerticalScrollBar").map(String::as_str),
+                horizontal_scroll_bar: item.scalars.get("HorizontalScrollBar").map(String::as_str),
+                protection: native_scalar_flag(item, "Protection", false),
+                selection_show_mode: item.scalars.get("SelectionShowMode").map(String::as_str),
+                output: item.scalars.get("Output").map(String::as_str),
+                edit: native_scalar_flag(item, "Edit", false),
+                show_groups: native_scalar_flag(item, "ShowGroups", true),
+                border_color: &border_color,
+                enable_start_drag: item.enable_start_drag.unwrap_or(true),
+                enable_drag: item.enable_drag.unwrap_or(true),
+                view_scaling_mode: item.scalars.get("ViewScalingMode").map(String::as_str),
+                auto_max_width: item.auto_max_width.unwrap_or(true),
+                max_width: item.max_width.as_deref().unwrap_or("0"),
+                auto_max_height: item.auto_max_height.unwrap_or(true),
+                max_height: item.max_height.as_deref().unwrap_or("0"),
+                show_cell_names: native_scalar_flag(item, "ShowCellNames", false),
+                show_row_and_column_names: native_scalar_flag(
+                    item,
+                    "ShowRowAndColumnNames",
+                    false,
+                ),
+                ..native::NativeSpreadsheetPayload::plain()
+            })
+            .ok_or_else(|| {
+                anyhow!("<SpreadSheetDocumentField> names a spelling the writer cannot place")
+            })
+        }
+        "PictureField" => {
+            if item.picture_present || item.font_present {
+                return Err(anyhow!("a picture field names a picture or a font"));
+            }
+            let text_color = native_scalar_color(item, "TextColor", source)?;
+            let back_color = native_scalar_color(item, "BackColor", source)?;
+            native::format_picture_payload(&native::NativePicturePayload {
+                width: item.width.as_deref().unwrap_or("0"),
+                height: item.height.as_deref().unwrap_or("0"),
+                horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
+                vertical_stretch: item.vertical_stretch.unwrap_or(true),
+                picture_size: item.scalars.get("PictureSize").map(String::as_str),
+                zoomable: native_scalar_flag(item, "Zoomable", false),
+                enable_drag: item.enable_drag.unwrap_or(false),
+                hyperlink: item.hyperlink.unwrap_or(false),
+                file_drag_mode: item.file_drag_mode.as_deref(),
+                text_color: &text_color,
+                back_color: &back_color,
+                auto_max_width: item.auto_max_width.unwrap_or(true),
+                max_width: item.max_width.as_deref().unwrap_or("0"),
+                auto_max_height: item.auto_max_height.unwrap_or(true),
+                max_height: item.max_height.as_deref().unwrap_or("0"),
+                ..native::NativePicturePayload::default()
+            })
+            .ok_or_else(|| anyhow!("<PictureField> names a spelling the writer cannot place"))
+        }
         _ => Err(anyhow!("<{}> has no payload writer yet", item.tag)),
     }
+}
+
+/// One scalar property of an item, or `"0"` when it names none -- what every
+/// size member of a payload carries.
+fn native_scalar<'a>(item: &'a FormXmlChildItem, name: &str) -> &'a str {
+    item.scalars.get(name).map_or("0", String::as_str)
+}
+
+/// One scalar property of an item read as a flag.
+fn native_scalar_flag(item: &FormXmlChildItem, name: &str, default: bool) -> bool {
+    item.scalars
+        .get(name)
+        .map_or(default, |value| value.trim() == "true")
+}
+
+/// One scalar colour property of an item, resolved through the configuration.
+fn native_scalar_color(
+    item: &FormXmlChildItem,
+    name: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    native_item_color(item.scalars.get(name).map(String::as_str), source)
+        .ok_or_else(|| anyhow!("<{}> names a colour the writer cannot place", item.tag))
 }
 
 /// What stops a form from being written in the shape the platform stores.
@@ -7839,7 +7974,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     command_bar.child_items_present = true;
                 }
-                if matches!(local.as_str(), "Format" | "CollapsedRepresentationTitle" | "Picture")
+                if matches!(
+                    local.as_str(),
+                    "Format" | "CollapsedRepresentationTitle" | "Picture" | "Font" | "ChoiceList"
+                )
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
                     })
@@ -7848,6 +7986,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     match local.as_str() {
                         "Format" => item.format_present = true,
                         "Picture" => item.picture_present = true,
+                        "Font" => item.font_present = true,
+                        "ChoiceList" => item.choice_list_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
@@ -8020,7 +8160,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     command_bar.child_items_present = true;
                 }
-                if matches!(local.as_str(), "Format" | "CollapsedRepresentationTitle" | "Picture")
+                if matches!(
+                    local.as_str(),
+                    "Format" | "CollapsedRepresentationTitle" | "Picture" | "Font" | "ChoiceList"
+                )
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
                     })
@@ -8029,6 +8172,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     match local.as_str() {
                         "Format" => item.format_present = true,
                         "Picture" => item.picture_present = true,
+                        "Font" => item.font_present = true,
+                        "ChoiceList" => item.choice_list_present = true,
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
@@ -11458,6 +11603,19 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
+                    name if !text_value.trim().is_empty()
+                        && path_ends_with_for_child_property(
+                            &path,
+                            &current_child_items,
+                            name,
+                        ) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.scalars
+                                .entry(name.to_string())
+                                .or_insert_with(|| text_value.trim().to_string());
+                        }
+                    }
                     _ => {}
                 }
                 let _ = path.pop();
@@ -11796,6 +11954,9 @@ fn parse_form_child_item_xml(
         pages_representation: None,
         container_representation: None,
         picture_present: false,
+        font_present: false,
+        choice_list_present: false,
+        scalars: BTreeMap::new(),
         child_items_present: false,
         child_items: Vec::new(),
     }))

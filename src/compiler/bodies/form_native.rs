@@ -1106,26 +1106,18 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
     ))
 }
 
-/// How a `<CheckBoxField>` draws itself.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeCheckBoxType {
-    /// Also what a field that names no type carries.
-    Auto,
-    CheckBox,
-    Tumbler,
-    /// A switcher differs from `Auto` in one of the two slots that carry the
-    /// type, which is why they cannot share a value.
-    Switcher,
-}
-
 /// The `{11,…}` payload of a check box field -- the same wrapper a label
 /// carries, with thirteen members instead of twenty.
 ///
-/// Two of them carry the check box type. A candidate that fills those two and
-/// copies the rest reproduces **all 10 385** check-box payloads of every ERP
-/// УХ form body exactly, first time.
+/// Eight of them carry an XML property, named by the partition test over all
+/// 10 385 check boxes of ERP УХ. `<CheckBoxType>` is written twice: slot 4
+/// tells `CheckBox` and `Tumbler` apart, and slot 12 also tells `Switcher`
+/// from `Auto`.
 pub(crate) struct NativeCheckBoxPayload<'a> {
-    pub(crate) check_box_type: NativeCheckBoxType,
+    /// Slot 1, `<ThreeState>`.
+    pub(crate) three_state: bool,
+    /// Slots 4 and 12.
+    pub(crate) check_box_type: Option<&'a str>,
     /// Slot 2, the text colour.
     pub(crate) text_color: &'a str,
     /// Slot 3, the background colour.
@@ -1136,57 +1128,82 @@ pub(crate) struct NativeCheckBoxPayload<'a> {
     pub(crate) border_color: &'a str,
     /// Slot 7, the font.
     pub(crate) font: &'a str,
+    /// Slots 8, 9 and 10: `<ItemTitleHeight>`, `<ItemWidth>` and
+    /// `<ItemHeight>`, 0 when the field names none.
+    pub(crate) item_title_height: &'a str,
+    pub(crate) item_width: &'a str,
+    pub(crate) item_height: &'a str,
+    /// Slot 11, `<EqualItemsWidth>`: `false` 0, `true` 1, absent 2.
+    pub(crate) equal_items_width: Option<&'a str>,
 }
 
 impl NativeCheckBoxPayload<'_> {
     pub(crate) const fn plain() -> Self {
         Self {
-            check_box_type: NativeCheckBoxType::Auto,
+            three_state: false,
+            check_box_type: None,
             text_color: "{3,4,{0}}",
             back_color: "{3,4,{0}}",
             format: "{1,0}",
             border_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
+            item_title_height: "0",
+            item_width: "0",
+            item_height: "0",
+            equal_items_width: None,
         }
     }
 }
 
-pub(crate) fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> String {
-    let (kind, tail) = match payload.check_box_type {
-        NativeCheckBoxType::Auto => ("0", "0"),
-        NativeCheckBoxType::CheckBox => ("1", "1"),
-        NativeCheckBoxType::Tumbler => ("2", "2"),
-        NativeCheckBoxType::Switcher => ("0", "3"),
-    };
-    format!(
-        "{{11,0,{text_color},{back_color},{kind},{format},{border_color},{font},0,0,0,2,{tail}}}",
+pub(crate) fn format_check_box_payload(payload: &NativeCheckBoxPayload<'_>) -> Option<String> {
+    let kind = root_code(
+        payload.check_box_type,
+        &[
+            ("Auto", "0"),
+            ("CheckBox", "1"),
+            ("Tumbler", "2"),
+            ("Switcher", "0"),
+        ],
+        "0",
+    )?;
+    let tail = root_code(
+        payload.check_box_type,
+        &[
+            ("Auto", "0"),
+            ("CheckBox", "1"),
+            ("Tumbler", "2"),
+            ("Switcher", "3"),
+        ],
+        "0",
+    )?;
+    let equal = root_code(
+        payload.equal_items_width,
+        &[("false", "0"), ("true", "1")],
+        "2",
+    )?;
+    Some(format!(
+        "{{11,{three_state},{text_color},{back_color},{kind},{format},{border_color},{font},{item_title_height},{item_width},{item_height},{equal},{tail}}}",
+        three_state = u8::from(payload.three_state),
         text_color = payload.text_color,
         back_color = payload.back_color,
         format = payload.format,
         border_color = payload.border_color,
         font = payload.font,
-    )
-}
-
-/// How a `<RadioButtonField>` draws itself.
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum NativeRadioButtonType {
-    /// Also what a field that names no type carries.
-    Auto,
-    RadioButtons,
-    Tumbler,
+        item_title_height = payload.item_title_height,
+        item_width = payload.item_width,
+        item_height = payload.item_height,
+    ))
 }
 
 /// The `{8,…}` payload of a radio-button field.
 ///
-/// Two of its twelve members carry an XML property: the number of columns and
-/// the type. A candidate that fills those two and copies the rest reproduces
-/// **all 2 282** radio-button payloads of every ERP УХ form body exactly,
-/// first time.
+/// Six of its twelve members carry an XML property, named by the partition
+/// test over all 2 282 radio buttons of ERP УХ.
 pub(crate) struct NativeRadioButtonPayload<'a> {
-    /// Slot 2, `0` when the field names no column count.
+    /// Slot 2, `<ColumnsCount>`, 0 when the field names none.
     pub(crate) columns: &'a str,
-    pub(crate) radio_button_type: NativeRadioButtonType,
+    /// Slot 7, `<RadioButtonType>`.
+    pub(crate) radio_button_type: Option<&'a str>,
     /// Slot 1, the choice list the field offers.
     pub(crate) choice_list: &'a str,
     /// Slot 3, the text colour; slot 5, the background; slot 8, the border.
@@ -1195,37 +1212,58 @@ pub(crate) struct NativeRadioButtonPayload<'a> {
     pub(crate) border_color: &'a str,
     /// Slot 4, the font.
     pub(crate) font: &'a str,
+    /// Slots 6, 9 and 10: `<ItemHeight>`, `<ItemTitleHeight>` and
+    /// `<ItemWidth>`, 0 when the field names none.
+    pub(crate) item_height: &'a str,
+    pub(crate) item_title_height: &'a str,
+    pub(crate) item_width: &'a str,
+    /// Slot 11, `<EqualColumnsWidth>`: `false` 0, `true` 1, absent 2.
+    pub(crate) equal_columns_width: Option<&'a str>,
 }
 
 impl NativeRadioButtonPayload<'_> {
     pub(crate) const fn plain() -> Self {
         Self {
-            columns: "1",
-            radio_button_type: NativeRadioButtonType::Auto,
+            columns: "0",
+            radio_button_type: None,
             choice_list: "{3,0}",
             text_color: "{3,4,{0}}",
             back_color: "{3,4,{0}}",
             border_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
+            item_height: "0",
+            item_title_height: "0",
+            item_width: "0",
+            equal_columns_width: None,
         }
     }
 }
 
-pub(crate) fn format_radio_button_payload(payload: &NativeRadioButtonPayload<'_>) -> String {
-    let kind = match payload.radio_button_type {
-        NativeRadioButtonType::Auto => "0",
-        NativeRadioButtonType::RadioButtons => "1",
-        NativeRadioButtonType::Tumbler => "2",
-    };
-    format!(
-        "{{8,{choice_list},{columns},{text_color},{font},{back_color},0,{kind},{border_color},0,0,2}}",
+pub(crate) fn format_radio_button_payload(
+    payload: &NativeRadioButtonPayload<'_>,
+) -> Option<String> {
+    let kind = root_code(
+        payload.radio_button_type,
+        &[("Auto", "0"), ("RadioButtons", "1"), ("Tumbler", "2")],
+        "0",
+    )?;
+    let equal = root_code(
+        payload.equal_columns_width,
+        &[("false", "0"), ("true", "1")],
+        "2",
+    )?;
+    Some(format!(
+        "{{8,{choice_list},{columns},{text_color},{font},{back_color},{item_height},{kind},{border_color},{item_title_height},{item_width},{equal}}}",
         choice_list = payload.choice_list,
         columns = payload.columns,
         text_color = payload.text_color,
         font = payload.font,
         back_color = payload.back_color,
+        item_height = payload.item_height,
         border_color = payload.border_color,
-    )
+        item_title_height = payload.item_title_height,
+        item_width = payload.item_width,
+    ))
 }
 
 /// The `{10,…}` payload of a picture field.
@@ -1255,6 +1293,9 @@ pub(crate) struct NativePicturePayload<'a> {
     pub(crate) max_height: &'a str,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
     pub(crate) file_drag_mode: Option<&'a str>,
+    /// Slot 7, `<Zoomable>`, and slot 15, `<EnableDrag>`.
+    pub(crate) zoomable: bool,
+    pub(crate) enable_drag: bool,
     /// Already formatted -- the picture, the title, the colours, the font,
     /// the border and the events.
     pub(crate) picture: &'a str,
@@ -1280,6 +1321,8 @@ impl Default for NativePicturePayload<'_> {
             auto_max_height: true,
             max_height: "0",
             file_drag_mode: None,
+            zoomable: false,
+            enable_drag: false,
             picture: "{4,0,{0},\"\",-1,-1,1,0,\"\"}",
             title: "{1,0}",
             text_color: "{3,4,{0}}",
@@ -1307,9 +1350,11 @@ pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Opti
     // A picture that names no drag mode writes 1, not 0.
     let drag = root_code(payload.file_drag_mode, &[("AsFile", "0")], "1")?;
     Some(format!(
-        "{{10,{width},{height},{horizontal},{vertical},{picture},{size},0,{hyperlink},{title},\
-         {text_color},{back_color},{font},{border},0,{events},{auto_max_width},{max_width},0,\
-         {auto_max_height},{max_height},{drag},0,100}}",
+        "{{10,{width},{height},{horizontal},{vertical},{picture},{size},{zoomable},{hyperlink},{title},\
+         {text_color},{back_color},{font},{border},{enable_drag},{events},{auto_max_width},\
+         {max_width},0,{auto_max_height},{max_height},{drag},0,100}}",
+        zoomable = u8::from(payload.zoomable),
+        enable_drag = u8::from(payload.enable_drag),
         width = payload.width,
         height = payload.height,
         horizontal = u8::from(payload.horizontal_stretch),
@@ -1331,32 +1376,134 @@ pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Opti
 
 /// The `{13,…}` payload of a spreadsheet document field.
 ///
-/// Six of its thirty-two members carry an XML property -- the two sizes, the
-/// two maxima and the two scroll bars, where a field naming neither scroll bar
-/// carries 2. All 942 records of the corpus are reproduced exactly, first
-/// time.
-#[allow(clippy::too_many_arguments)]
+/// Twenty-four of its thirty-two members carry an XML property, named by the
+/// partition test over all 942 spreadsheet fields of ERP УХ. Three are
+/// written twice under two codings: both scroll bars, where the later slot
+/// tells "names none" from `true`, and `<SelectionShowMode>`, where the later
+/// slot tells all four spellings apart.
+pub(crate) struct NativeSpreadsheetPayload<'a> {
+    /// Slots 1 and 2, `<Width>` and `<Height>`, 50 and 10 by default.
+    pub(crate) width: &'a str,
+    pub(crate) height: &'a str,
+    /// Slots 3 and 4, the two stretches, on unless the field turns them off.
+    pub(crate) horizontal_stretch: bool,
+    pub(crate) vertical_stretch: bool,
+    /// Slots 5 and 6, `<ShowGrid>` and `<ShowHeaders>`.
+    pub(crate) show_grid: bool,
+    pub(crate) show_headers: bool,
+    /// Slots 7 and 28, and 8 and 29: the two scroll bars.
+    pub(crate) vertical_scroll_bar: Option<&'a str>,
+    pub(crate) horizontal_scroll_bar: Option<&'a str>,
+    /// Slot 10, `<Protection>`.
+    pub(crate) protection: bool,
+    /// Slots 11 and 30, `<SelectionShowMode>`.
+    pub(crate) selection_show_mode: Option<&'a str>,
+    /// Slot 12, `<Output>`: `Enable` 1, `Disable` 2, absent 0.
+    pub(crate) output: Option<&'a str>,
+    /// Slots 13 and 14, `<Edit>` and `<ShowGroups>`.
+    pub(crate) edit: bool,
+    pub(crate) show_groups: bool,
+    /// Slot 15, the border colour.
+    pub(crate) border_color: &'a str,
+    /// Slots 16 and 17, `<EnableStartDrag>` and `<EnableDrag>`.
+    pub(crate) enable_start_drag: bool,
+    pub(crate) enable_drag: bool,
+    /// Slot 18, the field's events.
+    pub(crate) events: &'a str,
+    /// Slot 19, `<ViewScalingMode>`: `Normal` 1, absent 0.
+    pub(crate) view_scaling_mode: Option<&'a str>,
+    /// Slots 20, 21, 23 and 24: the two maxima and their flags.
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: &'a str,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
+    /// Slots 25 and 26, `<ShowCellNames>` and `<ShowRowAndColumnNames>`.
+    pub(crate) show_cell_names: bool,
+    pub(crate) show_row_and_column_names: bool,
+}
+
+impl NativeSpreadsheetPayload<'_> {
+    pub(crate) const fn plain() -> Self {
+        Self {
+            width: "50",
+            height: "10",
+            horizontal_stretch: true,
+            vertical_stretch: true,
+            show_grid: false,
+            show_headers: false,
+            vertical_scroll_bar: None,
+            horizontal_scroll_bar: None,
+            protection: false,
+            selection_show_mode: None,
+            output: None,
+            edit: false,
+            show_groups: true,
+            border_color: "{3,4,{0}}",
+            enable_start_drag: true,
+            enable_drag: true,
+            events: "{0,1,0}",
+            view_scaling_mode: None,
+            auto_max_width: true,
+            max_width: "0",
+            auto_max_height: true,
+            max_height: "0",
+            show_cell_names: false,
+            show_row_and_column_names: false,
+        }
+    }
+}
+
 pub(crate) fn format_spreadsheet_payload(
-    width: &str,
-    height: &str,
-    max_width: &str,
-    max_height: &str,
-    vertical_scroll_bar: Option<bool>,
-    horizontal_scroll_bar: Option<bool>,
-    middle: &str,
-    events: &str,
-    tail: &str,
-) -> String {
-    let bar = |value: Option<bool>| match value {
-        Some(true) => "1",
-        Some(false) => "0",
-        None => "2",
-    };
-    format!(
-        "{{13,{width},{height},{middle},{max_width},0,{max_height},0,0,{events},{tail},{vertical},{horizontal},1,2}}",
-        vertical = bar(vertical_scroll_bar),
-        horizontal = bar(horizontal_scroll_bar),
-    )
+    payload: &NativeSpreadsheetPayload<'_>,
+) -> Option<String> {
+    let bar = |value| root_code(value, &[("false", "0"), ("true", "1")], "1");
+    let bar_tail = |value| root_code(value, &[("false", "0"), ("true", "1")], "2");
+    let vertical = bar(payload.vertical_scroll_bar)?;
+    let horizontal = bar(payload.horizontal_scroll_bar)?;
+    let vertical_tail = bar_tail(payload.vertical_scroll_bar)?;
+    let horizontal_tail = bar_tail(payload.horizontal_scroll_bar)?;
+    let selection = root_code(
+        payload.selection_show_mode,
+        &[
+            ("WhenActive", "0"),
+            ("DontShow", "1"),
+            ("WhenMultipleCellsSelected", "1"),
+        ],
+        "1",
+    )?;
+    let selection_tail = root_code(
+        payload.selection_show_mode,
+        &[
+            ("WhenActive", "0"),
+            ("DontShow", "2"),
+            ("WhenMultipleCellsSelected", "3"),
+        ],
+        "1",
+    )?;
+    let output = root_code(payload.output, &[("Enable", "1"), ("Disable", "2")], "0")?;
+    let scaling = root_code(payload.view_scaling_mode, &[("Normal", "1")], "0")?;
+    Some(format!(
+        "{{13,{width},{height},{horizontal_stretch},{vertical_stretch},{show_grid},{show_headers},{vertical},{horizontal},0,{protection},{selection},{output},{edit},{show_groups},{border_color},{enable_start_drag},{enable_drag},{events},{scaling},{auto_max_width},{max_width},0,{auto_max_height},{max_height},{show_cell_names},{show_row_and_column_names},0,{vertical_tail},{horizontal_tail},{selection_tail},2}}",
+        width = payload.width,
+        height = payload.height,
+        horizontal_stretch = u8::from(payload.horizontal_stretch),
+        vertical_stretch = u8::from(payload.vertical_stretch),
+        show_grid = u8::from(payload.show_grid),
+        show_headers = u8::from(payload.show_headers),
+        protection = u8::from(payload.protection),
+        edit = u8::from(payload.edit),
+        show_groups = u8::from(payload.show_groups),
+        border_color = payload.border_color,
+        enable_start_drag = u8::from(payload.enable_start_drag),
+        enable_drag = u8::from(payload.enable_drag),
+        events = payload.events,
+        auto_max_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
+        auto_max_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
+        show_cell_names = u8::from(payload.show_cell_names),
+        show_row_and_column_names = u8::from(payload.show_row_and_column_names),
+    ))
 }
 
 /// The `{3,…}`, `{5,…}` and `{1,…}` payloads of the HTML, text and formatted
@@ -5172,31 +5319,61 @@ mod tests {
     #[test]
     fn writes_the_check_box_and_radio_payloads_the_platform_stores() {
         assert_eq!(
-            format_check_box_payload(&NativeCheckBoxPayload::plain()),
+            format_check_box_payload(&NativeCheckBoxPayload::plain()).expect("a payload"),
             "{11,0,{3,4,{0}},{3,4,{0}},0,{1,0},{3,4,{0}},{7,3,0,1,100},0,0,0,2,0}"
         );
         // `Auto` and `Switcher` share the first slot and differ in the last.
-        assert!(format_check_box_payload(&NativeCheckBoxPayload {
-            check_box_type: NativeCheckBoxType::Switcher,
-            ..NativeCheckBoxPayload::plain()
-        })
-        .ends_with(",0,0,0,2,3}"));
-        assert!(format_check_box_payload(&NativeCheckBoxPayload {
-            check_box_type: NativeCheckBoxType::Tumbler,
-            ..NativeCheckBoxPayload::plain()
-        })
-        .contains("{3,4,{0}},2,{1,0},"));
+        assert!(
+            format_check_box_payload(&NativeCheckBoxPayload {
+                check_box_type: Some("Switcher"),
+                ..NativeCheckBoxPayload::plain()
+            })
+            .expect("a payload")
+            .ends_with(",0,0,0,2,3}")
+        );
+        assert!(
+            format_check_box_payload(&NativeCheckBoxPayload {
+                check_box_type: Some("Tumbler"),
+                ..NativeCheckBoxPayload::plain()
+            })
+            .expect("a payload")
+            .contains("{3,4,{0}},2,{1,0},")
+        );
+        // `<ThreeState>` and the three sizes, each in its own slot.
+        assert!(
+            format_check_box_payload(&NativeCheckBoxPayload {
+                three_state: true,
+                item_title_height: "1",
+                item_width: "19",
+                item_height: "1",
+                equal_items_width: Some("false"),
+                ..NativeCheckBoxPayload::plain()
+            })
+            .expect("a payload")
+            .ends_with(",1,19,1,0,0}")
+        );
 
         assert_eq!(
-            format_radio_button_payload(&NativeRadioButtonPayload::plain()),
-            "{8,{3,0},1,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2}"
+            format_radio_button_payload(&NativeRadioButtonPayload::plain()).expect("a payload"),
+            "{8,{3,0},0,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,0,{3,4,{0}},0,0,2}"
         );
-        assert!(format_radio_button_payload(&NativeRadioButtonPayload {
-            columns: "3",
-            radio_button_type: NativeRadioButtonType::Tumbler,
-            ..NativeRadioButtonPayload::plain()
-        })
-        .starts_with("{8,{3,0},3,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,2,"));
+        assert!(
+            format_radio_button_payload(&NativeRadioButtonPayload {
+                columns: "3",
+                radio_button_type: Some("Tumbler"),
+                ..NativeRadioButtonPayload::plain()
+            })
+            .expect("a payload")
+            .starts_with("{8,{3,0},3,{3,4,{0}},{7,3,0,1,100},{3,4,{0}},0,2,")
+        );
+        // A spelling the corpus never stores is refused, not defaulted.
+        assert!(
+            format_radio_button_payload(&NativeRadioButtonPayload {
+                radio_button_type: Some("Switcher"),
+                ..NativeRadioButtonPayload::plain()
+            })
+            .is_none()
+        );
     }
 
     /// The default payload of each of the six group kinds the corpus closed
@@ -5325,16 +5502,22 @@ mod tests {
             None
         );
 
-        // A spreadsheet field that names neither scroll bar carries 2 in both
-        // of the slots that hold them.
+        // A spreadsheet field that names neither scroll bar carries 1 in the
+        // first slot that holds it and 2 in the second.
         let sheet = |vertical, horizontal| {
-            format_spreadsheet_payload(
-                "50", "10", "0", "0", vertical, horizontal,
-                "1,1,0", "0,0", "1,1",
-            )
+            format_spreadsheet_payload(&NativeSpreadsheetPayload {
+                vertical_scroll_bar: vertical,
+                horizontal_scroll_bar: horizontal,
+                ..NativeSpreadsheetPayload::plain()
+            })
+            .expect("a payload")
         };
-        assert!(sheet(None, None).ends_with(",2,2,1,2}"));
-        assert!(sheet(Some(true), Some(false)).ends_with(",1,0,1,2}"));
+        assert_eq!(
+            sheet(None, None),
+            "{13,50,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{0,1,0},0,1,0,0,1,0,0,0,0,2,2,1,2}"
+        );
+        assert!(sheet(Some("true"), Some("false")).ends_with(",1,0,1,2}"));
+        assert!(sheet(Some("true"), Some("false")).contains(",1,1,0,0,1,0,"));
     }
 
     /// Every colour shape an ERP УХ body stores, with the exact values the

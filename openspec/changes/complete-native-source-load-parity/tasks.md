@@ -45,9 +45,12 @@ rather than defaulting it.
       6 900 / 6 903 (99.96%). With this every item record of a form body is
       read. *(table-head-20260921.md)*
 - [x] **Colours** and **fonts** an item can carry.
-- [x] The item payloads: label, input, check box, radio button, picture,
-      spreadsheet, HTML, text and formatted document, usual group, button group,
-      command bar, pages, page, popup, column group.
+- [x] **The item payloads, every member of each.** The partition test closed
+      the usual group (24 of 29 members over 61 256 records), the auto command
+      bar, the button group, the command bar, the pages group, the popup, the
+      column group, the page, the check box, the radio button, the spreadsheet
+      document and the picture, and all of them are wired to the XML.
+      *(container-and-field-payloads-20260921.md)*
 
 ## Open
 
@@ -73,11 +76,16 @@ rather than defaulting it.
       item's tag -- containers, fields, buttons and decorations -- and the
       parameters and commands sections are written too. `child items` has left
       the refusal list entirely: 126 forms now reach comparison, up from 83.
-- [ ] **Resolve a button's `<CommandName>`**, which now holds up 4 614 forms --
-      the largest single group. `Form.Command.X` is the form's own command id;
-      `Form.StandardCommand.X` is a known uuid.
+- [x] **Resolve a button's `<CommandName>`.** Always `{<target>,<uuid>}`: the
+      target is 0 for a form standard command and the target item's own id for
+      an item standard command -- true in all 15 692 standard-command buttons
+      -- and the command's own id for `Form.Command.X`. The uuid is fixed per
+      scope and name, where the scope is the form's main attribute class or the
+      target item's tag plus whether it is bound to a dynamic list; 146 of 147
+      form keys and 156 of 158 item keys map to one uuid, and the rest are
+      refused.
 - [ ] **A dynamic list's settings** (2 630 forms) and the `{55,…}` table
-      dispatch (380).
+      record (1 766), now the two largest refusals.
 - [x] **The navigator** is not a source property at all: it travels with the
       settings composer spelling, which is not in the source either. Of the
       11 842 forms carrying one of the two canonical blobs, 11 821 agree --
@@ -91,7 +99,10 @@ rather than defaulting it.
       ever sees them: `<ExcludedCommand>` spellings (1 455), conditional
       appearance (569), list settings (401), DCS children (195).
 - [ ] **Close the round trip**: export → load into an empty database → export,
-      byte-identical.
+      byte-identical to the second export. This, not the body-to-body audit, is
+      the criterion: the navigator and the command bar's functional-options
+      block are not in the source at all, so `different` can never reach zero.
+      *(navigator-is-not-in-the-source-20260921.md)*
 
 ## The tool that turned out to matter
 
