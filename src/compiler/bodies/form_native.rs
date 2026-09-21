@@ -140,11 +140,81 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> String {
 /// of its own, with the one slot that separates a field the user edits from
 /// one that only shows.
 pub(crate) fn format_plain_field_payload(editable: bool) -> String {
+    format_label_payload(&NativeLabelPayload::plain(editable))
+}
+
+/// The `{11,…}` payload of a label field, member by member.
+///
+/// Five of its twenty members carry an XML property. They were read off the
+/// corpus and then measured against it: a candidate that fills these five and
+/// copies the rest reproduces **all 37 078** label payloads of every ERP УХ
+/// form body exactly, with no record left over. The other members are the
+/// appearance blocks and the event bindings, which are shapes of their own.
+pub(crate) struct NativeLabelPayload<'a> {
+    /// Slot 1, `0` when the item names no width.
+    pub(crate) width: &'a str,
+    /// Slot 2, `0` when it names no height.
+    pub(crate) height: &'a str,
+    /// Slot 3: `false` -> 0, `true` -> 1, absent -> 2.
+    pub(crate) horizontal_stretch: Option<bool>,
+    /// Slot 6, `{1,0}` when the item names no format.
+    pub(crate) format: &'a str,
+    /// Slot 7: whether the field is one the user edits.
+    pub(crate) editable: bool,
+    /// Slot 8, the text colour.
+    pub(crate) text_color: &'a str,
+    /// Slot 9, the background colour.
+    pub(crate) back_color: &'a str,
+    /// Slot 10, the font.
+    pub(crate) font: &'a str,
+    /// Slot 12, the item's own event bindings.
+    pub(crate) events: &'a str,
+    /// Slot 15: `0` exactly when the item says `AutoMaxWidth` is false.
+    pub(crate) auto_max_width: bool,
+    /// Slot 16, `0` when the item names no maximum width.
+    pub(crate) max_width: &'a str,
+}
+
+impl NativeLabelPayload<'_> {
+    /// What a label that names no property of its own carries.
+    pub(crate) const fn plain(editable: bool) -> Self {
+        Self {
+            width: "0",
+            height: "0",
+            horizontal_stretch: None,
+            format: "{1,0}",
+            editable,
+            text_color: "{3,4,{0}}",
+            back_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+            events: "{0,1,0}",
+            auto_max_width: true,
+            max_width: "0",
+        }
+    }
+}
+
+pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
+    let stretch = match payload.horizontal_stretch {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "2",
+    };
     format!(
-        "{{11,0,0,2,2,2,{{1,0}},{editable},{{3,4,{{0}}}},{{3,4,{{0}}}},{{7,3,0,1,100}},2,\
-         {{0,1,0}},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}},1,0,0,1,0}}",
-        editable = u8::from(editable),
+        "{{11,{width},{height},{stretch},2,2,{format},{editable},{text_color},{back_color},\
+         {font},2,{events},{{3,4,{{0}}}},{{3,0,{{0}},0,1,0,{appearance}}},{auto_max_width},\
+         {max_width},0,1,0}}",
+        width = payload.width,
+        height = payload.height,
+        format = payload.format,
+        editable = u8::from(payload.editable),
+        text_color = payload.text_color,
+        back_color = payload.back_color,
+        font = payload.font,
+        events = payload.events,
         appearance = DEFAULT_APPEARANCE_UUID,
+        auto_max_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
     )
 }
 
@@ -980,6 +1050,45 @@ mod tests {
             ",1,77ffcc29-7f2d-4223-b22f-19666e7250ba,{field},\"\",\"\",0,1,"
         )));
         assert!(root.ends_with(",0,0,0,{50,0},1}"));
+    }
+
+    /// Four label payloads of ERP УХ form bodies, each carrying a different
+    /// set of the five properties the mapping claims, exactly as stored.
+    #[test]
+    fn writes_the_label_payloads_the_platform_stores() {
+        // A label that names only a height: the height lands in slot 2.
+        assert_eq!(
+            format_label_payload(&NativeLabelPayload { height: "2", ..NativeLabelPayload::plain(false) }),
+            "{11,0,2,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0}"
+        );
+        // Width and height together.
+        assert_eq!(
+            format_label_payload(&NativeLabelPayload {
+                width: "16",
+                height: "1",
+                ..NativeLabelPayload::plain(false)
+            }),
+            "{11,16,1,2,2,2,{1,0},0,{3,4,{0}},{3,4,{0}},{7,3,0,1,100},2,{0,1,0},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,0,0,1,0}"
+        );
+        // `HorizontalStretch` is three-valued: false, true, and not named.
+        assert!(format_label_payload(&NativeLabelPayload {
+            horizontal_stretch: Some(false),
+            ..NativeLabelPayload::plain(false)
+        })
+        .starts_with("{11,0,0,0,"));
+        assert!(format_label_payload(&NativeLabelPayload {
+            horizontal_stretch: Some(true),
+            ..NativeLabelPayload::plain(false)
+        })
+        .starts_with("{11,0,0,1,"));
+        assert!(format_label_payload(&NativeLabelPayload::plain(false)).starts_with("{11,0,0,2,"));
+        // A maximum width switches the auto flag off and lands in slot 16.
+        assert!(format_label_payload(&NativeLabelPayload {
+            auto_max_width: false,
+            max_width: "15",
+            ..NativeLabelPayload::plain(false)
+        })
+        .ends_with(",0,15,0,1,0}"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in

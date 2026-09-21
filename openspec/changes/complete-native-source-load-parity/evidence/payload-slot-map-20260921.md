@@ -110,6 +110,30 @@ a track bar, a Gantt chart, a PDF document field and a graphical schema field
 appear once or twice in 3 000 forms. Those want the whole corpus and the BSP
 tree beside it.
 
+## Closing a payload: claim, measure, refine
+
+Reading a slot is a claim. A candidate writer turns it into a number.
+
+`try-label-payload.py` builds the label payload from the XML properties with
+the mapping read so far, copies the slots it does not claim from the stored
+record, and compares. Over every label payload of every ERP УХ form body --
+37 078 records from all 12 515 forms -- three rounds:
+
+| round | the rule under test | exact |
+|---|---|---|
+| 1 | `Width`, `Height`, `HorizontalStretch`, `MaxWidth`, and slot 15 as "a maximum width was named" | 34 195 of 37 078 (92.22%) |
+| 2 | slot 15 also 0 when `AutoMaxWidth` is false | 36 947 (99.65%) |
+| 3 | slot 15 0 **exactly when** `AutoMaxWidth` is false | **37 078 (100.00%)** |
+
+The mistake in round 1 was reading `MaxWidth` as the cause of slot 15; it is
+`AutoMaxWidth` alone, and a form may name a maximum width while leaving the
+flag alone. The corpus said so in 131 records, and the loop found it in one
+pass.
+
+`format_label_payload` now carries those five rules. This is the shape of the
+remaining work: not "look at the record and guess", but claim, measure over
+tens of thousands of records, refine, and stop when it is 100%.
+
 ## Why this matters for the estimate
 
 Each payload kind has a fixed member count -- 20 for a label, 66 for an input,
