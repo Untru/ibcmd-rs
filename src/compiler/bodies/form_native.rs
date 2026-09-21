@@ -1225,6 +1225,177 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
 /// The namespace a form *command* id lives in, which is not the item one.
 pub(crate) const FORM_COMMAND_NAMESPACE_UUID: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
 
+/// What a table says about itself after its columns -- the 37 members that
+/// close a `{55,…}` record.
+///
+/// A table's columns are `(kind uuid, record)` pairs like a group's children,
+/// and what follows them is **exactly 37 members in all 6 903 table records**
+/// of ERP УХ that could be split. **6 890 of them rebuild byte for byte**;
+/// the 13 left differ in two members whose driver is not in the element.
+///
+/// The one reading that could not be guessed is member 35: it is
+/// `<FileDragMode>`, and it is **1 when the table does not name one** and 0
+/// when it names `AsFile`. Every one of the 4 593 tables that name it writes
+/// 0 and every one of the 2 310 that do not writes 1, with nothing in between.
+/// Reading it as a drag flag, which three witnesses suggested, made the
+/// measurement worse rather than better.
+pub(crate) struct NativeTableTail<'a> {
+    /// `<AutoMarkIncomplete>` and `<AutoAddIncomplete>`: 2 when unnamed.
+    pub(crate) auto_mark_incomplete: Option<bool>,
+    pub(crate) auto_add_incomplete: Option<bool>,
+    pub(crate) visible: bool,
+    pub(crate) multiple_choice: bool,
+    /// `<SkipOnInput>`: 2 when unnamed.
+    pub(crate) skip_on_input: Option<bool>,
+    /// `<SearchOnInput>`: `Use` or `DontUse`.
+    pub(crate) search_on_input: Option<&'a str>,
+    /// `<ToolTipRepresentation>`.
+    pub(crate) tooltip_representation: Option<&'a str>,
+    /// The table's extended tooltip, already formatted.
+    pub(crate) extended_tooltip: &'a str,
+    /// Where the table shows its search string, its view status and its search
+    /// control.
+    pub(crate) search_string_location: Option<&'a str>,
+    pub(crate) view_status_location: Option<&'a str>,
+    pub(crate) search_control_location: Option<&'a str>,
+    /// The three `{5,…}` additions, always present, already formatted.
+    pub(crate) additions: [&'a str; 3],
+    /// `<RefreshRequest>`, of which only `PullFromTop` is ever stored.
+    pub(crate) refresh_request: Option<&'a str>,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: Option<&'a str>,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: Option<&'a str>,
+    /// `<HeightControlVariant>`: `UseHeightInFormRows`, `UseHeightInTableRows`
+    /// or `UseContentHeight`.
+    pub(crate) height_control_variant: Option<&'a str>,
+    pub(crate) auto_max_rows_count: bool,
+    pub(crate) max_rows_count: Option<&'a str>,
+    /// `<CurrentRowUse>`: `Choice`, `SelectionPresentation` or
+    /// `SelectionPresentationAndChoice`.
+    pub(crate) current_row_use: Option<&'a str>,
+    /// `<FileDragMode>`, of which only `AsFile` is ever stored.
+    pub(crate) file_drag_mode: Option<&'a str>,
+}
+
+impl Default for NativeTableTail<'_> {
+    fn default() -> Self {
+        Self {
+            auto_mark_incomplete: None,
+            auto_add_incomplete: None,
+            visible: true,
+            multiple_choice: false,
+            skip_on_input: None,
+            search_on_input: None,
+            tooltip_representation: None,
+            extended_tooltip: "",
+            search_string_location: None,
+            view_status_location: None,
+            search_control_location: None,
+            additions: ["", "", ""],
+            refresh_request: None,
+            auto_max_width: true,
+            max_width: None,
+            auto_max_height: true,
+            max_height: None,
+            height_control_variant: None,
+            auto_max_rows_count: true,
+            max_rows_count: None,
+            current_row_use: None,
+            file_drag_mode: None,
+        }
+    }
+}
+
+/// The 37 members that close a `{55,…}` table record.
+pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
+    let tooltip_representation = root_code(
+        tail.tooltip_representation,
+        &[
+            ("Auto", "0"),
+            ("None", "1"),
+            ("Balloon", "2"),
+            ("Button", "3"),
+            ("ShowAuto", "4"),
+            ("ShowTop", "5"),
+            ("ShowLeft", "6"),
+            ("ShowBottom", "7"),
+            ("ShowRight", "8"),
+        ],
+        "0",
+    )?;
+    let search_string = root_code(
+        tail.search_string_location,
+        &[
+            ("None", "1"),
+            ("CommandBar", "2"),
+            ("Top", "3"),
+            ("Bottom", "4"),
+            ("FormCaption", "5"),
+            ("PullFromTop", "6"),
+        ],
+        "0",
+    )?;
+    let view_status = root_code(
+        tail.view_status_location,
+        &[("None", "1"), ("Top", "2"), ("Bottom", "3")],
+        "0",
+    )?;
+    let search_control = root_code(
+        tail.search_control_location,
+        &[("None", "1"), ("CommandBar", "2")],
+        "0",
+    )?;
+    let refresh = root_code(tail.refresh_request, &[("PullFromTop", "1")], "0")?;
+    let height_variant = root_code(
+        tail.height_control_variant,
+        &[
+            ("UseHeightInFormRows", "1"),
+            ("UseHeightInTableRows", "2"),
+            ("UseContentHeight", "3"),
+        ],
+        "0",
+    )?;
+    let current_row_use = root_code(
+        tail.current_row_use,
+        &[
+            ("Choice", "1"),
+            ("SelectionPresentation", "2"),
+            ("SelectionPresentationAndChoice", "3"),
+        ],
+        "0",
+    )?;
+    let search_on_input = root_code(
+        tail.search_on_input,
+        &[("Use", "0"), ("DontUse", "1")],
+        "2",
+    )?;
+    // A table that does not name a drag mode writes 1, not 0.
+    let drag = root_code(tail.file_drag_mode, &[("AsFile", "0")], "1")?;
+    Some(format!(
+        "{auto_mark},{auto_add},{visible},{multiple_choice},{{\"Pattern\"}},\"\",\"\",\
+         {skip_on_input},{search_on_input},{tooltip_representation},1,{extended_tooltip},\
+         {search_string},{view_status},{search_control},1,{first},1,{second},1,{third},\
+         {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},3,3,\
+         {height_variant},{auto_max_rows},{max_rows},{current_row_use},0,0,{drag},0",
+        auto_mark = native_tristate(tail.auto_mark_incomplete),
+        auto_add = native_tristate(tail.auto_add_incomplete),
+        visible = u8::from(tail.visible),
+        multiple_choice = u8::from(tail.multiple_choice),
+        skip_on_input = native_tristate(tail.skip_on_input),
+        extended_tooltip = tail.extended_tooltip,
+        first = tail.additions[0],
+        second = tail.additions[1],
+        third = tail.additions[2],
+        auto_max_width = u8::from(tail.auto_max_width),
+        max_width = tail.max_width.unwrap_or("0"),
+        auto_max_height = u8::from(tail.auto_max_height),
+        max_height = tail.max_height.unwrap_or("0"),
+        auto_max_rows = u8::from(tail.auto_max_rows_count),
+        max_rows = tail.max_rows_count.unwrap_or("0"),
+    ))
+}
+
 /// A decoration, as the body stores it.
 ///
 /// An `<ExtendedTooltip>` is the commonest record in a form body -- 421 852 of
@@ -2986,6 +3157,58 @@ mod tests {
             }
             assert!(record.ends_with(&format!("{tooltip},0,3,3,0}}")));
         }
+    }
+
+    /// What a table says about itself after its columns.
+    #[test]
+    fn writes_what_a_table_says_about_itself() {
+        let quiet = format_table_tail(&NativeTableTail {
+            extended_tooltip: "{12,{6,x},0}",
+            additions: ["{5,{7,x},0}", "{5,{10,x},0}", "{5,{13,x},0}"],
+            ..NativeTableTail::default()
+        })
+        .expect("a table tail");
+        assert_eq!(top_level_members(&format!("{{{quiet}}}")).len(), 37);
+        assert!(quiet.starts_with("2,2,1,0,{\"Pattern\"},\"\",\"\",2,2,0,1,{12,{6,x},0},0,0,0,1,"));
+        // A table that names no drag mode writes 1 there, not 0.
+        assert!(quiet.ends_with(",3,3,0,1,0,0,0,0,1,0"));
+
+        let spoken = format_table_tail(&NativeTableTail {
+            auto_mark_incomplete: Some(true),
+            auto_add_incomplete: Some(false),
+            visible: false,
+            multiple_choice: true,
+            skip_on_input: Some(true),
+            search_on_input: Some("DontUse"),
+            tooltip_representation: Some("ShowRight"),
+            extended_tooltip: "{12,{6,x},0}",
+            search_string_location: Some("PullFromTop"),
+            view_status_location: Some("Top"),
+            search_control_location: Some("CommandBar"),
+            additions: ["{5,{7,x},0}", "{5,{10,x},0}", "{5,{13,x},0}"],
+            refresh_request: Some("PullFromTop"),
+            auto_max_width: false,
+            max_width: Some("70"),
+            auto_max_height: false,
+            max_height: Some("12"),
+            height_control_variant: Some("UseContentHeight"),
+            auto_max_rows_count: false,
+            max_rows_count: Some("6"),
+            current_row_use: Some("SelectionPresentationAndChoice"),
+            file_drag_mode: Some("AsFile"),
+        })
+        .expect("a table tail");
+        assert!(spoken.starts_with("1,0,0,1,{\"Pattern\"},\"\",\"\",1,1,8,1,{12,{6,x},0},6,2,2,1,"));
+        assert!(spoken.ends_with(",1,0,70,0,0,12,3,3,3,0,6,3,0,0,0,0"));
+
+        // A spelling the corpus never showed is refused.
+        assert_eq!(
+            format_table_tail(&NativeTableTail {
+                search_on_input: Some("Sometimes"),
+                ..NativeTableTail::default()
+            }),
+            None
+        );
     }
 
     /// What a decoration says about itself. The sharpest check: the full

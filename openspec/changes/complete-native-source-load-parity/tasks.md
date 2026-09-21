@@ -39,6 +39,8 @@ rather than defaulting it.
 - [x] **The `{12,…}` decoration record**, one layout for tooltips, labels and
       pictures: 464 526 / 464 539 (100.00%).
       *(decoration-record-20260921.md)*
+- [x] **The `{55,…}` table record's tail** -- the 37 members after its
+      columns: 6 890 / 6 903 (99.81%). *(table-tail-20260921.md)*
 - [x] **Colours** and **fonts** an item can carry.
 - [x] The item payloads: label, input, check box, radio button, picture,
       spreadsheet, HTML, text and formatted document, usual group, button group,
@@ -50,7 +52,9 @@ rather than defaulting it.
       read; what each key holds is not. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The `{55,…}` table record.**
+- [ ] **The `{55,…}` table record's head**, from `{55` to the column count:
+      61 to 87 members with the context menu, the command bar and the three
+      additions inline behind flags. *(table-tail-20260921.md)*
 - [ ] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
