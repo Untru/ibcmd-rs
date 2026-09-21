@@ -218,6 +218,92 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
     )
 }
 
+/// The `{36,…}` payload of an input field, member by member.
+///
+/// Seven of its sixty-six members carry an XML property. Measured the same way
+/// as the label: a candidate that fills these seven and copies the rest
+/// reproduces 69 452 of the 69 455 input payloads of every ERP УХ form body
+/// exactly, and the three it does not are a mask that carries a `;`, which the
+/// measurement's own property separator truncated -- not a rule this writer
+/// gets wrong.
+pub(crate) struct NativeInputPayload<'a> {
+    /// Slot 2, `0` when the item names no width.
+    pub(crate) width: &'a str,
+    /// Slot 3, `0` when it names no height.
+    pub(crate) height: &'a str,
+    /// Slot 4: `false` -> 0, `true` -> 1, absent -> 2.
+    pub(crate) horizontal_stretch: Option<bool>,
+    /// Slot 5, the same three ways for `VerticalStretch`.
+    pub(crate) vertical_stretch: Option<bool>,
+    /// Slot 18, the input mask, `""` when the item names none.
+    pub(crate) mask: &'a str,
+    /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
+    pub(crate) auto_max_width: bool,
+    /// Slot 50, `0` when the item names no maximum width.
+    pub(crate) max_width: &'a str,
+    /// Slot 29, the format, `{1,0}` by default.
+    pub(crate) format: &'a str,
+    /// Slot 30, the edit format, `{1,0}` by default.
+    pub(crate) edit_format: &'a str,
+    /// Slot 36, the item's own event bindings.
+    pub(crate) events: &'a str,
+    /// Slots 37, 38 and 39: the text colour, the background colour and the
+    /// border, `{3,4,{0}}` by default.
+    pub(crate) text_color: &'a str,
+    pub(crate) back_color: &'a str,
+    pub(crate) border_color: &'a str,
+    /// Slot 40, the font.
+    pub(crate) font: &'a str,
+}
+
+impl NativeInputPayload<'_> {
+    /// What an input field that names no property of its own carries -- the
+    /// payload 24 361 of the corpus's records carry unchanged.
+    pub(crate) const fn plain() -> Self {
+        Self {
+            width: "0",
+            height: "0",
+            horizontal_stretch: None,
+            vertical_stretch: None,
+            mask: "",
+            auto_max_width: true,
+            max_width: "0",
+            format: "{1,0}",
+            edit_format: "{1,0}",
+            events: "{0,1,0}",
+            text_color: "{3,4,{0}}",
+            back_color: "{3,4,{0}}",
+            border_color: "{3,4,{0}}",
+            font: "{7,3,0,1,100}",
+        }
+    }
+}
+
+pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> String {
+    let stretch = |value: Option<bool>| match value {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "2",
+    };
+    format!(
+        "{{36,{{3,0}},{width},{height},{horizontal},{vertical},1,2,2,2,2,2,2,2,2,2,{{\"U\"}},{{\"U\"}},{mask},0,{{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},0,0,2,3,00000000-0000-0000-0000-000000000000,{{5006,0}},{{0,0}},2,{format},{edit_format},2,1,0,{{\"Pattern\"}},1,{events},{text_color},{back_color},{border_color},{font},1,{{3,0,0}},0,{{1,0}},2,0,2,0,{auto_max_width},{max_width},0,1,0,0,0,0,0,0,0,0,0,{{0}},0,{{5007,0}},0}}",
+        width = payload.width,
+        height = payload.height,
+        horizontal = stretch(payload.horizontal_stretch),
+        vertical = stretch(payload.vertical_stretch),
+        mask = quoted(payload.mask),
+        format = payload.format,
+        edit_format = payload.edit_format,
+        events = payload.events,
+        text_color = payload.text_color,
+        back_color = payload.back_color,
+        border_color = payload.border_color,
+        font = payload.font,
+        auto_max_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
+    )
+}
+
 /// The `{31,…}` record of a `<Button>` whose action is a form standard
 /// command and which carries nothing but its name and its tooltip.
 ///
@@ -1089,6 +1175,32 @@ mod tests {
             ..NativeLabelPayload::plain(false)
         })
         .ends_with(",0,15,0,1,0}"));
+    }
+
+    /// The payload 24 361 input fields of the corpus carry unchanged, and the
+    /// three slots a form most often moves.
+    #[test]
+    fn writes_the_input_payloads_the_platform_stores() {
+        assert_eq!(
+            format_input_payload(&NativeInputPayload::plain()),
+            "{36,{3,0},0,0,2,2,1,2,2,2,2,2,2,2,2,2,{\"U\"},{\"U\"},\"\",0,{4,0,{0},\"\",-1,-1,1,0,\"\"},0,0,2,3,00000000-0000-0000-0000-000000000000,{5006,0},{0,0},2,{1,0},{1,0},2,1,0,{\"Pattern\"},1,{0,1,0},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},1,{3,0,0},0,{1,0},2,0,2,0,1,0,0,1,0,0,0,0,0,0,0,0,0,{0},0,{5007,0},0}"
+        );
+        assert!(format_input_payload(&NativeInputPayload {
+            width: "25",
+            ..NativeInputPayload::plain()
+        })
+        .starts_with("{36,{3,0},25,0,2,2,"));
+        assert!(format_input_payload(&NativeInputPayload {
+            auto_max_width: false,
+            max_width: "28",
+            ..NativeInputPayload::plain()
+        })
+        .contains(",2,0,2,0,0,28,0,1,0,"));
+        assert!(format_input_payload(&NativeInputPayload {
+            mask: "999-999-999 99",
+            ..NativeInputPayload::plain()
+        })
+        .contains(",{\"U\"},\"999-999-999 99\",0,"));
     }
 
     /// A name that carries a quote is escaped the way every other 1C string in
