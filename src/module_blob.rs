@@ -6645,6 +6645,12 @@ fn format_native_child_item(
             show_in_header: item.show_in_header.unwrap_or(true),
             show_in_footer: item.show_in_footer.unwrap_or(true),
             cell_hyperlink: item.cell_hyperlink.unwrap_or(false),
+            tooltip_representation: item.tooltip_representation.map(native_tooltip_representation),
+            group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+            group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+            horizontal_align: item.horizontal_align.map(native_horizontal_align_spelling),
+            vertical_align: item.vertical_align.map(native_vertical_align_spelling),
+            fixing_in_table: item.fixing_in_table.map(native_fixing_in_table_spelling),
             auto_cell_height: item.auto_cell_height.unwrap_or(false),
             payload: &payload,
             context_menu: &menu,
@@ -6670,6 +6676,9 @@ fn format_native_child_item(
             representation: item.button_representation.map(native_button_representation),
             default_button: item.default_button.unwrap_or(false),
             default_item: item.default_item.unwrap_or(false),
+            tooltip_representation: item.tooltip_representation.map(native_tooltip_representation),
+            group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+            group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
             location_in_command_bar: item.location_in_command_bar.map(|value| match value {
                 FormXmlButtonLocationInCommandBar::InCommandBar => "InCommandBar",
                 FormXmlButtonLocationInCommandBar::InAdditionalSubmenu => "InAdditionalSubmenu",
@@ -6718,6 +6727,9 @@ fn format_native_child_item(
             context_menu: Some(&menu),
             visible: item.visible.unwrap_or(true),
             skip_on_input: native_flag(item.skip_on_input),
+            tooltip_representation: item.tooltip_representation.map(native_tooltip_representation),
+            group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+            group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
             extended_tooltip: Some(&tooltip),
             auto_max_width: item.auto_max_width.unwrap_or(true),
             max_width: item.max_width.as_deref(),
@@ -7498,6 +7510,30 @@ struct NativeItemTarget {
     /// Whether the item is bound to an attribute of type `cfg:DynamicList`,
     /// which is what tells two uuids of the same command name apart.
     dynamic_list: bool,
+}
+
+/// `<ToolTipRepresentation>` as every record writer spells it.
+const fn native_tooltip_representation(value: FormTooltipRepresentation) -> &'static str {
+    match value {
+        FormTooltipRepresentation::Omit => "Auto",
+        FormTooltipRepresentation::None => "None",
+        FormTooltipRepresentation::Balloon => "Balloon",
+        FormTooltipRepresentation::Button => "Button",
+        FormTooltipRepresentation::ShowAuto => "ShowAuto",
+        FormTooltipRepresentation::ShowTop => "ShowTop",
+        FormTooltipRepresentation::ShowLeft => "ShowLeft",
+        FormTooltipRepresentation::ShowBottom => "ShowBottom",
+        FormTooltipRepresentation::ShowRight => "ShowRight",
+    }
+}
+
+/// `<GroupHorizontalAlign>` as the record writers spell it.
+const fn native_group_horizontal_align(align: FormFieldGroupHorizontalAlign) -> &'static str {
+    match align {
+        FormFieldGroupHorizontalAlign::Left => "Left",
+        FormFieldGroupHorizontalAlign::Center => "Center",
+        FormFieldGroupHorizontalAlign::Right => "Right",
+    }
 }
 
 /// `<CommandSource>`, which names a configuration object the writer has not
