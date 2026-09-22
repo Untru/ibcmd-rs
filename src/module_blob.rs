@@ -6678,6 +6678,34 @@ fn form_attribute_save_segment_uuid(segment: &str) -> Option<&str> {
     .then_some(rest)
 }
 
+/// A `<ContextMenu>`, which is a `{22,…}` record like any other container.
+fn native_context_menu(
+    menu: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+    command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut children = Vec::new();
+    for child in &menu.child_items {
+        children.push(format_native_child_item(
+            child,
+            data_paths,
+            command_ids,
+            items,
+            main_attribute_class,
+            source,
+        )?);
+    }
+    Ok(crate::compiler::bodies::form_native::format_field_context_menu(
+        &menu.id,
+        &menu.name,
+        menu.autofill,
+        &children,
+    ))
+}
+
 /// One child item, as the `(kind uuid, record)` pair its parent files it under.
 ///
 /// Fail-closed: a tag the writers have not measured, or a property whose
@@ -6773,7 +6801,7 @@ fn format_native_child_item(
             None => "{0}".to_string(),
         };
         let menu = match context_menu {
-            Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
             None => return Err(anyhow!("a field with no context menu is not measured")),
         };
         let tooltip = extended_tooltip
@@ -6885,7 +6913,7 @@ fn format_native_child_item(
 
     if matches!(item.tag.as_str(), "LabelDecoration" | "PictureDecoration") {
         let menu = match context_menu {
-            Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
             None => return Err(anyhow!("a decoration with no context menu is not measured")),
         };
         let tooltip = extended_tooltip
@@ -6943,7 +6971,15 @@ fn format_native_child_item(
         "SearchControlAddition" => Some(2),
         _ => None,
     } {
-        let record = native_table_addition(item, kind, items, source)?;
+        let record = native_table_addition(
+            item,
+            kind,
+            data_paths,
+            command_ids,
+            items,
+            main_attribute_class,
+            source,
+        )?;
         let kind_uuid = native::child_kind_uuid(5)
             .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
         return Ok((kind_uuid, record));
@@ -7048,7 +7084,7 @@ fn format_native_table(
         }
     }
     let context_menu = match context_menu {
-        Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
         None => return Err(anyhow!("a table with no context menu is not measured")),
     };
     let command_bar = match command_bar {
@@ -7161,7 +7197,15 @@ fn format_native_table(
         let Some(child) = child else {
             return Err(anyhow!("a table without all three additions is not measured"));
         };
-        addition_records.push(native_table_addition(child, kind as u8, items, source)?);
+        addition_records.push(native_table_addition(
+            child,
+            kind as u8,
+            data_paths,
+            command_ids,
+            items,
+            main_attribute_class,
+            source,
+        )?);
     }
 
     let tail = native::format_table_tail(&native::NativeTableTail {
@@ -7364,14 +7408,17 @@ fn native_root_property_bag(
 }
 
 /// One of the three `{5,…}` additions a table carries in its tail.
+#[allow(clippy::too_many_arguments)]
 fn native_table_addition(
     item: &FormXmlChildItem,
     kind: u8,
+    data_paths: &NativeDataPaths<'_>,
+    command_ids: &BTreeMap<String, String>,
     items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
-    let _ = source;
 
     let mut context_menu = None;
     let mut children = 0usize;
@@ -7385,7 +7432,7 @@ fn native_table_addition(
         return Err(anyhow!("an addition with children is not measured"));
     }
     let context_menu = match context_menu {
-        Some(menu) => native::format_field_context_menu(&menu.id, &menu.name),
+        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
         None => return Err(anyhow!("an addition with no context menu is not measured")),
     };
     let extended_tooltip = match &item.extended_tooltip {

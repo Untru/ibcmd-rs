@@ -593,12 +593,32 @@ pub(crate) fn format_extended_tooltip(id: &str, name: &str) -> String {
 
 /// The `{22,…}` record of a field's `<ContextMenu>`, as the platform stores it
 /// when the menu carries nothing but its own name.
-pub(crate) fn format_field_context_menu(id: &str, name: &str) -> String {
+pub(crate) fn format_field_context_menu(
+    id: &str,
+    name: &str,
+    autofill: Option<bool>,
+    children: &[(&str, String)],
+) -> String {
+    // Two of the twenty-nine were constants the corpus contradicts, both
+    // pure over 236 253 menus: member 21 is the payload, `{1,1}` when
+    // `<Autofill>` is absent and `{1,0}` when it is `false`; member 22 is
+    // the child count, 0 for the 233 070 menus with no `<ChildItems>` and n
+    // for the 3 183 that have them, with the child records following.
+    // `<Autofill>` with the lower-case f, for the third time in this writer.
+    let mut records = String::new();
+    for (kind_uuid, record) in children {
+        records.push(',');
+        records.push_str(kind_uuid);
+        records.push(',');
+        records.push_str(record);
+    }
     format!(
         "{{22,{{{id},{ns}}},0,0,0,8,{name},{{1,0}},{{1,0}},0,1,0,0,0,2,2,{{3,4,{{0}}}},\
-         {{7,3,0,1,100}},{{0,0,0}},1,{{1,1}},0,1,0,0,0,3,3,0}}",
+         {{7,3,0,1,100}},{{0,0,0}},1,{{1,{autofill}}},{count}{records},1,0,0,0,3,3,0}}",
         ns = FORM_ITEM_NAMESPACE_UUID,
         name = quoted(name),
+        autofill = u8::from(autofill.unwrap_or(true)),
+        count = children.len(),
     )
 }
 
@@ -2255,9 +2275,13 @@ pub(crate) fn format_label_decoration(decoration: &NativeLabelDecoration<'_>) ->
         name = quoted(decoration.name),
         title = decoration.title,
         appearance = DEFAULT_APPEARANCE_UUID,
+        // This formatter builds a decoration whose menu the caller has
+        // already refused children for, so the empty menu is right here.
         context_menu = format_field_context_menu(
             decoration.context_menu_id,
-            decoration.context_menu_name
+            decoration.context_menu_name,
+            None,
+            &[],
         ),
         tooltip = format_extended_tooltip(
             decoration.extended_tooltip_id,
@@ -5976,7 +6000,7 @@ mod tests {
             functional_options: Some("{0,{0,{\"B\",1},0}}"),
             data_path: "{2,{1},{3}}",
             payload: &format_plain_field_payload(false),
-            context_menu: &format_field_context_menu("21", "ПериодЗакупокКонтекстноеМеню"),
+            context_menu: &format_field_context_menu("21", "ПериодЗакупокКонтекстноеМеню", None, &[]),
             extended_tooltip: &format_extended_tooltip("22", "ПериодЗакупокРасширеннаяПодсказка"),
             ..NativeFieldItem::default()
         })
@@ -5993,7 +6017,7 @@ mod tests {
             functional_options: Some("{0,{0,{\"B\",1},0}}"),
             data_path: "{1,{2}}",
             payload: &format_plain_field_payload(true),
-            context_menu: &format_field_context_menu("47", "АнкетаПоставщикаКонтекстноеМеню"),
+            context_menu: &format_field_context_menu("47", "АнкетаПоставщикаКонтекстноеМеню", None, &[]),
             extended_tooltip: &format_extended_tooltip("48", "АнкетаПоставщикаРасширеннаяПодсказка"),
             ..NativeFieldItem::default()
         })
@@ -6017,7 +6041,7 @@ mod tests {
             title_location: Some("None"),
             data_path: "{1,{3}}",
             payload: "{13,100,10,1,1,0,0,1,1,0,0,1,0,0,1,{3,4,{0}},1,1,{0,1,0},0,1,0,0,1,0,0,0,0,1,1,1,2}",
-            context_menu: &format_field_context_menu("10", "РезультатКонтекстноеМеню"),
+            context_menu: &format_field_context_menu("10", "РезультатКонтекстноеМеню", None, &[]),
             extended_tooltip: &format_extended_tooltip("12", "РезультатРасширеннаяПодсказка"),
             ..NativeFieldItem::default()
         })
@@ -6037,7 +6061,7 @@ mod tests {
             "{12,{19,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,0,\"ЛотРасширеннаяПодсказка\",{1,0},{1,0},1,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{5,0,0,3,0,{0,1,0},{3,4,{0}},{3,4,{0}},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},0,1,2,{1,{1,0},0},0,0,1,0,0,1,0,3,3,0,0}"
         );
         assert_eq!(
-            format_field_context_menu("18", "ЛотКонтекстноеМеню"),
+            format_field_context_menu("18", "ЛотКонтекстноеМеню", None, &[]),
             "{22,{18,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,8,\"ЛотКонтекстноеМеню\",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{7,3,0,1,100},{0,0,0},1,{1,1},0,1,0,0,0,3,3,0}"
         );
     }
@@ -6980,7 +7004,7 @@ mod tests {
     /// 26 from the end, and the three additions 21, 19 and 17 from the end.
     #[test]
     fn writes_a_table_record_with_its_children_where_the_platform_keeps_them() {
-        let context_menu = format_field_context_menu("57", "ОтборКонтекстноеМеню");
+        let context_menu = format_field_context_menu("57", "ОтборКонтекстноеМеню", None, &[]);
         let command_bar = format_empty_auto_command_bar("58", "ОтборКоманднаяПанель");
         let tooltip = format_extended_tooltip("59", "ОтборРасширеннаяПодсказка");
         let record = format_table_item(&NativeTableItem {
@@ -7054,7 +7078,7 @@ mod tests {
             0,
             "ОтборСтрокаПоиска",
             "{1,0,2,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0}",
-            &format_field_context_menu("61", "ОтборСтрокаПоискаКонтекстноеМеню"),
+            &format_field_context_menu("61", "ОтборСтрокаПоискаКонтекстноеМеню", None, &[]),
             &format_extended_tooltip("62", "ОтборСтрокаПоискаРасширеннаяПодсказка"),
             "56",
         );
@@ -7068,7 +7092,7 @@ mod tests {
             2,
             "ОтборУправлениеПоиском",
             "{1,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{0,1,0},1,0,0,2}",
-            &format_field_context_menu("67", "ОтборУправлениеПоискомКонтекстноеМеню"),
+            &format_field_context_menu("67", "ОтборУправлениеПоискомКонтекстноеМеню", None, &[]),
             &format_extended_tooltip("68", "ОтборУправлениеПоискомРасширеннаяПодсказка"),
             "56",
         );
@@ -7146,7 +7170,7 @@ mod tests {
             name: "A",
             data_path: "{1,{2}}",
             payload: &format_plain_field_payload(true),
-            context_menu: &format_field_context_menu("2", "AM"),
+            context_menu: &format_field_context_menu("2", "AM", None, &[]),
             extended_tooltip: &format_extended_tooltip("3", "AT"),
             ..NativeFieldItem::default()
         })
