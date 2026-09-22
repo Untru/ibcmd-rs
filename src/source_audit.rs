@@ -1558,10 +1558,16 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                 let stored = form_uuid_of(path).and_then(|uuid| {
                     fs::read_to_string(bodies.join(format!("{uuid}.0__part0.txt"))).ok()
                 });
+                // An `<xr:Abs>` picture is a file the export carries beside
+                // the form, under `Ext/Form/Items/<item name>/`, and its bytes
+                // go into the record. The writer needs the directory to read
+                // them from.
+                let items_root = path.with_file_name("Form").join("Items");
                 let wrote = crate::module_blob::compile_native_form_body(
                     &form_xml,
                     module.as_deref(),
                     Some(&source),
+                    Some(items_root.as_path()),
                 )
                 .map_err(|error| error.to_string());
                 (relative, wrote, stored)

@@ -605,6 +605,12 @@ struct FormXmlControlBorder {
 /// which the two corpora hold 156, above all.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlItemPicture {
+    /// `<xr:Abs>`, which is not a base64 image but an **eleven-character file
+    /// name** -- `Picture.png` and four other extensions over all 228 of both
+    /// corpora. The file sits beside the form, under
+    /// `Ext/Form/Items/<item name>/`, and its bytes are member 7 of a
+    /// ten-member picture reference.
+    abs: Option<String>,
     reference: Option<String>,
     load_transparent: Option<String>,
     transparent_x: Option<String>,
@@ -6767,6 +6773,7 @@ fn native_context_menu(
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     let mut children = Vec::new();
     for child in &menu.child_items {
@@ -6777,6 +6784,7 @@ fn native_context_menu(
             items,
             main_attribute_class,
             source,
+            items_root,
         )?);
     }
     Ok(crate::compiler::bodies::form_native::format_field_context_menu(
@@ -6799,6 +6807,7 @@ fn format_native_child_item(
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<(&'static str, String)> {
     use crate::compiler::bodies::form_native as native;
 
@@ -6835,9 +6844,10 @@ fn format_native_child_item(
                 items,
                 main_attribute_class,
                 source,
+                items_root,
             )?);
         }
-        let payload = native_container_payload(item, data_paths, items, source)?;
+        let payload = native_container_payload(item, data_paths, items, source, items_root)?;
         let group_font = native_item_title_font(item, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
@@ -6869,12 +6879,12 @@ fn format_native_child_item(
     }
 
     if item.tag == "Table" {
-        let record = format_native_table(item, data_paths, command_ids, items, main_attribute_class, source)?;
+        let record = format_native_table(item, data_paths, command_ids, items, main_attribute_class, source, items_root)?;
         return Ok((kind_uuid, record));
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
-        let payload = native_field_payload(item, main_attribute_class, source)?;
+        let payload = native_field_payload(item, main_attribute_class, source, items_root)?;
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -6882,7 +6892,7 @@ fn format_native_child_item(
             None => "{0}".to_string(),
         };
         let menu = match context_menu {
-            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
+            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
             None => return Err(anyhow!("a field with no context menu is not measured")),
         };
         let tooltip = extended_tooltip
@@ -6941,7 +6951,7 @@ fn format_native_child_item(
         // constant and all 3 461 that spell one store a picture. The writer
         // emitted the constant either way because the call site never passed
         // one, though the resolver it needed was already here.
-        let picture = native_item_picture(item, source)?;
+        let picture = native_item_picture(item, source, items_root)?;
         let record = native::format_button_item(&native::NativeButtonItem {
             picture: &picture,
             id: &item.id,
@@ -6998,7 +7008,7 @@ fn format_native_child_item(
 
     if matches!(item.tag.as_str(), "LabelDecoration" | "PictureDecoration") {
         let menu = match context_menu {
-            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
+            Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
             None => return Err(anyhow!("a decoration with no context menu is not measured")),
         };
         let tooltip = extended_tooltip
@@ -7012,7 +7022,7 @@ fn format_native_child_item(
         // `{7,2,0,{0,<uuid>},1,100}` `format_native_font` writes.
         let font = native_item_font(item, source)?;
         let (rendered_title, title_content) = native_decoration_titles(item)?;
-        let payload = native_decoration_payload(item, main_attribute_class, source)?;
+        let payload = native_decoration_payload(item, main_attribute_class, source, items_root)?;
         let record = native::format_decoration_item(&native::NativeDecorationItem {
             id: &item.id,
             kind: u8::from(item.tag == "PictureDecoration"),
@@ -7064,6 +7074,7 @@ fn format_native_child_item(
             items,
             main_attribute_class,
             source,
+            items_root,
         )?;
         let kind_uuid = native::child_kind_uuid(5)
             .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
@@ -7135,6 +7146,7 @@ fn format_native_table(
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
@@ -7169,7 +7181,7 @@ fn format_native_table(
         }
     }
     let context_menu = match context_menu {
-        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
+        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
         None => return Err(anyhow!("a table with no context menu is not measured")),
     };
     let command_bar = match command_bar {
@@ -7191,6 +7203,7 @@ fn format_native_table(
                     items,
                     main_attribute_class,
                     source,
+                    items_root,
                 )?);
             }
             native::format_group_item(&native::NativeGroupItem {
@@ -7214,6 +7227,7 @@ fn format_native_table(
             items,
             main_attribute_class,
             source,
+            items_root,
         )?);
     }
     let column_records = column_records
@@ -7312,6 +7326,7 @@ fn format_native_table(
             items,
             main_attribute_class,
             source,
+            items_root,
         )?);
     }
 
@@ -7527,6 +7542,7 @@ fn native_table_addition(
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
@@ -7542,7 +7558,7 @@ fn native_table_addition(
         return Err(anyhow!("an addition with children is not measured"));
     }
     let context_menu = match context_menu {
-        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source)?,
+        Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
         None => return Err(anyhow!("an addition with no context menu is not measured")),
     };
     let extended_tooltip = match &item.extended_tooltip {
@@ -7699,6 +7715,7 @@ fn native_container_payload(
     data_paths: &NativeDataPaths<'_>,
     items: &BTreeMap<String, NativeItemTarget>,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     match item.tag.as_str() {
@@ -7774,7 +7791,7 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
         }
         "Popup" => {
-            let picture = native_item_picture(item, source)?;
+            let picture = native_item_picture(item, source, items_root)?;
             let command_source = native_command_source(item, items)?;
             let back_color = native_item_color(item.back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a popup names a background colour it cannot place"))?;
@@ -8256,6 +8273,7 @@ fn native_field_payload(
     item: &FormXmlChildItem,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let events =
@@ -8382,6 +8400,32 @@ fn native_field_payload(
             },
         )
         .ok_or_else(|| anyhow!("<HTMLDocumentField> names a spelling the writer cannot place")),
+        "FormattedDocumentField" => {
+            // The stretch pair is the one fact the corpora do not decide:
+            // no item spells one without the other, so which member is
+            // horizontal is unmeasured and only matters when the two differ.
+            let horizontal = item.horizontal_stretch.unwrap_or(true);
+            let vertical = item.vertical_stretch.unwrap_or(true);
+            if horizontal != vertical {
+                return Err(anyhow!(
+                    "a <FormattedDocumentField> stretches one way only, and the order of its                      payload members 3 and 4 is not measured"
+                ));
+            }
+            Ok(native::format_formatted_document_payload(
+                &native::NativeFormattedDocumentPayload {
+                    width: item.width.as_deref().unwrap_or("50"),
+                    height: item.height.as_deref().unwrap_or("10"),
+                    horizontal_stretch: horizontal,
+                    vertical_stretch: vertical,
+                    back_color: &native_scalar_color(item, "BackColor", source)?,
+                    border_color: &native_scalar_color(item, "BorderColor", source)?,
+                    font: &native_item_font(item, source)?,
+                    events: &events,
+                    auto_max_width: item.auto_max_width.unwrap_or(true),
+                    auto_max_height: item.auto_max_height.unwrap_or(true),
+                },
+            ))
+        }
         "TextDocumentField" => {
             // Member 3 is constant 1 over all 159 records because no field of
             // either corpus spells `<HorizontalStretch>`; one that does would
@@ -8499,7 +8543,7 @@ fn native_field_payload(
                 // largest never-filled field the struct sweep found: 2 110
                 // records of 1 102 forms store a picture where the writer put
                 // the empty constant, and 404 a border.
-                picture: &native_item_picture(item, source)?,
+                picture: &native_item_picture(item, source, items_root)?,
                 border: &native_item_control_border(item)?,
                 ..native::NativePicturePayload::default()
             })
@@ -8537,6 +8581,7 @@ fn native_decoration_payload(
     item: &FormXmlChildItem,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let border = native_item_control_border(item)?;
@@ -8581,7 +8626,7 @@ fn native_decoration_payload(
                  payload holds and the parser does not collect"
             ));
         }
-        let picture = native_item_picture(item, source)?;
+        let picture = native_item_picture(item, source, items_root)?;
         return native::format_picture_decoration_payload(
             &native::NativePictureDecorationPayload {
                 picture: &picture,
@@ -8968,16 +9013,26 @@ fn native_decoration_titles(item: &FormXmlChildItem) -> Result<(String, String)>
 fn native_item_picture(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
-    native_picture_of(&item.tag, item.picture.as_ref(), item.picture_present, source)
+    native_picture_of(
+        &item.tag,
+        &item.name,
+        item.picture.as_ref(),
+        item.picture_present,
+        source,
+        items_root,
+    )
 }
 
 /// The same `<Picture>`, on a holder that is not a child item.
 fn native_picture_of(
     holder: &str,
+    item_name: &str,
     picture: Option<&FormXmlItemPicture>,
     picture_present: bool,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let Some(picture) = picture else {
@@ -8988,6 +9043,32 @@ fn native_picture_of(
     };
     if let Some(part) = picture.unwritable.first() {
         return Err(anyhow!("<{holder}> names a <Picture><{part}>"));
+    }
+    // `<xr:Abs>` is an eleven-character file name, not a base64 image: the
+    // file sits beside the form and its bytes are member 7 of a ten-member
+    // reference. All 225 references of both corpora decode to the named file
+    // byte for byte.
+    if let Some(name) = picture
+        .abs
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        let root = items_root.ok_or_else(|| {
+            anyhow!("<{holder}> names a <Picture><Abs> and the form's item files are not on hand")
+        })?;
+        let path = root.join(item_name).join(name);
+        let bytes = fs::read(&path)
+            .with_context(|| format!("failed to read the <Abs> picture {}", path.display()))?;
+        // Read straight here: `false` is 0 and `true` is 1, with nothing in
+        // between, unlike a common picture where an absent one also writes 1.
+        let load_transparent = picture.load_transparent.as_deref().map(str::trim) == Some("true");
+        return Ok(native::format_native_inline_picture(
+            &bytes,
+            load_transparent,
+            picture.transparent_x.as_deref(),
+            picture.transparent_y.as_deref(),
+        ));
     }
     let reference = picture
         .reference
@@ -9186,6 +9267,7 @@ fn format_native_form_body(
     properties: &FormXmlBodyProperties,
     module_text: &str,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     let blockers = native_form_body_blockers(properties);
     if !blockers.is_empty() {
@@ -9300,6 +9382,7 @@ fn format_native_form_body(
             &items,
             &main_attribute_class,
             source,
+            items_root,
         )?;
             bar_children.push((uuid, record));
         }
@@ -9372,6 +9455,7 @@ fn format_native_form_body(
             &items,
             &main_attribute_class,
             source,
+            items_root,
         )?);
     }
     let children = children
@@ -9536,7 +9620,14 @@ fn format_native_form_body(
         let tooltip = format_form_title_value(&command.tooltip);
         let command_options = functional_options(&command.functional_options)?;
         let command_picture =
-            native_picture_of("Command", command.picture.as_ref(), command.picture_present, source)?;
+            native_picture_of(
+                "Command",
+                &command.name,
+                command.picture.as_ref(),
+                command.picture_present,
+                source,
+                items_root,
+            )?;
         commands.push(',');
         commands.push_str(
             &crate::compiler::bodies::form_native::format_form_command(
@@ -9595,6 +9686,7 @@ pub fn compile_native_form_body(
     form_xml: &[u8],
     module_text: Option<&[u8]>,
     source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
 ) -> Result<String> {
     validate_form_xml_document(form_xml)?;
     let properties = parse_form_xml_body_properties(form_xml)?;
@@ -9605,7 +9697,7 @@ pub fn compile_native_form_body(
             .to_string(),
         None => String::new(),
     };
-    format_native_form_body(&properties, &module, source)
+    format_native_form_body(&properties, &module, source, items_root)
 }
 
 /// Builds a managed Form body from source XML and a profile-known empty
@@ -10642,7 +10734,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     // read in the text arm below. Anything else inside
                     // `<Picture>` is a shape the measurement did not name, so
                     // it refuses the item rather than being dropped.
-                    if !matches!(local.as_str(), "Ref" | "LoadTransparent") {
+                    if !matches!(local.as_str(), "Ref" | "LoadTransparent" | "Abs") {
                         picture.unwritable.push(local.clone());
                     }
                 } else if matches!(local.as_str(), "Title" | "ToolTip")
@@ -11006,15 +11098,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
-                    && matches!(part, "Ref" | "LoadTransparent")
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
                     && let Some(picture) = item.picture.as_mut()
                 {
                     let chunk = text.xml_content()?;
-                    let slot = if part == "Ref" {
-                        &mut picture.reference
-                    } else {
-                        &mut picture.load_transparent
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
                     };
                     slot.get_or_insert_with(String::new)
                         .push_str(chunk.as_ref());
@@ -11541,15 +11633,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
-                    && matches!(part, "Ref" | "LoadTransparent")
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
                     && let Some(picture) = item.picture.as_mut()
                 {
                     let chunk = text.xml_content()?;
-                    let slot = if part == "Ref" {
-                        &mut picture.reference
-                    } else {
-                        &mut picture.load_transparent
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
                     };
                     slot.get_or_insert_with(String::new)
                         .push_str(chunk.as_ref());
@@ -32030,7 +32122,7 @@ mod tests {
             r#"</v8:DateQualifiers></Type></Parameter></Parameters>"#,
             "</Form>",
         );
-        let body = super::compile_native_form_body(xml.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(xml.as_bytes(), None, None, None)?;
 
         // Member 13 counts the columns and members 14.. are their records;
         // an empty `<Type/>` is `{"Pattern"}`, `DateFractions` is the second
@@ -32120,7 +32212,7 @@ mod tests {
                 "</xr:Item></MobileDeviceCommandBarContent>",
             ),
         );
-        let body = super::compile_native_form_body(named.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(named.as_bytes(), None, None, None)?;
         assert!(
             body.contains(r#"{50,1,"",{"N",46}}"#),
             "the mobile command bar does not name the item's id: {body}"
@@ -32136,7 +32228,7 @@ mod tests {
                 "</xr:Item></MobileDeviceCommandBarContent>",
             ),
         );
-        let body = super::compile_native_form_body(clashing.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(clashing.as_bytes(), None, None, None)?;
         assert!(
             body.contains(r#"{50,1,"",{"N",46}}"#),
             "the command's id was written instead of the item's: {body}"
@@ -32154,7 +32246,7 @@ mod tests {
                 "</xr:Item></MobileDeviceCommandBarContent>",
             ),
         );
-        let body = super::compile_native_form_body(empty.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(empty.as_bytes(), None, None, None)?;
         assert!(
             body.contains(r#"{50,1,"",{"N",0}}"#),
             "an empty value is not zero: {body}"
@@ -32162,7 +32254,7 @@ mod tests {
 
         // Absent is the literal the other 13 443 forms store.
         let absent = form("", "");
-        let body = super::compile_native_form_body(absent.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(absent.as_bytes(), None, None, None)?;
         assert!(
             body.contains("{50,0}"),
             "a form with no mobile command bar lost its literal: {body}"
@@ -32178,7 +32270,7 @@ mod tests {
                 "</xr:Item></MobileDeviceCommandBarContent>",
             ),
         );
-        let error = super::compile_native_form_body(unknown.as_bytes(), None, None)
+        let error = super::compile_native_form_body(unknown.as_bytes(), None, None, None)
             .expect_err("a name no item answers must refuse the form")
             .to_string();
         assert!(
@@ -32222,7 +32314,7 @@ mod tests {
             ),
             head = FORM_XML_HEAD,
         );
-        let body = super::compile_native_form_body(xml.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(xml.as_bytes(), None, None, None)?;
         assert!(
             body.contains(concat!(
                 r##"{8,{3,2,"",{"#",0e704aa2-07bd-48b9-8223-a0212c4d5fc2,"##,
@@ -32246,7 +32338,7 @@ mod tests {
             "<RadioButtonType>Auto</RadioButtonType>",
             r#"<RadioButtonType>Auto</RadioButtonType><Font ref="style:LargeTextFont" kind="StyleItem"/>"#,
         );
-        let body = super::compile_native_form_body(with_font.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(with_font.as_bytes(), None, None, None)?;
         assert!(
             body.contains("{7,2,0,{-32},1,100}"),
             "the platform style font is not the one the platform stores: {body}"
@@ -32255,7 +32347,7 @@ mod tests {
             "<RadioButtonType>Auto</RadioButtonType>",
             r#"<RadioButtonType>Auto</RadioButtonType><Font faceName="Arial" height="8" kind="Absolute"/>"#,
         );
-        let error = super::compile_native_form_body(absolute.as_bytes(), None, None)
+        let error = super::compile_native_form_body(absolute.as_bytes(), None, None, None)
             .expect_err("an Absolute font must refuse the form")
             .to_string();
         assert!(
@@ -32319,7 +32411,7 @@ mod tests {
             ),
             head = FORM_XML_HEAD,
         );
-        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source))?;
+        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source), None)?;
         let _ = std::fs::remove_dir_all(&root);
         assert!(
             body.contains(concat!(
@@ -32398,7 +32490,7 @@ mod tests {
         };
 
         let body =
-            super::compile_native_form_body(form("CommonPicture.СтрелкаВниз").as_bytes(), None, Some(&source))?;
+            super::compile_native_form_body(form("CommonPicture.СтрелкаВниз").as_bytes(), None, Some(&source), None)?;
         assert!(
             body.contains(concat!(
                 "{5,1,2,1,1,{1,11707a99-4eb9-4373-bc8c-84891483a034,\"ДекорацияНажатие\",1,0,",
@@ -32424,6 +32516,7 @@ mod tests {
             form("StdPicture.Information").as_bytes(),
             None,
             Some(&source),
+            None,
         )?;
         assert!(
             body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,1,0,\"\"}"),
@@ -32435,6 +32528,7 @@ mod tests {
             form("StdPicture.NoSuchPictureInAnyCorpus").as_bytes(),
             None,
             Some(&source),
+            None,
         )
         .expect_err("an unmeasured StdPicture name must refuse the form");
         let error = format!("{error:#}");
@@ -32495,7 +32589,7 @@ mod tests {
             ),
             head = FORM_XML_HEAD,
         );
-        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source))?;
+        let body = super::compile_native_form_body(xml.as_bytes(), None, Some(&source), None)?;
         let _ = std::fs::remove_dir_all(&root);
         assert!(
             body.contains(concat!(
@@ -32518,7 +32612,7 @@ mod tests {
             ),
             head = FORM_XML_HEAD,
         );
-        let body = super::compile_native_form_body(own.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(own.as_bytes(), None, None, None)?;
         assert!(
             body.contains("{0,1,{0}}"),
             "a <Save> of the attribute's own name is not {{0}}: {body}"
@@ -32527,7 +32621,7 @@ mod tests {
         // An attribute that names no `<Save>` keeps the `{0,0}` that 138 968
         // of the 141 723 attributes of both corpora store.
         let absent = own.replace("<Save><Field>СтрокаПоиска</Field></Save>", "");
-        let body = super::compile_native_form_body(absent.as_bytes(), None, None)?;
+        let body = super::compile_native_form_body(absent.as_bytes(), None, None, None)?;
         assert!(
             body.contains(r#"{9,{1},0,"СтрокаПоиска",{1,0},{"Pattern",{"S"}},{0,{0,{"B",1},0}},{0,{0,{"B",1},0}},{0,0},{0,0},0,0,0,0,{0,0},{0,0}}"#),
             "an attribute with no <Save> lost its defaults: {body}"
@@ -32626,7 +32720,7 @@ mod tests {
                 ),
                 part_body = body,
             );
-            let error = super::compile_native_form_body(xml.as_bytes(), None, None)
+            let error = super::compile_native_form_body(xml.as_bytes(), None, None, None)
                 .expect_err("a column that names {part} must refuse the form")
                 .to_string();
             assert!(
@@ -32673,7 +32767,7 @@ mod tests {
                 ),
                 holder = holder,
             );
-            let error = super::compile_native_form_body(xml.as_bytes(), None, None)
+            let error = super::compile_native_form_body(xml.as_bytes(), None, None, None)
                 .expect_err("functional options with no source must refuse the form")
                 .to_string();
             assert!(

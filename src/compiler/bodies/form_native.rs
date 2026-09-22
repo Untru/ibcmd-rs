@@ -3093,6 +3093,30 @@ pub(crate) fn format_native_item_picture(
     )
 }
 
+/// An inline picture: the bytes of a file the export carries beside the form.
+///
+/// Ten members, not the nine a named picture takes, and member 1 is `3` where
+/// a common picture writes 1 and no picture writes 0. Member 6 is
+/// `<xr:LoadTransparent>` read straight -- `false` is 0 and `true` is 1, with
+/// nothing in between, unlike the common-picture reading where an absent
+/// picture also writes 1. Every member partitions over all 225 references of
+/// both corpora, and the base64 in member 7 decodes to the named file byte
+/// for byte on all 225.
+pub(crate) fn format_native_inline_picture(
+    bytes: &[u8],
+    load_transparent: bool,
+    transparent_x: Option<&str>,
+    transparent_y: Option<&str>,
+) -> String {
+    format!(
+        "{{4,3,{{0}},\"\",{x},{y},{transparent},{{{{#base64:{data}}}}},0,\"\"}}",
+        x = transparent_x.unwrap_or("-1"),
+        y = transparent_y.unwrap_or("-1"),
+        transparent = u8::from(load_transparent),
+        data = crate::module_blob::encode_base64(bytes),
+    )
+}
+
 /// A picture reference to one of the platform's own pictures.
 ///
 /// `value` is what the name stores -- `{0,<uuid>}` for most of them, a bare
@@ -4226,6 +4250,50 @@ pub(crate) fn format_html_document_payload(
         horizontal = u8::from(payload.horizontal_stretch),
         vertical = u8::from(payload.vertical_stretch),
     ))
+}
+
+/// The `{1,…}` payload of a `<FormattedDocumentField>`, sixteen members.
+///
+/// Members 3 and 4 are the stretch pair, and the corpus cannot say which is
+/// which: no item of either corpus spells one without the other, so the two
+/// always move together and always to the same value. They are written from
+/// `<HorizontalStretch>` and `<VerticalStretch>` respectively, and the caller
+/// refuses when the two would differ -- which reproduces 75 of 75 and refuses
+/// nothing, rather than taking a coin flip the first time a form carries one
+/// of the pair alone.
+///
+/// Members 12 and 15 are 0 because no item spells `<MaxWidth>` or
+/// `<MaxHeight>`; by position they are the pair the sibling payloads carry.
+pub(crate) struct NativeFormattedDocumentPayload<'a> {
+    pub(crate) width: &'a str,
+    pub(crate) height: &'a str,
+    pub(crate) horizontal_stretch: bool,
+    pub(crate) vertical_stretch: bool,
+    pub(crate) back_color: &'a str,
+    pub(crate) border_color: &'a str,
+    pub(crate) font: &'a str,
+    pub(crate) events: &'a str,
+    pub(crate) auto_max_width: bool,
+    pub(crate) auto_max_height: bool,
+}
+
+pub(crate) fn format_formatted_document_payload(
+    payload: &NativeFormattedDocumentPayload<'_>,
+) -> String {
+    format!(
+        "{{1,{width},{height},{horizontal},{vertical},0,{{3,4,{{0}}}},{back_color},\
+         {border_color},{font},{events},{auto_width},0,0,{auto_height},0}}",
+        width = payload.width,
+        height = payload.height,
+        horizontal = u8::from(payload.horizontal_stretch),
+        vertical = u8::from(payload.vertical_stretch),
+        back_color = payload.back_color,
+        border_color = payload.border_color,
+        font = payload.font,
+        events = payload.events,
+        auto_width = u8::from(payload.auto_max_width),
+        auto_height = u8::from(payload.auto_max_height),
+    )
 }
 
 /// The `{5,…}` payload of a `<TextDocumentField>`, sixteen members.
