@@ -9626,6 +9626,9 @@ struct EnumProperties {
     extended_list_presentation: Vec<(String, String)>,
     explanation: Vec<(String, String)>,
     values: Vec<MetadataHeader>,
+    /// The colour member each 8.5 enum value record appends; `None` for a
+    /// record without one (8.3.27).
+    value_colors: Vec<Option<String>>,
     child_forms: Vec<String>,
     child_templates: Vec<String>,
 }
@@ -10663,6 +10666,25 @@ const RAW_GENERATED_TYPE_SCHEMAS: &[RawGeneratedTypeSchema] = &[
             field_index: 1,
             generated_type: "EnumRef",
         }],
+    },
+    // The 8.5 report record: `20` with its header at index 3, the 8.3.27
+    // `19` record plus one appended member (`<AuxiliaryVariantForm>`), whose
+    // generated types sit where `19` puts them. An enum `20` keeps its header
+    // at index 5, which is what tells the two apart (`metadata_source_for_
+    // object_fields` reads the same distinction).
+    RawGeneratedTypeSchema {
+        object_codes: &[20],
+        conditions: &[RawGeneratedTypeCondition::HeaderIndex(3)],
+        slots: &[
+            RawGeneratedTypeSlot {
+                field_index: 1,
+                generated_type: "ReportObject",
+            },
+            RawGeneratedTypeSlot {
+                field_index: 12,
+                generated_type: "ReportManager",
+            },
+        ],
     },
     RawGeneratedTypeSchema {
         object_codes: &[28],
@@ -30486,6 +30508,7 @@ fn parse_enum_properties_from_text(
     );
 
     let values = parse_enum_values_from_text(text);
+    let value_colors = parse_enum_value_colors_from_text(text, values.len());
 
     Some(EnumProperties {
         generated_types,
@@ -30505,6 +30528,7 @@ fn parse_enum_properties_from_text(
         extended_list_presentation: parse_1c_synonyms(fields.get(16).copied().unwrap_or("{0}")),
         explanation: parse_1c_synonyms(fields.get(17).copied().unwrap_or("{0}")),
         values,
+        value_colors,
         child_forms: owned_enum_form_names_in_text_order(text, &header.name, form_refs),
         child_templates: owned_enum_template_names_in_text_order(text, &header.name, template_refs),
     })
@@ -30538,6 +30562,56 @@ fn parse_enum_values(text: &str) -> Option<Vec<MetadataHeader>> {
     } else {
         None
     }
+}
+
+/// The colour member 8.5 appends to each enum value record:
+/// `{{1,{3,<header>},<colour>},0}` where 8.3.27 stores `{{1,{3,<header>}},0}`.
+fn parse_enum_value_colors_from_text(text: &str, count: usize) -> Vec<Option<String>> {
+    let colors = split_1c_braced_fields(text.trim_start_matches('\u{feff}'), 0)
+        .and_then(|root_fields| {
+            root_fields.iter().rev().find_map(|field| {
+                let fields = split_1c_braced_fields(field, 0)?;
+                let declared = fields.get(1)?.trim().parse::<usize>().ok()?;
+                if declared == 0 || declared != count || fields.len() < declared + 2 {
+                    return None;
+                }
+                fields
+                    .iter()
+                    .skip(2)
+                    .take(declared)
+                    .map(|value| {
+                        let outer = split_1c_braced_fields(value, 0)?;
+                        let record = split_1c_braced_fields(outer.first()?, 0)?;
+                        parse_enum_value_header(value)?;
+                        Some(match record.as_slice() {
+                            [_, _] => None,
+                            [_, _, color] => Some(color.trim().to_string()),
+                            _ => return None,
+                        })
+                    })
+                    .collect::<Option<Vec<_>>>()
+            })
+        })
+        .unwrap_or_default();
+    if colors.len() == count {
+        colors
+    } else {
+        vec![None; count]
+    }
+}
+
+/// The 2.21 spelling of an enum value colour: the unset colour is `auto`.
+///
+/// 8.5.1.1150 BSP: 540 of the 543 enum values store the unset `{3,4,{0}}`
+/// and write `auto`; the other three store palette colours and write them.
+fn enum_value_color_xml(color: &str) -> Option<String> {
+    if color == "{3,4,{0}}" {
+        return Some("auto".to_string());
+    }
+    if let Some(name) = form_v85::v85_palette_color(color) {
+        return Some(name.to_string());
+    }
+    form_body::parse_form_control_color(color, &BTreeMap::new())
 }
 
 fn parse_enum_value_header(text: &str) -> Option<MetadataHeader> {
@@ -38910,7 +38984,7 @@ fn format_enum_source_xml(
         xml.push_str("\t\t<ChildObjects/>\r\n");
     } else {
         xml.push_str("\t\t<ChildObjects>\r\n");
-        for value in &enumeration.values {
+        for (index, value) in enumeration.values.iter().enumerate() {
             xml.push_str(&format!(
                 "\t\t\t<EnumValue uuid=\"{}\">\r\n\
 \t\t\t\t<Properties>\r\n\
@@ -38928,7 +39002,18 @@ fn format_enum_source_xml(
                 ));
             }
             if source_version == InfobaseConfigSourceVersion::V2_21 {
-                xml.push_str("\t\t\t\t\t<Color>auto</Color>\r\n");
+                // An 8.5 record carries the colour; a record without one
+                // keeps the unset spelling.
+                let color = match enumeration.value_colors.get(index).cloned().flatten() {
+                    Some(color) => enum_value_color_xml(&color),
+                    None => Some("auto".to_string()),
+                };
+                if let Some(color) = color {
+                    xml.push_str(&format!(
+                        "\t\t\t\t\t<Color>{}</Color>\r\n",
+                        escape_xml_text(&color)
+                    ));
+                }
             }
             xml.push_str("\t\t\t\t</Properties>\r\n\t\t\t</EnumValue>\r\n");
         }

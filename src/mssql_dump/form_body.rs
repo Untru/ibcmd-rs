@@ -28440,6 +28440,9 @@ pub(super) fn form_spreadsheet_document_standard_command_suffix(
 
 pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
+        // Platform 8.5: the one identifier every 8.5 BSP table that excludes
+        // `ClearTableMarksAppearance` stores, and no other table does.
+        "daf40cdf-c477-48c5-9627-57d5450e1f3d" => Some("ClearTableMarksAppearance"),
         "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("UndoPosting"),
         "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
         "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),

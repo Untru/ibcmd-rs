@@ -143,6 +143,9 @@ struct XmlEdits<'a> {
     removed: BTreeSet<usize>,
     /// (start, end, replacement, child-order rank, sequence).
     edits: Vec<(usize, usize, String, usize, usize)>,
+    /// Elements to add: (parent, tag, body), placed once every removal is
+    /// known, so no element is anchored on a sibling a later rule removes.
+    inserts: Vec<(usize, String, String)>,
 }
 
 impl<'a> XmlEdits<'a> {
@@ -152,6 +155,7 @@ impl<'a> XmlEdits<'a> {
             elements: scan_elements(xml)?,
             removed: BTreeSet::new(),
             edits: Vec::new(),
+            inserts: Vec::new(),
         })
     }
 
@@ -181,9 +185,15 @@ impl<'a> XmlEdits<'a> {
         }
     }
 
-    /// Inserts `body` (CRLF-terminated lines, relative indentation) as a child
-    /// of `parent`, at the place the 2.21 child order gives `tag`.
+    /// Adds `body` (CRLF-terminated lines, relative indentation) as a child of
+    /// `parent`, at the place the 2.21 child order gives `tag`.
     fn insert_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
+        self.inserts
+            .push((parent, tag.to_owned(), body.to_owned()));
+        Ok(())
+    }
+
+    fn place_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
         let parent_tag = self.elements[parent].tag.clone();
         let order = super::form_v85_order::child_order(&parent_tag)
             .ok_or_else(|| anyhow!("no 2.21 child order is known for <{parent_tag}>"))?;
@@ -231,6 +241,9 @@ impl<'a> XmlEdits<'a> {
     }
 
     fn finish(mut self) -> Result<String> {
+        for (parent, tag, body) in std::mem::take(&mut self.inserts) {
+            self.place_child(parent, &tag, &body)?;
+        }
         self.edits
             .sort_by_key(|(start, _, _, rank, seq)| (*start, *rank, *seq));
         let mut out = String::with_capacity(self.xml.len() + 1024);
@@ -885,10 +898,15 @@ fn apply_rules(
             }
         }
         if let Some(value) = value {
+            // The one element of the table that 2.21 writes typed.
+            let open = match rule.element {
+                "WindowViewMode" => "WindowViewMode xsi:type=\"lf:FormWindowViewMode\"",
+                element => element,
+            };
             edits.insert_child(
                 element,
                 rule.element,
-                &format!("<{0}>{value}</{0}>\r\n", rule.element),
+                &format!("<{open}>{value}</{0}>\r\n", rule.element),
             )?;
         }
     }

@@ -304,6 +304,20 @@ fn is_v85_color(members: &[Node]) -> bool {
     }
 }
 
+/// `{8,0,<mask>,...,"<face>",1,<scale>,0}`: the 8.5 absolute font, the
+/// 8.3.27 `{7,0,...}` of 19 members plus one appended `0` (all 192 absolute
+/// fonts of the 8.5 BSP spreadsheets).
+fn is_v85_absolute_font(members: &[Node]) -> bool {
+    members.len() == 20
+        && members[0].leaf() == Some("8")
+        && members[1].leaf() == Some("0")
+        && members[2].leaf().is_some_and(is_int)
+        && members[16].leaf().is_some_and(|face| face.starts_with('"'))
+        && members[17].leaf() == Some("1")
+        && members[18].leaf().is_some_and(is_int)
+        && members[19].leaf() == Some("0")
+}
+
 /// `{8,<kind>,<mask>,...,1,<scale>}`: the 8.5 font tuple, the 8.3.27 `{7,...}`
 /// member for member.
 fn is_v85_font(members: &[Node]) -> bool {
@@ -340,6 +354,9 @@ pub(super) fn v85_palette_color_name(index: i64) -> Option<&'static str> {
         4 => "pal:Yellow",
         5 => "pal:Green",
         6 => "pal:LightBlue",
+        // An enum value colour (`Enums/УдалитьСостоянияИнтеграцииОбъектов`),
+        // beside the same record's `pal:Red` (2) and `pal:Green` (5).
+        7 => "pal:Blue",
         15 => "pal:Gray",
         _ => return None,
     })
@@ -446,6 +463,14 @@ pub(super) fn rewrite_v85_primitives_in_place(text: &str) -> std::borrow::Cow<'_
             index = end;
             continue;
         }
+        if is_v85_absolute_font(members) {
+            let mut converted = members.to_vec();
+            converted.truncate(19);
+            converted[0] = Node::Leaf("7".to_owned());
+            edits.push((index, end, Node::List(converted).to_text()));
+            index = end;
+            continue;
+        }
         index += 1;
     }
     if edits.is_empty() {
@@ -503,6 +528,12 @@ fn convert_primitives(node: Node, facts: &mut FormV85Facts) -> Node {
     }
     if is_v85_font(&members) {
         let mut members = members;
+        members[0] = Node::Leaf("7".to_owned());
+        return Node::List(members);
+    }
+    if is_v85_absolute_font(&members) {
+        let mut members = members;
+        members.truncate(19);
         members[0] = Node::Leaf("7".to_owned());
         return Node::List(members);
     }
