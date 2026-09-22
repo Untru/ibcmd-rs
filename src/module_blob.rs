@@ -1194,6 +1194,74 @@ impl MetadataSourceContext {
         Ok(properties.uuid)
     }
 
+    /// The names of an information register's dimensions whose `<Master>` is
+    /// `true`, in document order.
+    ///
+    /// That list is what indexes `OpenByValue`: the ordinal is `3 + <index of
+    /// the named dimension among these>`, exact on 360 of 360 references of
+    /// both corpora. The filter is `<Master>` and not a reference type --
+    /// "every dimension a reference names is a master dimension" holds, but
+    /// the converse test scores 285 of 360.
+    fn information_register_master_dimensions(&self, register: &str) -> Result<Vec<String>> {
+        let path = self
+            .source_root
+            .join("InformationRegisters")
+            .join(format!("{register}.xml"));
+        let xml = fs::read(&path)
+            .with_context(|| format!("failed to read InformationRegister XML {}", path.display()))?;
+        let mut reader = Reader::from_reader(xml.as_slice());
+        let mut buffer = Vec::new();
+        let mut path_stack = Vec::<String>::new();
+        let mut dimensions = Vec::new();
+        let mut name = None::<String>;
+        let mut master = false;
+        let mut text = String::new();
+        loop {
+            match reader.read_event_into(&mut buffer) {
+                Ok(Event::Start(event)) => {
+                    let local = xml_local_name(event.local_name().as_ref());
+                    if local == "Dimension" && path_ends_with(&path_stack, &["InformationRegister"])
+                    {
+                        name = None;
+                        master = false;
+                    }
+                    text.clear();
+                    path_stack.push(local);
+                }
+                Ok(Event::Text(chunk)) => text.push_str(chunk.xml_content()?.as_ref()),
+                Ok(Event::End(_)) => {
+                    let local = path_stack.pop().unwrap_or_default();
+                    let inside = path_stack
+                        .iter()
+                        .rev()
+                        .take(2)
+                        .any(|part| part == "Dimension");
+                    if inside && local == "Name" && name.is_none() {
+                        name = Some(text.trim().to_string());
+                    } else if inside && local == "Master" {
+                        master = text.trim() == "true";
+                    } else if local == "Dimension"
+                        && let Some(name) = name.take()
+                        && master
+                    {
+                        dimensions.push(name);
+                    }
+                    text.clear();
+                }
+                Ok(Event::Eof) => break,
+                Ok(_) => {}
+                Err(error) => {
+                    return Err(anyhow!(
+                        "failed to read InformationRegister XML {}: {error}",
+                        path.display()
+                    ));
+                }
+            }
+            buffer.clear();
+        }
+        Ok(dimensions)
+    }
+
     fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
         let generated_type_name = reference
             .trim()
@@ -7806,9 +7874,7 @@ fn native_button_command(
     // and so it does here -- its ordinal enumerates the owner's own standard
     // commands and one row of twenty is impure.
     if path.contains(".StandardCommand.") {
-        return Err(anyhow!(
-            "a button runs an object's standard command, whose ordinal is not measured"
-        ));
+        return native_object_standard_command(path, source);
     }
     if let Some((head, tail)) = path.split_once(':')
         && !head.is_empty()
@@ -15627,9 +15693,7 @@ fn native_command_interface_command(
     // dimensions that cannot be opened by value and which filter that is has
     // not been measured.
     if reference.contains(".StandardCommand.") {
-        return Err(anyhow!(
-            "a command interface item names an object's standard command, whose ordinal is not measured"
-        ));
+        return native_object_standard_command(reference, source);
     }
     let source =
         source.ok_or_else(|| anyhow!("a command interface has no source resolver"))?;
@@ -15640,6 +15704,87 @@ fn native_command_interface_command(
     };
     Ok(format!("{{0,{uuid}}}"))
 }
+
+/// `<Kind>.<Object>.StandardCommand.<Name>` as the `{<ordinal>,<owner uuid>}`
+/// pair both a panel item and a button store.
+///
+/// The ordinal is a fixed slot of the owner's kind, not a running count over
+/// the commands the owner happens to have: `InformationRegister.OpenByValue`
+/// starts at 3 on an independent register, which has no `OpenByRecorder` at
+/// all, and `Catalog.OpenByValue` is 4 whether the catalog has folders or not.
+/// Measured over 3 946 references of both corpora and both holders.
+fn native_object_standard_command(
+    reference: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let (owner, rest) = reference
+        .split_once(".StandardCommand.")
+        .ok_or_else(|| anyhow!("{reference} is not an object standard command"))?;
+    let (kind, object) = owner
+        .split_once('.')
+        .ok_or_else(|| anyhow!("{reference} names no object"))?;
+    let (name, field) = match rest.split_once('.') {
+        Some((name, field)) => (name, Some(field)),
+        None => (rest, None),
+    };
+    let source =
+        source.ok_or_else(|| anyhow!("{reference} needs a source resolver"))?;
+    let uuid = source.resolve_metadata_reference_uuid(owner)?;
+
+    // `OpenByValue` on an information register is the one row that is not a
+    // constant: it indexes the register's **master** dimensions, and the
+    // filter is `<Master>` rather than a reference type -- 360 of 360 against
+    // 285 for the type reading.
+    if kind == "InformationRegister" && name == "OpenByValue" {
+        let field = field.ok_or_else(|| {
+            anyhow!("{reference} names no dimension, which is not measured")
+        })?;
+        let dimensions = source.information_register_master_dimensions(object)?;
+        let index = dimensions
+            .iter()
+            .position(|candidate| candidate == field)
+            .ok_or_else(|| {
+                anyhow!("{reference} names a dimension the register does not master")
+            })?;
+        return Ok(format!("{{{},{uuid}}}", 3 + index));
+    }
+    if field.is_some() {
+        return Err(anyhow!(
+            "{reference} carries a field, which is only measured on an information register"
+        ));
+    }
+    let ordinal = OBJECT_STANDARD_COMMAND_ORDINALS
+        .iter()
+        .find_map(|(candidate, command, ordinal)| {
+            (*candidate == kind && *command == name).then_some(*ordinal)
+        })
+        .ok_or_else(|| anyhow!("no measured ordinal for {kind}.StandardCommand.{name}"))?;
+    Ok(format!("{{{ordinal},{uuid}}}"))
+}
+
+/// `(owner kind, standard command, ordinal)`, each a constant over every owner
+/// the corpora name. The uuid beside it is the plain object lookup and is
+/// never in doubt: over 552 distinct owners not one stores two uuids.
+const OBJECT_STANDARD_COMMAND_ORDINALS: &[(&str, &str, u32)] = &[
+    ("AccountingRegister", "OpenByRecorder", 1),
+    ("AccumulationRegister", "OpenByRecorder", 1),
+    ("BusinessProcess", "CreateBasedOn", 2),
+    ("CalculationRegister", "OpenByRecorder", 1),
+    ("Catalog", "Create", 1),
+    ("Catalog", "CreateBasedOn", 3),
+    ("Catalog", "OpenByValue", 4),
+    ("Catalog", "OpenList", 0),
+    ("CommonForm", "Open", 100),
+    ("DataProcessor", "Open", 0),
+    ("Document", "Create", 1),
+    ("Document", "CreateBasedOn", 2),
+    ("Document", "OpenList", 0),
+    ("DocumentJournal", "OpenList", 0),
+    ("FilterCriterion", "OpenByValue", 0),
+    ("InformationRegister", "OpenByRecorder", 2),
+    ("InformationRegister", "OpenList", 0),
+    ("Report", "Open", 0),
+];
 
 /// Whether a string is a bare uuid, which both a command and a command group
 /// can be spelled as when the export could not name the target.
