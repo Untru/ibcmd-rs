@@ -427,9 +427,7 @@ pub(crate) fn format_native_font(
         Some("WindowsFont") => "1",
         Some("StyleItem") => "2",
         Some("AutoFont") => "3",
-        // `Absolute` is a fixed nineteen-member LOGFONT that does not use the
-        // mask at all, and two of its nineteen spellings map to two stored
-        // tuples each: the block that separates them is not in the source.
+        Some("Absolute") => return format_native_absolute_font(attributes),
         _ => return None,
     };
     let reference = attributes.get("ref").map(String::as_str);
@@ -510,6 +508,49 @@ pub(crate) fn format_native_font(
     }
     out.push_str(&format!(",1,{scale}}}"));
     Some(out)
+}
+
+/// A `kind="Absolute"` font, which is a fixed nineteen-member LOGFONT rather
+/// than the mask-and-values tuple the other three kinds take.
+///
+/// Slots 11 to 15 are the LOGFONT's `charSet, outPrecision, clipPrecision,
+/// quality, pitchAndFamily`, and the `<Font>` element carries none of them.
+/// They hold `0,0,0,0,0` in 1 316 of the 1 321 elements of both corpora and
+/// `1,3,2,1,34` in five, whose source spelling is identical to the majority's
+/// -- so the source cannot choose. It does not have to: the platform's own
+/// export of both shapes is the same `<Font/>` element, byte for byte, and
+/// this crate's reader consults neither the mask nor slots 11 to 15 for kind
+/// 0. The first export of a loaded configuration differs from the database in
+/// those five records and the second is identical, which is the standard the
+/// settings composer and the navigator are already written under.
+///
+/// Every one of the 1 321 spells all seven attributes, so a font that omits
+/// one is unmeasured and refuses -- and the reader would make it worse than a
+/// byte difference, because kind 0 emits all seven unconditionally and the
+/// round trip would add the missing one to the source.
+fn format_native_absolute_font(attributes: &BTreeMap<String, String>) -> Option<String> {
+    let value = |name: &str| attributes.get(name).map(String::as_str);
+    let flag = |name: &str| native_font_flag(value(name)?).map(u8::from);
+    let height = value("height")?.trim().parse::<i64>().ok()? * 10;
+    let weight = if native_font_flag(value("bold")?)? {
+        "700"
+    } else {
+        "400"
+    };
+    let italic = flag("italic")?;
+    let underline = flag("underline")?;
+    let strikeout = flag("strikeout")?;
+    let face_name = value("faceName")?;
+    let scale = value("scale")?.trim().parse::<i64>().ok()?;
+    if attributes.len() != 8 {
+        // `kind` plus the seven. Anything else is a spelling the corpus never
+        // showed, and the writer does not invent a LOGFONT for it.
+        return None;
+    }
+    Some(format!(
+        "{{7,0,575,{height},0,0,0,{weight},{italic},{underline},{strikeout},0,0,0,0,0,{},1,{scale}}}",
+        quoted(face_name)
+    ))
 }
 
 /// `true`/`false` as a font attribute spells it.
@@ -7764,9 +7805,29 @@ mod tests {
             format_native_font(&font(&[("kind", "AutoFont"), ("scale", "120")]), none).as_deref(),
             Some("{7,3,512,1,120}")
         );
-        // `Absolute` is a different shape whose nineteen members the source
-        // does not decide, an unmeasured `ref`, and an unmeasured attribute
-        // are each refused rather than guessed.
+        // `Absolute` is a fixed nineteen-member LOGFONT, and every one of the
+        // 1 321 in the corpora spells all seven attributes. The five records
+        // whose LOGFONT block differs export to the same element, so the
+        // majority shape is written rather than refused.
+        assert_eq!(
+            format_native_font(
+                &font(&[
+                    ("kind", "Absolute"),
+                    ("faceName", "Arial"),
+                    ("height", "10"),
+                    ("bold", "true"),
+                    ("italic", "false"),
+                    ("underline", "false"),
+                    ("strikeout", "false"),
+                    ("scale", "100"),
+                ]),
+                none
+            )
+            .as_deref(),
+            Some("{7,0,575,100,0,0,0,700,0,0,0,0,0,0,0,0,\"Arial\",1,100}")
+        );
+        // One that omits an attribute is a spelling the corpus never showed,
+        // and the reader would add it back on the way out, so it refuses.
         assert_eq!(
             format_native_font(&font(&[("kind", "Absolute"), ("height", "8")]), none),
             None
