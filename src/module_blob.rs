@@ -234,6 +234,12 @@ struct FormXmlCommand {
     functional_options: Vec<String>,
     modifies_saved_data: Option<bool>,
     current_row_use: Option<FormXmlCommandCurrentRowUse>,
+    /// `<Picture>`, member 8 of the command's `{9,…}` record. Presence is
+    /// pure: 47 799 commands that spell none store the empty constant and all
+    /// 16 449 that spell one store a picture. Nothing read it before, so the
+    /// writer emitted the constant for every command of every form.
+    picture: Option<FormXmlItemPicture>,
+    picture_present: bool,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -8410,22 +8416,32 @@ fn native_item_picture(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    native_picture_of(&item.tag, item.picture.as_ref(), item.picture_present, source)
+}
+
+/// The same `<Picture>`, on a holder that is not a child item.
+fn native_picture_of(
+    holder: &str,
+    picture: Option<&FormXmlItemPicture>,
+    picture_present: bool,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
-    let Some(picture) = item.picture.as_ref() else {
-        if item.picture_present {
-            return Err(anyhow!("<{}> names a <Picture> the parser lost", item.tag));
+    let Some(picture) = picture else {
+        if picture_present {
+            return Err(anyhow!("<{holder}> names a <Picture> the parser lost"));
         }
         return Ok(native::format_native_item_picture(None, false, None, None));
     };
     if let Some(part) = picture.unwritable.first() {
-        return Err(anyhow!("<{}> names a <Picture><{part}>", item.tag));
+        return Err(anyhow!("<{holder}> names a <Picture><{part}>"));
     }
     let reference = picture
         .reference
         .as_deref()
         .map(str::trim)
         .filter(|value| !value.is_empty())
-        .ok_or_else(|| anyhow!("<{}> names a <Picture> with no <Ref>", item.tag))?;
+        .ok_or_else(|| anyhow!("<{holder}> names a <Picture> with no <Ref>"))?;
     // A `StdPicture` names the platform's own picture, which no file of the
     // source declares, so its stored value has to come from a table.
     if let Some(name) = reference.strip_prefix("StdPicture.") {
@@ -8441,8 +8457,7 @@ fn native_item_picture(
     }
     if !reference.starts_with("CommonPicture.") {
         return Err(anyhow!(
-            "<{}> names a <Picture> reference the writer cannot place: {reference}",
-            item.tag
+            "<{holder}> names a <Picture> reference the writer cannot place: {reference}"
         ));
     }
     let load_transparent = match picture.load_transparent.as_deref().map(str::trim) {
@@ -8450,13 +8465,12 @@ fn native_item_picture(
         Some("false") => false,
         _ => {
             return Err(anyhow!(
-                "<{}> names a <Picture> with no <LoadTransparent>",
-                item.tag
+                "<{holder}> names a <Picture> with no <LoadTransparent>"
             ));
         }
     };
     let source = source.ok_or_else(|| {
-        anyhow!("<{}> names {reference}, which needs --source-root", item.tag)
+        anyhow!("<{holder}> names {reference}, which needs --source-root")
     })?;
     let uuid = source.resolve_common_picture_uuid(reference)?;
     Ok(native::format_native_item_picture(
@@ -8968,6 +8982,8 @@ fn format_native_form_body(
         let title = format_form_title_value(&command.title);
         let tooltip = format_form_title_value(&command.tooltip);
         let command_options = functional_options(&command.functional_options)?;
+        let command_picture =
+            native_picture_of("Command", command.picture.as_ref(), command.picture_present, source)?;
         commands.push(',');
         commands.push_str(
             &crate::compiler::bodies::form_native::format_form_command(
@@ -8977,6 +8993,7 @@ fn format_native_form_body(
                     title: &title,
                     tooltip: &tooltip,
                     action: command.action.as_deref().unwrap_or(""),
+                    picture: &command_picture,
                     functional_options: &command_options,
                     modifies_saved_data: command.modifies_saved_data.unwrap_or(false),
                     current_row_use: command.current_row_use.map(|_| "DontUse"),
@@ -9862,6 +9879,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     attribute.save = Some(Vec::new());
                 }
+                if let Some(command) = current_command.as_mut() {
+                    if local == "Picture" && path_ends_with(&path, &["Form", "Commands", "Command"])
+                    {
+                        command.picture_present = true;
+                        match command.picture.as_mut() {
+                            Some(picture) => picture.unwritable.push("Picture".to_string()),
+                            None => command.picture = Some(FormXmlItemPicture::default()),
+                        }
+                    } else if path_ends_with(&path, &["Form", "Commands", "Command", "Picture"])
+                        && !matches!(local.as_str(), "Ref" | "LoadTransparent")
+                        && let Some(picture) = command.picture.as_mut()
+                    {
+                        picture.unwritable.push(local.clone());
+                    }
+                }
                 if local == "UseAlways"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
                     && let Some(attribute) = current_attribute.as_mut()
@@ -10202,6 +10234,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     attribute.save = Some(Vec::new());
                 }
+                if let Some(command) = current_command.as_mut() {
+                    if local == "Picture" && path_ends_with(&path, &["Form", "Commands", "Command"])
+                    {
+                        command.picture_present = true;
+                        match command.picture.as_mut() {
+                            Some(picture) => picture.unwritable.push("Picture".to_string()),
+                            None => command.picture = Some(FormXmlItemPicture::default()),
+                        }
+                    } else if path_ends_with(&path, &["Form", "Commands", "Command", "Picture"])
+                        && !matches!(local.as_str(), "Ref" | "LoadTransparent")
+                        && let Some(picture) = command.picture.as_mut()
+                    {
+                        picture.unwritable.push(local.clone());
+                    }
+                }
                 if local == "UseAlways"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
                     && let Some(attribute) = current_attribute.as_mut()
@@ -10358,6 +10405,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 // rather than through `text_value`, which is a whitelist of
                 // element names shared with every other owner in the file: a
                 // `Ref` is not the item's own property and must not reach it.
+                // The same two, on a form `<Command>` rather than an item.
+                if (path_ends_with(&path, &["Form", "Commands", "Command", "Picture", "Ref"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Picture", "LoadTransparent"],
+                    ))
+                    && let Some(picture) = current_command
+                        .as_mut()
+                        .and_then(|command| command.picture.as_mut())
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = if path.last().map(String::as_str) == Some("Ref") {
+                        &mut picture.reference
+                    } else {
+                        &mut picture.load_transparent
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent")
                     && let Some(item) = current_child_items.last_mut()
@@ -10874,6 +10939,24 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 // rather than through `text_value`, which is a whitelist of
                 // element names shared with every other owner in the file: a
                 // `Ref` is not the item's own property and must not reach it.
+                // The same two, on a form `<Command>` rather than an item.
+                if (path_ends_with(&path, &["Form", "Commands", "Command", "Picture", "Ref"])
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "Picture", "LoadTransparent"],
+                    ))
+                    && let Some(picture) = current_command
+                        .as_mut()
+                        .and_then(|command| command.picture.as_mut())
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = if path.last().map(String::as_str) == Some("Ref") {
+                        &mut picture.reference
+                    } else {
+                        &mut picture.load_transparent
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent")
                     && let Some(item) = current_child_items.last_mut()
@@ -14143,6 +14226,8 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         tooltip: Vec::new(),
         action: None,
         functional_options: Vec::new(),
+        picture: None,
+        picture_present: false,
         modifies_saved_data: None,
         current_row_use: None,
     }))
