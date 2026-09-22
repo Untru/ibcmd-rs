@@ -644,6 +644,8 @@ struct FormXmlChildItem {
     choice_parameter_links: Vec<FormXmlChoiceParameterLink>,
     /// An input field's `<TypeLink>`: its data path and link item.
     type_link: Option<(String, String)>,
+    /// An input field's `<AvailableTypes>`, the unwrapped type spelling.
+    available_types: Option<FormXmlTypeSpec>,
     /// An input field's `<ChoiceParameters>`: each parameter's name and its
     /// value, read with the choice-list grammar.
     choice_parameters: Vec<(String, FormXmlChoiceListItem)>,
@@ -6751,11 +6753,10 @@ fn native_form_attribute_use_always(
         // the source does not carry.
         return Ok("{0,0}".to_string());
     }
-    if declared == Some("cfg:ConstantsSet") {
-        return Err(anyhow!(
-            "<UseAlways> on a cfg:ConstantsSet is a delta against a flag the source does not carry"
-        ));
-    }
+    // A constants set's record is a delta against each constant's own
+    // always-used flag, which no exported property carries. A configuration
+    // loaded from its source tree has every flag clear, and against clear
+    // flags the delta is the set itself -- which is what is written.
     if fields.is_empty() {
         return Err(anyhow!("an empty <UseAlways> is not measured"));
     }
@@ -8844,6 +8845,10 @@ fn native_field_payload(
             input_hint: &native_localized(item, "InputHint"),
             choice_list: &native_choice_list(item, source)?,
             choice_parameters: &native_choice_parameters(item, source)?,
+            available_types: &match item.available_types.as_ref() {
+                Some(spec) => format_form_type_spec_pattern("InputField AvailableTypes", spec, source)?,
+                None => "{\"Pattern\"}".to_string(),
+            },
             text_input_tail: native_text_input_tail(item)?,
             choice_parameter_links: &choice_parameter_links.0,
             choice_parameter_links_again: &choice_parameter_links.1,
@@ -9037,6 +9042,32 @@ fn native_field_payload(
                 max = item.scalars.get("MaxValue").map_or("100", String::as_str),
                 percent = u8::from(native_scalar_flag(item, "ShowPercent", false)),
                 auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+            ))
+        }
+        // A calendar's `{6,…}` payload, 24 members over the 13 calendars of
+        // both corpora: the size (16 by 9 when absent), the current-date
+        // switch, the font and colour, the events, the months panel, the
+        // months across and down (1 when absent), the border (style 1 when
+        // absent), and the maximum-size switches.
+        "CalendarField" => {
+            let events = native_item_events_where(item, main_attribute_class, |name| name != "OnChange")?;
+            let border = if item.control_border.is_none() && !item.control_border_seen {
+                "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string()
+            } else {
+                native_item_control_border(item)?
+            };
+            Ok(format!(
+                "{{6,{width},{height},1,1,0,{current},1,00010101000000,00010101000000,{font},{color},0,0,{events},{months_panel},{across},{down},{border},{auto_max_width},0,0,{auto_max_height},0}}",
+                width = item.width.as_deref().unwrap_or("16"),
+                height = item.height.as_deref().unwrap_or("9"),
+                current = u8::from(native_scalar_flag(item, "ShowCurrentDate", true)),
+                font = native_item_font(item, source)?,
+                color = native_scalar_color(item, "TextColor", source)?,
+                months_panel = u8::from(native_scalar_flag(item, "ShowMonthsPanel", false)),
+                across = item.scalars.get("WidthInMonths").map_or("1", String::as_str),
+                down = item.scalars.get("HeightInMonths").map_or("1", String::as_str),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+                auto_max_height = u8::from(item.auto_max_height.unwrap_or(true)),
             ))
         }
         // A track bar's `{2,…}` payload, 18 members over 13 records.
@@ -11487,6 +11518,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     match local.as_str() {
                         "UserVisible" => item.user_visible = Some(FormXmlRights::default()),
+                        "AvailableTypes" => item.available_types = Some(FormXmlTypeSpec::default()),
                         "TypeLink" => item.type_link = Some((String::new(), String::new())),
                         _ => {}
                     }
@@ -13342,6 +13374,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 } else if let Some(last) = rights.values.last_mut() {
                                     last.1 = Some(value);
                                 }
+                            }
+                        }
+                    }
+                    _ if current_child_items.last().is_some_and(|item| {
+                        form_type_spec_part(&path, &[item.tag.as_str(), "AvailableTypes"], false)
+                            .is_some()
+                    }) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let tag = item.tag.clone();
+                            if let Some(part) =
+                                form_type_spec_part(&path, &[tag.as_str(), "AvailableTypes"], false)
+                                && let Some(spec) = item.available_types.as_mut()
+                            {
+                                apply_form_type_spec_part(spec, part, nested_text.trim());
                             }
                         }
                     }
@@ -16495,6 +16542,7 @@ fn parse_form_child_item_xml(
         user_visible: None,
         choice_parameter_links: Vec::new(),
         type_link: None,
+        available_types: None,
         choice_parameters: Vec::new(),
         child_items_present: false,
         child_items: Vec::new(),
@@ -16793,6 +16841,9 @@ fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -
 /// `<FunctionalOptions><Item>`. Neither of the last two carries a
 /// `<Presentation>`, a `<CheckState>` or a `<Value>`.
 fn form_nested_text_element(path: &[String]) -> bool {
+    if form_type_spec_part(path, &["AvailableTypes"], false).is_some() {
+        return true;
+    }
     if path_ends_with(path, &["Attribute", "Save", "Field"])
         || path_ends_with(path, &["Attribute", "UseAlways", "Field"])
         || path_ends_with(path, &["UserVisible", "Common"])

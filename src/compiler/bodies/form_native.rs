@@ -90,6 +90,12 @@ pub(crate) fn format_native_color(
             .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
         return Some(format!("{{3,2,{{{code}}}}}"));
     }
+    if let Some(name) = value.strip_prefix("win:") {
+        let code = WINDOWS_COLOR_CODES
+            .iter()
+            .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
+        return Some(format!("{{3,1,{{{code}}}}}"));
+    }
     let name = value.strip_prefix("style:")?;
     if let Some(code) = PLATFORM_STYLE_COLOR_CODES
         .iter()
@@ -203,13 +209,18 @@ const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("Beige", "6"),
     ("Black", "8"),
     ("Blue", "10"),
+    ("CadetBlue", "14"),
     ("Cream", "20"),
     ("Crimson", "21"),
     ("DarkBlue", "23"),
     ("DarkGray", "26"),
     ("DarkGreen", "27"),
+    ("DarkOliveGreen", "30"),
+    ("DarkOrange", "31"),
     ("DarkRed", "33"),
     ("DarkSlateGray", "37"),
+    ("DeepSkyBlue", "41"),
+    ("DimGray", "42"),
     ("DodgerBlue", "43"),
     ("FireBrick", "44"),
     ("FloralWhite", "45"),
@@ -234,35 +245,54 @@ const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("LightGreen", "70"),
     ("LightPink", "72"),
     ("LightSalmon", "73"),
+    ("LightSkyBlue", "75"),
     ("LightSlateGray", "77"),
     ("LightSteelBlue", "78"),
     ("LightYellow", "79"),
+    ("Lime", "80"),
     ("Maroon", "84"),
     ("MediumBlue", "86"),
     ("MediumGray", "87"),
+    ("MediumSeaGreen", "91"),
     ("MintCream", "97"),
     ("MistyRose", "98"),
     ("Moccasin", "96"),
     ("NavajoWhite", "100"),
-    ("Orange", "94"),
+    ("Orange", "105"),
+    ("OrangeRed", "106"),
+    ("PaleGreen", "109"),
     ("PaleTurquoise", "110"),
+    ("PapayaWhip", "112"),
     ("Pink", "115"),
     ("PowderBlue", "117"),
     ("Red", "119"),
     ("RosyBrown", "120"),
     ("RoyalBlue", "121"),
+    ("SaddleBrown", "122"),
     ("Salmon", "123"),
     ("Sienna", "127"),
     ("Silver", "128"),
     ("SkyBlue", "129"),
     ("SlateBlue", "130"),
     ("SlateGray", "131"),
+    ("Snow", "132"),
     ("SteelBlue", "134"),
     ("Violet", "140"),
     ("VioletRed", "141"),
     ("White", "143"),
     ("WhiteSmoke", "144"),
     ("Yellow", "145"),
+];
+
+/// The Windows system colours the corpus names, with the index a body stores
+/// under `{3,1,{n}}` -- the ones the form exporter reads back.
+const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
+    ("ActiveTitleBar", "2"),
+    ("ButtonDarkShadow", "21"),
+    ("ButtonText", "18"),
+    ("DisabledText", "17"),
+    ("MenuBar", "4"),
+    ("ScrollBar", "0"),
 ];
 
 /// One `<Event>` of an item, as the source names it.
@@ -927,6 +957,7 @@ pub(crate) fn native_field_kind(tag: &str) -> Option<u8> {
         "RadioButtonField" => 5,
         "SpreadSheetDocumentField" => 6,
         "TextDocumentField" => 7,
+        "CalendarField" => 8,
         "ProgressBarField" => 9,
         "TrackBarField" => 10,
         "GanttChartField" => 12,
@@ -1251,6 +1282,8 @@ pub(crate) struct NativeInputPayload<'a> {
     pub(crate) type_link: &'a str,
     /// Slot 27, `<ChoiceParameters>`, `{0,0}` by default.
     pub(crate) choice_parameters: &'a str,
+    /// Slot 34, `<AvailableTypes>` as a type pattern, `{"Pattern"}` by default.
+    pub(crate) available_types: &'a str,
     /// Slots 55 to 60: `<AutoShowClearButtonMode>`, `<AutoShowOpenButtonMode>`,
     /// `<AutoCorrectionOnTextInput>`, `<SpellCheckingOnTextInput>`, a constant,
     /// `<SpecialTextInputMode>` -- already coded.
@@ -1336,6 +1369,7 @@ impl NativeInputPayload<'_> {
             choice_parameter_links_again: "{5007,0}",
             type_link: "{3,0,0}",
             choice_parameters: "{0,0}",
+            available_types: "{\"Pattern\"}",
             text_input_tail: ["0", "0", "0", "0", "0", "0"],
             create_button: None,
             choice_button_representation: None,
@@ -1406,7 +1440,7 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
          {spin_button},{open_button},{min_value},{max_value},{mask},{list_choice_mode},\
          {picture},{choice_list_height},{drop_list_width},{quick_choice},{folders},\
          {choice_form},{links},{choice_parameters},{auto_choice_incomplete},{format},{edit_format},\
-         {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},{type_domain},{events},\
+         {auto_mark_incomplete},{choose_type},{incomplete},{available_types},{type_domain},{events},\
          {text_color},{back_color},{border_color},{font},{text_edit},{type_link},\
          {edit_text_update},{input_hint},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
@@ -1454,6 +1488,7 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         links_again = payload.choice_parameter_links_again,
         type_link = payload.type_link,
         choice_parameters = payload.choice_parameters,
+        available_types = payload.available_types,
         tail0 = payload.text_input_tail[0],
         tail1 = payload.text_input_tail[1],
         tail2 = payload.text_input_tail[2],
@@ -2069,6 +2104,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("SpreadSheetDocumentField", false, "Underline", "85bd789b-0047-46f9-9b2e-845907fc1b1d"),
     ("Table", false, "Add", "b0016a68-ec64-4e6d-b905-c71fd62efc4c"),
     ("Table", false, "AddFilterItem", "fca750bc-4fb6-40e2-ae0f-e818939a32e7"),
+    ("Table", false, "AddAutoOrderItem", "48e12019-0fd6-46eb-aab6-2acba716a623"),
     ("Table", false, "AddFilterItemGroup", "a5fdef31-bbf0-4a9d-98aa-fd5fd8f1344a"),
     ("Table", false, "AddGroup", "7b70c79a-199e-4e87-a7eb-29dea9a5ad69"),
     ("Table", false, "AddOrderItem", "62ff963c-9426-43af-bb23-1d2ef3a9a0c1"),
