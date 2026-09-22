@@ -8150,6 +8150,49 @@ fn native_field_payload(
             })
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
         }
+        "HTMLDocumentField" => native::format_html_document_payload(
+            &native::NativeHtmlDocumentPayload {
+                // A document field's size defaults are not a field's: absent
+                // stores 50 and 10, over all 222 records of both corpora.
+                width: item.width.as_deref().unwrap_or("50"),
+                height: item.height.as_deref().unwrap_or("10"),
+                border_color: &native_scalar_color(item, "BorderColor", source)?,
+                output: item.scalars.get("Output").map(String::as_str),
+                events: &events,
+                auto_max_width: item.auto_max_width.unwrap_or(true),
+                max_width: item.max_width.as_deref().unwrap_or("0"),
+                auto_max_height: item.auto_max_height.unwrap_or(true),
+                max_height: item.max_height.as_deref().unwrap_or("0"),
+                horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
+                vertical_stretch: item.vertical_stretch.unwrap_or(true),
+            },
+        )
+        .ok_or_else(|| anyhow!("<HTMLDocumentField> names a spelling the writer cannot place")),
+        "TextDocumentField" => {
+            // Member 3 is constant 1 over all 159 records because no field of
+            // either corpus spells `<HorizontalStretch>`; one that does would
+            // decide between a constant and the flag its neighbour is, and
+            // nothing measures which.
+            if item.horizontal_stretch.is_some() {
+                return Err(anyhow!(
+                    "a <TextDocumentField> names <HorizontalStretch>, whose member is not measured"
+                ));
+            }
+            Ok(native::format_text_document_payload(
+                &native::NativeTextDocumentPayload {
+                    width: item.width.as_deref().unwrap_or("50"),
+                    height: item.height.as_deref().unwrap_or("10"),
+                    vertical_stretch: item.vertical_stretch.unwrap_or(true),
+                    back_color: &native_scalar_color(item, "BackColor", source)?,
+                    font: &native_item_font(item, source)?,
+                    auto_max_width: item.auto_max_width.unwrap_or(true),
+                    max_width: item.max_width.as_deref().unwrap_or("0"),
+                    auto_max_height: item.auto_max_height.unwrap_or(true),
+                    max_height: item.max_height.as_deref().unwrap_or("0"),
+                    events: &events,
+                },
+            ))
+        }
         "RadioButtonField" => {
             // The font and the choice list used to refuse together, which
             // put 114 BSP forms behind a condition none of them meets: not

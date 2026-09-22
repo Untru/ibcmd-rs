@@ -4154,6 +4154,83 @@ impl NativePopupPayload<'_> {
     }
 }
 
+/// The `{3,…}` payload of an `<HTMLDocumentField>`, thirteen members.
+///
+/// Every member is a constant over all 222 records of both corpora or passes
+/// the partition test outright. Members 3 and 4 are the `border_color_option`
+/// and `document_field_output` slots the reader already claims for this kind,
+/// so the two directions agree slot for slot.
+pub(crate) struct NativeHtmlDocumentPayload<'a> {
+    pub(crate) width: &'a str,
+    pub(crate) height: &'a str,
+    pub(crate) border_color: &'a str,
+    pub(crate) output: Option<&'a str>,
+    pub(crate) events: &'a str,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: &'a str,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
+    pub(crate) horizontal_stretch: bool,
+    pub(crate) vertical_stretch: bool,
+}
+
+pub(crate) fn format_html_document_payload(
+    payload: &NativeHtmlDocumentPayload<'_>,
+) -> Option<String> {
+    let output = root_code(payload.output, &[("Enable", "1"), ("Disable", "2")], "0")?;
+    Some(format!(
+        "{{3,{width},{height},{border_color},{output},{events},{auto_width},{max_width},0,\
+         {auto_height},{max_height},{horizontal},{vertical}}}",
+        width = payload.width,
+        height = payload.height,
+        border_color = payload.border_color,
+        events = payload.events,
+        auto_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
+        auto_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
+        horizontal = u8::from(payload.horizontal_stretch),
+        vertical = u8::from(payload.vertical_stretch),
+    ))
+}
+
+/// The `{5,…}` payload of a `<TextDocumentField>`, sixteen members.
+///
+/// Member 15 is **not** where `OnChange` goes: all 20 items that spell it
+/// store the empty block here, because the field record keeps `OnChange` in
+/// its own member. Member 3 is constant 1 over all 159 records because no
+/// field of either corpus spells `<HorizontalStretch>`, so the caller refuses
+/// one that does rather than guess which of the two readings it takes.
+pub(crate) struct NativeTextDocumentPayload<'a> {
+    pub(crate) width: &'a str,
+    pub(crate) height: &'a str,
+    pub(crate) vertical_stretch: bool,
+    pub(crate) back_color: &'a str,
+    pub(crate) font: &'a str,
+    pub(crate) auto_max_width: bool,
+    pub(crate) max_width: &'a str,
+    pub(crate) auto_max_height: bool,
+    pub(crate) max_height: &'a str,
+    pub(crate) events: &'a str,
+}
+
+pub(crate) fn format_text_document_payload(payload: &NativeTextDocumentPayload<'_>) -> String {
+    format!(
+        "{{5,{width},{height},1,{vertical},0,{{3,4,{{0}}}},{back_color},{{3,4,{{0}}}},{font},\
+         {auto_width},{max_width},0,{auto_height},{max_height},{events}}}",
+        width = payload.width,
+        height = payload.height,
+        vertical = u8::from(payload.vertical_stretch),
+        back_color = payload.back_color,
+        font = payload.font,
+        auto_width = u8::from(payload.auto_max_width),
+        max_width = payload.max_width,
+        auto_height = u8::from(payload.auto_max_height),
+        max_height = payload.max_height,
+        events = payload.events,
+    )
+}
+
 pub(crate) fn format_popup_payload(payload: &NativePopupPayload<'_>) -> Option<String> {
     let representation = root_code(
         payload.representation,
