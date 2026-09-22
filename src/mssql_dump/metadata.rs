@@ -225,6 +225,20 @@ pub(super) fn metadata_source_for_object_fields(
         0 if header_index == Some(1) && field_is_quoted_string(fields.get(2)) => {
             Some(("Language", "Languages"))
         }
+        // A platform 8.5 palette colour: the header and one colour tuple,
+        // `{0,<header>,{3,<space>,{<payload>}}}` once the 8.5 colour is read
+        // in its 8.3.27 spelling (8.5.1.1150 BSP `PaletteColors/*`, 2 of 2).
+        // The integration service below shares the code and the header slot
+        // but carries identifiers after it, never a single colour.
+        0 if header_index == Some(1)
+            && fields.len() == 3
+            && fields.get(2).is_some_and(|field| {
+                let field = field.trim();
+                field.starts_with("{3,") || super::form_v85::v85_palette_color(field).is_some()
+            }) =>
+        {
+            Some(("PaletteColor", "PaletteColors"))
+        }
         0 if header_index == Some(1) => Some(("IntegrationService", "IntegrationServices")),
         1 if header_index == Some(1) && field_starts_with(fields.get(2), r#"{"Pattern""#) => {
             Some(("EventSubscription", "EventSubscriptions"))

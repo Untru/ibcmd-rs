@@ -11615,6 +11615,13 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
     let mut xml = if kind == "CommonPicture" {
         let picture = parse_common_picture_properties_from_text(text, uuid)?;
         format_common_picture_source_xml(&header, &picture, source_version).into_bytes()
+    } else if kind == "PaletteColor" {
+        let color = metadata_object_fields(text)
+            .and_then(|fields| fields.get(2).map(|field| field.trim().to_string()))?;
+        let color = form_v85::v85_palette_color(&color)
+            .map(ToOwned::to_owned)
+            .or_else(|| form_body::parse_form_control_color(&color, object_refs))?;
+        format_palette_color_source_xml(&header, &color, source_version).into_bytes()
     } else if kind == "Bot" {
         // Must run here, after `is_form_metadata_text`/`is_template_metadata_text`
         // and the other structural (shape-based) checks above, not among the
@@ -35616,6 +35623,23 @@ fn format_common_picture_source_xml(
         xml_bool(picture.availability_for_appearance)
     ));
     xml
+}
+
+/// A platform 8.5 palette colour: the header properties and the colour.
+fn format_palette_color_source_xml(
+    header: &MetadataHeader,
+    color: &str,
+    source_version: InfobaseConfigSourceVersion,
+) -> String {
+    let xml = format_full_metadata_source_xml("PaletteColor", header, source_version);
+    xml.replacen(
+        "\t\t</Properties>\r\n",
+        &format!(
+            "\t\t\t<Color>{}</Color>\r\n\t\t</Properties>\r\n",
+            escape_xml_text(color)
+        ),
+        1,
+    )
 }
 
 fn format_full_metadata_source_xml(

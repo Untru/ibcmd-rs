@@ -3218,8 +3218,9 @@ pub(super) fn extract_configuration_source_xml(
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
     let evidenced_property_fields = configuration_root_property_fields(text, uuid);
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
-        match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block(
+        match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block_on(
             property_fields,
+            configuration_root_is_v85(text),
         ) {
             Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
             Err(
@@ -3367,10 +3368,19 @@ pub(super) fn parse_configuration_properties_from_text(
     // length here tells the two apart instead of defaulting off of a match
     // that was never this record to begin with.
     let is_normalized_67_shape = !is_native_68_shape && fields.len() == 61;
+    // The platform that reads a configuration clamps its compatibility to
+    // its own edition: 8.3.27 prints `80501` as `Version8_3_27`, while 8.5
+    // (the only reader of a `{76,...}` tuple) prints it as `Version8_5_1`
+    // (8.5.1.1150 BSP 3.2.1.356, both properties).
+    let ceiling = if configuration_root_is_v85(text) {
+        V85_PACKED_PLATFORM_VERSION
+    } else {
+        MAX_EVIDENCED_PACKED_PLATFORM_VERSION
+    };
     let configuration_extension_compatibility_mode = if is_native_68_shape {
         fields
             .get(26)
-            .and_then(|field| configuration_compatibility_mode_xml(field.trim()))
+            .and_then(|field| configuration_compatibility_mode_xml_under(field.trim(), ceiling))
     } else if is_normalized_67_shape {
         configuration_compatibility_mode_xml(&MAX_EVIDENCED_PACKED_PLATFORM_VERSION.to_string())
     } else {
@@ -3613,6 +3623,22 @@ pub(super) fn configuration_root_fields(text: &str) -> Option<(Vec<&str>, bool)>
     if let Some(start) = text.find("{68,") {
         return Some((split_1c_braced_fields(text, start)?, true));
     }
+    // Platform 8.5 writes the tuple as `{76,...}` of 77 members: the genuine
+    // `{68,...}` 61 member for member (8.5.1.1150 BSP 3.2.1.356 against its
+    // 8.3.27 3.1.11.466 predecessor: every shared member equal except the
+    // version, copyright, compatibility and mobile-functionality values the
+    // release itself changed) plus 16 appended. Read as the 68 shape.
+    if !text.contains("{67,")
+        && let Some(start) = text.find("{76,")
+    {
+        let fields = split_1c_braced_fields(text, start)?;
+        if fields.len() == 77 {
+            let mut normalized = Vec::with_capacity(61);
+            normalized.push("68");
+            normalized.extend(fields[1..61].iter().copied());
+            return Some((normalized, true));
+        }
+    }
     let start = text.find("{67,")?;
     let fields = split_1c_braced_fields(text, start)?;
     Some((
@@ -3631,6 +3657,14 @@ pub(super) fn configuration_root_fields(text: &str) -> Option<(Vec<&str>, bool)>
 /// -- to be byte-identical with the reference's, and the reference's own
 /// index 0 is `"68"`.
 fn normalize_short_configuration_root_property_fields(fields: Vec<&str>) -> Option<Vec<&str>> {
+    // Platform 8.5's `{76,...}` of 77 members is the `{68,...}` of 61 plus 16
+    // appended (see `configuration_root_fields`).
+    if fields.first()?.trim() == "76" && fields.len() == 77 {
+        let mut normalized = Vec::with_capacity(61);
+        normalized.push("68");
+        normalized.extend(fields[1..61].iter().copied());
+        return Some(normalized);
+    }
     if fields.first()?.trim() != "67" || fields.len() != 60 {
         return Some(fields);
     }
@@ -4036,7 +4070,7 @@ fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
 
 const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
 
-const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 45] = [
+const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 46] = [
     "Language",
     "Subsystem",
     "StyleItem",
@@ -4059,6 +4093,8 @@ const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 45] = [
     "FunctionalOption",
     "FunctionalOptionsParameter",
     "DefinedType",
+    // 8.5: the palette colours follow the defined types (BSP 3.2.1.356).
+    "PaletteColor",
     "Bot",
     "CommonCommand",
     "CommandGroup",
@@ -4453,12 +4489,25 @@ pub(super) fn configuration_script_variant_xml(value: &str) -> Option<&'static s
 /// reading for it. Fail closed rather than print the arithmetic guess.
 const MAX_EVIDENCED_PACKED_PLATFORM_VERSION: u32 = 80327;
 
+/// Platform 8.5.1, the edition that writes the `{76,...}` configuration
+/// tuple and reads it back.
+const V85_PACKED_PLATFORM_VERSION: u32 = 80501;
+
+/// Whether a configuration root text carries the platform 8.5 tuple.
+pub(super) fn configuration_root_is_v85(text: &str) -> bool {
+    !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,")
+}
+
 pub(super) fn configuration_compatibility_mode_xml(value: &str) -> Option<String> {
+    configuration_compatibility_mode_xml_under(value, MAX_EVIDENCED_PACKED_PLATFORM_VERSION)
+}
+
+fn configuration_compatibility_mode_xml_under(value: &str, ceiling: u32) -> Option<String> {
     if let Some(value) = parse_1c_quoted_string(value) {
         return if value.is_empty() { None } else { Some(value) };
     }
     let version = value.parse::<u32>().ok()?;
-    if version < 80000 || version > MAX_EVIDENCED_PACKED_PLATFORM_VERSION {
+    if version < 80000 || version > ceiling {
         return None;
     }
     Some(format!(

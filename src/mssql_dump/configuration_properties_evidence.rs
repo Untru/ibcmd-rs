@@ -151,6 +151,29 @@ fn typed_field(
 pub(crate) fn parse_configuration_properties_evidenced_default_block(
     fields: &[&str],
 ) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
+    parse_configuration_properties_evidenced_default_block_on(fields, false)
+}
+
+/// The platform 8.5 reading of `InterfaceCompatibilityMode`'s stored digit.
+///
+/// 8.5.1.1150 BSP 3.2.1.356 stores `3` and its native `Configuration.xml`
+/// prints `Version8_5EnableTaxi`, where 8.3.27 prints the same digit as
+/// `Taxi`: the edition that reads the tuple decides the spelling. No other
+/// digit has been seen under 8.5, so every other one refuses.
+fn v85_interface_compatibility_mode_xml(digit: u8) -> Option<&'static str> {
+    match digit {
+        b'3' => Some("Version8_5EnableTaxi"),
+        _ => None,
+    }
+}
+
+/// As `parse_configuration_properties_evidenced_default_block`, read by the
+/// platform edition that wrote the tuple (`v85`: the 8.5 `{76,...}` tuple,
+/// normalized to the 61-field shape).
+pub(crate) fn parse_configuration_properties_evidenced_default_block_on(
+    fields: &[&str],
+    v85: bool,
+) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
     let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
     let reference = &*EVIDENCED_DEFAULT_REFERENCE_FIELDS;
     if fields.len() != reference.len() {
@@ -187,7 +210,13 @@ pub(crate) fn parse_configuration_properties_evidenced_default_block(
         fields,
         policy.interface_compatibility_mode_tuple_field(),
         "InterfaceCompatibilityMode",
-        |digit| policy.interface_compatibility_mode_xml(digit),
+        |digit| {
+            if v85 {
+                v85_interface_compatibility_mode_xml(digit)
+            } else {
+                policy.interface_compatibility_mode_xml(digit)
+            }
+        },
     )?;
     let synchronous_platform_extension_and_add_in_call_use_mode_xml = typed_field(
         fields,
