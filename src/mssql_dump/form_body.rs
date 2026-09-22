@@ -15987,6 +15987,9 @@ pub(super) fn parse_form_label_field_text_color(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    if let Some(name) = super::form_v85::v85_palette_color(field) {
+        return Some(name.to_owned());
+    }
     let fields = split_1c_braced_fields(field.trim(), 0)?;
     if fields.first().map(|value| value.trim()) != Some("3") {
         return None;
@@ -16024,6 +16027,10 @@ pub(super) fn parse_form_control_color(
     field: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<String> {
+    // An 8.5 palette colour keeps its own shape through the down-conversion.
+    if let Some(name) = super::form_v85::v85_palette_color(field) {
+        return Some(name.to_owned());
+    }
     let color = split_1c_braced_fields(field.trim(), 0)?;
     if color.len() != 3 || color.first()?.trim() != "3" {
         return None;

@@ -43,6 +43,10 @@ pub(super) enum Node {
 }
 
 impl Node {
+    pub(super) fn as_leaf(&self) -> Option<&str> {
+        self.leaf()
+    }
+
     fn leaf(&self) -> Option<&str> {
         match self {
             Self::Leaf(text) => Some(text),
@@ -157,8 +161,12 @@ pub(super) struct FormV85ItemFacts {
     pub(super) revision: String,
     /// The members 8.5 appended to the item record, in order.
     pub(super) tail: Vec<Node>,
-    /// The item's property bag 8.5 revision and its appended members.
+    /// The item's kind code (group, field or decoration kind).
+    pub(super) kind: Option<String>,
+    /// The item's property bag: its 8.5 revision, every 8.5 member, and the
+    /// members 8.5 appended.
     pub(super) bag_revision: Option<String>,
+    pub(super) bag: Vec<Node>,
     pub(super) bag_tail: Vec<Node>,
 }
 
@@ -173,6 +181,8 @@ pub(super) struct FormV85Facts {
     pub(super) commands: BTreeMap<String, Vec<Node>>,
     /// Palette colour tuples left in their 8.5 shape (no 8.3.27 spelling).
     pub(super) palette_colors: usize,
+    /// Colour tuples of a kind or palette index nothing names.
+    pub(super) unknown_palette_colors: Vec<String>,
 }
 
 pub(super) fn is_v85_form_body(body: &ParsedFormBodyBlob) -> bool {
@@ -195,6 +205,12 @@ pub(super) fn down_convert_v85_form_body(
     root = convert_primitives(root, &mut facts);
     root = convert_items(root, &mut facts)?;
     root = convert_values_and_commands(root, &mut facts)?;
+    if !facts.unknown_palette_colors.is_empty() {
+        bail!(
+            "8.5 form body carries colour tuples no palette names: {:?}",
+            facts.unknown_palette_colors
+        );
+    }
     let Node::List(mut root_members) = root else {
         bail!("8.5 form layout is not a tuple");
     };
@@ -306,6 +322,30 @@ fn is_v85_font(members: &[Node]) -> bool {
     }
 }
 
+/// The 2.21 spelling of a palette colour index.
+///
+/// 8.5.1.1150 BSP native tree: every item carrying exactly one palette tuple
+/// and one `pal:` element pairs index and name without exception over the 78
+/// such items. An index the table does not name refuses the body.
+pub(super) fn v85_palette_color_name(index: i64) -> Option<&'static str> {
+    Some(match index {
+        0 => "pal:FirstBrand",
+        1 => "pal:SecondBrand",
+        2 => "pal:Red",
+        3 => "pal:Orange",
+        4 => "pal:Yellow",
+        5 => "pal:Green",
+        6 => "pal:LightBlue",
+        15 => "pal:Gray",
+        _ => return None,
+    })
+}
+
+/// The 2.21 spelling of a palette colour tuple, if `text` is one.
+pub(super) fn v85_palette_color(text: &str) -> Option<&'static str> {
+    v85_palette_color_index(text.trim()).and_then(v85_palette_color_name)
+}
+
 /// Palette colour: space `4` ("automatic" to an 8.3.27 reader) with kind `5`.
 pub(super) fn v85_palette_color_index(text: &str) -> Option<i64> {
     let node = parse_node(text).ok()?;
@@ -349,6 +389,16 @@ fn convert_primitives(node: Node, facts: &mut FormV85Facts) -> Node {
             return Node::List(members);
         }
         facts.palette_colors += 1;
+        let index = match members[2].list() {
+            Some([Node::Leaf(value)]) => value.parse::<i64>().ok(),
+            _ => None,
+        };
+        if members[1].leaf() != Some("4")
+            || members[3].leaf() != Some("5")
+            || index.and_then(v85_palette_color_name).is_none()
+        {
+            facts.unknown_palette_colors.push(Node::List(members.clone()).to_text());
+        }
         return Node::List(members);
     }
     if is_v85_font(&members) {
@@ -385,40 +435,61 @@ fn item_revision(revision: &str) -> Option<(&'static str, usize)> {
     })
 }
 
-/// Property-bag slots, in the order a record without and with the optional
-/// common prefix places them.
-fn bag_slots(v83_revision: &str) -> &'static [usize] {
+/// The property-bag slot of a record that carries one, before the optional
+/// common prefix shifts it.
+fn bag_base_slot(v83_revision: &str) -> Option<usize> {
     match v83_revision {
-        "22" => &[20, 21],
-        "37" => &[39, 40],
-        "12" => &[18, 19],
-        _ => &[],
+        "22" => Some(20),
+        "37" => Some(39),
+        "12" => Some(18),
+        _ => None,
     }
 }
 
-/// (8.5 bag revision, 8.5 length) -> (8.3.27 revision, appended members), per
-/// owning record.
-fn bag_revision(v83_owner: &str, revision: &str, len: usize) -> Option<(&'static str, usize)> {
-    Some(match (v83_owner, revision, len) {
-        ("22", "38", 42) => ("29", 13),
-        ("22", "22", 24) => ("18", 4),
-        ("22", "5", 16) => ("2", 4),
-        ("22", "8", 10) => ("7", 1),
-        ("22", "2", 4) => ("1", 1),
-        ("22", "1", 4) => ("0", 1),
-        ("22", "1", 2) => ("1", 0),
-        ("22", "4", 6) => ("4", 0),
-        ("37", "38", 71) => ("36", 5),
-        ("37", "12", 21) => ("11", 1),
-        ("37", "13", 15) => ("11", 2),
-        ("37", "12", 26) => ("10", 2),
-        ("37", "11", 15) => ("8", 3),
-        ("37", "15", 34) => ("13", 2),
-        ("37", "5", 16) => ("5", 0),
-        ("37", "4", 16) => ("4", 0),
-        ("37", "4", 14) => ("3", 1),
-        ("12", "6", 15) => ("4", 2),
-        ("12", "5", 9) => ("5", 0),
+/// (owner 8.3.27 revision, item kind, 8.5 bag revision, 8.5 bag length) ->
+/// (8.3.27 bag revision, appended members).
+///
+/// Keyed by the item kind because two kinds share a shape across the
+/// revisions: a `ButtonGroup` (group kind 6) keeps its `{2,...}` bag of four
+/// members, while a `CommandBar` (kind 0) moves from `{1,...}` of three to
+/// `{2,...}` of four. Every (kind, shape) pair of the 8.5 BSP bodies is listed;
+/// each maps onto the one shape the 8.3.27 BSP bodies give that kind.
+fn bag_revision(
+    v83_owner: &str,
+    kind: &str,
+    revision: &str,
+    len: usize,
+) -> Option<(&'static str, usize)> {
+    Some(match (v83_owner, kind, revision, len) {
+        // Groups: CommandBar, ColumnGroup, Popup, Pages, Page, UsualGroup,
+        // ButtonGroup, ContextMenu, AutoCommandBar.
+        ("22", "0", "2", 4) => ("1", 1),
+        ("22", "1", "8", 10) => ("7", 1),
+        ("22", "2", "5", 16) => ("2", 4),
+        ("22", "3", "4", 6) => ("4", 0),
+        ("22", "4", "22", 24) => ("18", 4),
+        ("22", "5", "38", 42) => ("29", 13),
+        ("22", "6", "2", 4) => ("2", 0),
+        ("22", "8", "1", 2) => ("1", 0),
+        ("22", "9", "1", 4) => ("0", 1),
+        // Fields, by field kind.
+        ("37", "1", "12", 21) => ("11", 1),
+        ("37", "2", "38", 71) => ("36", 5),
+        ("37", "3", "13", 15) => ("11", 2),
+        ("37", "4", "12", 26) => ("10", 2),
+        ("37", "5", "11", 15) => ("8", 3),
+        ("37", "6", "15", 34) => ("13", 2),
+        ("37", "7", "5", 16) => ("5", 0),
+        ("37", "8", "6", 24) => ("6", 0),
+        ("37", "9", "4", 16) => ("4", 0),
+        ("37", "10", "2", 18) => ("2", 0),
+        ("37", "11", "1", 11) => ("1", 0),
+        ("37", "14", "3", 14) => ("3", 0),
+        ("37", "15", "4", 14) => ("3", 1),
+        ("37", "17", "1", 16) => ("1", 0),
+        // Decorations: label (and extended tooltip), picture.
+        ("12", "0", "5", 9) => ("5", 0),
+        ("12", "1", "6", 15) => ("4", 2),
         _ => return None,
     })
 }
@@ -448,49 +519,39 @@ fn convert_items(node: Node, facts: &mut FormV85Facts) -> Result<Node> {
         tail,
         ..FormV85ItemFacts::default()
     };
-    let slots = bag_slots(v83);
-    if !slots.is_empty() {
-        let mut converted = false;
-        for &slot in slots {
-            let Some(Node::List(bag)) = members.get(slot) else {
-                continue;
-            };
-            let Some(bag_lead) = bag.first().and_then(Node::leaf) else {
-                continue;
-            };
-            if !is_int(bag_lead) {
-                continue;
-            }
-            let Some((bag_v83, bag_appended)) = bag_revision(v83, bag_lead, bag.len()) else {
-                continue;
-            };
-            let bag_lead = bag_lead.to_owned();
-            let Some(Node::List(bag)) = members.get_mut(slot) else {
-                unreachable!("bag slot checked above");
-            };
-            let bag_kept = bag.len() - bag_appended;
-            item_facts.bag_tail = bag.split_off(bag_kept);
-            item_facts.bag_revision = Some(bag_lead);
-            bag[0] = Node::Leaf(bag_v83.to_owned());
-            converted = true;
-            break;
-        }
-        if !converted && v83 != "12" {
-            // Every 8.5 group and field carries a bag the table names; a
-            // decoration of another kind (an extended tooltip) carries none.
-            let seen = slots
-                .iter()
-                .filter_map(|slot| members.get(*slot))
-                .map(|node| {
-                    let text = node.to_text();
-                    text.chars().take(24).collect::<String>()
-                })
-                .collect::<Vec<_>>();
-            bail!(
-                "8.5 form item {id} (revision {}) carries no property bag this table names: {seen:?}",
-                item_facts.revision
-            );
-        }
+    if let Some(base) = bag_base_slot(v83) {
+        // The optional common prefix is a tuple ahead of the kind code and
+        // shifts every later member, the bag with them.
+        let offset = usize::from(matches!(members.get(5), Some(Node::List(_))));
+        let kind = members
+            .get(5 + offset)
+            .and_then(Node::leaf)
+            .ok_or_else(|| anyhow!("8.5 form item {id} carries no kind code"))?
+            .to_owned();
+        let slot = base + offset;
+        let Some(Node::List(bag)) = members.get_mut(slot) else {
+            bail!("8.5 form item {id} (kind {kind}) carries no property bag at member {slot}");
+        };
+        let bag_lead = bag
+            .first()
+            .and_then(Node::leaf)
+            .filter(|lead| is_int(lead))
+            .ok_or_else(|| anyhow!("8.5 form item {id} property bag has no revision"))?
+            .to_owned();
+        let (bag_v83, bag_appended) = bag_revision(v83, &kind, &bag_lead, bag.len())
+            .ok_or_else(|| {
+                anyhow!(
+                    "8.5 form item {id} (revision {}, kind {kind}) carries unknown property bag {{{bag_lead},...}} with {} members",
+                    item_facts.revision,
+                    bag.len()
+                )
+            })?;
+        item_facts.bag = bag.clone();
+        let bag_kept = bag.len() - bag_appended;
+        item_facts.bag_tail = bag.split_off(bag_kept);
+        item_facts.bag_revision = Some(bag_lead);
+        bag[0] = Node::Leaf(bag_v83.to_owned());
+        item_facts.kind = Some(kind);
     }
     facts.items.insert(id, item_facts);
     Ok(Node::List(members))
@@ -546,83 +607,6 @@ fn convert_values_and_commands(node: Node, facts: &mut FormV85Facts) -> Result<N
         }
     }
     Ok(Node::List(members))
-}
-
-/// The root-level children of a written `Form.xml`: tag and byte offset of
-/// the line each starts on. The writer puts every root child on its own line
-/// at exactly one tab of indentation.
-fn root_children(xml: &str) -> Vec<(String, usize)> {
-    let mut children = Vec::new();
-    let mut offset = 0;
-    for line in xml.split_inclusive('\n') {
-        if let Some(rest) = line.strip_prefix("\t<")
-            && !rest.starts_with('/')
-            && !rest.starts_with('\t')
-        {
-            let tag: String = rest
-                .chars()
-                .take_while(|ch| !matches!(ch, ' ' | '>' | '/' | '\r' | '\n'))
-                .collect();
-            children.push((tag, offset));
-        }
-        offset += line.len();
-    }
-    children
-}
-
-/// The line a root-level leaf element occupies, if the writer emitted one.
-fn root_leaf_line(xml: &str, tag: &str) -> Option<std::ops::Range<usize>> {
-    let open = format!("\t<{tag}>");
-    let mut offset = 0;
-    for line in xml.split_inclusive('\n') {
-        if line.starts_with(&open) {
-            return Some(offset..offset + line.len());
-        }
-        offset += line.len();
-    }
-    None
-}
-
-/// `WindowOpeningMode` of an 8.5 form, read from the root trailer member the
-/// 8.5 layout appends (trailer slot 28, appended member 4).
-///
-/// 8.5.1.1150 BSP native tree, 999 attributable forms: the member reads `0` on
-/// all 407 that write `DontBlock`, `1` on all 494 that write `LockOwner`, `2`
-/// on all 15 that write `LockWholeInterface` and `3` on all 83 that write no
-/// element. The 8.3.27 slot (root member 2) still holds `0`/`1`/`2`, but it
-/// cannot tell an explicit `DontBlock` from an unset mode, and 2.21 spells the
-/// owner-window lock `LockOwner` where 2.20 spelled `LockOwnerWindow`.
-fn v85_window_opening_mode(facts: &FormV85Facts) -> Result<Option<&'static str>> {
-    let member = facts
-        .root_tail
-        .get(4)
-        .and_then(Node::leaf)
-        .ok_or_else(|| anyhow!("8.5 form root trailer carries no window opening mode"))?;
-    Ok(match member {
-        "0" => Some("DontBlock"),
-        "1" => Some("LockOwner"),
-        "2" => Some("LockWholeInterface"),
-        "3" => None,
-        other => bail!("8.5 form root declares unknown window opening mode {other}"),
-    })
-}
-
-/// Applies to a written 8.5 `Form.xml` what the appended members say.
-pub(super) fn apply_v85_form_facts(xml: String, facts: &FormV85Facts) -> Result<String> {
-    let mut xml = xml;
-    // Root `WindowOpeningMode`: drop the 2.20 reading, write the 8.5 one.
-    if let Some(range) = root_leaf_line(&xml, "WindowOpeningMode") {
-        xml.replace_range(range, "");
-    }
-    if let Some(mode) = v85_window_opening_mode(facts)? {
-        let at = root_children(&xml)
-            .into_iter()
-            .find(|(tag, _)| !matches!(tag.as_str(), "Title" | "Width" | "Height"))
-            .map(|(_, offset)| offset)
-            .ok_or_else(|| anyhow!("8.5 form has no root child after its title and extent"))?;
-        xml.insert_str(at, &format!("\t<WindowOpeningMode>{mode}</WindowOpeningMode>\r\n"));
-    }
-    Ok(xml)
 }
 
 #[cfg(test)]

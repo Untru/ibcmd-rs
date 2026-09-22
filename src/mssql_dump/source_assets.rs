@@ -2177,6 +2177,12 @@ pub(super) fn write_source_asset(
                     .find_map(|cause| cause.downcast_ref::<SourceAssetRefusal>())
                     .filter(|refusal| is_collectible_source_refusal(refusal.class()))
                 {
+                    // The report keeps the code; the detail goes to the
+                    // diagnostic run's own log.
+                    eprintln!(
+                        "source asset {} refused: {refusal}",
+                        asset.primary_path.display()
+                    );
                     return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
                         primary_path: asset.primary_path.clone(),
                         family: source_asset_family_token(&asset.kind),
@@ -2355,7 +2361,7 @@ fn write_source_asset_inner(
                     diagnostics: extraction_diagnostics,
                 } => {
                     let xml = match &v85_facts {
-                        Some(facts) => super::form_v85::apply_v85_form_facts(xml, facts)
+                        Some(facts) => super::form_v85_writer::apply_v85_form_facts(xml, facts)
                             .map_err(|error| {
                                 anyhow::Error::new(SourceAssetRefusal::new(
                                     "source.form.v85.facts",

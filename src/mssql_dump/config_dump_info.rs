@@ -212,6 +212,15 @@ pub(super) fn write_config_dump_info(
     let mut names = BTreeMap::<String, String>::new();
     let mut unresolved_top_routes = Vec::<String>::new();
     for entry in versions {
+        // A configuration under vendor support stores each parent
+        // configuration's full `.cf` as a row named by the configuration root
+        // and the parent's uuid. The platform writes it out as
+        // `Ext/ParentConfigurations/<name>.cf` and lists it nowhere in
+        // `ConfigDumpInfo.xml` (8.5.1.1150 BSP 3.2.1.356: the versions blob
+        // names `66193438-….81401d17-…`, the native file does not).
+        if is_parent_configuration_body_id(&entry.id, &canonical_refs) {
+            continue;
+        }
         let name = match config_dump_top_name(
             &entry.id,
             &canonical_refs,
@@ -501,6 +510,16 @@ fn add_configuration_root_command_interface_references(
                 .or_insert_with(|| format!("{configuration_reference}.{role}"));
         }
     }
+}
+
+fn is_parent_configuration_body_id(id: &str, canonical_refs: &BTreeMap<String, String>) -> bool {
+    let Some((base, suffix)) = id.split_once('.') else {
+        return false;
+    };
+    uuid::Uuid::parse_str(suffix).is_ok()
+        && canonical_refs
+            .get(base)
+            .is_some_and(|reference| metadata_reference_family(reference) == Some("Configuration"))
 }
 
 fn config_dump_top_name(
