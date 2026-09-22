@@ -6817,7 +6817,8 @@ fn format_native_child_item(
     if item.tag == "Button" {
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
-        let command = native_button_command(item, command_ids, items, main_attribute_class)?;
+        let command =
+            native_button_command(item, command_ids, items, main_attribute_class, source)?;
         // Presence is pure: 85 254 buttons with no `<Picture>` store the empty
         // constant and all 3 461 that spell one store a picture. The writer
         // emitted the constant either way because the call site never passed
@@ -6923,6 +6924,23 @@ fn format_native_child_item(
             ..native::NativeDecorationItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
+        return Ok((kind_uuid, record));
+    }
+
+    // The three table additions are also spelled as children of an ordinary
+    // container, and the record does not change with the parent: the same
+    // 24-member `{5,…}`, the same payload wrapper and arity, and the kind
+    // uuid before it is `child_kind_uuid(5)` on all 549 container-borne
+    // additions of both corpora.
+    if let Some(kind) = match item.tag.as_str() {
+        "SearchStringAddition" => Some(0u8),
+        "ViewStatusAddition" => Some(1),
+        "SearchControlAddition" => Some(2),
+        _ => None,
+    } {
+        let record = native_table_addition(item, kind, items, source)?;
+        let kind_uuid = native::child_kind_uuid(5)
+            .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
         return Ok((kind_uuid, record));
     }
 
@@ -7578,15 +7596,14 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
         }
         "Popup" => {
-            if item.picture_present {
-                return Err(anyhow!("a popup names a picture"));
-            }
+            let picture = native_item_picture(item, source)?;
             let command_source = native_command_source(item, items)?;
             let back_color = native_item_color(item.back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a popup names a background colour it cannot place"))?;
             let border_color = native_item_color(item.popup_border_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a popup names a border colour it cannot place"))?;
             native::format_popup_payload(&native::NativePopupPayload {
+                picture: &picture,
                 command_source: &command_source,
                 representation: item.container_representation.as_deref(),
                 shape: item.shape.as_deref(),
@@ -7662,6 +7679,7 @@ fn native_button_command(
     command_ids: &BTreeMap<String, String>,
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let Some(path) = item.command_name.as_deref() else {
@@ -7688,7 +7706,34 @@ fn native_button_command(
             .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
         return Ok(format!("{{{},{uuid}}}", target.id));
     }
-    Err(anyhow!("a button's command names a configuration object"))
+    // A button's command namespace is the command interface's: 142 spellings
+    // occur on both a button and a panel item, single-valued on each side,
+    // and all 142 agree. `<Object>.StandardCommand.X` keeps refusing there
+    // and so it does here -- its ordinal enumerates the owner's own standard
+    // commands and one row of twenty is impure.
+    if path.contains(".StandardCommand.") {
+        return Err(anyhow!(
+            "a button runs an object's standard command, whose ordinal is not measured"
+        ));
+    }
+    if let Some((head, tail)) = path.split_once(':')
+        && !head.is_empty()
+        && head.bytes().all(|byte| byte.is_ascii_digit())
+        && is_uuid_reference(tail)
+    {
+        return Ok(format!("{{{head},{tail}}}"));
+    }
+    if !path.is_empty() && path.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(format!("{{{path}}}"));
+    }
+    let source = source
+        .ok_or_else(|| anyhow!("a button runs {path}, which needs a source resolver"))?;
+    let uuid = if path.contains(".Command.") {
+        source.resolve_command_reference_uuid(path)?
+    } else {
+        source.resolve_metadata_reference_uuid(path)?
+    };
+    Ok(format!("{{0,{uuid}}}"))
 }
 
 /// What a standard command needs to know about the item it acts on.

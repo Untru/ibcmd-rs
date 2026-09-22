@@ -4493,9 +4493,13 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
         &[
             ("Auto", "0"),
             ("None", "1"),
+            ("Balloon", "2"),
             ("Button", "3"),
+            ("ShowAuto", "4"),
             ("ShowTop", "5"),
+            ("ShowLeft", "6"),
             ("ShowBottom", "7"),
+            ("ShowRight", "8"),
         ],
         "0",
     )?;
