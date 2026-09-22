@@ -6810,6 +6810,10 @@ fn format_native_child_item(
             name == "OnChange"
         })?;
         let record = native::format_field_item(&native::NativeFieldItem {
+            footer_horizontal_align: item
+                .scalars
+                .get("FooterHorizontalAlign")
+                .map(String::as_str),
             id: &item.id,
             events: &events,
             kind,
@@ -7142,14 +7146,26 @@ fn format_native_table(
         Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
         None => return Err(anyhow!("a table with no extended tooltip is not measured")),
     };
-    // Member 44 is `<RowPictureDataPath>`, and it takes the same resolver the
-    // table's own `<DataPath>` takes two members earlier: absent stores `{0}`
-    // in 6 346 tables and a path stores the resolved path in 5 143.
+    // `<RowPictureDataPath>` keeps **one** segment, whatever the path's
+    // length: `Список.Active` stores `{1,{3}}` and `Список.DefaultPicture`
+    // stores `{1,{10000000}}`, the ordinary data-path token for the last
+    // segment and nothing before it. 5 143 tables of both corpora spell one
+    // and every stored record has a single segment; the 6 330 that do not
+    // store `{0}`.
     let row_picture_data_path = match item.row_picture_data_path.as_deref() {
         None => "{0}".to_string(),
-        Some(path) => data_paths.resolve(path).ok_or_else(|| {
-            anyhow!("a table's <RowPictureDataPath> names {path}, which the writer cannot place")
-        })?,
+        Some(path) => {
+            let resolved = data_paths.resolve(path).ok_or_else(|| {
+                anyhow!(
+                    "a table's <RowPictureDataPath> names {path}, which the writer cannot place"
+                )
+            })?;
+            let segments = scan_braced_fields(&resolved, 0)?;
+            let last = segments.last().cloned().ok_or_else(|| {
+                anyhow!("a table's <RowPictureDataPath> resolved to no segment")
+            })?;
+            format!("{{1,{}}}", &resolved[last])
+        }
     };
     let head = native::format_table_head(&native::NativeTableHead {
         row_picture_data_path: &row_picture_data_path,
@@ -7657,7 +7673,7 @@ fn native_container_payload(
         "CommandBar" => {
             let command_source = native_command_source(item, items)?;
             native::format_command_bar_payload(
-                item.horizontal_align.map(native_horizontal_align_spelling),
+                item.scalars.get("HorizontalLocation").map(String::as_str),
                 &command_source,
             )
             .ok_or_else(|| anyhow!("<CommandBar> names a spelling the writer cannot place"))
@@ -8168,7 +8184,9 @@ fn native_field_payload(
             height: item.height.as_deref().unwrap_or("0"),
             horizontal_stretch: item.horizontal_stretch,
             vertical_stretch: item.vertical_stretch,
-            hyperlink: item.hyperlink.unwrap_or(false),
+            hyperlink: item
+                .hyperlink
+                .unwrap_or_else(|| native_scalar_flag(item, "Hiperlink", false)),
             text_color: &native_scalar_color(item, "TextColor", source)?,
             back_color: &native_scalar_color(item, "BackColor", source)?,
             font: &native_item_font(item, source)?,
