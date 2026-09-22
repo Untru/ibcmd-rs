@@ -8115,6 +8115,7 @@ fn native_field_payload(
             text_color: &native_scalar_color(item, "TextColor", source)?,
             back_color: &native_scalar_color(item, "BackColor", source)?,
             font: &native_item_font(item, source)?,
+            mark_negatives: native_scalar_tristate(item, "MarkNegatives")?,
             auto_max_width: item.auto_max_width.unwrap_or(true),
             max_width: item.max_width.as_deref().unwrap_or("0"),
             auto_max_height: item.auto_max_height.unwrap_or(true),
@@ -8132,6 +8133,34 @@ fn native_field_payload(
             back_color: &native_scalar_color(item, "BackColor", source)?,
             border_color: &native_scalar_color(item, "BorderColor", source)?,
             font: &native_item_font(item, source)?,
+            mark_negatives: native_scalar_tristate(item, "MarkNegatives")?,
+            type_domain_enabled: native_scalar_flag(item, "TypeDomainEnabled", true),
+            extended_edit_multiple_values: native_scalar_flag(
+                item,
+                "ExtendedEditMultipleValues",
+                false,
+            ),
+            auto_choice_incomplete: native_scalar_tristate(item, "AutoChoiceIncomplete")?,
+            choice_folders_and_items: item
+                .scalars
+                .get("ChoiceFoldersAndItems")
+                .map(String::as_str),
+            incomplete_choice_mode: item
+                .scalars
+                .get("IncompleteChoiceMode")
+                .map(String::as_str),
+            choice_button_representation: item
+                .scalars
+                .get("ChoiceButtonRepresentation")
+                .map(String::as_str),
+            choice_history_on_input: item
+                .scalars
+                .get("ChoiceHistoryOnInput")
+                .map(String::as_str),
+            height_control_variant: item
+                .scalars
+                .get("HeightControlVariant")
+                .map(String::as_str),
             // Absent stores 2, `false` 0 and `true` 1 over 83 001 payloads.
             extended_edit: native_scalar_tristate(item, "ExtendedEdit")?,
             password_mode: item.password_mode,
@@ -8355,10 +8384,11 @@ fn native_decoration_payload(
     let hyperlink = item
         .hyperlink
         .unwrap_or_else(|| {
-            // The corpus spells it `<Hiperlink>`, with an i, on every one of
-            // the 2 513 label payloads that carry it; no field of either
-            // corpus spells the name the writer was looking for. Third
-            // misspelling after `<Autofill>`.
+            // Both names occur and the parent tag decides, on disjoint
+            // sets: `<Hiperlink>` with an i only on a `<LabelField>`
+            // (2 568 elements), `<Hyperlink>` only on a `<LabelDecoration>`
+            // (5 702), a `<PictureDecoration>`, a `<PictureField>` or an
+            // `<ExtendedTooltip>`. Neither arm is dead.
             native_scalar_flag(item, "Hyperlink", false)
                 || native_scalar_flag(item, "Hiperlink", false)
         });

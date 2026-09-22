@@ -1083,6 +1083,12 @@ pub(crate) struct NativeInputPayload<'a> {
     pub(crate) auto_max_height: bool,
     pub(crate) max_height: &'a str,
     pub(crate) height_control_variant: Option<&'a str>,
+    /// Slot 35, `<TypeDomainEnabled>`: absent 1, `false` 0. A bare literal
+    /// until now, and the corpus contradicts it on 25 records.
+    pub(crate) type_domain_enabled: bool,
+    /// Slot 65, `<ExtendedEditMultipleValues>`: absent 0, `true` 1. The same,
+    /// on 3 354.
+    pub(crate) extended_edit_multiple_values: bool,
     /// Slot 18, the input mask, `""` when the item names none.
     pub(crate) mask: &'a str,
     /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
@@ -1145,6 +1151,8 @@ impl NativeInputPayload<'_> {
             auto_max_height: true,
             max_height: "0",
             height_control_variant: None,
+            type_domain_enabled: true,
+            extended_edit_multiple_values: false,
             mask: "",
             auto_max_width: true,
             max_width: "0",
@@ -1205,13 +1213,15 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
          {spin_button},{open_button},{min_value},{max_value},{mask},{list_choice_mode},\
          {picture},{choice_list_height},{drop_list_width},{quick_choice},{folders},\
          {choice_form},{{5006,0}},{{0,0}},{auto_choice_incomplete},{format},{edit_format},\
-         {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},1,{events},\
+         {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},{type_domain},{events},\
          {text_color},{back_color},{border_color},{font},{text_edit},{{3,0,0}},\
          {edit_text_update},{{1,0}},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{{5007,0}},0}}",
+         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{{5007,0}},{multiple_values}}}",
         width = payload.width,
         height = payload.height,
+        type_domain = u8::from(payload.type_domain_enabled),
+        multiple_values = u8::from(payload.extended_edit_multiple_values),
         horizontal = tristate(payload.horizontal_stretch),
         vertical = tristate(payload.vertical_stretch),
         wrap = u8::from(payload.wrap),
