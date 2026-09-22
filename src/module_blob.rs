@@ -255,6 +255,12 @@ struct FormXmlAttribute {
     /// and each stores the referenced object's `<xr:TypeId>`, which is what
     /// `resolve_metadata_type_id` already returns for a `cfg:` name.
     types: Vec<String>,
+    /// `<v8:TypeSet>` entries, kept apart from `<v8:Type>` because a
+    /// multi-entry pattern is **not** in document order: the type sets
+    /// come first, each group in the order the file spells it. 28 079
+    /// placements correct against 2 wrong, where document order gets
+    /// 104 of 115.
+    type_sets: Vec<String>,
     string_length: Option<String>,
     string_allowed_length: Option<String>,
     number_digits: Option<String>,
@@ -12097,7 +12103,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             let value = text_value.trim();
                             if local == "TypeSet" {
                                 if !value.is_empty() {
-                                    attribute.types.push(value.to_string());
+                                    attribute.type_sets.push(value.to_string());
                                 }
                             } else {
                                 attribute.date_fractions = Some(value.to_string());
@@ -14836,6 +14842,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         id,
         name,
         types: Vec::new(),
+        type_sets: Vec::new(),
         string_length: None,
         string_allowed_length: None,
         number_digits: None,
@@ -23907,9 +23914,15 @@ fn format_form_attribute_type_pattern(
             FORM_DYNAMIC_LIST_TYPE_UUID
         ));
     }
+    let ordered = attribute
+        .type_sets
+        .iter()
+        .chain(attribute.types.iter())
+        .cloned()
+        .collect::<Vec<_>>();
     let value_types = parse_metadata_type_pattern_elements(
         "Form Attribute",
-        &attribute.types,
+        &ordered,
         attribute.string_length.clone(),
         attribute.string_allowed_length.clone(),
         attribute.number_digits.clone(),
@@ -29926,7 +29939,53 @@ fn parse_metadata_type_pattern_element(
 /// Each of the three below was measured over every attribute of ERP УХ that
 /// declares it, with one uuid each and no exception.
 fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
+    // A `d5p1:` or `d4p1:` prefix is a serialiser artefact, not a namespace:
+    // `d5p1` is bound to five different URIs across one corpus. These nine
+    // are keyed on the local name because no two of the measured spellings
+    // share one; the rest keep their well-known prefix, which is stable.
+    if let Some((_, local)) = type_name.trim().split_once(':') {
+        let generated = match local {
+            "TextDocument" => Some("ebf766b1-f32c-11d3-9851-008048da1252"),
+            "FormattedDocument" => Some("151f8778-e2d0-496a-9f02-d9ffd93b57ec"),
+            "GanttChart" => Some("3a6e63bf-16aa-42eb-b48c-2fff9670ad2f"),
+            "Chart" => Some("3543ef08-3316-4f7e-9447-0cd0a1cbf1d5"),
+            "FlowchartContextType" => Some("4af83795-fc2a-48cd-9bea-ce665789a62c"),
+            "DataAnalysisTimeIntervalUnitType" => Some("77a01c71-e9b2-4617-af07-c95a4b74548a"),
+            "PDFDocument" => Some("48510817-200c-48c2-9973-06cf90840514"),
+            "GeographicalSchema" => Some("95de81b0-81c3-4936-9dbb-6400e5c90378"),
+            "AccountingRecordType" => Some("741ae838-6e42-4ac0-b6a4-17e5604b0669"),
+            _ => None,
+        };
+        if generated.is_some() {
+            return generated;
+        }
+    }
     match type_name.trim() {
+        // The data-composition and interface types, whose prefixes the
+        // exporter does keep stable. Each maps to one stored value over both
+        // corpora, none impure.
+        "dcsset:DataCompositionComparisonType" => {
+            Some("dcbf2698-3c1f-4a22-997f-48070ae9bd64")
+        }
+        "dcsset:Filter" => Some("f6841c6b-6c71-4c82-ae9e-d08b49db326c"),
+        "dcsset:DataCompositionFieldPlacement" => {
+            Some("a090004e-b706-453f-aa10-090a77b53757")
+        }
+        "dcsset:ConditionalAppearance" => Some("7dd764b6-b22f-4712-8edc-c0d634340e60"),
+        "dcscor:DataCompositionGroupType" => Some("0e0850cf-0634-414e-85ba-9a88a8bd44c4"),
+        "dcscor:Field" => Some("913e8016-6e90-47a0-b2a0-4513f4edad61"),
+        "dcscor:DataCompositionPeriodAdditionType" => {
+            Some("c6a52555-d20f-452c-bfc2-1b53e9a56063")
+        }
+        "dcscor:DataCompositionSortDirection" => Some("af4a19b5-da3d-406f-be0c-81143e400452"),
+        "v8ui:VerticalAlign" => Some("52616226-8ccf-4d1d-a3da-827eeb4f9cf9"),
+        "v8ui:HorizontalAlign" => Some("43f9c095-40e8-441a-8fad-20a45798c71b"),
+        "v8:FillChecking" => Some("98ea8e5a-b586-442b-b944-6e3447734aa7"),
+        // Three bare `cfg:` references that never occur alone, so they could
+        // only be read off a multi-entry pattern.
+        "cfg:TaskRef" => Some("6291e9b3-8df5-44e1-b6b2-d9fe008016c0"),
+        "cfg:ChartOfCalculationTypesRef" => Some("593cd424-0877-470d-91f9-b90a982059b4"),
+        "cfg:ChartOfCharacteristicTypesRef" => Some("99892482-ed55-4fb5-a7f7-20888820a758"),
         "v8:ValueStorage" => Some("e199ca70-93cf-46ce-a54b-6edc88c3a296"),
         "v8:ValueTable" => Some("acf6192e-81ca-46ef-93a6-5a6968b78663"),
         "v8:ValueTree" => Some("e603c0f2-92fb-4d47-8f38-a44a381cf235"),
