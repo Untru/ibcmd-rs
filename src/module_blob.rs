@@ -6738,7 +6738,7 @@ fn format_native_child_item(
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
-        let payload = native_field_payload(item, source)?;
+        let payload = native_field_payload(item, main_attribute_class, source)?;
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -6751,7 +6751,9 @@ fn format_native_child_item(
         };
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a field with no extended tooltip is not measured"))?;
-        let events = native_item_events(item, main_attribute_class)?;
+        let events = native_item_events_where(item, main_attribute_class, |name| {
+            name == "OnChange"
+        })?;
         let record = native::format_field_item(&native::NativeFieldItem {
             id: &item.id,
             events: &events,
@@ -6807,9 +6809,16 @@ fn format_native_child_item(
             group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
             group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
             // `<Type>` is the kind of button -- member 4 coarsely and member
-            // 47 finely -- and it arrives through the scalar bag, because the
-            // typed `item_type` is an input field's mask.
-            button_type: item.scalars.get("Type").map(String::as_str),
+            // 47 finely. It lands in the typed `item_type`, whose own arm
+            // comes before the catch-all that fills the scalar bag, so the bag
+            // never held it and every button was written with the command-bar
+            // code: 11 750 ERP УХ and 803 BSP records, in 4 209 and 245 forms.
+            // Every button of both corpora spells the element, and the four
+            // spellings map to 0, 0, 1 and 2 with no absence anywhere.
+            button_type: item
+                .item_type
+                .as_deref()
+                .or_else(|| item.scalars.get("Type").map(String::as_str)),
             representation_in_context_menu: item
                 .scalars
                 .get("RepresentationInContextMenu")
@@ -7039,7 +7048,7 @@ fn format_native_table(
         title: &title,
         tooltip_title: &tooltip_title,
         data_path: &data_path,
-        autofill: item.autofill.unwrap_or(true),
+        autofill: item.autofill.unwrap_or(false),
         enabled: item.enabled.unwrap_or(true),
         read_only: item.read_only.unwrap_or(false),
         default_item: item.default_item.unwrap_or(false),
@@ -7063,7 +7072,7 @@ fn format_native_table(
         vertical_scroll_bar: item.scalars.get("VerticalScrollBar").map(String::as_str),
         horizontal_lines: native_scalar_flag(item, "HorizontalLines", true),
         vertical_lines: native_scalar_flag(item, "VerticalLines", true),
-        use_alternation_row_color: item.use_alternation_row_color.unwrap_or(true),
+        use_alternation_row_color: item.use_alternation_row_color.unwrap_or(false),
         auto_insert_new_row: native_scalar_flag(item, "AutoInsertNewRow", false),
         initial_list_view: item.table_initial_list_view.map(|value| match value {
             FormTableInitialListView::Beginning => "Beginning",
@@ -7995,9 +8004,12 @@ const fn native_vertical_align_spelling(align: FormFieldVerticalAlign) -> &'stat
 /// The payload a field carries, by its kind.
 fn native_field_payload(
     item: &FormXmlChildItem,
+    main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
+    let events =
+        native_item_events_where(item, main_attribute_class, |name| name != "OnChange")?;
     match item.tag.as_str() {
         "LabelField" => Ok(native::format_label_payload(&native::NativeLabelPayload {
             width: item.width.as_deref().unwrap_or("0"),
@@ -8009,6 +8021,7 @@ fn native_field_payload(
             max_width: item.max_width.as_deref().unwrap_or("0"),
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
+            events: &events,
             ..native::NativeLabelPayload::plain(false)
         })),
         "InputField" => native::format_input_payload(&native::NativeInputPayload {
@@ -8036,6 +8049,7 @@ fn native_field_payload(
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
             mask: item.item_type.as_deref().unwrap_or(""),
+            events: &events,
             ..native::NativeInputPayload::plain()
         })
         .ok_or_else(|| anyhow!("the input field names something the writer cannot place")),
@@ -8091,6 +8105,7 @@ fn native_field_payload(
         "SpreadSheetDocumentField" => {
             let border_color = native_scalar_color(item, "BorderColor", source)?;
             native::format_spreadsheet_payload(&native::NativeSpreadsheetPayload {
+                events: &events,
                 width: item.width.as_deref().unwrap_or("50"),
                 height: item.height.as_deref().unwrap_or("10"),
                 horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
@@ -8131,6 +8146,7 @@ fn native_field_payload(
             let text_color = native_scalar_color(item, "TextColor", source)?;
             let back_color = native_scalar_color(item, "BackColor", source)?;
             native::format_picture_payload(&native::NativePicturePayload {
+                events: &events,
                 width: item.width.as_deref().unwrap_or("0"),
                 height: item.height.as_deref().unwrap_or("0"),
                 horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
@@ -8433,9 +8449,26 @@ fn native_item_picture(
 /// The event block of one form item, refused when the table has no uuid for a
 /// name the item binds.
 fn native_item_events(item: &FormXmlChildItem, main_attribute_class: &str) -> Result<String> {
+    native_item_events_where(item, main_attribute_class, |_| true)
+}
+
+/// The events of an item that pass a filter, in the block a record stores.
+///
+/// A field keeps its `<OnChange>` in the record and sends every other event to
+/// its payload. The slot is decided by `(field tag, event name)` and the map
+/// is closed: over 139 936 field records of both corpora all 33 pairs land in
+/// exactly one slot, and `OnChange` is the only name on the record's side.
+/// Writing every event to the record and `{0,1,0}` to the payload was wrong at
+/// both ends.
+fn native_item_events_where(
+    item: &FormXmlChildItem,
+    main_attribute_class: &str,
+    keep: impl Fn(&str) -> bool,
+) -> Result<String> {
     let events = item
         .events
         .iter()
+        .filter(|event| keep(event.name.as_str()))
         .map(|event| crate::compiler::bodies::form_native::NativeEvent {
             name: &event.name,
             handler: &event.handler,
