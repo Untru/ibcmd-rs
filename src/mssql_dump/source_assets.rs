@@ -2059,9 +2059,75 @@ pub(crate) fn write_source_xml_file(
     source_version: InfobaseConfigSourceVersion,
 ) -> Result<()> {
     let adapter = MssqlLegacyAdapter::from_legacy_selector(source_version);
-    let normalized =
+    let mut normalized =
         normalize_legacy_source_asset_xml_version_bytes(xml.as_ref(), adapter.xml_dialect());
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        normalized = declare_palette_namespace_beside_style(normalized);
+    }
     fs::write(path, normalized).with_context(|| format!("failed to write {}", path.display()))
+}
+
+const STYLE_NAMESPACE_DECLARATION: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\"";
+const PALETTE_NAMESPACE_DECLARATION: &str =
+    " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";
+
+/// Dialect 2.21 declares the palette colour namespace on exactly the elements
+/// that declare the style namespace, and nowhere else.
+///
+/// 8.5.1.1150 BSP native tree: of 6 299 start tags carrying namespace
+/// declarations, every one of the 6 298 that declares `xmlns:style` also
+/// declares `xmlns:pal` (`MetaDataObject`, `Form`, `document`,
+/// `dcsset:settings`, `settings`, `GraphicalSchema`, `AppearanceTemplate`) and
+/// none of the others does. The platform lists declarations alphabetically by
+/// prefix, so `pal` goes before the first prefixed declaration that sorts after
+/// it -- `style` on most roots, `sch` on a graphical schema. A tag that already
+/// declares the prefix is left as it is.
+pub(super) fn declare_palette_namespace_beside_style(bytes: Vec<u8>) -> Vec<u8> {
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return bytes;
+    };
+    if !text.contains(STYLE_NAMESPACE_DECLARATION) {
+        return bytes;
+    }
+    let mut out = String::with_capacity(text.len() + 256);
+    let mut cursor = 0;
+    let mut search_from = 0;
+    while let Some(relative) = text[search_from..].find(STYLE_NAMESPACE_DECLARATION) {
+        let style_at = search_from + relative;
+        search_from = style_at + STYLE_NAMESPACE_DECLARATION.len();
+        let Some(tag_start) = text[..style_at].rfind('<') else {
+            continue;
+        };
+        if tag_start < cursor || text[tag_start..style_at].contains('>') {
+            continue;
+        }
+        let tag_end = text[style_at..]
+            .find('>')
+            .map_or(text.len(), |offset| style_at + offset);
+        let tag = &text[tag_start..tag_end];
+        if tag.contains(" xmlns:pal=") {
+            continue;
+        }
+        let mut insert_at = style_at;
+        let mut scan = tag_start;
+        while let Some(offset) = text[scan..style_at].find(" xmlns:") {
+            let declaration = scan + offset;
+            let prefix_start = declaration + " xmlns:".len();
+            let prefix_end = text[prefix_start..style_at]
+                .find('=')
+                .map_or(style_at, |end| prefix_start + end);
+            if &text[prefix_start..prefix_end] > "pal" {
+                insert_at = declaration;
+                break;
+            }
+            scan = prefix_end;
+        }
+        out.push_str(&text[cursor..insert_at]);
+        out.push_str(PALETTE_NAMESPACE_DECLARATION);
+        cursor = insert_at;
+    }
+    out.push_str(&text[cursor..]);
+    out.into_bytes()
 }
 
 /// Preserves historical MSSQL source-asset output behavior only.
@@ -2231,6 +2297,31 @@ fn write_source_asset_inner(
                 })?;
                 &owned_body
             };
+            // A platform 8.5 body is read through its 8.3.27 down-conversion;
+            // what its appended members say is applied to the written XML.
+            let v85_converted;
+            let mut v85_facts = None;
+            let body = if super::form_v85::is_v85_form_body(body) {
+                let (converted, facts) = super::form_v85::down_convert_v85_form_body(body)
+                    .map_err(|error| {
+                        anyhow::Error::new(SourceAssetRefusal::new(
+                            "source.form.v85.layout",
+                            MetadataSourceFailureClass::Unsupported,
+                            format!("{error:#}"),
+                        ))
+                    })
+                    .with_context(|| {
+                        format!(
+                            "failed to down-convert 8.5 form body of source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
+                v85_converted = converted;
+                v85_facts = Some(facts);
+                &v85_converted
+            } else {
+                body
+            };
             let adapter = MssqlLegacyAdapter::from_legacy_selector(context.source_version);
             let dcs_target_profile =
                 ProfileId::parse(&format!("xml-{}", context.source_version.as_str()))
@@ -2263,6 +2354,23 @@ fn write_source_asset_inner(
                     xml,
                     diagnostics: extraction_diagnostics,
                 } => {
+                    let xml = match &v85_facts {
+                        Some(facts) => super::form_v85::apply_v85_form_facts(xml, facts)
+                            .map_err(|error| {
+                                anyhow::Error::new(SourceAssetRefusal::new(
+                                    "source.form.v85.facts",
+                                    MetadataSourceFailureClass::Unsupported,
+                                    format!("{error:#}"),
+                                ))
+                            })
+                            .with_context(|| {
+                                format!(
+                                    "failed to apply 8.5 form facts to source asset {}",
+                                    asset.primary_path.display()
+                                )
+                            })?,
+                        None => xml,
+                    };
                     diagnostics = extraction_diagnostics;
                     let path = output_dir.join(&asset.primary_path);
                     if let Some(parent) = path.parent() {
@@ -2305,6 +2413,19 @@ fn write_source_asset_inner(
                         return Ok(WrittenSourceAsset::RejectedNotEmitted {
                             primary_path: asset.primary_path.clone(),
                             diagnostics: extraction_diagnostics,
+                        });
+                    }
+                    // A whole-form refusal carries no per-slot diagnostic, but
+                    // its variant is still a stable code: the diagnostic export
+                    // records it and keeps traversing, nothing is emitted.
+                    if context.collect_all_source_asset_diagnostics {
+                        return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
+                            primary_path: asset.primary_path.clone(),
+                            family: "form",
+                            code: error.diagnostic_code(),
+                            classification: error.diagnostic_reason(),
+                            raw_length: bytes.len(),
+                            raw_sha256: raw_body_sha256(bytes),
                         });
                     }
                     let diagnostic_codes = extraction_diagnostics
@@ -2723,6 +2844,7 @@ fn write_source_asset_inner(
                 context.metadata_object_refs,
                 context.type_index,
                 context.type_index_collisions,
+                context.source_version,
             )
             .with_context(|| {
                 format!(

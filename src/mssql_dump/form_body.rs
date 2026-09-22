@@ -1878,6 +1878,51 @@ pub(super) enum FormSchemaWriteError {
     },
 }
 
+impl FormSchemaWriteError {
+    /// A stable diagnostic code naming the refusal family, for the diagnostic
+    /// export that records a rejected form and keeps traversing.
+    pub(super) fn diagnostic_code(&self) -> &'static str {
+        match self {
+            Self::Corpus(_) => "source.form.rejected.writer-corpus",
+            Self::WriterRule(_) => "source.form.rejected.writer-rule",
+            Self::CanonicalDcs(_) => "source.form.rejected.canonical-dcs",
+            Self::DcsSettingsChildren(_) => "source.form.rejected.dcs-settings-children",
+            Self::UnexpectedPolicy { .. } => "source.form.rejected.unexpected-policy",
+            Self::OpaqueChoiceList { .. } => "source.form.rejected.opaque-choice-list",
+            Self::OpaqueChoiceParameters { .. } => "source.form.rejected.opaque-choice-parameters",
+            Self::OpaqueChoiceParameterLinks { .. } => {
+                "source.form.rejected.opaque-choice-parameter-links"
+            }
+            Self::OpaqueChoiceParameterAvailableTypes { .. } => {
+                "source.form.rejected.opaque-choice-parameter-available-types"
+            }
+            Self::UnexpectedAvailableTypesBlockShape => {
+                "source.form.rejected.available-types-block-shape"
+            }
+            Self::ChoiceParametersEmit(_) => "source.form.rejected.choice-parameters-emit",
+            Self::OpaqueDcsOrder { .. } => "source.form.rejected.opaque-dcs-order",
+            Self::OpaqueDcsFilter { .. } => "source.form.rejected.opaque-dcs-filter",
+            Self::OpaqueDcsConditionalAppearance { .. } => {
+                "source.form.rejected.opaque-dcs-conditional-appearance"
+            }
+            Self::OpaqueDcsFormAttributesConditionalAppearance { .. } => {
+                "source.form.rejected.opaque-dcs-form-attributes-conditional-appearance"
+            }
+        }
+    }
+
+    /// The static refusal reason when the variant carries one.
+    pub(super) fn diagnostic_reason(&self) -> &'static str {
+        match self {
+            Self::OpaqueDcsOrder { reason }
+            | Self::OpaqueDcsFilter { reason }
+            | Self::OpaqueDcsConditionalAppearance { reason }
+            | Self::OpaqueDcsFormAttributesConditionalAppearance { reason } => reason,
+            _ => "rejected",
+        }
+    }
+}
+
 impl From<WriterRuleLookupError> for FormSchemaWriteError {
     fn from(error: WriterRuleLookupError) -> Self {
         Self::WriterRule(error)

@@ -969,6 +969,7 @@ mod dcs;
 mod dynamic_generation;
 mod fetch;
 mod form_body;
+mod form_v85;
 mod forms;
 mod metadata;
 #[cfg(test)]
@@ -6089,9 +6090,17 @@ fn parse_business_process_flowchart_blob(
     metadata_object_refs: &BTreeMap<String, String>,
     type_index: &BTreeMap<String, String>,
     type_index_collisions: &BTreeSet<String>,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Option<BusinessProcessFlowchart> {
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
+    // An 8.5 flowchart differs from its 8.3.27 spelling only in its colour and
+    // font tuples (BSP `BusinessProcesses/Задание`, member for member).
+    let text = if source_version == InfobaseConfigSourceVersion::V2_21 {
+        form_v85::down_convert_v85_primitives_text(text.trim_start_matches('\u{feff}')).ok()?
+    } else {
+        text
+    };
     parse_business_process_flowchart_text_with_types(
         text.trim_start_matches('\u{feff}'),
         object_refs,
