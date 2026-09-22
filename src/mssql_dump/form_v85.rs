@@ -161,6 +161,10 @@ pub(super) struct FormV85ItemFacts {
     pub(super) revision: String,
     /// The members 8.5 appended to the item record, in order.
     pub(super) tail: Vec<Node>,
+    /// Every member of the 8.5 record ahead of the appended ones, and how
+    /// far the optional common prefix shifts them.
+    pub(super) record: Vec<Node>,
+    pub(super) prefix_offset: usize,
     /// The item's kind code (group, field or decoration kind).
     pub(super) kind: Option<String>,
     /// The item's property bag: its 8.5 revision, every 8.5 member, and the
@@ -362,6 +366,102 @@ pub(super) fn v85_palette_color_index(text: &str) -> Option<i64> {
     }
 }
 
+/// The span of the brace tuple that opens at `start`, if it closes within
+/// `limit` bytes.
+fn short_tuple_end(bytes: &[u8], start: usize, limit: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = start;
+    let end = bytes.len().min(start.saturating_add(limit));
+    while index < end {
+        match bytes[index] {
+            b'"' => {
+                index += 1;
+                while index < end {
+                    if bytes[index] == b'"' {
+                        if bytes.get(index + 1) == Some(&b'"') {
+                            index += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    index += 1;
+                }
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// Rewrites, in place, every 8.5 colour and font tuple of a stored text into
+/// its 8.3.27 spelling, leaving every other byte as stored.
+///
+/// Both shapes are 8.5's own: neither a `{4,<space>,{<payload>},<kind>}`
+/// colour nor an `{8,<kind>,<mask>,...,1,<scale>}` font occurs anywhere in the
+/// 60 000-odd 8.3.27 rows of the BSP and ERP УХ corpora (metadata texts and
+/// 25 030 form bodies, `F:/ibcmd/lab/v85/tools/shapescan.py`), while the 8.5
+/// BSP rows carry them by the tens of thousands. Rewriting them therefore
+/// changes nothing an 8.3.27 base stores. A palette colour, which 8.3.27
+/// cannot spell, stays as stored for the readers that name palettes.
+pub(super) fn rewrite_v85_primitives_in_place(text: &str) -> std::borrow::Cow<'_, str> {
+    const MAX_TUPLE: usize = 512;
+    let bytes = text.as_bytes();
+    let mut edits: Vec<(usize, usize, String)> = Vec::new();
+    let mut index = 0;
+    while index + 3 <= bytes.len() {
+        let lead = &bytes[index..index + 3];
+        if lead != b"{4," && lead != b"{8," {
+            index += 1;
+            continue;
+        }
+        let Some(end) = short_tuple_end(bytes, index, MAX_TUPLE) else {
+            index += 1;
+            continue;
+        };
+        let Ok(node) = parse_node(&text[index..end]) else {
+            index += 1;
+            continue;
+        };
+        let members = node.list().unwrap_or_default();
+        if is_v85_color(members) && members[1].leaf() == members[3].leaf() {
+            let mut replacement = String::from("{3,");
+            replacement.push_str(members[1].leaf().unwrap_or_default());
+            replacement.push(',');
+            replacement.push_str(&members[2].to_text());
+            replacement.push('}');
+            edits.push((index, end, replacement));
+            index = end;
+            continue;
+        }
+        if is_v85_font(members) {
+            edits.push((index + 1, index + 2, "7".to_owned()));
+            index = end;
+            continue;
+        }
+        index += 1;
+    }
+    if edits.is_empty() {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cursor = 0;
+    for (start, end, replacement) in edits {
+        out.push_str(&text[cursor..start]);
+        out.push_str(&replacement);
+        cursor = end;
+    }
+    out.push_str(&text[cursor..]);
+    std::borrow::Cow::Owned(out)
+}
+
 /// Rewrites the 8.5 colour and font tuples of any brace text into their
 /// 8.3.27 spelling. A palette colour, which 8.3.27 cannot spell, is refused.
 pub(super) fn down_convert_v85_primitives_text(text: &str) -> Result<String> {
@@ -519,10 +619,12 @@ fn convert_items(node: Node, facts: &mut FormV85Facts) -> Result<Node> {
         tail,
         ..FormV85ItemFacts::default()
     };
+    // The optional common prefix is a tuple ahead of the kind code and shifts
+    // every later member, the bag with them.
+    item_facts.prefix_offset = usize::from(matches!(members.get(5), Some(Node::List(_))));
+    item_facts.record = members.clone();
     if let Some(base) = bag_base_slot(v83) {
-        // The optional common prefix is a tuple ahead of the kind code and
-        // shifts every later member, the bag with them.
-        let offset = usize::from(matches!(members.get(5), Some(Node::List(_))));
+        let offset = item_facts.prefix_offset;
         let kind = members
             .get(5 + offset)
             .and_then(Node::leaf)

@@ -9239,6 +9239,9 @@ struct ReportProperties {
     default_settings_form: Option<String>,
     auxiliary_settings_form: Option<String>,
     default_variant_form: Option<String>,
+    /// `<AuxiliaryVariantForm>`, which only the 8.5 record (`20`) carries;
+    /// `None` on the 8.3.27 record (`19`), which writes no element.
+    auxiliary_variant_form: Option<Option<String>>,
     variants_storage: Option<String>,
     settings_storage: Option<String>,
     include_help_in_contents: bool,
@@ -26402,7 +26405,12 @@ fn parse_report_properties_from_text(
         "Manager",
     );
 
-    let strict_layout = fields.first()?.trim() == "19";
+    // 8.5 writes the report record as `20` with one member appended to the
+    // 8.3.27 `19` record's 18: `<AuxiliaryVariantForm>`, a form reference
+    // (8.5.1.1150 BSP: all 52 reports, member for member otherwise).
+    let revision = fields.first()?.trim();
+    let v85_record = revision == "20" && fields.len() == 19;
+    let strict_layout = revision == "19" || v85_record;
     let child_templates = if strict_layout {
         parse_report_child_templates_from_text(text, &header, template_refs)?
     } else {
@@ -26441,6 +26449,8 @@ fn parse_report_properties_from_text(
         default_settings_form: parse_catalog_form_ref(fields.get(6).copied(), form_refs),
         auxiliary_settings_form: parse_catalog_form_ref(fields.get(17).copied(), form_refs),
         default_variant_form: parse_catalog_form_ref(fields.get(10).copied(), form_refs),
+        auxiliary_variant_form: v85_record
+            .then(|| parse_catalog_form_ref(fields.get(18).copied(), form_refs)),
         variants_storage: parse_metadata_object_ref(fields.get(8).copied(), object_refs),
         settings_storage: parse_metadata_object_ref(fields.get(9).copied(), object_refs),
         include_help_in_contents: parse_1c_bool_field(fields.get(11).copied()).unwrap_or(false),
@@ -30798,9 +30808,10 @@ fn parse_strict_report_root_fields<'a>(
     let owner_fields = split_information_register_braced_fields(root_fields.get(1)?)?;
     let header_wrapper = split_information_register_braced_fields(owner_fields.get(3)?)?;
     let parsed_header = parse_information_register_owner_header(header_wrapper.get(1)?)?;
-    if owner_fields.len() != 18
-        || owner_fields.first()?.trim() != "19"
-        || metadata_header_field_index(&owner_fields, &expected_header.uuid) != Some(3)
+    if !matches!(
+        (owner_fields.first().map(|field| field.trim()), owner_fields.len()),
+        (Some("19"), 18) | (Some("20"), 19)
+    ) || metadata_header_field_index(&owner_fields, &expected_header.uuid) != Some(3)
         || header_wrapper.len() != 2
         || header_wrapper.first()?.trim() != "0"
         || !strict_metadata_headers_match(&parsed_header, expected_header)
@@ -34371,6 +34382,16 @@ fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
         -42 => "NavigationColor",
         -43 => "AuxiliaryNavigationColor",
         -44 => "ActivityColor",
+        // Platform 8.5 standard style fonts. 8.5.1.1150 BSP: every form item
+        // and style item that carries exactly one style font pairs the code
+        // with the native `ref` without exception (`fontcodes.py`).
+        -50 => "TitleLevel3",
+        -52 => "TitleLevel5",
+        -53 => "TextLevel1",
+        -54 => "TextLevel2",
+        -55 => "TextLevel3",
+        -56 => "SubtitleLevel1",
+        -59 => "TitleLevel2",
         _ => return None,
     };
     let order = STANDARD_STYLE_ITEM_CODES
@@ -34381,7 +34402,8 @@ fn standard_style_item_for_code(code: i32) -> Option<(usize, &'static str)> {
 
 const STANDARD_STYLE_ITEM_CODES: &[i32] = &[
     -1, -11, -3, -15, -7, -13, -21, -10, -14, -23, -24, -16, -17, -22, -25, -26, -27, -28, -18,
-    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -42, -43, -44,
+    -20, -30, -31, -32, -33, -34, -35, -36, -37, -38, -42, -43, -44, -50, -52, -53, -54, -55,
+    -56, -59,
 ];
 
 fn parse_style_body_color_value(
@@ -37710,6 +37732,14 @@ fn format_report_source_xml(
         "DefaultVariantForm",
         report.default_variant_form.as_deref(),
     );
+    if let Some(auxiliary_variant_form) = &report.auxiliary_variant_form {
+        push_optional_text_element(
+            &mut xml,
+            "\t\t\t",
+            "AuxiliaryVariantForm",
+            auxiliary_variant_form.as_deref(),
+        );
+    }
     push_optional_text_element(
         &mut xml,
         "\t\t\t",

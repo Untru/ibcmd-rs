@@ -22690,6 +22690,11 @@ pub(super) fn parse_form_child_item_event_identifier(
         "OnActivateField" => Some("OnActivateField".to_string()),
         "OnActivateRow" => Some("OnActivateRow".to_string()),
         "60edb81d-887b-478e-94ee-7fef2b13393d" => Some("OnActivateRow".to_string()),
+        // Platform 8.5 events; each identifier pairs with the native name on
+        // every 8.5.1.1150 BSP item that binds it (78, 6 and 5 bindings).
+        "c676f87f-6c33-4dba-aad8-0526726d1bcf" => Some("OnHover".to_string()),
+        "9d59f117-9183-4044-be98-829c9cd48754" => Some("MultipleValuesAdd".to_string()),
+        "147fd867-8f22-4463-939d-4b48c5860c89" => Some("OnSelectedRowsSetChange".to_string()),
         "fe115cc8-9e33-4684-a166-bd5136fe7a9f" => Some("OnChange".to_string()),
         "97365900-eadf-4dfd-a9aa-fbb9ecabd079" => Some("OnGetDataAtServer".to_string()),
         "BeforeAddRow" => Some("BeforeAddRow".to_string()),
@@ -35028,7 +35033,7 @@ fn format_form_tooltip_representation_xml(
 /// transparent pixel.  Every owner used to spell this out for itself, and each
 /// spelling that predated the pixel dropped it; with one writer a picture
 /// cannot be written two ways.
-fn format_form_picture_element(
+pub(super) fn format_form_picture_element(
     element: &str,
     reference: Option<&str>,
     file_name: Option<&str>,

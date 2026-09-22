@@ -264,6 +264,118 @@ enum FactSource {
     Command(usize),
     /// Two members an item record appends, read together as `a|b`.
     ItemPair(&'static str, usize, usize),
+    /// A member 8.5 kept in the item record (past the optional prefix), where
+    /// the 8.3.27 reader skips the item kind.
+    ItemMember(&'static str, usize),
+}
+
+/// What an appended member holds, when it is not a scalar code.
+#[derive(Debug, Clone, Copy)]
+enum FactObject {
+    /// A colour tuple; the unset `{3,4,{0}}` writes nothing.
+    Color,
+    /// A picture tuple; the empty `{4,0,{0},...}` writes nothing.
+    Picture,
+    /// A localized string; the empty `{1,0}` writes nothing.
+    Localized,
+}
+
+/// A property whose appended member is a colour, picture or localized string.
+struct FactObjectRule {
+    tags: &'static [&'static str],
+    source: FactSource,
+    element: &'static str,
+    object: FactObject,
+}
+
+/// Every one a total function over the 8.5.1.1150 BSP native tree, like the
+/// scalar rules: the unset spelling on every item without the element, and a
+/// readable value on every item with it.
+const FACT_OBJECT_RULES: &[FactObjectRule] = &[
+    FactObjectRule {
+        tags: &["Form"],
+        source: FactSource::Root(0),
+        element: "CreateButtonsGroupTitle",
+        object: FactObject::Localized,
+    },
+    FactObjectRule {
+        tags: &["InputField"],
+        source: FactSource::Bag("38", 0),
+        element: "DropListHint",
+        object: FactObject::Localized,
+    },
+    FactObjectRule {
+        tags: &["InputField"],
+        source: FactSource::Bag("38", 1),
+        element: "Picture",
+        object: FactObject::Picture,
+    },
+    FactObjectRule {
+        tags: &["InputField"],
+        source: FactSource::Bag("38", 2),
+        element: "ChoiceButtonTitle",
+        object: FactObject::Localized,
+    },
+    FactObjectRule {
+        tags: &["PictureDecoration"],
+        source: FactSource::Bag("6", 1),
+        element: "PictureColor",
+        object: FactObject::Color,
+    },
+    FactObjectRule {
+        tags: &["PictureField"],
+        source: FactSource::Bag("12", 1),
+        element: "PictureColor",
+        object: FactObject::Color,
+    },
+];
+
+fn fact_object_xml(
+    object: FactObject,
+    element: &str,
+    node: &Node,
+    object_refs: &std::collections::BTreeMap<String, String>,
+) -> Result<Option<String>> {
+    let text = node.to_text();
+    Ok(match object {
+        FactObject::Color => {
+            if text == "{3,4,{0}}" {
+                return Ok(None);
+            }
+            let value = super::form_body::parse_form_control_color(&text, object_refs)
+                .ok_or_else(|| anyhow!("<{element}>: unreadable 8.5 colour {text}"))?;
+            Some(format!("<{element}>{value}</{element}>
+"))
+        }
+        FactObject::Picture => {
+            if text.starts_with("{4,0,{0},") {
+                return Ok(None);
+            }
+            let (reference, load_transparent) =
+                super::form_body::parse_form_child_item_picture_value(&text, object_refs)
+                    .ok_or_else(|| anyhow!("<{element}>: unreadable 8.5 picture {text}"))?;
+            Some(super::form_body::format_form_picture_element(
+                element,
+                Some(&reference),
+                None,
+                load_transparent,
+                None,
+                0,
+            ))
+        }
+        FactObject::Localized => {
+            if text == "{1,0}" {
+                return Ok(None);
+            }
+            let values = super::form_body::parse_form_localized_strings(&text);
+            if values.is_empty() {
+                bail!("<{element}>: unreadable 8.5 localized string {text}");
+            }
+            Some(super::form_body::format_form_localized_section(
+                element, &values, 0,
+            ))
+        }
+    })
 }
 
 /// One property the 2.21 writer reads from an appended member: its element,
@@ -429,6 +541,22 @@ const FACT_RULES: &[FactRule] = &[
     },
     FactRule {
         tags: &["RadioButtonField"],
+        source: FactSource::Bag("11", 2),
+        element: "HorizontalStretch",
+        replaces: &[],
+        values: &[("1", Some("true")), ("2", None)],
+    },
+    // The 8.3.27 reader reads `EditMode` for every field kind but this one;
+    // the member is the same (1 unset, 2 `EnterOnInput`) on all 18 BSP bars.
+    FactRule {
+        tags: &["ProgressBarField"],
+        source: FactSource::ItemMember("48", 26),
+        element: "EditMode",
+        replaces: &[],
+        values: &[("1", None), ("2", Some("EnterOnInput"))],
+    },
+    FactRule {
+        tags: &["RadioButtonField"],
         source: FactSource::Bag("11", 1),
         element: "Orientation",
         replaces: &[],
@@ -535,6 +663,13 @@ const FACT_RULES: &[FactRule] = &[
         element: "ControlRepresentation",
         replaces: &[],
         values: &[("0", None), ("1", Some("Button"))],
+    },
+    FactRule {
+        tags: &["UsualGroup"],
+        source: FactSource::Bag("38", 2),
+        element: "Hyperlink",
+        replaces: &[],
+        values: &[("0", None), ("1", Some("true"))],
     },
     FactRule {
         tags: &["UsualGroup"],
@@ -669,6 +804,14 @@ fn fact_node<'f>(
             _ => None,
         },
         FactSource::ItemPair(..) => unreachable!("pairs are read by apply_rules"),
+        FactSource::ItemMember(revision, index) => match item {
+            Some(item) if item.revision == revision => Some(
+                item.record
+                    .get(index + item.prefix_offset)
+                    .ok_or_else(|| anyhow!("8.5 item record has no member {index}"))?,
+            ),
+            _ => None,
+        },
         FactSource::Command(index) => match command {
             Some(tail) => Some(
                 tail.get(index)
@@ -685,8 +828,25 @@ fn apply_rules(
     facts: &FormV85Facts,
     item: Option<&FormV85ItemFacts>,
     command: Option<&[Node]>,
+    object_refs: &std::collections::BTreeMap<String, String>,
 ) -> Result<()> {
     let tag = edits.elements[element].tag.clone();
+    for rule in FACT_OBJECT_RULES {
+        if !rule.tags.contains(&tag.as_str()) {
+            continue;
+        }
+        let Some(node) = fact_node(rule.source, facts, item, command)? else {
+            continue;
+        };
+        let body = fact_object_xml(rule.object, rule.element, node, object_refs)
+            .map_err(|error| anyhow!("<{tag}> {error}"))?;
+        for child in edits.direct_children(element, rule.element) {
+            edits.remove(child);
+        }
+        if let Some(body) = body {
+            edits.insert_child(element, rule.element, &body)?;
+        }
+    }
     for rule in FACT_RULES {
         if !rule.tags.contains(&tag.as_str()) {
             continue;
@@ -736,14 +896,18 @@ fn apply_rules(
 }
 
 /// Applies to a written 8.5 `Form.xml` what the appended members say.
-pub(super) fn apply_v85_form_facts(xml: String, facts: &FormV85Facts) -> Result<String> {
+pub(super) fn apply_v85_form_facts(
+    xml: String,
+    facts: &FormV85Facts,
+    object_refs: &std::collections::BTreeMap<String, String>,
+) -> Result<String> {
     let mut edits = XmlEdits::new(&xml)?;
     let root = edits
         .elements
         .iter()
         .position(|element| element.parent.is_none() && element.tag == "Form")
         .ok_or_else(|| anyhow!("written form XML has no <Form> root"))?;
-    apply_rules(&mut edits, root, facts, None, None)?;
+    apply_rules(&mut edits, root, facts, None, None, object_refs)?;
     // Items by id outside the attribute, command and parameter sections,
     // whose ids number different spaces; commands by id inside theirs.
     let mut items = Vec::new();
@@ -773,12 +937,12 @@ pub(super) fn apply_v85_form_facts(xml: String, facts: &FormV85Facts) -> Result<
     }
     for (element, id) in items {
         if let Some(item) = facts.items.get(&id) {
-            apply_rules(&mut edits, element, facts, Some(item), None)?;
+            apply_rules(&mut edits, element, facts, Some(item), None, object_refs)?;
         }
     }
     for (element, id) in commands {
         if let Some(tail) = facts.commands.get(&id) {
-            apply_rules(&mut edits, element, facts, None, Some(tail))?;
+            apply_rules(&mut edits, element, facts, None, Some(tail), object_refs)?;
         }
     }
     edits.finish()

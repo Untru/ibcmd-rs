@@ -2361,7 +2361,11 @@ fn write_source_asset_inner(
                     diagnostics: extraction_diagnostics,
                 } => {
                     let xml = match &v85_facts {
-                        Some(facts) => super::form_v85_writer::apply_v85_form_facts(xml, facts)
+                        Some(facts) => super::form_v85_writer::apply_v85_form_facts(
+                            xml,
+                            facts,
+                            context.object_refs,
+                        )
                             .map_err(|error| {
                                 anyhow::Error::new(SourceAssetRefusal::new(
                                     "source.form.v85.facts",

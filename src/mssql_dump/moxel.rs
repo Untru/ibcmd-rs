@@ -1346,8 +1346,9 @@ pub(crate) fn try_extract_moxel_spreadsheet_xml_with_generated_types(
     let body = crate::compiler::bodies::mxl::decode_compatible_mxl(bytes).map_err(|error| {
         MxlDiagnostic::decoder("mxl.decoder.binary-container", error.to_string())
     })?;
-    let decoded =
-        decode_moxel_spreadsheet_ir(body.native_body_text(), object_refs, generated_types, None)?;
+    // An 8.5 spreadsheet spells its colour and font tuples one revision later.
+    let text = super::form_v85::rewrite_v85_primitives_in_place(body.native_body_text());
+    let decoded = decode_moxel_spreadsheet_ir(&text, object_refs, generated_types, None)?;
     write_moxel_spreadsheet_xml(&decoded)
 }
 
@@ -4206,6 +4207,14 @@ fn moxel_predefined_font_style_ref(index: &str) -> Option<&'static str> {
         "-31" => Some("style:NormalTextFont"),
         "-32" => Some("style:LargeTextFont"),
         "-33" => Some("style:ExtraLargeTextFont"),
+        // Platform 8.5 standard style fonts (see `standard_style_item_for_code`).
+        "-50" => Some("style:TitleLevel3"),
+        "-52" => Some("style:TitleLevel5"),
+        "-53" => Some("style:TextLevel1"),
+        "-54" => Some("style:TextLevel2"),
+        "-55" => Some("style:TextLevel3"),
+        "-56" => Some("style:SubtitleLevel1"),
+        "-59" => Some("style:TitleLevel2"),
         _ => None,
     }
 }
