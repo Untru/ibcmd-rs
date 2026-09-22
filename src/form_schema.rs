@@ -7783,6 +7783,7 @@ pub(crate) fn normalize_form_table_command_bar_location_xml(value: &str) -> Opti
     match value {
         "None" => Some("None"),
         "Top" => Some("Top"),
+        "Bottom" => Some("Bottom"),
         _ => None,
     }
 }

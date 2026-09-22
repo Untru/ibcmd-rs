@@ -271,6 +271,10 @@ struct FormXmlAttribute {
     /// directly.
     saved_data: Option<bool>,
     fill_check: Option<String>,
+    /// `<FunctionalOptions><Item>`, in XML order. Every item reaches the
+    /// last member of the `{9,…}` record; none is dropped, and a holder that
+    /// spells the element never stores the `{0,0}` an absent one takes.
+    functional_options: Vec<String>,
     /// `<Save>`, as the list of `<Field>` paths it spells, in XML order.
     /// `None` when the attribute does not carry the element -- which is
     /// 138 968 of the 141 723 attributes of both corpora.
@@ -311,6 +315,9 @@ struct FormXmlAttributeColumn {
     title: Vec<LocalizedString>,
     spec: FormXmlTypeSpec,
     fill_check: Option<String>,
+    /// `<FunctionalOptions><Item>`, in XML order -- member 8 of the `{5,…}`
+    /// record, which reads the same collection as the attribute's own.
+    functional_options: Vec<String>,
     unwritable: Vec<String>,
 }
 
@@ -688,6 +695,7 @@ enum FormXmlViewModeApplicationOnSetReportResult {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlUpdateOnDataChange {
     Auto,
+    DontUpdate,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -723,9 +731,11 @@ enum FormXmlButtonLocationInCommandBar {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlTitleLocation {
     None,
+    Auto,
     Left,
     Top,
     Right,
+    Bottom,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -6813,9 +6823,11 @@ const fn native_button_representation(
 const fn native_title_location(location: FormXmlTitleLocation) -> &'static str {
     match location {
         FormXmlTitleLocation::None => "None",
+        FormXmlTitleLocation::Auto => "Auto",
         FormXmlTitleLocation::Left => "Left",
         FormXmlTitleLocation::Top => "Top",
         FormXmlTitleLocation::Right => "Right",
+        FormXmlTitleLocation::Bottom => "Bottom",
     }
 }
 
@@ -8341,9 +8353,16 @@ fn native_scalar_color(
 /// not written at all.
 fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> {
     let mut blockers = Vec::new();
-    for command in &properties.commands {
-        if !command.functional_options.is_empty() {
-            blockers.push("a command names functional options".to_string());
+    for attribute in &properties.attributes {
+        // `<Columns><AdditionalColumns>` does not go in the attribute's own
+        // record. Its columns live in the groups that close the attributes
+        // section -- `{4,N,<attribute>×N,<G>,<group>×G,0,<settings>}` -- and
+        // the writer emits that tail as the constant `0,0`, the `G = 0` case.
+        // A form that declares one was written short and came out different
+        // instead of refused, which is the silent loss every other refusal
+        // here exists to stop.
+        if !attribute.additional_columns.is_empty() {
+            blockers.push("an attribute names <AdditionalColumns>".to_string());
         }
     }
     for attribute in &properties.attributes {
@@ -8430,8 +8449,17 @@ fn format_native_form_body(
             handler: &event.handler,
         })
         .collect::<Vec<_>>();
-    let events = crate::compiler::bodies::form_native::format_native_events("Form", "", &events)
-        .ok_or_else(|| anyhow!("the form names an event the writer cannot place"))?;
+    // `BeforeWrite` and `BeforeWriteAtServer` are the two events whose uuid the
+    // form's main attribute decides, so the root call site has to pass the class
+    // the item and table sites already pass. With a literal empty class here the
+    // lookup fell through to the class-open rows, which hold neither name, and
+    // every form naming one was refused.
+    let events = crate::compiler::bodies::form_native::format_native_events(
+        "Form",
+        &form_main_attribute_class(properties),
+        &events,
+    )
+    .ok_or_else(|| anyhow!("the form names an event the writer cannot place"))?;
 
     let command_set = format_form_command_set(
         &properties.command_set_excluded_commands,
@@ -8584,6 +8612,27 @@ fn format_native_form_body(
         tail: &tail,
     });
 
+    // `<FunctionalOptions>` is one `{0,N,<option uuid>×N}` collection in three
+    // holders: the last member of an attribute's `{9,…}` record, member 12 of
+    // a command's, and member 8 of a column's `{5,…}`. Every `<Item>` reaches
+    // it, in XML order, none dropped and none sorted -- 5 885 of 5 885 joined
+    // records agree on the count, and 369 of 369 multi-item records on the
+    // order. A holder that omits the element stores `{0,0}` in 132 013 +
+    // 7 207 attribute, 59 320 + 2 977 command and 142 994 + 2 800 column
+    // records with no exception; one that spells it never does.
+    let functional_options = |references: &[String]| -> Result<String> {
+        if references.is_empty() {
+            return Ok("{0,0}".to_string());
+        }
+        if references.iter().any(|reference| reference.trim().is_empty()) {
+            return Err(anyhow!("a functional option is named by an empty <Item/>"));
+        }
+        let source = source.ok_or_else(|| {
+            anyhow!("a form names functional options but has no source resolver")
+        })?;
+        format_form_reference_list(source, references)
+    };
+
     // The attributes section, with the form's settings composer at its end.
     let mut attributes = String::new();
     for attribute in &properties.attributes {
@@ -8596,6 +8645,7 @@ fn format_native_form_body(
             let column_title = format_form_title_value(&column.title);
             let column_pattern =
                 format_form_type_spec_pattern("Form Attribute Column", &column.spec, source)?;
+            let column_options = functional_options(&column.functional_options)?;
             columns.push(
                 crate::compiler::bodies::form_native::format_form_attribute_column(
                     &crate::compiler::bodies::form_native::NativeFormAttributeColumn {
@@ -8603,6 +8653,7 @@ fn format_native_form_body(
                         name: &column.name,
                         title: &column_title,
                         type_pattern: &column_pattern,
+                        functional_options: &column_options,
                         fill_check: column.fill_check.as_deref() == Some("ShowError"),
                         ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
                     },
@@ -8610,8 +8661,7 @@ fn format_native_form_body(
             );
         }
         // trailing[0] is a value list's element type and `{0,0}` for every
-        // other kind of attribute; trailing[1] is `<FunctionalOptions>`,
-        // whose presence refuses the form above, so `{0,0}` is right here.
+        // other kind of attribute; trailing[1] is `<FunctionalOptions>`.
         let element_type = attribute
             .element_type
             .as_ref()
@@ -8626,6 +8676,7 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let attribute_options = functional_options(&attribute.functional_options)?;
         attributes.push(',');
         attributes.push_str(&crate::compiler::bodies::form_native::format_form_attribute(
             &crate::compiler::bodies::form_native::NativeFormAttribute {
@@ -8638,7 +8689,10 @@ fn format_native_form_body(
                 saved_data: attribute.saved_data.unwrap_or(false),
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
                 columns: &columns,
-                trailing: [element_type.as_deref().unwrap_or("{0,0}"), "{0,0}"],
+                trailing: [
+                    element_type.as_deref().unwrap_or("{0,0}"),
+                    &attribute_options,
+                ],
                 ..crate::compiler::bodies::form_native::NativeFormAttribute::default()
             },
         ));
@@ -8660,6 +8714,7 @@ fn format_native_form_body(
     for command in &properties.commands {
         let title = format_form_title_value(&command.title);
         let tooltip = format_form_title_value(&command.tooltip);
+        let command_options = functional_options(&command.functional_options)?;
         commands.push(',');
         commands.push_str(
             &crate::compiler::bodies::form_native::format_form_command(
@@ -8669,6 +8724,7 @@ fn format_native_form_body(
                     title: &title,
                     tooltip: &tooltip,
                     action: command.action.as_deref().unwrap_or(""),
+                    functional_options: &command_options,
                     modifies_saved_data: command.modifies_saved_data.unwrap_or(false),
                     current_row_use: command.current_row_use.map(|_| "DontUse"),
                     ..crate::compiler::bodies::form_native::NativeFormCommand::default()
@@ -9555,6 +9611,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         // `<SavedData>` read its `<MainAttribute>`.
                         | "SavedData"
                         | "FillCheck"
+                        // The same stale buffer, four more elements. A form
+                        // item spells `<Visible>` as `false` or not at all --
+                        // `true` occurs nowhere in either corpus -- so every
+                        // `unsupported Form ChildItem/Visible boolean value:
+                        // Form.Command.X` was the *previous* element's text
+                        // being parsed: the button's `<CommandName>`, a
+                        // `<DataPath>`, a width, `Alt+3`. 1 937 forms of ERP
+                        // УХ and 58 of BSP were refused for it.
+                        | "Visible"
+                        | "Enabled"
+                        | "EnableContentChange"
+                        | "ShowLeftMargin"
                         | "lang"
                         | "content"
                 ) {
@@ -9705,16 +9773,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 } else if path_ends_with(
                     &path,
                     &["Form", "Attributes", "Attribute", "Columns", "Column"],
-                ) && !matches!(local.as_str(), "Type" | "Title" | "FillCheck")
-                    && let Some(column) = current_column.as_mut()
+                ) && !matches!(
+                    local.as_str(),
+                    "Type" | "Title" | "FillCheck" | "FunctionalOptions"
+                ) && let Some(column) = current_column.as_mut()
                 {
-                    // The ten-member column record reads the title, the type
-                    // and `<FillCheck>` out of the source; `<View>`, `<Edit>`
-                    // and `<FunctionalOptions>` land in members the source
-                    // does not carry -- member 8's bag names a functional
-                    // option by a uuid only the configuration knows -- so
-                    // naming one refuses the form instead of taking the
-                    // default those members hold in 142 594 columns and more.
+                    // The ten-member column record reads the title, the
+                    // type, `<FillCheck>` and `<FunctionalOptions>` out of the
+                    // source; `<View>` and `<Edit>` land in members whose
+                    // content when the element is present was never measured,
+                    // so naming one still refuses the form instead of taking
+                    // the default those members hold in 142 594 columns.
                     if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
                     }
@@ -9848,6 +9917,32 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // `<Item/>` is an `Event::Empty`, so it never reaches the arm
+                // that reads an item's text. Eight items of ERP УХ are spelled
+                // that way and none of BSP. Pushing the empty string keeps the
+                // count right and refuses the holder below, which is what an
+                // unmeasured spelling gets; dropping it in silence would write
+                // a collection one short.
+                if local == "Item" {
+                    if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH) {
+                        if let Some(column) = current_column.as_mut() {
+                            column.functional_options.push(String::new());
+                        }
+                    } else if path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                    ) {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute.functional_options.push(String::new());
+                        }
+                    } else if path_ends_with(
+                        &path,
+                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                    ) && let Some(command) = current_command.as_mut()
+                    {
+                        command.functional_options.push(String::new());
+                    }
+                }
                 if local == "Events" && path_ends_with(&path, &["Form"]) {
                     properties.events_present = true;
                 }
@@ -10012,8 +10107,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 } else if path_ends_with(
                     &path,
                     &["Form", "Attributes", "Attribute", "Columns", "Column"],
-                ) && !matches!(local.as_str(), "Type" | "Title" | "FillCheck")
-                    && let Some(column) = current_column.as_mut()
+                ) && !matches!(
+                    local.as_str(),
+                    "Type" | "Title" | "FillCheck" | "FunctionalOptions"
+                ) && let Some(column) = current_column.as_mut()
                 {
                     if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
@@ -10194,6 +10291,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
                     )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     // Members 4, 11 and 12 of the `{9,…}` record read these
                     // three, and none of them was collected: the `<Title>` of
@@ -10732,6 +10834,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &path,
                         &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
                     )
+                    || path_ends_with(
+                        &path,
+                        &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                    )
+                    || path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     // Members 4, 11 and 12 of the `{9,…}` record read these
                     // three, and none of them was collected: the `<Title>` of
@@ -11771,6 +11878,26 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             if !value.is_empty() {
                                 command.functional_options.push(value.to_string());
                             }
+                        }
+                    }
+                    // A column's block sits inside an attribute, so its arm
+                    // has to come first: the attribute's guard would match a
+                    // column's item too.
+                    "Item" if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH) => {
+                        if let Some(column) = current_column.as_mut() {
+                            column.functional_options.push(text_value.trim().to_string());
+                        }
+                    }
+                    "Item"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                        ) =>
+                    {
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            attribute
+                                .functional_options
+                                .push(text_value.trim().to_string());
                         }
                     }
                     "Command" if path_ends_with(&path, &["Form", "Commands", "Command"]) => {
@@ -13947,6 +14074,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         main_attribute: None,
         settings: None,
         element_type: None,
+        functional_options: Vec::new(),
         columns: Vec::new(),
         additional_columns: Vec::new(),
         title: Vec::new(),
@@ -15208,7 +15336,7 @@ fn path_ends_with_for_child_table_current_row_use(
     let Some(item) = items.last() else {
         return false;
     };
-    path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
 }
 
 fn path_ends_with_for_child_table_horizontal_scroll_bar(
@@ -15218,7 +15346,7 @@ fn path_ends_with_for_child_table_horizontal_scroll_bar(
     let Some(item) = items.last() else {
         return false;
     };
-    path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
 }
 
 fn path_ends_with_for_child_table_multiple_choice(
@@ -15228,7 +15356,7 @@ fn path_ends_with_for_child_table_multiple_choice(
     let Some(item) = items.last() else {
         return false;
     };
-    path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
 }
 
 fn path_ends_with_for_child_table_search_on_input(
@@ -15238,7 +15366,7 @@ fn path_ends_with_for_child_table_search_on_input(
     let Some(item) = items.last() else {
         return false;
     };
-    path_ends_with(path, &[item.tag.as_str(), "SearchOnInput"])
+    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "SearchOnInput"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -15447,6 +15575,7 @@ fn parse_form_use_posting_mode_xml(value: &str) -> Result<FormXmlUsePostingMode>
 fn parse_form_update_on_data_change_xml(value: &str) -> Result<FormXmlUpdateOnDataChange> {
     match value {
         "Auto" => Ok(FormXmlUpdateOnDataChange::Auto),
+        "DontUpdate" => Ok(FormXmlUpdateOnDataChange::DontUpdate),
         other => Err(anyhow!(
             "unsupported Form Table UpdateOnDataChange: {other}"
         )),
@@ -15655,9 +15784,11 @@ fn parse_form_button_location_in_command_bar_xml(
 fn parse_form_title_location_xml(value: &str) -> Result<FormXmlTitleLocation> {
     match value {
         "None" => Ok(FormXmlTitleLocation::None),
+        "Auto" => Ok(FormXmlTitleLocation::Auto),
         "Left" => Ok(FormXmlTitleLocation::Left),
         "Top" => Ok(FormXmlTitleLocation::Top),
         "Right" => Ok(FormXmlTitleLocation::Right),
+        "Bottom" => Ok(FormXmlTitleLocation::Bottom),
         other => Err(anyhow!(
             "unsupported Form InputField TitleLocation: {other}"
         )),
@@ -16598,6 +16729,7 @@ fn form_use_posting_mode_code(value: FormXmlUsePostingMode) -> &'static str {
 fn form_update_on_data_change_code(value: FormXmlUpdateOnDataChange) -> &'static str {
     match value {
         FormXmlUpdateOnDataChange::Auto => "0",
+        FormXmlUpdateOnDataChange::DontUpdate => "1",
     }
 }
 
@@ -21017,9 +21149,13 @@ fn form_button_location_in_command_bar_code(
 fn form_input_field_title_location_code(value: FormXmlTitleLocation) -> &'static str {
     match value {
         FormXmlTitleLocation::None => "0",
+        // The same codes the native writer reads off the corpus: a field's
+        // member 7 stores `Bottom` as 5 and its absence as 1.
+        FormXmlTitleLocation::Auto => "1",
         FormXmlTitleLocation::Left => "2",
         FormXmlTitleLocation::Top => "3",
         FormXmlTitleLocation::Right => "4",
+        FormXmlTitleLocation::Bottom => "5",
     }
 }
 
@@ -30247,6 +30383,18 @@ fn path_is(path: &[String], owner: &[&str], tail: &[&str]) -> bool {
 const FORM_ATTRIBUTE_PATH: [&str; 3] = ["Form", "Attributes", "Attribute"];
 const FORM_PARAMETER_PATH: [&str; 3] = ["Form", "Parameters", "Parameter"];
 const FORM_COLUMN_PATH: [&str; 5] = ["Form", "Attributes", "Attribute", "Columns", "Column"];
+/// `<Attribute><Columns><Column><FunctionalOptions><Item>`, the deepest of
+/// the three holders of the collection.
+const FORM_COLUMN_FUNCTIONAL_OPTION_PATH: [&str; 7] = [
+    "Form",
+    "Attributes",
+    "Attribute",
+    "Columns",
+    "Column",
+    "FunctionalOptions",
+    "Item",
+];
+
 const FORM_ADDITIONAL_COLUMNS_PATH: [&str; 5] = [
     "Form",
     "Attributes",
@@ -30380,7 +30528,6 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
     match local {
         "UseAlways" => Some("UseAlways"),
-        "FunctionalOptions" => Some("FunctionalOptions"),
         "View" => Some("View"),
         "Edit" => Some("Edit"),
         _ => None,
@@ -31285,18 +31432,16 @@ mod tests {
         );
     }
 
-    /// Fail-closed: a column's `<View>`, `<Edit>` and `<FunctionalOptions>`
-    /// land in members the measurement does not give, so naming one refuses
-    /// the form rather than writing the default the other 142 594 store.
+    /// Fail-closed: a column's `<View>` and `<Edit>` land in members the
+    /// measurement does not give, so naming one refuses the form rather than
+    /// writing the default the other 142 594 store. `<FunctionalOptions>` has
+    /// left this list -- member 8 is measured now -- and refuses for the one
+    /// reason left, which the test below pins.
     #[test]
     fn refuses_a_column_that_names_a_part_the_writer_cannot_place() {
         for (part, body) in [
             ("View", "<View><Common>false</Common></View>"),
             ("Edit", "<Edit><Common>false</Common></Edit>"),
-            (
-                "FunctionalOptions",
-                "<FunctionalOptions><Item>cfg:FunctionalOption.Опция</Item></FunctionalOptions>",
-            ),
         ] {
             let xml = format!(
                 concat!(
@@ -31318,6 +31463,53 @@ mod tests {
             assert!(
                 error.contains(&format!("an attribute column names <{part}>")),
                 "{part} was written instead of refused: {error}"
+            );
+        }
+    }
+
+    /// `<FunctionalOptions>` is one `{0,N,<option uuid>×N}` collection, and
+    /// the uuid is only in the source tree. Without one the holder refuses
+    /// rather than write the `{0,0}` an absent element takes -- which is what
+    /// 132 013 attributes, 59 320 commands and 142 994 columns store, and no
+    /// record that spells the element ever does.
+    #[test]
+    fn refuses_functional_options_it_cannot_resolve() {
+        for holder in [
+            concat!(
+                r#"<Attributes><Attribute name="Реквизит" id="1"><Type/>"#,
+                r#"<FunctionalOptions><Item>FunctionalOption.Опция</Item></FunctionalOptions>"#,
+                r#"</Attribute></Attributes>"#,
+            ),
+            concat!(
+                r#"<Attributes><Attribute name="Таблица" id="1">"#,
+                r#"<Type><v8:Type>v8:ValueTable</v8:Type></Type><Columns>"#,
+                r#"<Column name="Графа" id="2"><Type/>"#,
+                r#"<FunctionalOptions><Item>FunctionalOption.Опция</Item></FunctionalOptions>"#,
+                r#"</Column></Columns></Attribute></Attributes>"#,
+            ),
+            concat!(
+                r#"<Commands><Command name="Команда" id="1">"#,
+                r#"<FunctionalOptions><Item>FunctionalOption.Опция</Item></FunctionalOptions>"#,
+                r#"</Command></Commands>"#,
+            ),
+        ] {
+            let xml = format!(
+                concat!(
+                    r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" "#,
+                    r#"xmlns:v8="http://v8.1c.ru/8.1/data/core" "#,
+                    r#"xmlns:xs="http://www.w3.org/2001/XMLSchema" "#,
+                    r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
+                    r#"<AutoCommandBar name="ФормаКоманднаяПанель" id="-1"/>"#,
+                    "{holder}</Form>",
+                ),
+                holder = holder,
+            );
+            let error = super::compile_native_form_body(xml.as_bytes(), None, None)
+                .expect_err("functional options with no source must refuse the form")
+                .to_string();
+            assert!(
+                error.contains("no source resolver"),
+                "the holder was written instead of refused: {error}"
             );
         }
     }

@@ -369,26 +369,28 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("Table", "", "de65638d-a806-4a76-bc10-f62bbc86e0e7", "de65638d-a806-4a76-bc10-f62bbc86e0e7"),
     ("TextDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("TrackBarField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
-    ("Form", "AccountingRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "AccountingRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "BusinessProcessObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "CatalogObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "CatalogObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "ChartOfAccountsObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "ChartOfCalculationTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "ChartOfCalculationTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "ChartOfCharacteristicTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "ChartOfCharacteristicTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "ConstantsSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "DocumentObject", "BeforeWrite", "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc"),
-    ("Form", "DocumentObject", "BeforeWriteAtServer", "8f42e083-be92-4102-b1f0-fa58452c1a63"),
-    ("Form", "ExchangePlanObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "ExchangePlanObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "InformationRegisterRecordManager", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "InformationRegisterRecordManager", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "InformationRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
-    ("Form", "InformationRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
-    ("Form", "TaskObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:AccountingRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:AccountingRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:BusinessProcessObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:BusinessProcessObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:CatalogObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:CatalogObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:ChartOfAccountsObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:ChartOfCalculationTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:ChartOfCalculationTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:ChartOfCharacteristicTypesObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:ChartOfCharacteristicTypesObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:ConstantsSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:ConstantsSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:DocumentObject", "BeforeWrite", "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc"),
+    ("Form", "cfg:DocumentObject", "BeforeWriteAtServer", "8f42e083-be92-4102-b1f0-fa58452c1a63"),
+    ("Form", "cfg:ExchangePlanObject", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:ExchangePlanObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:InformationRegisterRecordManager", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:InformationRegisterRecordManager", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:InformationRegisterRecordSet", "BeforeWrite", "9cc34712-da5f-4faa-a653-343d2085fbe8"),
+    ("Form", "cfg:InformationRegisterRecordSet", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
+    ("Form", "cfg:TaskObject", "BeforeWriteAtServer", "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"),
 ];
 
 /// The font a form item names, in the shape a body stores it.
@@ -2157,7 +2159,7 @@ pub(crate) struct NativeTableHead<'a> {
     /// `<HeightInTableRows>`.
     pub(crate) height_in_table_rows: Option<&'a str>,
     pub(crate) choice_mode: bool,
-    /// `<RowInputMode>`: `AtTheEnd` 1, `AfterCurrentRow` 2.
+    /// `<RowInputMode>`: `EndOfWindow` 1, `AfterCurrentRow` 2.
     pub(crate) row_input_mode: Option<&'a str>,
     /// `<SelectionMode>`: `SingleRow` 0, anything else 1.
     pub(crate) selection_mode: Option<&'a str>,
@@ -2283,7 +2285,7 @@ pub(crate) fn format_table_head(head: &NativeTableHead<'_>) -> Option<String> {
     )?;
     let row_input_mode = root_code(
         head.row_input_mode,
-        &[("AtTheEnd", "1"), ("AfterCurrentRow", "2")],
+        &[("EndOfWindow", "1"), ("AfterCurrentRow", "2")],
         "0",
     )?;
     let selection_mode = root_code(
@@ -7565,10 +7567,10 @@ mod tests {
         let before_write = |class| {
             format_native_events("Form", class, &[event("BeforeWrite", "ПередЗаписью")])
         };
-        assert!(before_write("DocumentObject")
+        assert!(before_write("cfg:DocumentObject")
             .unwrap()
             .contains("8a5894c9-d2ff-4c1d-b433-89cc352bbfbc"));
-        assert!(before_write("CatalogObject")
+        assert!(before_write("cfg:CatalogObject")
             .unwrap()
             .contains("9cc34712-da5f-4faa-a653-343d2085fbe8"));
         assert_eq!(before_write(""), None);
