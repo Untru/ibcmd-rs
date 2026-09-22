@@ -8049,11 +8049,29 @@ fn native_decoration_payload(
     let border = native_item_control_border(item)?;
     let border_color = native_scalar_color(item, "BorderColor", source)?;
     let events = native_item_events(item, main_attribute_class)?;
-    // `<Hyperlink>` reaches the typed field only for a picture decoration; a
-    // label's lands in the item's own scalar bag.
+    // These now reach the typed field on every tag; the fallback to the item's
+    // own scalar bag is what they took while the guards were still narrow.
     let hyperlink = item
         .hyperlink
         .unwrap_or_else(|| native_scalar_flag(item, "Hyperlink", false));
+    let horizontal_align = item
+        .horizontal_align
+        .map(native_horizontal_align_spelling)
+        .or_else(|| item.scalars.get("HorizontalAlign").map(String::as_str));
+    let vertical_align = item
+        .vertical_align
+        .map(native_vertical_align_spelling)
+        .or_else(|| item.scalars.get("VerticalAlign").map(String::as_str));
+    let file_drag_mode = item
+        .file_drag_mode
+        .as_deref()
+        .or_else(|| item.scalars.get("FileDragMode").map(String::as_str));
+    let enable_drag = item
+        .enable_drag
+        .unwrap_or_else(|| native_scalar_flag(item, "EnableDrag", false));
+    let enable_start_drag = item
+        .enable_start_drag
+        .unwrap_or_else(|| native_scalar_flag(item, "EnableStartDrag", false));
 
     if item.tag == "PictureDecoration" {
         if item.nonselected_picture_text_present {
@@ -8071,10 +8089,10 @@ fn native_decoration_payload(
                 zoomable: native_scalar_flag(item, "Zoomable", false),
                 border_color: &border_color,
                 border: &border,
-                enable_start_drag: native_scalar_flag(item, "EnableStartDrag", false),
-                enable_drag: native_scalar_flag(item, "EnableDrag", false),
+                enable_start_drag,
+                enable_drag,
                 events: &events,
-                file_drag_mode: item.scalars.get("FileDragMode").map(String::as_str),
+                file_drag_mode,
                 image_scale: Some(native_decoration_number(item, "ImageScale", "100")?),
                 ..native::NativePictureDecorationPayload::default()
             },
@@ -8091,8 +8109,8 @@ fn native_decoration_payload(
         .ok_or_else(|| anyhow!("<LabelDecoration> names a background colour it cannot place"))?;
     native::format_label_decoration_payload(&native::NativeLabelDecorationPayload {
         hyperlink,
-        horizontal_align: item.scalars.get("HorizontalAlign").map(String::as_str),
-        vertical_align: item.scalars.get("VerticalAlign").map(String::as_str),
+        horizontal_align,
+        vertical_align,
         title_height: Some(native_decoration_number(item, "TitleHeight", "0")?),
         events: &events,
         back_color: &back_color,
@@ -14689,7 +14707,7 @@ fn path_ends_with_for_child_default_button(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
+    path_ends_with(path, &[item.tag.as_str(), "DefaultButton"])
 }
 
 fn path_ends_with_for_child_scroll_on_compress(
@@ -14699,7 +14717,7 @@ fn path_ends_with_for_child_scroll_on_compress(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Page" && path_ends_with(path, &[item.tag.as_str(), "ScrollOnCompress"])
+    path_ends_with(path, &[item.tag.as_str(), "ScrollOnCompress"])
 }
 
 fn path_ends_with_for_child_read_only(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -14723,7 +14741,7 @@ fn path_ends_with_for_child_location_in_command_bar(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Button" && path_ends_with(path, &[item.tag.as_str(), "LocationInCommandBar"])
+    path_ends_with(path, &[item.tag.as_str(), "LocationInCommandBar"])
 }
 
 fn path_ends_with_for_child_title_location(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -14748,7 +14766,7 @@ fn path_ends_with_for_child_edit_mode(path: &[String], items: &[FormXmlChildItem
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "EditMode"])
+    path_ends_with(path, &[item.tag.as_str(), "EditMode"])
 }
 
 fn path_ends_with_for_child_mark_required_complete(
@@ -14758,14 +14776,14 @@ fn path_ends_with_for_child_mark_required_complete(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MarkRequiredComplete"])
+    path_ends_with(path, &[item.tag.as_str(), "MarkRequiredComplete"])
 }
 
 fn path_ends_with_for_child_auto_edit_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoEditMode"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoEditMode"])
 }
 
 fn path_ends_with_for_child_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -14786,28 +14804,28 @@ fn path_ends_with_for_child_auto_max_width(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxWidth"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoMaxWidth"])
 }
 
 fn path_ends_with_for_child_max_width(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MaxWidth"])
+    path_ends_with(path, &[item.tag.as_str(), "MaxWidth"])
 }
 
 fn path_ends_with_for_child_auto_max_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMaxHeight"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoMaxHeight"])
 }
 
 fn path_ends_with_for_child_max_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MaxHeight"])
+    path_ends_with(path, &[item.tag.as_str(), "MaxHeight"])
 }
 
 fn path_ends_with_for_child_horizontal_stretch(
@@ -14817,49 +14835,49 @@ fn path_ends_with_for_child_horizontal_stretch(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "HorizontalStretch"])
+    path_ends_with(path, &[item.tag.as_str(), "HorizontalStretch"])
 }
 
 fn path_ends_with_for_child_vertical_stretch(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "VerticalStretch"])
+    path_ends_with(path, &[item.tag.as_str(), "VerticalStretch"])
 }
 
 fn path_ends_with_for_child_password_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "PasswordMode"])
+    path_ends_with(path, &[item.tag.as_str(), "PasswordMode"])
 }
 
 fn path_ends_with_for_child_multi_line(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "MultiLine"])
+    path_ends_with(path, &[item.tag.as_str(), "MultiLine"])
 }
 
 fn path_ends_with_for_child_wrap(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "Wrap"])
+    path_ends_with(path, &[item.tag.as_str(), "Wrap"])
 }
 
 fn path_ends_with_for_child_text_edit(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "TextEdit"])
+    path_ends_with(path, &[item.tag.as_str(), "TextEdit"])
 }
 
 fn path_ends_with_for_child_auto_cell_height(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoCellHeight"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoCellHeight"])
 }
 
 fn path_ends_with_for_child_cell_hyperlink(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -14880,42 +14898,42 @@ fn path_ends_with_for_child_hyperlink(path: &[String], items: &[FormXmlChildItem
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "PictureDecoration" && path_ends_with(path, &[item.tag.as_str(), "Hyperlink"])
+    path_ends_with(path, &[item.tag.as_str(), "Hyperlink"])
 }
 
 fn path_ends_with_for_child_drop_list_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "DropListButton"])
+    path_ends_with(path, &[item.tag.as_str(), "DropListButton"])
 }
 
 fn path_ends_with_for_child_clear_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ClearButton"])
+    path_ends_with(path, &[item.tag.as_str(), "ClearButton"])
 }
 
 fn path_ends_with_for_child_open_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "OpenButton"])
+    path_ends_with(path, &[item.tag.as_str(), "OpenButton"])
 }
 
 fn path_ends_with_for_child_create_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "CreateButton"])
+    path_ends_with(path, &[item.tag.as_str(), "CreateButton"])
 }
 
 fn path_ends_with_for_child_choice_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChoiceButton"])
+    path_ends_with(path, &[item.tag.as_str(), "ChoiceButton"])
 }
 
 fn path_ends_with_for_child_choice_list_button(
@@ -14925,35 +14943,35 @@ fn path_ends_with_for_child_choice_list_button(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChoiceListButton"])
+    path_ends_with(path, &[item.tag.as_str(), "ChoiceListButton"])
 }
 
 fn path_ends_with_for_child_spin_button(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "SpinButton"])
+    path_ends_with(path, &[item.tag.as_str(), "SpinButton"])
 }
 
 fn path_ends_with_for_child_list_choice_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ListChoiceMode"])
+    path_ends_with(path, &[item.tag.as_str(), "ListChoiceMode"])
 }
 
 fn path_ends_with_for_child_quick_choice(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "QuickChoice"])
+    path_ends_with(path, &[item.tag.as_str(), "QuickChoice"])
 }
 
 fn path_ends_with_for_child_choose_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "ChooseType"])
+    path_ends_with(path, &[item.tag.as_str(), "ChooseType"])
 }
 
 fn path_ends_with_for_child_auto_mark_incomplete(
@@ -14963,7 +14981,7 @@ fn path_ends_with_for_child_auto_mark_incomplete(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField" && path_ends_with(path, &[item.tag.as_str(), "AutoMarkIncomplete"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoMarkIncomplete"])
 }
 
 fn path_ends_with_for_child_choice_button_representation(
@@ -14973,8 +14991,7 @@ fn path_ends_with_for_child_choice_button_representation(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "InputField"
-        && path_ends_with(path, &[item.tag.as_str(), "ChoiceButtonRepresentation"])
+    path_ends_with(path, &[item.tag.as_str(), "ChoiceButtonRepresentation"])
 }
 
 /// Whether the path ends at `<name>` inside the item being read, whatever the
@@ -15045,7 +15062,7 @@ fn path_ends_with_for_child_table_command_bar_location(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CommandBarLocation"])
+    path_ends_with(path, &[item.tag.as_str(), "CommandBarLocation"])
 }
 
 fn path_ends_with_for_child_height_in_table_rows(
@@ -15055,7 +15072,7 @@ fn path_ends_with_for_child_height_in_table_rows(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HeightInTableRows"])
+    path_ends_with(path, &[item.tag.as_str(), "HeightInTableRows"])
 }
 
 fn path_ends_with_for_child_row_selection_mode(
@@ -15065,35 +15082,35 @@ fn path_ends_with_for_child_row_selection_mode(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RowSelectionMode"])
+    path_ends_with(path, &[item.tag.as_str(), "RowSelectionMode"])
 }
 
 fn path_ends_with_for_child_enable_start_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableStartDrag"])
+    path_ends_with(path, &[item.tag.as_str(), "EnableStartDrag"])
 }
 
 fn path_ends_with_for_child_enable_drag(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "EnableDrag"])
+    path_ends_with(path, &[item.tag.as_str(), "EnableDrag"])
 }
 
 fn path_ends_with_for_child_file_drag_mode(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
+    path_ends_with(path, &[item.tag.as_str(), "FileDragMode"])
 }
 
 fn path_ends_with_for_child_auto_refresh(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AutoRefresh"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoRefresh"])
 }
 
 fn path_ends_with_for_child_auto_refresh_period(
@@ -15103,7 +15120,7 @@ fn path_ends_with_for_child_auto_refresh_period(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AutoRefreshPeriod"])
+    path_ends_with(path, &[item.tag.as_str(), "AutoRefreshPeriod"])
 }
 
 fn path_ends_with_for_child_period_variant(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -15134,7 +15151,7 @@ fn path_ends_with_for_child_use_alternation_row_color(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UseAlternationRowColor"])
+    path_ends_with(path, &[item.tag.as_str(), "UseAlternationRowColor"])
 }
 
 /// `<DefaultItem>` of the child item currently open.
@@ -15154,14 +15171,14 @@ fn path_ends_with_for_child_initial_tree_view(path: &[String], items: &[FormXmlC
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "InitialTreeView"])
+    path_ends_with(path, &[item.tag.as_str(), "InitialTreeView"])
 }
 
 fn path_ends_with_for_child_initial_list_view(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "InitialListView"])
+    path_ends_with(path, &[item.tag.as_str(), "InitialListView"])
 }
 
 fn path_ends_with_for_child_choice_folders_and_items(
@@ -15171,8 +15188,7 @@ fn path_ends_with_for_child_choice_folders_and_items(
     let Some(item) = items.last() else {
         return false;
     };
-    matches!(item.tag.as_str(), "Table" | "InputField")
-        && path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
+    path_ends_with(path, &[item.tag.as_str(), "ChoiceFoldersAndItems"])
 }
 
 fn path_ends_with_for_child_restore_current_row(
@@ -15182,7 +15198,7 @@ fn path_ends_with_for_child_restore_current_row(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RestoreCurrentRow"])
+    path_ends_with(path, &[item.tag.as_str(), "RestoreCurrentRow"])
 }
 
 fn path_ends_with_for_child_table_current_row_use(
@@ -15192,7 +15208,7 @@ fn path_ends_with_for_child_table_current_row_use(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
+    path_ends_with(path, &[item.tag.as_str(), "CurrentRowUse"])
 }
 
 fn path_ends_with_for_child_table_horizontal_scroll_bar(
@@ -15202,7 +15218,7 @@ fn path_ends_with_for_child_table_horizontal_scroll_bar(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
+    path_ends_with(path, &[item.tag.as_str(), "HorizontalScrollBar"])
 }
 
 fn path_ends_with_for_child_table_multiple_choice(
@@ -15212,7 +15228,7 @@ fn path_ends_with_for_child_table_multiple_choice(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
+    path_ends_with(path, &[item.tag.as_str(), "MultipleChoice"])
 }
 
 fn path_ends_with_for_child_table_search_on_input(
@@ -15222,7 +15238,7 @@ fn path_ends_with_for_child_table_search_on_input(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "SearchOnInput"])
+    path_ends_with(path, &[item.tag.as_str(), "SearchOnInput"])
 }
 
 fn path_ends_with_for_child_row_filter(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -15239,7 +15255,7 @@ fn path_ends_with_for_child_row_picture_data_path(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "RowPictureDataPath"])
+    path_ends_with(path, &[item.tag.as_str(), "RowPictureDataPath"])
 }
 
 fn path_ends_with_for_child_update_on_data_change(
@@ -15249,7 +15265,7 @@ fn path_ends_with_for_child_update_on_data_change(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UpdateOnDataChange"])
+    path_ends_with(path, &[item.tag.as_str(), "UpdateOnDataChange"])
 }
 
 fn path_ends_with_for_child_user_settings_group(
@@ -15259,7 +15275,7 @@ fn path_ends_with_for_child_user_settings_group(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "UserSettingsGroup"])
+    path_ends_with(path, &[item.tag.as_str(), "UserSettingsGroup"])
 }
 
 fn path_ends_with_for_child_allow_getting_current_row_url(
@@ -15269,14 +15285,14 @@ fn path_ends_with_for_child_allow_getting_current_row_url(
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "Table" && path_ends_with(path, &[item.tag.as_str(), "AllowGettingCurrentRowURL"])
+    path_ends_with(path, &[item.tag.as_str(), "AllowGettingCurrentRowURL"])
 }
 
 fn path_ends_with_for_child_horizontal_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "AutoCommandBar" && path_ends_with(path, &[item.tag.as_str(), "HorizontalAlign"])
+    path_ends_with(path, &[item.tag.as_str(), "HorizontalAlign"])
 }
 
 fn path_ends_with_for_child_group_horizontal_align(
@@ -15320,14 +15336,14 @@ fn path_ends_with_for_child_three_state(path: &[String], items: &[FormXmlChildIt
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "CheckBoxField" && path_ends_with(path, &[item.tag.as_str(), "ThreeState"])
+    path_ends_with(path, &[item.tag.as_str(), "ThreeState"])
 }
 
 fn path_ends_with_for_child_autofill(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
     };
-    item.tag == "AutoCommandBar" && path_ends_with(path, &[item.tag.as_str(), "Autofill"])
+    path_ends_with(path, &[item.tag.as_str(), "Autofill"])
 }
 
 fn parse_form_xml_bool(name: &str, value: &str) -> Result<bool> {
