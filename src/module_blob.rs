@@ -8338,6 +8338,12 @@ fn native_field_payload(
                 max_width: item.max_width.as_deref().unwrap_or("0"),
                 auto_max_height: item.auto_max_height.unwrap_or(true),
                 max_height: item.max_height.as_deref().unwrap_or("0"),
+                // The same two the decoration payload already fills, and the
+                // largest never-filled field the struct sweep found: 2 110
+                // records of 1 102 forms store a picture where the writer put
+                // the empty constant, and 404 a border.
+                picture: &native_item_picture(item, source)?,
+                border: &native_item_control_border(item)?,
                 ..native::NativePicturePayload::default()
             })
             .ok_or_else(|| anyhow!("<PictureField> names a spelling the writer cannot place"))

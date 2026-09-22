@@ -1436,6 +1436,13 @@ pub struct NativeFormWriterReport {
     /// blockers is counted once, under the first, so a count here is what
     /// removing that reason *starts* to unblock, not what it finishes.
     pub refused: BTreeMap<String, usize>,
+    /// Every differing form, not the twelve the examples keep: the form's
+    /// path, the offset of the first divergence and both lengths. The
+    /// 34-character shape key groups the families but does not identify a
+    /// record -- a measurement pass searching the corpus for one landed on an
+    /// unrelated item the writer reproduces correctly -- so a reader needs
+    /// the form to go back to.
+    pub differences: Vec<NativeFormWriterRow>,
     /// Forms whose stored body carries neither of the two facts the source
     /// does not determine, and so could in principle be written byte for
     /// byte; and how many of those are. Both are properties of the database
@@ -1466,6 +1473,15 @@ pub struct NativeFormWriterReport {
     /// examples.
     pub shapes: BTreeMap<String, usize>,
     pub examples: Vec<NativeFormWriterDifference>,
+}
+
+/// One differing form, by path and size, for every one of them.
+#[derive(Debug, Serialize)]
+pub struct NativeFormWriterRow {
+    pub form: String,
+    pub at: usize,
+    pub wrote: usize,
+    pub stored: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -1563,6 +1579,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         refused_sets: BTreeMap::new(),
         achievable: 0,
         achievable_exact: 0,
+        differences: Vec::new(),
         near_exact: BTreeMap::new(),
         different: 0,
         shapes: BTreeMap::new(),
@@ -1652,6 +1669,12 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                         format!("length differs: {bucket}")
                     };
                     *report.near_exact.entry(distance).or_insert(0) += 1;
+                    report.differences.push(NativeFormWriterRow {
+                        form: form.clone(),
+                        at,
+                        wrote: candidate.chars().count(),
+                        stored: stored.chars().count(),
+                    });
                     if report.examples.len() < 12 {
                         report.examples.push(NativeFormWriterDifference {
                             form,
