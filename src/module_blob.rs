@@ -7142,7 +7142,17 @@ fn format_native_table(
         Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
         None => return Err(anyhow!("a table with no extended tooltip is not measured")),
     };
+    // Member 44 is `<RowPictureDataPath>`, and it takes the same resolver the
+    // table's own `<DataPath>` takes two members earlier: absent stores `{0}`
+    // in 6 346 tables and a path stores the resolved path in 5 143.
+    let row_picture_data_path = match item.row_picture_data_path.as_deref() {
+        None => "{0}".to_string(),
+        Some(path) => data_paths.resolve(path).ok_or_else(|| {
+            anyhow!("a table's <RowPictureDataPath> names {path}, which the writer cannot place")
+        })?,
+    };
     let head = native::format_table_head(&native::NativeTableHead {
+        row_picture_data_path: &row_picture_data_path,
         id: &item.id,
         representation: item.table_representation.as_deref(),
         name: &item.name,
@@ -16294,8 +16304,10 @@ fn path_ends_with_for_child_group_horizontal_align(
     let Some(item) = items.last() else {
         return false;
     };
-    FormFieldSchema::supports_item_tag(&item.tag)
-        && path_ends_with(path, &[item.tag.as_str(), "GroupHorizontalAlign"])
+    // Gated to a field tag, and every one of the 2 133 elements that names
+    // this is a **decoration** -- so the property reached nothing. Pure
+    // across all three tags: absent 3, Left/Top 0, Center 1, Right/Bottom 2.
+    path_ends_with(path, &[item.tag.as_str(), "GroupHorizontalAlign"])
 }
 
 fn path_ends_with_for_child_vertical_align(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -16313,8 +16325,10 @@ fn path_ends_with_for_child_group_vertical_align(
     let Some(item) = items.last() else {
         return false;
     };
-    FormFieldSchema::supports_item_tag(&item.tag)
-        && path_ends_with(path, &[item.tag.as_str(), "GroupVerticalAlign"])
+    // Gated to a field tag, and every one of the 2 133 elements that names
+    // this is a **decoration** -- so the property reached nothing. Pure
+    // across all three tags: absent 3, Left/Top 0, Center 1, Right/Bottom 2.
+    path_ends_with(path, &[item.tag.as_str(), "GroupVerticalAlign"])
 }
 
 fn path_ends_with_for_child_fixing_in_table(path: &[String], items: &[FormXmlChildItem]) -> bool {
