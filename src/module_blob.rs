@@ -6809,7 +6809,13 @@ fn format_native_child_item(
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
         let command = native_button_command(item, command_ids, items, main_attribute_class)?;
+        // Presence is pure: 85 254 buttons with no `<Picture>` store the empty
+        // constant and all 3 461 that spell one store a picture. The writer
+        // emitted the constant either way because the call site never passed
+        // one, though the resolver it needed was already here.
+        let picture = native_item_picture(item, source)?;
         let record = native::format_button_item(&native::NativeButtonItem {
+            picture: &picture,
             id: &item.id,
             name: &item.name,
             title: &title,
@@ -8043,6 +8049,8 @@ fn native_field_payload(
             horizontal_stretch: item.horizontal_stretch,
             vertical_stretch: item.vertical_stretch,
             wrap: item.wrap.unwrap_or(true),
+            // Absent stores 2, `false` 0 and `true` 1 over 83 001 payloads.
+            extended_edit: native_scalar_tristate(item, "ExtendedEdit")?,
             password_mode: item.password_mode,
             multi_line: item.multi_line,
             clear_button: item.clear_button,
@@ -8499,6 +8507,21 @@ fn native_item_events_where(
 /// size member of a payload carries.
 fn native_scalar<'a>(item: &'a FormXmlChildItem, name: &str) -> &'a str {
     item.scalars.get(name).map_or("0", String::as_str)
+}
+
+/// One scalar property of an item read as a tri-state: absent, `false` and
+/// `true` are three stored values, not two, so the absence cannot be folded
+/// into either. A spelling that is neither word refuses the form.
+fn native_scalar_tristate(item: &FormXmlChildItem, name: &str) -> Result<Option<bool>> {
+    match item.scalars.get(name).map(|value| value.trim()) {
+        None => Ok(None),
+        Some("true") => Ok(Some(true)),
+        Some("false") => Ok(Some(false)),
+        Some(other) => Err(anyhow!(
+            "<{}> names <{name}>{other}, which is not measured",
+            item.tag
+        )),
+    }
 }
 
 /// One scalar property of an item read as a flag.
