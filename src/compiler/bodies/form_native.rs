@@ -409,27 +409,128 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
 /// 33 records of that corpus carry it, which is not enough to say what the
 /// mask counts.
 pub(crate) fn format_native_font(
-    kind: Option<&str>,
-    reference: Option<&str>,
-    has_other_attributes: bool,
+    attributes: &BTreeMap<String, String>,
     style_item_uuid: impl FnOnce(&str) -> Option<String>,
 ) -> Option<String> {
-    if kind.is_none() && reference.is_none() {
+    // `{7,<kind>,<mask>[,<ref slot>],<values…>,1,<scale>}`.
+    //
+    // The mask carries one bit per optional attribute and the values follow in
+    // an order that is not the one the XML spells them in. Built from the
+    // source attributes alone this reproduces 8 660 of the 8 665 font elements
+    // of both corpora byte for byte; the five it does not are `Absolute`,
+    // which is a different shape and refuses below. An element that is absent
+    // altogether is `{7,3,0,1,100}` in 1 269 821 of 1 269 821 item slots.
+    if attributes.is_empty() {
         return Some("{7,3,0,1,100}".to_string());
     }
-    if has_other_attributes || kind != Some("StyleItem") {
+    let kind = match attributes.get("kind").map(String::as_str) {
+        Some("WindowsFont") => "1",
+        Some("StyleItem") => "2",
+        Some("AutoFont") => "3",
+        // `Absolute` is a fixed nineteen-member LOGFONT that does not use the
+        // mask at all, and two of its nineteen spellings map to two stored
+        // tuples each: the block that separates them is not in the source.
+        _ => return None,
+    };
+    let reference = attributes.get("ref").map(String::as_str);
+    let slot = match (kind, reference) {
+        ("3", None) => None,
+        ("1", Some("sys:DefaultGUIFont")) => Some("{0}".to_string()),
+        ("1", Some("sys:ANSIFixedFont")) => Some("{2}".to_string()),
+        ("2", Some(reference)) => {
+            let name = reference.strip_prefix("style:")?;
+            match PLATFORM_STYLE_FONT_CODES
+                .iter()
+                .find(|(candidate, _)| *candidate == name)
+            {
+                Some((_, code)) => Some(format!("{{{code}}}")),
+                None => Some(format!("{{0,{}}}", style_item_uuid(name)?)),
+            }
+        }
+        _ => return None,
+    };
+
+    let mut mask = 0u32;
+    let mut values = Vec::new();
+    // `height` is tenths of a point, `bold` is 700 or 400, the three flags are
+    // 1 or 0, and `faceName` is quoted. `scale` sets its bit but rides in the
+    // tail rather than the value list.
+    if let Some(height) = attributes.get("height") {
+        mask |= 1 << 1;
+        values.push((1u32, (height.trim().parse::<i64>().ok()? * 10).to_string()));
+    }
+    if let Some(bold) = attributes.get("bold") {
+        mask |= 1 << 2;
+        values.push((2, if native_font_flag(bold)? { "700" } else { "400" }.to_string()));
+    }
+    for (name, bit) in [("italic", 3u32), ("underline", 4), ("strikeout", 5)] {
+        if let Some(value) = attributes.get(name) {
+            mask |= 1 << bit;
+            values.push((bit, u8::from(native_font_flag(value)?).to_string()));
+        }
+    }
+    if let Some(face) = attributes.get("faceName") {
+        mask |= 1 << 0;
+        values.push((6, quoted(face)));
+    }
+    let scale = match attributes.get("scale") {
+        Some(scale) => {
+            mask |= 1 << 9;
+            scale.trim().parse::<i64>().ok()?.to_string()
+        }
+        None => "100".to_string(),
+    };
+    // Every other key would be a spelling this rule has not measured.
+    if attributes.keys().any(|key| {
+        !matches!(
+            key.as_str(),
+            "kind"
+                | "ref"
+                | "faceName"
+                | "height"
+                | "bold"
+                | "italic"
+                | "underline"
+                | "strikeout"
+                | "scale"
+        )
+    }) {
         return None;
     }
-    let name = reference?.strip_prefix("style:")?;
-    // A platform style font is a negative code this writer has not measured.
-    if PLATFORM_STYLE_COLOR_CODES
-        .iter()
-        .any(|(candidate, _)| *candidate == name)
-    {
-        return None;
+    values.sort_by_key(|(order, _)| *order);
+
+    let mut out = format!("{{7,{kind},{mask}");
+    if let Some(slot) = slot {
+        out.push(',');
+        out.push_str(&slot);
     }
-    style_item_uuid(name).map(|uuid| format!("{{7,2,0,{{0,{uuid}}},1,100}}"))
+    for (_, value) in values {
+        out.push(',');
+        out.push_str(&value);
+    }
+    out.push_str(&format!(",1,{scale}}}"));
+    Some(out)
 }
+
+/// `true`/`false` as a font attribute spells it.
+fn native_font_flag(value: &str) -> Option<bool> {
+    match value.trim() {
+        "true" => Some(true),
+        "false" => Some(false),
+        _ => None,
+    }
+}
+
+/// The five platform fonts a `style:` reference can name, which no
+/// `StyleItems\<name>.xml` declares. Their codes are a table of their own --
+/// none of them collides with [`PLATFORM_STYLE_COLOR_CODES`].
+const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
+    ("ExtraLargeTextFont", "-33"),
+    ("LargeTextFont", "-32"),
+    ("NormalTextFont", "-31"),
+    ("SmallTextFont", "-30"),
+    ("TextFont", "-20"),
+];
 
 /// The `{12,…}` record of an item's `<ExtendedTooltip>`, as the platform
 /// stores it when the tooltip carries nothing but its own name.
@@ -7593,39 +7694,95 @@ mod tests {
         );
     }
 
-    /// The two font shapes the corpus pins down, and the refusal of the one
-    /// it does not.
+    /// The tuple, over the kinds and the attribute combinations the corpora
+    /// spell, and the refusal of the one shape they do not decide.
     #[test]
     fn writes_the_fonts_the_platform_stores() {
         let none = |_: &str| None;
+        let font = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let style = |name: &str| {
+            (name == "ШрифтНовостей").then(|| "db43d980-40e2-4f50-b17b-fac3bd9e2773".to_string())
+        };
+
         assert_eq!(
-            format_native_font(None, None, false, none).as_deref(),
+            format_native_font(&BTreeMap::new(), none).as_deref(),
             Some("{7,3,0,1,100}")
         );
+        // A style item the configuration declares, and one of the five
+        // platform fonts, which no `StyleItems\<name>.xml` carries.
         assert_eq!(
-            format_native_font(Some("StyleItem"), Some("style:ШрифтНовостей"), false, |name| {
-                (name == "ШрифтНовостей")
-                    .then(|| "db43d980-40e2-4f50-b17b-fac3bd9e2773".to_string())
-            })
+            format_native_font(
+                &font(&[("kind", "StyleItem"), ("ref", "style:ШрифтНовостей")]),
+                style
+            )
             .as_deref(),
             Some("{7,2,0,{0,db43d980-40e2-4f50-b17b-fac3bd9e2773},1,100}")
         );
-        // A font that also sets bold or a size, a Windows font, and a platform
-        // style font are all refused rather than guessed.
         assert_eq!(
-            format_native_font(Some("StyleItem"), Some("style:ШрифтНовостей"), true, |_| Some(
-                "db43d980-40e2-4f50-b17b-fac3bd9e2773".to_string()
-            )),
+            format_native_font(
+                &font(&[("kind", "StyleItem"), ("ref", "style:NormalTextFont")]),
+                none
+            )
+            .as_deref(),
+            Some("{7,2,0,{-31},1,100}")
+        );
+        // The mask names the attributes that are set and the values follow in
+        // an order of their own: height, bold, italic, underline, strikeout,
+        // faceName. Height is tenths of a point and bold is 700 or 400.
+        assert_eq!(
+            format_native_font(
+                &font(&[
+                    ("kind", "StyleItem"),
+                    ("ref", "style:NormalTextFont"),
+                    ("bold", "true"),
+                ]),
+                none
+            )
+            .as_deref(),
+            Some("{7,2,4,{-31},700,1,100}")
+        );
+        assert_eq!(
+            format_native_font(
+                &font(&[
+                    ("kind", "WindowsFont"),
+                    ("ref", "sys:DefaultGUIFont"),
+                    ("faceName", "Arial"),
+                    ("height", "8"),
+                    ("italic", "false"),
+                ]),
+                none
+            )
+            .as_deref(),
+            Some("{7,1,11,{0},80,0,\"Arial\",1,100}")
+        );
+        assert_eq!(
+            format_native_font(&font(&[("kind", "AutoFont"), ("scale", "120")]), none).as_deref(),
+            Some("{7,3,512,1,120}")
+        );
+        // `Absolute` is a different shape whose nineteen members the source
+        // does not decide, an unmeasured `ref`, and an unmeasured attribute
+        // are each refused rather than guessed.
+        assert_eq!(
+            format_native_font(&font(&[("kind", "Absolute"), ("height", "8")]), none),
             None
         );
         assert_eq!(
-            format_native_font(Some("WindowsFont"), Some("sys:DefaultGUIFont"), false, none),
+            format_native_font(
+                &font(&[("kind", "StyleItem"), ("ref", "style:НетТакого")]),
+                none
+            ),
             None
         );
         assert_eq!(
-            format_native_font(Some("StyleItem"), Some("style:FormBackColor"), false, |_| Some(
-                "x".to_string()
-            )),
+            format_native_font(
+                &font(&[("kind", "AutoFont"), ("charSet", "204")]),
+                none
+            ),
             None
         );
     }

@@ -6703,7 +6703,7 @@ fn format_native_child_item(
             )?);
         }
         let payload = native_container_payload(item, data_paths, items, source)?;
-        let group_font = native_item_font(item, source)?;
+        let group_font = native_item_title_font(item, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
             kind,
@@ -7746,13 +7746,27 @@ fn native_item_font(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    let attributes = item.font.clone().unwrap_or_default();
+    native_font_of(item, item.font.as_ref(), source)
+}
+
+/// A container's font slot is its `<TitleFont>`, never its `<Font>`: no
+/// container of either corpus spells a `<Font>` at all, and 905 spell a
+/// `<TitleFont>` that never reached the record.
+fn native_item_title_font(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    native_font_of(item, item.title_font.as_ref(), source)
+}
+
+fn native_font_of(
+    item: &FormXmlChildItem,
+    attributes: Option<&BTreeMap<String, String>>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let empty = BTreeMap::new();
     crate::compiler::bodies::form_native::format_native_font(
-        attributes.get("kind").map(String::as_str),
-        attributes.get("ref").map(String::as_str),
-        attributes
-            .keys()
-            .any(|key| !matches!(key.as_str(), "kind" | "ref")),
+        attributes.unwrap_or(&empty),
         |name| {
             source?
                 .resolve_style_item_uuid(&format!("StyleItem.{name}"))
@@ -8493,7 +8507,23 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             blockers.push(format!("an attribute names <{part}>"));
         }
         if attribute.settings.is_some() {
-            blockers.push("an attribute carries dynamic-list settings".to_string());
+            // One message stood for four situations, and only the first is a
+            // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
+            // 163 ERP УХ and 9 BSP canonically identical `<Attribute>`
+            // elements -- same `<Settings>`, same `<MainTable>`, so the same
+            // metadata object -- carry more than one stored map, 170 of them
+            // differing in the field *names*. No function of the form and the
+            // configuration can produce both, so nothing here is a matter of
+            // measuring harder.
+            blockers.push(
+                match attribute.types.first().map(|value| value.trim()) {
+                    Some("cfg:DynamicList") => {
+                        "a dynamic list's FieldsMap is not in the source".to_string()
+                    }
+                    Some(other) => format!("an embedded {other} has no writer yet"),
+                    None => "an untyped attribute carries settings".to_string(),
+                },
+            );
         }
         // A column's `<View>`, `<Edit>` and `<FunctionalOptions>` land in
         // members 6, 7 and 8 of its record, and what they hold when the
@@ -31353,19 +31383,29 @@ mod tests {
             "the radio button's payload is not the one the platform stores: {body}"
         );
 
-        // Splitting the two conditions did not open the font: a platform
-        // style font grows a negative code this writer has not measured, and
-        // naming one still refuses the form.
+        // A platform style font carries a negative code of its own, from a
+        // table that is not the colours'; `LargeTextFont` is -32 in 177 of
+        // the corpus's elements. An `Absolute` font is still refused: its
+        // nineteen-member shape is not decided by the source.
         let with_font = xml.replace(
             "<RadioButtonType>Auto</RadioButtonType>",
             r#"<RadioButtonType>Auto</RadioButtonType><Font ref="style:LargeTextFont" kind="StyleItem"/>"#,
         );
-        let error = super::compile_native_form_body(with_font.as_bytes(), None, None)
-            .expect_err("a platform style font must still refuse the form")
+        let body = super::compile_native_form_body(with_font.as_bytes(), None, None)?;
+        assert!(
+            body.contains("{7,2,0,{-32},1,100}"),
+            "the platform style font is not the one the platform stores: {body}"
+        );
+        let absolute = xml.replace(
+            "<RadioButtonType>Auto</RadioButtonType>",
+            r#"<RadioButtonType>Auto</RadioButtonType><Font faceName="Arial" height="8" kind="Absolute"/>"#,
+        );
+        let error = super::compile_native_form_body(absolute.as_bytes(), None, None)
+            .expect_err("an Absolute font must refuse the form")
             .to_string();
         assert!(
             error.contains("names a font the writer cannot place"),
-            "the platform style font was written instead of refused: {error}"
+            "the Absolute font was written instead of refused: {error}"
         );
         Ok(())
     }
