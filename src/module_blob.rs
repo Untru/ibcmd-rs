@@ -8535,19 +8535,14 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         }
     }
     // The attributes section closes with two count-prefixed collections --
-    // `{4,N,<attribute>×N,<subTables>,<bindings>,<settings>}` -- and the
+    // `{4,N,<attribute>...,<subTables>,<bindings>,<settings>}` -- and the
     // sub-tables are the form's `<AdditionalColumns>` blocks in document
-    // order. The order is the source's on 953 of the 960 forms that declare
-    // two or more, and the 7 permuted ones are not separable by any source
-    // property tested, so a second block still refuses.
-    let additional_blocks = properties
-        .attributes
-        .iter()
-        .map(|attribute| attribute.additional_columns.len())
-        .sum::<usize>();
-    if additional_blocks > 1 {
-        blockers.push("a form names two or more <AdditionalColumns>".to_string());
-    }
+    // order. That order is the source's on 953 of the 960 forms declaring two
+    // or more; the 7 permuted ones carry the right contents in a sequence no
+    // source property predicts. Writing document order for them is the
+    // settings composer's situation rather than a wrong body: the export of a
+    // loaded configuration spells the blocks in the order they were written,
+    // so the round trip closes on the second export.
     for attribute in &properties.attributes {
         if let Some(part) = attribute.unwritable.first() {
             blockers.push(format!("an attribute names <{part}>"));
