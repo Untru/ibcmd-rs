@@ -116,6 +116,11 @@ pub struct ParsedFormBodyBlob {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlBodyProperties {
+    /// Every scalar child of `<Form>` by element name, as the XML spells it.
+    root_scalars: BTreeMap<String, String>,
+    /// The form-wide `<ConditionalAppearance>` subtree exactly as Form.xml
+    /// spells it, from its opening tag to its closing tag.
+    attributes_conditional_appearance_source: Option<String>,
     title: Vec<LocalizedString>,
     width: Option<String>,
     height: Option<String>,
@@ -224,6 +229,22 @@ struct FormXmlEvent {
     handler: String,
 }
 
+/// A rights setting -- `<UserVisible>` of an item, `<Use>` of a command:
+/// `<xr:Common>` and one `<xr:Value name="Role.X">` per role, in XML order.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlRights {
+    common: Option<bool>,
+    values: Vec<(String, Option<bool>)>,
+}
+
+/// One `<xr:Link>` of an input field's `<ChoiceParameterLinks>`.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlChoiceParameterLink {
+    name: String,
+    data_path: String,
+    value_change: String,
+}
+
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlCommand {
     id: String,
@@ -244,6 +265,12 @@ struct FormXmlCommand {
     /// writer emitted the constant for every command of every form.
     picture: Option<FormXmlItemPicture>,
     picture_present: bool,
+    /// `<Shortcut>`, member 6.
+    shortcut: Option<String>,
+    /// `<Use>`, member 5.
+    use_rights: Option<FormXmlRights>,
+    /// `<AssociatedTableElementId>`, member 14: the name of an item.
+    associated_table_element_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -551,6 +578,10 @@ struct FormXmlChildItem {
     /// and 72 524 of 72 524 groups without one store `{1,0}`. Only the parser
     /// recorded nothing but the flag, and the writer refused on the flag.
     collapsed_representation_title: Vec<LocalizedString>,
+    /// An item's own `<CommandSet><ExcludedCommand>` -- a table's, most of
+    /// the time. Only the form root's set was ever read, so a table that
+    /// excluded its `Add`, `Change` and `Delete` exported with all of them.
+    excluded_commands: Vec<String>,
     associated_table_element_id: Option<String>,
     /// What the other container payloads read.
     header_horizontal_align: Option<String>,
@@ -586,6 +617,27 @@ struct FormXmlChildItem {
     /// Every other scalar property, by element name, as the XML spells it.
     /// The payload writers read from here rather than growing a field each.
     scalars: BTreeMap<String, String>,
+    /// The localized-string properties of [`CHILD_LOCALIZED_SECTIONS`], by
+    /// element name -- the same `<v8:item>` blocks a title is made of.
+    localized: BTreeMap<String, Vec<LocalizedString>>,
+    /// The pictures of [`CHILD_EXTRA_PICTURES`], by element name: the same
+    /// `<xr:Ref>`/`<xr:Abs>` reference a `<Picture>` is.
+    pictures: BTreeMap<String, FormXmlItemPicture>,
+    /// The fonts an item names beside its `<Font>` -- `<TitleFont>`,
+    /// `<FooterFont>`, `<HeaderFont>` -- by element name, as attributes.
+    fonts: BTreeMap<String, BTreeMap<String, String>>,
+    /// An `<ExtendedTooltip>` with content, read as an item of its own: its
+    /// record is a label decoration's, member for member.
+    extended_tooltip_item: Option<Box<FormXmlChildItem>>,
+    /// `<UserVisible>`, the block every item record lifts at member 4.
+    user_visible: Option<FormXmlRights>,
+    /// An input field's `<ChoiceParameterLinks>`, in XML order.
+    choice_parameter_links: Vec<FormXmlChoiceParameterLink>,
+    /// An input field's `<TypeLink>`: its data path and link item.
+    type_link: Option<(String, String)>,
+    /// An input field's `<ChoiceParameters>`: each parameter's name and its
+    /// value, read with the choice-list grammar.
+    choice_parameters: Vec<(String, FormXmlChoiceListItem)>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
@@ -1331,6 +1383,40 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to read command owner XML {}", path.display()))?;
         parse_nested_command_uuid_from_xml(&xml, command_name)
             .with_context(|| format!("failed to resolve command {reference}"))
+    }
+
+    /// The uuid of a form a property names: `CommonForm.<name>`, or
+    /// `<Owner>.Form.<name>` of an object, read from the form's own holder XML.
+    fn resolve_form_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let path = if let Some(name) = reference.strip_prefix("CommonForm.") {
+            self.source_root.join("CommonForms").join(format!("{name}.xml"))
+        } else {
+            let (owner, form) = reference
+                .split_once(".Form.")
+                .ok_or_else(|| anyhow!("unsupported form reference: {reference}"))?;
+            let (prefix, folder) = metadata_reference_source_folder(owner)
+                .ok_or_else(|| anyhow!("unsupported form owner reference: {reference}"))?;
+            let owner_name = owner
+                .strip_prefix(&format!("{prefix}."))
+                .ok_or_else(|| anyhow!("invalid form owner reference: {reference}"))?;
+            self.source_root
+                .join(folder)
+                .join(owner_name)
+                .join("Forms")
+                .join(format!("{form}.xml"))
+        };
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read form XML {}", path.display()))?;
+        for marker in ["<Form uuid=\"", "<CommonForm uuid=\""] {
+            if let Some(at) = text.find(marker) {
+                let rest = &text[at + marker.len()..];
+                if let Some(end) = rest.find('"') {
+                    return Ok(rest[..end].to_string());
+                }
+            }
+        }
+        Err(anyhow!("no form uuid in {}", path.display()))
     }
 }
 
@@ -6813,11 +6899,14 @@ fn format_native_child_item(
 
     let kind_uuid = native_child_kind_uuid(&item.tag)
         .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
+    let display_importance =
+        native::native_display_importance(item.display_importance.as_deref()).ok_or_else(|| {
+            anyhow!("<{}> names a DisplayImportance the writer has not measured", item.tag)
+        })?;
     let title = format_form_title_value(&item.title);
     let tooltip_title = format_form_title_value(&item.tooltip);
-    let extended_tooltip = item.extended_tooltip.as_ref().map(|tooltip| {
-        native::format_extended_tooltip(&tooltip.id, &tooltip.name)
-    });
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?;
 
     // A <ContextMenu> is itself a child item; a field keeps it in a member of
     // its own rather than among its children.
@@ -6870,8 +6959,17 @@ fn format_native_child_item(
                 .map(|(uuid, record)| (*uuid, record.clone()))
                 .collect::<Vec<_>>(),
             visible: item.visible.unwrap_or(true),
-            back_color: &native_scalar_color(item, "BackColor", source)?,
+            // The colour member of a group's own record is its title's text
+            // colour: its `<BackColor>` is member 9 of the payload. Read
+            // from `BackColor` it wrote the default while the bag never held
+            // one, and every group that names a background turned into a
+            // group with a coloured title once it did.
+            back_color: &native_scalar_color(item, "TitleTextColor", source)?,
             extended_tooltip: extended_tooltip.as_deref(),
+            horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+            vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+            display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
             ..native::NativeGroupItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -6884,7 +6982,7 @@ fn format_native_child_item(
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
-        let payload = native_field_payload(item, main_attribute_class, source, items_root)?;
+        let payload = native_field_payload(item, data_paths, main_attribute_class, source, items_root)?;
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -6900,6 +6998,31 @@ fn format_native_child_item(
         let events = native_item_events_where(item, main_attribute_class, |name| {
             name == "OnChange"
         })?;
+        // The members the agent's measurement named (rt-field.md): 12 the
+        // footer's data path, 17 and 18 the edit warning, 19 the footer text,
+        // 24 the header's alignment, 29 and 30 the header and footer
+        // pictures, 31 to 36 the title and footer appearance, 37 the
+        // shortcut. Every one was left at its default by this call site.
+        let footer_data_path = match item.scalars.get("FooterDataPath").map(|value| value.trim()) {
+            Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                anyhow!("<{}> totals {path}, which the writer cannot place", item.tag)
+            })?,
+            None => "{0}".to_string(),
+        };
+        let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
+        let footer_picture = native_extra_picture(item, "FooterPicture", source, items_root)?;
+        let title_text_color = native_scalar_color(item, "TitleTextColor", source)?;
+        let title_font = native_named_font(item, "TitleFont", source)?;
+        let title_back_color = native_scalar_color(item, "TitleBackColor", source)?;
+        let footer_text_color = native_scalar_color(item, "FooterTextColor", source)?;
+        let footer_font = native_named_font(item, "FooterFont", source)?;
+        let shortcut = match item.scalars.get("Shortcut") {
+            Some(text) => native::format_native_shortcut(text).ok_or_else(|| {
+                anyhow!("<{}> names the shortcut {text}, which is not measured", item.tag)
+            })?,
+            None => "{0,0,0}".to_string(),
+        };
+        let user_visible = native_user_visible(item, source)?;
         let record = native::format_field_item(&native::NativeFieldItem {
             footer_horizontal_align: item
                 .scalars
@@ -6910,9 +7033,28 @@ fn format_native_child_item(
             kind,
             name: &item.name,
             title_location: item.title_location.map(native_title_location),
+            title_height: item.scalars.get("TitleHeight").map(String::as_str),
             title: &title,
             tooltip_title: &tooltip_title,
             data_path: &data_path,
+            footer_data_path: &footer_data_path,
+            warning_on_edit: item.scalars.get("WarningOnEditRepresentation").map(String::as_str),
+            header_title: &format_form_title_value(&item.warning_on_edit),
+            footer_title: &native_localized(item, "FooterText"),
+            header_horizontal_align: item.scalars.get("HeaderHorizontalAlign").map(String::as_str),
+            header_picture: &header_picture,
+            footer_picture: &footer_picture,
+            appearance: [
+                &title_text_color,
+                &title_font,
+                &title_back_color,
+                &footer_text_color,
+                "{3,4,{0}}",
+                &footer_font,
+                native::NativeFieldItem::default().appearance[6],
+            ],
+            picture_index: &shortcut,
+            functional_options: user_visible.as_deref(),
             enabled: item.enabled.unwrap_or(true),
             read_only: item.read_only.unwrap_or(false),
             skip_on_input: native_flag(item.skip_on_input),
@@ -6935,6 +7077,7 @@ fn format_native_child_item(
             context_menu: &menu,
             visible: item.visible.unwrap_or(true),
             extended_tooltip: &tooltip,
+            display_importance,
             ..native::NativeFieldItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -6952,8 +7095,23 @@ fn format_native_child_item(
         // emitted the constant either way because the call site never passed
         // one, though the resolver it needed was already here.
         let picture = native_item_picture(item, source, items_root)?;
+        let back_color = native_scalar_color(item, "BackColor", source)?;
+        let text_color = native_scalar_color(item, "TextColor", source)?;
+        let border_color = native_scalar_color(item, "BorderColor", source)?;
+        let font = native_item_font(item, source)?;
+        let data_path = match item.data_path.as_deref() {
+            Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                anyhow!("<Button> binds to {path}, which the writer cannot place")
+            })?,
+            None => "{0}".to_string(),
+        };
         let record = native::format_button_item(&native::NativeButtonItem {
             picture: &picture,
+            appearance: [&back_color, &text_color, &border_color, &font],
+            data_path: &data_path,
+            title_height: item.scalars.get("TitleHeight").map(String::as_str),
+            check: native_scalar_flag(item, "Check", false),
+            picture_location: item.scalars.get("PictureLocation").map(String::as_str),
             id: &item.id,
             name: &item.name,
             title: &title,
@@ -7000,6 +7158,8 @@ fn format_native_child_item(
             max_height: item.max_height.as_deref(),
             horizontal_stretch: item.horizontal_stretch.unwrap_or(false),
             vertical_stretch: item.vertical_stretch.unwrap_or(false),
+            forty_eighth: display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
             ..native::NativeButtonItem::default()
         })
         .ok_or_else(|| anyhow!("<Button> names something the writer cannot place"))?;
@@ -7049,6 +7209,8 @@ fn format_native_child_item(
             max_width: item.max_width.as_deref(),
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref(),
+            display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
             ..native::NativeDecorationItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -7150,8 +7312,8 @@ fn format_native_table(
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
-    if item.picture_present || item.font_present {
-        return Err(anyhow!("a table names a picture or a font"));
+    if item.picture_present {
+        return Err(anyhow!("a table names a picture"));
     }
     if !item.scalars.contains_key("DataPath") && item.data_path.is_none() {
         return Err(anyhow!("a table that binds to nothing is not measured"));
@@ -7237,10 +7399,26 @@ fn format_native_table(
 
     let title = format_form_title_value(&item.title);
     let tooltip_title = format_form_title_value(&item.tooltip);
-    let extended_tooltip = match &item.extended_tooltip {
-        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
-        None => return Err(anyhow!("a table with no extended tooltip is not measured")),
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?
+            .ok_or_else(|| anyhow!("a table with no extended tooltip is not measured"))?;
+    let table_rows_picture = native_extra_picture(item, "RowsPicture", source, items_root)?;
+    let table_appearance = [
+        native_scalar_color(item, "BackColor", source)?,
+        native_scalar_color(item, "TextColor", source)?,
+        native_scalar_color(item, "BorderColor", source)?,
+        native_item_font(item, source)?,
+        native_scalar_color(item, "TitleTextColor", source)?,
+        native_named_font(item, "TitleFont", source)?,
+    ];
+    let table_shortcut = match item.scalars.get("Shortcut") {
+        Some(text) => native::format_native_shortcut(text)
+            .ok_or_else(|| anyhow!("a table names the shortcut {text}, which is not measured"))?,
+        None => "{0,0,0}".to_string(),
     };
+    let table_user_visible = native_user_visible(item, source)?;
+    let table_display_importance = native::native_display_importance(item.display_importance.as_deref())
+        .ok_or_else(|| anyhow!("a table names a DisplayImportance the writer has not measured"))?;
     // `<RowPictureDataPath>` keeps **one** segment, whatever the path's
     // length: `Список.Active` stores `{1,{3}}` and `Список.DefaultPicture`
     // stores `{1,{10000000}}`, the ordinary data-path token for the last
@@ -7307,8 +7485,21 @@ fn format_native_table(
         output: item.scalars.get("Output").map(String::as_str),
         horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
         vertical_stretch: item.vertical_stretch.unwrap_or(true),
-        enable_start_drag: item.enable_start_drag.unwrap_or(true),
-        enable_drag: item.enable_drag.unwrap_or(true),
+        enable_start_drag: item.enable_start_drag.unwrap_or(false),
+        enable_drag: item.enable_drag.unwrap_or(false),
+        // Head members 44 to 51 (rt-table.md): the rows' picture, the six
+        // colours and fonts, and the shortcut; the `<UserVisible>` block at 4.
+        row_picture: &table_rows_picture,
+        appearance: [
+            &table_appearance[0],
+            &table_appearance[1],
+            &table_appearance[2],
+            &table_appearance[3],
+            &table_appearance[4],
+            &table_appearance[5],
+        ],
+        shortcut: &table_shortcut,
+        functional_options: table_user_visible.as_deref(),
         ..native::NativeTableHead::default()
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the head writer cannot place"))?;
@@ -7372,6 +7563,10 @@ fn format_native_table(
         // table that spelled `<CurrentRowUse>` refused whatever it spelled.
         current_row_use: item.table_current_row_use.map(FormTableCurrentRowUse::xml_value),
         file_drag_mode: item.file_drag_mode.as_deref(),
+        auto_add_incomplete: native_scalar_tristate(item, "AutoAddIncomplete")?,
+        group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+        group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+        display_importance: table_display_importance,
         ..native::NativeTableTail::default()
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the tail writer cannot place"))?;
@@ -7388,12 +7583,32 @@ fn format_native_table(
     let events = native::format_native_events(&item.tag, main_attribute_class, &events)
         .ok_or_else(|| anyhow!("a table names an event the writer cannot place"))?;
 
+    // `{<count>,<uuid>…}` in uuid order, the shape the form root's set takes,
+    // with each name resolved among the table's own standard commands.
+    let dynamic_list = items.get(&item.name).is_some_and(|target| target.dynamic_list);
+    let mut excluded = item
+        .excluded_commands
+        .iter()
+        .map(|name| {
+            native::item_standard_command_uuid(&item.tag, dynamic_list, name).ok_or_else(|| {
+                anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    excluded.sort_unstable();
+    let mut command_set = format!("{{{}", excluded.len());
+    for uuid in &excluded {
+        command_set.push(',');
+        command_set.push_str(uuid);
+    }
+    command_set.push('}');
     Ok(native::format_table_record(
         &head,
         &bag.iter()
             .map(|(key, value)| (*key, value.clone()))
             .collect::<Vec<_>>(),
         &events,
+        &command_set,
         &context_menu,
         &command_bar,
         &column_records,
@@ -7561,10 +7776,9 @@ fn native_table_addition(
         Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
         None => return Err(anyhow!("an addition with no context menu is not measured")),
     };
-    let extended_tooltip = match &item.extended_tooltip {
-        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
-        None => return Err(anyhow!("an addition with no extended tooltip is not measured")),
-    };
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?
+            .ok_or_else(|| anyhow!("an addition with no extended tooltip is not measured"))?;
     // Member 19 names the item the addition serves, which is not always the
     // table it sits in: 392 of the corpus's additions live elsewhere.
     let source_item = match item.addition_source_item.as_deref() {
@@ -7697,6 +7911,23 @@ fn native_table_property_bag(
         bag.push(("19", "{\"S\",\"\"}".to_string()));
         bag.push(("20", flag("AllowGettingCurrentRowURL", true)));
     } else {
+        // Key 3 `<ViewMode>` and key 4
+        // `<SettingsNamedItemDetailedRepresentation>`, absent keys when the
+        // table names neither: 124 + 66 and 218 + 1 of 11 235 tables.
+        match scalar("ViewMode") {
+            Some("All") => bag.push(("3", "{\"#\",c04ead79-749a-4981-915e-6fcb144f44e4,0}".to_string())),
+            Some("QuickAccess") => {
+                bag.push(("3", "{\"#\",c04ead79-749a-4981-915e-6fcb144f44e4,1}".to_string()));
+            }
+            Some(other) => return Err(anyhow!("a table's <ViewMode>{other} is not measured")),
+            None => {}
+        }
+        if scalar("SettingsNamedItemDetailedRepresentation").is_some() {
+            bag.push((
+                "4",
+                flag("SettingsNamedItemDetailedRepresentation", false),
+            ));
+        }
         if item.row_filter_present {
             bag.push(("13", "{\"U\"}".to_string()));
         }
@@ -7720,14 +7951,9 @@ fn native_container_payload(
     use crate::compiler::bodies::form_native as native;
     match item.tag.as_str() {
         "UsualGroup" => {
-            if item.format_present {
-                return Err(anyhow!("a group names a format"));
-            }
+            let format = native_localized(item, "Format");
             let collapsed_title =
                 format_form_title_value(&item.collapsed_representation_title);
-            if item.associated_table_element_id.is_some() {
-                return Err(anyhow!("a group names an associated table element"));
-            }
             let title_data_path = match item.title_data_path.as_deref() {
                 Some(path) => data_paths.resolve(path).ok_or_else(|| {
                     anyhow!("a group titles itself from {path}, which the writer cannot place")
@@ -7759,6 +7985,11 @@ fn native_container_payload(
                 hidden_state_title_back_color: &hidden,
                 current_row_use: item.current_row_use.as_deref(),
                 collapsed_representation_title: &collapsed_title,
+                format: &format,
+                associated_table_element_id: item
+                    .associated_table_element_id
+                    .as_deref()
+                    .unwrap_or("0"),
                 ..native::NativeUsualGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
@@ -7783,11 +8014,10 @@ fn native_container_payload(
             if item.associated_table_element_id.is_some() {
                 return Err(anyhow!("a pages group names an associated table element"));
             }
-            native::format_pages_payload(
-                item.pages_representation.as_deref(),
-                "{0,1,0}",
-                "0",
-            )
+            // Payload member 2 holds the group's own events --
+            // `OnCurrentPageChange` -- 374 of 374.
+            let events = native_item_events(item, "")?;
+            native::format_pages_payload(item.pages_representation.as_deref(), &events, "0")
             .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
         }
         "Popup" => {
@@ -7827,12 +8057,8 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<ColumnGroup> names a spelling the writer cannot place"))
         }
         "Page" => {
-            if item.picture_present {
-                return Err(anyhow!("a page names a picture"));
-            }
-            if item.format_present {
-                return Err(anyhow!("a page names a format"));
-            }
+            let picture = native_item_picture(item, source, items_root)?;
+            let format = native_localized(item, "Format");
             let title_data_path = match item.title_data_path.as_deref() {
                 Some(path) => data_paths.resolve(path).ok_or_else(|| {
                     anyhow!("a page titles itself from {path}, which the writer cannot place")
@@ -7853,6 +8079,8 @@ fn native_container_payload(
                 vertical_align: item.vertical_align.map(native_vertical_align_spelling),
                 children_align: item.children_align.as_deref(),
                 scroll_on_compress: item.scroll_on_compress.unwrap_or(false),
+                picture: &picture,
+                format: &format,
                 ..native::NativePagePayload::plain()
             })
             .ok_or_else(|| anyhow!("<Page> names a spelling the writer cannot place"))
@@ -8032,7 +8260,13 @@ fn native_item_title_font(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    native_font_of(item, item.title_font.as_ref(), source)
+    // The typed field is read for a usual group only; every other container
+    // keeps its `<TitleFont>` in the font map -- 82 of 82 popups lost theirs.
+    native_font_of(
+        item,
+        item.title_font.as_ref().or_else(|| item.fonts.get("TitleFont")),
+        source,
+    )
 }
 
 fn native_font_of(
@@ -8081,6 +8315,24 @@ fn native_choice_list(
         values.push(native_choice_list_value(choice, source)?);
     }
     Ok(crate::compiler::bodies::form_native::format_native_choice_list(&values))
+}
+
+/// Payload member 27 of an input field: its `<ChoiceParameters>`,
+/// `{0,N,("<name>",<value>)×N}` with the choice-list value grammar, `{0,0}`
+/// when it names none. 1 356 of 1 364.
+fn native_choice_parameters(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut out = format!("{{0,{}", item.choice_parameters.len());
+    for (name, value) in &item.choice_parameters {
+        out.push(',');
+        out.push_str(&format_1c_string(name));
+        out.push(',');
+        out.push_str(&native_choice_list_value(value, source)?);
+    }
+    out.push('}');
+    Ok(out)
 }
 
 /// One `<xr:Item>` of a `<ChoiceList>`, as the body stores its value.
@@ -8133,6 +8385,15 @@ fn native_choice_list_value(
             Ok(native::format_native_choice_list_value(
                 false,
                 &native::NativeChoiceListLiteral::Number(text),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        Some("xs:boolean") if matches!(text, "true" | "false") => {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Boolean(text == "true"),
                 NATIVE_ZERO_UUID,
                 NATIVE_ZERO_UUID,
                 &title,
@@ -8271,6 +8532,7 @@ const fn native_vertical_align_spelling(align: FormFieldVerticalAlign) -> &'stat
 /// The payload a field carries, by its kind.
 fn native_field_payload(
     item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
@@ -8296,9 +8558,12 @@ fn native_field_payload(
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
             events: &events,
+            format: &native_localized(item, "Format"),
             ..native::NativeLabelPayload::plain(false)
         })),
-        "InputField" => native::format_input_payload(&native::NativeInputPayload {
+        "InputField" => {
+            let choice_parameter_links = native_choice_parameter_links(item, data_paths)?;
+            native::format_input_payload(&native::NativeInputPayload {
             width: item.width.as_deref().unwrap_or("0"),
             height: item.height.as_deref().unwrap_or("0"),
             horizontal_stretch: item.horizontal_stretch,
@@ -8324,10 +8589,15 @@ fn native_field_payload(
                 .scalars
                 .get("IncompleteChoiceMode")
                 .map(String::as_str),
-            choice_button_representation: item
-                .scalars
-                .get("ChoiceButtonRepresentation")
-                .map(String::as_str),
+            choice_button_representation: item.choice_button_representation.map(|value| {
+                match value {
+                    FormXmlChoiceButtonRepresentation::ShowInDropList => "ShowInDropList",
+                    FormXmlChoiceButtonRepresentation::ShowInDropListAndInInputField => {
+                        "ShowInDropListAndInInputField"
+                    }
+                    FormXmlChoiceButtonRepresentation::ShowInInputField => "ShowInInputField",
+                }
+            }),
             choice_history_on_input: item
                 .scalars
                 .get("ChoiceHistoryOnInput")
@@ -8356,15 +8626,30 @@ fn native_field_payload(
             max_width: item.max_width.as_deref().unwrap_or("0"),
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
-            mask: item.item_type.as_deref().unwrap_or(""),
+            mask: item.scalars.get("Mask").map_or("", String::as_str),
             events: &events,
+            min_value: &native_typed_scalar(item, "MinValue")?,
+            max_value: &native_typed_scalar(item, "MaxValue")?,
+            picture: &native_extra_picture(item, "ChoiceButtonPicture", source, items_root)?,
+            choice_list_height: native_scalar(item, "ChoiceListHeight"),
+            drop_list_width: native_scalar(item, "DropListWidth"),
+            choice_form: &native_choice_form(item, source)?,
+            format: &native_localized(item, "Format"),
+            edit_format: &native_localized(item, "EditFormat"),
+            edit_text_update: item.scalars.get("EditTextUpdate").map(String::as_str),
+            input_hint: &native_localized(item, "InputHint"),
+            choice_list: &native_choice_list(item, source)?,
+            choice_parameters: &native_choice_parameters(item, source)?,
+            choice_parameter_links: &choice_parameter_links.0,
+            choice_parameter_links_again: &choice_parameter_links.1,
+            type_link: &native_type_link(item, data_paths)?,
             ..native::NativeInputPayload::plain()
         })
-        .ok_or_else(|| anyhow!("the input field names something the writer cannot place")),
+        .ok_or_else(|| anyhow!("the input field names something the writer cannot place"))
+        }
         "CheckBoxField" => {
-            if item.format_present || item.font_present {
-                return Err(anyhow!("a check box names a format or a font"));
-            }
+            let format = native_localized(item, "Format");
+            let font = native_item_font(item, source)?;
             let text_color = native_scalar_color(item, "TextColor", source)?;
             let back_color = native_scalar_color(item, "BackColor", source)?;
             let border_color = native_scalar_color(item, "BorderColor", source)?;
@@ -8378,6 +8663,8 @@ fn native_field_payload(
                 item_width: native_scalar(item, "ItemWidth"),
                 item_height: native_scalar(item, "ItemHeight"),
                 equal_items_width: item.scalars.get("EqualItemsWidth").map(String::as_str),
+                format: &format,
+                font: &font,
                 ..native::NativeCheckBoxPayload::plain()
             })
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
@@ -8516,12 +8803,69 @@ fn native_field_payload(
                 anyhow!("<SpreadSheetDocumentField> names a spelling the writer cannot place")
             })
         }
+        // A progress bar's `{4,…}` payload, 16 members over 65 records: the
+        // width (32 when absent), a constant 1, the horizontal stretch, the
+        // maximum (100), the representation (`Broken` 0, absent 1), the
+        // percentage and the maximum-width switch; the rest never varies.
+        "ProgressBarField" => {
+            if item.height.is_some() {
+                return Err(anyhow!("a progress bar names a height, which is not measured"));
+            }
+            let representation = match item.scalars.get("Representation").map(String::as_str) {
+                None => "1",
+                Some("Broken") => "0",
+                Some(other) => {
+                    return Err(anyhow!("a progress bar's <Representation>{other} is not measured"));
+                }
+            };
+            Ok(format!(
+                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},0,0,1,0}}",
+                width = item.width.as_deref().unwrap_or("32"),
+                stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
+                max = item.scalars.get("MaxValue").map_or("100", String::as_str),
+                percent = u8::from(native_scalar_flag(item, "ShowPercent", false)),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+            ))
+        }
+        // A track bar's `{2,…}` payload, 18 members over 13 records.
+        "TrackBarField" => {
+            let marking = match item.scalars.get("MarkingAppearance").map(String::as_str) {
+                None => "2",
+                Some("TopLeft") => "1",
+                Some(other) => {
+                    return Err(anyhow!("a track bar's <MarkingAppearance>{other} is not measured"));
+                }
+            };
+            Ok(format!(
+                "{{2,{width},{height},{stretch},0,{min},{max},{step},0,{large_step},{marking_step},{marking},{{3,4,{{0}}}},{auto_max_width},0,0,1,0}}",
+                width = item.width.as_deref().unwrap_or("32"),
+                height = item.height.as_deref().unwrap_or("2"),
+                stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
+                min = item.scalars.get("MinValue").map_or("0", String::as_str),
+                max = item.scalars.get("MaxValue").map_or("100", String::as_str),
+                step = item.scalars.get("Step").map_or("1", String::as_str),
+                large_step = item.scalars.get("LargeStep").map_or("10", String::as_str),
+                marking_step = item.scalars.get("MarkingStep").map_or("5", String::as_str),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+            ))
+        }
         "PictureField" => {
-            if item.picture_present || item.font_present {
-                return Err(anyhow!("a picture field names a picture or a font"));
+            if item.picture_present {
+                return Err(anyhow!("a picture field names a picture"));
             }
             let text_color = native_scalar_color(item, "TextColor", source)?;
-            let back_color = native_scalar_color(item, "BackColor", source)?;
+            // Member 11 is the border colour: no picture field of either
+            // corpus names a background, and 26 of 26 border colours land here.
+            let back_color = native_scalar_color(item, "BorderColor", source)?;
+            let font = native_item_font(item, source)?;
+            let nonselected_picture_text = native_localized(item, "NonselectedPictureText");
+            // A picture field that names no border stores style 1, not the
+            // decoration's 0: 2 047 of 2 047.
+            let border = if item.control_border.is_none() && !item.control_border_seen {
+                native::NativePicturePayload::default().border.to_string()
+            } else {
+                native_item_control_border(item)?
+            };
             native::format_picture_payload(&native::NativePicturePayload {
                 events: &events,
                 width: item.width.as_deref().unwrap_or("0"),
@@ -8543,8 +8887,10 @@ fn native_field_payload(
                 // largest never-filled field the struct sweep found: 2 110
                 // records of 1 102 forms store a picture where the writer put
                 // the empty constant, and 404 a border.
-                picture: &native_item_picture(item, source, items_root)?,
-                border: &native_item_control_border(item)?,
+                picture: &native_extra_picture(item, "ValuesPicture", source, items_root)?,
+                border: &border,
+                font: &font,
+                title: &nonselected_picture_text,
                 ..native::NativePicturePayload::default()
             })
             .ok_or_else(|| anyhow!("<PictureField> names a spelling the writer cannot place"))
@@ -8620,13 +8966,8 @@ fn native_decoration_payload(
         .unwrap_or_else(|| native_scalar_flag(item, "EnableStartDrag", false));
 
     if item.tag == "PictureDecoration" {
-        if item.nonselected_picture_text_present {
-            return Err(anyhow!(
-                "<PictureDecoration> names a <NonselectedPictureText>, which member 5 of its \
-                 payload holds and the parser does not collect"
-            ));
-        }
         let picture = native_item_picture(item, source, items_root)?;
+        let nonselected_picture_text = native_localized(item, "NonselectedPictureText");
         return native::format_picture_decoration_payload(
             &native::NativePictureDecorationPayload {
                 picture: &picture,
@@ -8640,6 +8981,7 @@ fn native_decoration_payload(
                 events: &events,
                 file_drag_mode,
                 image_scale: Some(native_decoration_number(item, "ImageScale", "100")?),
+                nonselected_picture_text: &nonselected_picture_text,
                 ..native::NativePictureDecorationPayload::default()
             },
         )
@@ -8734,6 +9076,8 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("AppearanceCheckBox", "{0,7a9cd2fd-6372-4342-9a9e-3ebbd754fd83}"),
     ("AppearanceCheckIcon", "{0,85998f14-805b-4e2b-ba19-9d79b0464042}"),
     ("AppearanceCircleEmpty", "{0,2721abfb-fbff-4a3a-98ac-b7c9eb29cd85}"),
+    ("AppearanceFlagRed", "{0,b0dd988f-2d9f-4364-b1f4-a4d5f45ffb78}"),
+    ("AppearanceStarFilled", "{0,3689585c-a3e2-45d0-a302-caeb31b78835}"),
     ("AppearanceCircleFilled", "{0,788667db-61c9-45f3-9c4f-5f660ecdf3e1}"),
     ("AppearanceCircleGreen", "{0,71cbcb5c-f3f0-4ffd-a4d0-19b802b5ed6b}"),
     ("AppearanceCircleOneFourthFilled", "{0,fc058833-e57f-4f93-ba7a-803992a65c3e}"),
@@ -8848,6 +9192,8 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("InformationRegister", "{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c}"),
     ("InputFieldCalculator", "{-6}"),
     ("InputFieldCalendar", "{-5}"),
+    ("InputFieldChooseType", "{-14}"),
+    ("SetListItemDeletionMark", "{0,4bf588d5-b8d8-47fd-8f41-eb9b668981ce}"),
     ("InputFieldClear", "{-2}"),
     ("InputFieldOpen", "{-7}"),
     ("InputFieldSelect", "{-1}"),
@@ -9189,6 +9535,242 @@ fn native_scalar_color(
         .ok_or_else(|| anyhow!("<{}> names a colour the writer cannot place", item.tag))
 }
 
+/// An item's `<ExtendedTooltip>` record, `None` when it has none.
+///
+/// An empty tooltip is the fixed template. One with content is a label
+/// decoration's record member for member -- kind 0, no context menu and no
+/// tooltip of its own -- whatever item holds it: 3 015 of 3 039 ERP УХ and 440
+/// of 440 BSP non-empty tooltips rebuild byte for byte that way, and the 24
+/// others differ only in a prefix the exporter strips.
+fn native_item_extended_tooltip(
+    item: &FormXmlChildItem,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<Option<String>> {
+    use crate::compiler::bodies::form_native as native;
+    let Some(tooltip) = item.extended_tooltip.as_ref() else {
+        return Ok(None);
+    };
+    let Some(tip) = item.extended_tooltip_item.as_deref() else {
+        return Ok(Some(native::format_extended_tooltip(&tooltip.id, &tooltip.name)));
+    };
+    let text_color = native_scalar_color(tip, "TextColor", source)?;
+    let font = native_item_font(tip, source)?;
+    let (rendered_title, title_content) = native_decoration_titles(tip)?;
+    let payload = native_decoration_payload(tip, main_attribute_class, source, items_root)?;
+    let display_importance = native::native_display_importance(tip.display_importance.as_deref())
+        .ok_or_else(|| anyhow!("an extended tooltip names a DisplayImportance the writer has not measured"))?;
+    native::format_decoration_item(&native::NativeDecorationItem {
+        id: &tip.id,
+        kind: 0,
+        name: &tip.name,
+        text_color: &text_color,
+        font: &font,
+        payload: &payload,
+        title: &rendered_title,
+        tooltip_title: "{1,0}",
+        width: tip.width.as_deref(),
+        height: tip.height.as_deref(),
+        horizontal_stretch: native_flag(tip.horizontal_stretch),
+        vertical_stretch: native_flag(tip.vertical_stretch),
+        content: &title_content,
+        enabled: true,
+        context_menu: None,
+        visible: true,
+        skip_on_input: None,
+        tooltip_representation: None,
+        group_horizontal_align: tip.group_horizontal_align.map(native_group_horizontal_align),
+        group_vertical_align: tip.group_vertical_align.map(native_vertical_align_spelling),
+        extended_tooltip: None,
+        auto_max_width: tip.auto_max_width.unwrap_or(true),
+        max_width: tip.max_width.as_deref(),
+        auto_max_height: tip.auto_max_height.unwrap_or(true),
+        max_height: tip.max_height.as_deref(),
+        display_importance,
+        ..native::NativeDecorationItem::default()
+    })
+    .map(Some)
+    .ok_or_else(|| anyhow!("<ExtendedTooltip> names something the writer cannot place"))
+}
+
+/// A rights setting as every record stores it:
+/// `{0,{0,{"B",<common>},<n>,(<role uuid>,{"B",<value>})×n}}`, the roles in XML
+/// order. `Role.X` is the uuid of `Roles/X.xml`; a name that is itself a uuid
+/// -- a role the configuration no longer has -- is written verbatim. 7 239 of
+/// 7 239 `<UserVisible>` blocks and 376 of 376 command `<Use>` blocks.
+fn native_rights(
+    rights: &FormXmlRights,
+    owner: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let common = rights
+        .common
+        .ok_or_else(|| anyhow!("{owner} spells no <Common>"))?;
+    let mut out = format!("{{0,{{0,{{\"B\",{}}},{}", u8::from(common), rights.values.len());
+    for (name, value) in &rights.values {
+        let value = value.ok_or_else(|| anyhow!("{owner} names {name} with no value"))?;
+        let uuid = if let Some(role) = name.strip_prefix("Role.") {
+            let source = source
+                .ok_or_else(|| anyhow!("{owner} names Role.{role} and no configuration is on hand"))?;
+            source.resolve_simple_metadata_uuid(name, "Role", "Roles", "Role.")?
+        } else if is_uuid_text(name) {
+            name.clone()
+        } else {
+            return Err(anyhow!("{owner} names {name}, which is not a role"));
+        };
+        out.push_str(&format!(",{uuid},{{\"B\",{}}}", u8::from(value)));
+    }
+    out.push_str("}}");
+    Ok(out)
+}
+
+/// An item's `<UserVisible>` block, `None` when it spells none.
+fn native_user_visible(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    item.user_visible
+        .as_ref()
+        .map(|rights| native_rights(rights, &format!("<{}><UserVisible>", item.tag), source))
+        .transpose()
+}
+
+/// A data path inside a choice parameter link or a type link: the item
+/// `<DataPath>` encoding with its outer braces removed. A path the exporter
+/// spelled with raw ids -- `1/-5`, `1/0:<uuid>` -- transliterates segment by
+/// segment.
+fn native_inline_data_path(
+    path: &str,
+    data_paths: &NativeDataPaths<'_>,
+    owner: &str,
+) -> Result<String> {
+    let path = path.trim();
+    let raw = !path.is_empty()
+        && path.split('/').all(|segment| {
+            segment.split(':').all(|part| {
+                !part.is_empty()
+                    && (part.trim_start_matches('-').bytes().all(|byte| byte.is_ascii_digit())
+                        || is_uuid_text(part))
+            })
+        });
+    let full = if raw {
+        let segments = path
+            .split('/')
+            .map(|segment| format!("{{{}}}", segment.replace(':', ",")))
+            .collect::<Vec<_>>();
+        format!("{{{},{}}}", segments.len(), segments.join(","))
+    } else {
+        data_paths
+            .resolve(path)
+            .ok_or_else(|| anyhow!("{owner} names {path}, which the writer cannot place"))?
+    };
+    full.strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{owner} resolved {path} to an unbraced path"))
+}
+
+/// Payload members 26 and 64 of an input field: its `<ChoiceParameterLinks>`
+/// -- `{5006,N,("<name>",<path>,<Clear 0|DontChange 1>)×N}` and the same with
+/// `"",""` after each link under `5007`. 1 296 of 1 296 records.
+fn native_choice_parameter_links(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<(String, String)> {
+    let mut first = format!("{{5006,{}", item.choice_parameter_links.len());
+    let mut second = format!("{{5007,{}", item.choice_parameter_links.len());
+    for link in &item.choice_parameter_links {
+        let path = native_inline_data_path(&link.data_path, data_paths, "a choice parameter link")?;
+        let change = match link.value_change.as_str() {
+            "Clear" => "0",
+            "DontChange" => "1",
+            other => return Err(anyhow!("a choice parameter link changes its value by {other}")),
+        };
+        let entry = format!(",{},{path},{change}", format_1c_string(&link.name));
+        first.push_str(&entry);
+        second.push_str(&entry);
+        second.push_str(",\"\",\"\"");
+    }
+    first.push('}');
+    second.push('}');
+    Ok((first, second))
+}
+
+/// Payload member 42 of an input field: `<TypeLink>` as
+/// `{3,<path>,<LinkItem>}`, `{3,0,0}` when it names none. 156 of 156.
+fn native_type_link(item: &FormXmlChildItem, data_paths: &NativeDataPaths<'_>) -> Result<String> {
+    let Some((path, link_item)) = item.type_link.as_ref() else {
+        return Ok("{3,0,0}".to_string());
+    };
+    let path = native_inline_data_path(path, data_paths, "a type link")?;
+    let link_item = if link_item.is_empty() { "0" } else { link_item.as_str() };
+    Ok(format!("{{3,{path},{link_item}}}"))
+}
+
+/// A font an item names under another element than `<Font>`.
+fn native_named_font(
+    item: &FormXmlChildItem,
+    element: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    native_font_of(item, item.fonts.get(element), source)
+}
+
+/// A property of [`CHILD_LOCALIZED_SECTIONS`] as a body stores it: the same
+/// `{1,N,{lang,content}...}` a title is, `{1,0}` when the item has none.
+fn native_localized(item: &FormXmlChildItem, section: &str) -> String {
+    format_form_title_value(item.localized.get(section).map_or(&[][..], Vec::as_slice))
+}
+
+/// A picture of [`CHILD_EXTRA_PICTURES`], the empty reference when the item
+/// has none.
+fn native_extra_picture(
+    item: &FormXmlChildItem,
+    section: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<String> {
+    native_picture_of(
+        &item.tag,
+        &item.name,
+        item.pictures.get(section),
+        false,
+        source,
+        items_root,
+    )
+}
+
+/// `<MinValue>` or `<MaxValue>` as a typed value: `{"N",n}` for a number and
+/// `{"S","text"}` for a string -- the only two types either corpus spells --
+/// and `{"U"}` when the item names none.
+fn native_typed_scalar(item: &FormXmlChildItem, name: &str) -> Result<String> {
+    let kind = item.scalars.get(&format!("{name}@type")).map(String::as_str);
+    let text = item.scalars.get(name).map_or("", String::as_str);
+    match kind {
+        None if text.trim().is_empty() => Ok("{\"U\"}".to_string()),
+        Some("xs:decimal") if native_choice_list_number(text.trim()) => {
+            Ok(format!("{{\"N\",{}}}", text.trim()))
+        }
+        Some("xs:string") => Ok(format!("{{\"S\",{}}}", format_1c_string(text))),
+        _ => Err(anyhow!("<{name}> spells a value the writer has not measured")),
+    }
+}
+
+/// The uuid of the form a `<ChoiceForm>` names, which only the configuration
+/// holds; the zero uuid when the item names none.
+fn native_choice_form(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(reference) = item.scalars.get("ChoiceForm").map(|value| value.trim()) else {
+        return Ok(NATIVE_ZERO_UUID.to_string());
+    };
+    let source = source
+        .ok_or_else(|| anyhow!("<ChoiceForm> names {reference} and no configuration is on hand"))?;
+    source.resolve_form_uuid(reference)
+}
+
 /// What stops a form from being written in the shape the platform stores.
 ///
 /// Fail-closed: every part the native writers have not measured refuses the
@@ -9249,9 +9831,6 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             }
         }
     }
-    if properties.attributes_conditional_appearance.is_some() {
-        blockers.push("a conditional appearance".to_string());
-    }
     // `<AutoTime>`, `<UsePostingMode>`, `<RepostOnWrite>` and
     // `<UseForFoldersAndItems>` used to stop a form here because the root's
     // keyed property bag was unread. It is read now -- see
@@ -9263,6 +9842,95 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
 }
 
 /// The whole body of a form, in the shape the platform stores it.
+/// The form-wide `<ConditionalAppearance>` of a Form.xml, verbatim.
+///
+/// It is the only element of that name without a prefix: a dynamic list's is
+/// `<dcsset:conditionalAppearance>`.
+fn form_attributes_conditional_appearance_source(xml: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(xml).ok()?;
+    let start = text.find("<ConditionalAppearance>")?;
+    let close = "</ConditionalAppearance>";
+    let end = text[start..].find(close)? + start + close.len();
+    Some(text[start..end].to_string())
+}
+
+/// The storage document the attributes section closes with, carrying the
+/// form-wide conditional appearance.
+///
+/// The rule of `findings/conditional-appearance.md`: the subtree renamed to
+/// `conditionalAppearance`, `dcsset:` dropped from element names and
+/// `xsi:type` values, one tab removed from every line, CRLF, and a
+/// `style:<Name>` the configuration declares rewritten to `0:<its uuid>`;
+/// wrapped in the fixed ten-namespace `<Settings>` header.
+fn native_conditional_appearance_settings(
+    subtree: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    const HEADER: &str = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+        "xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" ",
+        "xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ",
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" ",
+        "xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" ",
+        "xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" ",
+        "xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" ",
+        "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+    );
+    let mut lines = Vec::new();
+    for (index, line) in subtree.replace("\r\n", "\n").split('\n').enumerate() {
+        // The first line starts at its tag; every other one sits one level
+        // deeper in Form.xml than in the document.
+        let line = if index == 0 {
+            format!("\t{line}")
+        } else {
+            line.strip_prefix('\t')
+                .ok_or_else(|| anyhow!("a conditional appearance line is not indented"))?
+                .to_string()
+        };
+        lines.push(line);
+    }
+    let mut body = lines.join("\r\n");
+    body = body
+        .replace("<ConditionalAppearance>", "<conditionalAppearance>")
+        .replace("</ConditionalAppearance>", "</conditionalAppearance>")
+        .replace("<dcsset:", "<")
+        .replace("</dcsset:", "</")
+        .replace("xsi:type=\"dcsset:", "xsi:type=\"");
+    // `style:<Name>` in a colour's text and in a font's `ref`.
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body.as_str();
+    while let Some(at) = rest.find("style:") {
+        let (before, after) = rest.split_at(at);
+        out.push_str(before);
+        let name_len = after["style:".len()..]
+            .find(|c: char| c == '<' || c == '"')
+            .ok_or_else(|| anyhow!("a conditional appearance style reference does not end"))?;
+        let name = &after["style:".len().."style:".len() + name_len];
+        let declared = source.and_then(|source| {
+            source
+                .resolve_style_item_uuid(&format!("StyleItem.{name}"))
+                .ok()
+        });
+        match declared {
+            Some(uuid) => {
+                out.push_str("0:");
+                out.push_str(&uuid);
+            }
+            None => {
+                out.push_str("style:");
+                out.push_str(name);
+            }
+        }
+        rest = &after["style:".len() + name_len..];
+    }
+    out.push_str(rest);
+    let document = format!("{HEADER}{out}\r\n</Settings>");
+    Ok(format!("{{#base64:{}}}", encode_base64(document.as_bytes())))
+}
+
 fn format_native_form_body(
     properties: &FormXmlBodyProperties,
     module_text: &str,
@@ -9292,10 +9960,10 @@ fn format_native_form_body(
         auto_title: properties.auto_title.unwrap_or(true),
         title: &title,
         group: properties.group.map(|_| "Vertical"),
-        child_items_width: None,
+        child_items_width: properties.root_scalars.get("ChildItemsWidth").map(String::as_str),
         auto_fill_check: properties.auto_fill_check.unwrap_or(true),
         customizable: properties.customizable.unwrap_or(true),
-        enabled: true,
+        enabled: properties.root_scalars.get("Enabled").map(String::as_str) != Some("false"),
         command_bar_location: properties.command_bar_location.map(|location| match location {
             FormXmlCommandBarLocation::None => "None",
             FormXmlCommandBarLocation::Top => "Top",
@@ -9412,8 +10080,8 @@ fn format_native_form_body(
             FormXmlScalingMode::Normal => "Normal",
             FormXmlScalingMode::Compact => "Compact",
         }),
-        horizontal_spacing: None,
-        vertical_spacing: None,
+        horizontal_spacing: properties.root_scalars.get("HorizontalSpacing").map(String::as_str),
+        vertical_spacing: properties.root_scalars.get("VerticalSpacing").map(String::as_str),
         horizontal_align: properties.horizontal_align.map(|align| match align {
             FormXmlHorizontalAlign::Left => "Left",
             FormXmlHorizontalAlign::Center => "Center",
@@ -9425,7 +10093,7 @@ fn format_native_form_body(
             FormRootVerticalAlign::Center => "Center",
             FormRootVerticalAlign::Bottom => "Bottom",
         }),
-        children_align: None,
+        children_align: properties.root_scalars.get("ChildrenAlign").map(String::as_str),
         group: properties.group.map(|group| match group {
             FormXmlGroup::Vertical => "Vertical",
             FormXmlGroup::Horizontal => "Horizontal",
@@ -9436,9 +10104,14 @@ fn format_native_form_body(
         show_title: properties.show_title.unwrap_or(true),
         show_close_button: properties.show_close_button.unwrap_or(true),
         conversations_representation: properties
-            .conversations_representation
-            .map(|_| "Show"),
-        collapse_items_by_importance: None,
+            .root_scalars
+            .get("ConversationsRepresentation")
+            .map(String::as_str)
+            .or(properties.conversations_representation.map(|_| "Show")),
+        collapse_items_by_importance: properties
+            .root_scalars
+            .get("CollapseItemsByImportanceVariant")
+            .map(String::as_str),
         save_window_settings: properties.save_window_settings.unwrap_or(true),
         navigator: None,
         mobile_device_command_bar_content: &mobile_device_command_bar_content,
@@ -9619,6 +10292,24 @@ fn format_native_form_body(
         let title = format_form_title_value(&command.title);
         let tooltip = format_form_title_value(&command.tooltip);
         let command_options = functional_options(&command.functional_options)?;
+        // Members 5, 6 and 14 (rt-command.md): `<Use>`, `<Shortcut>` and the
+        // id of the item `<AssociatedTableElementId>` names.
+        let command_use = match command.use_rights.as_ref() {
+            Some(rights) => native_rights(rights, "a command's <Use>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
+        let command_shortcut = match command.shortcut.as_deref() {
+            Some(text) => crate::compiler::bodies::form_native::format_native_shortcut(text)
+                .ok_or_else(|| anyhow!("a command names the shortcut {text}, which is not measured"))?,
+            None => "{0,0,0}".to_string(),
+        };
+        let command_associated = match command.associated_table_element_id.as_deref() {
+            Some(name) => items
+                .get(name)
+                .map(|target| target.id.clone())
+                .ok_or_else(|| anyhow!("a command is associated with {name}, which the writer cannot place"))?,
+            None => "0".to_string(),
+        };
         let command_picture =
             native_picture_of(
                 "Command",
@@ -9645,6 +10336,9 @@ fn format_native_form_body(
                         FormXmlCommandCurrentRowUse::DontUse => "DontUse",
                         FormXmlCommandCurrentRowUse::Use => "Use",
                     }),
+                    use_always: &command_use,
+                    picture_index: &command_shortcut,
+                    fourteenth: &command_associated,
                     ..crate::compiler::bodies::form_native::NativeFormCommand::default()
                 },
             )
@@ -9677,7 +10371,10 @@ fn format_native_form_body(
         command_count = properties.commands.len(),
         module = format_1c_string(module_text),
         count = properties.attributes.len(),
-        settings = NATIVE_EMPTY_SETTINGS,
+        settings = match properties.attributes_conditional_appearance_source.as_deref() {
+            Some(subtree) => native_conditional_appearance_settings(subtree, source)?,
+            None => NATIVE_EMPTY_SETTINGS.to_string(),
+        },
     ))
 }
 
@@ -10351,16 +11048,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut canonical_conditional_appearances = canonical_dcs
         .list_settings_conditional_appearances
         .into_iter();
+    // The form-wide conditional appearance reaches the body as a transcription
+    // of its own subtree (findings/conditional-appearance.md, 663 of 663 byte
+    // for byte), so the typed reading is not needed to write it and its cohort
+    // refusal no longer stops the form.
     let attributes_conditional_appearance =
         match canonical_dcs.form_attributes_conditional_appearance {
             DcsChildParseOutcome::Typed(value) => Some(value),
-            DcsChildParseOutcome::Unsupported(reason) => {
-                return Err(anyhow!(
-                    "unsupported Form Attributes conditional appearance: {reason}"
-                ));
-            }
-            DcsChildParseOutcome::Absent => None,
+            DcsChildParseOutcome::Unsupported(_) | DcsChildParseOutcome::Absent => None,
         };
+    let attributes_conditional_appearance_source =
+        form_attributes_conditional_appearance_source(xml);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
@@ -10370,6 +11068,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut child_text = String::new();
     let mut properties = FormXmlBodyProperties::default();
     properties.attributes_conditional_appearance = attributes_conditional_appearance;
+    properties.attributes_conditional_appearance_source = attributes_conditional_appearance_source;
     let mut current_event_name = None::<String>;
     let mut current_command = None::<FormXmlCommand>;
     let mut current_localized_section = None::<String>;
@@ -10401,6 +11100,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut nested_text = String::new();
     let mut current_mobile_item = None::<FormXmlMobileCommandBarItem>;
     let mut current_choice_item = None::<FormXmlChoiceListItem>;
+    let mut current_choice_parameter = None::<String>;
     let mut current_choice_lang = None::<String>;
     let mut current_choice_content = None::<String>;
 
@@ -10496,6 +11196,75 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
+                if current_child_items.last().is_some_and(|item| {
+                    path.last().map(String::as_str) == Some(item.tag.as_str())
+                }) && let Some(item) = current_child_items.last_mut()
+                {
+                    if CHILD_EXTRA_PICTURES.contains(&local.as_str()) {
+                        // A second one says nothing about which the body
+                        // holds, so it refuses the item.
+                        match item.pictures.get_mut(local.as_str()) {
+                            Some(picture) => picture.unwritable.push(local.clone()),
+                            None => {
+                                item.pictures.insert(local.clone(), FormXmlItemPicture::default());
+                            }
+                        }
+                    }
+                    if matches!(local.as_str(), "MinValue" | "MaxValue")
+                        && let Some(kind) = xml_attribute_value(&event, "type")?
+                    {
+                        item.scalars.insert(format!("{local}@type"), kind);
+                    }
+                    if local.ends_with("Font") && local != "Font" {
+                        item.fonts.insert(local.clone(), xml_attrs_map(&event));
+                    }
+                    match local.as_str() {
+                        "UserVisible" => item.user_visible = Some(FormXmlRights::default()),
+                        "TypeLink" => item.type_link = Some((String::new(), String::new())),
+                        _ => {}
+                    }
+                }
+                // The inside of a rights setting, a choice parameter link and
+                // a command's own `<Use>`.
+                if local == "Value"
+                    && current_child_items
+                        .last()
+                        .is_some_and(|item| path_ends_with(&path, &[item.tag.as_str(), "UserVisible"]))
+                    && let Some(rights) = current_child_items
+                        .last_mut()
+                        .and_then(|item| item.user_visible.as_mut())
+                {
+                    rights.values.push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if local == "Link"
+                    && current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "ChoiceParameterLinks"])
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.choice_parameter_links.push(FormXmlChoiceParameterLink::default());
+                }
+                if path_ends_with(&path, &["Form", "Commands", "Command"])
+                    && local == "Use"
+                    && let Some(command) = current_command.as_mut()
+                {
+                    command.use_rights = Some(FormXmlRights::default());
+                }
+                if local == "Value"
+                    && path_ends_with(&path, &["Form", "Commands", "Command", "Use"])
+                    && let Some(rights) = current_command
+                        .as_mut()
+                        .and_then(|command| command.use_rights.as_mut())
+                {
+                    rights.values.push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if let Some(section) = child_extra_picture_section(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                    && !matches!(local.as_str(), "Ref" | "LoadTransparent" | "Abs")
+                {
+                    picture.unwritable.push(local.clone());
+                }
                 if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -10520,6 +11289,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Item" && path_ends_with_for_choice_list(&path, &current_child_items) {
                     current_choice_item = Some(FormXmlChoiceListItem::default());
+                    current_choice_parameter = None;
+                    current_choice_lang = None;
+                    current_choice_content = None;
+                } else if local == "item"
+                    && current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "ChoiceParameters"])
+                    })
+                {
+                    current_choice_item = Some(FormXmlChoiceListItem::default());
+                    current_choice_parameter = Some(xml_attribute_value(&event, "name")?.unwrap_or_default());
                     current_choice_lang = None;
                     current_choice_content = None;
                 } else if let Some(choice) = current_choice_item.as_mut() {
@@ -10672,17 +11451,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && (path_ends_with_for_child_title(&path, &current_child_items)
                         || path_ends_with_for_child_tooltip(&path, &current_child_items)
                         || path_ends_with_for_child_collapsed_title(&path, &current_child_items)
-                        || path_ends_with_for_child_warning_on_edit(&path, &current_child_items))
+                        || path_ends_with_for_child_warning_on_edit(&path, &current_child_items)
+                        || child_localized_section(&path, &current_child_items, &[]).is_some())
                 {
                     current_child_localized_section =
                         path.last().map(|value| value.to_string()).filter(|value| {
-                            matches!(
-                                value.as_str(),
-                                "Title"
-                                    | "ToolTip"
-                                    | "WarningOnEdit"
-                                    | "CollapsedRepresentationTitle"
-                            )
+                            matches!(value.as_str(), "Title" | "ToolTip" | "WarningOnEdit")
+                                || CHILD_LOCALIZED_SECTIONS.contains(&value.as_str())
                         });
                     current_child_title_lang = None;
                     current_child_title_content = None;
@@ -10700,6 +11475,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                    // An opening tag means content: the tooltip is read as an
+                    // item of its own until it closes, and its holder keeps it.
+                    if let Some(mut tip) = parse_form_child_item_xml("ExtendedTooltip", &event)? {
+                        tip.depth = current_child_items.len();
+                        current_child_items.push(tip);
+                    }
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -10853,6 +11634,41 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                         "RowFilter" => item.row_filter_present = true,
                         _ => item.collapsed_representation_title_present = true,
+                    }
+                }
+                if local.ends_with("Font")
+                    && local != "Font"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.fonts.insert(local.clone(), xml_attrs_map(&event));
+                }
+                // An empty `<Settings xsi:type="v8:TypeDescription"/>` is a
+                // value list whose element type names no type at all: it
+                // stores `{"Pattern"}` in the trailing bag on 1 385 ERP УХ and
+                // 208 BSP attributes, and only the opening-tag arm read it.
+                if local == "Settings"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && xml_attribute_value(&event, "type")?.as_deref() == Some("v8:TypeDescription")
+                    && let Some(attribute) = current_attribute.as_mut()
+                    && attribute.element_type.is_none()
+                {
+                    attribute.element_type = Some(FormXmlTypeSpec::default());
+                }
+                if let Some(section) = child_extra_picture_section(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    if local == "TransparentPixel" {
+                        picture.transparent_x = xml_attribute_value(&event, "x")?;
+                        picture.transparent_y = xml_attribute_value(&event, "y")?;
+                        if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                            picture.unwritable.push(local.clone());
+                        }
+                    } else if !matches!(local.as_str(), "Ref" | "LoadTransparent" | "Abs") {
+                        picture.unwritable.push(local.clone());
                     }
                 }
                 if local == "ChildItems"
@@ -11097,6 +11913,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     };
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
+                if let Some((section, part)) =
+                    child_extra_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
@@ -11128,6 +11958,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         .is_some_and(|item| path[path.len() - 2] == item.tag)
                 {
                     child_text.push_str(text.xml_content()?.as_ref());
+                } else if path.len() == 2 && path[0] == "Form" && current_child_items.is_empty() {
+                    child_text.push_str(text.xml_content()?.as_ref());
                 }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
@@ -11145,6 +11977,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                    })
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "VerticalAlign"])
@@ -11372,6 +12207,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || child_localized_section(&path, &current_child_items, &["item", "lang"])
+                        .is_some()
+                    || child_localized_section(&path, &current_child_items, &["item", "content"])
+                        .is_some()
                     || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
@@ -11632,6 +12471,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     };
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
+                if let Some((section, part)) =
+                    child_extra_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
@@ -11665,6 +12518,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                    })
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "VerticalAlign"])
@@ -11892,6 +12748,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || child_localized_section(&path, &current_child_items, &["item", "lang"])
+                        .is_some()
+                    || child_localized_section(&path, &current_child_items, &["item", "content"])
+                        .is_some()
                     || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
@@ -12078,7 +12938,124 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if text_value.trim().is_empty() && !child_text.trim().is_empty() {
                     text_value.push_str(&child_text);
                 }
+                // Every scalar child of an item reaches the bag, whether or
+                // not an arm below also reads it into a typed field. The bag
+                // used to be the last arm, so a property a typed arm took
+                // first -- `<BorderColor>` into the popup's own field -- never
+                // reached the payload writers that read the bag, and an input
+                // field's border was written as the default on 46 BSP forms.
+                if !child_text.trim().is_empty()
+                    && path.len() == 2
+                    && path[0] == "Form"
+                    && current_child_items.is_empty()
+                {
+                    properties
+                        .root_scalars
+                        .entry(local.clone())
+                        .or_insert_with(|| child_text.trim().to_string());
+                }
+                if !child_text.trim().is_empty()
+                    && path_ends_with_for_child_property(&path, &current_child_items, &local)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.scalars
+                        .entry(local.clone())
+                        .or_insert_with(|| child_text.trim().to_string());
+                }
                 match local.as_str() {
+                    "ExtendedTooltip"
+                        if current_child_items
+                            .last()
+                            .is_some_and(|item| item.tag == "ExtendedTooltip")
+                            && path.last().map(String::as_str) == Some("ExtendedTooltip") =>
+                    {
+                        if let Some(tip) = current_child_items.pop()
+                            && let Some(holder) = current_child_items.last_mut()
+                        {
+                            holder.extended_tooltip_item = Some(Box::new(tip));
+                        }
+                    }
+                    "Common" | "Value"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "UserVisible", local.as_str()])
+                        }) =>
+                    {
+                        let value = parse_form_xml_bool("UserVisible", nested_text.trim())?;
+                        if let Some(rights) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.user_visible.as_mut())
+                        {
+                            if local == "Common" {
+                                rights.common = Some(value);
+                            } else if let Some(last) = rights.values.last_mut() {
+                                last.1 = Some(value);
+                            }
+                        }
+                    }
+                    "Common" | "Value"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", "Use", local.as_str()]) =>
+                    {
+                        let value = parse_form_xml_bool("Command/Use", nested_text.trim())?;
+                        if let Some(rights) = current_command
+                            .as_mut()
+                            .and_then(|command| command.use_rights.as_mut())
+                        {
+                            if local == "Common" {
+                                rights.common = Some(value);
+                            } else if let Some(last) = rights.values.last_mut() {
+                                last.1 = Some(value);
+                            }
+                        }
+                    }
+                    "Shortcut" | "AssociatedTableElementId"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", local.as_str()]) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            let value = Some(nested_text.trim().to_string());
+                            if local == "Shortcut" {
+                                command.shortcut = value;
+                            } else {
+                                command.associated_table_element_id = value;
+                            }
+                        }
+                    }
+                    "Name" | "DataPath" | "ValueChange"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(
+                                &path,
+                                &[item.tag.as_str(), "ChoiceParameterLinks", "Link", local.as_str()],
+                            )
+                        }) =>
+                    {
+                        if let Some(link) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.choice_parameter_links.last_mut())
+                        {
+                            let value = nested_text.trim().to_string();
+                            match local.as_str() {
+                                "Name" => link.name = value,
+                                "DataPath" => link.data_path = value,
+                                _ => link.value_change = value,
+                            }
+                        }
+                    }
+                    "DataPath" | "LinkItem"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "TypeLink", local.as_str()])
+                        }) =>
+                    {
+                        if let Some(link) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.type_link.as_mut())
+                        {
+                            let value = nested_text.trim().to_string();
+                            if local == "DataPath" {
+                                link.0 = value;
+                            } else {
+                                link.1 = value;
+                            }
+                        }
+                    }
                     // One `<xr:Item>` of `<MobileDeviceCommandBarContent>`.
                     "Presentation" | "CheckState" | "Value"
                         if current_mobile_item.is_some()
@@ -12139,7 +13116,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                         choice.title.push(LocalizedString { lang, content });
                                     }
                                 }
-                                FormChoiceListPart::Close => {}
+                                FormChoiceListPart::Close | FormChoiceListPart::CloseParameter => {}
                             }
                         }
                         if part == FormChoiceListPart::Close
@@ -12149,6 +13126,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 .and_then(|item| item.choice_list.as_mut())
                         {
                             list.push(choice);
+                        }
+                        if part == FormChoiceListPart::CloseParameter
+                            && let Some(choice) = current_choice_item.take()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.choice_parameters
+                                .push((current_choice_parameter.take().unwrap_or_default(), choice));
                         }
                     }
                     // One `<Field>` of an attribute's `<Save>`.
@@ -12406,6 +13390,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "AutoFillCheck" if path_ends_with(&path, &["Form", "AutoFillCheck"]) => {
                         properties.auto_fill_check =
                             Some(parse_form_xml_bool("AutoFillCheck", text_value.trim())?);
+                    }
+                    "ExcludedCommand"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                        }) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.excluded_commands.push(text_value.trim().to_string());
+                        }
                     }
                     "ExcludedCommand"
                         if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
@@ -13374,7 +14367,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_lang(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(
+                                &path,
+                                &current_child_items,
+                                &["item", "lang"],
+                            )
+                            .is_some() =>
                     {
                         current_child_title_lang = Some(text_value.trim().to_string());
                     }
@@ -13387,7 +14386,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_content(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(
+                                &path,
+                                &current_child_items,
+                                &["item", "content"],
+                            )
+                            .is_some() =>
                     {
                         current_child_title_content = Some(text_value.to_string());
                     }
@@ -13400,7 +14405,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_item(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(&path, &current_child_items, &["item"])
+                                .is_some() =>
                     {
                         if let (Some(item), Some(lang), Some(content)) = (
                             current_child_items.last_mut(),
@@ -13413,6 +14420,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some("WarningOnEdit") => item.warning_on_edit.push(value),
                                 Some("CollapsedRepresentationTitle") => {
                                     item.collapsed_representation_title.push(value);
+                                }
+                                Some(section) if CHILD_LOCALIZED_SECTIONS.contains(&section) => {
+                                    item.localized.entry(section.to_string()).or_default().push(value);
                                 }
                                 _ => item.title.push(value),
                             }
@@ -14920,6 +15930,9 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         picture_present: false,
         modifies_saved_data: None,
         current_row_use: None,
+        shortcut: None,
+        use_rights: None,
+        associated_table_element_id: None,
     }))
 }
 
@@ -15094,6 +16107,7 @@ fn parse_form_child_item_xml(
         format_present: false,
         collapsed_representation_title_present: false,
         collapsed_representation_title: Vec::new(),
+        excluded_commands: Vec::new(),
         associated_table_element_id: None,
         header_horizontal_align: None,
         shape: None,
@@ -15113,6 +16127,14 @@ fn parse_form_child_item_xml(
         row_filter_present: false,
         display_importance: xml_attribute_value(event, "DisplayImportance")?,
         scalars: BTreeMap::new(),
+        localized: BTreeMap::new(),
+        pictures: BTreeMap::new(),
+        fonts: BTreeMap::new(),
+        extended_tooltip_item: None,
+        user_visible: None,
+        choice_parameter_links: Vec::new(),
+        type_link: None,
+        choice_parameters: Vec::new(),
         child_items_present: false,
         child_items: Vec::new(),
     }))
@@ -15254,6 +16276,8 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
                 | "SearchStringAddition"
                 | "ViewStatusAddition"
                 | "SearchControlAddition"
+                | "ProgressBarField"
+                | "TrackBarField"
         )
 }
 
@@ -15305,6 +16329,34 @@ fn path_ends_with_for_child_tooltip_representation(
 
 fn form_child_item_supports_warning_on_edit(tag: &str) -> bool {
     tag == "Column" || FormFieldSchema::supports_item_tag(tag)
+}
+
+/// The localized-string properties of a child item the `<v8:item>` reader
+/// collects beside its title, tooltip and warning -- every other element of
+/// both corpora whose content is `<v8:item>` blocks, bar the choice-list
+/// presentations, which have a reader of their own.
+const CHILD_LOCALIZED_SECTIONS: &[&str] = &[
+    "CollapsedRepresentationTitle",
+    "EditFormat",
+    "FooterText",
+    "Format",
+    "InputHint",
+    "NonselectedPictureText",
+];
+
+/// Which of [`CHILD_LOCALIZED_SECTIONS`] the path is inside, `rest` being
+/// what follows the section's own element.
+fn child_localized_section(
+    path: &[String],
+    items: &[FormXmlChildItem],
+    rest: &[&str],
+) -> Option<&'static str> {
+    let item = items.last()?;
+    CHILD_LOCALIZED_SECTIONS.iter().copied().find(|section| {
+        let mut tail = vec![item.tag.as_str(), *section];
+        tail.extend_from_slice(rest);
+        path_ends_with(path, &tail)
+    })
 }
 
 fn path_ends_with_for_child_collapsed_title(
@@ -15367,6 +16419,17 @@ fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -
 fn form_nested_text_element(path: &[String]) -> bool {
     if path_ends_with(path, &["Attribute", "Save", "Field"])
         || path_ends_with(path, &["Attribute", "UseAlways", "Field"])
+        || path_ends_with(path, &["UserVisible", "Common"])
+        || path_ends_with(path, &["UserVisible", "Value"])
+        || path_ends_with(path, &["Command", "Use", "Common"])
+        || path_ends_with(path, &["Command", "Use", "Value"])
+        || path_ends_with(path, &["Commands", "Command", "Shortcut"])
+        || path_ends_with(path, &["Commands", "Command", "AssociatedTableElementId"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "Name"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "DataPath"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "ValueChange"])
+        || path_ends_with(path, &["TypeLink", "DataPath"])
+        || path_ends_with(path, &["TypeLink", "LinkItem"])
     {
         return true;
     }
@@ -15382,6 +16445,15 @@ fn form_nested_text_element(path: &[String]) -> bool {
     path_ends_with(path, &["Item", "Value", "Value"])
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "lang"])
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "content"])
+        || path_ends_with(path, &["ChoiceParameters", "item", "value", "Value"])
+        || path_ends_with(
+            path,
+            &["ChoiceParameters", "item", "value", "Presentation", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["ChoiceParameters", "item", "value", "Presentation", "item", "content"],
+        )
 }
 
 /// The part of a `<ChoiceList>` item a closing element is, if it is one.
@@ -15398,6 +16470,18 @@ enum FormChoiceListPart {
     TitleItem,
     /// `</xr:Item>` itself.
     Close,
+    /// `</app:item>` of a `<ChoiceParameters>`.
+    CloseParameter,
+}
+
+/// The two containers whose items share the choice-list value grammar: a
+/// field's `<ChoiceList>` -- `<xr:Item>` holding `<xr:Value>` -- and an input
+/// field's `<ChoiceParameters>` -- `<app:item name>` holding `<app:value>`.
+fn choice_list_containers(tag: &str) -> [([&str; 3], &'static str); 2] {
+    [
+        ([tag, "ChoiceList", "Item"], "Value"),
+        ([tag, "ChoiceParameters", "item"], "value"),
+    ]
 }
 
 fn form_choice_list_part(
@@ -15406,25 +16490,33 @@ fn form_choice_list_part(
     local: &str,
 ) -> Option<FormChoiceListPart> {
     let tag = items.last()?.tag.as_str();
-    let ends = |tail: &[&str]| {
-        let mut suffix = vec![tag, "ChoiceList", "Item"];
-        suffix.extend_from_slice(tail);
-        path_ends_with(path, &suffix)
-    };
-    match local {
-        "Presentation" if ends(&["Presentation"]) => Some(FormChoiceListPart::Presentation),
-        "CheckState" if ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
-        "Value" if ends(&["Value", "Value"]) => Some(FormChoiceListPart::Literal),
-        "lang" if ends(&["Value", "Presentation", "item", "lang"]) => {
-            Some(FormChoiceListPart::TitleLang)
+    for (prefix, outer) in choice_list_containers(tag) {
+        let ends = |tail: &[&str]| {
+            let mut suffix = prefix.to_vec();
+            suffix.extend_from_slice(tail);
+            path_ends_with(path, &suffix)
+        };
+        let list = outer == "Value";
+        let part = match local {
+            "Presentation" if list && ends(&["Presentation"]) => Some(FormChoiceListPart::Presentation),
+            "CheckState" if list && ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
+            "Value" if ends(&[outer, "Value"]) => Some(FormChoiceListPart::Literal),
+            "lang" if ends(&[outer, "Presentation", "item", "lang"]) => {
+                Some(FormChoiceListPart::TitleLang)
+            }
+            "content" if ends(&[outer, "Presentation", "item", "content"]) => {
+                Some(FormChoiceListPart::TitleContent)
+            }
+            "item" if ends(&[outer, "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
+            "Item" if list && ends(&[]) => Some(FormChoiceListPart::Close),
+            "item" if !list && ends(&[]) => Some(FormChoiceListPart::CloseParameter),
+            _ => None,
+        };
+        if part.is_some() {
+            return part;
         }
-        "content" if ends(&["Value", "Presentation", "item", "content"]) => {
-            Some(FormChoiceListPart::TitleContent)
-        }
-        "item" if ends(&["Value", "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
-        "Item" if ends(&[]) => Some(FormChoiceListPart::Close),
-        _ => None,
     }
+    None
 }
 
 /// One opening element inside a `<ChoiceList>` item.
@@ -15444,31 +16536,33 @@ fn apply_form_choice_list_part(
     let Some(tag) = items.last().map(|item| item.tag.as_str()) else {
         return Ok(());
     };
-    let opens = |tail: &[&str]| {
-        let mut suffix = vec![tag, "ChoiceList", "Item"];
-        suffix.extend_from_slice(tail);
-        path_ends_with(path, &suffix)
-    };
-    if opens(&[]) {
-        match local {
-            "Presentation" | "CheckState" => {}
-            "Value" => choice.value_type = xml_attribute_value(event, "type")?,
-            other => choice.unwritable.push(other.to_string()),
+    for (prefix, outer) in choice_list_containers(tag) {
+        let opens = |tail: &[&str]| {
+            let mut suffix = prefix.to_vec();
+            suffix.extend_from_slice(tail);
+            path_ends_with(path, &suffix)
+        };
+        if opens(&[]) {
+            match local {
+                "Presentation" | "CheckState" if outer == "Value" => {}
+                name if name == outer => choice.value_type = xml_attribute_value(event, "type")?,
+                other => choice.unwritable.push(other.to_string()),
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
-    if opens(&["Value"]) {
-        match local {
-            "Presentation" => {}
-            "Value" => choice.literal_type = xml_attribute_value(event, "type")?,
-            other => choice.unwritable.push(other.to_string()),
+        if opens(&[outer]) {
+            match local {
+                "Presentation" => {}
+                "Value" => choice.literal_type = xml_attribute_value(event, "type")?,
+                other => choice.unwritable.push(other.to_string()),
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
-    if (opens(&["Value", "Presentation"]) && local == "item")
-        || (opens(&["Value", "Presentation", "item"]) && matches!(local, "lang" | "content"))
-    {
-        return Ok(());
+        if (opens(&[outer, "Presentation"]) && local == "item")
+            || (opens(&[outer, "Presentation", "item"]) && matches!(local, "lang" | "content"))
+        {
+            return Ok(());
+        }
     }
     choice.unwritable.push(local.to_string());
     Ok(())
@@ -15513,6 +16607,36 @@ fn path_ends_with_for_child_picture(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Picture"])
+}
+
+/// The pictures a child item carries beside its `<Picture>`: an input
+/// field's choice button, a picture field's values, a table's rows, and the
+/// header and footer of a column. Each is the same reference a `<Picture>` is.
+const CHILD_EXTRA_PICTURES: &[&str] = &[
+    "ChoiceButtonPicture",
+    "FooterPicture",
+    "HeaderPicture",
+    "RowsPicture",
+    "ValuesPicture",
+];
+
+/// Which of [`CHILD_EXTRA_PICTURES`] the path is directly inside.
+fn child_extra_picture_section(path: &[String], items: &[FormXmlChildItem]) -> Option<&'static str> {
+    let item = items.last()?;
+    CHILD_EXTRA_PICTURES
+        .iter()
+        .copied()
+        .find(|section| path_ends_with(path, &[item.tag.as_str(), section]))
+}
+
+/// The extra picture and the name of its child whose text is being read.
+fn child_extra_picture_part<'a>(
+    path: &'a [String],
+    items: &[FormXmlChildItem],
+) -> Option<(&'static str, &'a str)> {
+    let (last, parent) = path.split_last()?;
+    let section = child_extra_picture_section(parent, items)?;
+    Some((section, last.as_str()))
 }
 
 /// The name of the `<Picture>` child whose text the parser is reading.
@@ -15659,6 +16783,8 @@ fn form_localized_text_path_allows_entity_ref(
         || path_ends_with_for_child_title_content(path, child_items)
         || path_ends_with_for_child_tooltip_lang(path, child_items)
         || path_ends_with_for_child_tooltip_content(path, child_items)
+        || child_localized_section(path, child_items, &["item", "lang"]).is_some()
+        || child_localized_section(path, child_items, &["item", "content"]).is_some()
         || path_ends_with_for_child_warning_on_edit_lang(path, child_items)
         || path_ends_with_for_child_warning_on_edit_content(path, child_items)
 }
@@ -16610,8 +17736,7 @@ fn path_ends_with_for_child_vertical_align(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    FormFieldSchema::supports_item_tag(&item.tag)
-        && path_ends_with(path, &[item.tag.as_str(), "VerticalAlign"])
+    path_ends_with(path, &[item.tag.as_str(), "VerticalAlign"])
 }
 
 fn path_ends_with_for_child_group_vertical_align(

@@ -70,6 +70,11 @@ pub(crate) fn format_native_color(
     let Some(value) = value else {
         return Some("{3,4,{0}}".to_string());
     };
+    // `auto`, the platform's automatic colour: `{3,4,{-1}}` on every button
+    // of both corpora that spells it.
+    if value == "auto" {
+        return Some("{3,4,{-1}}".to_string());
+    }
     if let Some(hex) = value.strip_prefix('#') {
         if hex.len() != 6 {
             return None;
@@ -99,8 +104,12 @@ pub(crate) fn format_native_color(
 /// them.
 const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
     ("AccentColor", "-46"),
+    ("ActivityColor", "-44"),
     ("AuxiliaryNavigationColor", "-43"),
+    ("BorderColor", "-22"),
     ("ButtonBackColor", "-7"),
+    ("ButtonBorderColor", "-34"),
+    ("ButtonTextColor", "-21"),
     ("FieldAlternativeBackColor", "-13"),
     ("FieldBackColor", "-10"),
     ("FieldSelectedTextColor", "-15"),
@@ -114,25 +123,97 @@ const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
     ("ReportGroup1BackColor", "-26"),
     ("ReportGroup2BackColor", "-27"),
     ("ReportHeaderBackColor", "-25"),
+    ("ReportLineColor", "-28"),
     ("SpecialTextColor", "-16"),
     ("TableFooterBackColor", "-37"),
     ("TableHeaderBackColor", "-35"),
+    ("TableHeaderTextColor", "-36"),
     ("ToolTipBackColor", "-23"),
     ("ToolTipTextColor", "-24"),
 ];
 
+/// A `<Shortcut>` as a body stores it: `{0,<virtual-key code>,<modifiers>}`,
+/// Shift 4, Ctrl 8 and Alt 16 summed. The inverse of the reader's table,
+/// measured on 2 451 ERP УХ and 148 BSP command records and 112 item records:
+/// letters and digits are their upper-case ASCII, `F1`..`F12` 112..123,
+/// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
+/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
+/// refused.
+pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
+    let text = text.trim();
+    // `Num +` ends in the separator itself, so it is split off first.
+    let (modifiers, key) = if let Some(prefix) = text.strip_suffix("Num +") {
+        (prefix.strip_suffix('+').unwrap_or(prefix), "Num +")
+    } else {
+        match text.rsplit_once('+') {
+            Some((prefix, key)) => (prefix, key),
+            None => ("", text),
+        }
+    };
+    let code: u32 = match key {
+        "BackSpace" => 8,
+        "Enter" => 13,
+        "Esc" => 27,
+        "Num *" => 106,
+        "Num +" => 107,
+        "Num -" => 109,
+        "Num ." => 110,
+        "Num /" => 111,
+        _ => {
+            if let Some(digit) = key.strip_prefix("Num ") {
+                let digit: u32 = digit.parse().ok()?;
+                if digit > 9 {
+                    return None;
+                }
+                96 + digit
+            } else if let Some(number) = key.strip_prefix('F').filter(|rest| !rest.is_empty()) {
+                let number: u32 = number.parse().ok()?;
+                if !(1..=12).contains(&number) {
+                    return None;
+                }
+                111 + number
+            } else {
+                let mut chars = key.chars();
+                let single = chars.next()?;
+                if chars.next().is_some() || !(single.is_ascii_uppercase() || single.is_ascii_digit()) {
+                    return None;
+                }
+                u32::from(single)
+            }
+        }
+    };
+    let mut mask = 0u32;
+    if !modifiers.is_empty() {
+        for modifier in modifiers.split('+') {
+            mask |= match modifier {
+                "Shift" => 4,
+                "Ctrl" => 8,
+                "Alt" => 16,
+                _ => return None,
+            };
+        }
+    }
+    Some(format!("{{0,{code},{mask}}}"))
+}
+
 /// The web colours the corpus names, with the index a body stores.
 const WEB_COLOR_CODES: &[(&str, &str)] = &[
+    ("AliceBlue", "1"),
     ("FireBrick", "44"),
     ("ForestGreen", "46"),
+    ("Gainsboro", "48"),
+    ("Gold", "50"),
     ("Gray", "52"),
     ("HoneyDew", "55"),
     ("IndianRed", "57"),
     ("LightGreen", "70"),
     ("LightYellow", "79"),
     ("MistyRose", "98"),
+    ("NavajoWhite", "100"),
     ("Red", "119"),
+    ("White", "143"),
     ("WhiteSmoke", "144"),
+    ("Yellow", "145"),
 ];
 
 /// One `<Event>` of an item, as the source names it.
@@ -707,6 +788,24 @@ pub(crate) struct NativeFieldItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) group_horizontal_align: Option<&'a str>,
     pub(crate) group_vertical_align: Option<&'a str>,
+    /// Member 55, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
+}
+
+/// The `DisplayImportance` XML attribute an item may carry, as every item
+/// record stores it: absent 0, `VeryHigh` 1, `High` 2, `Usual` 3, `Low` 4,
+/// `VeryLow` 5 -- pure over the button, field, decoration and group records
+/// of BSP. A spelling outside those is refused.
+pub(crate) fn native_display_importance(value: Option<&str>) -> Option<&'static str> {
+    match value {
+        None => Some("0"),
+        Some("VeryHigh") => Some("1"),
+        Some("High") => Some("2"),
+        Some("Usual") => Some("3"),
+        Some("Low") => Some("4"),
+        Some("VeryLow") => Some("5"),
+        Some(_) => None,
+    }
 }
 
 impl Default for NativeFieldItem<'_> {
@@ -761,6 +860,7 @@ impl Default for NativeFieldItem<'_> {
             extended_tooltip: "",
             group_horizontal_align: None,
             group_vertical_align: None,
+            display_importance: "0",
         }
     }
 }
@@ -779,6 +879,7 @@ pub(crate) fn native_field_kind(tag: &str) -> Option<u8> {
         "SpreadSheetDocumentField" => 6,
         "TextDocumentField" => 7,
         "ProgressBarField" => 9,
+        "TrackBarField" => 10,
         "GanttChartField" => 12,
         "HTMLDocumentField" => 15,
         "FormattedDocumentField" => 17,
@@ -882,7 +983,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
          {footer_picture},{a0},{a1},{a2},{a3},{a4},{a5},{picture_index},1,{payload},{events},1,\
          {context_menu},{visible},{format_one},{format_two},{string_one},{string_two},\
          {appearance_tail},{fixing},{tooltip_representation},1,{extended_tooltip},\
-         {group_horizontal},{group_vertical},0,0,0,0}}",
+         {group_horizontal},{group_vertical},{display_importance},0,0,0}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = item.kind,
@@ -921,6 +1022,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
         string_one = item.format_strings[0],
         string_two = item.format_strings[1],
         extended_tooltip = item.extended_tooltip,
+        display_importance = item.display_importance,
     ))
 }
 
@@ -1089,6 +1191,17 @@ pub(crate) struct NativeInputPayload<'a> {
     /// Slot 43, `<EditTextUpdate>`: `DontUse` 1, `OnValueChange` 2,
     /// `Always` 3.
     pub(crate) edit_text_update: Option<&'a str>,
+    /// Slot 44, `<InputHint>`, a localized string, `{1,0}` by default.
+    pub(crate) input_hint: &'a str,
+    /// Slot 1, `<ChoiceList>`, `{3,0}` by default.
+    pub(crate) choice_list: &'a str,
+    /// Slots 26 and 64, `<ChoiceParameterLinks>`, `{5006,0}` and `{5007,0}`.
+    pub(crate) choice_parameter_links: &'a str,
+    pub(crate) choice_parameter_links_again: &'a str,
+    /// Slot 42, `<TypeLink>`, `{3,0,0}` by default.
+    pub(crate) type_link: &'a str,
+    /// Slot 27, `<ChoiceParameters>`, `{0,0}` by default.
+    pub(crate) choice_parameters: &'a str,
     /// Slot 45, `<CreateButton>`.
     pub(crate) create_button: Option<bool>,
     /// Slot 46, `<ChoiceButtonRepresentation>`: `ShowInDropList` 1,
@@ -1164,6 +1277,12 @@ impl NativeInputPayload<'_> {
             incomplete_choice_mode: None,
             text_edit: true,
             edit_text_update: None,
+            input_hint: "{1,0}",
+            choice_list: "{3,0}",
+            choice_parameter_links: "{5006,0}",
+            choice_parameter_links_again: "{5007,0}",
+            type_link: "{3,0,0}",
+            choice_parameters: "{0,0}",
             create_button: None,
             choice_button_representation: None,
             drop_list_button: None,
@@ -1228,16 +1347,16 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         "0",
     )?;
     Some(format!(
-        "{{36,{{3,0}},{width},{height},{horizontal},{vertical},{wrap},{password},{multi_line},\
+        "{{36,{choice_list},{width},{height},{horizontal},{vertical},{wrap},{password},{multi_line},\
          {extended_edit},{mark_negatives},{choice_list_button},{choice_button},{clear_button},\
          {spin_button},{open_button},{min_value},{max_value},{mask},{list_choice_mode},\
          {picture},{choice_list_height},{drop_list_width},{quick_choice},{folders},\
-         {choice_form},{{5006,0}},{{0,0}},{auto_choice_incomplete},{format},{edit_format},\
+         {choice_form},{links},{choice_parameters},{auto_choice_incomplete},{format},{edit_format},\
          {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},{type_domain},{events},\
-         {text_color},{back_color},{border_color},{font},{text_edit},{{3,0,0}},\
-         {edit_text_update},{{1,0}},{create_button},{choice_representation},\
+         {text_color},{back_color},{border_color},{font},{text_edit},{type_link},\
+         {edit_text_update},{input_hint},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{{5007,0}},{multiple_values}}}",
+         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{links_again},{multiple_values}}}",
         width = payload.width,
         height = payload.height,
         type_domain = u8::from(payload.type_domain_enabled),
@@ -1274,6 +1393,12 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         border_color = payload.border_color,
         font = payload.font,
         text_edit = u8::from(payload.text_edit),
+        input_hint = payload.input_hint,
+        choice_list = payload.choice_list,
+        links = payload.choice_parameter_links,
+        links_again = payload.choice_parameter_links_again,
+        type_link = payload.type_link,
+        choice_parameters = payload.choice_parameters,
         create_button = tristate(payload.create_button),
         drop_list_button = tristate(payload.drop_list_button),
         auto_max_width = u8::from(payload.auto_max_width),
@@ -1464,6 +1589,8 @@ pub(crate) enum NativeChoiceListLiteral<'a> {
     Number(&'a str),
     /// `xs:string` -- 1 047 items.
     Text(&'a str),
+    /// `xs:boolean` -- 247 values in 124 input field lists.
+    Boolean(bool),
     /// `ent:AccountType` -- 6 items, the ordinal of its three spellings.
     AccountType(u8),
     /// `xr:DesignTimeRef`, and an empty `<Value/>` with no type at all.
@@ -1475,6 +1602,7 @@ impl NativeChoiceListLiteral<'_> {
         match self {
             Self::Number(value) => format!("{{\"N\",{value}}}"),
             Self::Text(value) => format!("{{\"S\",{}}}", quoted(value)),
+            Self::Boolean(value) => format!("{{\"B\",{}}}", u8::from(*value)),
             Self::AccountType(ordinal) => {
                 format!("{{\"#\",{CHOICE_LIST_ACCOUNT_TYPE_UUID},{ordinal}}}")
             }
@@ -1617,8 +1745,8 @@ pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Opti
     let drag = root_code(payload.file_drag_mode, &[("AsFile", "0")], "1")?;
     Some(format!(
         "{{10,{width},{height},{horizontal},{vertical},{picture},{size},{zoomable},{hyperlink},{title},\
-         {text_color},{back_color},{font},{border},{enable_drag},{events},{auto_max_width},\
-         {max_width},0,{auto_max_height},{max_height},{drag},0,100}}",
+         {text_color},{back_color},{font},{border},0,{enable_drag},{events},{auto_max_width},\
+         {max_width},0,{auto_max_height},{max_height},{drag},100}}",
         zoomable = u8::from(payload.zoomable),
         enable_drag = u8::from(payload.enable_drag),
         width = payload.width,
@@ -1884,6 +2012,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "CancelSearch", "44ad3ec9-f3c2-4913-9224-5f9fb6418743"),
     ("Table", false, "Change", "b41f5bbc-ba5d-4888-8cd1-db246a371418"),
     ("Table", false, "CheckAll", "18248aa8-e621-4e19-a611-54fb8923644c"),
+    ("Table", false, "Choose", "8969c93a-23e5-4bef-941d-aaef315858d2"),
     ("Table", false, "ChooseAll", "15664824-eedc-4a92-9f6b-c89a2dead157"),
     ("Table", false, "Copy", "0ae4bea5-23be-42a7-b69e-97b11b29c453"),
     ("Table", false, "CopyToClipboard", "88078230-1f6b-415f-99e4-ad2ff73810cf"),
@@ -1900,9 +2029,11 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "OutputList", "49602716-fea6-497f-8047-726404038857"),
     ("Table", false, "Pickup", "59b4387d-f5be-4658-901f-bd3068217469"),
     ("Table", false, "SearchEverywhere", "7b683784-b474-441a-ba63-3d757bd0ffd4"),
+    ("Table", false, "SearchHistory", "d96b0c03-b209-4d01-a3fc-17a14f873b64"),
     ("Table", false, "SelectAll", "51c99108-107c-43e1-8918-e48835bf2495"),
     ("Table", false, "SetPresentation", "7d4db5ed-0981-4020-b3b8-886b7165ba05"),
     ("Table", false, "ShowMultipleSelection", "e7216412-03ac-4a81-99c2-1d7c28e88e31"),
+    ("Table", false, "ShowRowRearrangement", "8af6ebff-cd02-4bfe-a984-44a292623708"),
     ("Table", false, "SortListAsc", "2bbe4e12-06d2-409b-a972-eea585125d83"),
     ("Table", false, "SortListDesc", "58b2a785-23f6-4b0e-a324-9a1323285595"),
     ("Table", false, "Tree", "05468165-f954-45a5-84f2-6641c51f9f23"),
@@ -2547,6 +2678,7 @@ pub(crate) fn format_table_record(
     head: &str,
     properties: &[(&str, String)],
     events: &str,
+    command_set: &str,
     context_menu: &str,
     command_bar: &str,
     columns: &[(&str, String)],
@@ -2567,7 +2699,7 @@ pub(crate) fn format_table_record(
         body.push_str(record);
     }
     format!(
-        "{{{head},{count}{bag},{events},{{0}},1,{context_menu},1,{command_bar},\
+        "{{{head},{count}{bag},{events},{command_set},1,{context_menu},1,{command_bar},\
          {columns}{body},{tail}}}",
         count = properties.len(),
         columns = columns.len(),
@@ -2625,6 +2757,11 @@ pub(crate) struct NativeTableTail<'a> {
     pub(crate) current_row_use: Option<&'a str>,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
     pub(crate) file_drag_mode: Option<&'a str>,
+    /// Tail members 27, 28 and 34: `<GroupHorizontalAlign>`,
+    /// `<GroupVerticalAlign>` and the `DisplayImportance` attribute.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub(crate) group_vertical_align: Option<&'a str>,
+    pub(crate) display_importance: &'a str,
 }
 
 impl Default for NativeTableTail<'_> {
@@ -2652,6 +2789,9 @@ impl Default for NativeTableTail<'_> {
             max_rows_count: None,
             current_row_use: None,
             file_drag_mode: None,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            display_importance: "0",
         }
     }
 }
@@ -2725,8 +2865,20 @@ pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
         "{auto_mark},{auto_add},{visible},{multiple_choice},{{\"Pattern\"}},\"\",\"\",\
          {skip_on_input},{search_on_input},{tooltip_representation},1,{extended_tooltip},\
          {search_string},{view_status},{search_control},1,{first},1,{second},1,{third},\
-         {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},3,3,\
-         {height_variant},{auto_max_rows},{max_rows},{current_row_use},0,0,{drag},0",
+         {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},\
+         {group_horizontal},{group_vertical},{height_variant},{auto_max_rows},{max_rows},\
+         {current_row_use},0,{display_importance},{drag},0",
+        group_horizontal = root_code(
+            tail.group_horizontal_align,
+            &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+            "3",
+        )?,
+        group_vertical = root_code(
+            tail.group_vertical_align,
+            &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+            "3",
+        )?,
+        display_importance = tail.display_importance,
         auto_mark = native_tristate(tail.auto_mark_incomplete),
         auto_add = native_tristate(tail.auto_add_incomplete),
         visible = u8::from(tail.visible),
@@ -2921,6 +3073,8 @@ pub(crate) struct NativeDecorationItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) group_horizontal_align: Option<&'a str>,
     pub(crate) group_vertical_align: Option<&'a str>,
+    /// Member 34, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
 }
 
 impl Default for NativeDecorationItem<'_> {
@@ -2955,6 +3109,7 @@ impl Default for NativeDecorationItem<'_> {
             max_height: None,
             group_horizontal_align: None,
             group_vertical_align: None,
+            display_importance: "0",
         }
     }
 }
@@ -3003,7 +3158,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
          {width},{height},{horizontal_stretch},{vertical_stretch},{text_color},{font},\
          {{0,0,0}},1,{payload},{menu},{visible},{skip_on_input},{content},\
          {tooltip_representation},{tooltip},{auto_max_width},{max_width},0,\
-         {auto_max_height},{max_height},{horizontal},{vertical},0,0}}",
+         {auto_max_height},{max_height},{horizontal},{vertical},{display_importance},0}}",
         enabled = u8::from(decoration.enabled),
         visible = u8::from(decoration.visible),
         skip_on_input = native_tristate(decoration.skip_on_input),
@@ -3025,6 +3180,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         max_width = decoration.max_width.unwrap_or("0"),
         auto_max_height = u8::from(decoration.auto_max_height),
         max_height = decoration.max_height.unwrap_or("0"),
+        display_importance = decoration.display_importance,
     ))
 }
 
@@ -4594,6 +4750,8 @@ pub(crate) struct NativeGroupItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) horizontal_align: Option<&'a str>,
     pub(crate) vertical_align: Option<&'a str>,
+    /// The last member, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
 }
 
 impl Default for NativeGroupItem<'_> {
@@ -4621,6 +4779,7 @@ impl Default for NativeGroupItem<'_> {
             extended_tooltip: None,
             horizontal_align: None,
             vertical_align: None,
+            display_importance: "0",
         }
     }
 }
@@ -4696,7 +4855,8 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
         "{{22,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},\
          {content_change},{enabled},{read_only},{width},{height},{horizontal_stretch},\
          {vertical_stretch},{back_color},{font},{{0,0,0}},1,{payload},{count}{children},\
-         {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},0}}",
+         {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},\
+         {display_importance}}}",
         id = group.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = group.kind,
@@ -4715,6 +4875,7 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
         payload = group.payload,
         count = group.children.len(),
         visible = u8::from(group.visible),
+        display_importance = group.display_importance,
     ))
 }
 
@@ -5373,6 +5534,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ChartOfAccounts", "OffBalance", "-11"),
     ("ChartOfAccounts", "ExtDimensionTypes", "-12"),
     ("ChartOfAccounts", "Order", "-17"),
+    ("ChartOfAccounts", "Ref", "-2"),
     ("ChartOfAccounts/ExtDimensionTypes", "ExtDimensionType", "-13"),
     ("ChartOfAccounts/ExtDimensionTypes", "TurnoversOnly", "-15"),
     ("ChartOfCalculationTypes", "Code", "-2"),
@@ -5412,12 +5574,14 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ExchangePlan", "ReceivedNo", "-10"),
     ("ExchangePlan", "ThisNode", "-13"),
     ("ExchangePlan", "ExchangeDate", "-14"),
+    ("ExchangePlan", "Ref", "-6"),
     ("InformationRegister", "Period", "-2"),
     ("InformationRegister", "Recorder", "-3"),
     ("InformationRegister", "LineNumber", "-4"),
     ("Task", "Number", "-2"),
     ("Task", "Date", "-3"),
     ("Task", "BusinessProcess", "-7"),
+    ("Task", "Ref", "-5"),
     ("Task", "RoutePoint", "-8"),
     ("Task", "Description", "-9"),
     ("Task", "Executed", "-10"),
@@ -6313,6 +6477,7 @@ mod tests {
             &head,
             &[("5", "{\"B\",0}".to_string())],
             "{0,1,0}",
+            "{0}",
             "{22,{30,x},0}",
             "{22,{31,x},0}",
             &[("77ffcc29-7f2d-4223-b22f-19666e7250ba", "{37,{32,x},0}".to_string())],
@@ -6368,6 +6533,9 @@ mod tests {
             max_rows_count: Some("6"),
             current_row_use: Some("SelectionPresentationAndChoice"),
             file_drag_mode: Some("AsFile"),
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            display_importance: "0",
         })
         .expect("a table tail");
         assert!(spoken.starts_with("1,0,0,1,{\"Pattern\"},\"\",\"\",1,1,8,1,{12,{6,x},0},6,2,2,1,"));
@@ -7628,7 +7796,7 @@ mod tests {
         .expect("a picture payload");
         assert!(spoken.starts_with("{10,0,0,0,0,"));
         assert!(spoken.contains(",0,0,1,{1,0},"));
-        assert!(spoken.ends_with(",0,6,0,0,3,1,0,100}"));
+        assert!(spoken.ends_with(",{0,1,0},0,6,0,0,3,1,100}"));
         assert_eq!(
             format_picture_payload(&NativePicturePayload {
                 picture_size: Some("Tile"),

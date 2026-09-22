@@ -1570,6 +1570,26 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                     Some(items_root.as_path()),
                 )
                 .map_err(|error| error.to_string());
+                // The round-trip instrument's other half: every body the
+                // writer compiles is kept, named the way the exporter's
+                // override looks it up, so a full export can be run with the
+                // compiled bodies in place of the stored ones.
+                // A body the exporter cannot parse would make it fall back to
+                // the stored one and pass the round trip for nothing, so such
+                // a body is recorded as a failure instead of being written.
+                let wrote = match wrote {
+                    Ok(body) if crate::module_blob::parse_form_body_plain(&body).is_err() => {
+                        Err("the compiled body does not parse back".to_string())
+                    }
+                    other => other,
+                };
+                if let (Ok(body), Some(dir), Some(uuid)) = (
+                    wrote.as_ref(),
+                    std::env::var_os("IBCMD_RS_WRITE_BODIES_DIR"),
+                    form_uuid_of(path),
+                ) {
+                    let _ = fs::write(Path::new(&dir).join(format!("{uuid}.0.txt")), body);
+                }
                 (relative, wrote, stored)
             })
             .collect::<Vec<_>>()

@@ -4870,6 +4870,16 @@ fn dump_table_rows_streamed(
     })
 }
 
+/// A compiled form body to export in place of the stored one, if the
+/// round-trip override directory holds one for this row.
+fn form_body_override(file_name: &str) -> Option<String> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let dir = DIR
+        .get_or_init(|| std::env::var_os("IBCMD_RS_FORM_BODY_OVERRIDE_DIR").map(PathBuf::from))
+        .as_ref()?;
+    fs::read_to_string(dir.join(format!("{file_name}.txt"))).ok()
+}
+
 fn elapsed_ms(started: Instant) -> u64 {
     started.elapsed().as_millis().min(u128::from(u64::MAX)) as u64
 }
@@ -5427,7 +5437,16 @@ fn dump_table_row_bytes(
         Some(SourceAssetKind::Form { .. })
     ) {
         let started = Instant::now();
-        let parsed = parse_form_body_blob(bytes).ok();
+        // The round-trip instrument: when `IBCMD_RS_FORM_BODY_OVERRIDE_DIR`
+        // names a directory holding `<file name>.txt`, that plain body -- one
+        // the native form writer compiled from the source -- is exported in
+        // place of the stored one. Everything else in the export stays the
+        // database's, so a `source-diff` against the native tree measures
+        // exactly whether a compiled body exports back to its `Form.xml`.
+        let parsed = match form_body_override(file_name) {
+            Some(plain) => crate::module_blob::parse_form_body_plain(&plain).ok(),
+            None => parse_form_body_blob(bytes).ok(),
+        };
         timings.form_body_parse_cpu_ms += elapsed_ms(started);
         parsed
     } else {
