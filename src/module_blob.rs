@@ -539,6 +539,12 @@ struct FormXmlChildItem {
     hidden_state_title_back_color: Option<String>,
     format_present: bool,
     collapsed_representation_title_present: bool,
+    /// `<CollapsedRepresentationTitle>`, an ordinary localized-string block.
+    /// It lands in member 14 of the `{29,…}` payload, which already has a
+    /// slot for it: 202 of 202 store `format_form_title_value` of the element
+    /// and 72 524 of 72 524 groups without one store `{1,0}`. Only the parser
+    /// recorded nothing but the flag, and the writer refused on the flag.
+    collapsed_representation_title: Vec<LocalizedString>,
     associated_table_element_id: Option<String>,
     /// What the other container payloads read.
     header_horizontal_align: Option<String>,
@@ -616,6 +622,7 @@ struct FormXmlExtendedTooltip {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlCommandCurrentRowUse {
     DontUse,
+    Use,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -7339,7 +7346,10 @@ fn format_native_table(
         height_control_variant: item.scalars.get("HeightControlVariant").map(String::as_str),
         auto_max_rows_count: native_scalar_flag(item, "AutoMaxRowsCount", true),
         max_rows_count: item.scalars.get("MaxRowsCount").map(String::as_str),
-        current_row_use: item.table_current_row_use.map(|_| "DontUse"),
+        // The table's own spelling, not the constant the call site threw it
+        // away for: `DontUse` is in no arm of the tail's table, so every
+        // table that spelled `<CurrentRowUse>` refused whatever it spelled.
+        current_row_use: item.table_current_row_use.map(FormTableCurrentRowUse::xml_value),
         file_drag_mode: item.file_drag_mode.as_deref(),
         ..native::NativeTableTail::default()
     })
@@ -7690,9 +7700,8 @@ fn native_container_payload(
             if item.format_present {
                 return Err(anyhow!("a group names a format"));
             }
-            if item.collapsed_representation_title_present {
-                return Err(anyhow!("a group names a collapsed-representation title"));
-            }
+            let collapsed_title =
+                format_form_title_value(&item.collapsed_representation_title);
             if item.associated_table_element_id.is_some() {
                 return Err(anyhow!("a group names an associated table element"));
             }
@@ -7726,6 +7735,7 @@ fn native_container_payload(
                 united: item.united.unwrap_or(true),
                 hidden_state_title_back_color: &hidden,
                 current_row_use: item.current_row_use.as_deref(),
+                collapsed_representation_title: &collapsed_title,
                 ..native::NativeUsualGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
@@ -9534,7 +9544,10 @@ fn format_native_form_body(
                     picture: &command_picture,
                     functional_options: &command_options,
                     modifies_saved_data: command.modifies_saved_data.unwrap_or(false),
-                    current_row_use: command.current_row_use.map(|_| "DontUse"),
+                    current_row_use: command.current_row_use.map(|value| match value {
+                        FormXmlCommandCurrentRowUse::DontUse => "DontUse",
+                        FormXmlCommandCurrentRowUse::Use => "Use",
+                    }),
                     ..crate::compiler::bodies::form_native::NativeFormCommand::default()
                 },
             )
@@ -10560,11 +10573,18 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 } else if local == "item"
                     && (path_ends_with_for_child_title(&path, &current_child_items)
                         || path_ends_with_for_child_tooltip(&path, &current_child_items)
+                        || path_ends_with_for_child_collapsed_title(&path, &current_child_items)
                         || path_ends_with_for_child_warning_on_edit(&path, &current_child_items))
                 {
                     current_child_localized_section =
                         path.last().map(|value| value.to_string()).filter(|value| {
-                            matches!(value.as_str(), "Title" | "ToolTip" | "WarningOnEdit")
+                            matches!(
+                                value.as_str(),
+                                "Title"
+                                    | "ToolTip"
+                                    | "WarningOnEdit"
+                                    | "CollapsedRepresentationTitle"
+                            )
                         });
                     current_child_title_lang = None;
                     current_child_title_content = None;
@@ -13293,6 +13313,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             match current_child_localized_section.as_deref() {
                                 Some("ToolTip") => item.tooltip.push(value),
                                 Some("WarningOnEdit") => item.warning_on_edit.push(value),
+                                Some("CollapsedRepresentationTitle") => {
+                                    item.collapsed_representation_title.push(value);
+                                }
                                 _ => item.title.push(value),
                             }
                         }
@@ -14971,6 +14994,7 @@ fn parse_form_child_item_xml(
         hidden_state_title_back_color: None,
         format_present: false,
         collapsed_representation_title_present: false,
+        collapsed_representation_title: Vec::new(),
         associated_table_element_id: None,
         header_horizontal_align: None,
         shape: None,
@@ -15182,6 +15206,16 @@ fn path_ends_with_for_child_tooltip_representation(
 
 fn form_child_item_supports_warning_on_edit(tag: &str) -> bool {
     tag == "Column" || FormFieldSchema::supports_item_tag(tag)
+}
+
+fn path_ends_with_for_child_collapsed_title(
+    path: &[String],
+    items: &[FormXmlChildItem],
+) -> bool {
+    let Some(item) = items.last() else {
+        return false;
+    };
+    path_ends_with(path, &[item.tag.as_str(), "CollapsedRepresentationTitle"])
 }
 
 fn path_ends_with_for_child_warning_on_edit(path: &[String], items: &[FormXmlChildItem]) -> bool {
@@ -16558,6 +16592,7 @@ fn parse_form_table_period_date_xml(name: &str, value: &str) -> Result<String> {
 fn parse_form_command_current_row_use_xml(value: &str) -> Result<FormXmlCommandCurrentRowUse> {
     match value {
         "DontUse" => Ok(FormXmlCommandCurrentRowUse::DontUse),
+        "Use" => Ok(FormXmlCommandCurrentRowUse::Use),
         other => Err(anyhow!("unsupported Form Command CurrentRowUse: {other}")),
     }
 }
@@ -24643,7 +24678,7 @@ fn patch_form_body_command_entry(
     {
         replacements.push((
             current_row_use_range.clone(),
-            form_command_current_row_use_code(current_row_use).to_string(),
+            form_command_current_row_use_code(current_row_use)?.to_string(),
         ));
     }
     if let Some(modifies_saved_data) = command.modifies_saved_data
@@ -24918,9 +24953,17 @@ fn format_form_body_new_command(
     ))
 }
 
-fn form_command_current_row_use_code(value: FormXmlCommandCurrentRowUse) -> &'static str {
+/// The template compiler's own code for a command's `<CurrentRowUse>`, which
+/// is a different member from the native writer's pair and has only ever been
+/// measured for `DontUse`. `Use` refuses rather than borrowing that code.
+fn form_command_current_row_use_code(
+    value: FormXmlCommandCurrentRowUse,
+) -> Result<&'static str> {
     match value {
-        FormXmlCommandCurrentRowUse::DontUse => "3",
+        FormXmlCommandCurrentRowUse::DontUse => Ok("3"),
+        FormXmlCommandCurrentRowUse::Use => Err(anyhow!(
+            "a command's <CurrentRowUse>Use has no measured code in the template layout"
+        )),
     }
 }
 
