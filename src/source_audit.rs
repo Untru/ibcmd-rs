@@ -1436,6 +1436,16 @@ pub struct NativeFormWriterReport {
     /// blockers is counted once, under the first, so a count here is what
     /// removing that reason *starts* to unblock, not what it finishes.
     pub refused: BTreeMap<String, usize>,
+    /// Forms whose stored body carries neither of the two facts the source
+    /// does not determine, and so could in principle be written byte for
+    /// byte; and how many of those are. Both are properties of the database
+    /// the body came from rather than of the form: a navigator and a settings
+    /// document that is not the empty constant appear on Designer-saved
+    /// bodies and on none of the bodies of a configuration that was loaded.
+    /// Measuring against `compared` hides that; this is the denominator that
+    /// says how much of the gap is writer work.
+    pub achievable: usize,
+    pub achievable_exact: usize,
     /// How far a differing form is from exact, as `"<runs> runs"` when the
     /// two bodies are the same length and `"length differs"` when they are
     /// not. A form in `1 runs` is one member away; the ones in `length
@@ -1551,6 +1561,8 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         exact: 0,
         refused: BTreeMap::new(),
         refused_sets: BTreeMap::new(),
+        achievable: 0,
+        achievable_exact: 0,
         near_exact: BTreeMap::new(),
         different: 0,
         shapes: BTreeMap::new(),
@@ -1582,9 +1594,17 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                 };
                 report.compared += 1;
                 let stored = native_body_for_comparison(stored.trim_start_matches('\u{feff}'));
+                let achievable = !stored.contains("\"Navigator\"")
+                    && stored.contains(crate::module_blob::NATIVE_EMPTY_SETTINGS);
+                if achievable {
+                    report.achievable += 1;
+                }
                 let candidate = native_body_for_comparison(&wrote);
                 if candidate == stored.trim() {
                     report.exact += 1;
+                    if achievable {
+                        report.achievable_exact += 1;
+                    }
                 } else {
                     let stored = stored.trim();
                     report.different += 1;
