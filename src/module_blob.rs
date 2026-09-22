@@ -6751,6 +6751,7 @@ fn format_native_child_item(
                 .map(|(uuid, record)| (*uuid, record.clone()))
                 .collect::<Vec<_>>(),
             visible: item.visible.unwrap_or(true),
+            back_color: &native_scalar_color(item, "BackColor", source)?,
             extended_tooltip: extended_tooltip.as_deref(),
             ..native::NativeGroupItem::default()
         })
@@ -8111,6 +8112,9 @@ fn native_field_payload(
             horizontal_stretch: item.horizontal_stretch,
             vertical_stretch: item.vertical_stretch,
             hyperlink: item.hyperlink.unwrap_or(false),
+            text_color: &native_scalar_color(item, "TextColor", source)?,
+            back_color: &native_scalar_color(item, "BackColor", source)?,
+            font: &native_item_font(item, source)?,
             auto_max_width: item.auto_max_width.unwrap_or(true),
             max_width: item.max_width.as_deref().unwrap_or("0"),
             auto_max_height: item.auto_max_height.unwrap_or(true),
@@ -8124,6 +8128,10 @@ fn native_field_payload(
             horizontal_stretch: item.horizontal_stretch,
             vertical_stretch: item.vertical_stretch,
             wrap: item.wrap.unwrap_or(true),
+            text_color: &native_scalar_color(item, "TextColor", source)?,
+            back_color: &native_scalar_color(item, "BackColor", source)?,
+            border_color: &native_scalar_color(item, "BorderColor", source)?,
+            font: &native_item_font(item, source)?,
             // Absent stores 2, `false` 0 and `true` 1 over 83 001 payloads.
             extended_edit: native_scalar_tristate(item, "ExtendedEdit")?,
             password_mode: item.password_mode,
