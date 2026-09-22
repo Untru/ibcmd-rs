@@ -388,7 +388,20 @@ struct FormXmlListSettingsOrder {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlCommandInterfaceItem {
+    /// `NavigationPanel` or `CommandBar` -- which of the two panels spells it,
+    /// and so which member of the frame the item's record lands in: 7 for the
+    /// navigation panel, 8 for the command bar.
+    panel: String,
     command: Option<String>,
+    /// `<Attribute>`, a form-local data path whose encoding is unmeasured.
+    attribute: Option<String>,
+    /// `<Type>`: `Auto` and `Added`, the only two either corpus spells.
+    item_type: Option<String>,
+    /// How many `<Visible><Value name="Role.X">` children the item carries.
+    /// Their tuple is `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<v>}×n}}` and
+    /// the role uuids are a configuration lookup this writer does not do, so a
+    /// non-zero count refuses the form.
+    visible_roles: usize,
     command_group: Option<String>,
     index: Option<usize>,
     default_visible: Option<bool>,
@@ -8476,7 +8489,7 @@ fn native_item_events_where(
         .collect::<Vec<_>>();
     crate::compiler::bodies::form_native::format_native_events(
         &item.tag,
-        main_attribute_class,
+        &main_attribute_class,
         &events,
     )
     .ok_or_else(|| anyhow!("<{}> names an event the writer cannot place", item.tag))
@@ -8569,9 +8582,6 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
                 blockers.push(format!("an attribute column names <{part}>"));
             }
         }
-    }
-    if !properties.command_interface_items.is_empty() {
-        blockers.push("a command interface".to_string());
     }
     if properties.attributes_conditional_appearance.is_some() {
         blockers.push("a conditional appearance".to_string());
@@ -8959,10 +8969,27 @@ fn format_native_form_body(
         );
     }
 
+    // Frame members 6 and 7 are the two command interface panels, each
+    // `{0,<count>,<item> repeated count times}` over its `<Item>` children
+    // in document order. Absent and empty are the same source fact and
+    // both store `{0,0}`, in 10 551 + 1 059 forms with no exception.
+    let navigation_panel = native_command_interface_panel(
+        properties,
+        "NavigationPanel",
+        &main_attribute_class,
+        source,
+    )?;
+    let command_bar = native_command_interface_panel(
+        properties,
+        "CommandBar",
+        &main_attribute_class,
+        source,
+    )?;
+
     Ok(format!(
         "{{4,{root},{module},{{4,{count}{attributes},{sub_table_count}{sub_tables},0,{settings}}},\
-         {{0,{parameter_count}{parameters}}},{{0,{command_count}{commands}}},{{0,0}},\
-         {{0,0}},0,0}}",
+         {{0,{parameter_count}{parameters}}},{{0,{command_count}{commands}}},\
+         {navigation_panel},{command_bar},0,0}}",
         parameter_count = properties.parameters.len(),
         command_count = properties.commands.len(),
         module = format_1c_string(module_text),
@@ -10056,10 +10083,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Settings"])
                 {
                     current_dynamic_list_field = Some(FormXmlDynamicListField::default());
-                } else if local == "Item"
-                    && path_ends_with(&path, &["Form", "CommandInterface", "NavigationPanel"])
-                {
-                    current_command_interface_item = Some(FormXmlCommandInterfaceItem::default());
+                } else if local == "Item" && command_interface_path(&path, &[]) {
+                    current_command_interface_item = Some(FormXmlCommandInterfaceItem {
+                        panel: path.last().cloned().unwrap_or_default(),
+                        ..FormXmlCommandInterfaceItem::default()
+                    });
                 } else if (is_form_child_item_xml_tag(&local)
                     && (path.last().map(String::as_str) == Some("ChildItems")
                         || current_child_items.last().is_some_and(|item| {
@@ -10706,57 +10734,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "itemsUserSettingID",
                         ],
                     )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Command",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "CommandGroup",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Index",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "DefaultVisible",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Visible",
-                            "Common",
-                        ],
-                    )
+                    || command_interface_path(&path, &["Item", "Command"])
+                    || command_interface_path(&path, &["Item", "Attribute"])
+                    || command_interface_path(&path, &["Item", "Type"])
+                    || command_interface_path(&path, &["Item", "Visible", "Value"])
+                    || command_interface_path(&path, &["Item", "CommandGroup"])
+                    || command_interface_path(&path, &["Item", "Index"])
+                    || command_interface_path(&path, &["Item", "DefaultVisible"])
+                    || command_interface_path(&path, &["Item", "Visible", "Common"])
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "Title", "item", "lang"],
@@ -11250,57 +11235,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             "itemsUserSettingID",
                         ],
                     )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Command",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "CommandGroup",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Index",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "DefaultVisible",
-                        ],
-                    )
-                    || path_ends_with(
-                        &path,
-                        &[
-                            "Form",
-                            "CommandInterface",
-                            "NavigationPanel",
-                            "Item",
-                            "Visible",
-                            "Common",
-                        ],
-                    )
+                    || command_interface_path(&path, &["Item", "Command"])
+                    || command_interface_path(&path, &["Item", "Attribute"])
+                    || command_interface_path(&path, &["Item", "Type"])
+                    || command_interface_path(&path, &["Item", "Visible", "Value"])
+                    || command_interface_path(&path, &["Item", "CommandGroup"])
+                    || command_interface_path(&path, &["Item", "Index"])
+                    || command_interface_path(&path, &["Item", "DefaultVisible"])
+                    || command_interface_path(&path, &["Item", "Visible", "Common"])
                     || path_ends_with(
                         &path,
                         &["Form", "Commands", "Command", "Title", "item", "lang"],
@@ -12719,48 +12661,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                     }
                     "Command"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "CommandInterface",
-                                "NavigationPanel",
-                                "Item",
-                                "Command",
-                            ],
-                        ) =>
+                        if command_interface_path(&path, &["Item", "Command"]) =>
                     {
                         if let Some(item) = current_command_interface_item.as_mut() {
                             item.command = Some(text_value.trim().to_string());
                         }
                     }
                     "CommandGroup"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "CommandInterface",
-                                "NavigationPanel",
-                                "Item",
-                                "CommandGroup",
-                            ],
-                        ) =>
+                        if command_interface_path(&path, &["Item", "CommandGroup"]) =>
                     {
                         if let Some(item) = current_command_interface_item.as_mut() {
                             item.command_group = Some(text_value.trim().to_string());
                         }
                     }
                     "Index"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "CommandInterface",
-                                "NavigationPanel",
-                                "Item",
-                                "Index",
-                            ],
-                        ) =>
+                        if command_interface_path(&path, &["Item", "Index"]) =>
                     {
                         if let Some(item) = current_command_interface_item.as_mut() {
                             item.index = Some(text_value.trim().parse().with_context(|| {
@@ -12771,17 +12686,23 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             })?);
                         }
                     }
+                    "Attribute" if command_interface_path(&path, &["Item", "Attribute"]) => {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.attribute = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Type" if command_interface_path(&path, &["Item", "Type"]) => {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.item_type = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Value" if command_interface_path(&path, &["Item", "Visible", "Value"]) => {
+                        if let Some(item) = current_command_interface_item.as_mut() {
+                            item.visible_roles += 1;
+                        }
+                    }
                     "DefaultVisible"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "CommandInterface",
-                                "NavigationPanel",
-                                "Item",
-                                "DefaultVisible",
-                            ],
-                        ) =>
+                        if command_interface_path(&path, &["Item", "DefaultVisible"]) =>
                     {
                         if let Some(item) = current_command_interface_item.as_mut() {
                             item.default_visible = Some(parse_form_xml_bool(
@@ -12791,17 +12712,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                     }
                     "Common"
-                        if path_ends_with(
-                            &path,
-                            &[
-                                "Form",
-                                "CommandInterface",
-                                "NavigationPanel",
-                                "Item",
-                                "Visible",
-                                "Common",
-                            ],
-                        ) =>
+                        if command_interface_path(&path, &["Item", "Visible", "Common"]) =>
                     {
                         if let Some(item) = current_command_interface_item.as_mut() {
                             item.visible_common = Some(parse_form_xml_bool(
@@ -12810,12 +12721,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             )?);
                         }
                     }
-                    "Item"
-                        if path_ends_with(
-                            &path,
-                            &["Form", "CommandInterface", "NavigationPanel", "Item"],
-                        ) =>
-                    {
+                    "Item" if command_interface_path(&path, &["Item"]) => {
                         if let Some(item) = current_command_interface_item.take() {
                             properties.command_interface_items.push(item);
                         }
@@ -15099,6 +15005,212 @@ fn form_localized_text_path_allows_entity_ref(
         || path_ends_with_for_child_warning_on_edit_content(path, child_items)
 }
 
+/// One command interface panel, `{0,<count>,<item>...}`.
+fn native_command_interface_panel(
+    properties: &FormXmlBodyProperties,
+    panel: &str,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut records = String::new();
+    let mut count = 0usize;
+    for item in properties
+        .command_interface_items
+        .iter()
+        .filter(|item| item.panel == panel)
+    {
+        records.push(',');
+        records.push_str(&native_command_interface_item(
+            item,
+            count,
+            properties,
+            main_attribute_class,
+            source,
+        )?);
+        count += 1;
+    }
+    Ok(format!("{{0,{count}{records}}}"))
+}
+
+/// The `{3,…}` record of one item of a command interface panel.
+///
+/// Nine members on all 9 325 items of both corpora, no other arity:
+/// `{3,<id>,<command>,<parameter>,<type>,<group>,<index>,<default visible>,<visible>}`.
+/// Slot 1 is a designer-assigned identity the XML does not carry; it is the
+/// item's position in 9 303 of the 9 325, and in the 22 it is not, a number
+/// outlived the item that held it. That is the same unknowable as the
+/// settings composer: the round trip closes on the second export, not on the
+/// database the body came from.
+fn native_command_interface_item(
+    item: &FormXmlCommandInterfaceItem,
+    position: usize,
+    properties: &FormXmlBodyProperties,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    if item.attribute.is_some() {
+        return Err(anyhow!(
+            "a command interface item names an <Attribute>, whose data path is not measured"
+        ));
+    }
+    if item.visible_roles > 0 {
+        return Err(anyhow!(
+            "a command interface item's <Visible> names roles, whose tuple is not measured"
+        ));
+    }
+    let command = native_command_interface_command(item, properties, main_attribute_class, source)?;
+    // Every item of both corpora spells `<Type>`, and only these two words.
+    let kind = match item.item_type.as_deref() {
+        Some("Auto") => "0",
+        Some("Added") => "1",
+        other => {
+            return Err(anyhow!(
+                "a command interface item names the type {}, which is not measured",
+                other.unwrap_or("nothing")
+            ));
+        }
+    };
+    let group = match item.command_group.as_deref().map(str::trim) {
+        None => "{0}".to_string(),
+        Some(name) => {
+            let uuid = common_command_group_uuid(name)
+                .or_else(|| is_uuid_reference(name).then(|| name.to_string()))
+                .or_else(|| {
+                    let name = name.strip_prefix("CommandGroup.")?;
+                    source?
+                        .resolve_metadata_reference_uuid(&format!("CommandGroup.{name}"))
+                        .ok()
+                })
+                .ok_or_else(|| {
+                    anyhow!("a command interface item names the command group {name}, which the writer cannot place")
+                })?;
+            format!("{{0,{uuid}}}")
+        }
+    };
+    let index = item.index.map_or(0, |index| index);
+    // `<DefaultVisible>` is `false` or absent; `true` is never spelled.
+    let default_visible = u8::from(item.default_visible.unwrap_or(true));
+    // `<Visible><Common>` decides the flag when it is there; with no
+    // `<Visible>` at all a `<DefaultVisible>false` means visible. An item that
+    // spells neither stores `{"B",1}` 262 times and `{"B",0}` 28 times and no
+    // property of the item separates them, so it refuses.
+    let common = match (item.visible_common, item.default_visible) {
+        (Some(common), _) => common,
+        (None, Some(false)) => true,
+        (None, _) => {
+            return Err(anyhow!(
+                "a command interface item spells neither <DefaultVisible> nor <Visible>"
+            ));
+        }
+    };
+    Ok(format!(
+        "{{3,{position},{command},{{0}},{kind},{group},{index},{default_visible},\
+         {{0,{{0,{{\"B\",{}}},0}}}}}}",
+        u8::from(common)
+    ))
+}
+
+/// Member 2 of the item record: `{<discriminator>,<owner uuid>}`, which is not
+/// the flat single-uuid namespace a button's standard command uses.
+fn native_command_interface_command(
+    item: &FormXmlCommandInterfaceItem,
+    properties: &FormXmlBodyProperties,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    const FORM_COMMANDS: &str = "409b9a53-7f7e-4178-86c1-33176c7c7a7a";
+    let reference = item
+        .command
+        .as_deref()
+        .map(str::trim)
+        .ok_or_else(|| anyhow!("a command interface item names no command"))?;
+
+    // The two spellings the exporter writes when the target no longer
+    // resolves: a discriminator with a uuid, and a discriminator alone.
+    if let Some((head, tail)) = reference.split_once(':')
+        && head.bytes().all(|byte| byte.is_ascii_digit())
+        && !head.is_empty()
+        && is_uuid_reference(tail)
+    {
+        return Ok(format!("{{{head},{tail}}}"));
+    }
+    if !reference.is_empty() && reference.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Ok(format!("{{{reference}}}"));
+    }
+    if let Some(name) = reference.strip_prefix("Form.Command.") {
+        let id = properties
+            .commands
+            .iter()
+            .find(|command| command.name == name)
+            .map(|command| command.id.as_str())
+            .ok_or_else(|| {
+                anyhow!("a command interface item names {reference}, which the form does not declare")
+            })?;
+        return Ok(format!("{{{id},{FORM_COMMANDS}}}"));
+    }
+    if let Some(name) = reference.strip_prefix("Form.StandardCommand.") {
+        let uuid = crate::compiler::bodies::form_native::form_standard_command_uuid(
+            main_attribute_class,
+            name,
+        )
+        .or_else(|| {
+            crate::compiler::bodies::form_native::form_standard_command_uuid("", name)
+        })
+        .ok_or_else(|| {
+            anyhow!("a command interface item names {reference}, which the writer cannot place")
+        })?;
+        return Ok(format!("{{0,{uuid}}}"));
+    }
+    // `<Kind>.<Object>.StandardCommand.<Name>` stores an ordinal enumerating
+    // the owner's own standard commands. Every row but one is a per-kind
+    // constant; `InformationRegister.OpenByValue.<Dimension>` is
+    // `3 + <index>` on only 290 of 343 items, because the enumeration skips
+    // dimensions that cannot be opened by value and which filter that is has
+    // not been measured.
+    if reference.contains(".StandardCommand.") {
+        return Err(anyhow!(
+            "a command interface item names an object's standard command, whose ordinal is not measured"
+        ));
+    }
+    let source =
+        source.ok_or_else(|| anyhow!("a command interface has no source resolver"))?;
+    let uuid = if reference.contains(".Command.") {
+        source.resolve_command_reference_uuid(reference)?
+    } else {
+        source.resolve_metadata_reference_uuid(reference)?
+    };
+    Ok(format!("{{0,{uuid}}}"))
+}
+
+/// Whether a string is a bare uuid, which both a command and a command group
+/// can be spelled as when the export could not name the target.
+fn is_uuid_reference(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
+}
+
+/// Whether a path sits under a command interface panel, either of the two.
+///
+/// `<NavigationPanel>` and `<CommandBar>` carry the same `<Item>` grammar and
+/// land in frame members 7 and 8. Only the navigation panel was ever read, so
+/// a form whose command interface held a command bar was written with the bar
+/// dropped -- 876 ERP УХ and 14 BSP forms, 404 299 characters -- and was not
+/// refused, because the blocker reads the same list.
+fn command_interface_path(path: &[String], tail: &[&str]) -> bool {
+    ["NavigationPanel", "CommandBar"].iter().any(|panel| {
+        let mut wanted = Vec::with_capacity(tail.len() + 3);
+        wanted.extend_from_slice(&["Form", "CommandInterface", panel]);
+        wanted.extend_from_slice(tail);
+        path_ends_with(path, &wanted)
+    })
+}
+
 fn path_ends_with_for_child_type(path: &[String], items: &[FormXmlChildItem]) -> bool {
     let Some(item) = items.last() else {
         return false;
@@ -17114,7 +17226,7 @@ fn form_excluded_command_uuid<'a>(
         return Ok(uuid);
     }
     crate::compiler::bodies::form_native::form_standard_command_uuid(
-        main_attribute_class,
+        &main_attribute_class,
         &command.0,
     )
     .ok_or_else(|| {
