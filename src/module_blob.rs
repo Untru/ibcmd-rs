@@ -233,6 +233,10 @@ struct FormXmlCommand {
     action: Option<String>,
     functional_options: Vec<String>,
     modifies_saved_data: Option<bool>,
+    /// `<Representation>`, member 10. Absent stores 3 and the three words 0,
+    /// 1 and 2 over 64 248 command records -- the table the writer already
+    /// holds, and never received.
+    representation: Option<String>,
     current_row_use: Option<FormXmlCommandCurrentRowUse>,
     /// `<Picture>`, member 8 of the command's `{9,…}` record. Presence is
     /// pure: 47 799 commands that spell none store the empty constant and all
@@ -7052,11 +7056,27 @@ fn format_native_table(
                 bar.horizontal_align,
                 bar.autofill,
             )?;
+            // Member 22 of the group record is the child count, and 3 457 of
+            // the 11 489 table command bars carry children. This was the one
+            // of the three `NativeGroupItem` call sites that did not pass
+            // them, so every one of those bars was written empty.
+            let mut bar_children = Vec::new();
+            for child in &bar.child_items {
+                bar_children.push(format_native_child_item(
+                    child,
+                    data_paths,
+                    command_ids,
+                    items,
+                    main_attribute_class,
+                    source,
+                )?);
+            }
             native::format_group_item(&native::NativeGroupItem {
                 id: &bar.id,
                 kind: 9,
                 name: &bar.name,
                 payload: &payload,
+                children: &bar_children,
                 ..native::NativeGroupItem::default()
             })
             .ok_or_else(|| anyhow!("a table's command bar names something unplaceable"))?
@@ -8326,7 +8346,14 @@ fn native_decoration_payload(
     // own scalar bag is what they took while the guards were still narrow.
     let hyperlink = item
         .hyperlink
-        .unwrap_or_else(|| native_scalar_flag(item, "Hyperlink", false));
+        .unwrap_or_else(|| {
+            // The corpus spells it `<Hiperlink>`, with an i, on every one of
+            // the 2 513 label payloads that carry it; no field of either
+            // corpus spells the name the writer was looking for. Third
+            // misspelling after `<Autofill>`.
+            native_scalar_flag(item, "Hyperlink", false)
+                || native_scalar_flag(item, "Hiperlink", false)
+        });
     let horizontal_align = item
         .horizontal_align
         .map(native_horizontal_align_spelling)
@@ -9318,6 +9345,7 @@ fn format_native_form_body(
                     title: &title,
                     tooltip: &tooltip,
                     action: command.action.as_deref().unwrap_or(""),
+                    representation: command.representation.as_deref(),
                     picture: &command_picture,
                     functional_options: &command_options,
                     modifies_saved_data: command.modifies_saved_data.unwrap_or(false),
@@ -10836,6 +10864,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Representation"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
                     || path_ends_with_for_child_table_horizontal_scroll_bar(
@@ -11355,6 +11384,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "Events", "Event"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "Action"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "ModifiesSavedData"])
+                    || path_ends_with(&path, &["Form", "Commands", "Command", "Representation"])
                     || path_ends_with(&path, &["Form", "Commands", "Command", "CurrentRowUse"])
                     || path_ends_with_for_child_table_current_row_use(&path, &current_child_items)
                     || path_ends_with_for_child_table_horizontal_scroll_bar(
@@ -12421,6 +12451,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(command) = current_command.as_mut() {
                             command.current_row_use =
                                 Some(parse_form_command_current_row_use_xml(text_value.trim())?);
+                        }
+                    }
+                    "Representation"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Commands", "Command", "Representation"],
+                        ) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            command.representation = Some(text_value.trim().to_string());
                         }
                     }
                     "Item"
@@ -14568,6 +14608,7 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         title: Vec::new(),
         tooltip: Vec::new(),
         action: None,
+        representation: None,
         functional_options: Vec::new(),
         picture: None,
         picture_present: false,
