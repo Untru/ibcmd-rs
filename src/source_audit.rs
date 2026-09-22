@@ -1436,6 +1436,13 @@ pub struct NativeFormWriterReport {
     /// blockers is counted once, under the first, so a count here is what
     /// removing that reason *starts* to unblock, not what it finishes.
     pub refused: BTreeMap<String, usize>,
+    /// How far a differing form is from exact, as `"<runs> runs"` when the
+    /// two bodies are the same length and `"length differs"` when they are
+    /// not. A form in `1 runs` is one member away; the ones in `length
+    /// differs` are missing or carrying a whole record. Removing a blocker
+    /// moves a form into `different`, never into `exact`, so this is the
+    /// histogram that says what the exact count is actually waiting on.
+    pub near_exact: BTreeMap<String, usize>,
     /// The same forms keyed by their whole blocker set, joined as the writer
     /// joined it. A reason that is the only entry of its key is a sole
     /// blocker -- removing it frees those forms outright -- and one that
@@ -1544,6 +1551,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         exact: 0,
         refused: BTreeMap::new(),
         refused_sets: BTreeMap::new(),
+        near_exact: BTreeMap::new(),
         different: 0,
         shapes: BTreeMap::new(),
         examples: Vec::new(),
@@ -1591,6 +1599,39 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                         divergence_window(stored, at, 0, 34),
                     );
                     *report.shapes.entry(shape).or_insert(0) += 1;
+                    let distance = if candidate.chars().count() == stored.chars().count() {
+                        let mut runs = 0usize;
+                        let mut inside = false;
+                        for (left, right) in candidate.chars().zip(stored.chars()) {
+                            if left == right {
+                                inside = false;
+                            } else if !inside {
+                                inside = true;
+                                runs += 1;
+                            }
+                        }
+                        format!("{runs:03} runs")
+                    } else {
+                        // Which way, and by how much: a body that is short by
+                        // a tenth is missing a record, one short by a few
+                        // characters is missing a member. Ninety per cent of
+                        // the differing forms land here, so "one member off"
+                        // is not what the exact count is waiting on.
+                        let wrote = candidate.chars().count() as i64;
+                        let stored = stored.chars().count() as i64;
+                        let percent = (wrote - stored) * 100 / stored.max(1);
+                        let bucket = match percent {
+                            ..=-50 => "shorter by half or more",
+                            -49..=-10 => "shorter by 10-50%",
+                            -9..=-1 => "shorter by under 10%",
+                            0 => "shorter or longer by under 1%",
+                            1..=9 => "longer by under 10%",
+                            10..=49 => "longer by 10-50%",
+                            _ => "longer by half or more",
+                        };
+                        format!("length differs: {bucket}")
+                    };
+                    *report.near_exact.entry(distance).or_insert(0) += 1;
                     if report.examples.len() < 12 {
                         report.examples.push(NativeFormWriterDifference {
                             form,

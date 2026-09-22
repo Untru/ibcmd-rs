@@ -8466,16 +8466,27 @@ fn native_scalar_color(
 fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> {
     let mut blockers = Vec::new();
     for attribute in &properties.attributes {
-        // `<Columns><AdditionalColumns>` does not go in the attribute's own
-        // record. Its columns live in the groups that close the attributes
-        // section -- `{4,N,<attribute>×N,<G>,<group>×G,0,<settings>}` -- and
-        // the writer emits that tail as the constant `0,0`, the `G = 0` case.
-        // A form that declares one was written short and came out different
-        // instead of refused, which is the silent loss every other refusal
-        // here exists to stop.
-        if !attribute.additional_columns.is_empty() {
-            blockers.push("an attribute names <AdditionalColumns>".to_string());
+        for block in &attribute.additional_columns {
+            for column in &block.columns {
+                if let Some(part) = column.unwritable.first() {
+                    blockers.push(format!("an additional column names <{part}>"));
+                }
+            }
         }
+    }
+    // The attributes section closes with two count-prefixed collections --
+    // `{4,N,<attribute>×N,<subTables>,<bindings>,<settings>}` -- and the
+    // sub-tables are the form's `<AdditionalColumns>` blocks in document
+    // order. The order is the source's on 953 of the 960 forms that declare
+    // two or more, and the 7 permuted ones are not separable by any source
+    // property tested, so a second block still refuses.
+    let additional_blocks = properties
+        .attributes
+        .iter()
+        .map(|attribute| attribute.additional_columns.len())
+        .sum::<usize>();
+    if additional_blocks > 1 {
+        blockers.push("a form names two or more <AdditionalColumns>".to_string());
     }
     for attribute in &properties.attributes {
         if let Some(part) = attribute.unwritable.first() {
@@ -8746,6 +8757,8 @@ fn format_native_form_body(
     };
 
     // The attributes section, with the form's settings composer at its end.
+    let mut sub_tables = String::new();
+    let mut sub_table_count = 0usize;
     let mut attributes = String::new();
     for attribute in &properties.attributes {
         let pattern = format_form_attribute_type_pattern(attribute, source)?;
@@ -8774,6 +8787,41 @@ fn format_native_form_body(
         }
         // trailing[0] is a value list's element type and `{0,0}` for every
         // other kind of attribute; trailing[1] is `<FunctionalOptions>`.
+        for block in &attribute.additional_columns {
+            let mut records = String::new();
+            for column in &block.columns {
+                let column_title = format_form_title_value(&column.title);
+                let column_pattern = format_form_type_spec_pattern(
+                    "Form Additional Column",
+                    &column.spec,
+                    source,
+                )?;
+                let column_options = functional_options(&column.functional_options)?;
+                records.push(',');
+                records.push_str(
+                    &crate::compiler::bodies::form_native::format_form_attribute_column(
+                        &crate::compiler::bodies::form_native::NativeFormAttributeColumn {
+                            id: &column.id,
+                            name: &column.name,
+                            title: &column_title,
+                            type_pattern: &column_pattern,
+                            functional_options: &column_options,
+                            fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                            ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
+                        },
+                    ),
+                );
+            }
+            let path = data_paths.resolve(&block.table).ok_or_else(|| {
+                anyhow!(
+                    "<AdditionalColumns> names the table {}, which the writer cannot place",
+                    block.table
+                )
+            })?;
+            sub_tables.push(',');
+            sub_tables.push_str(&format!("{{0,{path},{}{records}}}", block.columns.len()));
+            sub_table_count += 1;
+        }
         let element_type = attribute
             .element_type
             .as_ref()
@@ -8849,7 +8897,7 @@ fn format_native_form_body(
     }
 
     Ok(format!(
-        "{{4,{root},{module},{{4,{count}{attributes},0,0,{settings}}},\
+        "{{4,{root},{module},{{4,{count}{attributes},{sub_table_count}{sub_tables},0,{settings}}},\
          {{0,{parameter_count}{parameters}}},{{0,{command_count}{commands}}},{{0,0}},\
          {{0,0}},0,0}}",
         parameter_count = properties.parameters.len(),
@@ -9886,6 +9934,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     });
                 } else if local == "Column" && path_ends_with(&path, &FORM_ADDITIONAL_COLUMNS_PATH) {
                     current_additional_column = parse_form_attribute_column_xml(&event)?;
+                } else if path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_PATH)
+                    && !matches!(
+                        local.as_str(),
+                        "Type" | "Title" | "FillCheck" | "FunctionalOptions"
+                    )
+                    && let Some(column) = current_additional_column.as_mut()
+                {
+                    // `<View>` and `<Edit>` land in members 6 and 7 of the
+                    // `{5,…}` record and what they hold when the element is
+                    // present was never measured -- the same refusal the
+                    // attribute's own columns carry. 7 records in 4 forms.
+                    if !column.unwritable.contains(&local) {
+                        column.unwritable.push(local.clone());
+                    }
                 } else if local == "Column"
                     && path_ends_with(&path, &["Form", "Attributes", "Attribute", "Columns"])
                 {
@@ -10422,6 +10484,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
                     )
                     || path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH)
+                    || path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_OPTION_PATH)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     // Members 4, 11 and 12 of the `{9,…}` record read these
                     // three, and none of them was collected: the `<Title>` of
@@ -10965,6 +11028,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
                     )
                     || path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH)
+                    || path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_OPTION_PATH)
                     || path_ends_with(&path, &["Form", "Attributes", "Attribute", "MainAttribute"])
                     // Members 4, 11 and 12 of the `{9,…}` record read these
                     // three, and none of them was collected: the `<Title>` of
@@ -11562,6 +11626,56 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "FillCheck" if path_is(&path, &FORM_COLUMN_PATH, &["FillCheck"]) => {
                         if let Some(column) = current_column.as_mut() {
                             column.fill_check = Some(text_value.trim().to_string());
+                        }
+                    }
+                    // A column under `<AdditionalColumns>` stores the same ten
+                    // members as the attribute's own, and until now only its
+                    // `id` and `name` were read: the whole block went into the
+                    // tail of the attributes section, which the writer emitted
+                    // as a constant, so nothing downstream ever asked.
+                    _ if form_type_spec_part(&path, &FORM_ADDITIONAL_COLUMN_PATH, true).is_some() => {
+                        if let Some(part) =
+                            form_type_spec_part(&path, &FORM_ADDITIONAL_COLUMN_PATH, true)
+                            && let Some(column) = current_additional_column.as_mut()
+                        {
+                            apply_form_type_spec_part(&mut column.spec, part, text_value.trim());
+                        }
+                    }
+                    "lang"
+                        if path_is(
+                            &path,
+                            &FORM_ADDITIONAL_COLUMN_PATH,
+                            &["Title", "item", "lang"],
+                        ) =>
+                    {
+                        current_localized_lang = Some(text_value.trim().to_string());
+                    }
+                    "content"
+                        if path_is(
+                            &path,
+                            &FORM_ADDITIONAL_COLUMN_PATH,
+                            &["Title", "item", "content"],
+                        ) =>
+                    {
+                        current_localized_content = Some(text_value.to_string());
+                    }
+                    "item" if path_is(&path, &FORM_ADDITIONAL_COLUMN_PATH, &["Title", "item"]) => {
+                        if let (Some(column), Some(lang), Some(content)) = (
+                            current_additional_column.as_mut(),
+                            current_localized_lang.take(),
+                            current_localized_content.take(),
+                        ) {
+                            column.title.push(LocalizedString { lang, content });
+                        }
+                    }
+                    "FillCheck" if path_is(&path, &FORM_ADDITIONAL_COLUMN_PATH, &["FillCheck"]) => {
+                        if let Some(column) = current_additional_column.as_mut() {
+                            column.fill_check = Some(text_value.trim().to_string());
+                        }
+                    }
+                    "Item" if path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_OPTION_PATH) => {
+                        if let Some(column) = current_additional_column.as_mut() {
+                            column.functional_options.push(text_value.trim().to_string());
                         }
                     }
                     "Column" if path_ends_with(&path, &FORM_ADDITIONAL_COLUMN_PATH) => {
@@ -30554,6 +30668,19 @@ const FORM_ADDITIONAL_COLUMN_PATH: [&str; 6] = [
     "AdditionalColumns",
     "Column",
 ];
+/// The same collection, one level deeper, on a column of an
+/// `<AdditionalColumns>` block.
+const FORM_ADDITIONAL_COLUMN_OPTION_PATH: [&str; 8] = [
+    "Form",
+    "Attributes",
+    "Attribute",
+    "Columns",
+    "AdditionalColumns",
+    "Column",
+    "FunctionalOptions",
+    "Item",
+];
+
 const FORM_ELEMENT_TYPE_PATH: [&str; 4] = ["Form", "Attributes", "Attribute", "Settings"];
 
 /// Every text node of a `<Type>` block, under the element that wraps it.
@@ -30611,10 +30738,14 @@ fn path_ends_with_for_form_type_text(path: &[String]) -> bool {
             &["Type", "DateQualifiers", "DateFractions"],
         )
         || form_type_spec_part(path, &FORM_COLUMN_PATH, true).is_some()
+        || form_type_spec_part(path, &FORM_ADDITIONAL_COLUMN_PATH, true).is_some()
         || form_type_spec_part(path, &FORM_ELEMENT_TYPE_PATH, false).is_some()
         || path_is(path, &FORM_COLUMN_PATH, &["FillCheck"])
         || path_is(path, &FORM_COLUMN_PATH, &["Title", "item", "lang"])
         || path_is(path, &FORM_COLUMN_PATH, &["Title", "item", "content"])
+        || path_is(path, &FORM_ADDITIONAL_COLUMN_PATH, &["FillCheck"])
+        || path_is(path, &FORM_ADDITIONAL_COLUMN_PATH, &["Title", "item", "lang"])
+        || path_is(path, &FORM_ADDITIONAL_COLUMN_PATH, &["Title", "item", "content"])
 }
 
 /// One text node of a `<Type>` block, stored where it belongs.
