@@ -121,6 +121,8 @@ struct FormXmlBodyProperties {
     /// The form-wide `<ConditionalAppearance>` subtree exactly as Form.xml
     /// spells it, from its opening tag to its closing tag.
     attributes_conditional_appearance_source: Option<String>,
+    /// Why the typed DCS children did not read, when they did not.
+    dcs_error: Option<String>,
     title: Vec<LocalizedString>,
     width: Option<String>,
     height: Option<String>,
@@ -211,10 +213,14 @@ struct FormXmlChoiceListItem {
     literal: Option<String>,
     /// Anything inside the item the writer has not measured.
     unwritable: Vec<String>,
+    /// The values of a `v8:FixedArray` literal, each read like an item.
+    array: Vec<FormXmlChoiceListItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlAutoCommandBar {
+    /// The `DisplayImportance` attribute, the group record's last member.
+    display_importance: Option<String>,
     id: String,
     name: String,
     horizontal_align: Option<FormXmlHorizontalAlign>,
@@ -275,6 +281,9 @@ struct FormXmlCommand {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlAttribute {
+    /// `<View>` and `<Edit>`, members 6 and 7 of the record.
+    view: Option<FormXmlRights>,
+    edit: Option<FormXmlRights>,
     id: String,
     name: String,
     /// Every entry of `<Type>`, in XML order: `<v8:Type>` and `<v8:TypeSet>`
@@ -6970,6 +6979,7 @@ fn format_native_child_item(
             vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
             display_importance,
             functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
             ..native::NativeGroupItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -7008,6 +7018,23 @@ fn format_native_child_item(
                 anyhow!("<{}> totals {path}, which the writer cannot place", item.tag)
             })?,
             None => "{0}".to_string(),
+        };
+        // Record member 48 is the field's own `<CommandSet>` -- a spreadsheet
+        // document's excluded commands, the table's shape.
+        let field_command_set = if item.excluded_commands.is_empty() {
+            native::NativeFieldItem::default().appearance[6].to_string()
+        } else {
+            let mut excluded = item
+                .excluded_commands
+                .iter()
+                .map(|name| {
+                    native::item_standard_command_uuid(&item.tag, false, name).ok_or_else(|| {
+                        anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            excluded.sort_unstable();
+            format!("{{{},{}}}", excluded.len(), excluded.join(","))
         };
         let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
         let footer_picture = native_extra_picture(item, "FooterPicture", source, items_root)?;
@@ -7051,7 +7078,7 @@ fn format_native_child_item(
                 &footer_text_color,
                 "{3,4,{0}}",
                 &footer_font,
-                native::NativeFieldItem::default().appearance[6],
+                &field_command_set,
             ],
             picture_index: &shortcut,
             functional_options: user_visible.as_deref(),
@@ -7160,6 +7187,8 @@ fn format_native_child_item(
             vertical_stretch: item.vertical_stretch.unwrap_or(false),
             forty_eighth: display_importance,
             functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
+            parameter: &native_button_parameter(item, source)?,
             ..native::NativeButtonItem::default()
         })
         .ok_or_else(|| anyhow!("<Button> names something the writer cannot place"))?;
@@ -7211,6 +7240,7 @@ fn format_native_child_item(
             max_height: item.max_height.as_deref(),
             display_importance,
             functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
             ..native::NativeDecorationItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -7721,10 +7751,77 @@ fn native_root_property_bag(
         | "cfg:ChartOfCalculationTypesObject" => {
             bag.push(("24", "{\"B\",0}".to_string()));
         }
+        // A report form's bag carries eleven keys nothing in Form.xml decides
+        // -- the default forms, the variant name, a settings value, the
+        // report's name -- and the export reads none of them back. The eight
+        // it does read are written from the root's own elements:
+        // `ReportResult` 5, `DetailsData` 6 and `VariantAppearance` 20 as a
+        // reference to a form attribute, `ReportFormType` 7, `AutoShowState`
+        // 21, `CustomSettingsFolder` 23 as an item id, `ReportResultViewMode`
+        // 27 and `ViewModeApplicationOnSetReportResult` 29.
         "cfg:ReportObject" => {
-            return Err(anyhow!(
-                "a report form's property bag names what the source does not carry"
-            ));
+            let scalar = |name: &str| properties.root_scalars.get(name).map(|value| value.trim());
+            let attribute_ref = |name: &str| -> Result<String> {
+                let attribute = properties
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.name == name)
+                    .ok_or_else(|| anyhow!("the report names {name}, which is not a form attribute"))?;
+                Ok(format!(
+                    "{{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{{1,{{{}}}}}}}",
+                    attribute.id
+                ))
+            };
+            let enumerated = |name: &str, uuid: &str, table: &[(&str, &str)]| -> Result<Option<String>> {
+                let Some(value) = scalar(name) else {
+                    return Ok(None);
+                };
+                let code = table
+                    .iter()
+                    .find_map(|(spelling, code)| (*spelling == value).then_some(*code))
+                    .ok_or_else(|| anyhow!("<{name}>{value} is not measured"))?;
+                Ok(Some(format!("{{\"#\",{uuid},{code}}}")))
+            };
+            if let Some(name) = scalar("ReportResult") {
+                bag.push(("5", attribute_ref(name)?));
+            }
+            if let Some(name) = scalar("DetailsData") {
+                bag.push(("6", attribute_ref(name)?));
+            }
+            if let Some(value) = enumerated(
+                "ReportFormType",
+                "acbc2eeb-2efb-48e4-b78a-661fd09fcf80",
+                &[("Main", "0"), ("Settings", "1"), ("Variant", "2")],
+            )? {
+                bag.push(("7", value));
+            }
+            if let Some(name) = scalar("VariantAppearance") {
+                bag.push(("20", attribute_ref(name)?));
+            }
+            if let Some(value) = enumerated(
+                "AutoShowState",
+                "f26c3706-a6ca-45cb-869a-e6ad38cd5f78",
+                &[("Auto", "0"), ("DontShow", "1"), ("ShowOnComposition", "3")],
+            )? {
+                bag.push(("21", value));
+            }
+            if let Some(name) = scalar("CustomSettingsFolder") {
+                bag.push(("23", format!("{{\"N\",{}}}", item_id(Some(name))?)));
+            }
+            if let Some(value) = enumerated(
+                "ReportResultViewMode",
+                "b9311bea-b26b-4ae0-8b5d-7b64048fd2df",
+                &[("Auto", "0"), ("Default", "1"), ("Compact", "2")],
+            )? {
+                bag.push(("27", value));
+            }
+            if let Some(value) = enumerated(
+                "ViewModeApplicationOnSetReportResult",
+                "874260df-7e23-4f02-9e10-5794914b5adf",
+                &[("Auto", "0")],
+            )? {
+                bag.push(("29", value));
+            }
         }
         "dcsset:SettingsComposer" => {
             return Err(anyhow!("a settings-composer form's property bag is not measured"));
@@ -7827,7 +7924,10 @@ fn native_table_addition(
             FormTooltipRepresentation::ShowLeft => "ShowLeft",
             FormTooltipRepresentation::ShowBottom => "ShowBottom",
             FormTooltipRepresentation::ShowRight => "ShowRight",
-        }),
+        })
+        // The typed reader is gated to fields; an addition's own spelling is
+        // in the bag.
+        .or_else(|| item.scalars.get("ToolTipRepresentation").map(String::as_str)),
         payload: &payload,
         context_menu: &context_menu,
         extended_tooltip: &extended_tooltip,
@@ -8043,6 +8143,7 @@ fn native_container_payload(
             if item.picture_present {
                 return Err(anyhow!("a column group names a picture"));
             }
+            let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
             let title_back_color = native_item_color(item.title_back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a column group names a colour it cannot place"))?;
             native::format_column_group_payload(&native::NativeColumnGroupPayload {
@@ -8052,6 +8153,7 @@ fn native_container_payload(
                 header_horizontal_align: item.header_horizontal_align.as_deref(),
                 title_back_color: &title_back_color,
                 fixing_in_table: item.fixing_in_table.map(native_fixing_in_table_spelling),
+                picture: &header_picture,
                 ..native::NativeColumnGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<ColumnGroup> names a spelling the writer cannot place"))
@@ -8317,6 +8419,67 @@ fn native_choice_list(
     Ok(crate::compiler::bodies::form_native::format_native_choice_list(&values))
 }
 
+/// Payload members 55 to 60 of an input field, measured over both corpora:
+/// `<AutoShowClearButtonMode>` and `<AutoShowOpenButtonMode>` (`Always` 1,
+/// `FilledOnly` 2), `<AutoCorrectionOnTextInput>` and
+/// `<SpellCheckingOnTextInput>` (`Use` 1, `DontUse` 2), a constant 0, and
+/// `<SpecialTextInputMode>` (`Email` 4, `PhoneNumber` 5, `Digits` 6); 0 when
+/// absent. Another spelling is refused.
+fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 6]> {
+    let code = |name: &str, table: &[(&str, &'static str)]| -> Result<&'static str> {
+        match item.scalars.get(name).map(String::as_str) {
+            None => Ok("0"),
+            Some(value) => table
+                .iter()
+                .find_map(|(spelling, code)| (*spelling == value).then_some(*code))
+                .ok_or_else(|| anyhow!("<{name}>{value} is not measured")),
+        }
+    };
+    let show = [("Always", "1"), ("FilledOnly", "2")];
+    let usage = [("Use", "1"), ("DontUse", "2")];
+    Ok([
+        code("AutoShowClearButtonMode", &show)?,
+        code("AutoShowOpenButtonMode", &show)?,
+        code("AutoCorrectionOnTextInput", &usage)?,
+        code("SpellCheckingOnTextInput", &usage)?,
+        "0",
+        code(
+            "SpecialTextInputMode",
+            &[("Email", "4"), ("PhoneNumber", "5"), ("Digits", "6")],
+        )?,
+    ])
+}
+
+/// Member 33 of a button: the command's `<Parameter>`, `{"U"}` when it names
+/// none. An `xr:MDObjectRef` stores `{"#",fc01b5df-…,<object uuid>}`, the
+/// shape a dynamic list's main table takes; another type is not measured.
+fn native_button_parameter(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(value) = item.scalars.get("Parameter").map(|value| value.trim()) else {
+        return Ok("{\"U\"}".to_string());
+    };
+    match item.scalars.get("Parameter@type").map(String::as_str) {
+        Some("xr:MDObjectRef") => {
+            let source = source
+                .ok_or_else(|| anyhow!("a button names {value} and no configuration is on hand"))?;
+            let uuid = source.resolve_metadata_reference_uuid(value)?;
+            Ok(format!("{{\"#\",fc01b5df-97fe-449b-83d4-218a090e681e,{uuid}}}"))
+        }
+        other => Err(anyhow!("a button's <Parameter> of type {other:?} is not measured")),
+    }
+}
+
+/// A `<Shortcut>` of an item, `{0,0,0}` when it names none.
+fn native_item_shortcut(item: &FormXmlChildItem) -> Result<String> {
+    match item.scalars.get("Shortcut") {
+        Some(text) => crate::compiler::bodies::form_native::format_native_shortcut(text)
+            .ok_or_else(|| anyhow!("<{}> names the shortcut {text}, which is not measured", item.tag)),
+        None => Ok("{0,0,0}".to_string()),
+    }
+}
+
 /// Payload member 27 of an input field: its `<ChoiceParameters>`,
 /// `{0,N,("<name>",<value>)×N}` with the choice-list value grammar, `{0,0}`
 /// when it names none. 1 356 of 1 364.
@@ -8385,6 +8548,47 @@ fn native_choice_list_value(
             Ok(native::format_native_choice_list_value(
                 false,
                 &native::NativeChoiceListLiteral::Number(text),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // `v8:FixedArray`: `{"#",4500381b-…,{<n>,<value>×n}}`, each value an
+        // ordinary choice-list value, the flag 1 and both ids zero -- 159 of
+        // 159 choice parameters.
+        Some("v8:FixedArray") => {
+            let values = choice
+                .array
+                .iter()
+                .map(|value| native_choice_list_value(value, source))
+                .collect::<Result<Vec<_>>>()?;
+            let mut literal = format!(
+                "{{\"#\",4500381b-db30-4a10-9db4-990038032acf,{{{}",
+                values.len()
+            );
+            for value in &values {
+                literal.push(',');
+                literal.push_str(value);
+            }
+            literal.push_str("}}");
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&literal),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // `xs:dateTime`: `{"D",<yyyymmddhhmmss>}`.
+        Some("xs:dateTime") => {
+            let digits = text.chars().filter(char::is_ascii_digit).collect::<String>();
+            if digits.len() != 14 {
+                return Err(anyhow!("a <ChoiceList> date {text} is not measured"));
+            }
+            let literal = format!("{{\"D\",{digits}}}");
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&literal),
                 NATIVE_ZERO_UUID,
                 NATIVE_ZERO_UUID,
                 &title,
@@ -8640,6 +8844,7 @@ fn native_field_payload(
             input_hint: &native_localized(item, "InputHint"),
             choice_list: &native_choice_list(item, source)?,
             choice_parameters: &native_choice_parameters(item, source)?,
+            text_input_tail: native_text_input_tail(item)?,
             choice_parameter_links: &choice_parameter_links.0,
             choice_parameter_links_again: &choice_parameter_links.1,
             type_link: &native_type_link(item, data_paths)?,
@@ -8648,7 +8853,14 @@ fn native_field_payload(
         .ok_or_else(|| anyhow!("the input field names something the writer cannot place"))
         }
         "CheckBoxField" => {
-            let format = native_localized(item, "Format");
+            // Slot 5 holds a check box's `<EditFormat>` -- the `БЛ=…; БИ=…`
+            // pair of its two captions, 81 ERP УХ forms -- and `<Format>` when
+            // it names that instead.
+            let format = if item.localized.contains_key("EditFormat") {
+                native_localized(item, "EditFormat")
+            } else {
+                native_localized(item, "Format")
+            };
             let font = native_item_font(item, source)?;
             let text_color = native_scalar_color(item, "TextColor", source)?;
             let back_color = native_scalar_color(item, "BackColor", source)?;
@@ -9800,6 +10012,11 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         if let Some(part) = attribute.unwritable.first() {
             blockers.push(format!("an attribute names <{part}>"));
         }
+        if attribute.settings.is_some()
+            && let Some(error) = properties.dcs_error.as_ref()
+        {
+            blockers.push(error.clone());
+        }
         if attribute.settings.is_some() {
             // One message stood for four situations, and only the first is a
             // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
@@ -9943,6 +10160,14 @@ fn format_native_form_body(
     }
 
     let title = format_form_title_value(&properties.title);
+    let settings_storage = match properties.root_scalars.get("SettingsStorage") {
+        Some(reference) => Some(
+            source
+                .ok_or_else(|| anyhow!("the form names {reference} and no configuration is on hand"))?
+                .resolve_metadata_reference_uuid(reference)?,
+        ),
+        None => None,
+    };
     let root_head = crate::compiler::bodies::form_native::format_root_head(&crate::compiler::bodies::form_native::NativeRootHead {
         window_opening_mode: properties.window_opening_mode.map(|mode| match mode {
             FormXmlWindowOpeningMode::DontBlock => "DontUse",
@@ -9956,7 +10181,7 @@ fn format_native_form_body(
             .map(|_| "DefaultButton"),
         save_data_in_settings: properties.save_data_in_settings.map(|_| "UseList"),
         auto_save_data_in_settings: properties.auto_save_data_in_settings.map(|_| "Use"),
-        settings_storage: None,
+        settings_storage: settings_storage.as_deref(),
         auto_title: properties.auto_title.unwrap_or(true),
         title: &title,
         group: properties.group.map(|_| "Vertical"),
@@ -10064,6 +10289,10 @@ fn format_native_form_body(
                 name: &bar.name,
                 children: &bar_children,
                 payload: &payload,
+                display_importance: crate::compiler::bodies::form_native::native_display_importance(
+                    bar.display_importance.as_deref(),
+                )
+                .ok_or_else(|| anyhow!("the auto command bar names an unmeasured DisplayImportance"))?,
                 ..crate::compiler::bodies::form_native::NativeGroupItem::default()
             })
             .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?
@@ -10251,6 +10480,14 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let attribute_view = match attribute.view.as_ref() {
+            Some(rights) => native_rights(rights, "an attribute's <View>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
+        let attribute_edit = match attribute.edit.as_ref() {
+            Some(rights) => native_rights(rights, "an attribute's <Edit>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
         let use_always = native_form_attribute_use_always(attribute, &data_paths)?;
         let attribute_options = functional_options(&attribute.functional_options)?;
         attributes.push(',');
@@ -10262,6 +10499,8 @@ fn format_native_form_body(
                 type_pattern: &pattern,
                 use_always: &use_always,
                 save: &save,
+                view: &attribute_view,
+                edit: &attribute_edit,
                 main_attribute: attribute.main_attribute.unwrap_or(false),
                 saved_data: attribute.saved_data.unwrap_or(false),
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
@@ -11041,8 +11280,17 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
-    let canonical_dcs = parse_form_dcs_children(xml)
-        .map_err(|error| anyhow!("cannot parse Form DCS children: {error}"))?;
+    // The typed DCS reading serves the dynamic lists' settings; the form-wide
+    // conditional appearance is transcribed and does not need it. A form
+    // whose DCS children do not read is refused only when a dynamic list
+    // would be written from them.
+    let (canonical_dcs, dcs_error) = match parse_form_dcs_children(xml) {
+        Ok(children) => (children, None),
+        Err(error) => (
+            Default::default(),
+            Some(format!("cannot parse Form DCS children: {error}")),
+        ),
+    };
     let mut canonical_filters = canonical_dcs.list_settings_filters.into_iter();
     let mut canonical_orders = canonical_dcs.list_settings_orders.into_iter();
     let mut canonical_conditional_appearances = canonical_dcs
@@ -11069,6 +11317,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut properties = FormXmlBodyProperties::default();
     properties.attributes_conditional_appearance = attributes_conditional_appearance;
     properties.attributes_conditional_appearance_source = attributes_conditional_appearance_source;
+    properties.dcs_error = dcs_error;
     let mut current_event_name = None::<String>;
     let mut current_command = None::<FormXmlCommand>;
     let mut current_localized_section = None::<String>;
@@ -11105,7 +11354,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut current_choice_content = None::<String>;
 
     loop {
-        match reader.read_event_into(&mut buffer) {
+        // An entity reference is text: `&amp;` between two chunks of a title
+        // is one `&` of the same string. Handing it to the text arm keeps every
+        // buffer that arm feeds in step; the reference arm's own allow-list
+        // turned `R&amp;M` into `RM` in 19 ERP УХ titles.
+        let event = match reader.read_event_into(&mut buffer) {
+            Ok(Event::GeneralRef(reference)) => {
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_string()
+                };
+                Ok(Event::Text(quick_xml::events::BytesText::from_escaped(value)))
+            }
+            other => other,
+        };
+        match event {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 // Cleared on every open. The list of names this used to
@@ -11210,7 +11477,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
-                    if matches!(local.as_str(), "MinValue" | "MaxValue")
+                    if matches!(local.as_str(), "MinValue" | "MaxValue" | "Parameter")
                         && let Some(kind) = xml_attribute_value(&event, "type")?
                     {
                         item.scalars.insert(format!("{local}@type"), kind);
@@ -11249,6 +11516,32 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(command) = current_command.as_mut()
                 {
                     command.use_rights = Some(FormXmlRights::default());
+                }
+                if path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && matches!(local.as_str(), "View" | "Edit")
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    if local == "View" {
+                        attribute.view = Some(FormXmlRights::default());
+                    } else {
+                        attribute.edit = Some(FormXmlRights::default());
+                    }
+                }
+                if local == "Value"
+                    && (path_ends_with(&path, &["Form", "Attributes", "Attribute", "View"])
+                        || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Edit"]))
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    let rights = if path.last().map(String::as_str) == Some("View") {
+                        attribute.view.as_mut()
+                    } else {
+                        attribute.edit.as_mut()
+                    };
+                    if let Some(rights) = rights {
+                        rights
+                            .values
+                            .push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                    }
                 }
                 if local == "Value"
                     && path_ends_with(&path, &["Form", "Commands", "Command", "Use"])
@@ -11328,7 +11621,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         && !matches!(local.as_str(), "Ref" | "LoadTransparent")
                         && let Some(picture) = command.picture.as_mut()
                     {
-                        picture.unwritable.push(local.clone());
+                        // `<xr:TransparentPixel x y/>` is members 4 and 5 of the
+                        // reference, on a command as on an item.
+                        if local == "TransparentPixel" {
+                            picture.transparent_x = xml_attribute_value(&event, "x")?;
+                            picture.transparent_y = xml_attribute_value(&event, "y")?;
+                            if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                                picture.unwritable.push(local.clone());
+                            }
+                        } else {
+                            picture.unwritable.push(local.clone());
+                        }
                     }
                 }
                 if local == "UseAlways"
@@ -11736,7 +12039,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         && !matches!(local.as_str(), "Ref" | "LoadTransparent")
                         && let Some(picture) = command.picture.as_mut()
                     {
-                        picture.unwritable.push(local.clone());
+                        // `<xr:TransparentPixel x y/>` is members 4 and 5 of the
+                        // reference, on a command as on an item.
+                        if local == "TransparentPixel" {
+                            picture.transparent_x = xml_attribute_value(&event, "x")?;
+                            picture.transparent_y = xml_attribute_value(&event, "y")?;
+                            if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                                picture.unwritable.push(local.clone());
+                            }
+                        } else {
+                            picture.unwritable.push(local.clone());
+                        }
                     }
                 }
                 if local == "UseAlways"
@@ -13007,6 +13320,31 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             }
                         }
                     }
+                    "Common" | "Value"
+                        if path.len() >= 2
+                            && matches!(path[path.len() - 2].as_str(), "View" | "Edit")
+                            && path_ends_with(
+                                &path[..path.len() - 2],
+                                &["Form", "Attributes", "Attribute"],
+                            ) =>
+                    {
+                        let value = parse_form_xml_bool("Attribute rights", nested_text.trim())?;
+                        let section = path[path.len() - 2].clone();
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let rights = if section == "View" {
+                                attribute.view.as_mut()
+                            } else {
+                                attribute.edit.as_mut()
+                            };
+                            if let Some(rights) = rights {
+                                if local == "Common" {
+                                    rights.common = Some(value);
+                                } else if let Some(last) = rights.values.last_mut() {
+                                    last.1 = Some(value);
+                                }
+                            }
+                        }
+                    }
                     "Shortcut" | "AssociatedTableElementId"
                         if path_ends_with(&path, &["Form", "Commands", "Command", local.as_str()]) =>
                     {
@@ -13114,6 +13452,26 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                         current_choice_content.take(),
                                     ) {
                                         choice.title.push(LocalizedString { lang, content });
+                                    }
+                                }
+                                FormChoiceListPart::ArrayLiteral => {
+                                    if let Some(value) = choice.array.last_mut() {
+                                        value.literal = Some(nested_text.trim().to_string());
+                                    }
+                                }
+                                FormChoiceListPart::ArrayTitleLang => {
+                                    current_choice_lang = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::ArrayTitleContent => {
+                                    current_choice_content = Some(nested_text.to_string());
+                                }
+                                FormChoiceListPart::ArrayTitleItem => {
+                                    if let (Some(value), Some(lang), Some(content)) = (
+                                        choice.array.last_mut(),
+                                        current_choice_lang.take(),
+                                        current_choice_content.take(),
+                                    ) {
+                                        value.title.push(LocalizedString { lang, content });
                                     }
                                 }
                                 FormChoiceListPart::Close | FormChoiceListPart::CloseParameter => {}
@@ -15902,6 +16260,7 @@ fn parse_form_auto_command_bar_xml(
         return Ok(None);
     };
     Ok(Some(FormXmlAutoCommandBar {
+        display_importance: xml_attribute_value(event, "DisplayImportance")?,
         id,
         name,
         horizontal_align: None,
@@ -15944,6 +16303,8 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         return Ok(None);
     };
     Ok(Some(FormXmlAttribute {
+        view: None,
+        edit: None,
         id,
         name,
         types: Vec::new(),
@@ -16278,6 +16639,21 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
                 | "SearchControlAddition"
                 | "ProgressBarField"
                 | "TrackBarField"
+                // Field kinds with no payload writer yet: recognised so that
+                // the form is refused rather than written without them.
+                | "ChartField"
+                | "GanttChartField"
+                | "PDFDocumentField"
+                | "DendrogramField"
+                | "PlannerField"
+                | "GeographicalSchemaField"
+                | "GraphicalSchemaField"
+                | "PeriodField"
+                | "CalendarField"
+                | "FormattedDocumentField"
+                | "TextDocumentField"
+                | "HTMLDocumentField"
+                | "SpreadSheetDocumentField"
         )
 }
 
@@ -16422,6 +16798,10 @@ fn form_nested_text_element(path: &[String]) -> bool {
         || path_ends_with(path, &["UserVisible", "Common"])
         || path_ends_with(path, &["UserVisible", "Value"])
         || path_ends_with(path, &["Command", "Use", "Common"])
+        || path_ends_with(path, &["Attribute", "View", "Common"])
+        || path_ends_with(path, &["Attribute", "View", "Value"])
+        || path_ends_with(path, &["Attribute", "Edit", "Common"])
+        || path_ends_with(path, &["Attribute", "Edit", "Value"])
         || path_ends_with(path, &["Command", "Use", "Value"])
         || path_ends_with(path, &["Commands", "Command", "Shortcut"])
         || path_ends_with(path, &["Commands", "Command", "AssociatedTableElementId"])
@@ -16446,6 +16826,9 @@ fn form_nested_text_element(path: &[String]) -> bool {
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "lang"])
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "content"])
         || path_ends_with(path, &["ChoiceParameters", "item", "value", "Value"])
+        || path_ends_with(path, &["item", "value", "Value", "Value", "Value"])
+        || path_ends_with(path, &["value", "Value", "Value", "Presentation", "item", "lang"])
+        || path_ends_with(path, &["value", "Value", "Value", "Presentation", "item", "content"])
         || path_ends_with(
             path,
             &["ChoiceParameters", "item", "value", "Presentation", "item", "lang"],
@@ -16468,6 +16851,11 @@ enum FormChoiceListPart {
     TitleLang,
     TitleContent,
     TitleItem,
+    /// The literal and the title of a value inside a `v8:FixedArray`.
+    ArrayLiteral,
+    ArrayTitleLang,
+    ArrayTitleContent,
+    ArrayTitleItem,
     /// `</xr:Item>` itself.
     Close,
     /// `</app:item>` of a `<ChoiceParameters>`.
@@ -16508,6 +16896,18 @@ fn form_choice_list_part(
                 Some(FormChoiceListPart::TitleContent)
             }
             "item" if ends(&[outer, "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
+            "Value" if ends(&[outer, "Value", "Value", "Value"]) => {
+                Some(FormChoiceListPart::ArrayLiteral)
+            }
+            "lang" if ends(&[outer, "Value", "Value", "Presentation", "item", "lang"]) => {
+                Some(FormChoiceListPart::ArrayTitleLang)
+            }
+            "content" if ends(&[outer, "Value", "Value", "Presentation", "item", "content"]) => {
+                Some(FormChoiceListPart::ArrayTitleContent)
+            }
+            "item" if ends(&[outer, "Value", "Value", "Presentation", "item"]) => {
+                Some(FormChoiceListPart::ArrayTitleItem)
+            }
             "Item" if list && ends(&[]) => Some(FormChoiceListPart::Close),
             "item" if !list && ends(&[]) => Some(FormChoiceListPart::CloseParameter),
             _ => None,
@@ -16562,6 +16962,39 @@ fn apply_form_choice_list_part(
             || (opens(&[outer, "Presentation", "item"]) && matches!(local, "lang" | "content"))
         {
             return Ok(());
+        }
+        // A `v8:FixedArray` literal holds `<v8:Value>`s, each the same
+        // presentation-and-literal pair an item's value is.
+        if choice.literal_type.as_deref() == Some("v8:FixedArray") {
+            if opens(&[outer, "Value"]) {
+                if local == "Value" {
+                    choice.array.push(FormXmlChoiceListItem {
+                        value_type: xml_attribute_value(event, "type")?,
+                        ..FormXmlChoiceListItem::default()
+                    });
+                } else {
+                    choice.unwritable.push(local.to_string());
+                }
+                return Ok(());
+            }
+            if opens(&[outer, "Value", "Value"]) {
+                let Some(value) = choice.array.last_mut() else {
+                    choice.unwritable.push(local.to_string());
+                    return Ok(());
+                };
+                match local {
+                    "Presentation" => {}
+                    "Value" => value.literal_type = xml_attribute_value(event, "type")?,
+                    other => value.unwritable.push(other.to_string()),
+                }
+                return Ok(());
+            }
+            if (opens(&[outer, "Value", "Value", "Presentation"]) && local == "item")
+                || (opens(&[outer, "Value", "Value", "Presentation", "item"])
+                    && matches!(local, "lang" | "content"))
+            {
+                return Ok(());
+            }
         }
     }
     choice.unwritable.push(local.to_string());
@@ -16877,15 +17310,11 @@ fn native_command_interface_item(
     // `<Visible><Common>` decides the flag when it is there; with no
     // `<Visible>` at all a `<DefaultVisible>false` means visible. An item that
     // spells neither stores `{"B",1}` 262 times and `{"B",0}` 28 times and no
-    // property of the item separates them, so it refuses.
+    // property of the item separates them -- but the export spells neither
+    // for both, so the majority's `{"B",1}` reads back the same.
     let common = match (item.visible_common, item.default_visible) {
         (Some(common), _) => common,
-        (None, Some(false)) => true,
-        (None, _) => {
-            return Err(anyhow!(
-                "a command interface item spells neither <DefaultVisible> nor <Visible>"
-            ));
-        }
+        (None, _) => true,
     };
     Ok(format!(
         "{{3,{position},{command},{{0}},{kind},{group},{index},{default_visible},\
@@ -29631,6 +30060,8 @@ enum MetadataTypePatternElement {
     Reference {
         type_id: String,
     },
+    /// `v8:Null`, stored as `{"L"}`.
+    Null,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31113,6 +31544,21 @@ fn parse_metadata_type_pattern_element(
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime {
             fractions: parse_date_fractions_mark(date_fractions)?,
         }),
+        "v8:Null" => Ok(MetadataTypePatternElement::Null),
+        // The platform's document and chart types. Form.xml spells them with a
+        // generated or a short prefix -- `d5p1:TextDocument`, `fd:FormattedDocument`
+        // -- so the local name decides; measured over every single-typed form
+        // attribute of both corpora that declares one.
+        other
+            if other.split_once(':').is_some_and(|(_, local)| {
+                platform_document_type_id(local).is_some()
+            }) && !other.starts_with("cfg:") =>
+        {
+            let local = other.split_once(':').map_or(other, |(_, local)| local);
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: platform_document_type_id(local).unwrap_or_default().to_string(),
+            })
+        }
         // A platform type, whichever namespace spells it: `v8:` is the common
         // one, but a spreadsheet document is `mxl:`, a colour or a font
         // `v8ui:`, a settings composer `dcsset:`.
@@ -31149,6 +31595,18 @@ fn parse_metadata_type_pattern_element(
         }
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
     }
+}
+
+/// The uuid of a platform document or chart type, by its local name.
+fn platform_document_type_id(local: &str) -> Option<&'static str> {
+    Some(match local {
+        "TextDocument" => "ebf766b1-f32c-11d3-9851-008048da1252",
+        "FormattedDocument" => "151f8778-e2d0-496a-9f02-d9ffd93b57ec",
+        "Chart" => "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5",
+        "GanttChart" => "3a6e63bf-16aa-42eb-b48c-2fff9670ad2f",
+        "GeographicalSchema" => "95de81b0-81c3-4936-9dbb-6400e5c90378",
+        _ => return None,
+    })
 }
 
 /// The uuid a platform type is stored under.
@@ -31677,6 +32135,7 @@ fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElement)
             fractions: Some(mark),
         } => format!(r#"{{"D","{mark}"}}"#),
         MetadataTypePatternElement::Reference { type_id } => format!("{{\"#\",{type_id}}}"),
+        MetadataTypePatternElement::Null => r#"{"L"}"#.to_string(),
     }
 }
 
@@ -32903,11 +33362,10 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 /// `<View>`/`<Edit>` are 6 and 7; what those hold when the element is present
 /// was not measured, so naming one still refuses the form.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
-    match local {
-        "View" => Some("View"),
-        "Edit" => Some("Edit"),
-        _ => None,
-    }
+    // `<View>` and `<Edit>` are read now: members 6 and 7 of the `{9,…}`
+    // record, the same rights tuple an item's `<UserVisible>` is.
+    let _ = local;
+    None
 }
 
 fn parse_form_attribute_column_xml(

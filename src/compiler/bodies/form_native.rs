@@ -196,21 +196,70 @@ pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
     Some(format!("{{0,{code},{mask}}}"))
 }
 
-/// The web colours the corpus names, with the index a body stores.
+/// The web colours, with the index a body stores: the ones measured on form
+/// items, and the rest of the table the exporter reads the index back with.
 const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("AliceBlue", "1"),
+    ("Beige", "6"),
+    ("Black", "8"),
+    ("Blue", "10"),
+    ("Cream", "20"),
+    ("Crimson", "21"),
+    ("DarkBlue", "23"),
+    ("DarkGray", "26"),
+    ("DarkGreen", "27"),
+    ("DarkRed", "33"),
+    ("DarkSlateGray", "37"),
+    ("DodgerBlue", "43"),
     ("FireBrick", "44"),
+    ("FloralWhite", "45"),
     ("ForestGreen", "46"),
     ("Gainsboro", "48"),
+    ("GhostWhite", "49"),
     ("Gold", "50"),
+    ("Goldenrod", "51"),
     ("Gray", "52"),
+    ("Green", "53"),
     ("HoneyDew", "55"),
     ("IndianRed", "57"),
+    ("Lavender", "61"),
+    ("LavenderBlush", "62"),
+    ("LemonChiffon", "64"),
+    ("LightBlue", "65"),
+    ("LightCoral", "66"),
+    ("LightCyan", "67"),
+    ("LightGoldenRod", "68"),
+    ("LightGoldenRodYellow", "69"),
+    ("LightGray", "71"),
     ("LightGreen", "70"),
+    ("LightPink", "72"),
+    ("LightSalmon", "73"),
+    ("LightSlateGray", "77"),
+    ("LightSteelBlue", "78"),
     ("LightYellow", "79"),
+    ("Maroon", "84"),
+    ("MediumBlue", "86"),
+    ("MediumGray", "87"),
+    ("MintCream", "97"),
     ("MistyRose", "98"),
+    ("Moccasin", "96"),
     ("NavajoWhite", "100"),
+    ("Orange", "94"),
+    ("PaleTurquoise", "110"),
+    ("Pink", "115"),
+    ("PowderBlue", "117"),
     ("Red", "119"),
+    ("RosyBrown", "120"),
+    ("RoyalBlue", "121"),
+    ("Salmon", "123"),
+    ("Sienna", "127"),
+    ("Silver", "128"),
+    ("SkyBlue", "129"),
+    ("SlateBlue", "130"),
+    ("SlateGray", "131"),
+    ("SteelBlue", "134"),
+    ("Violet", "140"),
+    ("VioletRed", "141"),
     ("White", "143"),
     ("WhiteSmoke", "144"),
     ("Yellow", "145"),
@@ -1202,6 +1251,10 @@ pub(crate) struct NativeInputPayload<'a> {
     pub(crate) type_link: &'a str,
     /// Slot 27, `<ChoiceParameters>`, `{0,0}` by default.
     pub(crate) choice_parameters: &'a str,
+    /// Slots 55 to 60: `<AutoShowClearButtonMode>`, `<AutoShowOpenButtonMode>`,
+    /// `<AutoCorrectionOnTextInput>`, `<SpellCheckingOnTextInput>`, a constant,
+    /// `<SpecialTextInputMode>` -- already coded.
+    pub(crate) text_input_tail: [&'a str; 6],
     /// Slot 45, `<CreateButton>`.
     pub(crate) create_button: Option<bool>,
     /// Slot 46, `<ChoiceButtonRepresentation>`: `ShowInDropList` 1,
@@ -1283,6 +1336,7 @@ impl NativeInputPayload<'_> {
             choice_parameter_links_again: "{5007,0}",
             type_link: "{3,0,0}",
             choice_parameters: "{0,0}",
+            text_input_tail: ["0", "0", "0", "0", "0", "0"],
             create_button: None,
             choice_button_representation: None,
             drop_list_button: None,
@@ -1356,7 +1410,8 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
          {text_color},{back_color},{border_color},{font},{text_edit},{type_link},\
          {edit_text_update},{input_hint},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{links_again},{multiple_values}}}",
+         {max_height},{height_variant},{tail0},{tail1},{tail2},{tail3},{tail4},{tail5},0,{{0}},0,\
+         {links_again},{multiple_values}}}",
         width = payload.width,
         height = payload.height,
         type_domain = u8::from(payload.type_domain_enabled),
@@ -1399,6 +1454,12 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         links_again = payload.choice_parameter_links_again,
         type_link = payload.type_link,
         choice_parameters = payload.choice_parameters,
+        tail0 = payload.text_input_tail[0],
+        tail1 = payload.text_input_tail[1],
+        tail2 = payload.text_input_tail[2],
+        tail3 = payload.text_input_tail[3],
+        tail4 = payload.text_input_tail[4],
+        tail5 = payload.text_input_tail[5],
         create_button = tristate(payload.create_button),
         drop_list_button = tristate(payload.drop_list_button),
         auto_max_width = u8::from(payload.auto_max_width),
@@ -1591,6 +1652,8 @@ pub(crate) enum NativeChoiceListLiteral<'a> {
     Text(&'a str),
     /// `xs:boolean` -- 247 values in 124 input field lists.
     Boolean(bool),
+    /// A literal already spelled -- a fixed array, a date.
+    Raw(&'a str),
     /// `ent:AccountType` -- 6 items, the ordinal of its three spellings.
     AccountType(u8),
     /// `xr:DesignTimeRef`, and an empty `<Value/>` with no type at all.
@@ -1603,6 +1666,7 @@ impl NativeChoiceListLiteral<'_> {
             Self::Number(value) => format!("{{\"N\",{value}}}"),
             Self::Text(value) => format!("{{\"S\",{}}}", quoted(value)),
             Self::Boolean(value) => format!("{{\"B\",{}}}", u8::from(*value)),
+            Self::Raw(value) => (*value).to_string(),
             Self::AccountType(ordinal) => {
                 format!("{{\"#\",{CHOICE_LIST_ACCOUNT_TYPE_UUID},{ordinal}}}")
             }
@@ -3075,6 +3139,8 @@ pub(crate) struct NativeDecorationItem<'a> {
     pub(crate) group_vertical_align: Option<&'a str>,
     /// Member 34, see [`native_display_importance`].
     pub(crate) display_importance: &'a str,
+    /// Member 16, `<Shortcut>`, `{0,0,0}` by default.
+    pub(crate) shortcut: &'a str,
 }
 
 impl Default for NativeDecorationItem<'_> {
@@ -3110,6 +3176,7 @@ impl Default for NativeDecorationItem<'_> {
             group_horizontal_align: None,
             group_vertical_align: None,
             display_importance: "0",
+            shortcut: "{0,0,0}",
         }
     }
 }
@@ -3156,7 +3223,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
     Some(format!(
         "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},{enabled},\
          {width},{height},{horizontal_stretch},{vertical_stretch},{text_color},{font},\
-         {{0,0,0}},1,{payload},{menu},{visible},{skip_on_input},{content},\
+         {shortcut},1,{payload},{menu},{visible},{skip_on_input},{content},\
          {tooltip_representation},{tooltip},{auto_max_width},{max_width},0,\
          {auto_max_height},{max_height},{horizontal},{vertical},{display_importance},0}}",
         enabled = u8::from(decoration.enabled),
@@ -3181,6 +3248,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         auto_max_height = u8::from(decoration.auto_max_height),
         max_height = decoration.max_height.unwrap_or("0"),
         display_importance = decoration.display_importance,
+        shortcut = decoration.shortcut,
     ))
 }
 
@@ -3560,6 +3628,9 @@ pub(crate) struct NativeButtonItem<'a> {
     /// of the corpus name something there and the rest write 0.
     pub(crate) forty_eighth: &'a str,
     pub(crate) command_uniqueness: bool,
+    /// Member 23, `<Shortcut>`, and member 33, the command's `<Parameter>`.
+    pub(crate) shortcut: &'a str,
+    pub(crate) parameter: &'a str,
 }
 
 impl Default for NativeButtonItem<'_> {
@@ -3601,6 +3672,8 @@ impl Default for NativeButtonItem<'_> {
             picture_location: None,
             forty_eighth: "0",
             command_uniqueness: true,
+            shortcut: "{0,0,0}",
+            parameter: "{\"U\"}",
         }
     }
 }
@@ -3702,9 +3775,9 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
     Some(format!(
         "{{31,{{{id},{ns}}},0,{options},{coarse_type},{name},{title},{enabled},{command},\
          {data_path},{representation},{default_button},0,{default_item},2,{coarse_location},\
-         {width},{height},{title_height},{back},{text},{border},{font},{{0,0,0}},{check},\
+         {width},{height},{title_height},{back},{text},{border},{font},{shortcut},{check},\
          {picture},{visible},{{\"Pattern\"}},\"\",{skip_on_input},{tooltip_representation},1,\
-         {extended_tooltip},{{\"U\"}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {extended_tooltip},{parameter},{auto_max_width},{max_width},0,{auto_max_height},\
          {max_height},{horizontal_stretch},{vertical_stretch},{group_horizontal},\
          {group_vertical},{in_context_menu},{shape},{shape_representation},{fine_type},\
          {picture_location},{forty_eighth},{fine_location},{command_uniqueness},0}}",
@@ -3737,6 +3810,8 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
         vertical_stretch = u8::from(button.vertical_stretch),
         forty_eighth = button.forty_eighth,
         command_uniqueness = u8::from(button.command_uniqueness),
+        shortcut = button.shortcut,
+        parameter = button.parameter,
     ))
 }
 
@@ -4752,6 +4827,8 @@ pub(crate) struct NativeGroupItem<'a> {
     pub(crate) vertical_align: Option<&'a str>,
     /// The last member, see [`native_display_importance`].
     pub(crate) display_importance: &'a str,
+    /// Member 18, `<Shortcut>`, `{0,0,0}` by default.
+    pub(crate) shortcut: &'a str,
 }
 
 impl Default for NativeGroupItem<'_> {
@@ -4780,6 +4857,7 @@ impl Default for NativeGroupItem<'_> {
             horizontal_align: None,
             vertical_align: None,
             display_importance: "0",
+            shortcut: "{0,0,0}",
         }
     }
 }
@@ -4854,7 +4932,7 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
     Some(format!(
         "{{22,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},\
          {content_change},{enabled},{read_only},{width},{height},{horizontal_stretch},\
-         {vertical_stretch},{back_color},{font},{{0,0,0}},1,{payload},{count}{children},\
+         {vertical_stretch},{back_color},{font},{shortcut},1,{payload},{count}{children},\
          {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},\
          {display_importance}}}",
         id = group.id,
@@ -4876,6 +4954,7 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
         count = group.children.len(),
         visible = u8::from(group.visible),
         display_importance = group.display_importance,
+        shortcut = group.shortcut,
     ))
 }
 
@@ -4899,7 +4978,7 @@ pub(crate) struct NativeRootHead<'a> {
     pub(crate) save_data_in_settings: Option<&'a str>,
     /// `<AutoSaveDataInSettings>`, of which only `Use` is ever stored.
     pub(crate) auto_save_data_in_settings: Option<&'a str>,
-    /// `<SettingsStorage>`. Naming one refuses the head.
+    /// The uuid of the `<SettingsStorage>` the form names.
     pub(crate) settings_storage: Option<&'a str>,
     /// `<AutoTitle>`, on unless the form turns it off.
     pub(crate) auto_title: bool,
@@ -4944,9 +5023,6 @@ impl Default for NativeRootHead<'_> {
 
 /// The root record's head, from `50` to the command bar's location.
 pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
-    if head.settings_storage.is_some() {
-        return None;
-    }
     let members = [
         "50".to_string(),
         "0".to_string(),
@@ -4964,7 +5040,11 @@ pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
         root_code(head.enter_key_behavior, &[("DefaultButton", "0")], "1")?,
         root_code(head.save_data_in_settings, &[("UseList", "1")], "0")?,
         root_code(head.auto_save_data_in_settings, &[("Use", "1")], "0")?,
-        "00000000-0000-0000-0000-000000000000".to_string(),
+        // Member 8: the uuid of the `<SettingsStorage>` the form names, which
+        // the caller resolves against the configuration.
+        head.settings_storage
+            .unwrap_or("00000000-0000-0000-0000-000000000000")
+            .to_string(),
         u8::from(head.auto_title).to_string(),
         head.title.to_string(),
         u8::from(head.group.is_some()).to_string(),
@@ -7911,14 +7991,15 @@ mod tests {
             Some("50,0,0,0,0,0,1,1,00000000-0000-0000-0000-000000000000,1,{1,0},1,5,0,0,0,0,0")
         );
 
-        // A form that names a settings storage is refused: the head would have
-        // to carry that object's uuid, which only the configuration knows.
-        assert_eq!(
+        // A form that names a settings storage carries that object's uuid,
+        // resolved by the caller, in member 8.
+        assert!(
             format_root_head(&NativeRootHead {
-                settings_storage: Some("SettingsStorage.Общие"),
+                settings_storage: Some("0f7a4e33-1c7d-4c5f-9a4b-3f0f1b8a2e61"),
                 ..NativeRootHead::default()
-            }),
-            None
+            })
+            .expect("a head")
+            .contains(",0f7a4e33-1c7d-4c5f-9a4b-3f0f1b8a2e61,")
         );
 
         // So is a spelling the corpus never showed.
