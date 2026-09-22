@@ -271,6 +271,12 @@ struct FormXmlAttribute {
     /// directly.
     saved_data: Option<bool>,
     fill_check: Option<String>,
+    /// `<UseAlways>`, as the list of `<Field>` paths it spells. Member 8 is
+    /// that list in full -- nothing is filtered, and the coverage rule this
+    /// writer once carried was an artefact of the dynamic lists, which store
+    /// `{0,0}` whatever their fields say. `None` when the attribute does not
+    /// carry the element, which is 137 353 of the 141 723 of both corpora.
+    use_always: Option<Vec<String>>,
     /// `<FunctionalOptions><Item>`, in XML order. Every item reaches the
     /// last member of the `{9,…}` record; none is dropped, and a holder that
     /// spells the element never stores the `{0,0}` an absent one takes.
@@ -6510,6 +6516,84 @@ fn native_mobile_device_command_bar_content(
 ///   inside that type's own field list rather than a name-to-number table --
 ///   `Variant` is `2` under one type and `0` under another -- so 88 ERP УХ
 ///   entries and 0 BSP entries stay outside this writer.
+/// Member 8, `<UseAlways>`, in the same `{0,<n>,<path>×n}` shape as member 9.
+///
+/// The list is written in full. A coverage filter lived here for a day on the
+/// strength of a 89.8 % fit and was wrong: the correlation came entirely from
+/// the dynamic lists, which store `{0,0}` whatever their fields say and whose
+/// fields happen to be the ones the form binds. Measured over both corpora,
+/// the attribute's first `<Type>` crossed with the presence of the element
+/// partitions every one of the 141 723 records except one cell.
+///
+/// That cell is `cfg:ConstantsSet`, where the member is a delta against each
+/// constant's own `always_used` flag -- `constants_set_use_always_is_a_delta_…`
+/// in `mssql_dump/refs.rs` reads it that way -- and no exported property
+/// carries the flag. 81 records, and they keep the refusal.
+fn native_form_attribute_use_always(
+    attribute: &FormXmlAttribute,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<String> {
+    let Some(fields) = attribute.use_always.as_deref() else {
+        return Ok("{0,0}".to_string());
+    };
+    let declared = attribute.types.first().map(|value| value.trim());
+    if declared == Some("cfg:DynamicList") {
+        // 4 709 of 4 709 dynamic-list records, 3 028 of them bearing the
+        // element, store `{0,0}`. Their fields go to the `FieldsMap`, which
+        // the source does not carry.
+        return Ok("{0,0}".to_string());
+    }
+    if declared == Some("cfg:ConstantsSet") {
+        return Err(anyhow!(
+            "<UseAlways> on a cfg:ConstantsSet is a delta against a flag the source does not carry"
+        ));
+    }
+    if fields.is_empty() {
+        return Err(anyhow!("an empty <UseAlways> is not measured"));
+    }
+    let mut paths = Vec::with_capacity(fields.len());
+    for field in fields {
+        let field = field.trim();
+        let resolved = data_paths
+            .resolve(field)
+            .ok_or_else(|| anyhow!("<UseAlways> names {field}, which the writer cannot place"))?;
+        let ranges = scan_braced_fields(&resolved, 0)?;
+        let Some(tail) = ranges.get(2..) else {
+            return Err(anyhow!("<UseAlways> names {field}, which resolved to no segment"));
+        };
+        let segments = tail
+            .iter()
+            .map(|range| resolved[range.clone()].trim().to_string())
+            .collect::<Vec<_>>();
+        // The two shapes the measurement read: `{0,<uuid>}` for a field the
+        // configuration declares and `{-8}` and its like for a standard
+        // attribute. A third would be a guess.
+        if !segments
+            .iter()
+            .all(|segment| form_use_always_segment_is_measured(segment))
+        {
+            return Err(anyhow!(
+                "<UseAlways> names {field}, whose segment shape is not measured"
+            ));
+        }
+        paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
+    }
+    Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
+}
+
+/// Whether one resolved segment of a `<UseAlways>` path takes a shape the
+/// corpus showed: `{0,<uuid>}` or a bare negative standard-attribute code.
+fn form_use_always_segment_is_measured(segment: &str) -> bool {
+    if form_attribute_save_segment_uuid(segment).is_some() {
+        return true;
+    }
+    let Some(rest) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
+        return false;
+    };
+    let digits = rest.strip_prefix('-').unwrap_or(rest);
+    !digits.is_empty() && digits.bytes().all(|byte| byte.is_ascii_digit())
+}
+
 fn native_form_attribute_save(
     attribute: &FormXmlAttribute,
     data_paths: &NativeDataPaths<'_>,
@@ -6618,7 +6702,7 @@ fn format_native_child_item(
                 source,
             )?);
         }
-        let payload = native_container_payload(item, data_paths, source)?;
+        let payload = native_container_payload(item, data_paths, items, source)?;
         let group_font = native_item_font(item, source)?;
         let record = native::format_group_item(&native::NativeGroupItem {
             id: &item.id,
@@ -7379,6 +7463,7 @@ fn native_table_property_bag(
 fn native_container_payload(
     item: &FormXmlChildItem,
     data_paths: &NativeDataPaths<'_>,
+    items: &BTreeMap<String, NativeItemTarget>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
@@ -7428,7 +7513,7 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
         }
         "ButtonGroup" => {
-            let command_source = native_command_source(item)?;
+            let command_source = native_command_source(item, items)?;
             native::format_button_group_payload(
                 &command_source,
                 item.container_representation.as_deref(),
@@ -7436,7 +7521,7 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<ButtonGroup> names a spelling the writer cannot place"))
         }
         "CommandBar" => {
-            let command_source = native_command_source(item)?;
+            let command_source = native_command_source(item, items)?;
             native::format_command_bar_payload(
                 item.horizontal_align.map(native_horizontal_align_spelling),
                 &command_source,
@@ -7458,7 +7543,7 @@ fn native_container_payload(
             if item.picture_present {
                 return Err(anyhow!("a popup names a picture"));
             }
-            let command_source = native_command_source(item)?;
+            let command_source = native_command_source(item, items)?;
             let back_color = native_item_color(item.back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a popup names a background colour it cannot place"))?;
             let border_color = native_item_color(item.popup_border_color.as_deref(), source)
@@ -7601,12 +7686,39 @@ const fn native_group_horizontal_align(align: FormFieldGroupHorizontalAlign) -> 
     }
 }
 
-/// `<CommandSource>`, which names a configuration object the writer has not
-/// measured; a container that names none carries `{0}`.
-fn native_command_source(item: &FormXmlChildItem) -> Result<String> {
-    match item.command_source.as_deref() {
-        None => Ok("{0}".to_string()),
-        Some(_) => Err(anyhow!("a container names a command source")),
+/// `<CommandSource>` as the `{<id>,<namespace uuid>}` pair a container stores.
+///
+/// Three spellings over 3 676 elements of both corpora, and the resolution is
+/// the same on all three tags that carry one -- `ButtonGroup` in payload
+/// member 1, `CommandBar` and `Popup` in member 2. A container that names
+/// none carries the one-member `{0}`, in 34 340 of 34 340 records.
+///
+/// `Item.<name>` resolves against the form's items and nothing else. The
+/// form's attributes, columns and commands live in their own id spaces and
+/// carry colliding names; resolving against every named node disagrees with
+/// the body on 573 of 980 elements, and against the items on none.
+fn native_command_source(
+    item: &FormXmlChildItem,
+    items: &BTreeMap<String, NativeItemTarget>,
+) -> Result<String> {
+    const FORM_COMMANDS: &str = "02023637-7868-4a5f-8576-835a76e0c9ba";
+    let Some(source) = item.command_source.as_deref().map(str::trim) else {
+        return Ok("{0}".to_string());
+    };
+    match source {
+        "Form" => Ok(format!("{{0,{FORM_COMMANDS}}}")),
+        "FormCommandPanelGlobalCommands" => {
+            Ok("{0,2ef6d6fa-847a-485e-8684-d37a3ab5efb8}".to_string())
+        }
+        _ => {
+            let name = source.strip_prefix("Item.").ok_or_else(|| {
+                anyhow!("a container names the command source {source}, which is not measured")
+            })?;
+            let target = items.get(name).ok_or_else(|| {
+                anyhow!("a container's command source names {source}, which is not an item of the form")
+            })?;
+            Ok(format!("{{{},{FORM_COMMANDS}}}", target.id))
+        }
     }
 }
 
@@ -8676,6 +8788,7 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let use_always = native_form_attribute_use_always(attribute, &data_paths)?;
         let attribute_options = functional_options(&attribute.functional_options)?;
         attributes.push(',');
         attributes.push_str(&crate::compiler::bodies::form_native::format_form_attribute(
@@ -8684,6 +8797,7 @@ fn format_native_form_body(
                 name: &attribute.name,
                 title: &title,
                 type_pattern: &pattern,
+                use_always: &use_always,
                 save: &save,
                 main_attribute: attribute.main_attribute.unwrap_or(false),
                 saved_data: attribute.saved_data.unwrap_or(false),
@@ -9740,6 +9854,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 {
                     attribute.save = Some(Vec::new());
                 }
+                if local == "UseAlways"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    attribute.use_always = Some(Vec::new());
+                }
                 if local == "Command" && path_ends_with(&path, &["Form", "Commands"]) {
                     current_command = parse_form_command_xml(&event)?;
                 } else if local == "Attribute" && path_ends_with(&path, &["Form", "Attributes"]) {
@@ -10058,6 +10178,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(attribute) = current_attribute.as_mut()
                 {
                     attribute.save = Some(Vec::new());
+                }
+                if local == "UseAlways"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    attribute.use_always = Some(Vec::new());
                 }
                 if local == "AutoCommandBar" && path_ends_with(&path, &["Form"]) {
                     properties.auto_command_bar = parse_form_auto_command_bar_xml(&event)?;
@@ -11337,6 +11463,21 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         if let Some(list) = current_attribute
                             .as_mut()
                             .and_then(|attribute| attribute.save.as_mut())
+                        {
+                            list.push(nested_text.trim().to_string());
+                        }
+                    }
+                    // And one of its `<UseAlways>`, which takes the same
+                    // `{0,<n>,<path>×n}` shape in the member before it.
+                    "Field"
+                        if path_ends_with(
+                            &path,
+                            &["Form", "Attributes", "Attribute", "UseAlways", "Field"],
+                        ) =>
+                    {
+                        if let Some(list) = current_attribute
+                            .as_mut()
+                            .and_then(|attribute| attribute.use_always.as_mut())
                         {
                             list.push(nested_text.trim().to_string());
                         }
@@ -14074,6 +14215,7 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         main_attribute: None,
         settings: None,
         element_type: None,
+        use_always: None,
         functional_options: Vec::new(),
         columns: Vec::new(),
         additional_columns: Vec::new(),
@@ -14482,7 +14624,9 @@ fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -
 /// `<FunctionalOptions><Item>`. Neither of the last two carries a
 /// `<Presentation>`, a `<CheckState>` or a `<Value>`.
 fn form_nested_text_element(path: &[String]) -> bool {
-    if path_ends_with(path, &["Attribute", "Save", "Field"]) {
+    if path_ends_with(path, &["Attribute", "Save", "Field"])
+        || path_ends_with(path, &["Attribute", "UseAlways", "Field"])
+    {
         return true;
     }
     if path.len() >= 2
@@ -30527,7 +30671,6 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 /// was not measured, so naming one still refuses the form.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
     match local {
-        "UseAlways" => Some("UseAlways"),
         "View" => Some("View"),
         "Edit" => Some("Edit"),
         _ => None,

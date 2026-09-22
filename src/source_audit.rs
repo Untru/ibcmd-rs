@@ -1432,8 +1432,16 @@ pub struct NativeFormWriterReport {
     pub compared: usize,
     /// Forms the writer reproduced byte for byte.
     pub exact: usize,
-    /// Forms the writer refused, by reason.
+    /// Forms the writer refused, by their first reason. A form with three
+    /// blockers is counted once, under the first, so a count here is what
+    /// removing that reason *starts* to unblock, not what it finishes.
     pub refused: BTreeMap<String, usize>,
+    /// The same forms keyed by their whole blocker set, joined as the writer
+    /// joined it. A reason that is the only entry of its key is a sole
+    /// blocker -- removing it frees those forms outright -- and one that
+    /// always shares its key frees none on its own. Ordering the work by
+    /// `refused` alone over-counts every reason that travels with another.
+    pub refused_sets: BTreeMap<String, usize>,
     /// Forms the writer wrote but got wrong, with one example each.
     pub different: usize,
     /// The differing forms clustered by what the divergence looks like, so a
@@ -1535,6 +1543,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         compared: 0,
         exact: 0,
         refused: BTreeMap::new(),
+        refused_sets: BTreeMap::new(),
         different: 0,
         shapes: BTreeMap::new(),
         examples: Vec::new(),
@@ -1542,18 +1551,23 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
     for (form, wrote, stored) in outcomes {
         match wrote {
             Err(reason) => {
-                let reason = reason
+                let first = reason
                     .split(';')
                     .next()
                     .unwrap_or(&reason)
                     .trim()
                     .to_string();
-                *report.refused.entry(reason).or_insert(0) += 1;
+                *report.refused.entry(first).or_insert(0) += 1;
+                *report.refused_sets.entry(reason).or_insert(0) += 1;
             }
             Ok(wrote) => {
                 let Some(stored) = stored else {
                     *report
                         .refused
+                        .entry("no stored body in the dump".to_string())
+                        .or_insert(0) += 1;
+                    *report
+                        .refused_sets
                         .entry("no stored body in the dump".to_string())
                         .or_insert(0) += 1;
                     continue;
