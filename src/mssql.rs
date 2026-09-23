@@ -62,6 +62,7 @@ use crate::module_blob::{
     common_module_metadata_base_free_blockers, form_body_base_free_blockers,
     form_body_base_free_compilation_blockers, hex_sha256, interface_asset_plaintext, metadata_xml_base_free_blockers, module_blob_text_sha256, pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_xml_and_bytes, pack_form_body_blob_from_form_xml_base_free, pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts, pack_interface_asset_blob, pack_module_blob_container_bytes, pack_native_form_body_blob, pack_predefined_data_blob_from_xml, pack_role_rights_blob_base_free, pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml, parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
 };
+use crate::module_blob::{HtmlPageOwner, html_page_storage_bytes};
 use crate::mssql_main_activation::{
     MainActivationDryRunReport, MainActivationMode,
     MainActivationSnapshot as MainPublicationSnapshot, MainStorageRow, prepare_main_activation,
@@ -4424,7 +4425,7 @@ fn prepare_metadata_body_rows(
         _ => Ok(Vec::new()),
     }?;
     rows.extend(prepare_object_help_body_row(
-        sqlcmd, server, database, xml_path, properties,
+        sqlcmd, server, database, xml_path, properties, source,
     )?);
     rows.extend(prepare_object_module_body_rows(
         sqlcmd, server, database, xml_path, properties, axes,
@@ -4595,9 +4596,9 @@ fn prepare_template_body_row(
             };
             prepare_raw_template_body_row(body_path, properties, kind, source)
         }
-        TemplateKind::HtmlDocument => {
-            prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties, axes)
-        }
+        TemplateKind::HtmlDocument => prepare_html_template_body_row(
+            sqlcmd, server, database, xml_path, properties, source, axes,
+        ),
         // Diagnostic switch for a real load while the spreadsheet writer's
         // bodies are not yet platform-readable (native ibcmd refuses them):
         // stage nothing, so the target keeps its own row for the body.
@@ -4707,15 +4708,30 @@ fn prepare_html_template_body_row(
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     ensure_template_axes(axes)?;
+    Ok(html_template_source_row(xml_path, properties, source)?
+        .map(HelpSourceRow::into_stage)
+        .into_iter()
+        .collect())
+}
+
+/// The body of the `HTMLDocument` template `xml_path` declares, with its pages
+/// stored the way the platform stores them.
+pub(crate) fn html_template_source_row(
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<HelpSourceRow>> {
     let body_path = infer_html_template_body_path(xml_path);
     if !body_path.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
     let body_id = format!("{}.0", properties.uuid);
-    let (pages, files) = read_help_source_parts(&body_path, "HTML Template")?;
+    let (pages, files) =
+        read_help_source_parts(&body_path, "HTML Template", HtmlPageOwner::Template, source)?;
     let blob = compile_evidenced_template(
         TemplateKind::HtmlDocument,
         TemplateSource::Html {
@@ -4724,12 +4740,11 @@ fn prepare_html_template_body_row(
         },
     )
     .with_context(|| format!("failed to compile HTML Template {}", body_path.display()))?;
-    Ok(vec![PreparedMetadataBodyStage {
+    Ok(Some(HelpSourceRow {
         body_id,
         path: body_path,
-        blob_sha256: hex_sha256(&blob),
         blob,
-    }])
+    }))
 }
 
 fn prepare_binary_template_body_row(
@@ -5504,51 +5519,91 @@ fn prepare_command_interface_body_row(
     }])
 }
 
+/// A help row or an HTML template body as the loader stores it.
+pub(crate) struct HelpSourceRow {
+    pub(crate) body_id: String,
+    /// The `Ext/Help.xml` or `Ext/Template.xml` it was read from.
+    pub(crate) path: PathBuf,
+    /// The raw-deflated row.
+    pub(crate) blob: Vec<u8>,
+}
+
+impl HelpSourceRow {
+    fn into_stage(self) -> PreparedMetadataBodyStage {
+        PreparedMetadataBodyStage {
+            blob_sha256: hex_sha256(&self.blob),
+            body_id: self.body_id,
+            path: self.path,
+            blob: self.blob,
+        }
+    }
+}
+
 fn prepare_object_help_body_row(
-    sqlcmd: &Path,
-    server: &str,
-    database: &str,
+    _sqlcmd: &Path,
+    _server: &str,
+    _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    Ok(object_help_source_row(xml_path, properties, source)?
+        .map(HelpSourceRow::into_stage)
+        .into_iter()
+        .collect())
+}
+
+/// The help row of the object `xml_path` declares, when it has an
+/// `Ext/Help.xml`. Its pages are stored the way the platform stores them: the
+/// readable names the export writes resolve against `source`.
+pub(crate) fn object_help_source_row(
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<HelpSourceRow>> {
     let body_path = infer_object_help_body_path(xml_path, &properties.kind);
     if !body_path.exists() {
-        return Ok(Vec::new());
+        return Ok(None);
     }
-    // The configuration's help, like its other asset rows, is stored under
-    // its managed-application module group.
-    let body_id = match (properties.kind == "Configuration")
+    let body_id = object_help_body_id(xml_path, properties);
+    // `Configuration.xml` sits at the root of its tree, so the names its help
+    // spells resolve there even when the caller staged it without naming the
+    // tree.
+    let inferred = (properties.kind == "Configuration" && source.is_none())
+        .then(|| xml_path.parent())
+        .flatten()
+        .map(|root| MetadataSourceContext::new(root.to_path_buf()));
+    let source = source.or(inferred.as_ref());
+    let (pages, files) = read_help_source_parts(&body_path, "Help", HtmlPageOwner::Help, source)?;
+    let packed = pack_help_blob_from_parts(&pages, &files)
+        .with_context(|| format!("failed to pack Help {}", body_path.display()))?;
+    Ok(Some(HelpSourceRow {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+    }))
+}
+
+/// The row an object's help is stored in. The configuration's help, like its
+/// other asset rows, is stored under its managed-application module group.
+pub(crate) fn object_help_body_id(
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> String {
+    match (properties.kind == "Configuration")
         .then(|| configuration_asset_owner_uuid(xml_path))
         .flatten()
     {
         Some(owner) => infer_help_body_id_for_kind(&properties.kind, &owner),
         None => infer_help_body_id(properties),
-    };
-    prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
-}
-
-fn prepare_help_blob_body_row(
-    _sqlcmd: &Path,
-    _server: &str,
-    _database: &str,
-    body_id: String,
-    body_path: PathBuf,
-    label: &str,
-) -> Result<Vec<PreparedMetadataBodyStage>> {
-    let (pages, files) = read_help_source_parts(&body_path, label)?;
-    let packed = pack_help_blob_from_parts(&pages, &files)
-        .with_context(|| format!("failed to pack {label} {}", body_path.display()))?;
-    Ok(vec![PreparedMetadataBodyStage {
-        body_id,
-        path: body_path,
-        blob: packed.blob,
-        blob_sha256: packed.output_sha256,
-    }])
+    }
 }
 
 fn read_help_source_parts(
     body_path: &Path,
     label: &str,
+    owner: HtmlPageOwner,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<(Vec<(String, Vec<u8>)>, Vec<(String, Vec<u8>)>)> {
     let xml = fs::read(&body_path)
         .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
@@ -5563,6 +5618,8 @@ fn read_help_source_parts(
         let page_path = help_dir.join(format!("{page}.html"));
         let content = fs::read(&page_path)
             .with_context(|| format!("failed to read {label} page {}", page_path.display()))?;
+        let content = html_page_storage_bytes(&content, owner, source)
+            .with_context(|| format!("failed to store {label} page {}", page_path.display()))?;
         pages.push((page, content));
     }
     let mut files = Vec::<(String, Vec<u8>)>::new();
@@ -5585,7 +5642,16 @@ fn read_help_source_parts(
             })?;
             files.push((file_name, content));
         }
-        files.sort_by(|left, right| left.0.cmp(&right.0));
+        // The platform keeps the attachments in case-insensitive name order:
+        // all 51 ERP УХ helps with more than one file, six of which a
+        // byte-order sort would get wrong (`план закупок.png` before
+        // `Режим плана закупок.png`).
+        files.sort_by(|left, right| {
+            left.0
+                .to_lowercase()
+                .cmp(&right.0.to_lowercase())
+                .then_with(|| left.0.cmp(&right.0))
+        });
     }
     Ok((pages, files))
 }
@@ -10908,6 +10974,7 @@ mod tests {
             "missing-database",
             &catalog_xml,
             &properties,
+            None,
         )
         .unwrap();
 
@@ -12793,6 +12860,7 @@ mod tests {
             "missing-database",
             &template_xml,
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap();

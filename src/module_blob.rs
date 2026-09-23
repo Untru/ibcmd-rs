@@ -1069,8 +1069,10 @@ struct FlowchartXmlItem {
     events: BTreeMap<String, Option<String>>,
 }
 
+mod help_pages;
 mod interface_assets;
 
+pub use help_pages::{HtmlPageOwner, html_page_storage_bytes};
 pub use interface_assets::{
     InterfaceAssetSource, interface_asset_plaintext, pack_interface_asset_blob,
 };
@@ -1098,6 +1100,9 @@ pub struct MetadataSourceContext {
     generated_type_ids: Arc<Mutex<BTreeMap<String, Option<String>>>>,
     /// `StyleItems/*.xml`: uuid -> name, read once.
     style_items: Arc<std::sync::OnceLock<BTreeMap<String, String>>>,
+    /// The uuid each readable name of a help page resolves to, or why it does
+    /// not: pages of one tree link the same objects over and over.
+    help_references: Arc<Mutex<BTreeMap<String, Result<help_pages::HelpReference, String>>>>,
 }
 
 impl MetadataSourceContext {
@@ -1111,6 +1116,7 @@ impl MetadataSourceContext {
             )),
             generated_type_ids: Arc::new(Mutex::new(BTreeMap::new())),
             style_items: Arc::new(std::sync::OnceLock::new()),
+            help_references: Arc::new(Mutex::new(BTreeMap::new())),
         }
     }
 
