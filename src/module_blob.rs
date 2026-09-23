@@ -1912,14 +1912,21 @@ pub fn pack_style_body_blob_from_xml_with_base(
         });
     }
 
-    let mut fields = Vec::with_capacity(items.len() + 3);
-    fields.push("2".to_string());
-    fields.push(items.len().to_string());
+    // The 8.3.27 layout, the one the exporter reads (`STYLE_BODY_TAG` "1"):
+    // `{1,<count>,{<key>,<kind>,<value>},...}` with no trailer, measured over
+    // every item of ERP УХ's `Styles/Основной` (231 items, five value
+    // shapes). Laid out as the platform stores it: the BOM, every nested
+    // record on its own line, a list that ends with one closed on its own line.
+    let mut entries = vec![
+        StyleNode::token("1"),
+        StyleNode::token(items.len().to_string()),
+    ];
     for item in &items {
-        fields.push(format_style_body_item(item, source)?);
+        entries.push(style_body_item_node(item, source)?);
     }
-    fields.push("{0}".to_string());
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let mut text = String::from("\u{feff}");
+    StyleNode::List(entries).write_platform(&mut text, true);
+    let plain = text.into_bytes();
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -1928,6 +1935,185 @@ pub fn pack_style_body_blob_from_xml_with_base(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+/// A brace value of a style body, serialized the platform's way.
+enum StyleNode {
+    Token(String),
+    List(Vec<StyleNode>),
+}
+
+impl StyleNode {
+    fn token(value: impl Into<String>) -> Self {
+        Self::Token(value.into())
+    }
+
+    fn write_platform(&self, out: &mut String, outermost: bool) {
+        match self {
+            Self::Token(value) => out.push_str(value),
+            Self::List(values) => {
+                if !outermost {
+                    out.push_str("\r\n");
+                }
+                out.push('{');
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    value.write_platform(out, false);
+                }
+                if matches!(values.last(), Some(Self::List(_))) {
+                    out.push_str("\r\n");
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// `{0,<uuid>}` for a configuration style item, `{<code>}` for a standard one.
+fn style_body_key_node(name: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    if let Some(code) = style_body_standard_code_for_name(name) {
+        return Ok(StyleNode::List(vec![StyleNode::token(code.to_string())]));
+    }
+    if name.starts_with("StyleItem.") {
+        let source = source.ok_or_else(|| {
+            anyhow!("source root is required to resolve Style body reference {name}")
+        })?;
+        let uuid = source.resolve_style_item_uuid(name)?;
+        return Ok(StyleNode::List(vec![
+            StyleNode::token("0"),
+            StyleNode::token(uuid),
+        ]));
+    }
+    Err(anyhow!("unsupported Style Item name: {name}"))
+}
+
+fn style_body_ref_node(reference: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    let reference = reference.trim();
+    let name = reference
+        .strip_prefix("style:")
+        .ok_or_else(|| anyhow!("unsupported Style reference: {reference}"))?;
+    if style_body_standard_code_for_name(name).is_some() || name.starts_with("StyleItem.") {
+        return style_body_key_node(name, source);
+    }
+    style_body_key_node(&format!("StyleItem.{name}"), source)
+}
+
+/// One `{<key>,<kind>,<value>}` item: kind 0 a color `{3,<variant>,<code>}`
+/// (0 direct RGB, 2 web color, 3 style reference), kind 1 a style-item font
+/// `{7,2,<mask>,<ref>,<members>,1,<scale>}`, kind 2 a border
+/// `{3,1,<ref>,0,0,0}` -- the inverse of the exporter's
+/// `parse_style_body_items`.
+fn style_body_item_node(
+    item: &StyleBodyXmlItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<StyleNode> {
+    let key = style_body_key_node(&item.name, source)?;
+    let (kind, value) = match &item.value {
+        StyleBodyXmlValue::Color(value) => ("0", style_body_color_node(value, source)?),
+        StyleBodyXmlValue::Font(attrs) => ("1", style_body_font_node(attrs, source)?),
+        StyleBodyXmlValue::Border(attrs) => {
+            let reference = attrs
+                .get("ref")
+                .ok_or_else(|| anyhow!("Style Border without ref: {}", item.name))?;
+            (
+                "2",
+                StyleNode::List(vec![
+                    StyleNode::token("3"),
+                    StyleNode::token("1"),
+                    style_body_ref_node(reference, source)?,
+                    StyleNode::token("0"),
+                    StyleNode::token("0"),
+                    StyleNode::token("0"),
+                ]),
+            )
+        }
+    };
+    Ok(StyleNode::List(vec![key, StyleNode::token(kind), value]))
+}
+
+fn style_body_color_node(value: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    let value = value.trim();
+    let (variant, code) = if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() != 6 {
+            return Err(anyhow!("unsupported Style color literal: {value}"));
+        }
+        let red = u32::from_str_radix(&hex[0..2], 16)?;
+        let green = u32::from_str_radix(&hex[2..4], 16)?;
+        let blue = u32::from_str_radix(&hex[4..6], 16)?;
+        (
+            "0",
+            StyleNode::List(vec![StyleNode::token(
+                (red | (green << 8) | (blue << 16)).to_string(),
+            )]),
+        )
+    } else if value.starts_with("web:") {
+        let code = (-1..=512)
+            .find(|code| crate::mssql_dump::style_web_color_name(*code) == Some(value))
+            .ok_or_else(|| anyhow!("unsupported Style web color: {value}"))?;
+        ("2", StyleNode::List(vec![StyleNode::token(code.to_string())]))
+    } else if value.starts_with("style:") {
+        ("3", style_body_ref_node(value, source)?)
+    } else {
+        return Err(anyhow!("unsupported Style color value: {value}"));
+    };
+    Ok(StyleNode::List(vec![
+        StyleNode::token("3"),
+        StyleNode::token(variant),
+        code,
+    ]))
+}
+
+/// The mask declares which of height (2), weight (4), italic (8), underline
+/// (16) and strikeout (32) follow the reference, in that order; a present XML
+/// attribute is a declared member. `1` and the scale close the record. Only
+/// the default scale is observed and a non-default one is refused.
+fn style_body_font_node(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<StyleNode> {
+    if attrs.get("kind").map(String::as_str) != Some("StyleItem") {
+        return Err(anyhow!("unsupported Style Font kind: {:?}", attrs.get("kind")));
+    }
+    let reference = attrs
+        .get("ref")
+        .ok_or_else(|| anyhow!("Style Font without ref"))?;
+    if attrs.get("scale").is_some_and(|scale| scale != "100") {
+        return Err(anyhow!("unobserved Style Font scale: {:?}", attrs.get("scale")));
+    }
+    let mut mask = 0u32;
+    let mut members = Vec::new();
+    if let Some(height) = attrs.get("height") {
+        let height = height
+            .trim()
+            .parse::<i64>()
+            .with_context(|| format!("invalid Style Font height {height}"))?;
+        mask |= 2;
+        members.push(StyleNode::token((height * 10).to_string()));
+    }
+    if let Some(bold) = attrs.get("bold") {
+        mask |= 4;
+        let bold = parse_optional_xml_bool(Some(bold))?;
+        members.push(StyleNode::token(if bold { "700" } else { "400" }));
+    }
+    for (bit, name) in [(8, "italic"), (16, "underline"), (32, "strikeout")] {
+        if let Some(flag) = attrs.get(name) {
+            mask |= bit;
+            let flag = parse_optional_xml_bool(Some(flag))?;
+            members.push(StyleNode::token(if flag { "1" } else { "0" }));
+        }
+    }
+    let mut values = vec![
+        StyleNode::token("7"),
+        StyleNode::token("2"),
+        StyleNode::token(mask.to_string()),
+        style_body_ref_node(reference, source)?,
+    ];
+    values.extend(members);
+    values.push(StyleNode::token("1"));
+    values.push(StyleNode::token("100"));
+    Ok(StyleNode::List(values))
 }
 
 fn style_body_item_key(value: &str) -> Result<String> {
@@ -37745,16 +37931,17 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let packed = super::pack_style_body_blob_from_xml(xml, Some(&source))?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        assert!(text.starts_with("\u{feff}{1,5,\r\n{\r\n{-1},0,\r\n{3,2,\r\n{20}\r\n}\r\n}"));
+        let text = text.replace("\r\n", "");
 
-        assert!(text.starts_with("{2,5,"));
-        assert!(text.contains("{{-1},0,{4,2,{20},2}}"));
+        assert!(text.contains("{{-1},0,{3,2,{20}}}"));
         assert!(text.contains("{{-18},2,{3,1,{-18},0,0,0}}"));
-        assert!(text.contains("{{-20},1,{8,2,0,{-20},1,100}}"));
-        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{4,0,{13158655},0}}"));
+        assert!(text.contains("{{-20},1,{7,2,0,{-20},1,100}}"));
+        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{3,0,{13158655}}}"));
         assert!(text.contains(
-            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{8,2,0,{-20},400,0,0,1,1,100}}"
+            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{7,2,60,{-20},400,0,0,1,1,100}}"
         ));
-        assert!(text.ends_with(",{0}}"));
+        assert!(text.ends_with("1,100}}}"));
 
         let _ = std::fs::remove_dir_all(root);
         Ok(())

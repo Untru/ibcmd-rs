@@ -34619,7 +34619,7 @@ fn parse_style_border_value_xml(value: &str) -> Option<String> {
 /// KnownColor numbering, which this table's existing gaps/duplicates --
 /// e.g. `27`/`31` both `DarkGreen`, `94`/`105` both `Orange` -- already show
 /// does not hold platform-wide).
-fn style_web_color_name(code: i32) -> Option<&'static str> {
+pub(crate) fn style_web_color_name(code: i32) -> Option<&'static str> {
     match code {
         6 => Some("web:Beige"),
         8 => Some("web:Black"),
