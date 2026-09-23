@@ -150,16 +150,25 @@ asset owner, constant/defined-type string and date qualifiers, picture
 transparency, detailed job schedules, exchange-plan AutoRecord and trailer,
 bodyless common modules, the 64 MiB template ceiling, help/picture layout.
 
-Open, each in its own branch:
+Each done in its own branch and merged into `fix/8-3-27-parity`:
 
-- [ ] DCS templates compile base-free and round-trip (`feat/dcs-template-writer`)
-- [ ] Role rights compile base-free and round-trip (`feat/role-rights-writer`)
-- [ ] Command interface, home page, client application interface, standalone
+- [x] DCS templates compile base-free and round-trip (`feat/dcs-template-writer`)
+- [x] Role rights compile base-free and round-trip (`feat/role-rights-writer`)
+- [x] Command interface, home page, client application interface, standalone
       content compile base-free and round-trip (`feat/interface-assets-writer`)
-- [ ] Spreadsheet templates round-trip (`feat/mxl-template-writer`)
-- [ ] ERP УХ virtual cycle
-- [ ] Real cycle on a disposable clone: stage, publish, export with ibcmd-rs
-      and with native ibcmd
+- [x] Spreadsheet templates stored as the platform stores them
+      (`feat/mxl-template-writer`; MOXCEL framing -- native ibcmd refused the
+      earlier compact bodies although our exporter read them)
+- [x] Help pages and HTML templates stored with the platform's link spellings
+      and CRLF (`feat/help-links-writer`)
+- [x] БСП virtual cycle: 12 198 / 12 198 files, 0 prepare failures
+- [x] БСП real cycle on the disposable clone (2026-09-23, `F:\ibcmd\lab\realcycle\bsp_r3`):
+      stage 9 514 rows in 3 minutes, publish (dropping the dynamic-update
+      leftovers), export with ibcmd-rs and with native ibcmd 8.3.27.2214 --
+      native accepts everything, both exports reproduce 12 197 / 12 198 files
+      and agree with each other; the last one is `ConfigDumpInfo.xml`, whose
+      configVersion values are the new generation the load wrote
+- [ ] ERP УХ virtual cycle, then the real cycle on a УХ clone
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
