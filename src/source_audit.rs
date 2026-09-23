@@ -2388,7 +2388,7 @@ mod tests {
         assert!(
             report.errors[0]
                 .message
-                .contains("SpreadsheetDocument XML has no rowsItem entries")
+                .contains("the document spells no default <columns>")
         );
 
         Ok(())
@@ -2437,6 +2437,10 @@ mod tests {
 			</c>
 		</row>
 	</rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
 </document>
 "#,
         )?;

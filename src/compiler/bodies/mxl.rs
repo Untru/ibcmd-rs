@@ -8,7 +8,7 @@ use ibcmd_core::profile::EffectiveProfile;
 
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{
-    NativeError, exact_list, exact_token, inflate, parse, parse_without_bom, required_list,
+    NativeError, exact_token, inflate, parse, parse_without_bom, required_list,
     required_token,
 };
 use crate::module_blob::{
@@ -189,14 +189,21 @@ fn decode_plain(
         ));
     }
     if strict {
-        exact_token(
-            &fields[fields.len() - 2],
-            "2",
-            "MOXCEL trailing version marker",
-        )?;
-        let tail = exact_list(&fields[fields.len() - 1], 2, "MOXCEL trailing descriptor")?;
-        exact_token(&tail[0], "0", "MOXCEL trailing descriptor marker")?;
-        exact_token(&tail[1], "1", "MOXCEL trailing descriptor version")?;
+        // Every stored spreadsheet row of both corpora (14 046 ERP УХ, 61
+        // БСП) opens `{8,1,12,`: the third member is a constant of the
+        // format, not a column count.
+        exact_token(&fields[2], "12", "MOXCEL root revision")?;
+        // The platform closes every body with the same six scalars: all 14 046
+        // ERP УХ and 61 БСП stored spreadsheet rows end `…,0,0,1,0,0,0}`.
+        let tail = fields
+            .get(fields.len().saturating_sub(6)..)
+            .filter(|tail| tail.len() == 6)
+            .ok_or_else(|| {
+                MxlCodecError::InvalidShape("MOXCEL root has no trailer".to_string())
+            })?;
+        for (field, expected) in tail.iter().zip(["0", "0", "1", "0", "0", "0"]) {
+            exact_token(field, expected, "MOXCEL trailer")?;
+        }
     }
 
     let plain = String::from_utf8(plain)
@@ -276,6 +283,8 @@ mod tests {
 		<c><c><f>0</f><tl><v8:item><v8:lang>en</v8:lang><v8:content>Hello</v8:content></v8:item></tl></c></c>
 		<c><i>2</i><c><f>0</f><parameter>Name</parameter></c></c>
 	</row></rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format><width>72</width></format>
 </document>"#;
 
     #[test]
@@ -287,8 +296,9 @@ mod tests {
 
         let decoded = decode_mxl(&profile, &first).unwrap();
         assert!(decoded.plaintext().starts_with(MOXCEL_HEADER));
-        assert!(decoded.native_body_text().starts_with("{8,"));
-        assert_eq!(decoded.declared_columns(), 3);
+        // Field 2 is the platform's constant 12 whatever the column count.
+        assert!(decoded.native_body_text().starts_with("{8,1,12,"));
+        assert_eq!(decoded.declared_columns(), 13);
         assert!(decoded.native_fields() >= 8);
 
         let xml = crate::mssql_dump::extract_moxel_spreadsheet_xml(&first, &BTreeMap::new())
