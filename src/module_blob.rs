@@ -26884,7 +26884,7 @@ fn collect_flowchart_item_replacements(
                 push_1c_string_replacement(
                     plain,
                     fields.get(3).cloned(),
-                    explanation,
+                    &crlf_line_breaks(explanation),
                     replacements,
                 );
             }
@@ -26907,7 +26907,7 @@ fn collect_flowchart_item_replacements(
                 push_1c_string_replacement(
                     plain,
                     fields.get(7).cloned(),
-                    task_description,
+                    &crlf_line_breaks(task_description),
                     replacements,
                 );
             }
@@ -26915,6 +26915,23 @@ fn collect_flowchart_item_replacements(
         _ => {}
     }
     Ok(())
+}
+
+/// A line break inside a stored string is CRLF, while the XML hands its text
+/// over with the bare LF the file spells (ERP УХ
+/// `СхемыСправки/ВалютныйКонтрольРасчетыСПоставщикомПостоплата`: `…валюты\n`
+/// in the XML, `…валюты\r\n` stored); the exporter turns it back into LF.
+fn crlf_line_breaks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut previous = '\0';
+    for ch in text.chars() {
+        if ch == '\n' && previous != '\r' {
+            out.push('\r');
+        }
+        out.push(ch);
+        previous = ch;
+    }
+    out
 }
 
 fn flowchart_base_ranges(
@@ -27078,6 +27095,24 @@ fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
             }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    if let Some(ch) = reference.resolve_char_ref()? {
+                        text_value.push(ch);
+                    } else {
+                        let entity = reference.decode()?;
+                        text_value.push_str(
+                            resolve_xml_entity(entity.as_ref())
+                                .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?,
+                        );
+                    }
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if let Some(item) = current.as_mut() {
@@ -27088,13 +27123,15 @@ fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
                         "TabOrder" if path_ends_with(&path, &["Properties", "TabOrder"]) => {
                             item.tab_order = text_value.trim().to_string();
                         }
+                        // Free text is kept as written: a trailing space or
+                        // line break is data (three ERP УХ graphical schemes).
                         "Explanation" if path_ends_with(&path, &["Properties", "Explanation"]) => {
-                            item.explanation = Some(text_value.trim().to_string());
+                            item.explanation = Some(text_value.clone());
                         }
                         "TaskDescription"
                             if path_ends_with(&path, &["Properties", "TaskDescription"]) =>
                         {
-                            item.task_description = Some(text_value.trim().to_string());
+                            item.task_description = Some(text_value.clone());
                         }
                         "Event" => {
                             if let Some(name) = current_event.take() {
