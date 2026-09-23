@@ -978,7 +978,13 @@ mod mxl_ir;
 pub mod offline_context;
 mod refs;
 mod role_rights;
-pub(crate) use role_rights::role_right_name;
+pub(crate) use role_rights::{
+    CONFIGURATION_MODE_RIGHT_NAMES, ROLE_RIGHTS_EXT_DIMENSION_FAMILY,
+    ROLE_RIGHTS_EXT_DIMENSION_TYPE_FAMILY, ROLE_RIGHTS_STANDARD_ATTRIBUTE_FAMILY,
+    ROLE_RIGHTS_STANDARD_TABULAR_SECTION_FAMILY, role_right_name, role_right_uuid,
+    role_rights_xml_from_blob, role_standard_attribute_slot,
+    role_standard_tabular_section_attribute_slot, role_standard_tabular_section_slot,
+};
 mod selected;
 mod source_asset_diagnostics;
 mod source_assets;

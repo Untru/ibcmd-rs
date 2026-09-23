@@ -215,6 +215,83 @@ pub(super) fn role_object_ref_name(
 /// `STANDARD_TABULAR_SECTION_FAMILY`.
 const STANDARD_ATTRIBUTE_FAMILY: &str = "03f171e8-326f-41c6-9fa5-932a0b12cddf";
 const STANDARD_TABULAR_SECTION_FAMILY: &str = "28db313d-dbc2-4b83-8c4a-d2aeee708062";
+pub(crate) const ROLE_RIGHTS_STANDARD_ATTRIBUTE_FAMILY: &str = STANDARD_ATTRIBUTE_FAMILY;
+pub(crate) const ROLE_RIGHTS_STANDARD_TABULAR_SECTION_FAMILY: &str =
+    STANDARD_TABULAR_SECTION_FAMILY;
+pub(crate) const ROLE_RIGHTS_EXT_DIMENSION_FAMILY: &str = EXT_DIMENSION_FAMILY;
+pub(crate) const ROLE_RIGHTS_EXT_DIMENSION_TYPE_FAMILY: &str = EXT_DIMENSION_TYPE_FAMILY;
+
+/// Every slot a braced `{slot, family}` reference is observed to carry for a
+/// standard attribute or a standard tabular section, and a margin around
+/// them: the inverse lookups below search this range and refuse a name that
+/// two slots would claim.
+fn role_rights_slot_candidates() -> impl Iterator<Item = isize> {
+    (-120..=-1).rev().chain(std::iter::once(-60003))
+}
+
+/// The braced slot and print order a standard attribute of `kind` is written
+/// with -- the inverse of `role_standard_attribute_descriptor` over the
+/// negative-slot form, which is the only form a role Rights blob uses (see
+/// `role_rights_object_intra_uuid_order`). `None` when no slot, or more than
+/// one, carries the name.
+pub(crate) fn role_standard_attribute_slot(kind: &str, name: &str) -> Option<(isize, usize)> {
+    unique_slot(role_rights_slot_candidates(), |slot| {
+        role_standard_attribute_descriptor(kind, slot, None)
+            .filter(|(candidate, _)| *candidate == name)
+            .map(|(_, order)| order)
+    })
+}
+
+/// The inverse of `role_standard_tabular_section`.
+pub(crate) fn role_standard_tabular_section_slot(kind: &str, name: &str) -> Option<(isize, usize)> {
+    unique_slot(role_rights_slot_candidates(), |slot| {
+        role_standard_tabular_section(kind, slot)
+            .filter(|(candidate, _)| *candidate == name)
+            .map(|(_, order)| order)
+    })
+}
+
+/// The inverse of `role_standard_tabular_section_attribute`.
+pub(crate) fn role_standard_tabular_section_attribute_slot(
+    kind: &str,
+    name: &str,
+) -> Option<(isize, usize)> {
+    unique_slot(role_rights_slot_candidates(), |slot| {
+        role_standard_tabular_section_attribute(kind, slot)
+            .filter(|(candidate, _)| *candidate == name)
+            .map(|(_, position)| position)
+    })
+}
+
+fn unique_slot(
+    candidates: impl Iterator<Item = isize>,
+    matches: impl Fn(isize) -> Option<usize>,
+) -> Option<(isize, usize)> {
+    let mut found = None;
+    for slot in candidates {
+        if let Some(order) = matches(slot) {
+            if found.is_some() {
+                return None;
+            }
+            found = Some((slot, order));
+        }
+    }
+    found
+}
+
+/// The Rights.xml text the exporter writes for a stored Role rights row, or
+/// `None` where the exporter refuses the row: `parse_role_rights_blob` then
+/// `format_role_rights_xml`, for callers outside the exporter that need to
+/// read a row back the way the export does (the base-free writer's audit and
+/// its self-check).
+pub(crate) fn role_rights_xml_from_blob(
+    bytes: &[u8],
+    object_refs: &BTreeMap<String, String>,
+    field_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    parse_role_rights_blob(bytes, object_refs, field_refs)
+        .map(|rights| format_role_rights_xml(&rights))
+}
 
 /// The two families an accounting register's ext-dimension pair is split
 /// across: `{n, EXT_DIMENSION_FAMILY}` is `ExtDimension<n+1>`,
@@ -670,7 +747,7 @@ pub(super) fn is_configuration_mode_right(name: &str) -> bool {
     CONFIGURATION_MODE_RIGHT_NAMES.contains(&name)
 }
 
-const CONFIGURATION_MODE_RIGHT_NAMES: [&str; 6] = [
+pub(crate) const CONFIGURATION_MODE_RIGHT_NAMES: [&str; 6] = [
     "MainWindowModeNormal",
     "MainWindowModeWorkplace",
     "MainWindowModeEmbeddedWorkplace",
@@ -1083,8 +1160,22 @@ pub(crate) fn role_right_name(uuid: &str) -> Option<&'static str> {
     ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied()
 }
 
+/// The right uuid a `Rights.xml` right name stands for: the same table read
+/// the other way. Every name in it is unique, so the inverse is exact.
+pub(crate) fn role_right_uuid(name: &str) -> Option<&'static str> {
+    ROLE_RIGHT_UUIDS_BY_NAME.get(name).copied()
+}
+
 static ROLE_RIGHT_NAMES_BY_UUID: LazyLock<HashMap<&'static str, &'static str>> =
     LazyLock::new(|| ROLE_RIGHT_NAMES.iter().copied().collect());
+
+static ROLE_RIGHT_UUIDS_BY_NAME: LazyLock<HashMap<&'static str, &'static str>> =
+    LazyLock::new(|| {
+        ROLE_RIGHT_NAMES
+            .iter()
+            .map(|(uuid, name)| (*name, *uuid))
+            .collect()
+    });
 
 const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
     ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
