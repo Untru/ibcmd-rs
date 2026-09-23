@@ -135,6 +135,36 @@ settings blob. The loader prefers the native writer for a new or changed form
 (`IBCMD_RS_NATIVE_FORM_WRITER=always` for every form); the database cycle --
 the load of every other object kind, then export -- is the step that remains.
 
+## The database cycle, measured without writing SQL (2026-09-23)
+
+`F:\ibcmd\lab\tools\vcycle.sh <bsp|uha> <run>`: `mssql-audit-source-parity`
+writes every row a load would stage (`IBCMD_RS_WRITE_STAGED_ROWS_DIR`),
+`mssql-dump-config` exports the database with those rows in place of its own
+(`IBCMD_RS_ROW_OVERRIDE_DIR`), and `source-diff` compares the export with the
+native tree. The file diff is the verdict; a row whose plain text differs but
+exports identically (forms, layout-only differences) is not a failure.
+
+First БСП result: 12 082 of 12 198 files unchanged (99.05 %). Fixed on the way,
+each measured over both corpora: help rows' per-class suffix, the configuration
+asset owner, constant/defined-type string and date qualifiers, picture
+transparency, detailed job schedules, exchange-plan AutoRecord and trailer,
+bodyless common modules, the 64 MiB template ceiling, help/picture layout.
+
+Open, each in its own branch:
+
+- [ ] DCS templates compile base-free and round-trip (`feat/dcs-template-writer`)
+- [ ] Role rights compile base-free and round-trip (`feat/role-rights-writer`)
+- [ ] Command interface, home page, client application interface, standalone
+      content compile base-free and round-trip (`feat/interface-assets-writer`)
+- [ ] Spreadsheet templates round-trip (`feat/mxl-template-writer`)
+- [ ] ERP УХ virtual cycle
+- [ ] Real cycle on a disposable clone: stage, publish, export with ibcmd-rs
+      and with native ibcmd
+
+Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
+existing rows; a load into an empty database needs a descriptor compiler per
+metadata class and is not part of this cycle.
+
 ## The tool that turned out to matter
 
 `partition-table-head.py` asks, for one member, **which property maps each of
