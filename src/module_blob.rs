@@ -30534,7 +30534,9 @@ fn flowchart_base_ranges(
     base_range: Range<usize>,
 ) -> Result<(String, Range<usize>, Range<usize>)> {
     let head_fields = scan_wrapped_braced_fields(plain, base_range)?;
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+    // A typed item -- start, end, condition, activity, and a nested
+    // business process (code 10) -- wraps its base record one level deeper.
+    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "10") {
         scan_wrapped_braced_fields(
             plain,
             head_fields

@@ -4654,6 +4654,20 @@ fn prepare_common_picture_body_row(
     }])
 }
 
+/// The object the configuration's own asset rows are stored under: the
+/// `<xr:ContainedObject>` of class `9cd510cd-…` (the managed application's
+/// module group), not the configuration itself -- БСП keeps `.2` … `.f` under
+/// `f389d417-…` while `Configuration.xml` is `66193438-…`.
+fn configuration_asset_owner_uuid(xml_path: &Path) -> Option<String> {
+    let xml = fs::read_to_string(xml_path).ok()?;
+    let class = xml.find("<xr:ClassId>9cd510cd-abfc-11d4-9434-004095e12fc7</xr:ClassId>")?;
+    let rest = &xml[class..];
+    let open = rest.find("<xr:ObjectId>")? + "<xr:ObjectId>".len();
+    let close = rest[open..].find("</xr:ObjectId>")? + open;
+    let uuid = rest[open..close].trim();
+    (uuid.len() == 36).then(|| uuid.to_string())
+}
+
 fn prepare_configuration_asset_body_rows(
     sqlcmd: &Path,
     server: &str,
@@ -4663,6 +4677,11 @@ fn prepare_configuration_asset_body_rows(
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let owner = configuration_asset_owner_uuid(xml_path).map(|uuid| SimpleMetadataXmlProperties {
+        uuid,
+        ..properties.clone()
+    });
+    let properties = owner.as_ref().unwrap_or(properties);
     let mut rows = Vec::new();
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
@@ -5253,7 +5272,15 @@ fn prepare_object_help_body_row(
     if !body_path.exists() {
         return Ok(Vec::new());
     }
-    let body_id = infer_help_body_id(properties);
+    // The configuration's help, like its other asset rows, is stored under
+    // its managed-application module group.
+    let body_id = match (properties.kind == "Configuration")
+        .then(|| configuration_asset_owner_uuid(xml_path))
+        .flatten()
+    {
+        Some(owner) => infer_help_body_id_for_kind(&properties.kind, &owner),
+        None => infer_help_body_id(properties),
+    };
     prepare_help_blob_body_row(sqlcmd, server, database, body_id, body_path, "Help")
 }
 
@@ -5373,12 +5400,18 @@ fn prepare_object_module_body_rows(
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
+    // The configuration's own modules live under its managed-application
+    // module group, like its other asset rows.
+    let owner = (properties.kind == "Configuration")
+        .then(|| configuration_asset_owner_uuid(xml_path))
+        .flatten()
+        .unwrap_or_else(|| properties.uuid.clone());
     for (suffix, _) in object_module_body_suffixes(&properties.kind) {
         let body_path = infer_object_module_body_path(xml_path, &properties.kind, suffix);
         let Some(body_path) = source_module_body_path(body_path) else {
             continue;
         };
-        let body_id = format!("{}.{}", properties.uuid, suffix);
+        let body_id = format!("{owner}.{suffix}");
         let packed = pack_module_body_source(&body_path, &body_id, axes)
             .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
         rows.push(PreparedMetadataBodyStage {
@@ -9173,8 +9206,21 @@ mod tests {
 
         assert_eq!(
             super::infer_help_body_id(&object),
-            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5"
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1"
         );
+        for (kind, suffix) in [
+            ("InformationRegister", "0"),
+            ("Subsystem", "0"),
+            ("CommonCommand", "1"),
+            ("BusinessProcess", "5"),
+            ("ChartOfAccounts", "5"),
+        ] {
+            assert_eq!(
+                super::infer_help_body_id_for_kind(kind, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa"),
+                format!("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.{suffix}"),
+                "{kind}"
+            );
+        }
         assert_eq!(
             super::infer_help_body_id(&form),
             "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.1"
@@ -9200,7 +9246,7 @@ mod tests {
                 binary_hex: encode_hex(&module.blob),
             },
             BinaryBlobRow {
-                file_name: format!("{uuid}.1"),
+                file_name: format!("{uuid}.5"),
                 data_size: legacy_help.blob.len() as i64,
                 binary_hex: encode_hex(&legacy_help.blob),
             },
@@ -9208,17 +9254,17 @@ mod tests {
 
         assert_eq!(
             super::resolve_help_body_id_from_config_rows("Catalog", uuid, &rows).as_deref(),
-            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1")
+            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5")
         );
 
         rows.push(BinaryBlobRow {
-            file_name: format!("{uuid}.5"),
+            file_name: format!("{uuid}.1"),
             data_size: current_help.blob.len() as i64,
             binary_hex: encode_hex(&current_help.blob),
         });
         assert_eq!(
             super::resolve_help_body_id_from_config_rows("Catalog", uuid, &rows).as_deref(),
-            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5")
+            Some("aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1")
         );
     }
 
@@ -9916,7 +9962,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             row.config_file_name,
-            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5"
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1"
         );
         assert_eq!(row.generation, "can_generate_without_base_blob");
         assert_eq!(row.source_path, "Catalogs/Products/Ext/Help.xml");
@@ -10493,7 +10539,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.5");
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.1");
         assert_eq!(rows[0].path, body_path);
 
         let _ = fs::remove_dir_all(root);

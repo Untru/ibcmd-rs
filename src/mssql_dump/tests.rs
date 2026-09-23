@@ -1003,7 +1003,7 @@ fn source_asset_discovery_fails_closed_for_recognized_family_decoder_misses() {
     };
     let rows = vec![
         row(catalog_uuid.to_string(), &catalog_metadata),
-        row(format!("{catalog_uuid}.5"), &invalid),
+        row(format!("{catalog_uuid}.1"), &invalid),
         row(format!("{catalog_uuid}.1c"), &invalid),
         row(role_uuid.to_string(), &role_metadata),
         row(format!("{role_uuid}.0"), &invalid),
@@ -30489,13 +30489,13 @@ fn prefers_new_object_help_suffix_when_legacy_help_blob_remains() {
             binary_hex: encode_hex_for_test(&metadata),
         },
         ConfigRow {
-            file_name: format!("{uuid}.1"),
+            file_name: format!("{uuid}.5"),
             part_no: 0,
             data_size: legacy_help.len() as i64,
             binary_hex: encode_hex_for_test(&legacy_help),
         },
         ConfigRow {
-            file_name: format!("{uuid}.5"),
+            file_name: format!("{uuid}.1"),
             part_no: 0,
             data_size: current_help.len() as i64,
             binary_hex: encode_hex_for_test(&current_help),
@@ -30513,7 +30513,7 @@ fn prefers_new_object_help_suffix_when_legacy_help_blob_remains() {
         dumped
             .rows
             .iter()
-            .find(|row| row.file_name == format!("{uuid}.1"))
+            .find(|row| row.file_name == format!("{uuid}.5"))
             .unwrap()
             .source_asset_path,
         None
@@ -30522,7 +30522,7 @@ fn prefers_new_object_help_suffix_when_legacy_help_blob_remains() {
         dumped
             .rows
             .iter()
-            .find(|row| row.file_name == format!("{uuid}.5"))
+            .find(|row| row.file_name == format!("{uuid}.1"))
             .unwrap()
             .source_asset_path
             .as_deref(),
