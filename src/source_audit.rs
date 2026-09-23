@@ -1466,6 +1466,9 @@ pub struct NativeFormWriterReport {
     /// always shares its key frees none on its own. Ordering the work by
     /// `refused` alone over-counts every reason that travels with another.
     pub refused_sets: BTreeMap<String, usize>,
+    /// Every refused form with its reasons, which is what a refusal that
+    /// names no path is traced back by.
+    pub refused_forms: BTreeMap<String, String>,
     /// Forms the writer wrote but got wrong, with one example each.
     pub different: usize,
     /// The differing forms clustered by what the divergence looks like, so a
@@ -1603,6 +1606,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         exact: 0,
         refused: BTreeMap::new(),
         refused_sets: BTreeMap::new(),
+        refused_forms: BTreeMap::new(),
         achievable: 0,
         achievable_exact: 0,
         differences: Vec::new(),
@@ -1621,7 +1625,8 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                     .trim()
                     .to_string();
                 *report.refused.entry(first).or_insert(0) += 1;
-                *report.refused_sets.entry(reason).or_insert(0) += 1;
+                *report.refused_sets.entry(reason.clone()).or_insert(0) += 1;
+                report.refused_forms.insert(form.clone(), reason);
             }
             Ok(wrote) => {
                 let Some(stored) = stored else {

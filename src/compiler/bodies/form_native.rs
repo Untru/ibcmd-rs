@@ -404,6 +404,7 @@ fn is_uuid(value: &str) -> bool {
 /// An empty class matches any form; only `BeforeWrite` and `BeforeWriteAtServer`
 /// of a form need the class, and only a document form parts company there.
 const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
+    ("CalendarField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("CalendarField", "", "OnPeriodOutput", "1490ede6-6f33-4c6d-b971-53b2541331ea"),
     ("CalendarField", "", "Selection", "2feb1ee9-b750-4352-bb4c-67ba1c608dc6"),
     ("ChartField", "", "DetailProcessing", "650da4af-3233-4ce0-a1ae-23f87a226eee"),
@@ -452,6 +453,7 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("FormattedDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("GanttChartField", "", "DetailProcessing", "8724b8d4-140d-4357-8ac9-46e29ba7b168"),
     ("GanttChartField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    ("GraphicalSchemaField", "", "OnActivate", "83c14f85-ab1f-4c77-bd3b-81970b72543b"),
     ("GraphicalSchemaField", "", "Selection", "3c3da18f-fc18-4f77-8c2d-96c25bec40a5"),
     ("HTMLDocumentField", "", "DocumentComplete", "53325f0c-b112-4c44-ab12-5d1ee0b1f07b"),
     ("HTMLDocumentField", "", "OnClick", "da8dfb86-c5d1-4e35-a8a4-01b167a60ad3"),
@@ -869,6 +871,10 @@ pub(crate) struct NativeFieldItem<'a> {
     pub(crate) group_vertical_align: Option<&'a str>,
     /// Member 55, see [`native_display_importance`].
     pub(crate) display_importance: &'a str,
+    /// The additions a field carries in its tail, `<n>` then the records:
+    /// `0` for every field but a PDF document's, whose `<ViewStatusAddition>`
+    /// is `1,{…}` (8 of 8).
+    pub(crate) additions: &'a str,
 }
 
 /// The `DisplayImportance` XML attribute an item may carry, as every item
@@ -940,6 +946,7 @@ impl Default for NativeFieldItem<'_> {
             group_horizontal_align: None,
             group_vertical_align: None,
             display_importance: "0",
+            additions: "0",
         }
     }
 }
@@ -960,9 +967,12 @@ pub(crate) fn native_field_kind(tag: &str) -> Option<u8> {
         "CalendarField" => 8,
         "ProgressBarField" => 9,
         "TrackBarField" => 10,
+        "ChartField" => 11,
         "GanttChartField" => 12,
+        "GraphicalSchemaField" => 14,
         "HTMLDocumentField" => 15,
         "FormattedDocumentField" => 17,
+        "PDFDocumentField" => 20,
         _ => return None,
     })
 }
@@ -1063,7 +1073,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
          {footer_picture},{a0},{a1},{a2},{a3},{a4},{a5},{picture_index},1,{payload},{events},1,\
          {context_menu},{visible},{format_one},{format_two},{string_one},{string_two},\
          {appearance_tail},{fixing},{tooltip_representation},1,{extended_tooltip},\
-         {group_horizontal},{group_vertical},{display_importance},0,0,0}}",
+         {group_horizontal},{group_vertical},{display_importance},0,{additions},0}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = item.kind,
@@ -1103,6 +1113,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
         string_two = item.format_strings[1],
         extended_tooltip = item.extended_tooltip,
         display_importance = item.display_importance,
+        additions = item.additions,
     ))
 }
 
@@ -1143,8 +1154,14 @@ pub(crate) struct NativeLabelPayload<'a> {
     pub(crate) back_color: &'a str,
     /// Slot 10, the font.
     pub(crate) font: &'a str,
+    /// Slot 11, `<PasswordMode>`, tri-state like the stretches.
+    pub(crate) password_mode: Option<bool>,
     /// Slot 12, the item's own event bindings.
     pub(crate) events: &'a str,
+    /// Slot 13, `<BorderColor>`.
+    pub(crate) border_color: &'a str,
+    /// Slot 14, the `<Border>`.
+    pub(crate) border: &'a str,
     /// Slot 15: `0` exactly when the item says `AutoMaxWidth` is false.
     pub(crate) auto_max_width: bool,
     /// Slot 16, `0` when the item names no maximum width.
@@ -1168,7 +1185,10 @@ impl NativeLabelPayload<'_> {
             text_color: "{3,4,{0}}",
             back_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
+            password_mode: None,
             events: "{0,1,0}",
+            border_color: "{3,4,{0}}",
+            border: "{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}",
             auto_max_width: true,
             max_width: "0",
             auto_max_height: true,
@@ -1185,8 +1205,8 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
     };
     format!(
         "{{11,{width},{height},{stretch},{vertical},{mark_negatives},{format},{hyperlink},\
-         {text_color},{back_color},{font},2,{events},{{3,4,{{0}}}},\
-         {{3,0,{{0}},0,1,0,{appearance}}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {text_color},{back_color},{font},{password_mode},{events},{border_color},\
+         {border},{auto_max_width},{max_width},0,{auto_max_height},\
          {max_height}}}",
         width = payload.width,
         height = payload.height,
@@ -1201,10 +1221,77 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
         back_color = payload.back_color,
         font = payload.font,
         events = payload.events,
-        appearance = DEFAULT_APPEARANCE_UUID,
+        password_mode = tristate(payload.password_mode),
+        border_color = payload.border_color,
+        border = payload.border,
         auto_max_width = u8::from(payload.auto_max_width),
         max_width = payload.max_width,
     )
+}
+
+/// Slot 62 of an input payload once the item names any of its three
+/// properties: member 4 is `<ShowCheckBoxesInDropList>` (absent 2, `false` 0,
+/// `true` 1), member 9 `<MultipleValueDataPath>` and member 15
+/// `<MultipleValuePresentDataPath>`, each `{1,{<column id>}}` or `{0}`. The
+/// rest is constant over the 5 such fields of both corpora.
+pub(crate) fn format_input_drop_list_settings(
+    show_check_boxes: Option<bool>,
+    value_path: &str,
+    present_path: &str,
+) -> String {
+    let check = match show_check_boxes {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "2",
+    };
+    format!(
+        "{{1,2,0,0,{check},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
+         {{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{value_path},\"\",{{\"Pattern\"}},{{0}},\"\",\
+         {{\"Pattern\"}},{present_path},\"\",{{\"Pattern\"}},0,0}}"
+    )
+}
+
+/// The `{3,…}` payload of a `<GraphicalSchemaField>` (rt-fields2.md §2, 11 of
+/// 11): width and height default 50 and 10, `<Output>` absent 0 and `Enable`
+/// 1, `<Edit>` 1 unless `false`, then the events and constants.
+pub(crate) fn format_graphical_schema_payload(
+    width: &str,
+    height: &str,
+    output: Option<&str>,
+    edit: bool,
+    events: &str,
+) -> Option<String> {
+    let output = match output {
+        None => "0",
+        Some("Enable") => "1",
+        Some(_) => return None,
+    };
+    Some(format!(
+        "{{3,{width},{height},{output},{edit},{{3,4,{{0}}}},{events},1,0,0,1,0,1,1}}",
+        edit = u8::from(edit),
+    ))
+}
+
+/// The `{1,…}` payload of a `<ChartField>` (rt-fields2.md §3, 9 of 9).
+pub(crate) fn format_chart_payload(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+    max_height: &str,
+) -> String {
+    format!(
+        "{{1,{width},{height},{horizontal},{vertical},{events},1,0,0,1,{max_height}}}",
+        horizontal = u8::from(horizontal_stretch),
+        vertical = u8::from(vertical_stretch),
+    )
+}
+
+/// The `{1,…}` payload of a `<PDFDocumentField>` (rt-fields2.md §4, 8 of 8):
+/// only the size varies.
+pub(crate) fn format_pdf_document_payload(width: &str, height: &str) -> String {
+    format!("{{1,{width},{height},{{3,4,{{0}}}},0,{{0,1,0}},1,0,0,1,0,1,1,0}}")
 }
 
 /// The `{36,…}` payload of an input field, member by member.
@@ -1308,6 +1395,10 @@ pub(crate) struct NativeInputPayload<'a> {
     /// Slot 65, `<ExtendedEditMultipleValues>`: absent 0, `true` 1. The same,
     /// on 3 354.
     pub(crate) extended_edit_multiple_values: bool,
+    /// Slot 62, the drop-list settings: `{0}` unless the item names
+    /// `<ShowCheckBoxesInDropList>` or a multiple-value data path -- see
+    /// [`format_input_drop_list_settings`].
+    pub(crate) drop_list_settings: &'a str,
     /// Slot 18, the input mask, `""` when the item names none.
     pub(crate) mask: &'a str,
     /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
@@ -1380,6 +1471,7 @@ impl NativeInputPayload<'_> {
             height_control_variant: None,
             type_domain_enabled: true,
             extended_edit_multiple_values: false,
+            drop_list_settings: "{0}",
             mask: "",
             auto_max_width: true,
             max_width: "0",
@@ -1444,12 +1536,13 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
          {text_color},{back_color},{border_color},{font},{text_edit},{type_link},\
          {edit_text_update},{input_hint},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{height_variant},{tail0},{tail1},{tail2},{tail3},{tail4},{tail5},0,{{0}},0,\
+         {max_height},{height_variant},{tail0},{tail1},{tail2},{tail3},{tail4},{tail5},0,{drop_list_settings},0,\
          {links_again},{multiple_values}}}",
         width = payload.width,
         height = payload.height,
         type_domain = u8::from(payload.type_domain_enabled),
         multiple_values = u8::from(payload.extended_edit_multiple_values),
+        drop_list_settings = payload.drop_list_settings,
         horizontal = tristate(payload.horizontal_stretch),
         vertical = tristate(payload.vertical_stretch),
         wrap = u8::from(payload.wrap),
@@ -1913,6 +2006,8 @@ pub(crate) struct NativeSpreadsheetPayload<'a> {
     /// Slots 25 and 26, `<ShowCellNames>` and `<ShowRowAndColumnNames>`.
     pub(crate) show_cell_names: bool,
     pub(crate) show_row_and_column_names: bool,
+    /// Slot 31, `<DrawingSelectionShowMode>`: absent 2, `Show` 0 (1 of 1).
+    pub(crate) drawing_selection_show_mode: Option<&'a str>,
 }
 
 impl NativeSpreadsheetPayload<'_> {
@@ -1942,6 +2037,7 @@ impl NativeSpreadsheetPayload<'_> {
             max_height: "0",
             show_cell_names: false,
             show_row_and_column_names: false,
+            drawing_selection_show_mode: None,
         }
     }
 }
@@ -1975,8 +2071,9 @@ pub(crate) fn format_spreadsheet_payload(
     )?;
     let output = root_code(payload.output, &[("Enable", "1"), ("Disable", "2")], "0")?;
     let scaling = root_code(payload.view_scaling_mode, &[("Normal", "1")], "0")?;
+    let drawing_selection = root_code(payload.drawing_selection_show_mode, &[("Show", "0")], "2")?;
     Some(format!(
-        "{{13,{width},{height},{horizontal_stretch},{vertical_stretch},{show_grid},{show_headers},{vertical},{horizontal},0,{protection},{selection},{output},{edit},{show_groups},{border_color},{enable_start_drag},{enable_drag},{events},{scaling},{auto_max_width},{max_width},0,{auto_max_height},{max_height},{show_cell_names},{show_row_and_column_names},0,{vertical_tail},{horizontal_tail},{selection_tail},2}}",
+        "{{13,{width},{height},{horizontal_stretch},{vertical_stretch},{show_grid},{show_headers},{vertical},{horizontal},0,{protection},{selection},{output},{edit},{show_groups},{border_color},{enable_start_drag},{enable_drag},{events},{scaling},{auto_max_width},{max_width},0,{auto_max_height},{max_height},{show_cell_names},{show_row_and_column_names},0,{vertical_tail},{horizontal_tail},{selection_tail},{drawing_selection}}}",
         width = payload.width,
         height = payload.height,
         horizontal_stretch = u8::from(payload.horizontal_stretch),
@@ -2169,6 +2266,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", true, "Refresh", "403bc6e6-b98e-4181-9f43-9c75cbbf82cf"),
     ("Table", true, "SaveDynamicListSettings", "95b4bc12-2ece-4d7a-b3e2-6f9293620a06"),
     ("Table", true, "SearchEverywhere", "7b683784-b474-441a-ba63-3d757bd0ffd4"),
+    ("Table", true, "SearchHistory", "d96b0c03-b209-4d01-a3fc-17a14f873b64"),
     ("Table", true, "SetDateInterval", "daa306cd-a78a-4e74-a14c-739daba624cb"),
     ("Table", true, "SetDeletionMark", "a2f737a8-0114-4e86-a214-45e5c213fa65"),
     ("Table", true, "ShowMultipleSelection", "e7216412-03ac-4a81-99c2-1d7c28e88e31"),
@@ -2272,6 +2370,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:DynamicList", "Copy", "342c531d-dc73-458a-8ac4-6a746916a33b"),
     ("cfg:DynamicList", "Create", "4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
     ("cfg:DynamicList", "CreateFolder", "d8772fd1-a3bf-417d-8334-c49968dbb45e"),
+    ("cfg:DynamicList", "CreateInitialImage", "62778a6d-6114-471c-93f7-e1ccd54bd266"),
     ("cfg:DynamicList", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:DynamicList", "DynamicListStandardSettings", "d603a249-6eb3-4e38-bb2d-a8a86a8ab156"),
     ("cfg:DynamicList", "Find", "bdefa701-6685-453e-a02a-3683d0cc16d3"),
@@ -2401,6 +2500,31 @@ pub(crate) fn dynamic_list_delete_command_uuid(main_table_kind: Option<&str>) ->
     }
 }
 
+/// The uuid of an item's own `Delete` -- a `<Table>`'s `<ExcludedCommand>`
+/// or a button's `Form.Item.<table>.StandardCommand.Delete` -- when the table
+/// shows a dynamic list. Measured over 445 tables and 59 buttons of both
+/// corpora: a list over an `InformationRegister` stores the plain table's
+/// `8d772f97-…` in 101 of 101 tables, and a list over a kind with a deletion
+/// mark stores `ec576e13-…` in 344 of 344.
+///
+/// A kind outside those measured gets no answer.
+pub(crate) fn dynamic_list_item_delete_command_uuid(
+    main_table_kind: Option<&str>,
+) -> Option<&'static str> {
+    match main_table_kind {
+        Some("InformationRegister") => Some("8d772f97-c0ef-47c0-9cb0-efea28c61341"),
+        Some(
+            "Document"
+            | "Catalog"
+            | "DocumentJournal"
+            | "BusinessProcess"
+            | "ChartOfCharacteristicTypes"
+            | "ExchangePlan",
+        ) => Some("ec576e13-1e76-4c33-98aa-a33204514227"),
+        _ => None,
+    }
+}
+
 /// Whether any form's class stores a uuid for a standard command of this
 /// name, which is what tells a spelling the corpus knows from one it does not.
 pub(crate) fn is_form_standard_command(name: &str) -> bool {
@@ -2411,15 +2535,29 @@ pub(crate) fn is_form_standard_command(name: &str) -> bool {
 
 /// The uuid of `Form.StandardCommand.<name>` for a form whose main attribute
 /// is of this class.
+///
+/// A pair the corpus never showed falls back to the name alone when every
+/// class that does show the name stores one uuid for it -- `Write` is
+/// `fe558fde-…` on all nine classes that have it, and a `ConstantsSet` form's
+/// button stores the same. A name whose classes disagree gets no answer.
 pub(crate) fn form_standard_command_uuid(
     main_attribute_class: &str,
     name: &str,
 ) -> Option<&'static str> {
-    FORM_STANDARD_COMMAND_UUIDS
+    if let Some(uuid) = FORM_STANDARD_COMMAND_UUIDS
         .iter()
         .find_map(|(candidate, command, uuid)| {
             (*candidate == main_attribute_class && *command == name).then_some(*uuid)
         })
+    {
+        return Some(uuid);
+    }
+    let mut uuids = FORM_STANDARD_COMMAND_UUIDS
+        .iter()
+        .filter(|(_, command, _)| *command == name)
+        .map(|(_, _, uuid)| *uuid);
+    let first = uuids.next()?;
+    uuids.all(|uuid| uuid == first).then_some(first)
 }
 
 /// The `{31,…}` record of a `<Button>` whose action is a form standard
@@ -3302,7 +3440,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
 /// Those eight, and the two whose `<Border>` names neither a width nor a style
 /// and stores `{3,1,{-18},1,1,0}` -- a six-member tuple of a different shape
 /// entirely -- are refused by the caller rather than written with width 1.
-pub(crate) fn format_native_control_border(style: Option<&str>) -> Option<String> {
+pub(crate) fn format_native_control_border(style: Option<&str>, width: &str) -> Option<String> {
     let code = root_code(
         style,
         &[
@@ -3317,7 +3455,7 @@ pub(crate) fn format_native_control_border(style: Option<&str>) -> Option<String
         "0",
     )?;
     Some(format!(
-        "{{3,0,{{0}},{code},1,0,{DEFAULT_APPEARANCE_UUID}}}"
+        "{{3,0,{{0}},{code},{width},0,{DEFAULT_APPEARANCE_UUID}}}"
     ))
 }
 
@@ -3382,16 +3520,19 @@ pub(crate) fn format_native_inline_picture(
 /// `value` is what the name stores -- `{0,<uuid>}` for most of them, a bare
 /// negative code for a few. The rest of the reference holds one shape over
 /// all 666 of the corpus: present, the transparent pixel when the source
-/// names one, and member 6 is **1**, not the 0 a common picture takes.
+/// names one, and member 6 is **1**, not the 0 a common picture takes --
+/// unless the source says `<xr:LoadTransparent>false`, which stores 0.
 pub(crate) fn format_native_std_picture(
     value: &str,
+    load_transparent: bool,
     transparent_x: Option<&str>,
     transparent_y: Option<&str>,
 ) -> String {
     format!(
-        "{{4,1,{value},\"\",{x},{y},1,0,\"\"}}",
+        "{{4,1,{value},\"\",{x},{y},{transparent},0,\"\"}}",
         x = transparent_x.unwrap_or("-1"),
         y = transparent_y.unwrap_or("-1"),
+        transparent = u8::from(load_transparent),
     )
 }
 
@@ -6827,7 +6968,7 @@ mod tests {
         // `Catalogs/ПоказателиМонитораКлючевыхПоказателей/Forms/ФормаЭлемента`
         // item 246: `<BackColor>#C0DCC0</>` at member 6 and a `Single`
         // `<Border>` at member 8.
-        let border = format_native_control_border(Some("Single")).expect("a single border");
+        let border = format_native_control_border(Some("Single"), "1").expect("a single border");
         assert_eq!(
             format_label_decoration_payload(&NativeLabelDecorationPayload {
                 back_color: "{3,0,{12639424}}",
@@ -6872,7 +7013,7 @@ mod tests {
             }),
             None
         );
-        assert_eq!(format_native_control_border(Some("Dotted")), None);
+        assert_eq!(format_native_control_border(Some("Dotted"), "1"), None);
     }
 
     /// The `{4,…}` payload of a picture decoration, against three payloads read
@@ -6935,7 +7076,7 @@ mod tests {
             }],
         )
         .expect("the click of a picture decoration");
-        let border = format_native_control_border(Some("Single")).expect("a single border");
+        let border = format_native_control_border(Some("Single"), "1").expect("a single border");
         assert_eq!(
             format_picture_decoration_payload(&NativePictureDecorationPayload {
                 picture: &format_native_item_picture(

@@ -445,15 +445,14 @@ struct FormXmlCommandInterfaceItem {
     /// navigation panel, 8 for the command bar.
     panel: String,
     command: Option<String>,
-    /// `<Attribute>`, a form-local data path whose encoding is unmeasured.
+    /// `<Attribute>`, a form-local data path stored at slot 3 exactly as an
+    /// item's `<DataPath>` is (rt-fields2.md §8.1, 56 of 56).
     attribute: Option<String>,
     /// `<Type>`: `Auto` and `Added`, the only two either corpus spells.
     item_type: Option<String>,
-    /// How many `<Visible><Value name="Role.X">` children the item carries.
-    /// Their tuple is `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<v>}×n}}` and
-    /// the role uuids are a configuration lookup this writer does not do, so a
-    /// non-zero count refuses the form.
-    visible_roles: usize,
+    /// The `<Visible><Value name="Role.X">` children, in order: slot 8 is the
+    /// tuple `native_rights` builds (rt-fields2.md §8.2, 8 of 8).
+    visible_roles: Vec<(String, Option<bool>)>,
     command_group: Option<String>,
     index: Option<usize>,
     default_visible: Option<bool>,
@@ -658,6 +657,10 @@ struct FormXmlControlBorder {
     style: Option<FormControlBorderStyle>,
     style_seen: bool,
     valid: bool,
+    /// The `width` attribute, stored verbatim at tuple member 4.
+    width: String,
+    /// `<Border ref="style:ControlBorder"/>`, which stores `{3,1,{-18},1,1,0}`.
+    reference: bool,
 }
 
 /// A `<Picture>` a form item names, as the XML spells it.
@@ -6972,10 +6975,22 @@ fn native_form_attribute_use_always(
     attribute: &FormXmlAttribute,
     data_paths: &NativeDataPaths<'_>,
 ) -> Result<String> {
+    let declared = attribute.types.first().map(|value| value.trim());
     let Some(fields) = attribute.use_always.as_deref() else {
+        // No field named is the flagged set itself under the delta reading.
+        if declared == Some("cfg:ConstantsSet") {
+            let paths = target_always_used_constants()
+                .iter()
+                .map(|uuid| format!("{{1,{{0,{uuid}}}}}"))
+                .collect::<Vec<_>>();
+            if !paths.is_empty() {
+                return Ok(crate::compiler::bodies::form_native::format_form_attribute_save(
+                    &paths,
+                ));
+            }
+        }
         return Ok("{0,0}".to_string());
     };
-    let declared = attribute.types.first().map(|value| value.trim());
     if declared == Some("cfg:DynamicList") {
         // 4 709 of 4 709 dynamic-list records, 3 028 of them bearing the
         // element, store `{0,0}`. Their fields go to the `FieldsMap`, which
@@ -6985,10 +7000,17 @@ fn native_form_attribute_use_always(
     // A constants set's record is a delta against each constant's own
     // always-used flag, which no exported property carries. A configuration
     // loaded from its source tree has every flag clear, and against clear
-    // flags the delta is the set itself -- which is what is written.
+    // flags the delta is the set itself -- which is what is written. A target
+    // database that already holds flagged constants names them through
+    // `IBCMD_RS_ALWAYS_USED_CONSTANTS`, and the delta is taken against those.
     if fields.is_empty() {
         return Err(anyhow!("an empty <UseAlways> is not measured"));
     }
+    let flagged = if declared == Some("cfg:ConstantsSet") {
+        target_always_used_constants()
+    } else {
+        Vec::new()
+    };
     let mut paths = Vec::with_capacity(fields.len());
     for field in fields {
         let field = field.trim();
@@ -7016,7 +7038,41 @@ fn native_form_attribute_use_always(
         }
         paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
     }
+    if !flagged.is_empty() {
+        for uuid in &flagged {
+            let path = format!("{{1,{{0,{uuid}}}}}");
+            if let Some(at) = paths.iter().position(|candidate| *candidate == path) {
+                paths.remove(at);
+            } else {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        if paths.is_empty() {
+            return Ok("{0,0}".to_string());
+        }
+    }
     Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
+}
+
+/// The constants the target database flags always-used, one uuid a line in
+/// the file `IBCMD_RS_ALWAYS_USED_CONSTANTS` names; none when it names none.
+fn target_always_used_constants() -> Vec<String> {
+    static FLAGGED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FLAGGED
+        .get_or_init(|| {
+            std::env::var_os("IBCMD_RS_ALWAYS_USED_CONSTANTS")
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .map(|text| {
+                    text.lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 /// Whether one resolved segment of a `<UseAlways>` path takes a shape the
@@ -7223,6 +7279,33 @@ fn format_native_child_item(
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
         let payload = native_field_payload(item, data_paths, main_attribute_class, source, items_root)?;
+        // A PDF document field keeps its one `<ViewStatusAddition>` in the
+        // record's tail, as a table keeps its additions; no other field
+        // carries one.
+        let additions = if item.tag == "PDFDocumentField" {
+            let mut records = Vec::new();
+            for child in &children {
+                if child.tag != "ViewStatusAddition" {
+                    return Err(anyhow!("a <PDFDocumentField> holds a <{}>, which is not measured", child.tag));
+                }
+                records.push(native_table_addition(
+                    child,
+                    1,
+                    data_paths,
+                    command_ids,
+                    items,
+                    main_attribute_class,
+                    source,
+                    items_root,
+                )?);
+            }
+            if records.len() != 1 {
+                return Err(anyhow!("a <PDFDocumentField> without one <ViewStatusAddition> is not measured"));
+            }
+            format!("1,{}", records[0])
+        } else {
+            "0".to_string()
+        };
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -7335,10 +7418,10 @@ fn format_native_child_item(
             visible: item.visible.unwrap_or(true),
             extended_tooltip: &tooltip,
             display_importance,
+            additions: &additions,
             ..native::NativeFieldItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
-        let _ = children;
         return Ok((kind_uuid, record));
     }
 
@@ -7419,6 +7502,7 @@ fn format_native_child_item(
             functional_options: native_user_visible(item, source)?.as_deref(),
             shortcut: &native_item_shortcut(item)?,
             parameter: &native_button_parameter(item, source)?,
+            command_uniqueness: native_scalar_flag(item, "CommandUniqueness", true),
             ..native::NativeButtonItem::default()
         })
         .ok_or_else(|| anyhow!("<Button> names something the writer cannot place"))?;
@@ -7853,7 +7937,7 @@ fn format_native_table(
         .iter()
         .map(|name| {
             if dynamic_list && name == "Delete" {
-                return native::dynamic_list_delete_command_uuid(main_table_kind).ok_or_else(|| {
+                return native::dynamic_list_item_delete_command_uuid(main_table_kind).ok_or_else(|| {
                     anyhow!(
                         "<Table> excludes Delete on a dynamic list over {}",
                         main_table_kind.unwrap_or("nothing")
@@ -8325,6 +8409,20 @@ fn native_container_payload(
                 .ok_or_else(|| anyhow!("a group names a background colour it cannot place"))?;
             let hidden = native_item_color(item.hidden_state_title_back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a group names a hidden-state colour it cannot place"))?;
+            // Payload member 26 is the id of the item the element names.
+            let associated = match item.associated_table_element_id.as_deref().map(str::trim) {
+                Some(name) => match items.get(name) {
+                    Some(target) => target.id.clone(),
+                    None => name
+                        .strip_suffix(":02023637-7868-4a5f-8576-835a76e0c9ba")
+                        .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            anyhow!("a group is associated with {name}, which the writer cannot place")
+                        })?,
+                },
+                None => "0".to_string(),
+            };
             native::format_usual_group_payload(&native::NativeUsualGroupPayload {
                 group: item.group.map(native_group_spelling),
                 behavior: item.behavior.map(native_group_behavior_spelling),
@@ -8347,10 +8445,7 @@ fn native_container_payload(
                 current_row_use: item.current_row_use.as_deref(),
                 collapsed_representation_title: &collapsed_title,
                 format: &format,
-                associated_table_element_id: item
-                    .associated_table_element_id
-                    .as_deref()
-                    .unwrap_or("0"),
+                associated_table_element_id: &associated,
                 ..native::NativeUsualGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
@@ -8478,8 +8573,15 @@ fn native_button_command(
         return Ok(format!("{{{id},{}}}", native::FORM_COMMAND_NAMESPACE_UUID));
     }
     if let Some(name) = path.strip_prefix("Form.StandardCommand.") {
-        let uuid = native::form_standard_command_uuid(main_attribute_class, name)
-            .ok_or_else(|| anyhow!("no measured uuid for {path} on {main_attribute_class}"))?;
+        let uuid = if main_attribute_class == "cfg:DynamicList" && name == "Delete" {
+            // The form itself is filed under the empty name, which no item takes.
+            native::dynamic_list_delete_command_uuid(
+                items.get("").and_then(|form| form.main_table_kind.as_deref()),
+            )
+        } else {
+            native::form_standard_command_uuid(main_attribute_class, name)
+        }
+        .ok_or_else(|| anyhow!("no measured uuid for {path} on {main_attribute_class}"))?;
         return Ok(format!("{{0,{uuid}}}"));
     }
     if let Some(rest) = path.strip_prefix("Form.Item.")
@@ -8489,7 +8591,7 @@ fn native_button_command(
             .get(target)
             .ok_or_else(|| anyhow!("a button runs {path}, whose item the form does not declare"))?;
         let uuid = if target.dynamic_list && name == "Delete" {
-            native::dynamic_list_delete_command_uuid(target.main_table_kind.as_deref())
+            native::dynamic_list_item_delete_command_uuid(target.main_table_kind.as_deref())
         } else {
             native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
         }
@@ -9030,6 +9132,9 @@ fn native_field_payload(
             max_height: item.max_height.as_deref().unwrap_or("0"),
             events: &events,
             format: &native_localized(item, "Format"),
+            password_mode: native_scalar_tristate(item, "PasswordMode")?,
+            border: &native_item_control_border(item)?,
+            border_color: &native_scalar_color(item, "BorderColor", source)?,
             ..native::NativeLabelPayload::plain(false)
         })),
         "InputField" => {
@@ -9051,6 +9156,7 @@ fn native_field_payload(
                 "ExtendedEditMultipleValues",
                 false,
             ),
+            drop_list_settings: &native_input_drop_list_settings(item, data_paths)?,
             auto_choice_incomplete: native_scalar_tristate(item, "AutoChoiceIncomplete")?,
             choice_folders_and_items: item
                 .scalars
@@ -9151,6 +9257,62 @@ fn native_field_payload(
                 ..native::NativeCheckBoxPayload::plain()
             })
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
+        }
+        "GraphicalSchemaField" => {
+            if item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch.is_some()
+                || item.vertical_stretch.is_some()
+                || item.scalars.contains_key("BorderColor")
+                || !item.excluded_commands.is_empty()
+            {
+                return Err(anyhow!("a <GraphicalSchemaField> names a property whose slot is not measured"));
+            }
+            native::format_graphical_schema_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                item.scalars.get("Output").map(|value| value.trim()),
+                native_scalar_flag(item, "Edit", true),
+                &events,
+            )
+            .ok_or_else(|| anyhow!("<GraphicalSchemaField> names a spelling the writer cannot place"))
+        }
+        "ChartField" => {
+            let horizontal = item.horizontal_stretch.unwrap_or(true);
+            let vertical = item.vertical_stretch.unwrap_or(true);
+            if horizontal != vertical
+                || item.max_width.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+            {
+                return Err(anyhow!("a <ChartField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_chart_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                horizontal,
+                vertical,
+                &events,
+                item.max_height.as_deref().unwrap_or("0"),
+            ))
+        }
+        "PDFDocumentField" => {
+            if events != "{0,1,0}"
+                || item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch.is_some()
+                || item.vertical_stretch.is_some()
+            {
+                return Err(anyhow!("a <PDFDocumentField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_pdf_document_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+            ))
         }
         "HTMLDocumentField" => native::format_html_document_payload(
             &native::NativeHtmlDocumentPayload {
@@ -9280,6 +9442,10 @@ fn native_field_payload(
                     "ShowRowAndColumnNames",
                     false,
                 ),
+                drawing_selection_show_mode: item
+                    .scalars
+                    .get("DrawingSelectionShowMode")
+                    .map(String::as_str),
                 ..native::NativeSpreadsheetPayload::plain()
             })
             .ok_or_else(|| {
@@ -9302,12 +9468,13 @@ fn native_field_payload(
                 }
             };
             Ok(format!(
-                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},0,0,1,0}}",
+                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},0,0,{auto_max_height},0}}",
                 width = item.width.as_deref().unwrap_or("32"),
                 stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
                 max = item.scalars.get("MaxValue").map_or("100", String::as_str),
                 percent = u8::from(native_scalar_flag(item, "ShowPercent", false)),
                 auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+                auto_max_height = u8::from(item.auto_max_height.unwrap_or(true)),
             ))
         }
         // A calendar's `{6,…}` payload, 24 members over the 13 calendars of
@@ -9546,7 +9713,7 @@ fn native_decoration_number<'a>(
 /// shape.
 fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
     if !item.control_border_seen {
-        return crate::compiler::bodies::form_native::format_native_control_border(None)
+        return crate::compiler::bodies::form_native::format_native_control_border(None, "1")
             .ok_or_else(|| anyhow!("<{}> cannot place its default border", item.tag));
     }
     let border = item
@@ -9554,11 +9721,17 @@ fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
         .as_ref()
         .filter(|border| border.valid)
         .ok_or_else(|| anyhow!("<{}> names a <Border> the writer cannot place", item.tag))?;
+    if border.reference {
+        return Ok("{3,1,{-18},1,1,0}".to_string());
+    }
     let style = border
         .style
         .ok_or_else(|| anyhow!("<{}> names a <Border> with no style", item.tag))?;
-    crate::compiler::bodies::form_native::format_native_control_border(Some(style.xml_value()))
-        .ok_or_else(|| anyhow!("<{}> names a border style the writer cannot place", item.tag))
+    crate::compiler::bodies::form_native::format_native_control_border(
+        Some(style.xml_value()),
+        &border.width,
+    )
+    .ok_or_else(|| anyhow!("<{}> names a border style the writer cannot place", item.tag))
 }
 
 /// The `{4,…}` picture reference an item's `<Picture>` stores.
@@ -9940,6 +10113,7 @@ fn native_picture_of(
             .ok_or_else(|| anyhow!("no measured value for StdPicture.{name}"))?;
         return Ok(native::format_native_std_picture(
             value,
+            picture.load_transparent.as_deref().map(str::trim) != Some("false"),
             picture.transparent_x.as_deref(),
             picture.transparent_y.as_deref(),
         ));
@@ -10250,6 +10424,39 @@ fn native_extra_picture(
     )
 }
 
+/// Slot 62 of an input payload, see `format_input_drop_list_settings`. A
+/// multiple-value path names a column of a value-table attribute and stores
+/// that column's own id alone.
+fn native_input_drop_list_settings(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<String> {
+    let check = native_scalar_tristate(item, "ShowCheckBoxesInDropList")?;
+    let column = |name: &str| -> Result<Option<String>> {
+        let Some(path) = item.scalars.get(name).map(|value| value.trim()) else {
+            return Ok(None);
+        };
+        let resolved = data_paths
+            .resolve(path)
+            .ok_or_else(|| anyhow!("<{name}> names {path}, which the writer cannot place"))?;
+        let ranges = scan_braced_fields(&resolved, 0)?;
+        if ranges.len() != 3 || resolved[ranges[0].clone()].trim() != "2" {
+            return Err(anyhow!("<{name}> names {path}, which is not an attribute column"));
+        }
+        Ok(Some(format!("{{1,{}}}", resolved[ranges[2].clone()].trim())))
+    };
+    let value_path = column("MultipleValueDataPath")?;
+    let present_path = column("MultipleValuePresentDataPath")?;
+    if check.is_none() && value_path.is_none() && present_path.is_none() {
+        return Ok("{0}".to_string());
+    }
+    Ok(crate::compiler::bodies::form_native::format_input_drop_list_settings(
+        check,
+        value_path.as_deref().unwrap_or("{0}"),
+        present_path.as_deref().unwrap_or("{0}"),
+    ))
+}
+
 /// `<MinValue>` or `<MaxValue>` as a typed value: `{"N",n}` for a number and
 /// `{"S","text"}` for a string -- the only two types either corpus spells --
 /// and `{"U"}` when the item names none.
@@ -10548,9 +10755,12 @@ fn format_native_form_body(
         )
         .collect::<Vec<_>>();
     while let Some(item) = stack.pop() {
-        let list = item.data_path.as_deref().and_then(|path| {
+        // Only an item bound to the list itself shows it: a table on
+        // `<list>.SettingsComposer.Settings.Filter` is a plain table (its
+        // `Delete` stores the plain `8d772f97-…`), and so is a column.
+        let list = item.data_path.as_deref().map(str::trim).and_then(|path| {
             properties.attributes.iter().find(|attribute| {
-                attribute.name == path.split('.').next().unwrap_or(path)
+                attribute.name == path
                     && attribute.types.len() == 1
                     && attribute.types[0].trim() == "cfg:DynamicList"
             })
@@ -10571,6 +10781,16 @@ fn format_native_form_body(
         stack.extend(item.child_items.iter());
     }
     let main_attribute_class = form_main_attribute_class(properties);
+    // The form's own standard commands ask for its list's main table too.
+    items.insert(
+        String::new(),
+        NativeItemTarget {
+            tag: "Form".to_string(),
+            id: "0".to_string(),
+            dynamic_list: main_attribute_class == "cfg:DynamicList",
+            main_table_kind: form_main_table_kind(properties),
+        },
+    );
 
     let mut bar_children = Vec::new();
     if let Some(bar) = &properties.auto_command_bar {
@@ -10701,13 +10921,25 @@ fn format_native_form_body(
         if references.is_empty() {
             return Ok("{0,0}".to_string());
         }
-        if references.iter().any(|reference| reference.trim().is_empty()) {
-            return Err(anyhow!("a functional option is named by an empty <Item/>"));
+        // An empty `<Item/>` stores the nil uuid in its place (6 commands and
+        // one attribute of ERP УХ, all `{0,1,00000000-…}`).
+        let mut text = format!("{{0,{}", references.len());
+        for reference in references {
+            let reference = reference.trim();
+            let uuid = if reference.is_empty() {
+                "00000000-0000-0000-0000-000000000000".to_string()
+            } else {
+                source
+                    .ok_or_else(|| {
+                        anyhow!("a form names functional options but has no source resolver")
+                    })?
+                    .resolve_metadata_reference_uuid(reference)?
+            };
+            text.push(',');
+            text.push_str(&uuid);
         }
-        let source = source.ok_or_else(|| {
-            anyhow!("a form names functional options but has no source resolver")
-        })?;
-        format_form_reference_list(source, references)
+        text.push('}');
+        Ok(text)
     };
 
     // The attributes section, with the form's settings composer at its end.
@@ -10913,12 +11145,14 @@ fn format_native_form_body(
         properties,
         "NavigationPanel",
         &main_attribute_class,
+        &data_paths,
         source,
     )?;
     let command_bar = native_command_interface_panel(
         properties,
         "CommandBar",
         &main_attribute_class,
+        &data_paths,
         source,
     )?;
 
@@ -11865,6 +12099,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                 }
                 if local == "Value"
+                    && command_interface_path(&path, &["Item", "Visible"])
+                    && let Some(item) = current_command_interface_item.as_mut()
+                {
+                    item.visible_roles
+                        .push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if local == "Value"
                     && path_ends_with(&path, &["Form", "Commands", "Command", "Use"])
                     && let Some(rights) = current_command
                         .as_mut()
@@ -12162,6 +12403,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // `<v8:lang/>` and `<v8:content/>` are empty strings of a
+                // localized item -- a title can name one language as "" --
+                // and never reach the text arm either.
+                if path.last().map(String::as_str) == Some("item") {
+                    match local.as_str() {
+                        "lang" => {
+                            current_localized_lang = Some(String::new());
+                            current_child_title_lang = Some(String::new());
+                        }
+                        "content" => {
+                            current_localized_content = Some(String::new());
+                            current_child_title_content = Some(String::new());
+                        }
+                        _ => {}
+                    }
+                }
                 // `<Item/>` is an `Event::Empty`, so it never reaches the arm
                 // that reads an item's text. Eight items of ERP УХ are spelled
                 // that way and none of BSP. Pushing the empty string keeps the
@@ -12169,20 +12426,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 // unmeasured spelling gets; dropping it in silence would write
                 // a collection one short.
                 if local == "Item" {
-                    if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH) {
+                    if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH[..6]) {
                         if let Some(column) = current_column.as_mut() {
                             column.functional_options.push(String::new());
                         }
                     } else if path_ends_with(
                         &path,
-                        &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                        &["Form", "Attributes", "Attribute", "FunctionalOptions"],
                     ) {
                         if let Some(attribute) = current_attribute.as_mut() {
                             attribute.functional_options.push(String::new());
                         }
                     } else if path_ends_with(
                         &path,
-                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                        &["Form", "Commands", "Command", "FunctionalOptions"],
                     ) && let Some(command) = current_command.as_mut()
                     {
                         command.functional_options.push(String::new());
@@ -12453,8 +12710,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
                 {
+                    // Only the self-closed style reference is a whole border.
+                    let border = parse_form_xml_control_border(&event)?;
+                    item.control_border = (!item.control_border_seen && border.reference && border.valid)
+                        .then_some(border);
                     item.control_border_seen = true;
-                    item.control_border = None;
                 } else if path_ends_with_for_child_control_border(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
                     && let Some(border) = item.control_border.as_mut()
@@ -14998,7 +15258,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Value" if command_interface_path(&path, &["Item", "Visible", "Value"]) => {
                         if let Some(item) = current_command_interface_item.as_mut() {
-                            item.visible_roles += 1;
+                            let value = match text_value.trim() {
+                                "true" => Some(true),
+                                "false" => Some(false),
+                                _ => None,
+                            };
+                            if let Some(last) = item.visible_roles.last_mut() {
+                                last.1 = value;
+                            }
                         }
                     }
                     "DefaultVisible"
@@ -16803,6 +17070,7 @@ fn parse_form_child_item_xml(
 fn parse_form_xml_control_border(event: &BytesStart<'_>) -> Result<FormXmlControlBorder> {
     let mut width = None::<String>;
     let mut gap = None::<String>;
+    let mut reference = None::<String>;
     let mut valid = true;
     for attr in event.attributes() {
         let attr = attr?;
@@ -16810,14 +17078,27 @@ fn parse_form_xml_control_border(event: &BytesStart<'_>) -> Result<FormXmlContro
         match attr.key.as_ref() {
             b"width" if width.is_none() => width = Some(value),
             b"gap" if gap.is_none() => gap = Some(value),
+            b"ref" if reference.is_none() => reference = Some(value),
             _ => valid = false,
         }
     }
-    valid &= width.as_deref() == Some("1") && gap.as_deref().is_none_or(|value| value == "false");
+    // Widths 0, 1, 3 and 5 occur and each is stored as spelled; the only
+    // reference either corpus spells is the style's own border.
+    let is_reference = reference.is_some();
+    valid &= if is_reference {
+        reference.as_deref() == Some("style:ControlBorder") && width.is_none() && gap.is_none()
+    } else {
+        width
+            .as_deref()
+            .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            && gap.as_deref().is_none_or(|value| value == "false")
+    };
     Ok(FormXmlControlBorder {
         style: None,
         style_seen: false,
         valid,
+        width: width.unwrap_or_else(|| "1".to_string()),
+        reference: is_reference,
     })
 }
 
@@ -17306,7 +17587,7 @@ fn apply_form_choice_list_part(
 fn form_child_item_supports_control_border(tag: &str) -> bool {
     matches!(
         tag,
-        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration"
+        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration" | "CalendarField"
     )
 }
 
@@ -17529,6 +17810,7 @@ fn native_command_interface_panel(
     properties: &FormXmlBodyProperties,
     panel: &str,
     main_attribute_class: &str,
+    data_paths: &NativeDataPaths<'_>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let mut records = String::new();
@@ -17544,6 +17826,7 @@ fn native_command_interface_panel(
             count,
             properties,
             main_attribute_class,
+            data_paths,
             source,
         )?);
         count += 1;
@@ -17565,18 +17848,15 @@ fn native_command_interface_item(
     position: usize,
     properties: &FormXmlBodyProperties,
     main_attribute_class: &str,
+    data_paths: &NativeDataPaths<'_>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if item.attribute.is_some() {
-        return Err(anyhow!(
-            "a command interface item names an <Attribute>, whose data path is not measured"
-        ));
-    }
-    if item.visible_roles > 0 {
-        return Err(anyhow!(
-            "a command interface item's <Visible> names roles, whose tuple is not measured"
-        ));
-    }
+    let attribute = match item.attribute.as_deref().map(str::trim) {
+        Some(path) => data_paths.resolve(path).ok_or_else(|| {
+            anyhow!("a command interface item names {path}, which the writer cannot place")
+        })?,
+        None => "{0}".to_string(),
+    };
     let command = native_command_interface_command(item, properties, main_attribute_class, source)?;
     // Every item of both corpora spells `<Type>`, and only these two words.
     let kind = match item.item_type.as_deref() {
@@ -17618,10 +17898,20 @@ fn native_command_interface_item(
         (Some(common), _) => common,
         (None, _) => true,
     };
+    let visible = if item.visible_roles.is_empty() {
+        format!("{{0,{{0,{{\"B\",{}}},0}}}}", u8::from(common))
+    } else {
+        native_rights(
+            &FormXmlRights {
+                common: Some(common),
+                values: item.visible_roles.clone(),
+            },
+            "a command interface item's <Visible>",
+            source,
+        )?
+    };
     Ok(format!(
-        "{{3,{position},{command},{{0}},{kind},{group},{index},{default_visible},\
-         {{0,{{0,{{\"B\",{}}},0}}}}}}",
-        u8::from(common)
+        "{{3,{position},{command},{attribute},{kind},{group},{index},{default_visible},{visible}}}"
     ))
 }
 
@@ -34397,8 +34687,8 @@ mod tests {
 
         // A `StdPicture` names the platform's own picture, which no file of
         // the source declares. Its value comes from a table measured over both
-        // corpora, and its reference carries 1 at member 6 where a common
-        // picture carries 0.
+        // corpora; member 6 is `<xr:LoadTransparent>`, which this helper spells
+        // `false` -- 1 is what the usual `true` stores.
         let body = super::compile_native_form_body(
             form("StdPicture.Information").as_bytes(),
             None,
@@ -34406,7 +34696,7 @@ mod tests {
             None,
         )?;
         assert!(
-            body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,1,0,\"\"}"),
+            body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,0,0,\"\"}"),
             "the StdPicture reference is not the one the platform stores: {body}"
         );
 
