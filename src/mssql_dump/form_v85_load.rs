@@ -1156,9 +1156,10 @@ pub(crate) fn up_convert_v85_primitives_in_place(text: &str) -> String {
 }
 
 /// The chart records of a spreadsheet template the way 8.5 stores them: the
-/// 8.3.27 `{74,...}` record of 105 members becomes `{75,...}` with eight
-/// automatic colours appended (8.5.1.1150 BSP, both Gantt chart templates;
-/// the exporter reads nothing else in those eight).
+/// 8.3.27 `{74,...}` record (`{{11},{74,...}}`, its length set by the series
+/// and points) becomes `{75,...}` with eight automatic colours appended
+/// (8.5.1.1150 BSP, both Gantt chart templates; the exporter reads nothing
+/// else in those eight).
 pub(crate) fn up_convert_v85_chart_records(text: &str) -> Result<String> {
     const RECORD_LIMIT: usize = 16 * 1024 * 1024;
     let mut out = String::with_capacity(text.len() + 256);
@@ -1176,8 +1177,9 @@ pub(crate) fn up_convert_v85_chart_records(text: &str) -> Result<String> {
         let Node::List(mut members) = parse_raw(&text[start..end])? else {
             bail!("a chart record is not a tuple");
         };
-        if members.len() != 105 {
-            bail!("a chart record `{{74,...}}` carries {} members, not 105", members.len());
+        // The record's fixed part alone is 97 members (`moxel.rs`).
+        if members.len() < 97 {
+            bail!("a chart record `{{74,...}}` carries {} members, fewer than 97", members.len());
         }
         members[0] = Node::Leaf("75".to_owned());
         for _ in 0..8 {
