@@ -34,6 +34,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
+use crate::compiler::bodies::role_rights_writer::SourceTreeRoleRightsSource;
 use crate::compiler::bodies::form_native::{
     ConfigurationField, ConfigurationObject, ConfigurationObjects, DataPathAttribute,
     DataPathColumn, DataPathForm, DataPathItem,
@@ -1079,14 +1080,23 @@ pub struct MetadataSourceContext {
     /// here rather than re-read per field. A miss is memoised too, as `None`.
     /// Shared between clones and across the threads an audit runs on.
     configuration_objects: Arc<Mutex<BTreeMap<String, Option<Arc<ConfigurationObject>>>>>,
+    /// The metadata names a role's `Rights.xml` refers to, each owner file
+    /// parsed once and shared between clones.
+    role_rights_source: Arc<SourceTreeRoleRightsSource>,
 }
 
 impl MetadataSourceContext {
     pub fn new(source_root: PathBuf) -> Self {
         Self {
+            role_rights_source: Arc::new(SourceTreeRoleRightsSource::new(source_root.clone())),
             source_root,
             configuration_objects: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// The resolver the base-free role rights writer looks names up with.
+    pub fn role_rights_source(&self) -> &SourceTreeRoleRightsSource {
+        &self.role_rights_source
     }
 
     /// One metadata object of the source tree, by `"<Class>.<Name>"`.
@@ -28058,7 +28068,62 @@ pub fn pack_role_rights_blob_from_xml_with_source(
     })
 }
 
-pub fn role_rights_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+/// Compiles a role's `Rights.xml` into its stored rights row without a base
+/// blob (see `compiler::bodies::role_rights_writer`), names looked up in the
+/// source tree.
+///
+/// Fail-closed twice over: the writer refuses what it cannot place, and a
+/// row it did write is read back through the exporter and must give the same
+/// document again -- the objects in any order, everything inside them as the
+/// XML has it. A row that would export differently is refused, never staged.
+pub fn pack_role_rights_blob_base_free(
+    xml: &[u8],
+    source: &MetadataSourceContext,
+) -> Result<PackedRawDeflatedBlob> {
+    use crate::compiler::bodies::role_rights_writer::{parse_rights_xml, write_role_rights};
+
+    let written = write_role_rights(xml, source.role_rights_source())
+        .map_err(|refusal| anyhow!("Role rights writer refused: {refusal}"))?;
+    let blob = deflate_raw(&written.plain)?;
+    let exported = crate::mssql_dump::role_rights_xml_from_blob(
+        &blob,
+        &written.object_refs,
+        &written.field_refs,
+    )
+    .ok_or_else(|| anyhow!("Role rights writer: the written row does not read back"))?;
+    let mut original = parse_rights_xml(xml)
+        .map_err(|refusal| anyhow!("Role rights writer refused: {refusal}"))?;
+    let mut reread = parse_rights_xml(exported.as_bytes())
+        .map_err(|refusal| anyhow!("Role rights writer: the read-back XML is unreadable: {refusal}"))?;
+    original.objects.sort_by(|left, right| left.name.cmp(&right.name));
+    reread.objects.sort_by(|left, right| left.name.cmp(&right.name));
+    if original != reread {
+        return Err(anyhow!(
+            "Role rights writer: the written row reads back into a different Rights.xml"
+        ));
+    }
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        plain_bytes: written.plain.len(),
+        blob,
+        output_sha256,
+    })
+}
+
+/// Why a role's `Rights.xml` still needs the active base row: nothing when
+/// the base-free writer compiles it from `source`, else the writer's refusal
+/// followed by what the base patcher preserves from the base row.
+pub fn role_rights_base_free_blockers(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<String>> {
+    let writer_refusal = match source {
+        Some(source) => match pack_role_rights_blob_base_free(xml, source) {
+            Ok(_) => return Ok(Vec::new()),
+            Err(error) => Some(format!("{error:#}")),
+        },
+        None => None,
+    };
     let rights = parse_role_rights_xml(xml)?;
     let conditional_rights = rights
         .objects
@@ -28078,6 +28143,9 @@ pub fn role_rights_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
         .map(|object| object.rights.len())
         .sum::<usize>();
     let mut blockers = Vec::new();
+    if let Some(refusal) = writer_refusal {
+        blockers.push(refusal);
+    }
     blockers.push(format!(
         "source XML has {} object entries but does not carry the base Role object table order or per-object entry identifiers",
         rights.objects.len()
@@ -47310,7 +47378,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </Rights>
 "#;
 
-        let blockers = super::role_rights_base_free_blockers(xml)?;
+        let blockers = super::role_rights_base_free_blockers(xml, None)?;
 
         assert!(
             blockers

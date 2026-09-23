@@ -67,7 +67,8 @@ use crate::module_blob::{
     pack_form_body_blob_from_form_xml_base_free, pack_native_form_body_blob,
     pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
     pack_module_blob_container_bytes, pack_predefined_data_blob_from_xml,
-    pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml,
+    pack_role_rights_blob_base_free, pack_role_rights_blob_from_xml_with_source,
+    pack_schedule_blob_from_xml,
     pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
     parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
     parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
@@ -1425,6 +1426,7 @@ fn source_bootstrap_readiness_report(
 ) -> Result<MssqlSourceBootstrapReadinessReport> {
     let mut rows = Vec::new();
     let mut objects = Vec::new();
+    let role_source = MetadataSourceContext::new(source_root.to_path_buf());
 
     for xml_path in metadata_xmls {
         let xml = fs::read(xml_path)
@@ -1449,6 +1451,7 @@ fn source_bootstrap_readiness_report(
         ));
         rows.extend(metadata_body_bootstrap_rows(
             source_root,
+            &role_source,
             xml_path,
             &xml,
             &properties,
@@ -1571,6 +1574,7 @@ fn source_bootstrap_readiness_report(
 
 fn metadata_body_bootstrap_rows(
     source_root: &Path,
+    role_source: &MetadataSourceContext,
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
@@ -1755,12 +1759,33 @@ fn metadata_body_bootstrap_rows(
         "Role" => {
             let body_path = infer_role_rights_body_path(xml_path);
             if body_path.exists() {
-                let reason = role_rights_base_free_blocker_reason(&body_path).with_context(|| {
-                    format!(
-                        "failed to audit Role rights base-free blockers for {}",
-                        body_path.display()
-                    )
+                let xml = fs::read(&body_path).with_context(|| {
+                    format!("failed to read Role rights XML {}", body_path.display())
                 })?;
+                let blockers =
+                    role_rights_base_free_blockers(&xml, Some(role_source)).with_context(|| {
+                        format!(
+                            "failed to audit Role rights base-free blockers for {}",
+                            body_path.display()
+                        )
+                    })?;
+                let (generation, current_staging_fetches_base_blob, reason) =
+                    if blockers.is_empty() {
+                        (
+                            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                            false,
+                            "the role rights writer compiles Rights.xml into the rights row from the source tree without reading the active Config row".to_string(),
+                        )
+                    } else {
+                        (
+                            BootstrapGeneration::RequiresBaseBlob,
+                            true,
+                            format!(
+                                "Role Rights.xml requires active base blob: {}",
+                                blockers.join("; ")
+                            ),
+                        )
+                    };
                 rows.push(bootstrap_row_report(
                     "metadata_object",
                     &properties.kind,
@@ -1768,8 +1793,8 @@ fn metadata_body_bootstrap_rows(
                     source_relative_path(source_root, &body_path),
                     format!("{}.0", properties.uuid),
                     "role_rights_body",
-                    BootstrapGeneration::RequiresBaseBlob,
-                    true,
+                    generation,
+                    current_staging_fetches_base_blob,
                     &reason,
                 ));
             }
@@ -2179,10 +2204,13 @@ fn common_module_metadata_base_free_blocker_reason(xml: &[u8]) -> Result<String>
     ))
 }
 
-fn role_rights_base_free_blocker_reason(body_path: &Path) -> Result<String> {
+fn role_rights_base_free_blocker_reason(
+    body_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     let xml = fs::read(body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
-    let blockers = role_rights_base_free_blockers(&xml)?;
+    let blockers = role_rights_base_free_blockers(&xml, source)?;
     Ok(format!(
         "Role Rights.xml requires active base blob: {}",
         blockers.join("; ")
@@ -5220,12 +5248,24 @@ fn prepare_role_rights_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let reason = role_rights_base_free_blocker_reason(&body_path)?;
+    let xml = fs::read(&body_path)
+        .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
+    // The base-free writer compiles the row from the source alone and is the
+    // first choice; a role it refuses falls back to patching the active row.
+    if let Some(source) = source
+        && let Ok(packed) = pack_role_rights_blob_base_free(&xml, source)
+    {
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        }]);
+    }
+    let reason = role_rights_base_free_blocker_reason(&body_path, source)?;
     let required = classify_required_base(axes, &body_id, &body_path, &reason, "Role Rights")?;
     let base_body =
         fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
-    let xml = fs::read(&body_path)
-        .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
     let packed = pack_role_rights_blob_from_xml_with_source(&base_body, &xml, source)
         .with_context(|| format!("failed to pack Role rights {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
