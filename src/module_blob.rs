@@ -26789,8 +26789,10 @@ fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
                             .ok_or_else(|| anyhow!("PredefinedData property outside Item"))?;
                         match local.as_str() {
                             "Name" => item.name = text_value.trim().to_string(),
-                            "Code" => item.code = text_value.trim().to_string(),
-                            "Description" => item.description = text_value.trim().to_string(),
+                            // Kept as written: a trailing space is data (ERP
+                            // УХ `ЭлементыКонструктораВидовПродукцииИС`).
+                            "Code" => item.code = text_value.clone(),
+                            "Description" => item.description = text_value.clone(),
                             "IsFolder" => {
                                 item.is_folder = parse_xml_bool_text(
                                     "PredefinedData/Item/IsFolder",
@@ -27844,10 +27846,15 @@ enum CommonCommandPicture {
     CommonPicture {
         uuid: String,
         load_transparent: bool,
+        /// `<xr:TransparentPixel x y/>`, stored in the two slots after the
+        /// empty string (`-1,-1` when absent): ERP УХ `ПротоколОшибок`
+        /// stores `{4,1,{0,<uuid>},"",12,2,1,0,""}`.
+        pixel: Option<(i64, i64)>,
     },
     StdPictureCode {
         code: i32,
         load_transparent: bool,
+        pixel: Option<(i64, i64)>,
     },
 }
 
@@ -27869,6 +27876,7 @@ enum CommandGroupPicture {
     CommonPicture {
         uuid: String,
         load_transparent: bool,
+        pixel: Option<(i64, i64)>,
     },
     StdPicturePrint,
 }
@@ -28123,6 +28131,7 @@ fn parse_common_command_xml_properties(
     let mut representation = None::<String>;
     let mut picture_ref = None::<String>;
     let mut picture_load_transparent = None::<String>;
+    let mut picture_pixel = None::<(i64, i64)>;
     let mut tooltip = Vec::<LocalizedString>::new();
     let mut pending_tooltip_lang = None::<String>;
     let mut pending_tooltip_content = None::<String>;
@@ -28206,6 +28215,23 @@ fn parse_common_command_xml_properties(
                     &mut on_main_server_unavailable_behavior,
                 );
             }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "TransparentPixel"
+                    && path_ends_with(&path, &["CommonCommand", "Properties", "Picture"])
+                {
+                    let attrs = xml_attrs_map(&event);
+                    let coordinate = |name: &str| -> Result<i64> {
+                        attrs
+                            .get(name)
+                            .ok_or_else(|| anyhow!("CommonCommand Picture TransparentPixel has no {name}"))?
+                            .trim()
+                            .parse::<i64>()
+                            .with_context(|| format!("invalid CommonCommand TransparentPixel {name}"))
+                    };
+                    picture_pixel = Some((coordinate("x")?, coordinate("y")?));
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if local == "item"
@@ -28230,7 +28256,12 @@ fn parse_common_command_xml_properties(
 
     Ok(CommonCommandXmlProperties {
         simple,
-        picture: parse_common_command_picture(picture_ref, picture_load_transparent, source)?,
+        picture: parse_common_command_picture(
+            picture_ref,
+            picture_load_transparent,
+            picture_pixel,
+            source,
+        )?,
         representation: parse_common_command_representation(representation)?,
         tooltip,
         include_help_in_contents: parse_required_metadata_bool(
@@ -28275,6 +28306,7 @@ fn parse_command_group_xml_properties(
     let mut representation = None::<String>;
     let mut picture_ref = None::<String>;
     let mut picture_load_transparent = None::<String>;
+    let mut picture_pixel = None::<(i64, i64)>;
     let mut tooltip = Vec::<LocalizedString>::new();
     let mut pending_tooltip_lang = None::<String>;
     let mut pending_tooltip_content = None::<String>;
@@ -28338,6 +28370,23 @@ fn parse_command_group_xml_properties(
                     &mut category,
                 );
             }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "TransparentPixel"
+                    && path_ends_with(&path, &["CommandGroup", "Properties", "Picture"])
+                {
+                    let attrs = xml_attrs_map(&event);
+                    let coordinate = |name: &str| -> Result<i64> {
+                        attrs
+                            .get(name)
+                            .ok_or_else(|| anyhow!("CommandGroup Picture TransparentPixel has no {name}"))?
+                            .trim()
+                            .parse::<i64>()
+                            .with_context(|| format!("invalid CommandGroup TransparentPixel {name}"))
+                    };
+                    picture_pixel = Some((coordinate("x")?, coordinate("y")?));
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if local == "item"
@@ -28362,7 +28411,12 @@ fn parse_command_group_xml_properties(
 
     Ok(CommandGroupXmlProperties {
         simple,
-        picture: parse_command_group_picture(picture_ref, picture_load_transparent, source)?,
+        picture: parse_command_group_picture(
+            picture_ref,
+            picture_load_transparent,
+            picture_pixel,
+            source,
+        )?,
         representation: parse_common_command_representation(representation)?,
         tooltip,
         category: parse_command_group_category(category)?,
@@ -29464,6 +29518,7 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
 fn parse_common_command_picture(
     reference: Option<String>,
     load_transparent: Option<String>,
+    pixel: Option<(i64, i64)>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<CommonCommandPicture> {
     let Some(reference) = reference.map(|value| value.trim().to_string()) else {
@@ -29481,6 +29536,7 @@ fn parse_common_command_picture(
         return Ok(CommonCommandPicture::StdPictureCode {
             code,
             load_transparent,
+            pixel,
         });
     }
     if let Some(uuid) = common_command_standard_picture_uuid(&reference) {
@@ -29492,6 +29548,7 @@ fn parse_common_command_picture(
         return Ok(CommonCommandPicture::CommonPicture {
             uuid: uuid.to_string(),
             load_transparent,
+            pixel,
         });
     }
     if reference.starts_with("StdPicture.") {
@@ -29517,6 +29574,7 @@ fn parse_common_command_picture(
     Ok(CommonCommandPicture::CommonPicture {
         uuid,
         load_transparent,
+        pixel,
     })
 }
 
@@ -29586,6 +29644,7 @@ fn std_picture_value_uuid(reference: &str) -> Option<&'static str> {
 fn parse_command_group_picture(
     reference: Option<String>,
     load_transparent: Option<String>,
+    pixel: Option<(i64, i64)>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<CommandGroupPicture> {
     let Some(reference) = reference.map(|value| value.trim().to_string()) else {
@@ -29606,6 +29665,7 @@ fn parse_command_group_picture(
         return Ok(CommandGroupPicture::CommonPicture {
             uuid: STD_PICTURE_INFORMATION_REGISTER_UUID.to_string(),
             load_transparent,
+            pixel,
         });
     }
     if let Some(uuid) = std_picture_value_uuid(&reference) {
@@ -29617,6 +29677,7 @@ fn parse_command_group_picture(
         return Ok(CommandGroupPicture::CommonPicture {
             uuid: uuid.to_string(),
             load_transparent,
+            pixel,
         });
     }
     if !reference.starts_with("CommonPicture.") {
@@ -29635,6 +29696,7 @@ fn parse_command_group_picture(
     Ok(CommandGroupPicture::CommonPicture {
         uuid,
         load_transparent,
+        pixel,
     })
 }
 
@@ -29936,17 +29998,25 @@ fn format_common_command_picture(picture: &CommonCommandPicture) -> String {
         CommonCommandPicture::CommonPicture {
             uuid,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{0,{uuid}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
         CommonCommandPicture::StdPictureCode {
             code,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{{code}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{{code}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
     }
 }
 
@@ -29957,10 +30027,14 @@ fn format_command_group_picture(picture: &CommandGroupPicture) -> String {
         CommandGroupPicture::CommonPicture {
             uuid,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{0,{uuid}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
     }
 }
 
@@ -43039,14 +43113,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
                 code: -7,
-                load_transparent: true
+                load_transparent: true,
+                pixel: None,
             }),
             r#"{4,1,{-7},"",-1,-1,1,0,""}"#
         );
         assert_eq!(
             super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
                 code: -9,
-                load_transparent: true
+                load_transparent: true,
+                pixel: None,
             }),
             r#"{4,1,{-9},"",-1,-1,1,0,""}"#
         );
