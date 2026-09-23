@@ -168,7 +168,14 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       native accepts everything, both exports reproduce 12 197 / 12 198 files
       and agree with each other; the last one is `ConfigDumpInfo.xml`, whose
       configVersion values are the new generation the load wrote
-- [ ] ERP УХ virtual cycle, then the real cycle on a УХ clone
+- [x] ERP УХ virtual cycle (2026-09-23, run v8, commit ce082eac): 140 709 /
+      140 709 files, 0 prepare failures. On the way: style bodies in the
+      8.3.27 layout, all flowchart item shapes, StdPicture tables for command
+      pictures, WSReference Format15 containers, additional indexes compiled,
+      graphical schema templates through the flowchart grammar, entities and
+      untrimmed free text in predefined data and flowcharts, command picture
+      transparency pixels
+- [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead)
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
