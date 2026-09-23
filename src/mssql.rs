@@ -4391,7 +4391,7 @@ fn prepare_metadata_body_rows(
         ),
         "WSReference" => prepare_ws_reference_body_row(xml_path, properties),
         "CommonTemplate" | "Template" => prepare_template_body_row(
-            sqlcmd, server, database, xml_path, xml, properties, source, axes,
+            sqlcmd, server, sql_auth, database, xml_path, xml, properties, source, axes,
         ),
         "CommonPicture" => {
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
@@ -4644,6 +4644,7 @@ fn prepare_raw_deflated_body_row(
 fn prepare_template_body_row(
     sqlcmd: &Path,
     server: &str,
+    sql_auth: SqlAuth<'_>,
     database: &str,
     xml_path: &Path,
     xml: &[u8],
@@ -4658,9 +4659,44 @@ fn prepare_template_body_row(
     let kind = TemplateKind::parse(&template_type)
         .map_err(|error| anyhow!("unsupported Template body: {error}"))?;
     match kind {
+        // Every ERP УХ graphical schema template (64) is stored in the
+        // business-process flowchart grammar with its pictures inline, which
+        // the XML alone cannot give back (38 of them lost their Items
+        // pictures). Until that grammar has a base-free writer, patch the
+        // target's own row the way a business-process flowchart is loaded;
+        // a target without such a row gets the XML.
+        TemplateKind::GraphicalSchema => {
+            let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, kind.as_str())
+            else {
+                return Ok(Vec::new());
+            };
+            let body_id = format!("{}.0", properties.uuid);
+            let base = fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, &body_id).ok();
+            let brace_base = base.filter(|blob| {
+                crate::compiler::families::native::inflate(blob).is_ok_and(|plain| {
+                    let text = String::from_utf8_lossy(&plain);
+                    text.trim_start_matches('\u{feff}').trim_start().starts_with("{5,")
+                })
+            });
+            if let Some(base) = brace_base {
+                let xml = fs::read(&body_path).with_context(|| {
+                    format!("failed to read GraphicalSchema Template {}", body_path.display())
+                })?;
+                let packed = pack_business_process_flowchart_blob_from_xml(&base, &xml)
+                    .with_context(|| {
+                        format!("failed to pack GraphicalSchema Template {}", body_path.display())
+                    })?;
+                return Ok(vec![PreparedMetadataBodyStage {
+                    body_id,
+                    path: body_path,
+                    blob: packed.blob,
+                    blob_sha256: packed.output_sha256,
+                }]);
+            }
+            prepare_raw_template_body_row(body_path, properties, kind, source)
+        }
         TemplateKind::DataCompositionAppearanceTemplate
         | TemplateKind::DataCompositionSchema
-        | TemplateKind::GraphicalSchema
         | TemplateKind::TextDocument => {
             let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, kind.as_str())
             else {
