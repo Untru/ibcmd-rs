@@ -9,6 +9,7 @@ use ibcmd_core::version::PlatformBuild;
 
 pub mod command_interface;
 pub mod dcs;
+pub mod dynamic_list;
 pub mod form;
 pub mod form_native;
 pub mod mxl;

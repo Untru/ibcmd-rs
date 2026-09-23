@@ -7454,7 +7454,7 @@ fn form_dynamic_list_main_table_children(
 /// use-always list stores. The sets are deliberately property-blind — they do
 /// not condition on hierarchy, owners, periodicity or write mode — and the
 /// whole-tree measurement above holds with them as written.
-pub(super) fn form_dynamic_list_std_attribute_pairs(
+pub(crate) fn form_dynamic_list_std_attribute_pairs(
     kind: &str,
 ) -> Option<&'static [(&'static str, &'static str)]> {
     const CATALOG: [(&str, &str); 10] = [

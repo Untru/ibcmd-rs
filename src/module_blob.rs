@@ -772,6 +772,7 @@ enum FormXmlUseForFoldersAndItems {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlVerticalScroll {
     UseIfNecessary,
+    UseWithoutStretch,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -6559,7 +6560,10 @@ impl NativeDataPaths<'_> {
 }
 
 /// The form's own half of the data-path tables, read off `Form.xml`.
-fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
+fn native_data_path_form(
+    properties: &FormXmlBodyProperties,
+    dynamic_lists: &BTreeMap<String, (crate::compiler::bodies::dynamic_list::FieldMap, Vec<String>)>,
+) -> DataPathForm {
     let mut form = DataPathForm::default();
     for attribute in &properties.attributes {
         let columns = attribute
@@ -6593,6 +6597,20 @@ fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
                 );
             }
         }
+        let mut dynamic_fields = BTreeMap::new();
+        let mut dynamic_marked = BTreeMap::new();
+        if let Some((map, _)) = dynamic_lists.get(&attribute.name) {
+            for entry in &map.entries {
+                match &entry.variant {
+                    None => {
+                        dynamic_fields.insert(entry.name.clone(), entry.id.to_string());
+                    }
+                    Some(twin) => {
+                        dynamic_marked.insert((entry.name.clone(), twin.clone()), entry.id.to_string());
+                    }
+                }
+            }
+        }
         form.attributes.insert(
             attribute.name.clone(),
             DataPathAttribute {
@@ -6600,6 +6618,9 @@ fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
                 types: attribute.types.clone(),
                 columns,
                 additional_columns,
+                dynamic_fields,
+                dynamic_marked,
+                list_name: Some(attribute.name.clone()),
             },
         );
     }
@@ -6616,6 +6637,214 @@ fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
         collect_native_data_path_items(bar.child_items.iter(), &mut form.items);
     }
     form
+}
+
+/// Every `Form.xml` string that walks into one dynamic list.
+fn native_dynamic_list_references(
+    properties: &FormXmlBodyProperties,
+    list: &str,
+) -> Vec<(bool, crate::compiler::bodies::dynamic_list::ListPath)> {
+    use crate::compiler::bodies::dynamic_list::parse_list_path;
+    let mut tables = Vec::new();
+    let mut stack = properties
+        .child_items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    if let Some(bar) = &properties.auto_command_bar {
+        stack.extend(bar.child_items.iter());
+    }
+    let mut all = Vec::new();
+    while let Some(item) = stack.pop() {
+        if item.tag == "Table" && item.data_path.as_deref() == Some(list) {
+            tables.push(item.name.clone());
+        }
+        all.push(item);
+        stack.extend(item.child_items.iter());
+    }
+    // (is a <UseAlways> field, the path)
+    let mut out = Vec::new();
+    let mut push = |text: &str, use_always: bool, tables: &[String]| {
+        if let Some(path) = parse_list_path(text, list, tables) {
+            out.push((use_always, path));
+        }
+    };
+    for item in &all {
+        if let Some(path) = item.data_path.as_deref() {
+            push(path, false, &tables);
+        }
+        if let Some(path) = item.title_data_path.as_deref() {
+            push(path, false, &tables);
+        }
+        for name in ["FooterDataPath", "HeaderDataPath"] {
+            if let Some(path) = item.scalars.get(name) {
+                push(path, false, &tables);
+            }
+        }
+        if item.tag == "Table"
+            && item.data_path.as_deref() == Some(list)
+            && let Some(path) = item.scalars.get("RowPictureDataPath")
+        {
+            push(path, false, &tables);
+        }
+        for link in &item.choice_parameter_links {
+            push(&link.data_path, false, &tables);
+        }
+        if let Some((path, _)) = &item.type_link {
+            push(path, false, &tables);
+        }
+    }
+    // The form's conditional appearance: every leaf text that is a path.
+    if let Some(subtree) = properties.attributes_conditional_appearance_source.as_deref() {
+        let mut rest = subtree;
+        while let Some(at) = rest.find('>') {
+            let after = &rest[at + 1..];
+            let Some(end) = after.find('<') else {
+                break;
+            };
+            let text = after[..end].trim();
+            if !text.is_empty() && after[end..].starts_with("</") {
+                push(text, false, &tables);
+            }
+            rest = &after[end..];
+        }
+    }
+    for item in &properties.command_interface_items {
+        if let Some(path) = item.attribute.as_deref() {
+            push(path, false, &tables);
+        }
+    }
+    for attribute in &properties.attributes {
+        for block in &attribute.additional_columns {
+            push(&block.table, false, &tables);
+        }
+    }
+    if let Some(attribute) = properties.attributes.iter().find(|attribute| attribute.name == list)
+        && let Some(fields) = attribute.use_always.as_deref()
+    {
+        for field in fields {
+            if let Some(path) = parse_list_path(field, list, &[]) {
+                out.push((true, path));
+            }
+        }
+    }
+    out
+}
+
+/// The synthetic field map of every dynamic list of the form, and the ids its
+/// `<UseAlways>` stores in `ReqMapFieldId`.
+/// A dynamic list's whole settings bag, with the configuration lookups the
+/// re-spelling needs.
+fn native_dynamic_list_bag(
+    form_text: &str,
+    attribute: &str,
+    map: &crate::compiler::bodies::dynamic_list::FieldMap,
+    required: &[String],
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::dynamic_list::{ListConfiguration, dynamic_list_bag};
+    let type_id = |name: &str, _is_set: bool| -> Result<String> {
+        let source = source.ok_or_else(|| anyhow!("a dynamic list names cfg:{name} and no configuration is on hand"))?;
+        source.resolve_metadata_type_id(&format!("cfg:{name}"))
+    };
+    let style_item = |name: &str| -> Option<String> {
+        source?.resolve_style_item_uuid(&format!("StyleItem.{name}")).ok()
+    };
+    let object = |reference: &str| -> Result<String> {
+        let source = source.ok_or_else(|| anyhow!("a dynamic list names {reference} and no configuration is on hand"))?;
+        source.resolve_metadata_reference_uuid(reference)
+    };
+    dynamic_list_bag(
+        form_text,
+        attribute,
+        map,
+        required,
+        &ListConfiguration {
+            type_id: &type_id,
+            style_item: &style_item,
+            object: &object,
+        },
+    )
+}
+
+fn native_dynamic_list_field_maps(
+    properties: &FormXmlBodyProperties,
+) -> Result<BTreeMap<String, (crate::compiler::bodies::dynamic_list::FieldMap, Vec<String>)>> {
+    use crate::compiler::bodies::dynamic_list::FieldMap;
+    let mut maps = BTreeMap::new();
+    for attribute in &properties.attributes {
+        if attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList") {
+            continue;
+        }
+        let references = native_dynamic_list_references(properties, &attribute.name);
+        let mut map = FieldMap::default();
+        for (_, path) in &references {
+            map.add_path(path);
+        }
+        // Plain English standard attributes take their Russian twin.
+        let kind = attribute
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.main_table.as_deref())
+            .and_then(|table| table.trim().split('.').next().map(str::to_string));
+        let mut twins = BTreeMap::<String, String>::new();
+        match kind
+            .as_deref()
+            .and_then(crate::mssql_dump::form_dynamic_list_std_attribute_pairs)
+        {
+            Some(pairs) => {
+                for (russian, english) in pairs {
+                    twins.insert((*english).to_string(), (*russian).to_string());
+                }
+            }
+            None => {
+                let mut union = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+                for kind in [
+                    "Catalog",
+                    "Document",
+                    "Enum",
+                    "ChartOfCharacteristicTypes",
+                    "ChartOfAccounts",
+                    "ChartOfCalculationTypes",
+                    "ExchangePlan",
+                    "BusinessProcess",
+                    "Task",
+                    "InformationRegister",
+                    "AccumulationRegister",
+                    "AccountingRegister",
+                    "CalculationRegister",
+                    "DocumentJournal",
+                ] {
+                    for (russian, english) in
+                        crate::mssql_dump::form_dynamic_list_std_attribute_pairs(kind).unwrap_or(&[])
+                    {
+                        union
+                            .entry((*english).to_string())
+                            .or_default()
+                            .insert((*russian).to_string());
+                    }
+                }
+                for (english, russians) in union {
+                    if russians.len() == 1
+                        && let Some(russian) = russians.into_iter().next()
+                    {
+                        twins.insert(english, russian);
+                    }
+                }
+            }
+        }
+        map.apply_std_twins(&twins);
+        let mut required = Vec::new();
+        for (use_always, path) in &references {
+            if *use_always {
+                required.push(map.required_id(path).ok_or_else(|| {
+                    anyhow!("a dynamic list's <UseAlways> field has no field-map entry")
+                })?);
+            }
+        }
+        maps.insert(attribute.name.clone(), (map, required));
+    }
+    Ok(maps)
 }
 
 /// Every named item of the form, by name, with its id and its `<DataPath>`.
@@ -7616,11 +7845,21 @@ fn format_native_table(
 
     // `{<count>,<uuid>…}` in uuid order, the shape the form root's set takes,
     // with each name resolved among the table's own standard commands.
-    let dynamic_list = items.get(&item.name).is_some_and(|target| target.dynamic_list);
+    let target = items.get(&item.name);
+    let dynamic_list = target.is_some_and(|target| target.dynamic_list);
+    let main_table_kind = target.and_then(|target| target.main_table_kind.as_deref());
     let mut excluded = item
         .excluded_commands
         .iter()
         .map(|name| {
+            if dynamic_list && name == "Delete" {
+                return native::dynamic_list_delete_command_uuid(main_table_kind).ok_or_else(|| {
+                    anyhow!(
+                        "<Table> excludes Delete on a dynamic list over {}",
+                        main_table_kind.unwrap_or("nothing")
+                    )
+                });
+            }
             native::item_standard_command_uuid(&item.tag, dynamic_list, name).ok_or_else(|| {
                 anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
             })
@@ -7964,7 +8203,28 @@ fn native_table_property_bag(
             "6",
             format!("{{\"N\",{}}}", scalar("AutoRefreshPeriod").unwrap_or("60")),
         ));
-        bag.push(("7", "{\"#\",2fdc88ec-7c9b-43cd-8b0d-7d4dbbd0d1b3}".to_string()));
+        // Key 7 is the table's `<Period>`, a standard period: `Custom` (the
+        // only variant either corpus spells) is 0, with its two dates. A table
+        // that names none keeps the constant it always stored.
+        bag.push((
+            "7",
+            match item.period.as_ref() {
+                Some(period) => {
+                    let variant = match period.variant.as_deref() {
+                        None | Some("Custom") => "0",
+                        Some(other) => {
+                            return Err(anyhow!("a table period variant {other} is not measured"));
+                        }
+                    };
+                    format!(
+                        "{{\"#\",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{{{variant},{},{}}}}}",
+                        period.start_date.as_deref().unwrap_or("00010101000000"),
+                        period.end_date.as_deref().unwrap_or("00010101000000"),
+                    )
+                }
+                None => "{\"#\",2fdc88ec-7c9b-43cd-8b0d-7d4dbbd0d1b3}".to_string(),
+            },
+        ));
         let folders = match scalar("ChoiceFoldersAndItems") {
             None | Some("Items") => "0",
             Some("Folders") => "1",
@@ -8228,8 +8488,12 @@ fn native_button_command(
         let target = items
             .get(target)
             .ok_or_else(|| anyhow!("a button runs {path}, whose item the form does not declare"))?;
-        let uuid = native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
-            .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
+        let uuid = if target.dynamic_list && name == "Delete" {
+            native::dynamic_list_delete_command_uuid(target.main_table_kind.as_deref())
+        } else {
+            native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
+        }
+        .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
         return Ok(format!("{{{},{uuid}}}", target.id));
     }
     // A button's command namespace is the command interface's: 142 spellings
@@ -8267,6 +8531,8 @@ struct NativeItemTarget {
     /// Whether the item is bound to an attribute of type `cfg:DynamicList`,
     /// which is what tells two uuids of the same command name apart.
     dynamic_list: bool,
+    /// The kind of that list's `<MainTable>`, which decides `Delete`.
+    main_table_kind: Option<String>,
 }
 
 /// `<ToolTipRepresentation>` as every record writer spells it.
@@ -10044,11 +10310,14 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             blockers.push(format!("an attribute names <{part}>"));
         }
         if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
             && let Some(error) = properties.dcs_error.as_ref()
         {
             blockers.push(error.clone());
         }
-        if attribute.settings.is_some() {
+        if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
+        {
             // One message stood for four situations, and only the first is a
             // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
             // 163 ERP УХ and 9 BSP canonically identical `<Attribute>`
@@ -10180,6 +10449,7 @@ fn native_conditional_appearance_settings(
 }
 
 fn format_native_form_body(
+    form_text: Option<&str>,
     properties: &FormXmlBodyProperties,
     module_text: &str,
     source: Option<&MetadataSourceContext>,
@@ -10253,8 +10523,9 @@ fn format_native_form_body(
         &form_main_attribute_class(properties),
         form_main_table_kind(properties).as_deref(),
     )?;
+    let dynamic_lists = native_dynamic_list_field_maps(properties)?;
     let data_paths = NativeDataPaths {
-        form: native_data_path_form(properties),
+        form: native_data_path_form(properties, &dynamic_lists),
         source,
     };
     let command_ids = properties
@@ -10277,19 +10548,24 @@ fn format_native_form_body(
         )
         .collect::<Vec<_>>();
     while let Some(item) = stack.pop() {
-        let dynamic_list = item.data_path.as_deref().is_some_and(|path| {
-            properties.attributes.iter().any(|attribute| {
+        let list = item.data_path.as_deref().and_then(|path| {
+            properties.attributes.iter().find(|attribute| {
                 attribute.name == path.split('.').next().unwrap_or(path)
                     && attribute.types.len() == 1
                     && attribute.types[0].trim() == "cfg:DynamicList"
             })
         });
+        let main_table_kind = list
+            .and_then(|attribute| attribute.settings.as_ref())
+            .and_then(|settings| settings.main_table.as_deref())
+            .and_then(|table| table.trim().split('.').next().map(str::to_string));
         items.insert(
             item.name.clone(),
             NativeItemTarget {
                 tag: item.tag.clone(),
                 id: item.id.clone(),
-                dynamic_list,
+                dynamic_list: list.is_some(),
+                main_table_kind,
             },
         );
         stack.extend(item.child_items.iter());
@@ -10335,7 +10611,10 @@ fn format_native_form_body(
         native_mobile_device_command_bar_content(properties, &data_paths.form.items)?;
     let tail = crate::compiler::bodies::form_native::format_root_tail(&crate::compiler::bodies::form_native::NativeRootTail {
         auto_url: properties.auto_url.unwrap_or(true),
-        vertical_scroll: properties.vertical_scroll.map(|_| "useIfNecessary"),
+        vertical_scroll: properties.vertical_scroll.map(|scroll| match scroll {
+            FormXmlVerticalScroll::UseIfNecessary => "useIfNecessary",
+            FormXmlVerticalScroll::UseWithoutStretch => "useWithoutStretch",
+        }),
         scaling_mode: properties.scaling_mode.map(|mode| match mode {
             FormXmlScalingMode::Normal => "Normal",
             FormXmlScalingMode::Compact => "Compact",
@@ -10511,6 +10790,13 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let dynamic_list_bag = match dynamic_lists.get(&attribute.name) {
+            Some((map, required)) => {
+                let text = form_text.ok_or_else(|| anyhow!("a dynamic list needs the Form.xml text"))?;
+                Some(native_dynamic_list_bag(text, &attribute.name, map, required, source)?)
+            }
+            None => None,
+        };
         let attribute_view = match attribute.view.as_ref() {
             Some(rights) => native_rights(rights, "an attribute's <View>", source)?,
             None => "{0,{0,{\"B\",1},0}}".to_string(),
@@ -10537,7 +10823,10 @@ fn format_native_form_body(
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
                 columns: &columns,
                 trailing: [
-                    element_type.as_deref().unwrap_or("{0,0}"),
+                    dynamic_list_bag
+                        .as_deref()
+                        .or(element_type.as_deref())
+                        .unwrap_or("{0,0}"),
                     &attribute_options,
                 ],
                 ..crate::compiler::bodies::form_native::NativeFormAttribute::default()
@@ -10664,7 +10953,7 @@ pub fn compile_native_form_body(
             .to_string(),
         None => String::new(),
     };
-    format_native_form_body(&properties, &module, source, items_root)
+    format_native_form_body(std::str::from_utf8(form_xml).ok(), &properties, &module, source, items_root)
 }
 
 /// Builds a managed Form body from source XML and a profile-known empty
@@ -14562,22 +14851,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_filters.next() {
-                            Some(DcsChildParseOutcome::Typed(filter)) => filter,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings filter: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings filter has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) = canonical_filters.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.filter =
                                 Some(FormXmlListSettingsFilter { canonical });
@@ -14596,22 +14876,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_conditional_appearances.next() {
-                            Some(DcsChildParseOutcome::Typed(value)) => value,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings conditional appearance: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings conditional appearance has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) =
+                            canonical_conditional_appearances.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.conditional_appearance = Some(canonical);
                         }
@@ -14629,22 +14901,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_orders.next() {
-                            Some(DcsChildParseOutcome::Typed(order)) => order,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings order: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings order has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) = canonical_orders.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.order =
                                 Some(FormXmlListSettingsOrder { canonical });
@@ -16279,21 +16542,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
         buffer.clear();
     }
 
-    if canonical_filters.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings filter parse results were not consumed by the Form structure"
-        ));
-    }
-    if canonical_orders.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings order parse results were not consumed by the Form structure"
-        ));
-    }
-    if canonical_conditional_appearances.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings conditional-appearance parse results were not consumed by the Form structure"
-        ));
-    }
+    let _ = canonical_filters.next();
+    let _ = canonical_orders.next();
+    let _ = canonical_conditional_appearances.next();
     Ok(properties)
 }
 
@@ -18472,6 +18723,7 @@ fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseFor
 fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> {
     match value {
         "useIfNecessary" => Ok(FormXmlVerticalScroll::UseIfNecessary),
+        "useWithoutStretch" => Ok(FormXmlVerticalScroll::UseWithoutStretch),
         other => Err(anyhow!("unsupported Form VerticalScroll: {other}")),
     }
 }
@@ -19516,6 +19768,7 @@ fn form_update_on_data_change_code(value: FormXmlUpdateOnDataChange) -> &'static
 fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
     match value {
         FormXmlVerticalScroll::UseIfNecessary => "2",
+        FormXmlVerticalScroll::UseWithoutStretch => "0",
     }
 }
 

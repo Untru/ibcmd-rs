@@ -1097,6 +1097,7 @@ pub(crate) use form_body::{
     FormItemSchemaTraceEvent, FormItemTraceEvent, FormItemTraceSink, trace_form_body_with_context,
 };
 pub(crate) use form_body::{extract_form_body_xml, unpack_form_body_module_text};
+pub(crate) use form_body::form_dynamic_list_std_attribute_pairs;
 /// The one table that names a form standard command uuid, shared with the
 /// source compiler so both directions read the same fact.
 pub(crate) use form_body::form_standard_command_suffix;

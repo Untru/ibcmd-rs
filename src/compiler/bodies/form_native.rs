@@ -5771,6 +5771,13 @@ pub(crate) struct DataPathColumn {
 /// A form `<Attribute>`, with the two column tables a data path walks into.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(crate) struct DataPathAttribute {
+    /// A dynamic list's synthetic field map: the id each dotted prefix of a
+    /// query field stores, and the ids of the `~`-marked references by prefix
+    /// and twin (`findings/rt-dynamic-list.md` §3).
+    pub(crate) dynamic_fields: BTreeMap<String, String>,
+    pub(crate) dynamic_marked: BTreeMap<(String, Option<String>), String>,
+    /// The attribute's own name, which a marked reference's twin repeats.
+    pub(crate) list_name: Option<String>,
     pub(crate) id: String,
     pub(crate) types: Vec<String>,
     /// `<Columns><Column name= id=>`.
@@ -6043,7 +6050,17 @@ pub(crate) fn resolve_form_data_path(
     configuration: Option<&dyn ConfigurationObjects>,
     data_path: &str,
 ) -> Option<String> {
-    let tokens = parse_data_path_tokens(data_path.trim());
+    // `~N.X` -- and `~N.X~N.Y` with a twin -- is the export's spelling of a
+    // dynamic-list field it cannot resolve; the terminal part then stores the
+    // marked entry of the list's field map.
+    let (data_path, marked) = match data_path.trim().strip_prefix('~') {
+        Some(body) => match body.split_once('~') {
+            Some((body, twin)) => (body, Some(Some(twin.to_string()))),
+            None => (body, Some(None)),
+        },
+        None => (data_path.trim(), None),
+    };
+    let tokens = parse_data_path_tokens(data_path);
     if tokens.is_empty() || tokens[0].0.is_empty() {
         return None;
     }
@@ -6150,8 +6167,38 @@ pub(crate) fn resolve_form_data_path(
                             index += 1;
                             continue;
                         }
-                        if name != "DefaultPicture" {
-                            return None;
+                        if name != "DefaultPicture" || index != dynamic_list_start {
+                            // A query field: the id the list's own field map
+                            // gives the dotted prefix walked so far.
+                            let entry = attribute?;
+                            let dotted = tokens[dynamic_list_start..=index]
+                                .iter()
+                                .map(|token| token.0.as_str())
+                                .collect::<Vec<_>>()
+                                .join(".");
+                            let last = index + 1 == tokens.len();
+                            let id = match (&marked, last) {
+                                (Some(twin), true) => {
+                                    let twin = twin.as_ref().map(|twin| {
+                                        entry
+                                            .list_name
+                                            .as_deref()
+                                            .and_then(|list| twin.strip_prefix(&format!("{list}.")))
+                                            .unwrap_or(twin)
+                                            .to_string()
+                                    });
+                                    entry.dynamic_marked.get(&(dotted, twin))?
+                                }
+                                _ => entry.dynamic_fields.get(&dotted)?,
+                            };
+                            emitted.push(format!("{{{id}}}"));
+                            context = DataPathContext::DynamicList;
+                            if let Some(subscript) = subscript {
+                                emitted.push(format!("{{{subscript},{DATA_PATH_INDEX_UUID}}}"));
+                            }
+                            prefix.push(name.to_string());
+                            index += 1;
+                            continue;
                         }
                         emitted.push(format!("{{{DATA_PATH_DEFAULT_PICTURE_MARKER}}}"));
                     }
