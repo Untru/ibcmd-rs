@@ -1721,6 +1721,481 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
     Ok(report)
 }
 
+/// How many spreadsheet templates the template writer reproduces.
+///
+/// Every `Templates/<Name>/Ext/Template.xml` and `CommonTemplates/<Name>/Ext/
+/// Template.xml` whose holder declares `SpreadsheetDocument` is compiled the
+/// way the loader compiles it, base-free. The compiled row is compared with
+/// the row the platform stored (the inflated dump of the same database), and
+/// it is read back through the exporter's own MOXCEL reader and XML writer --
+/// the round trip, which has to give the native `Template.xml` byte for byte.
+#[derive(Debug, Serialize)]
+pub struct MxlWriterReport {
+    pub root: PathBuf,
+    pub bodies: PathBuf,
+    pub templates: usize,
+    pub compiled: usize,
+    /// Templates the writer refused, by the first reason, digits folded.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_templates: BTreeMap<String, String>,
+    /// Compiled templates whose stored row the dump does not hold.
+    pub no_stored_row: usize,
+    /// The compiled plain text equals the stored one, byte for byte.
+    pub plain_identical: usize,
+    /// ... and once line breaks are ignored.
+    pub plain_identical_ignoring_breaks: usize,
+    /// ... and once the language record's two load-dependent members are
+    /// folded as well (see `normalize_moxel_plain`).
+    pub plain_identical_normalized: usize,
+    /// The compiled row reads back into the native `Template.xml`.
+    pub round_trip_identical: usize,
+    pub round_trip_unreadable: usize,
+    pub round_trip_different: usize,
+    /// The stored row itself reads back into the native `Template.xml` -- the
+    /// check that this audit's reference indexes are the dump's.
+    pub stored_round_trip_identical: usize,
+    /// Templates whose stored row does not read back into the native file.
+    pub stored_round_trip_failures: Vec<String>,
+    /// The differing templates by their first differing line pair, digits
+    /// folded, so a systematic cause shows up as one bucket.
+    pub shapes: BTreeMap<String, usize>,
+    pub differences: Vec<MxlWriterDifference>,
+    /// Templates whose normalized plain text differs from the stored one, by
+    /// the context of the first differing position.
+    pub plain_shapes: BTreeMap<String, usize>,
+    /// Those templates, as `<uuid> <path>`.
+    pub plain_different: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MxlWriterDifference {
+    pub template: String,
+    pub uuid: String,
+    /// 1-based line of the first difference.
+    pub line: usize,
+    pub ours: String,
+    pub native: String,
+    pub ours_lines: usize,
+    pub native_lines: usize,
+}
+
+fn fold_digits(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_digits = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+            }
+            in_digits = true;
+        } else {
+            in_digits = false;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// The generated reference types of a source tree, as the dump's MOXCEL
+/// reader receives them: `TypeId` (lowercase) to `CatalogRef.<Name>` and the
+/// like, read from every root object's `<xr:GeneratedType category="Ref">`.
+fn moxel_generated_types_from_tree(root: &Path) -> BTreeMap<String, String> {
+    const HEAD: &str = "<xr:GeneratedType name=\"";
+    let mut types = BTreeMap::new();
+    let Ok(families) = fs::read_dir(root) else {
+        return types;
+    };
+    for family in families.flatten() {
+        let family = family.path();
+        if !family.is_dir() {
+            continue;
+        }
+        let Ok(objects) = fs::read_dir(&family) else {
+            continue;
+        };
+        for object in objects.flatten() {
+            let path = object.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("xml") {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find(HEAD) {
+                rest = &rest[at + HEAD.len()..];
+                let Some(end) = rest.find('"') else {
+                    break;
+                };
+                let name = &rest[..end];
+                let head_end = rest.find('>').unwrap_or(rest.len());
+                let is_ref = rest[..head_end].contains("category=\"Ref\"");
+                let Some(type_at) = rest.find("<xr:TypeId>") else {
+                    break;
+                };
+                let type_rest = &rest[type_at + "<xr:TypeId>".len()..];
+                let Some(type_end) = type_rest.find("</xr:TypeId>") else {
+                    break;
+                };
+                let type_id = type_rest[..type_end].trim().to_ascii_lowercase();
+                if is_ref
+                    && name
+                        .split_once('.')
+                        .is_some_and(|(kind, _)| kind.ends_with("Ref"))
+                {
+                    types.insert(type_id, name.to_string());
+                }
+            }
+        }
+    }
+    types
+}
+
+/// `(holder, Template.xml, template uuid)` for every spreadsheet template.
+fn collect_spreadsheet_templates(root: &Path) -> Result<Vec<(PathBuf, PathBuf, String)>> {
+    let mut templates = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        let Ok(metadata) = fs::read(&metadata_xml) else {
+            continue;
+        };
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        let properties = parse_simple_metadata_xml_properties(&metadata)
+            .with_context(|| format!("failed to parse {}", metadata_xml.display()))?;
+        templates.push((metadata_xml, template_xml.to_path_buf(), properties.uuid));
+    }
+    templates.sort();
+    Ok(templates)
+}
+
+/// One template's verdict, reduced where it is computed so that a corpus of
+/// fourteen thousand templates never holds their texts at once.
+enum MxlWriterOutcome {
+    Refused(String),
+    Compiled(MxlTemplateSummary),
+}
+
+struct MxlTemplateSummary {
+    has_stored: bool,
+    plain_identical: bool,
+    plain_identical_ignoring_breaks: bool,
+    plain_identical_normalized: bool,
+    /// The first plain divergence (normalized), where the round trip holds.
+    plain_shape: Option<String>,
+    stored_round_trip_ok: bool,
+    round_trip: MxlRoundTrip,
+}
+
+enum MxlRoundTrip {
+    Identical,
+    Unreadable,
+    Different {
+        line: usize,
+        ours: String,
+        native: String,
+        ours_lines: usize,
+        native_lines: usize,
+    },
+}
+
+/// The body text as the plain comparison reads it: line breaks dropped, and
+/// the two language-record members no source spells -- the third, which a
+/// load from XML writes as 1 and a Designer save as 0, and the last -- folded
+/// to `_`.
+fn normalize_moxel_plain(plain: &[u8]) -> String {
+    let text = String::from_utf8_lossy(plain)
+        .replace(['\r', '\n'], "");
+    let Some(start) = text.find("{8,1,12,{") else {
+        return text;
+    };
+    let record_start = start + "{8,1,12,".len();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut commas = Vec::new();
+    let mut record_end = None;
+    for (offset, ch) in text[record_start..].char_indices() {
+        let at = record_start + offset;
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    record_end = Some(at);
+                    break;
+                }
+            }
+            ',' if depth == 1 => commas.push(at),
+            _ => {}
+        }
+    }
+    let (Some(end), true) = (record_end, commas.len() >= 3) else {
+        return text;
+    };
+    let third = (commas[1] + 1, commas[2]);
+    let last = (commas[commas.len() - 1] + 1, end);
+    format!(
+        "{}_{}_{}",
+        &text[..third.0],
+        &text[third.1..last.0],
+        &text[last.1..]
+    )
+}
+
+fn audit_one_mxl_template(
+    template_xml: &Path,
+    uuid: &str,
+    bodies: &Path,
+    source: &MetadataSourceContext,
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    write_dir: Option<&Path>,
+) -> MxlWriterOutcome {
+    use crate::compiler::bodies::template::{
+        TemplateKind, TemplateSource, compile_evidenced_template,
+    };
+    use std::io::Read;
+
+    let native = match fs::read(template_xml) {
+        Ok(bytes) => bytes,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let blob = match compile_evidenced_template(
+        TemplateKind::SpreadsheetDocument,
+        TemplateSource::Spreadsheet {
+            xml: &native,
+            source: Some(source),
+            number_format_hint: None,
+        },
+    ) {
+        Ok(blob) => blob,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let mut plain = Vec::new();
+    if let Err(error) = flate2::read::DeflateDecoder::new(blob.as_slice()).read_to_end(&mut plain) {
+        return MxlWriterOutcome::Refused(format!("the compiled row does not inflate: {error}"));
+    }
+    if let Some(dir) = write_dir {
+        let _ = fs::write(dir.join(format!("{uuid}.0__part0.txt")), &plain);
+    }
+    let native_text = String::from_utf8_lossy(&native);
+    let round_trip = match crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+        &blob,
+        object_refs,
+        generated_types,
+    ) {
+        Err(_) => MxlRoundTrip::Unreadable,
+        Ok(ours) if ours == native_text => MxlRoundTrip::Identical,
+        Ok(ours) => {
+            let ours_lines = ours.split("\r\n").collect::<Vec<_>>();
+            let native_lines = native_text.split("\r\n").collect::<Vec<_>>();
+            let line = ours_lines
+                .iter()
+                .zip(native_lines.iter())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours_lines.len().min(native_lines.len()));
+            MxlRoundTrip::Different {
+                line: line + 1,
+                ours: ours_lines.get(line).copied().unwrap_or("<end>").trim().to_string(),
+                native: native_lines
+                    .get(line)
+                    .copied()
+                    .unwrap_or("<end>")
+                    .trim()
+                    .to_string(),
+                ours_lines: ours_lines.len(),
+                native_lines: native_lines.len(),
+            }
+        }
+    };
+    let stored = fs::read(bodies.join(format!("{uuid}.0__part0.txt"))).ok();
+    let mut summary = MxlTemplateSummary {
+        has_stored: stored.is_some(),
+        plain_identical: false,
+        plain_identical_ignoring_breaks: false,
+        plain_identical_normalized: false,
+        plain_shape: None,
+        stored_round_trip_ok: false,
+        round_trip,
+    };
+    if let Some(stored) = stored {
+        summary.plain_identical = stored == plain;
+        let strip = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .copied()
+                .filter(|byte| *byte != b'\r' && *byte != b'\n')
+                .collect::<Vec<_>>()
+        };
+        summary.plain_identical_ignoring_breaks = strip(&stored) == strip(&plain);
+        let ours = normalize_moxel_plain(&plain);
+        let theirs = normalize_moxel_plain(&stored);
+        summary.plain_identical_normalized = ours == theirs;
+        if !summary.plain_identical_normalized {
+            let at = ours
+                .chars()
+                .zip(theirs.chars())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours.chars().count().min(theirs.chars().count()));
+            summary.plain_shape = Some(format!(
+                "ours {} | stored {}",
+                fold_digits(&divergence_window(&ours, at, 12, 24)),
+                fold_digits(&divergence_window(&theirs, at, 12, 24)),
+            ));
+        }
+        summary.stored_round_trip_ok = crate::compiler::families::native::deflate_bytes(&stored)
+            .ok()
+            .and_then(|stored_blob| {
+                crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+                    &stored_blob,
+                    object_refs,
+                    generated_types,
+                )
+                .ok()
+            })
+            .is_some_and(|xml| xml == native_text);
+    }
+    MxlWriterOutcome::Compiled(summary)
+}
+
+pub fn audit_mxl_writer(root: &Path, bodies: &Path) -> Result<MxlWriterReport> {
+    let mut templates = collect_spreadsheet_templates(root)?;
+    // `IBCMD_RS_MXL_AUDIT_FILTER=a|b` keeps the templates whose path contains
+    // one of the substrings -- a quick rerun of the ones a change touches.
+    if let Some(filter) = std::env::var_os("IBCMD_RS_MXL_AUDIT_FILTER") {
+        let filter = filter.to_string_lossy().to_string();
+        let needles = filter.split('|').filter(|needle| !needle.is_empty()).collect::<Vec<_>>();
+        templates.retain(|(_, template_xml, _)| {
+            let relative = relative_path_string(root, template_xml);
+            needles.iter().any(|needle| relative.contains(needle))
+        });
+    }
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let object_refs = source.moxel_object_refs()?;
+    let generated_types = moxel_generated_types_from_tree(root);
+    let write_dir = std::env::var_os("IBCMD_RS_WRITE_MXL_DIR").map(PathBuf::from);
+    let outcomes = parallel::install(|| {
+        templates
+            .par_iter()
+            .map(|(_, template_xml, uuid)| {
+                (
+                    relative_path_string(root, template_xml),
+                    uuid.clone(),
+                    audit_one_mxl_template(
+                        template_xml,
+                        uuid,
+                        bodies,
+                        &source,
+                        &object_refs,
+                        &generated_types,
+                        write_dir.as_deref(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = MxlWriterReport {
+        root: root.to_path_buf(),
+        bodies: bodies.to_path_buf(),
+        templates: templates.len(),
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_templates: BTreeMap::new(),
+        no_stored_row: 0,
+        plain_identical: 0,
+        plain_identical_ignoring_breaks: 0,
+        plain_identical_normalized: 0,
+        round_trip_identical: 0,
+        round_trip_unreadable: 0,
+        round_trip_different: 0,
+        stored_round_trip_identical: 0,
+        stored_round_trip_failures: Vec::new(),
+        shapes: BTreeMap::new(),
+        differences: Vec::new(),
+        plain_shapes: BTreeMap::new(),
+        plain_different: Vec::new(),
+    };
+    for (template, uuid, outcome) in outcomes {
+        let summary = match outcome {
+            MxlWriterOutcome::Refused(reason) => {
+                let first = reason.split(';').next().unwrap_or(&reason).trim();
+                *report.refused.entry(fold_digits(first)).or_insert(0) += 1;
+                report.refused_templates.insert(template, reason);
+                continue;
+            }
+            MxlWriterOutcome::Compiled(summary) => summary,
+        };
+        report.compiled += 1;
+        if summary.stored_round_trip_ok {
+            report.stored_round_trip_identical += 1;
+        } else if summary.has_stored {
+            report.stored_round_trip_failures.push(template.clone());
+        }
+        if !summary.has_stored {
+            report.no_stored_row += 1;
+        }
+        report.plain_identical += usize::from(summary.plain_identical);
+        report.plain_identical_ignoring_breaks +=
+            usize::from(summary.plain_identical_ignoring_breaks);
+        report.plain_identical_normalized += usize::from(summary.plain_identical_normalized);
+        if let Some(shape) = summary.plain_shape {
+            *report.plain_shapes.entry(shape).or_insert(0) += 1;
+            report.plain_different.push(format!("{uuid} {template}"));
+        }
+        match summary.round_trip {
+            MxlRoundTrip::Identical => report.round_trip_identical += 1,
+            MxlRoundTrip::Unreadable => {
+                report.round_trip_unreadable += 1;
+                *report
+                    .shapes
+                    .entry("the compiled row does not read back".to_string())
+                    .or_insert(0) += 1;
+            }
+            MxlRoundTrip::Different {
+                line,
+                ours,
+                native,
+                ours_lines,
+                native_lines,
+            } => {
+                report.round_trip_different += 1;
+                let shape = format!("ours {} | native {}", fold_digits(&ours), fold_digits(&native));
+                *report.shapes.entry(shape).or_insert(0) += 1;
+                report.differences.push(MxlWriterDifference {
+                    template,
+                    uuid,
+                    line,
+                    ours,
+                    native,
+                    ours_lines,
+                    native_lines,
+                });
+            }
+        }
+    }
+    Ok(report)
+}
+
 /// Audits every `Form.xml` of a source tree against the base-free form body
 /// model, and reports what stands between the tree and a load.
 pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {
