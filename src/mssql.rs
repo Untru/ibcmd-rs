@@ -56,26 +56,11 @@ use crate::compiler::{
     AdditionalIndexesMapping, CompileAxes, CompileRequest, SourcePayload, compile_source,
 };
 use crate::module_blob::{
-    CommonModuleXmlProperties, MetadataSourceContext, SimpleMetadataXmlProperties,
-    VersionReplacement, business_process_flowchart_base_free_blockers,
+    CommonModuleXmlProperties, InterfaceAssetSource, MetadataSourceContext,
+    SimpleMetadataXmlProperties, VersionReplacement, business_process_flowchart_base_free_blockers,
     command_interface_base_free_blockers, command_interface_xml_can_pack_without_base,
     common_module_metadata_base_free_blockers, form_body_base_free_blockers,
-    form_body_base_free_compilation_blockers, hex_sha256, metadata_xml_base_free_blockers,
-    module_blob_text_sha256, pack_business_process_flowchart_blob_from_xml,
-    pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
-    pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_xml_and_bytes,
-    pack_form_body_blob_from_form_xml_base_free, pack_native_form_body_blob,
-    pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
-    pack_module_blob_container_bytes, pack_predefined_data_blob_from_xml,
-    pack_role_rights_blob_base_free, pack_role_rights_blob_from_xml_with_source,
-    pack_schedule_blob_from_xml,
-    pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml,
-    parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml,
-    parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml,
-    patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions,
-    predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256,
-    raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers,
-    versions_base_free_blockers,
+    form_body_base_free_compilation_blockers, hex_sha256, interface_asset_plaintext, metadata_xml_base_free_blockers, module_blob_text_sha256, pack_business_process_flowchart_blob_from_xml, pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml, pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_xml_and_bytes, pack_form_body_blob_from_form_xml_base_free, pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts, pack_interface_asset_blob, pack_module_blob_container_bytes, pack_native_form_body_blob, pack_predefined_data_blob_from_xml, pack_role_rights_blob_base_free, pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml, pack_simple_metadata_blob_from_xml_with_source, pack_style_body_blob_from_xml, parse_common_module_xml_properties, parse_ext_picture_file_name_from_xml, parse_help_pages_from_xml, parse_simple_metadata_xml_properties, parse_template_type_from_xml, patch_versions_blob_bytes, patch_versions_blob_bytes_allowing_additions, predefined_data_base_free_blockers, raw_deflated_first_base64_payload_sha256, raw_deflated_help_content_sha256, raw_deflated_plain_sha256, role_rights_base_free_blockers, versions_base_free_blockers,
 };
 use crate::mssql_main_activation::{
     MainActivationDryRunReport, MainActivationMode,
@@ -1844,7 +1829,11 @@ fn metadata_body_bootstrap_rows(
         ));
     }
 
-    if let Some(suffix) = command_interface_body_suffix(&properties.kind) {
+    // The configuration's own command interface is one of its asset rows,
+    // reported by `configuration_asset_bootstrap_rows`.
+    if let Some(suffix) = command_interface_body_suffix(&properties.kind)
+        && properties.kind != "Configuration"
+    {
         rows.extend(command_interface_bootstrap_row(
             source_root,
             properties,
@@ -2097,6 +2086,7 @@ fn command_interface_bootstrap_row(
     if !body_path.exists() {
         return Vec::new();
     }
+    let source = MetadataSourceContext::new(source_root.to_path_buf());
     let (generation, current_staging_fetches_base_blob, reason) = fs::read(&body_path)
         .ok()
         .and_then(|xml| {
@@ -2105,6 +2095,18 @@ fn command_interface_bootstrap_row(
                     BootstrapGeneration::CanGenerateWithoutBaseBlob,
                     false,
                     "CommandInterface.xml contains raw command references and can be packed without reading the active Config row".to_string(),
+                ))
+            } else if interface_asset_plaintext(
+                InterfaceAssetSource::CommandInterface,
+                &xml,
+                Some(&source),
+            )
+            .is_ok()
+            {
+                Some((
+                    BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                    false,
+                    "CommandInterface.xml compiles base-free: every section is encoded and every name resolves against the source tree without reading the active Config row".to_string(),
                 ))
             } else {
                 let blockers = command_interface_base_free_blockers(&xml).ok()?;
@@ -2260,6 +2262,13 @@ fn configuration_asset_bootstrap_rows(
     properties: &SimpleMetadataXmlProperties,
     object_path: &str,
 ) -> Vec<MssqlSourceBootstrapRowReport> {
+    // The rows live under the configuration's module group, as the loader
+    // stages them.
+    let owner = configuration_asset_owner_uuid(xml_path).map(|uuid| SimpleMetadataXmlProperties {
+        uuid,
+        ..properties.clone()
+    });
+    let properties = owner.as_ref().unwrap_or(properties);
     let mut rows = Vec::new();
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -2283,16 +2292,16 @@ fn configuration_asset_bootstrap_rows(
         false,
         "ParentConfigurations.bin is exported as inflated raw-deflated source bytes and staging re-deflates it without reading the active Config row",
     ));
-    rows.extend(optional_body_bootstrap_row(
+    let source = MetadataSourceContext::new(source_root.to_path_buf());
+    rows.extend(interface_asset_bootstrap_row(
         source_root,
         properties,
         object_path,
         infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
         "8",
         "configuration_home_page_work_area_body",
-        BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        false,
-        "HomePageWorkArea.xml is stored as a raw deflated configuration body generated from source bytes without reading the active Config row",
+        InterfaceAssetSource::HomePageWorkArea,
+        &source,
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -2321,16 +2330,15 @@ fn configuration_asset_bootstrap_rows(
         "9",
         "configuration_command_interface_body",
     ));
-    rows.extend(optional_body_bootstrap_row(
+    rows.extend(interface_asset_bootstrap_row(
         source_root,
         properties,
         object_path,
         infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
         "b",
-        "configuration_raw_body",
-        BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        false,
-        "configuration raw asset is stored as a raw deflated body generated from source bytes without reading the active Config row",
+        "configuration_client_application_interface_body",
+        InterfaceAssetSource::ClientApplicationInterface,
+        &source,
     ));
     rows.extend(optional_body_bootstrap_row(
         source_root,
@@ -2343,18 +2351,65 @@ fn configuration_asset_bootstrap_rows(
         false,
         "configuration picture body creates a new ExtPicture wrapper from source bytes without reading the active Config row",
     ));
-    rows.extend(optional_body_bootstrap_row(
+    rows.extend(interface_asset_bootstrap_row(
         source_root,
         properties,
         object_path,
         infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
         "f",
         "configuration_standalone_content_body",
-        BootstrapGeneration::CanGenerateWithoutBaseBlob,
-        false,
-        "standalone configuration content is stored as a raw deflated body generated from source bytes without reading the active Config row",
+        InterfaceAssetSource::StandaloneContent,
+        &source,
     ));
     rows
+}
+
+/// A configuration interface asset the base-free writer compiles. One it
+/// refuses has no base to patch either, so the load refuses it too.
+fn interface_asset_bootstrap_row(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    kind: InterfaceAssetSource,
+    source: &MetadataSourceContext,
+) -> Option<MssqlSourceBootstrapRowReport> {
+    if !body_path.exists() {
+        return None;
+    }
+    let file = body_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let refusal = fs::read(&body_path)
+        .map_err(anyhow::Error::from)
+        .and_then(|xml| interface_asset_plaintext(kind, &xml, Some(source)))
+        .err();
+    let (generation, reason) = match refusal {
+        None => (
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            format!(
+                "{file} compiles base-free to the stored brace text, names resolved against the source tree, without reading the active Config row"
+            ),
+        ),
+        Some(error) => (
+            BootstrapGeneration::RequiresBaseBlob,
+            format!("{file} is refused by the base-free writer and has no base patch: {error:#}"),
+        ),
+    };
+    Some(bootstrap_row_report(
+        "metadata_object",
+        &properties.kind,
+        object_path,
+        source_relative_path(source_root, &body_path),
+        format!("{}.{}", properties.uuid, suffix),
+        row_kind,
+        generation,
+        false,
+        &reason,
+    ))
 }
 
 fn optional_body_bootstrap_row(
@@ -4326,7 +4381,7 @@ fn prepare_metadata_body_rows(
             prepare_common_picture_body_row(sqlcmd, server, database, xml_path, properties)
         }
         "Configuration" => prepare_configuration_asset_body_rows(
-            sqlcmd, server, sql_auth, database, xml_path, properties, axes,
+            sqlcmd, server, sql_auth, database, xml_path, properties, source, axes,
         ),
         "BusinessProcess" => prepare_business_process_flowchart_body_row(
             sqlcmd, server, sql_auth, database, xml_path, properties, axes,
@@ -4355,7 +4410,7 @@ fn prepare_metadata_body_rows(
         sqlcmd, server, database, xml_path, xml, properties, axes,
     )?);
     rows.extend(prepare_command_interface_body_row(
-        sqlcmd, server, sql_auth, database, xml_path, properties, axes,
+        sqlcmd, server, sql_auth, database, xml_path, properties, source, axes,
     )?);
     rows.extend(prepare_additional_indexes_body_row(
         sqlcmd, server, database, xml_path, properties, axes,
@@ -4727,6 +4782,7 @@ fn prepare_configuration_asset_body_rows(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let owner = configuration_asset_owner_uuid(xml_path).map(|uuid| SimpleMetadataXmlProperties {
@@ -4753,14 +4809,13 @@ fn prepare_configuration_asset_body_rows(
         "ParentConfigurations",
         axes,
     )?);
-    rows.extend(prepare_configuration_raw_deflated_body_row(
-        sqlcmd,
-        server,
-        database,
+    rows.extend(prepare_configuration_interface_asset_body_row(
         properties,
         infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
         "8",
+        InterfaceAssetSource::HomePageWorkArea,
         "HomePageWorkArea",
+        source,
         axes,
     )?);
     rows.extend(prepare_configuration_raw_deflated_body_row(
@@ -4781,6 +4836,7 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
         "a",
+        source,
         axes,
     )?);
     rows.extend(prepare_configuration_command_interface_body_row(
@@ -4791,16 +4847,16 @@ fn prepare_configuration_asset_body_rows(
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
         "9",
+        source,
         axes,
     )?);
-    rows.extend(prepare_configuration_raw_deflated_body_row(
-        sqlcmd,
-        server,
-        database,
+    rows.extend(prepare_configuration_interface_asset_body_row(
         properties,
         infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
         "b",
+        InterfaceAssetSource::ClientApplicationInterface,
         "ClientApplicationInterface",
+        source,
         axes,
     )?);
     rows.extend(prepare_configuration_ext_picture_body_row(
@@ -4811,17 +4867,80 @@ fn prepare_configuration_asset_body_rows(
         infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
         "c",
     )?);
-    rows.extend(prepare_configuration_raw_deflated_body_row(
-        sqlcmd,
-        server,
-        database,
+    rows.extend(prepare_configuration_interface_asset_body_row(
         properties,
         infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
         "f",
+        InterfaceAssetSource::StandaloneContent,
         "StandaloneConfigurationContent",
+        source,
         axes,
     )?);
     Ok(rows)
+}
+
+/// A command interface compiled from the source alone, names resolved
+/// against the source tree. `None` when the writer refuses the file, and the
+/// caller keeps the older path for it.
+fn base_free_command_interface_body(
+    body_id: &str,
+    body_path: &Path,
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
+) -> Option<PreparedMetadataBodyStage> {
+    if crate::compiler::unsupported_axes_reason(axes).is_some() {
+        return None;
+    }
+    let packed =
+        pack_interface_asset_blob(InterfaceAssetSource::CommandInterface, xml, source).ok()?;
+    Some(PreparedMetadataBodyStage {
+        body_id: body_id.to_string(),
+        path: body_path.to_path_buf(),
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    })
+}
+
+/// `Ext/HomePageWorkArea.xml`, `Ext/ClientApplicationInterface.xml` and
+/// `Ext/StandaloneConfigurationContent.bin`: the platform stores each as brace
+/// text the writer compiles from the source. There is no base to patch, so a
+/// file the writer refuses fails the load rather than being staged as its own
+/// bytes, which no export can read back.
+fn prepare_configuration_interface_asset_body_row(
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+    kind: InterfaceAssetSource,
+    label: &str,
+    source: Option<&MetadataSourceContext>,
+    axes: &CompileAxes,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    if let Some(reason) = crate::compiler::unsupported_axes_reason(axes) {
+        return Err(anyhow!("unsupported Configuration {label}: {reason}"));
+    }
+    let body_id = format!("{}.{}", properties.uuid, suffix);
+    let xml = fs::read(&body_path).with_context(|| {
+        format!(
+            "failed to read Configuration {label} {}",
+            body_path.display()
+        )
+    })?;
+    let packed = pack_interface_asset_blob(kind, &xml, source).with_context(|| {
+        format!(
+            "the base-free writer refuses Configuration {label} {}",
+            body_path.display()
+        )
+    })?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
 }
 
 fn prepare_configuration_ext_picture_body_row(
@@ -4877,6 +4996,7 @@ fn prepare_configuration_command_interface_body_row(
     properties: &SimpleMetadataXmlProperties,
     body_path: PathBuf,
     suffix: &str,
+    source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     if !body_path.exists() {
@@ -4889,6 +5009,9 @@ fn prepare_configuration_command_interface_body_row(
             body_path.display()
         )
     })?;
+    if let Some(row) = base_free_command_interface_body(&body_id, &body_path, &xml, source, axes) {
+        return Ok(vec![row]);
+    }
     let classification = compile_mssql_source(
         axes,
         &body_id,
@@ -5283,8 +5406,16 @@ fn prepare_command_interface_body_row(
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    // The configuration's `Ext/CommandInterface.xml` is one of its asset rows,
+    // stored under its module group and staged there by
+    // `prepare_configuration_asset_body_rows`; a second copy keyed by the
+    // configuration's own uuid is a row the platform never has.
+    if properties.kind == "Configuration" {
+        return Ok(Vec::new());
+    }
     let Some(suffix) = command_interface_body_suffix(&properties.kind) else {
         return Ok(Vec::new());
     };
@@ -5299,6 +5430,9 @@ fn prepare_command_interface_body_row(
             body_path.display()
         )
     })?;
+    if let Some(row) = base_free_command_interface_body(&body_id, &body_path, &xml, source, axes) {
+        return Ok(vec![row]);
+    }
     let classification = compile_mssql_source(
         axes,
         &body_id,
@@ -8759,6 +8893,7 @@ mod tests {
             "missing-database",
             &owner_xml,
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap_err();
@@ -12925,6 +13060,7 @@ mod tests {
             "missing-database",
             &root.join("Configuration.xml"),
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13010,6 +13146,7 @@ mod tests {
             "missing-database",
             &configuration_xml,
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13025,6 +13162,8 @@ mod tests {
 
         let _ = fs::remove_dir_all(root);
     }
+
+    const HOME_PAGE_WORK_AREA_XML: &[u8] = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<HomePageWorkArea xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\t<WorkingAreaTemplate>TwoColumnsVariableWidth</WorkingAreaTemplate>\r\n\t<LeftColumn>\r\n\t\t<Item>\r\n\t\t\t<Form>0c03f54c-e251-4dc9-85cb-f1c23b377597</Form>\r\n\t\t\t<Height>10</Height>\r\n\t\t\t<Visibility>\r\n\t\t\t\t<xr:Common>true</xr:Common>\r\n\t\t\t</Visibility>\r\n\t\t</Item>\r\n\t</LeftColumn>\r\n\t<RightColumn>\r\n\t</RightColumn>\r\n</HomePageWorkArea>";
 
     #[test]
     fn reports_home_page_work_area_body_as_currently_base_free() {
@@ -13045,7 +13184,7 @@ mod tests {
 </MetaDataObject>"#,
         )
         .unwrap();
-        fs::write(ext.join("HomePageWorkArea.xml"), br#"<HomePageWorkArea/>"#).unwrap();
+        fs::write(ext.join("HomePageWorkArea.xml"), HOME_PAGE_WORK_AREA_XML).unwrap();
 
         let report = super::source_bootstrap_readiness_report(
             &root,
@@ -13073,29 +13212,27 @@ mod tests {
     }
 
     #[test]
-    fn prepares_home_page_work_area_without_fetching_base_blob() {
+    fn compiles_home_page_work_area_to_the_stored_brace_text() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-home-page-work-area-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
         let body_path = root.join("Ext").join("HomePageWorkArea.xml");
         fs::create_dir_all(body_path.parent().unwrap()).unwrap();
-        let body = br#"<HomePageWorkArea/>"#;
-        fs::write(&body_path, body).unwrap();
+        fs::write(&body_path, HOME_PAGE_WORK_AREA_XML).unwrap();
         let properties = test_simple_metadata_properties(
             "Configuration",
             "ffffffff-ffff-4fff-ffff-ffffffffffff",
             "Main",
         );
 
-        let rows = super::prepare_configuration_raw_deflated_body_row(
-            PathBuf::from("missing-sqlcmd-for-home-page-work-area-test").as_path(),
-            "missing-server",
-            "missing-database",
+        let rows = super::prepare_configuration_interface_asset_body_row(
             &properties,
             body_path.clone(),
             "8",
+            super::InterfaceAssetSource::HomePageWorkArea,
             "HomePageWorkArea",
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13105,7 +13242,9 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(body)
+            hex_sha256(
+                b"\xef\xbb\xbf{1,2,1,\r\n{0,\r\n{0,0c03f54c-e251-4dc9-85cb-f1c23b377597},10,\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n}\r\n},0,2}"
+            )
         );
 
         let _ = fs::remove_dir_all(root);
@@ -13188,6 +13327,7 @@ mod tests {
             "missing-database",
             &subsystem_xml,
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13233,6 +13373,7 @@ mod tests {
             "missing-database",
             &common_command_xml,
             &properties,
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13322,6 +13463,7 @@ mod tests {
             &properties,
             body_path.clone(),
             "a",
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13414,6 +13556,7 @@ mod tests {
             &properties,
             body_path.clone(),
             "9",
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13431,10 +13574,12 @@ mod tests {
         let _ = fs::remove_dir_all(root);
     }
 
+    const CLIENT_APPLICATION_INTERFACE_XML: &[u8] = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n\t<panelDef id=\"b553047f-c9aa-4157-978d-448ecad24248\"/>\r\n\t<panelDef id=\"8e10648b-f52d-4ec2-b4dd-87de33778d95\"/>\r\n</ClientApplicationInterface>";
+
     #[test]
-    fn reports_configuration_raw_body_as_currently_base_free() {
+    fn reports_client_application_interface_body_as_base_free() {
         let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-configuration-raw-readiness-{}",
+            "ibcmd-rs-configuration-client-interface-readiness-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
         let configuration_xml = root.join("Configuration.xml");
@@ -13452,7 +13597,7 @@ mod tests {
         .unwrap();
         fs::write(
             ext.join("ClientApplicationInterface.xml"),
-            br#"<ClientApplicationInterface/>"#,
+            CLIENT_APPLICATION_INTERFACE_XML,
         )
         .unwrap();
 
@@ -13466,7 +13611,7 @@ mod tests {
             .rows
             .iter()
             .find(|row| {
-                row.row_kind == "configuration_raw_body"
+                row.row_kind == "configuration_client_application_interface_body"
                     && row.config_file_name == "ffffffff-ffff-4fff-ffff-ffffffffffff.b"
             })
             .unwrap();
@@ -13480,39 +13625,38 @@ mod tests {
     }
 
     #[test]
-    fn prepares_configuration_raw_without_fetching_base_blob() {
+    fn compiles_client_application_interface_to_the_stored_brace_text() {
         let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-configuration-raw-no-fetch-{}",
+            "ibcmd-rs-configuration-client-interface-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
         let body_path = root.join("Ext").join("ClientApplicationInterface.xml");
         fs::create_dir_all(body_path.parent().unwrap()).unwrap();
-        let body = br#"<ClientApplicationInterface/>"#;
-        fs::write(&body_path, body).unwrap();
+        fs::write(&body_path, CLIENT_APPLICATION_INTERFACE_XML).unwrap();
         let properties = test_simple_metadata_properties(
             "Configuration",
             "ffffffff-ffff-4fff-ffff-ffffffffffff",
             "Main",
         );
 
-        let rows = super::prepare_configuration_raw_deflated_body_row(
-            PathBuf::from("missing-sqlcmd-for-configuration-raw-test").as_path(),
-            "missing-server",
-            "missing-database",
+        let rows = super::prepare_configuration_interface_asset_body_row(
             &properties,
             body_path.clone(),
             "b",
+            super::InterfaceAssetSource::ClientApplicationInterface,
             "ClientApplicationInterface",
+            None,
             &test_compile_axes(),
         )
         .unwrap();
 
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "ffffffff-ffff-4fff-ffff-ffffffffffff.b");
-        assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(body)
+            hex_sha256(
+                b"\xef\xbb\xbf{1,\r\n{0,1,\r\n{0,0}\r\n},\r\n{0,2,\r\n{0,0}\r\n},\r\n{0,3,\r\n{0,0}\r\n},\r\n{0,4,\r\n{0,0}\r\n},2,\r\n{b553047f-c9aa-4157-978d-448ecad24248,0},1,\r\n{8e10648b-f52d-4ec2-b4dd-87de33778d95,1,\"\"},0}"
+            )
         );
 
         let _ = fs::remove_dir_all(root);
@@ -13655,14 +13799,16 @@ mod tests {
     }
 
     #[test]
-    fn prepares_standalone_configuration_content_without_fetching_base_blob() {
+    fn compiles_standalone_configuration_content_to_the_stored_brace_text() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-standalone-content-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
         ));
         let body_path = root.join("Ext").join("StandaloneConfigurationContent.bin");
         fs::create_dir_all(body_path.parent().unwrap()).unwrap();
-        let body = br#"<StandaloneContent/>"#;
+        // What the exporter writes for a record with no sections beyond the
+        // used list: it ends on a line break.
+        let body = b"\xef\xbb\xbf<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<StandaloneContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n</StandaloneContent>\r\n";
         fs::write(&body_path, body).unwrap();
         let properties = test_simple_metadata_properties(
             "Configuration",
@@ -13670,14 +13816,13 @@ mod tests {
             "Main",
         );
 
-        let rows = super::prepare_configuration_raw_deflated_body_row(
-            PathBuf::from("missing-sqlcmd-for-standalone-content-test").as_path(),
-            "missing-server",
-            "missing-database",
+        let rows = super::prepare_configuration_interface_asset_body_row(
             &properties,
             body_path.clone(),
             "f",
+            super::InterfaceAssetSource::StandaloneContent,
             "StandaloneConfigurationContent",
+            None,
             &test_compile_axes(),
         )
         .unwrap();
@@ -13687,7 +13832,7 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(body)
+            hex_sha256(b"\xef\xbb\xbf{2,0}")
         );
 
         let _ = fs::remove_dir_all(root);
