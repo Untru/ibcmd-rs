@@ -125,16 +125,15 @@ diffs the export against the native tree. A form passes when it compiles and its
 | | forms | compiled | unchanged |
 |---|---|---|---|
 | BSP | 1 108 | 1 108 | 1 108 (100 %) |
-| ERP УХ | 13 044 | 13 020 | 13 018 |
+| ERP УХ | 13 044 | 13 044 | 13 044 (100 %) |
 
-The ERP УХ remainder is 24 forms with an embedded `Chart`/`GanttChart` value
-(a writer is in progress) and the two forms fixed after that run. What is not in
-the source and is therefore neutral to the round trip: the navigator, the
-dynamic-list field map ids, a constants set's always-used flags (a delta the
-target database decides -- `IBCMD_RS_ALWAYS_USED_CONSTANTS`), and the empty
-settings blob. The loader now prefers the native writer for a new or changed
-form (`IBCMD_RS_NATIVE_FORM_WRITER=always` for every form); the database cycle
-below is the step that remains.
+Every export file is unchanged on both corpora. What is not in the source and
+is therefore neutral to the round trip: the navigator, the dynamic-list field
+map ids, a chart's legend layout, a constants set's always-used flags (a delta
+the target database decides -- `IBCMD_RS_ALWAYS_USED_CONSTANTS`), and the empty
+settings blob. The loader prefers the native writer for a new or changed form
+(`IBCMD_RS_NATIVE_FORM_WRITER=always` for every form); the database cycle --
+the load of every other object kind, then export -- is the step that remains.
 
 ## The tool that turned out to matter
 
