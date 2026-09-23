@@ -11716,14 +11716,12 @@ mod tests {
             row.reason
                 .contains("CommandInterface.xml requires active base blob")
         );
-        assert!(row.reason.contains("2 command visibility entries"));
-        assert!(row.reason.contains("1 readable refs"));
-        assert!(row.reason.contains("1 raw kind:uuid refs"));
+        // The source tree declares no `Catalogs/Products.xml`, so the name
+        // does not resolve and the writer refuses the file by that name.
         assert!(
             row.reason
                 .contains("Catalog.Products.StandardCommand.OpenList")
         );
-        assert!(row.reason.contains("serialized command order"));
 
         let _ = fs::remove_dir_all(root);
     }
@@ -13200,7 +13198,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},0,0,0,0,0}"
             )
         );
 
@@ -13245,7 +13243,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},0,0,0,0,0}"
             )
         );
 
@@ -13334,7 +13332,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},0,0,0,0,0}"
             )
         );
 
@@ -13426,7 +13424,7 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"\xef\xbb\xbf{7,1,1,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},0,0,0,0,0}"
+                b"\xef\xbb\xbf{7,1,1,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},0,0,0,0,0}"
             )
         );
 

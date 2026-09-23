@@ -13,6 +13,7 @@ pub mod dynamic_list;
 pub mod form;
 pub mod form_chart;
 pub mod form_native;
+pub mod interface_assets;
 pub mod mxl;
 pub mod predefined;
 pub mod rights;

@@ -1069,6 +1069,12 @@ struct FlowchartXmlItem {
     events: BTreeMap<String, Option<String>>,
 }
 
+mod interface_assets;
+
+pub use interface_assets::{
+    InterfaceAssetSource, interface_asset_plaintext, pack_interface_asset_blob,
+};
+
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
@@ -1083,6 +1089,9 @@ pub struct MetadataSourceContext {
     /// The metadata names a role's `Rights.xml` refers to, each owner file
     /// parsed once and shared between clones.
     role_rights_source: Arc<SourceTreeRoleRightsSource>,
+    /// What the interface writers resolve more than once: a metadata file's
+    /// class and uuid, an owner's declared commands.
+    interface_memo: Arc<Mutex<interface_assets::InterfaceResolutionMemo>>,
 }
 
 impl MetadataSourceContext {
@@ -1091,6 +1100,9 @@ impl MetadataSourceContext {
             role_rights_source: Arc::new(SourceTreeRoleRightsSource::new(source_root.clone())),
             source_root,
             configuration_objects: Arc::new(Mutex::new(BTreeMap::new())),
+            interface_memo: Arc::new(Mutex::new(
+                interface_assets::InterfaceResolutionMemo::default(),
+            )),
         }
     }
 
@@ -28178,10 +28190,10 @@ pub fn pack_command_interface_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
-    let entries = parse_command_interface_xml(xml)?;
     if base_blob.is_empty() {
-        return pack_command_interface_entries_without_base(&entries);
+        return pack_command_interface_blob_from_xml_base_free(xml);
     }
+    let entries = parse_command_interface_xml(xml)?;
     let inflated =
         inflate_raw(base_blob).context("failed to inflate base CommandInterface blob")?;
     let mut plain =
@@ -28237,19 +28249,15 @@ pub fn pack_command_interface_blob_from_xml(
     })
 }
 
-/// Packs CommandInterface XML only when every command reference is base-free.
+/// Packs CommandInterface XML without a source tree: only when every section
+/// spells raw references (`<code>:<uuid>` commands, bare uuids).
 ///
-/// Readable command references are classified as requiring a base and rejected
-/// instead of being routed through the base-capable packer with an empty blob.
+/// Readable names are classified as requiring a base and rejected here; the
+/// loader resolves them with [`pack_interface_asset_blob`] and a source tree.
 pub fn pack_command_interface_blob_from_xml_base_free(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
-    if !command_interface_xml_can_pack_without_base(xml)? {
-        let blockers = command_interface_base_free_blockers(xml)?;
-        return Err(anyhow!(
-            "CommandInterface XML requires a base entry: {}",
-            blockers.join("; ")
-        ));
-    }
-    pack_command_interface_blob_from_xml(&[], xml)
+    validate_command_interface_xml_document(xml)?;
+    pack_interface_asset_blob(InterfaceAssetSource::CommandInterface, xml, None)
+        .map_err(|error| anyhow!("CommandInterface XML requires a base entry: {error:#}"))
 }
 
 fn validate_command_interface_xml_document(xml: &[u8]) -> Result<()> {
@@ -28343,101 +28351,27 @@ fn validate_command_interface_xml_document(xml: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Whether the XML packs without a base and without a source tree: every
+/// section it holds is one the writer encodes, spelled with raw references.
+/// A section the writer cannot encode, or a name only a source tree resolves,
+/// is `false` -- never a body with the section dropped.
 pub fn command_interface_xml_can_pack_without_base(xml: &[u8]) -> Result<bool> {
     validate_command_interface_xml_document(xml)?;
-    let entries = parse_command_interface_xml(xml)?;
-    Ok(entries
-        .iter()
-        .all(|entry| format_raw_command_interface_ref(&entry.name).is_ok()))
+    Ok(interface_asset_plaintext(InterfaceAssetSource::CommandInterface, xml, None).is_ok())
 }
 
+/// Why the XML does not pack without a base and a source tree; empty when it
+/// does.
 pub fn command_interface_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
-    let entries = parse_command_interface_xml(xml)?;
-    let raw_count = entries
-        .iter()
-        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_ok())
-        .count();
-    let readable = entries
-        .iter()
-        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_err())
-        .map(|entry| entry.name.as_str())
-        .collect::<Vec<_>>();
-    if readable.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let readable_count = readable.len();
-    let sample = readable
-        .iter()
-        .take(3)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut blockers = Vec::new();
-    blockers.push(format!(
-        "source XML has {} command visibility entries ({readable_count} readable refs, {raw_count} raw kind:uuid refs), but base-free packing can only synthesize raw numeric kind:uuid command tuples",
-        entries.len()
-    ));
-    blockers.push(format!(
-        "readable CommandInterface refs such as {sample} require the active base row to preserve the platform command tuple kind, UUID and serialized command order"
-    ));
-    blockers.push(
-        "staging currently patches visibility flags into the existing CommandInterface row and validates the command count against the base blob".to_string(),
-    );
-    Ok(blockers)
-}
-
-fn pack_command_interface_entries_without_base(
-    entries: &[CommandInterfaceXmlEntry],
-) -> Result<PackedRawDeflatedBlob> {
-    use crate::compiler::bodies::command_interface::{
-        CommandInterfaceModel, CommandReference, CommandVisibility,
-        compile_evidenced_command_interface,
-    };
-
-    let commands_visibility = entries
-        .iter()
-        .map(|entry| {
-            let (kind, uuid) = parse_raw_command_interface_ref(&entry.name)?;
-            Ok(CommandVisibility {
-                command: CommandReference::resolved(kind, uuid),
-                common: entry.common,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let model = CommandInterfaceModel {
-        commands_visibility,
-        ..CommandInterfaceModel::default()
-    };
-    let blob = compile_evidenced_command_interface(&model)
-        .map_err(|error| anyhow!("failed to compile CommandInterface model: {error}"))?;
-    let plain_bytes = inflate_raw(&blob)?.len();
-    let output_sha256 = hex_sha256(&blob);
-    Ok(PackedRawDeflatedBlob {
-        blob,
-        plain_bytes,
-        output_sha256,
-    })
-}
-
-fn format_raw_command_interface_ref(name: &str) -> Result<String> {
-    let (kind, uuid) = parse_raw_command_interface_ref(name)?;
-    Ok(format!("{{{kind},{uuid}}}"))
-}
-
-fn parse_raw_command_interface_ref(name: &str) -> Result<(u32, ibcmd_core::identity::ObjectUuid)> {
-    let (kind, uuid) = name
-        .split_once(':')
-        .ok_or_else(|| anyhow!("base-free CommandInterface command must be kind:uuid: {name}"))?;
-    let kind = kind.trim();
-    let uuid = uuid.trim();
-    let kind = kind.parse::<u32>().map_err(|_| {
-        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
-    })?;
-    let uuid = ibcmd_core::identity::ObjectUuid::parse(uuid).map_err(|_| {
-        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
-    })?;
-    Ok((kind, uuid))
+    validate_command_interface_xml_document(xml)?;
+    Ok(
+        match interface_asset_plaintext(InterfaceAssetSource::CommandInterface, xml, None) {
+            Ok(_) => Vec::new(),
+            Err(error) => vec![format!(
+                "the base-free writer refuses the file without a source tree: {error:#}"
+            )],
+        },
+    )
 }
 
 pub fn pack_exchange_plan_content_blob_from_xml(
@@ -34387,6 +34321,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
             "ChartsOfCalculationRegisters",
         )),
         "CommonCommand" => Some(("CommonCommand", "CommonCommands")),
+        "CommonModule" => Some(("CommonModule", "CommonModules")),
         "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
         "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
         "Constant" => Some(("Constant", "Constants")),
@@ -47538,7 +47473,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "\u{feff}{7,1,2,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}},0,0,0,0,0}"
+            "\u{feff}{7,1,2,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},\r\n{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},\r\n{0,\r\n{0,\r\n{\"B\",0},0}\r\n},0,0,0,0,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -47578,11 +47513,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!super::command_interface_xml_can_pack_without_base(xml).unwrap());
         let error = super::pack_command_interface_blob_from_xml(&[], xml).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("base-free CommandInterface command"),
+            error.to_string().contains("requires a base entry")
+                && error
+                    .to_string()
+                    .contains("Catalog.Products.StandardCommand.OpenList"),
             "{error}"
         );
+    }
+
+    /// The defect the writer replaced: a file holding only readable
+    /// subsystem names was accepted without a base and compiled to the empty
+    /// body `{7,0,0,0,0,0,0}`, dropping the section.
+    #[test]
+    fn subsystems_order_alone_is_never_packed_as_an_empty_body() {
+        let xml = br#"<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<SubsystemsOrder>
+		<Subsystem>Subsystem.A.Subsystem.B</Subsystem>
+	</SubsystemsOrder>
+</CommandInterface>"#;
+
+        assert!(!super::command_interface_xml_can_pack_without_base(xml).unwrap());
+        assert!(super::pack_command_interface_blob_from_xml_base_free(xml).is_err());
     }
 
     #[test]
@@ -47636,13 +47587,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let blockers = super::command_interface_base_free_blockers(xml)?;
 
-        assert_eq!(blockers.len(), 3);
-        assert!(blockers[0].contains("2 command visibility entries"));
-        assert!(blockers[0].contains("1 readable refs"));
-        assert!(blockers[0].contains("1 raw kind:uuid refs"));
-        assert!(blockers[1].contains("Catalog.Products.StandardCommand.OpenList"));
-        assert!(blockers[1].contains("platform command tuple kind"));
-        assert!(blockers[2].contains("validates the command count"));
+        assert_eq!(blockers.len(), 1);
+        assert!(blockers[0].contains("without a source tree"));
+        assert!(blockers[0].contains("Catalog.Products.StandardCommand.OpenList"));
 
         Ok(())
     }

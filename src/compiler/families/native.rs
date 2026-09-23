@@ -125,6 +125,29 @@ pub(crate) fn styled_list_with_tail(
     }
 }
 
+/// A list laid out the way the platform lays out its own plain text: a line
+/// break before every nested list that is not the list's first value, and one
+/// before the closing brace when the list ends with a nested list.
+///
+/// Read off the stored command-interface, home-page, client-interface and
+/// standalone-content rows of БСП and ERP УХ, where it holds for every list.
+pub(crate) fn platform_list(values: Vec<NativeValue>) -> NativeValue {
+    let line_breaks = values
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, value)| matches!(value, NativeValue::List { .. }))
+        .map(|(index, _)| index)
+        .collect();
+    let trailing_break = matches!(values.last(), Some(NativeValue::List { .. }));
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break,
+    }
+}
+
 pub(crate) fn formatted_list(
     values: Vec<NativeValue>,
     leading_break: bool,
