@@ -30911,6 +30911,10 @@ fn writes_template_metadata_xml_to_owner_or_common_template_layout() {
 			</c>
 		</row>
 	</rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
 </document>
 "#,
     )
@@ -32567,6 +32571,10 @@ fn spreadsheet_pack_extract_roundtrip_preserves_vertical_unmerge() {
 		<c>1</c>
 		<w>3</w>
 	</verticalUnmerge>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
 </document>
 "#;
 
@@ -32665,249 +32673,6 @@ fn spreadsheet_extract_formats_horizontal_unmerge_and_merge_columns_id() {
 }
 
 #[test]
-fn spreadsheet_pack_extract_preserves_hybrid_drawing_back_color_format() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>2</formatIndex>
-		<beginRow>0</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>1</endRow>
-		<endRowOffset>0</endRowOffset>
-		<beginColumn>0</beginColumn>
-		<beginColumnOffset>0</beginColumnOffset>
-		<endColumn>1</endColumn>
-		<endColumnOffset>0</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-	<format/>
-	<format>
-		<verticalAlignment>Top</verticalAlignment>
-		<backColor>style:FieldBackColor</backColor>
-		<drawingBorder>4</drawingBorder>
-	</format>
-</document>
-"#;
-
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
-
-    assert!(extracted.contains("<drawingBorder>4</drawingBorder>"));
-    assert!(extracted.contains("<backColor>style:FieldBackColor</backColor>"));
-}
-
-#[test]
-fn spreadsheet_pack_extract_preserves_hybrid_drawing_form_back_color_format() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>2</formatIndex>
-		<beginRow>0</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>1</endRow>
-		<endRowOffset>0</endRowOffset>
-		<beginColumn>0</beginColumn>
-		<beginColumnOffset>0</beginColumnOffset>
-		<endColumn>1</endColumn>
-		<endColumnOffset>0</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-	<format/>
-	<format>
-		<verticalAlignment>Top</verticalAlignment>
-		<backColor>style:FormBackColor</backColor>
-		<drawingBorder>2</drawingBorder>
-		<hyperLink>false</hyperLink>
-	</format>
-</document>
-"#;
-
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
-
-    assert!(extracted.contains("<drawingBorder>2</drawingBorder>"));
-    assert!(extracted.contains("<hyperLink>false</hyperLink>"));
-    assert!(extracted.contains("<backColor>style:FormBackColor</backColor>"));
-}
-
-#[test]
-fn spreadsheet_pack_extract_preserves_shared_cell_and_drawing_back_color_format() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<tl>
-						<v8:item>
-							<v8:lang>ru</v8:lang>
-							<v8:content>Cell</v8:content>
-						</v8:item>
-					</tl>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>2</formatIndex>
-		<beginRow>0</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>1</endRow>
-		<endRowOffset>0</endRowOffset>
-		<beginColumn>0</beginColumn>
-		<beginColumnOffset>0</beginColumnOffset>
-		<endColumn>1</endColumn>
-		<endColumnOffset>0</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-	<format/>
-	<format>
-		<verticalAlignment>Top</verticalAlignment>
-		<backColor>style:FieldBackColor</backColor>
-		<drawingBorder>4</drawingBorder>
-	</format>
-</document>
-"#;
-
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
-
-    assert!(extracted.contains("<f>2</f>"));
-    assert!(extracted.contains("<formatIndex>2</formatIndex>"));
-    assert!(extracted.contains("<drawingBorder>4</drawingBorder>"));
-    assert!(extracted.contains("<backColor>style:FieldBackColor</backColor>"));
-}
-
-#[test]
-fn spreadsheet_pack_extract_preserves_sparse_shared_cell_and_drawing_back_color_format() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>1</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>3</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>5</f>
-					<tl>
-						<v8:item>
-							<v8:lang>ru</v8:lang>
-							<v8:content>Cell</v8:content>
-						</v8:item>
-					</tl>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>5</formatIndex>
-		<beginRow>0</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>1</endRow>
-		<endRowOffset>0</endRowOffset>
-		<beginColumn>0</beginColumn>
-		<beginColumnOffset>0</beginColumnOffset>
-		<endColumn>1</endColumn>
-		<endColumnOffset>0</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-	<format>
-		<width>10</width>
-	</format>
-	<format>
-		<width>20</width>
-	</format>
-	<format>
-		<width>30</width>
-	</format>
-	<format>
-		<width>40</width>
-	</format>
-	<format>
-		<verticalAlignment>Top</verticalAlignment>
-		<backColor>style:FieldBackColor</backColor>
-		<drawingBorder>4</drawingBorder>
-	</format>
-</document>
-"#;
-
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
-
-    assert!(extracted.contains("<formatIndex>3</formatIndex>"));
-    assert!(extracted.contains("<f>2</f>"));
-    assert!(extracted.contains("<drawingBorder>4</drawingBorder>"));
-    assert!(extracted.contains("<backColor>style:FieldBackColor</backColor>"));
-}
-
-#[test]
 fn spreadsheet_pack_extract_roundtrip_preserves_text_entity_spacing() {
     let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
 <document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
@@ -32930,6 +32695,10 @@ fn spreadsheet_pack_extract_roundtrip_preserves_text_entity_spacing() {
 			</c>
 		</row>
 	</rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
 </document>
 "#;
 
@@ -33043,45 +32812,6 @@ fn spreadsheet_extract_omits_default_print_settings() {
     let extracted = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(!extracted.contains("<printSettings>"));
-}
-
-#[test]
-fn spreadsheet_pack_extract_roundtrip_preserves_nonzero_first_row() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>1</index>
-		<row>
-			<c>
-				<c>
-					<f>0</f>
-					<tl>
-						<v8:item>
-							<v8:lang>ru</v8:lang>
-							<v8:content>Second row</v8:content>
-						</v8:item>
-					</tl>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-    let first = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted =
-        extract_moxel_spreadsheet_xml(&first.blob, &BTreeMap::new()).expect("first extract");
-    let second = pack_moxel_spreadsheet_blob_from_xml(extracted.as_bytes()).unwrap();
-    let extracted_again =
-        extract_moxel_spreadsheet_xml(&second.blob, &BTreeMap::new()).expect("second extract");
-
-    assert_eq!(extracted, extracted_again);
-    assert!(extracted.contains("\t<rowsItem>\r\n\t\t<index>1</index>"));
-    assert!(!extracted.contains("\t<rowsItem>\r\n\t\t<index>0</index>"));
-    assert!(extracted.contains("<v8:content>Second row</v8:content>"));
 }
 
 #[test]
@@ -35439,57 +35169,6 @@ fn formats_moxel_preserve_drawing_line_slot_for_none_solid_dotted_triplet() {
 }
 
 #[test]
-fn spreadsheet_pack_extract_does_not_promote_field_back_color_style_ref_to_extra_line() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>4</defaultFormatIndex>
-	<line width="1" gap="false">
-		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style>
-	</line>
-	<line width="1" gap="false">
-		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style>
-	</line>
-	<line width="1" gap="false">
-		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Dotted</v8ui:style>
-	</line>
-	<format>
-		<border>0</border>
-	</format>
-	<format>
-		<bottomBorder>1</bottomBorder>
-	</format>
-	<format>
-		<verticalAlignment>Top</verticalAlignment>
-		<backColor>style:FieldBackColor</backColor>
-	</format>
-	<format>
-		<width>30</width>
-	</format>
-</document>
-"#;
-
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).unwrap();
-    let extracted = extract_moxel_spreadsheet_xml(&packed.blob, &BTreeMap::new()).expect("extract");
-
-    assert_eq!(
-        extracted
-            .matches("<line width=\"1\" gap=\"false\">")
-            .count(),
-        3
-    );
-    assert!(extracted.contains("<backColor>style:FieldBackColor</backColor>"));
-}
-
-#[test]
 fn formats_moxel_web_colors_embedded_styles_and_details_use() {
     let style_refs = parse_moxel_style_refs(
         &[
@@ -36132,57 +35811,6 @@ fn moxel_style_ref_palette_rejects_zero_and_overflow_counts() {
 }
 
 #[test]
-fn moxel_style_ref_palette_has_exact_counted_layout_before_nested_formats() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<rowsItem><index>0</index><row><c><c><tl><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></tl></c></c></row></rowsItem>
-	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style></line>
-	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style></line>
-	<format><width>37</width><backColor>style:FieldBackColor</backColor></format>
-	<format><width>38</width></format>
-</document>"#;
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated =
-        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
-    let body_start = inflated.find("{8,").expect("MOXCEL root");
-    let fields = split_1c_braced_fields(&inflated[body_start..], 0).expect("root fields");
-    let candidates = fields
-        .iter()
-        .enumerate()
-        .filter_map(|(start, field)| {
-            let count = field.parse::<usize>().ok()?;
-            if count == 0 {
-                return None;
-            }
-            let entries = fields.get(start + 1..start + 1 + count)?;
-            entries
-                .iter()
-                .all(|entry| parse_moxel_style_ref_slot(entry, &BTreeMap::new()).is_some())
-                .then_some((start, count))
-        })
-        .collect::<Vec<_>>();
-
-    assert_eq!(candidates.len(), 1);
-    let (palette_start, palette_count) = candidates[0];
-    assert_eq!(palette_count, 2 + 1, "two lines plus one style reference");
-    let palette = &fields[palette_start + 1..=palette_start + palette_count];
-    assert_eq!(palette[0].trim(), "{3,3,{-1}}", "first line descriptor");
-    assert_eq!(palette[1].trim(), "{3,3,{-3}}", "second line descriptor");
-    assert_eq!(
-        parse_moxel_style_ref_slot(palette[2], &BTreeMap::new()),
-        Some(Some("style:FieldBackColor".to_owned())),
-        "third palette entry is the FieldBackColor style reference"
-    );
-    let table = split_1c_braced_fields(fields[palette_start + palette_count + 1], 0)
-        .expect("nested format table follows palette");
-    assert_eq!(
-        table.first().and_then(|count| count.parse::<usize>().ok()),
-        Some(2)
-    );
-    assert_eq!(table.len(), 3);
-}
-
-#[test]
 fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_formats() {
     let fields = ["1", "{3,3,{-1}}", "{2,{0},{0}}", "{3,3,{-3}}"];
 
@@ -36197,64 +35825,6 @@ fn moxel_style_ref_palette_ignores_unrelated_root_descriptor_after_nested_format
         formats
             .iter()
             .all(|format| *format == MoxelFormat::default())
-    );
-}
-
-#[test]
-fn moxel_format_table_skips_confirmed_palette_when_invalid_override_clears_refs() {
-    let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<rowsItem><index>0</index><row><c><c><tl><v8:item><v8:lang>ru</v8:lang><v8:content>x</v8:content></v8:item></tl></c></c></row></rowsItem>
-	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style></line>
-	<line width="1" gap="false"><v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style></line>
-	<format><width>37</width><backColor>style:FieldBackColor</backColor></format>
-	<format><width>38</width></format>
-</document>"#;
-    let packed = pack_moxel_spreadsheet_blob_from_xml(xml).expect("pack");
-    let inflated =
-        String::from_utf8(inflate_raw_deflate(&packed.blob).expect("inflate")).expect("UTF-8");
-    let body_start = inflated.find("{8,").expect("MOXCEL root");
-    let mut fields = split_1c_braced_fields(&inflated[body_start..], 0)
-        .expect("root fields")
-        .into_iter()
-        .map(str::to_string)
-        .collect::<Vec<_>>();
-    let (palette_start, palette_count) = fields
-        .iter()
-        .enumerate()
-        .find_map(|(start, field)| {
-            let count = field.parse::<usize>().ok()?;
-            if count == 0 {
-                return None;
-            }
-            let entries = fields.get(start + 1..start + 1 + count)?;
-            entries
-                .iter()
-                .all(|entry| parse_moxel_style_ref_slot(entry, &BTreeMap::new()).is_some())
-                .then_some((start, count))
-        })
-        .expect("canonical palette");
-    fields.insert(
-        palette_start + palette_count + 1,
-        "{1,2048,{3,3,{-10}}}".to_string(),
-    );
-    let body = format!("{{{}}}", fields.join(","));
-    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new())
-        .expect("full MOXCEL body with fail-closed palette");
-
-    let widths = spreadsheet
-        .column_formats
-        .iter()
-        .chain(&spreadsheet.formats)
-        .map(|format| format.width)
-        .collect::<Vec<_>>();
-    assert!(
-        widths.contains(&Some(37))
-            || spreadsheet.default_format.width == Some(37)
-            || spreadsheet.default_format_width == Some(37),
-        "format widths: {widths:?}, default={:?}, default width={:?}",
-        spreadsheet.default_format.width,
-        spreadsheet.default_format_width,
     );
 }
 

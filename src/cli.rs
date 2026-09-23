@@ -62,6 +62,10 @@ pub enum Commands {
     AuditHelpWriter(AuditInterfaceWriterArgs),
     /// Round-trip every DataCompositionSchema template through the loader and the exporter.
     AuditDcsTemplateWriter(AuditDcsTemplateWriterArgs),
+    /// Measure the spreadsheet template writer: compile, compare with the stored
+    /// row, and read the compiled row back into Template.xml.
+    #[command(hide = true)]
+    AuditMxlWriter(AuditMxlWriterArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -964,6 +968,17 @@ pub struct AuditDcsTemplateWriterArgs {
     pub bodies: PathBuf,
     /// Dump directory (manifest.json + Config_inflated) the export index is built from.
     pub dump: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditMxlWriterArgs {
+    /// Root folder with the native 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated stored rows of the same database.
+    pub bodies: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
     #[arg(short, long)]
     pub output: Option<PathBuf>,

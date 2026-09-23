@@ -27,8 +27,15 @@
 //! - the record version is `74` and the scale-id list holds the ex-series id
 //!   and every real series id (`1+N`), a repeated id once;
 //! - a border's member 5 is `0`, and its style uuid is the palette uuid,
-//!   except a chart border (`chBorder`) that is not `WithoutBorder`, which
-//!   stores the nil uuid (10 of the 14 ERP УХ Gantt charts that have one);
+//!   except a form's chart border (`chBorder`) that is not `WithoutBorder`,
+//!   which stores the nil uuid (10 of the 14 ERP УХ Gantt charts that have
+//!   one); a spreadsheet template's stores the palette uuid there as well
+//!   (all 5 template charts of both corpora that have one, the two БСП rows
+//!   an XML load wrote among them);
+//! - `userMaxValue` and `userMinValue` are doubles: a template stores them in
+//!   the platform's double spelling (`2e3`, `5e2`, `3e2` -- every non-zero
+//!   one of ERP УХ, one of them in a row an XML load wrote), a form the XML's
+//!   own (its decoder publishes the stored text and refuses an exponent);
 //! - member 100 repeats the palette code of member 179;
 //! - a series' cached colour and marker are its legend entry's when that
 //!   entry names one, else the automatic palette's for the chart type;
@@ -65,18 +72,27 @@ const LINE_UUID: &str = "e5cabe59-d992-4d31-8086-3116931aff81";
 /// `auto`, and a font that names nothing.
 const AUTO_COLOR: &str = "{3,4,{0}}";
 const AUTO_FONT: &str = "{7,3,0,1,100}";
-/// The bounds the exporter's decoder reads under.
-const MAX_SERIES: usize = 64;
+/// The bounds the exporters' decoders read under: the form exporter stops at
+/// 64 series and refuses a longer chart through the round-trip check, the
+/// template exporter reads ERP УХ's 75-series `ФинансовыйАнализ` charts.
+const MAX_SERIES: usize = 1024;
 const MAX_POINTS: usize = 4096;
 /// The untouched layout both twelve-member layout runs hold.
 const UNTOUCHED_LAYOUT: [&str; 12] = ["0", "0", "0", "0", "0", "0", "1", "1", "0", "0", "1", "1"];
 
+/// The row a chart value is written into. A spreadsheet template's chart
+/// drawing stores the same serialization as a form attribute, except for the
+/// members the module docs name.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum ChartHost {
+    FormAttribute,
+    SpreadsheetTemplate,
+}
+
 /// `<Settings xsi:type="d4p1:Chart">`, the whole element as Form.xml spells
 /// it, to the member-14 value `{0,1,"Chart",{…}}`.
 pub(crate) fn format_form_embedded_chart(settings_xml: &str) -> Result<String> {
-    let root = parse_settings(settings_xml, "d4p1:Chart")?;
-    let record = chart_record(&root)?;
-    let value = format!("{{0,1,\"Chart\",{{\"#\",{CHART_VALUE_TYPE_UUID},{{11}},{record}}}}}");
+    let value = chart_value(settings_xml, ChartHost::FormAttribute)?;
     verify_round_trip(
         settings_xml,
         &value,
@@ -87,17 +103,33 @@ pub(crate) fn format_form_embedded_chart(settings_xml: &str) -> Result<String> {
 
 /// `<Settings xsi:type="d4p1:GanttChart">` to `{0,1,"GanttChart",{…}}`.
 pub(crate) fn format_form_embedded_gantt_chart(settings_xml: &str) -> Result<String> {
-    let root = parse_settings(settings_xml, "d4p1:GanttChart")?;
-    let wrapper = gantt_wrapper(&root)?;
-    let value = format!(
-        "{{0,1,\"GanttChart\",{{\"#\",{GANTT_CHART_VALUE_TYPE_UUID},{wrapper}}}}}"
-    );
+    let value = gantt_chart_value(settings_xml, ChartHost::FormAttribute)?;
     verify_round_trip(
         settings_xml,
         &value,
         crate::mssql_dump::render_form_gantt_chart_settings_value,
     )?;
     Ok(value)
+}
+
+/// The chart value `format_form_embedded_chart` returns, before the form
+/// exporter's check: a spreadsheet template carries the same serialization
+/// and checks it against its own exporter instead.
+pub(crate) fn chart_value(settings_xml: &str, host: ChartHost) -> Result<String> {
+    let root = parse_settings(settings_xml, "d4p1:Chart")?;
+    let record = chart_record(&root, host)?;
+    Ok(format!(
+        "{{0,1,\"Chart\",{{\"#\",{CHART_VALUE_TYPE_UUID},{{11}},{record}}}}}"
+    ))
+}
+
+/// The Gantt chart's counterpart to `chart_value`.
+pub(crate) fn gantt_chart_value(settings_xml: &str, host: ChartHost) -> Result<String> {
+    let root = parse_settings(settings_xml, "d4p1:GanttChart")?;
+    let wrapper = gantt_wrapper(&root, host)?;
+    Ok(format!(
+        "{{0,1,\"GanttChart\",{{\"#\",{GANTT_CHART_VALUE_TYPE_UUID},{wrapper}}}}}"
+    ))
 }
 
 /// The exporter renders the value at the indent `<Settings>` sits at inside
@@ -175,7 +207,9 @@ const MARKERS: &[(&str, &str)] = &[
 
 const CHART_TYPES: &[(&str, &str)] = &[
     ("Line", "0"),
+    ("StackedColumn", "5"),
     ("Column3D", "6"),
+    ("StackedBar", "9"),
     ("Pie", "12"),
     ("Gauge", "38"),
     ("Bubble", "44"),
@@ -186,7 +220,7 @@ const CHART_TYPES: &[(&str, &str)] = &[
 /// elements (a `Chart` attribute's `<Settings>`, a Gantt chart's
 /// `<d4p1:chart>`).
 #[allow(clippy::too_many_lines)]
-fn chart_record(node: &XmlNode) -> Result<String> {
+fn chart_record(node: &XmlNode, host: ChartHost) -> Result<String> {
     let mut c = Children::chart(node)?;
     let series_cur_id = integer(c.required("seriesCurId")?)?;
     let points_cur_id = integer(c.required("pointsCurId")?)?;
@@ -272,7 +306,10 @@ fn chart_record(node: &XmlNode) -> Result<String> {
     set(15, color(c.required("ttlBorderColor")?)?);
     set(16, border(c.required("lgBorder")?, false)?);
     set(17, color(c.required("lgBorderColor")?)?);
-    set(18, border(c.required("chBorder")?, true)?);
+    set(
+        18,
+        border(c.required("chBorder")?, host == ChartHost::FormAttribute)?,
+    );
     set(19, color(c.required("chBorderColor")?)?);
     set(20, boolean(c.required("transparent")?)?.into());
     set(21, color(c.required("bkgColor")?)?);
@@ -298,7 +335,19 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         set(slot, boolean(c.required(name)?)?.into());
     }
     set(39, localized(c.required("vsFormat")?)?);
-    set(40, code(c.required("xLabelsOrientation")?, &[("Auto", "0")])?.into());
+    // `xLabelsOrientation` is `post[1]`'s code (`Horizontal` 0, `Vertical` 1,
+    // `Auto` 2), which the points scale's own orientation mirrors; `tail[40]`
+    // reads 1 on the one `Vertical` record of the stand and 0 on every other.
+    let (orientation_40, orientation_code) =
+        match leaf(c.required("xLabelsOrientation")?)?.trim() {
+            "Auto" => ("0", "2"),
+            "Horizontal" => ("0", "0"),
+            "Vertical" => ("1", "1"),
+            other => bail!(
+                "<d4p1:xLabelsOrientation> spells {other}, which the chart writer has not measured"
+            ),
+        };
+    set(40, orientation_40.into());
     set(41, line(c.required("scaleLine")?)?);
     set(42, color(c.required("scaleColor")?)?);
     set(43, boolean(c.required("isAutoSeriesName")?)?.into());
@@ -332,6 +381,7 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         "Auto" => "14",
         "Palette8" => "0",
         "Palette32" => "1",
+        "Gradient" => "13",
         other => bail!("<d4p1:paletteKind> spells {other}, which the chart writer has not measured"),
     };
     set(63, "0".into());
@@ -354,14 +404,7 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         68,
         code(c.required("gaugeValuesPresentation")?, &[("Needle", "0")])?.into(),
     );
-    let bands = c.required("gaugeQualityBands")?;
-    ensure!(
-        bands.children.is_empty()
-            && bands.text.trim().is_empty()
-            && attributes_are(bands, &[("useTextStr", "false"), ("useTooltipStr", "false")]),
-        "<d4p1:gaugeQualityBands> names bands the chart writer has not measured"
-    );
-    set(69, "{1,0,0,0}".into());
+    set(69, gauge_quality_bands(c.required("gaugeQualityBands")?)?);
     set(70, integer(c.required("beginGaugeAngle")?)?);
     set(71, integer(c.required("endGaugeAngle")?)?);
     set(72, integer(c.required("gaugeThickness")?)?);
@@ -373,13 +416,23 @@ fn chart_record(node: &XmlNode) -> Result<String> {
     set(75, integer(c.required("gaugeBushThickness")?)?);
     set(76, color(c.required("gaugeBushColor")?)?);
     set(77, boolean(c.required("autoMaxValue")?)?.into());
-    set(78, decimal(c.required("userMaxValue")?)?);
+    let bound = |node: &XmlNode| match host {
+        ChartHost::FormAttribute => decimal(node),
+        ChartHost::SpreadsheetTemplate => double(node),
+    };
+    set(78, bound(c.required("userMaxValue")?)?);
     set(79, boolean(c.required("autoMinValue")?)?.into());
-    set(80, decimal(c.required("userMinValue")?)?);
+    set(80, bound(c.required("userMinValue")?)?);
     set(81, boolean(c.required("elementsIsInit")?)?.into());
-    exact(c.required("titleIsInit")?, "true")?;
-    exact(c.required("legendIsInit")?, "true")?;
-    exact(c.required("chartIsInit")?, "true")?;
+    // `titleIsInit`, `legendIsInit` and `chartIsInit` are `post[7..10)`, which
+    // the template exporter reads as one flag.
+    let title_is_init = boolean(c.required("titleIsInit")?)?;
+    let legend_is_init = boolean(c.required("legendIsInit")?)?;
+    let chart_is_init = boolean(c.required("chartIsInit")?)?;
+    ensure!(
+        title_is_init == legend_is_init && legend_is_init == chart_is_init,
+        "the chart's titleIsInit, legendIsInit and chartIsInit disagree"
+    );
     for (start, name) in [
         (163, "elementsChart"),
         (167, "elementsLegend"),
@@ -414,10 +467,8 @@ fn chart_record(node: &XmlNode) -> Result<String> {
     set(115, percent(c.required("funnelGapSumPercent")?)?);
     set(116, line(c.required("multiStageLinkLine")?)?);
     set(117, color(c.required("multiStageLinkColor")?)?);
-    empty(c.required("valuesAxis")?)?;
-    empty(c.required("pointsAxis")?)?;
-    set(127, "{0,0,{0,1,0,1,0},0,0}".into());
-    set(128, "{0,0,{0,1,0,1,0},0,0}".into());
+    set(127, axis(c.required("valuesAxis")?)?);
+    set(128, axis(c.required("pointsAxis")?)?);
     for (slot, name) in [(139, "pointsScale"), (140, "valuesScale"), (141, "seriesScale")] {
         let block = match c.optional(name) {
             Some(scale) => scale_of(scale)?,
@@ -476,26 +527,53 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         183,
         format!("{{0,{tooltip_mode},0,{points_drop_lines},{values_drop_lines}}}"),
     );
-    match (palette_code, c.optional("colorPaletteDescription")) {
-        ("14", None) => {}
+    // The palette record is `{0,<code>,<gradient start colour>,auto,0,0}`; the
+    // start colour is repeated at 144 (`valuesAxis` + 17).
+    let gradient_start = match (palette_code, c.optional("colorPaletteDescription")) {
+        ("14", None) => AUTO_COLOR.to_string(),
         (_, Some(description)) if palette_code != "14" => {
             let mut d = Children::chart(description)?;
             exact(d.required("colorPalette")?, &palette_kind)?;
+            let start = match d.optional("gradientPaletteStartColor") {
+                Some(start) => color(start)?,
+                None => AUTO_COLOR.to_string(),
+            };
             d.finish()?;
+            start
         }
         _ => bail!("<d4p1:paletteKind> {palette_kind} disagrees with <d4p1:colorPaletteDescription>"),
-    }
+    };
+    let reference_bands_palette = match c.optional("referenceBandsColorPaletteDescription") {
+        None => "{0,14,{3,4,{0}},{3,4,{0}},0,0}".to_string(),
+        Some(description) => {
+            let mut d = Children::chart(description)?;
+            let code = match leaf(d.required("colorPalette")?)?.trim() {
+                "Palette8" => "0",
+                "Palette32" => "1",
+                "Gradient" => "13",
+                other => bail!(
+                    "<d4p1:colorPalette> spells {other}, which the chart writer has not measured"
+                ),
+            };
+            let start = match d.optional("gradientPaletteStartColor") {
+                Some(start) => color(start)?,
+                None => AUTO_COLOR.to_string(),
+            };
+            d.finish()?;
+            format!("{{0,{code},{start},{AUTO_COLOR},0,0}}")
+        }
+    };
     c.finish()?;
 
     // The members no element carries.
     set(100, palette_code.into());
+    set(101, orientation_code.into());
+    for slot in 107..110 {
+        set(slot, title_is_init.into());
+    }
     for (slot, value) in [
-        (101, "2"),
         (102, AUTO_FONT),
         (103, "1"),
-        (107, "1"),
-        (108, "1"),
-        (109, "1"),
         (118, "2"),
         (119, "255"),
         (122, NIL_UUID),
@@ -512,7 +590,6 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         (138, "0"),
         (142, "0"),
         (143, "0"),
-        (144, AUTO_COLOR),
         (145, AUTO_COLOR),
         (146, "0"),
         (94, "0"),
@@ -520,7 +597,6 @@ fn chart_record(node: &XmlNode) -> Result<String> {
         (176, "{0,0}"),
         (177, "{0,0}"),
         (178, "{0,0}"),
-        (180, "{0,14,{3,4,{0}},{3,4,{0}},0,0}"),
         (181, "0"),
         (182, "0"),
         (184, "{0,0,0,0}"),
@@ -531,7 +607,12 @@ fn chart_record(node: &XmlNode) -> Result<String> {
     ] {
         set(slot, value.into());
     }
-    set(179, format!("{{0,{palette_code},{{3,4,{{0}}}},{{3,4,{{0}}}},0,0}}"));
+    set(
+        179,
+        format!("{{0,{palette_code},{gradient_start},{{3,4,{{0}}}},0,0}}"),
+    );
+    set(144, gradient_start);
+    set(180, reference_bands_palette);
     set(188, Scale::default().encode());
     for slot in 190..197 {
         set(slot, "0".into());
@@ -736,7 +817,7 @@ fn real_data_items(node: &XmlNode, expected: usize) -> Result<Vec<String>> {
         );
         let typed = match value.attribute("xsi:type") {
             Some("xs:decimal") => format!("{{\"N\",{}}}", decimal_text(&value.text)?),
-            Some("xs:string") => format!("{{\"S\",{}}}", quote(single_line(&value.text)?)),
+            Some("xs:string") => format!("{{\"S\",{}}}", quote(&value.text)),
             _ => bail!("<d4p1:valData> names a value type the chart writer has not measured"),
         };
         let info = i.required("valInfo")?;
@@ -841,54 +922,125 @@ impl Scale {
     }
 }
 
-/// A scale element, read in the one order every shape the decoder writes
-/// keeps: title members, the title area, then the grid and label members.
+/// A scale element. The form exporter and the template exporter write the
+/// members in different orders (the template one puts `labelFormat` ahead of
+/// the grid and `labelFont` ahead of `labelColor`), so each member is taken
+/// wherever it stands, once; the caller's round-trip check holds the order.
 fn scale_of(node: &XmlNode) -> Result<Scale> {
     let mut scale = Scale::default();
-    let mut c = Children::chart(node)?;
-    if let Some(show) = c.optional("showTitle") {
-        scale.show_title = code(show, &[("DontShow", "1"), ("Show", "2")])?;
+    ensure!(
+        node.text.trim().is_empty() && node.attributes.is_empty(),
+        "<{}> carries markup the chart writer does not place",
+        node.name
+    );
+    let mut seen = std::collections::BTreeSet::new();
+    let mut title_area_seen = false;
+    let mut title_text_source = false;
+    let mut title_text = false;
+    for child in &node.children {
+        let name = child
+            .name
+            .strip_prefix("d4p1:")
+            .ok_or_else(|| anyhow!("<{}> names <{}>, which the chart writer cannot place", node.name, child.name))?;
+        ensure!(
+            seen.insert(name.to_string()),
+            "<{}> names <d4p1:{name}> twice",
+            node.name
+        );
+        match name {
+            "showTitle" => {
+                scale.show_title = code(child, &[("DontShow", "1"), ("Show", "2")])?;
+            }
+            "titleTextSource" => {
+                scale.title_text_source = code(child, &[("UseText", "1")])?;
+                title_text_source = true;
+            }
+            "titleText" => {
+                scale.title_text = localized(child)?;
+                title_text = true;
+            }
+            "titleArea" => {
+                scale.title_area = title_area(child)?;
+                title_area_seen = true;
+            }
+            "titlePlacement" => {
+                scale.title_placement = code(child, &[("PlotArea", "1")])?;
+            }
+            "gridLinesShowMode" => {
+                scale.grid_lines_show_mode = code(child, &[("Show", "0"), ("DontShow", "1")])?;
+            }
+            "gridLine" => scale.grid_line = Some(line(child)?),
+            "labelColor" => scale.label_color = color(child)?,
+            "scaleLabelLocation" => {
+                scale.label_location = code(child, &[("None", "1")])?;
+            }
+            "labelFont" => scale.label_font = font(child)?,
+            "labelFormat" => scale.label_format = localized(child)?,
+            "labelOrientation" => {
+                scale.label_orientation = code(
+                    child,
+                    &[("Horizontal", "0"), ("Vertical", "1"), ("CustomAngle", "3")],
+                )?;
+            }
+            "maxLabelRows" => scale.max_label_rows = integer(child)?,
+            "labelAngle" => scale.label_angle = integer(child)?,
+            "showInChart" => {
+                scale.show_in_chart = code(child, &[("DontShow", "2")])?;
+            }
+            other => bail!(
+                "<{}> names <d4p1:{other}>, which the chart writer cannot place",
+                node.name
+            ),
+        }
     }
-    if let Some(source) = c.optional("titleTextSource") {
-        scale.title_text_source = code(source, &[("UseText", "1")])?;
-        scale.title_text = localized(c.required("titleText")?)?;
-    }
-    scale.title_area = title_area(c.required("titleArea")?)?;
-    if let Some(placement) = c.optional("titlePlacement") {
-        scale.title_placement = code(placement, &[("PlotArea", "1")])?;
-    }
-    if let Some(mode) = c.optional("gridLinesShowMode") {
-        scale.grid_lines_show_mode = code(mode, &[("Show", "0"), ("DontShow", "1")])?;
-    }
-    if let Some(grid) = c.optional("gridLine") {
-        scale.grid_line = Some(line(grid)?);
-    }
-    if let Some(label) = c.optional("labelColor") {
-        scale.label_color = color(label)?;
-    }
-    if let Some(location) = c.optional("scaleLabelLocation") {
-        scale.label_location = code(location, &[("None", "1")])?;
-    }
-    if let Some(label) = c.optional("labelFont") {
-        scale.label_font = font(label)?;
-    }
-    if let Some(format) = c.optional("labelFormat") {
-        scale.label_format = localized(format)?;
-    }
-    if let Some(orientation) = c.optional("labelOrientation") {
-        scale.label_orientation = code(orientation, &[("CustomAngle", "3")])?;
-    }
-    if let Some(rows) = c.optional("maxLabelRows") {
-        scale.max_label_rows = integer(rows)?;
-    }
-    if let Some(angle) = c.optional("labelAngle") {
-        scale.label_angle = integer(angle)?;
-    }
-    if let Some(show) = c.optional("showInChart") {
-        scale.show_in_chart = code(show, &[("DontShow", "2")])?;
-    }
-    c.finish()?;
+    ensure!(title_area_seen, "<{}> has no <d4p1:titleArea>", node.name);
+    ensure!(
+        title_text_source == title_text,
+        "<{}> spells a title text without its source",
+        node.name
+    );
     Ok(scale)
+}
+
+/// `<d4p1:valuesAxis>`/`<d4p1:pointsAxis>`: `{0,<baseValue>,{0,1,<minValue>,
+/// 1,<maxValue>},<maxDetection>,<minDetection>}`, an absent value 0 and a
+/// detection flag 2 where the element publishes `UseValueWithLimitations`.
+fn axis(node: &XmlNode) -> Result<String> {
+    let mut c = Children::chart(node)?;
+    let base = match c.optional("baseValue") {
+        Some(value) => decimal(value)?,
+        None => "0".to_string(),
+    };
+    let mut bound = |name: &str| -> Result<String> {
+        match c.optional(name) {
+            Some(value) => {
+                ensure!(
+                    value.children.is_empty()
+                        && attributes_are(value, &[("xsi:type", "xs:decimal")]),
+                    "<d4p1:{name}> is not an xs:decimal"
+                );
+                decimal_text(&value.text)
+            }
+            None => Ok("0".to_string()),
+        }
+    };
+    let min = bound("minValue")?;
+    let max = bound("maxValue")?;
+    let mut detection = |name: &str| -> Result<&'static str> {
+        match c.optional(name) {
+            Some(value) => {
+                exact(value, "UseValueWithLimitations")?;
+                Ok("2")
+            }
+            None => Ok("0"),
+        }
+    };
+    let min_detection = detection("minValueDetectionMethod")?;
+    let max_detection = detection("maxValueDetectionMethod")?;
+    c.finish()?;
+    Ok(format!(
+        "{{0,{base},{{0,1,{min},1,{max}}},{max_detection},{min_detection}}}"
+    ))
 }
 
 /// `{1,4,0.5,0.5,<font>,<textColor>,<backColor>,1,<border>,<borderColor>,4,2,0}`.
@@ -936,9 +1088,9 @@ const TIME_MEASURES: &[(&str, &str)] = &[
 /// {3,{0,{1,0,0},0},{0,0}},0,linksColor,<linksLine>,{0,0,0},showPointsText,
 /// showData,1,textPlacement,0}` -- revision 19, the one that stores
 /// `textPlacement` (18 of the 18 ERP УХ records).
-fn gantt_wrapper(node: &XmlNode) -> Result<String> {
+fn gantt_wrapper(node: &XmlNode, host: ChartHost) -> Result<String> {
     let mut c = Children::chart(node)?;
-    let chart = chart_record(c.required("chart")?)?;
+    let chart = chart_record(c.required("chart")?, host)?;
     let points = gantt_series_like(c.required("points")?, true)?;
     let series = gantt_series_like(c.required("series")?, false)?;
     let draw_empty = boolean(c.required("drawEmpty")?)?;
@@ -1085,10 +1237,18 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
         let mut l = Children::chart(level)?;
         let measure = code(l.required("measure")?, TIME_MEASURES)?;
         exact(l.required("interval")?, "1")?;
-        exact(l.required("show")?, "true")?;
+        // The form exporter publishes only `true`/`MonthDayWeekDay` here and
+        // refuses anything else through the round-trip check; a template's
+        // exporter reads both members (`show`, and `dayFormatRule` `WeekDay`
+        // 2 / `MonthDayWeekDay` 3).
+        let show = boolean(l.required("show")?)?;
         let level_line = line(l.required("line")?)?;
         exact(l.required("scaleColor")?, "#C0C0C0")?;
-        exact(l.required("dayFormatRule")?, "MonthDayWeekDay")?;
+        let day_format_rule = match leaf(l.required("dayFormatRule")?)?.trim() {
+            "WeekDay" => "2",
+            "MonthDayWeekDay" => "3",
+            other => bail!("<d4p1:dayFormatRule> spells {other}, which the chart writer has not measured"),
+        };
         empty(l.required("format")?)?;
         let mut labels = Children::chart(l.required("labels")?)?;
         exact(labels.required("ticks")?, "0")?;
@@ -1098,7 +1258,7 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
         exact(l.required("showPereodicalLabels")?, "true")?;
         l.finish()?;
         levels.push(format!(
-            "{{8,{measure},1,1,{level_line},{{3,0,{{12632256}}}},3,{{1,0}},{{0,{{1,0,0}}}},{AUTO_COLOR},{AUTO_COLOR},1}}"
+            "{{8,{measure},1,{show},{level_line},{{3,0,{{12632256}}}},{day_format_rule},{{1,0}},{{0,{{1,0,0}}}},{AUTO_COLOR},{AUTO_COLOR},1}}"
         ));
     }
     ensure!(!levels.is_empty(), "a Gantt chart's time scale names no level");
@@ -1112,6 +1272,50 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
         levels.len(),
         levels.join(",")
     ))
+}
+
+/// `<d4p1:gaugeQualityBands>`: `{1,N,<band>×N,<useTextStr>,<useTooltipStr>}`,
+/// a band `{3,<begin>,<end>,<backColor>,<text>,<tooltip>,"",0,"",0,<begin>,
+/// <end>}`. The two string members stay empty while both flags are `false`,
+/// which is all the stand spells (ERP УХ `ФинансовыйАнализ` gauges, three
+/// bands each); a flag set to `true` is refused.
+fn gauge_quality_bands(node: &XmlNode) -> Result<String> {
+    ensure!(
+        node.text.trim().is_empty()
+            && attributes_are(node, &[("useTextStr", "false"), ("useTooltipStr", "false")]),
+        "<d4p1:gaugeQualityBands> spells flags the chart writer has not measured"
+    );
+    let mut bands = String::new();
+    for item in &node.children {
+        let names = item
+            .children
+            .iter()
+            .map(|child| child.name.as_str())
+            .collect::<Vec<_>>();
+        ensure!(
+            item.name == "v8ui:item"
+                && item.attributes.is_empty()
+                && item.text.trim().is_empty()
+                && names
+                    == [
+                        "v8ui:begin",
+                        "v8ui:end",
+                        "v8ui:backColor",
+                        "v8ui:text",
+                        "v8ui:tooltip"
+                    ],
+            "a gauge quality band names members the chart writer has not measured"
+        );
+        let begin = decimal(&item.children[0])?;
+        let end = decimal(&item.children[1])?;
+        let back_color = color(&item.children[2])?;
+        let text = localized(&item.children[3])?;
+        let tooltip = localized(&item.children[4])?;
+        bands.push_str(&format!(
+            ",{{3,{begin},{end},{back_color},{text},{tooltip},\"\",0,\"\",0,{begin},{end}}}"
+        ));
+    }
+    Ok(format!("{{1,{}{bands},0,0}}", node.children.len()))
 }
 
 /// `YYYY-MM-DDTHH:MM:SS` to the bare fourteen digits the record stores.
@@ -1195,6 +1399,16 @@ fn decimal_text(text: &str) -> Result<String> {
     Ok(text.to_string())
 }
 
+/// A decimal stored as a double, in the platform's spelling. A value the
+/// sixteen digits do not hold exactly is refused by the caller's round trip.
+fn double(node: &XmlNode) -> Result<String> {
+    let text = decimal(node)?;
+    let value: f64 = text
+        .parse()
+        .map_err(|_| anyhow!("<{}> spells {text}, which is not a double", node.name))?;
+    Ok(platform_double(value))
+}
+
 /// A whole percentage, stored as the fraction it is in the platform's
 /// shortest exponent spelling: `10` is `1e-1`, `3` is `3e-2`, `0` is `0`
 /// (every funnel member of both corpora).
@@ -1263,17 +1477,9 @@ fn empty(node: &XmlNode) -> Result<()> {
     Ok(())
 }
 
-/// A 1C string literal of an element's text.
+/// A 1C string literal of an element's text, its own line breaks included.
 fn string(node: &XmlNode) -> Result<String> {
-    Ok(quote(single_line(leaf(node)?)?))
-}
-
-fn single_line(text: &str) -> Result<&str> {
-    ensure!(
-        !text.contains(['\r', '\n']),
-        "a chart string spans lines, which the chart writer has not measured"
-    );
-    Ok(text)
+    Ok(quote(leaf(node)?))
 }
 
 fn quote(text: &str) -> String {
@@ -1439,8 +1645,8 @@ fn localized(node: &XmlNode) -> Result<String> {
         );
         items.push(format!(
             "{{{},{}}}",
-            quote(single_line(leaf(lang)?)?),
-            quote(single_line(leaf(content)?)?)
+            quote(leaf(lang)?),
+            quote(leaf(content)?)
         ));
     }
     Ok(if items.is_empty() {

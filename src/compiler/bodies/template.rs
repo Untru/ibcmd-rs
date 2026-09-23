@@ -687,7 +687,13 @@ mod tests {
         )
         .unwrap();
         let mxl = decode_template(&profile, TemplateKind::SpreadsheetDocument, &mxl).unwrap();
-        assert_eq!(mxl.spreadsheet().unwrap().declared_columns(), 1);
+        // Field 2 is the platform's constant 12 whatever the column count.
+        assert!(
+            mxl.spreadsheet()
+                .unwrap()
+                .native_body_text()
+                .starts_with("{8,1,12,")
+        );
     }
 
     #[test]
