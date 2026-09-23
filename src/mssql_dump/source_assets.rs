@@ -3240,7 +3240,11 @@ pub(super) fn parse_help_blob(bytes: &[u8]) -> Option<HelpContent> {
     Some(HelpContent { pages, files })
 }
 
-pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8> {
+/// The file the exporter writes for a stored help or HTML template page.
+///
+/// The loader's `html_page_storage_bytes` is its inverse and checks every page
+/// it stores by running it back through here.
+pub(crate) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(content) else {
         return content.to_vec();
     };
@@ -3314,7 +3318,10 @@ pub(super) fn rewrite_help_links(content: &[u8], refs: &BTreeMap<String, String>
 /// of ERP УХ 3.2.12.6 (`DataProcessors/СхемыСправки` and its forms,
 /// `DataProcessors/УправлениеОтклонениями`, two
 /// `Documents/ВерсияСоглашения*`) differ for that reason alone.
-fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
+///
+/// The loader asks the same question of a readable `<Reference>/Help` before it
+/// stores it back as a link.
+pub(crate) fn help_link_marker_is_anchor(text: &str, marker_start: usize) -> bool {
     let Some(tag_start) = text[..marker_start].rfind('<') else {
         return false;
     };
@@ -3408,21 +3415,36 @@ fn resolve_help_picture_reference(token: &str, refs: &BTreeMap<String, String>) 
     standard_picture_name(uuid).map(str::to_string)
 }
 
+/// The standard pictures a help page stores by negative index,
+/// `../../mdpicture/idn-<index>`; every other one is stored by its uuid. One
+/// table for both directions: the exporter names the index, the loader stores
+/// the name back as it.
+const HELP_STANDARD_PICTURE_INDEXES: &[(&str, &str)] = &[
+    ("1", "StdPicture.InputFieldSelect"),
+    ("2", "StdPicture.InputFieldClear"),
+    ("3", "StdPicture.MoveUp"),
+    ("4", "StdPicture.MoveDown"),
+    ("5", "StdPicture.InputFieldCalendar"),
+    ("7", "StdPicture.InputFieldOpen"),
+    ("8", "StdPicture.MoveLeft"),
+    ("9", "StdPicture.MoveRight"),
+    ("10", "StdPicture.CheckAll"),
+    ("11", "StdPicture.UncheckAll"),
+    ("13", "StdPicture.Print"),
+];
+
 fn help_standard_picture_by_negative_index(index: &str) -> Option<&'static str> {
-    match index {
-        "1" => Some("StdPicture.InputFieldSelect"),
-        "2" => Some("StdPicture.InputFieldClear"),
-        "3" => Some("StdPicture.MoveUp"),
-        "4" => Some("StdPicture.MoveDown"),
-        "5" => Some("StdPicture.InputFieldCalendar"),
-        "7" => Some("StdPicture.InputFieldOpen"),
-        "8" => Some("StdPicture.MoveLeft"),
-        "9" => Some("StdPicture.MoveRight"),
-        "10" => Some("StdPicture.CheckAll"),
-        "11" => Some("StdPicture.UncheckAll"),
-        "13" => Some("StdPicture.Print"),
-        _ => None,
-    }
+    HELP_STANDARD_PICTURE_INDEXES
+        .iter()
+        .find_map(|(candidate, name)| (*candidate == index).then_some(*name))
+}
+
+/// The negative index a help page stores `StdPicture.<Name>` by, when it
+/// stores it by one.
+pub(crate) fn help_standard_picture_negative_index(reference: &str) -> Option<&'static str> {
+    HELP_STANDARD_PICTURE_INDEXES
+        .iter()
+        .find_map(|(index, name)| (*name == reference).then_some(*index))
 }
 
 const PREDEFINED_DATA_SOURCE_MODELS: &[(&str, PredefinedDataSourceModel)] = &[
