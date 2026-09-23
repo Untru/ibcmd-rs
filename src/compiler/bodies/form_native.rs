@@ -484,6 +484,8 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("PictureField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("RadioButtonField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("SpreadSheetDocumentField", "", "AdditionalDetailProcessing", "0b8dc702-d001-4637-a215-9f35613e096c"),
+    ("SpreadSheetDocumentField", "", "BeforeWrite", "b7646583-04d3-4905-8f04-8985914bd1b7"),
+    ("Table", "", "OnCurrentParentChange", "2971b9a9-1724-4f34-aaa4-f3db584c3ca0"),
     ("SpreadSheetDocumentField", "", "BeforePrint", "61455593-0982-4415-bc2e-2e8722a7abd0"),
     ("SpreadSheetDocumentField", "", "DetailProcessing", "2988b2a5-c887-4928-94ae-5d0c9c31e999"),
     ("SpreadSheetDocumentField", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
@@ -1229,12 +1231,14 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
     )
 }
 
-/// Slot 62 of an input payload once the item names any of its three
-/// properties: member 4 is `<ShowCheckBoxesInDropList>` (absent 2, `false` 0,
+/// Slot 62 of an input payload once the item names any of its four
+/// properties: member 2 is `<AllowInputEmptyMultipleValues>` (absent 0,
+/// `true` 1), member 4 is `<ShowCheckBoxesInDropList>` (absent 2, `false` 0,
 /// `true` 1), member 9 `<MultipleValueDataPath>` and member 15
 /// `<MultipleValuePresentDataPath>`, each `{1,{<column id>}}` or `{0}`. The
 /// rest is constant over the 5 such fields of both corpora.
 pub(crate) fn format_input_drop_list_settings(
+    allow_empty_multiple_values: bool,
     show_check_boxes: Option<bool>,
     value_path: &str,
     present_path: &str,
@@ -1245,9 +1249,10 @@ pub(crate) fn format_input_drop_list_settings(
         None => "2",
     };
     format!(
-        "{{1,2,0,0,{check},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
+        "{{1,2,{allow_empty},0,{check},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
          {{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{value_path},\"\",{{\"Pattern\"}},{{0}},\"\",\
-         {{\"Pattern\"}},{present_path},\"\",{{\"Pattern\"}},0,0}}"
+         {{\"Pattern\"}},{present_path},\"\",{{\"Pattern\"}},0,0}}",
+        allow_empty = u8::from(allow_empty_multiple_values),
     )
 }
 
@@ -2238,6 +2243,75 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "Ungroup", "82b88a24-2856-484a-afd9-55a15bdf9785"),
     ("Table", false, "UseFieldAsValue", "d7e55d2e-bfea-4d80-b4ad-a1bb31ec2147"),
     ("Table", false, "UserSettingItemProperties", "1f1e900a-8488-4159-81be-9704eb96906d"),
+    // rt-uuids.md: corpus-pinned, and the platform's own registration for
+    // names that only ever occur together.
+    ("Table", true, "CreateByParameter", "b59f3c87-e213-4947-abae-9dbaffaef147"),
+    ("Table", false, "Expand", "fc120c02-7f39-469b-b357-b2dd8d4b0765"),
+    ("Table", false, "AddChart", "a10f1c0b-73ec-448f-b6d2-be0c86e95712"),
+    ("Table", false, "AddNestedSchema", "e809ae75-11b6-480d-bc87-caf93b28236d"),
+    ("Table", false, "UserSettings", "329bb47c-392f-4779-a1af-347d06bb624b"),
+    ("Table", false, "Group", "33ff70c9-5df3-4907-9611-7649411f9180"),
+    ("Table", false, "LoadSettings", "358196aa-1061-458a-8fba-e9cd11081205"),
+    ("Table", false, "SaveSettings", "49a25ff2-06bc-4547-a119-a428f60bdfbf"),
+    ("Table", false, "StandardSettings", "3bd8cc97-31ca-4fad-acf4-cc8f4d648a95"),
+    ("SpreadSheetDocumentField", false, "ColumnWidth", "97407339-2c9f-400b-bd5b-3d97b6d00c21"),
+    ("SpreadSheetDocumentField", false, "Ellipse", "93d90e38-02a4-42f8-828a-2798f51c4500"),
+    ("SpreadSheetDocumentField", false, "GoToCell", "25d773e7-9961-49fc-a9c8-527079090143"),
+    ("SpreadSheetDocumentField", false, "Group", "e406e2a0-f06b-4402-b8c3-9017c95df44c"),
+    ("SpreadSheetDocumentField", false, "Hide", "b573b54a-ce87-4078-bd21-4f06709157c6"),
+    ("SpreadSheetDocumentField", false, "InsertColumnsLeft", "468dca2b-17be-4657-bae8-64b94fcf6187"),
+    ("SpreadSheetDocumentField", false, "InsertColumnsRight", "0a2d962b-5178-4fce-983b-19068b919f41"),
+    ("SpreadSheetDocumentField", false, "InsertRowsBottom", "1d6dbce7-a813-437b-89b8-450319ed13bd"),
+    ("SpreadSheetDocumentField", false, "InsertRowsTop", "4ecc8cf1-2a26-446f-9fb6-93db4ffee068"),
+    ("SpreadSheetDocumentField", false, "Line", "c9b9e671-7c9b-44b5-97e9-dd1ee51a1bfd"),
+    ("SpreadSheetDocumentField", false, "Picture", "a97ea34e-7af2-412c-aa9d-b3393b1914ac"),
+    ("SpreadSheetDocumentField", false, "Rectangle", "852f0fba-4338-4c43-a2da-851fcffd07bb"),
+    ("SpreadSheetDocumentField", false, "RowHeight", "17b9f6bb-74b3-439d-b719-eb236b2fe001"),
+    ("SpreadSheetDocumentField", false, "SearchEverywhere", "ff533ae0-46a9-4e1d-aa3a-6dffa27e076b"),
+    ("SpreadSheetDocumentField", false, "Show", "1b680da5-a5ca-4ea7-8db9-df079de39b61"),
+    ("SpreadSheetDocumentField", false, "Text", "80455469-5f1c-4817-a992-756dfee9138f"),
+    ("SpreadSheetDocumentField", false, "Ungroup", "88a56d46-abff-4925-91a2-6592a4664912"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingBottom", "9f71febd-8c22-4471-8410-31f455bb3c57"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingCenter", "f2b6b156-d929-4be2-af5b-9c9b792524bb"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingLeft", "ee0aab77-fd5f-4594-9c5e-e989a953642f"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingMiddle", "719daaab-c2d0-473d-b373-faf18ebe7d9d"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingRight", "80a0b41c-24df-40e4-8269-683fb557214d"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingTop", "f9395bfa-9301-4cec-8c1e-e2b62fb3abd6"),
+    ("SpreadSheetDocumentField", false, "BringDrawingForward", "49a22a23-d2cf-4f84-97ae-66f94f863145"),
+    ("SpreadSheetDocumentField", false, "BringDrawingToFront", "b383fa5a-2324-4e7e-a166-aabb5d64aea3"),
+    ("SpreadSheetDocumentField", false, "CombineToGroup", "4402cb7a-f68e-44cd-9478-52a695b18a25"),
+    ("SpreadSheetDocumentField", false, "DistributeDrawingsHorizontally", "60abcc40-dc62-4d03-833b-7b8ab8232d2c"),
+    ("SpreadSheetDocumentField", false, "DistributeDrawingsVertically", "7f3f496d-506c-4239-98fb-58e1ea6ba54a"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingHeight", "f5773ab5-4036-49ca-8286-7a4ea2c354d7"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingSize", "fd523437-4160-4a52-a70b-9166c7eebcf0"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingWidth", "5ccf1fce-3fab-4fb6-ac04-a9b2cf689cee"),
+    ("SpreadSheetDocumentField", false, "RemoveFromGroup", "69333d9f-28d1-446b-bd9a-cf8f85cf1704"),
+    ("SpreadSheetDocumentField", false, "RemoveRepeatOnEachPage", "0e8c7cb4-f146-4208-af36-b3f8c7d71b66"),
+    ("SpreadSheetDocumentField", false, "RepeatOnEachPage", "c50fd6b2-51a1-47e0-8cd3-84b16823287c"),
+    ("SpreadSheetDocumentField", false, "SendDrawingBackward", "7e79f8d3-6cab-49d5-aac0-43f5056ed958"),
+    ("SpreadSheetDocumentField", false, "SendDrawingToBack", "14bd1c58-da9d-41db-a515-75f8b39fdc52"),
+    ("SpreadSheetDocumentField", false, "BlackAndWhiteView", "9e525e9b-99ed-4d89-9f02-2bf449ba65e6"),
+    ("SpreadSheetDocumentField", false, "HeaderFooter", "2da58c85-ae4d-403f-b0e2-c50027a5467f"),
+    ("SpreadSheetDocumentField", false, "InsertPageBreak", "952af05e-0771-4c26-adb6-a3418a262e4a"),
+    ("SpreadSheetDocumentField", false, "Names", "feb51db7-bc1f-4b9f-a6e6-db24d5f812ab"),
+    ("SpreadSheetDocumentField", false, "NextComment", "3e15759b-551a-46c4-8d24-8d6df22a1a64"),
+    ("SpreadSheetDocumentField", false, "PageViewMode", "1c7e6bb5-54ac-4ebf-8823-e92b3cf629da"),
+    ("SpreadSheetDocumentField", false, "PreviousComment", "e1ae173a-22c3-4909-a72c-5454b64c6446"),
+    ("SpreadSheetDocumentField", false, "RemovePageBreak", "3a7ef674-f589-4734-9b22-954ea64dc79f"),
+    ("SpreadSheetDocumentField", false, "RemovePrintArea", "41f3fbde-476a-4984-bd12-b32e990af811"),
+    ("SpreadSheetDocumentField", false, "SetPrintArea", "6728e5c7-8f67-4b0d-bd6f-90b728218fe3"),
+    ("SpreadSheetDocumentField", false, "ShowCellNames", "0c66c888-7512-402c-941d-96bec0e5749a"),
+    ("SpreadSheetDocumentField", false, "ShowComments", "95dbc17e-d11e-4008-b9a9-24d5f5b1d061"),
+    ("SpreadSheetDocumentField", false, "ShowRowAndColumnNames", "08fdfb5b-192a-41a9-b57a-9781cd3ef7b6"),
+    ("SpreadSheetDocumentField", false, "Redo", "6f1ea963-0807-4de8-b544-b5666f500b05"),
+    ("SpreadSheetDocumentField", false, "Undo", "f5814962-2bef-43dd-b633-a193d4b0970e"),
+    ("FormattedDocumentField", false, "SearchEverywhere", "6e2f7ea0-a346-4c78-96d9-a0f512000910"),
+    ("FormattedDocumentField", false, "Char", "871100d5-049d-4b22-a46a-fabf54bd64c3"),
+    ("FormattedDocumentField", false, "Hyperlink", "6d83186a-5838-40a5-95e7-8990193adf0a"),
+    ("FormattedDocumentField", false, "LineSpacing", "408f351e-0536-46be-8916-a891db9bfbe6"),
+    ("FormattedDocumentField", false, "Redo", "6f1ea963-0807-4de8-b544-b5666f500b05"),
+    ("FormattedDocumentField", false, "Strikeout", "db1cd9b3-bdf4-43f5-abd6-c2e4bd85d709"),
+    ("FormattedDocumentField", false, "Undo", "f5814962-2bef-43dd-b633-a193d4b0970e"),
     ("Table", true, "AddFilterItem", "fca750bc-4fb6-40e2-ae0f-e818939a32e7"),
     ("Table", true, "CancelSearch", "44ad3ec9-f3c2-4913-9224-5f9fb6418743"),
     ("Table", true, "Change", "b41f5bbc-ba5d-4888-8cd1-db246a371418"),
@@ -2298,6 +2372,8 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("", "Ignore", "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7"),
+    ("", "OpenFromStandaloneServer", "0ea1a92b-3477-44dd-b152-ea7d411f1c5d"),
+    ("", "Retry", "5174ad3f-0569-42fd-8adf-011d8206db6c"),
     ("", "No", "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d"),
     ("", "OK", "f3613d5c-20c6-46e5-b4d5-7d712ece1296"),
     ("", "RestoreValues", "71e0226e-ebb2-4e33-8745-0a94a01bbf15"),
@@ -2461,6 +2537,32 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
 
 /// The uuid of `Form.Item.<item>.StandardCommand.<name>`, or `None` when the
 /// corpus never stored one for that target and name.
+/// `item_standard_command_uuid`, with the two names a plain table's own
+/// binding splits (rt-uuids.md §1): `Ungroup` on a settings-structure table
+/// (`….Settings`) is `23802256-…` and on a filter `82b88a24-…`; `Choose` on a
+/// table of available fields is `d77e5787-…` and elsewhere `8969c93a-…`.
+pub(crate) fn table_item_standard_command_uuid(
+    tag: &str,
+    dynamic_list: bool,
+    data_path: Option<&str>,
+    name: &str,
+) -> Option<&'static str> {
+    if tag == "Table" && !dynamic_list {
+        let path = data_path.unwrap_or("").trim();
+        let last = path.rsplit('.').next().unwrap_or("");
+        match name {
+            "Ungroup" if path.ends_with(".Settings") => {
+                return Some("23802256-7145-47c7-b379-8d60ca1b1262");
+            }
+            "Choose" if last.ends_with("AvailableFields") => {
+                return Some("d77e5787-b130-4355-8f8f-01ecec82f843");
+            }
+            _ => {}
+        }
+    }
+    item_standard_command_uuid(tag, dynamic_list, name)
+}
+
 pub(crate) fn item_standard_command_uuid(
     tag: &str,
     dynamic_list: bool,
@@ -4109,7 +4211,24 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
 /// and silently swaps the uuids.
 pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
     let mut sorted = paths.to_vec();
-    sorted.sort();
+    // By the segment count, then segment by segment: the first member as a
+    // number, the rest as text -- `{1,{-30}}` before `{1,{-20}}`, `{1,{2}}`
+    // before `{1,{17}}` (271 of 271 lists).
+    let key = |path: &String| {
+        let fields = top_level_braced_fields(path);
+        let count = fields.first().and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
+        let segments = fields
+            .iter()
+            .skip(1)
+            .map(|segment| {
+                let inner = top_level_braced_fields(segment);
+                let first = inner.first().and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
+                (first, inner.get(1..).map(|rest| rest.join(",")).unwrap_or_default())
+            })
+            .collect::<Vec<_>>();
+        (count, segments)
+    };
+    sorted.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| a.cmp(b)));
     let mut out = format!("{{0,{}", sorted.len());
     for path in sorted {
         out.push(',');
@@ -4117,6 +4236,41 @@ pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
     }
     out.push('}');
     out
+}
+
+/// The top-level members of one `{…}` value, braces removed.
+fn top_level_braced_fields(text: &str) -> Vec<String> {
+    let text = text.trim();
+    let Some(inner) = text.strip_prefix('{').and_then(|rest| rest.strip_suffix('}')) else {
+        return vec![text.to_string()];
+    };
+    let mut fields = Vec::new();
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut current = String::new();
+    for character in inner.chars() {
+        match character {
+            '"' => {
+                quoted = !quoted;
+                current.push(character);
+            }
+            '{' if !quoted => {
+                depth += 1;
+                current.push(character);
+            }
+            '}' if !quoted => {
+                depth -= 1;
+                current.push(character);
+            }
+            ',' if !quoted && depth == 0 => {
+                fields.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(character),
+        }
+    }
+    fields.push(current.trim().to_string());
+    fields
 }
 
 /// One `<Column>` of a value table or a value tree, as the body stores it.
@@ -4582,6 +4736,7 @@ pub(crate) fn format_pages_payload(
         ("TabsOnTop", "1"),
         ("TabsOnBottom", "2"),
         ("TabsOnLeftHorizontal", "3"),
+        ("TabsOnRightHorizontal", "4"),
         ("Swipe", "5"),
     ];
     let first = root_code(representation, CODES, "1")?;
@@ -5669,14 +5824,23 @@ const DATA_PATH_DEFAULT_PICTURE_MARKER: &str = "10000000";
 /// The members of the builtin (non-configuration) attribute types. Each is a
 /// fixed small table; every name maps to one number over every record.
 const DATA_PATH_VALUE_LIST_MEMBERS: &[(&str, &str)] = &[
+    ("ValueType", "-1"),
     ("Value", "0"),
     ("Presentation", "1"),
     ("Check", "2"),
     ("Picture", "3"),
+    ("RowsCount", "100000000"),
 ];
 const DATA_PATH_STANDARD_PERIOD_MEMBERS: &[(&str, &str)] =
     &[("Variant", "0"), ("StartDate", "1"), ("EndDate", "2")];
-const DATA_PATH_COMPOSER_MEMBERS: &[(&str, &str)] = &[("Settings", "0"), ("UserSettings", "1")];
+const DATA_PATH_STANDARD_BEGINNING_DATE_MEMBERS: &[(&str, &str)] =
+    &[("Variant", "0"), ("Date", "1")];
+const DATA_PATH_COMPOSER_MEMBERS: &[(&str, &str)] =
+    &[("Settings", "0"), ("UserSettings", "1"), ("FixedSettings", "2")];
+/// A bare `cfg:ReportObject` -- a common form's `Отчет` -- has one member the
+/// walk reaches, the composer, stored under the platform's own uuid.
+const DATA_PATH_REPORT_OBJECT_MEMBERS: &[(&str, &str)] =
+    &[("SettingsComposer", "0,b9754f01-29e9-11d6-a3c7-0050bae0a776")];
 const DATA_PATH_GANTT_CHART_MEMBERS: &[(&str, &str)] = &[("Point", "0"), ("Text", "1")];
 
 /// A dynamic list's own members, ahead of its query fields.
@@ -5688,10 +5852,13 @@ const DATA_PATH_DYNAMIC_LIST_MEMBERS: &[(&str, &str)] =
 /// conditional-appearance item, and splitting by parent removes every
 /// ambiguity.
 const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
+    ("DataParameters", "0"),
     ("Filter", "1"),
     ("Selection", "2"),
     ("Order", "3"),
     ("ConditionalAppearance", "4"),
+    ("OutputParameters", "5"),
+    ("UserFields", "6"),
     ("Use", "10000"),
     ("ReportStructure", "10001"),
     ("HasSelection", "10002"),
@@ -5699,12 +5866,18 @@ const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
     ("HasOrder", "10004"),
     ("HasConditionalAppearance", "10005"),
     ("HasOutputParameters", "10006"),
+    ("ItemDataParameters", "10007"),
     ("ItemFilter", "10008"),
+    ("ItemGroupFields", "10009"),
     ("ItemSelection", "10010"),
     ("ItemOrder", "10011"),
     ("ItemConditionalAppearance", "10012"),
+    ("ItemOutputParameters", "10013"),
+    ("ItemUserFields", "10014"),
     ("ReportStructurePicture", "10015"),
 ];
+const DATA_PATH_DCS_SELECTION: &[(&str, &str)] = &[("SelectionAvailableFields", "0")];
+const DATA_PATH_DCS_GROUP_FIELDS: &[(&str, &str)] = &[("GroupFieldsAvailableFields", "0")];
 const DATA_PATH_DCS_FILTER: &[(&str, &str)] = &[
     ("FilterAvailableFields", "0"),
     ("Use", "10000"),
@@ -5725,9 +5898,14 @@ const DATA_PATH_DCS_CONDITIONAL_APPEARANCE: &[(&str, &str)] = &[
     ("Filter", "10002"),
     ("Fields", "10003"),
     ("Presentation", "10004"),
+    ("UseArea", "10005"),
 ];
-const DATA_PATH_DCS_ORDER: &[(&str, &str)] =
-    &[("Use", "10000"), ("Field", "10002"), ("OrderType", "10003")];
+const DATA_PATH_DCS_ORDER: &[(&str, &str)] = &[
+    ("OrderAvailableFields", "0"),
+    ("Use", "10000"),
+    ("Field", "10002"),
+    ("OrderType", "10003"),
+];
 const DATA_PATH_DCS_USER_SETTINGS: &[(&str, &str)] = &[
     ("Use", "10000"),
     ("SettingPicture", "10001"),
@@ -5736,6 +5914,10 @@ const DATA_PATH_DCS_USER_SETTINGS: &[(&str, &str)] = &[
     ("ValuePicture", "10004"),
     ("Value", "10005"),
     ("EditInReportForm", "10006"),
+    ("Filter", "10007"),
+    ("Order", "10008"),
+    ("ConditionalAppearance", "10010"),
+    ("Structure", "10011"),
 ];
 const DATA_PATH_DCS_APPEARANCE: &[(&str, &str)] = &[
     ("Use", "10000"),
@@ -5745,7 +5927,8 @@ const DATA_PATH_DCS_APPEARANCE: &[(&str, &str)] = &[
 ];
 const DATA_PATH_DCS_FILTER_AVAILABLE_FIELDS: &[(&str, &str)] =
     &[("FieldPicture", "10000"), ("Title", "10001")];
-const DATA_PATH_DCS_FIELDS: &[(&str, &str)] = &[("Use", "10000"), ("Field", "10002")];
+const DATA_PATH_DCS_FIELDS: &[(&str, &str)] =
+    &[("Use", "10000"), ("FieldPicture", "10001"), ("Field", "10002")];
 
 /// The standard-attribute table: `(scope, name)` to the negative number the
 /// body stores.
@@ -5822,6 +6005,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ChartOfCharacteristicTypes", "PredefinedDataName", "-14"),
     ("Document", "Number", "-2"),
     ("Document", "Date", "-3"),
+    ("Document", "DeletionMark", "-4"),
     ("Document", "Ref", "-5"),
     ("Document", "Posted", "-7"),
     ("Document", "RegisterRecords", "-8"),
@@ -6009,7 +6193,9 @@ fn data_path_builtin_members(
     Some(match declared_type {
         "v8:ValueListType" => (DATA_PATH_VALUE_LIST_MEMBERS, false),
         "v8:StandardPeriod" => (DATA_PATH_STANDARD_PERIOD_MEMBERS, false),
+        "v8:StandardBeginningDate" => (DATA_PATH_STANDARD_BEGINNING_DATE_MEMBERS, false),
         "dcsset:SettingsComposer" => (DATA_PATH_COMPOSER_MEMBERS, true),
+        "cfg:ReportObject" => (DATA_PATH_REPORT_OBJECT_MEMBERS, true),
         "d4p1:GanttChart" | "d5p1:GanttChart" => (DATA_PATH_GANTT_CHART_MEMBERS, false),
         _ => return None,
     })
@@ -6018,7 +6204,11 @@ fn data_path_builtin_members(
 /// The member table of one settings-composer parent collection.
 fn data_path_dcs_members(parent: &str) -> &'static [(&'static str, &'static str)] {
     match parent {
-        "Settings" => DATA_PATH_DCS_SETTINGS,
+        // A report object's composer opens the composer's own table.
+        "SettingsComposer" => DATA_PATH_COMPOSER_MEMBERS,
+        "Settings" | "FixedSettings" => DATA_PATH_DCS_SETTINGS,
+        "Selection" | "ItemSelection" => DATA_PATH_DCS_SELECTION,
+        "GroupFields" | "ItemGroupFields" => DATA_PATH_DCS_GROUP_FIELDS,
         "Filter" | "ItemFilter" => DATA_PATH_DCS_FILTER,
         "ConditionalAppearance" | "ItemConditionalAppearance" => {
             DATA_PATH_DCS_CONDITIONAL_APPEARANCE
@@ -6205,6 +6395,30 @@ pub(crate) fn resolve_form_data_path(
     if tokens.is_empty() || tokens[0].0.is_empty() {
         return None;
     }
+    let resolved = resolve_data_path_tokens(form, configuration, &tokens, &marked, 0)?;
+    Some(format!(
+        "{{{},{}}}",
+        resolved.emitted.len(),
+        resolved.emitted.join(",")
+    ))
+}
+
+/// What a walk leaves behind: the segments, the context it ended in, the
+/// attribute it stood in and the path expanded to that attribute's root.
+struct ResolvedDataPath<'a> {
+    emitted: Vec<String>,
+    context: DataPathContext,
+    attribute: Option<&'a DataPathAttribute>,
+    prefix: Vec<String>,
+}
+
+fn resolve_data_path_tokens<'a>(
+    form: &'a DataPathForm,
+    configuration: Option<&dyn ConfigurationObjects>,
+    tokens: &[DataPathToken],
+    marked: &Option<Option<String>>,
+    depth: usize,
+) -> Option<ResolvedDataPath<'a>> {
     let mut emitted = Vec::<String>::new();
     let mut context = DataPathContext::Form;
     let mut attribute: Option<&DataPathAttribute> = None;
@@ -6228,11 +6442,27 @@ pub(crate) fn resolve_form_data_path(
                 if tokens.get(index).is_some_and(|token| token.0 == "CurrentData") {
                     index += 1;
                 }
+                // The context after the head is the one the item's own path
+                // resolves to, walked in full -- composer levels, builtins and
+                // a nested `Items.` head included -- and the additional-column
+                // prefix is that path expanded to its attribute (111 holders).
                 let inner = parse_data_path_tokens(item.data_path.as_deref()?);
-                let head = walk_data_path_context(form, configuration, &inner)?;
-                context = head.context;
-                attribute = head.attribute;
-                prefix = inner.into_iter().map(|token| token.0).collect();
+                match (depth < 8)
+                    .then(|| resolve_data_path_tokens(form, configuration, &inner, &None, depth + 1))
+                    .flatten()
+                {
+                    Some(head) => {
+                        context = head.context;
+                        attribute = head.attribute;
+                        prefix = head.prefix;
+                    }
+                    None => {
+                        let head = walk_data_path_context(form, configuration, &inner)?;
+                        context = head.context;
+                        attribute = head.attribute;
+                        prefix = inner.into_iter().map(|token| token.0).collect();
+                    }
+                }
                 dynamic_list_start = index;
                 continue;
             }
@@ -6318,7 +6548,7 @@ pub(crate) fn resolve_form_data_path(
                                 .collect::<Vec<_>>()
                                 .join(".");
                             let last = index + 1 == tokens.len();
-                            let id = match (&marked, last) {
+                            let id = match (marked, last) {
                                 (Some(twin), true) => {
                                     let twin = twin.as_ref().map(|twin| {
                                         entry
@@ -6400,7 +6630,12 @@ pub(crate) fn resolve_form_data_path(
         index += 1;
     }
 
-    Some(format!("{{{},{}}}", emitted.len(), emitted.join(",")))
+    Some(ResolvedDataPath {
+        emitted,
+        context,
+        attribute,
+        prefix,
+    })
 }
 
 /// One segment resolved against a metadata object, and the context it opens.
@@ -6458,7 +6693,28 @@ fn resolve_metadata_data_path_part(
             DataPathContext::Stop,
         ));
     }
-    if name == "RowsCount" && section.is_some() {
+    // `ExtDimension<N>`, `ExtDimensionDr<N>` and `ExtDimensionCr<N>` of an
+    // accounting register are platform constants, one uuid per side over
+    // every register, with N-1 in front (81 of 81).
+    if object.class == "AccountingRegister" {
+        for (prefix, uuid) in [
+            ("ExtDimensionDr", "1ab44b24-3315-40a9-b495-f1f1227ac205"),
+            ("ExtDimensionCr", "f77758c9-9fcd-490f-9bbd-1e446541f536"),
+            ("ExtDimension", "91162600-3161-4326-89a0-4a7cecd5092a"),
+        ] {
+            if let Some(number) = name
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.parse::<u32>().ok())
+                .filter(|number| *number >= 1)
+            {
+                return Some((format!("{{{},{uuid}}}", number - 1), DataPathContext::Stop));
+            }
+        }
+    }
+    if name == "RowsCount"
+        && (section.is_some()
+            || matches!(object.class.as_str(), "InformationRegister" | "AccountingRegister"))
+    {
         return Some((
             format!("{{{DATA_PATH_ROWS_COUNT_MARKER}}}"),
             DataPathContext::Stop,
@@ -8787,13 +9043,16 @@ mod tests {
                 ..ConfigurationObject::default()
             },
         )]);
+        // An accounting register's extra dimensions are platform constants,
+        // one uuid per side with N-1 in front (rt-paths.md §4.4, 81 of 81).
         assert_eq!(
             resolve_form_data_path(
                 &records,
                 Some(&configuration),
                 "ПроводкиСКорреспонденцией.ExtDimensionDr1"
-            ),
-            None
+            )
+            .as_deref(),
+            Some("{2,{3},{0,1ab44b24-3315-40a9-b495-f1f1227ac205}}")
         );
         // Without a configuration to read, a dotted path refuses too.
         assert_eq!(

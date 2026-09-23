@@ -370,6 +370,9 @@ struct FormXmlTypeSpec {
 struct FormXmlAttributeColumn {
     id: String,
     name: String,
+    /// `<View>` and `<Edit>`, members 6 and 7, the tuple `native_rights` builds.
+    view: Option<FormXmlRights>,
+    edit: Option<FormXmlRights>,
     title: Vec<LocalizedString>,
     spec: FormXmlTypeSpec,
     fill_check: Option<String>,
@@ -6586,16 +6589,13 @@ fn native_data_path_form(
         for block in &attribute.additional_columns {
             let table = additional_columns.entry(block.table.clone()).or_default();
             for column in &block.columns {
-                // An additional column's own `<Type>` is not read, so a path
-                // that walks *past* one into a typed context refuses instead
-                // of guessing. A path that walks into another additional
-                // column still places: those are found by the dotted prefix,
-                // not by the type.
+                // An additional column's own `<Type>` opens the context a path
+                // walks on in past it (rt-paths.md §4.5, 3 of 3).
                 table.insert(
                     column.name.clone(),
                     DataPathColumn {
                         id: column.id.clone(),
-                        types: Vec::new(),
+                        types: column.spec.types.clone(),
                     },
                 );
             }
@@ -7081,6 +7081,15 @@ fn form_use_always_segment_is_measured(segment: &str) -> bool {
     if form_attribute_save_segment_uuid(segment).is_some() {
         return true;
     }
+    // An additional column, `{<id>,5bdad865-…}` (rt-paths.md §3.5).
+    if let Some(id) = segment
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix(",5bdad865-f2c5-434b-8041-ba4aad3b6687}"))
+        && !id.is_empty()
+        && id.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return true;
+    }
     let Some(rest) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
         return false;
     };
@@ -7105,6 +7114,19 @@ fn native_form_attribute_save(
             paths.push("{0}".to_string());
             continue;
         }
+        // `<id>/<seg>…` is the exporter's raw spelling of a field it could not
+        // name -- a deleted one; the head is the attribute's own id, dropped
+        // like any path's head (19 of 19).
+        if let Some((head, rest)) = field.split_once('/')
+            && head == attribute.id
+        {
+            let segments = rest
+                .split('/')
+                .map(|segment| format!("{{{}}}", segment.replace(':', ",")))
+                .collect::<Vec<_>>();
+            paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
+            continue;
+        }
         if !field.starts_with(&format!("{}.", attribute.name)) {
             return Err(anyhow!(
                 "<Save> names {field}, which is not rooted at the attribute"
@@ -7118,17 +7140,12 @@ fn native_form_attribute_save(
         let Some(tail) = ranges.get(2..) else {
             return Err(anyhow!("<Save> names {field}, which resolved to no segment"));
         };
+        // The resolver's segments are what the body stores, builtin sub-field
+        // codes included (rt-paths.md §2, 2 523 + 316 lists).
         let segments = tail
             .iter()
             .map(|range| resolved[range.clone()].trim().to_string())
             .collect::<Vec<_>>();
-        if !segments.iter().all(|segment| {
-            form_attribute_save_segment_uuid(segment).is_some()
-        }) {
-            return Err(anyhow!(
-                "<Save> names {field}, whose sub-field code is not measured"
-            ));
-        }
         paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
     }
     Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
@@ -7659,9 +7676,8 @@ fn format_native_table(
     if item.picture_present {
         return Err(anyhow!("a table names a picture"));
     }
-    if !item.scalars.contains_key("DataPath") && item.data_path.is_none() {
-        return Err(anyhow!("a table that binds to nothing is not measured"));
-    }
+    // A table with no `<DataPath>` stores `{0}` there and in every column
+    // (12 tables of ERP УХ, rt-paths.md §4.10).
     let data_path = match item.data_path.as_deref() {
         Some(path) => data_paths
             .resolve(path)
@@ -7944,7 +7960,7 @@ fn format_native_table(
                     )
                 });
             }
-            native::item_standard_command_uuid(&item.tag, dynamic_list, name).ok_or_else(|| {
+            native::table_item_standard_command_uuid(&item.tag, dynamic_list, item.data_path.as_deref(), name).ok_or_else(|| {
                 anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
             })
         })
@@ -8146,6 +8162,21 @@ fn native_root_property_bag(
             )? {
                 bag.push(("29", value));
             }
+        }
+        // Both forms of both corpora whose main attribute is a settings
+        // composer store keys 12, 16 and 28 as constants and key 23 as the
+        // `<CustomSettingsFolder>` item's id, the report's own key 23.
+        "dcsset:SettingsComposer" if properties.root_scalars.contains_key("CustomSettingsFolder") => {
+            bag.push(("12", "{\"S\",\"\"}".to_string()));
+            bag.push(("16", "{\"B\",0}".to_string()));
+            bag.push((
+                "23",
+                format!(
+                    "{{\"N\",{}}}",
+                    item_id(properties.root_scalars.get("CustomSettingsFolder").map(|value| value.trim()))?
+                ),
+            ));
+            bag.push(("28", "{\"B\",0}".to_string()));
         }
         "dcsset:SettingsComposer" => {
             return Err(anyhow!("a settings-composer form's property bag is not measured"));
@@ -8467,13 +8498,19 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<CommandBar> names a spelling the writer cannot place"))
         }
         "Pages" => {
-            if item.associated_table_element_id.is_some() {
-                return Err(anyhow!("a pages group names an associated table element"));
-            }
+            let associated = match item.associated_table_element_id.as_deref().map(str::trim) {
+                Some(name) => items
+                    .get(name)
+                    .map(|target| target.id.clone())
+                    .ok_or_else(|| {
+                        anyhow!("a pages group is associated with {name}, which the writer cannot place")
+                    })?,
+                None => "0".to_string(),
+            };
             // Payload member 2 holds the group's own events --
             // `OnCurrentPageChange` -- 374 of 374.
             let events = native_item_events(item, "")?;
-            native::format_pages_payload(item.pages_representation.as_deref(), &events, "0")
+            native::format_pages_payload(item.pages_representation.as_deref(), &events, &associated)
             .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
         }
         "Popup" => {
@@ -8593,7 +8630,12 @@ fn native_button_command(
         let uuid = if target.dynamic_list && name == "Delete" {
             native::dynamic_list_item_delete_command_uuid(target.main_table_kind.as_deref())
         } else {
-            native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
+            native::table_item_standard_command_uuid(
+                &target.tag,
+                target.dynamic_list,
+                target.data_path.as_deref(),
+                name,
+            )
         }
         .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
         return Ok(format!("{{{},{uuid}}}", target.id));
@@ -8635,6 +8677,8 @@ struct NativeItemTarget {
     dynamic_list: bool,
     /// The kind of that list's `<MainTable>`, which decides `Delete`.
     main_table_kind: Option<String>,
+    /// The item's own `<DataPath>`, which splits `Ungroup` and `Choose`.
+    data_path: Option<String>,
 }
 
 /// `<ToolTipRepresentation>` as every record writer spells it.
@@ -8861,6 +8905,18 @@ fn native_choice_parameters(
         out.push(',');
         out.push_str(&format_1c_string(name));
         out.push(',');
+        // `<app:value xsi:nil="true"/>` stores the bare `{"U"}`, with no
+        // wrapper (7 of 7).
+        if value.value_type.is_none()
+            && value.literal_type.is_none()
+            && value.literal.as_deref().is_none_or(|text| text.trim().is_empty())
+            && value.array.is_empty()
+            && value.title.is_empty()
+            && value.unwritable.is_empty()
+        {
+            out.push_str("{\"U\"}");
+            continue;
+        }
         out.push_str(&native_choice_list_value(value, source)?);
     }
     out.push('}');
@@ -8972,9 +9028,10 @@ fn native_choice_list_value(
                 &title,
             ))
         }
+        // A string keeps its spaces: `" "` is a value of its own.
         Some("xs:string") => Ok(native::format_native_choice_list_value(
             false,
-            &native::NativeChoiceListLiteral::Text(text),
+            &native::NativeChoiceListLiteral::Text(choice.literal.as_deref().unwrap_or("")),
             NATIVE_ZERO_UUID,
             NATIVE_ZERO_UUID,
             &title,
@@ -8996,6 +9053,51 @@ fn native_choice_list_value(
                 &title,
             ))
         }
+        // A platform comparison type: its enum literal, both ids zero (10 of 10).
+        Some("dcsset:DataCompositionComparisonType") => {
+            let ordinal = match text {
+                "Equal" => 0,
+                "NotEqual" => 1,
+                "InList" => 7,
+                "InListByHierarchy" => 8,
+                "InHierarchy" => 9,
+                "NotInList" => 11,
+                "Filled" => 14,
+                "NotFilled" => 15,
+                other => {
+                    return Err(anyhow!("a <ChoiceList> item names comparison type {other}"));
+                }
+            };
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&format!(
+                    "{{\"#\",dcbf2698-3c1f-4a22-997f-48070ae9bd64,{ordinal}}}"
+                )),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // An empty value list (2 of 2); a populated one is unmeasured.
+        Some("xr:ValueList") if text.is_empty() && choice.array.is_empty() => {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(
+                    "{\"#\",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3,{6,1e512aab-1b41-4ef6-9375-f0137be9dd91,0,0,{0},{\"Pattern\"},0,-1}}",
+                ),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // An empty design-time reference, which only a radio button spells.
+        Some("xr:DesignTimeRef") if text.is_empty() => Ok(native::format_native_choice_list_value(
+            true,
+            &native::NativeChoiceListLiteral::Undefined,
+            NATIVE_ZERO_UUID,
+            NATIVE_ZERO_UUID,
+            &title,
+        )),
         Some("xr:DesignTimeRef") => {
             let (type_id, value_id) = native_choice_list_reference(text, source)?;
             Ok(native::format_native_choice_list_value(
@@ -9032,6 +9134,14 @@ fn native_choice_list_reference(
     reference: &str,
     source: Option<&MetadataSourceContext>,
 ) -> Result<(String, String)> {
+    // `<type uuid>.<value uuid>` is the exporter's spelling of a value its
+    // type does not name; the body holds the two uuids (2 of 2).
+    if let Some((type_id, value_id)) = reference.split_once('.')
+        && is_uuid_text(type_id)
+        && is_uuid_text(value_id)
+    {
+        return Ok((type_id.to_string(), value_id.to_string()));
+    }
     let source =
         source.ok_or_else(|| anyhow!("a <ChoiceList> names {reference} with no source tree"))?;
     let mut parts = reference.splitn(3, '.');
@@ -9753,6 +9863,9 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("ActivateTask", "{0,093dd4ed-e03c-4fc6-a95a-01f51379cccf}"),
     ("ActiveUsers", "{0,47f01799-7968-4f44-9acc-fe1bdde8beb2}"),
     ("AddListItem", "{0,2a0c2238-cb59-4473-ada6-352b60f3c0a9}"),
+    ("CollaborationSystemUser", "{0,a722bc14-4edb-4eed-84b9-5d9b2b443e04}"),
+    ("ExternalDataSourceFunction", "{0,2954e819-f3fc-40de-9769-292efce9a355}"),
+    ("ShowPassword", "{0,97f87955-b88a-4225-a0d8-03af981ecd86}"),
     ("AddToFavorites", "{0,1001ae3e-9289-4303-9699-3c0c17e20e61}"),
     ("AppearanceBoxesFilled", "{0,ba592483-bc90-4e26-ba4d-2126359c6529}"),
     ("AppearanceCheckBox", "{0,7a9cd2fd-6372-4342-9a9e-3ebbd754fd83}"),
@@ -10118,6 +10231,21 @@ fn native_picture_of(
             picture.transparent_y.as_deref(),
         ));
     }
+    // `0:<uuid>` is a common picture that no longer exists, spelled by its
+    // uuid; the body holds the common-picture shape with that uuid (16 of 16).
+    if let Some(uuid) = reference.strip_prefix("0:").filter(|tail| is_uuid_text(tail)) {
+        let load_transparent = match picture.load_transparent.as_deref().map(str::trim) {
+            Some("true") => true,
+            Some("false") => false,
+            _ => return Err(anyhow!("<{holder}> names a <Picture> with no <LoadTransparent>")),
+        };
+        return Ok(native::format_native_item_picture(
+            Some(uuid),
+            load_transparent,
+            picture.transparent_x.as_deref(),
+            picture.transparent_y.as_deref(),
+        ));
+    }
     if !reference.starts_with("CommonPicture.") {
         return Err(anyhow!(
             "<{holder}> names a <Picture> reference the writer cannot place: {reference}"
@@ -10308,6 +10436,106 @@ fn native_rights(
     Ok(out)
 }
 
+/// The attribute's `<Settings xsi:type="mxl:SpreadsheetDocument">`, when it
+/// is the empty document: a fixed MOXCEL skeleton with three members taken
+/// from the source -- the language record, the default format and the
+/// template mode (rt-embedded.md §1.1, 33 of 33). The language record's third
+/// member is what a load from XML writes, 1; any other document refuses.
+fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<String> {
+    let refuse = || anyhow!("an embedded mxl:SpreadsheetDocument that is not empty has no writer yet");
+    let head = format!("<Attribute name=\"{attribute}\"");
+    let start = form_text.find(&head).ok_or_else(refuse)?;
+    let end = form_text[start..].find("</Attribute>").ok_or_else(refuse)? + start;
+    let block = &form_text[start..end];
+    let open = block.find("<Settings").ok_or_else(refuse)?;
+    let body_start = block[open..].find('>').ok_or_else(refuse)? + open + 1;
+    let body_end = block.rfind("</Settings>").ok_or_else(refuse)?;
+    // The XML with the whitespace between tags and the `mxl:` prefix gone.
+    let mut inner = String::new();
+    let mut pending = String::new();
+    for character in block[body_start..body_end].chars() {
+        if character.is_whitespace() {
+            pending.push(character);
+            continue;
+        }
+        if character != '<' && !inner.ends_with('>') {
+            inner.push_str(&pending);
+        } else if character != '<' {
+            inner.push_str(&pending);
+        }
+        pending.clear();
+        inner.push(character);
+    }
+    let inner = inner.replace("<mxl:", "<").replace("</mxl:", "</");
+    let mut rest = inner.as_str();
+    const RU: &str = "<languageSettings><currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo></languageSettings>";
+    let language = match rest.strip_prefix(RU) {
+        Some(tail) => {
+            rest = tail;
+            "{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",0}"
+        }
+        None => "{\"#\",\"\",1,1,\"#\",\"Язык по умолчанию\",\"Язык по умолчанию\",0}",
+    };
+    rest = rest
+        .strip_prefix("<columns><size>0</size></columns><rowsItem><index>0</index><row><empty>true</empty></row></rowsItem>")
+        .ok_or_else(refuse)?;
+    let template = match rest.strip_prefix("<templateMode>true</templateMode>") {
+        Some(tail) => {
+            rest = tail;
+            "1"
+        }
+        None => "0",
+    };
+    let default_format = match rest.strip_prefix("<defaultFormatIndex>1</defaultFormatIndex>") {
+        Some(tail) => {
+            rest = tail;
+            true
+        }
+        None => false,
+    };
+    rest = rest.strip_prefix("<vgRows>0</vgRows>").ok_or_else(refuse)?;
+    let format = if default_format {
+        let width = rest
+            .strip_prefix("<format><width>")
+            .and_then(|tail| tail.strip_suffix("</width></format>"))
+            .filter(|width| !width.is_empty() && width.bytes().all(|byte| byte.is_ascii_digit()))
+            .ok_or_else(refuse)?;
+        rest = "";
+        format!("{{128,{width}}}")
+    } else {
+        "{0}".to_string()
+    };
+    if !rest.is_empty() {
+        return Err(refuse());
+    }
+    Ok(format!(
+        "{{0,1,\"Moxel\",{{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,{{8,1,12,{language},{format},{{0}},0,\
+         {{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{template},2,1,0,0,0,\
+         {{0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0,0,0,0,0,{{0}},{{0}},{{0}},{{0}},\"\",\
+         {{{{0,6,6,{{\"N\",1000}},7,{{\"N\",1000}},8,{{\"N\",1000}},9,{{\"N\",1000}},10,{{\"N\",1000}},\
+         11,{{\"N\",1000}}}}}},{{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000}},0,0,0,0,0,0,0,1,0,\
+         1,0,0,0,0,0,2,{{3,3,{{-1}}}},{{3,3,{{-3}}}},0,0,0,\"\",0,\
+         {{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0}},{{0}},0,0,0,1,0,0,0}}}}}}"
+    ))
+}
+
+/// A column's `<View>` and `<Edit>`, each the default tuple when absent.
+fn native_column_rights(
+    column: &FormXmlAttributeColumn,
+    source: Option<&MetadataSourceContext>,
+) -> Result<(String, String)> {
+    let one = |rights: Option<&FormXmlRights>, owner: &str| -> Result<String> {
+        match rights {
+            Some(rights) => native_rights(rights, owner, source),
+            None => Ok("{0,{0,{\"B\",1},0}}".to_string()),
+        }
+    };
+    Ok((
+        one(column.view.as_ref(), "a column's <View>")?,
+        one(column.edit.as_ref(), "a column's <Edit>")?,
+    ))
+}
+
 /// An item's `<UserVisible>` block, `None` when it spells none.
 fn native_user_visible(
     item: &FormXmlChildItem,
@@ -10447,10 +10675,12 @@ fn native_input_drop_list_settings(
     };
     let value_path = column("MultipleValueDataPath")?;
     let present_path = column("MultipleValuePresentDataPath")?;
-    if check.is_none() && value_path.is_none() && present_path.is_none() {
+    let allow_empty = native_scalar_tristate(item, "AllowInputEmptyMultipleValues")?;
+    if check.is_none() && value_path.is_none() && present_path.is_none() && allow_empty.is_none() {
         return Ok("{0}".to_string());
     }
     Ok(crate::compiler::bodies::form_native::format_input_drop_list_settings(
+        allow_empty.unwrap_or(false),
         check,
         value_path.as_deref().unwrap_or("{0}"),
         present_path.as_deref().unwrap_or("{0}"),
@@ -10516,14 +10746,18 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         if let Some(part) = attribute.unwritable.first() {
             blockers.push(format!("an attribute names <{part}>"));
         }
+        let embedded_spreadsheet =
+            attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument");
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
+            && !embedded_spreadsheet
             && let Some(error) = properties.dcs_error.as_ref()
         {
             blockers.push(error.clone());
         }
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
+            && !embedded_spreadsheet
         {
             // One message stood for four situations, and only the first is a
             // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
@@ -10669,11 +10903,17 @@ fn format_native_form_body(
 
     let title = format_form_title_value(&properties.title);
     let settings_storage = match properties.root_scalars.get("SettingsStorage") {
-        Some(reference) => Some(
-            source
-                .ok_or_else(|| anyhow!("the form names {reference} and no configuration is on hand"))?
-                .resolve_metadata_reference_uuid(reference)?,
-        ),
+        Some(reference) => {
+            let source = source
+                .ok_or_else(|| anyhow!("the form names {reference} and no configuration is on hand"))?;
+            // A form can be the storage too -- `Report.X.Form.Y`, which
+            // stores that form's own uuid (3 of 3).
+            Some(if reference.contains(".Form.") || reference.trim().starts_with("CommonForm.") {
+                source.resolve_form_uuid(reference)?
+            } else {
+                source.resolve_metadata_reference_uuid(reference)?
+            })
+        }
         None => None,
     };
     let root_head = crate::compiler::bodies::form_native::format_root_head(&crate::compiler::bodies::form_native::NativeRootHead {
@@ -10776,6 +11016,7 @@ fn format_native_form_body(
                 id: item.id.clone(),
                 dynamic_list: list.is_some(),
                 main_table_kind,
+                data_path: item.data_path.clone(),
             },
         );
         stack.extend(item.child_items.iter());
@@ -10789,6 +11030,7 @@ fn format_native_form_body(
             id: "0".to_string(),
             dynamic_list: main_attribute_class == "cfg:DynamicList",
             main_table_kind: form_main_table_kind(properties),
+            data_path: None,
         },
     );
 
@@ -10928,6 +11170,10 @@ fn format_native_form_body(
             let reference = reference.trim();
             let uuid = if reference.is_empty() {
                 "00000000-0000-0000-0000-000000000000".to_string()
+            } else if is_uuid_text(reference) {
+                // The exporter spells an option it cannot name -- a deleted
+                // one -- by its uuid, which is what the body holds.
+                reference.to_string()
             } else {
                 source
                     .ok_or_else(|| {
@@ -10957,6 +11203,7 @@ fn format_native_form_body(
             let column_pattern =
                 format_form_type_spec_pattern("Form Attribute Column", &column.spec, source)?;
             let column_options = functional_options(&column.functional_options)?;
+            let (column_view, column_edit) = native_column_rights(column, source)?;
             columns.push(
                 crate::compiler::bodies::form_native::format_form_attribute_column(
                     &crate::compiler::bodies::form_native::NativeFormAttributeColumn {
@@ -10966,6 +11213,7 @@ fn format_native_form_body(
                         type_pattern: &column_pattern,
                         functional_options: &column_options,
                         fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                        restrictions: [&column_view, &column_edit],
                         ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
                     },
                 ),
@@ -10983,6 +11231,7 @@ fn format_native_form_body(
                     source,
                 )?;
                 let column_options = functional_options(&column.functional_options)?;
+                let (column_view, column_edit) = native_column_rights(column, source)?;
                 records.push(',');
                 records.push_str(
                     &crate::compiler::bodies::form_native::format_form_attribute_column(
@@ -10993,6 +11242,7 @@ fn format_native_form_body(
                             type_pattern: &column_pattern,
                             functional_options: &column_options,
                             fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                            restrictions: [&column_view, &column_edit],
                             ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
                         },
                     ),
@@ -11022,6 +11272,14 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let embedded = if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument")
+        {
+            let text = form_text.ok_or_else(|| anyhow!("an embedded spreadsheet needs the Form.xml text"))?;
+            Some(native_embedded_spreadsheet(text, &attribute.name)?)
+        } else {
+            None
+        };
         let dynamic_list_bag = match dynamic_lists.get(&attribute.name) {
             Some((map, required)) => {
                 let text = form_text.ok_or_else(|| anyhow!("a dynamic list needs the Form.xml text"))?;
@@ -11057,6 +11315,7 @@ fn format_native_form_body(
                 trailing: [
                     dynamic_list_bag
                         .as_deref()
+                        .or(embedded.as_deref())
                         .or(element_type.as_deref())
                         .unwrap_or("{0,0}"),
                     &attribute_options,
@@ -11098,6 +11357,14 @@ fn format_native_form_body(
             Some(name) => items
                 .get(name)
                 .map(|target| target.id.clone())
+                .or_else(|| {
+                    properties.child_items.iter().find_map(|item| {
+                        item.extended_tooltip
+                            .as_ref()
+                            .filter(|tip| tip.name == name)
+                            .map(|tip| tip.id.clone())
+                    })
+                })
                 .ok_or_else(|| anyhow!("a command is associated with {name}, which the writer cannot place"))?,
             None => "0".to_string(),
         };
@@ -12099,6 +12366,25 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                 }
                 if local == "Value"
+                    && path.len() >= 2
+                    && matches!(path[path.len() - 1].as_str(), "View" | "Edit")
+                    && path[path.len() - 2] == "Column"
+                {
+                    let name = xml_attribute_value(&event, "name")?.unwrap_or_default();
+                    let edit = path[path.len() - 1] == "Edit";
+                    let column = if current_additional_column.is_some() {
+                        current_additional_column.as_mut()
+                    } else {
+                        current_column.as_mut()
+                    };
+                    if let Some(column) = column {
+                        let rights = if edit { column.edit.as_mut() } else { column.view.as_mut() };
+                        if let Some(rights) = rights {
+                            rights.values.push((name, None));
+                        }
+                    }
+                }
+                if local == "Value"
                     && command_interface_path(&path, &["Item", "Visible"])
                     && let Some(item) = current_command_interface_item.as_mut()
                 {
@@ -12235,11 +12521,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     && let Some(column) = current_additional_column.as_mut()
                 {
-                    // `<View>` and `<Edit>` land in members 6 and 7 of the
-                    // `{5,…}` record and what they hold when the element is
-                    // present was never measured -- the same refusal the
-                    // attribute's own columns carry. 7 records in 4 forms.
-                    if !column.unwritable.contains(&local) {
+                    // `<View>` and `<Edit>` are members 6 and 7 of the `{5,…}`
+                    // record, the same rights tuple an attribute stores.
+                    if local == "View" && column.view.is_none() {
+                        column.view = Some(FormXmlRights::default());
+                    } else if local == "Edit" && column.edit.is_none() {
+                        column.edit = Some(FormXmlRights::default());
+                    } else if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
                     }
                 } else if local == "Column"
@@ -12255,12 +12543,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 ) && let Some(column) = current_column.as_mut()
                 {
                     // The ten-member column record reads the title, the
-                    // type, `<FillCheck>` and `<FunctionalOptions>` out of the
-                    // source; `<View>` and `<Edit>` land in members whose
-                    // content when the element is present was never measured,
-                    // so naming one still refuses the form instead of taking
-                    // the default those members hold in 142 594 columns.
-                    if !column.unwritable.contains(&local) {
+                    // type, `<FillCheck>`, `<FunctionalOptions>` and the
+                    // `<View>`/`<Edit>` rights out of the source.
+                    if local == "View" && column.view.is_none() {
+                        column.view = Some(FormXmlRights::default());
+                    } else if local == "Edit" && column.edit.is_none() {
+                        column.edit = Some(FormXmlRights::default());
+                    } else if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
                     }
                 } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
@@ -13902,6 +14191,29 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         }
                     }
                     "Common" | "Value"
+                        if path.len() >= 3
+                            && matches!(path[path.len() - 2].as_str(), "View" | "Edit")
+                            && path[path.len() - 3] == "Column" =>
+                    {
+                        let value = parse_form_xml_bool("Column rights", nested_text.trim())?;
+                        let edit = path[path.len() - 2] == "Edit";
+                        let column = if current_additional_column.is_some() {
+                            current_additional_column.as_mut()
+                        } else {
+                            current_column.as_mut()
+                        };
+                        if let Some(column) = column {
+                            let rights = if edit { column.edit.as_mut() } else { column.view.as_mut() };
+                            if let Some(rights) = rights {
+                                if local == "Common" {
+                                    rights.common = Some(value);
+                                } else if let Some(last) = rights.values.last_mut() {
+                                    last.1 = Some(value);
+                                }
+                            }
+                        }
+                    }
+                    "Common" | "Value"
                         if path.len() >= 2
                             && matches!(path[path.len() - 2].as_str(), "View" | "Edit")
                             && path_ends_with(
@@ -14034,7 +14346,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                     choice.check_state = Some(nested_text.trim().to_string());
                                 }
                                 FormChoiceListPart::Literal => {
-                                    choice.literal = Some(nested_text.trim().to_string());
+                                    choice.literal = Some(nested_text.to_string());
                                 }
                                 FormChoiceListPart::TitleLang => {
                                     current_choice_lang = Some(nested_text.trim().to_string());
@@ -14052,7 +14364,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 }
                                 FormChoiceListPart::ArrayLiteral => {
                                     if let Some(value) = choice.array.last_mut() {
-                                        value.literal = Some(nested_text.trim().to_string());
+                                        value.literal = Some(nested_text.to_string());
                                     }
                                 }
                                 FormChoiceListPart::ArrayTitleLang => {
@@ -15763,14 +16075,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                     text_value.trim()
                                 )
                             })?;
-                            if item.tag == "ColumnGroup"
-                                && fixing_in_table != FormFixingInTable::Left
-                            {
-                                return Err(anyhow!(
-                                    "unsupported Form ColumnGroup FixingInTable: {}",
-                                    text_value.trim()
-                                ));
-                            }
                             item.fixing_in_table = Some(fixing_in_table);
                         }
                     }
@@ -17385,6 +17689,10 @@ fn form_nested_text_element(path: &[String]) -> bool {
         || path_ends_with(path, &["Attribute", "View", "Value"])
         || path_ends_with(path, &["Attribute", "Edit", "Common"])
         || path_ends_with(path, &["Attribute", "Edit", "Value"])
+        || path_ends_with(path, &["Column", "View", "Common"])
+        || path_ends_with(path, &["Column", "View", "Value"])
+        || path_ends_with(path, &["Column", "Edit", "Common"])
+        || path_ends_with(path, &["Column", "Edit", "Value"])
         || path_ends_with(path, &["Command", "Use", "Value"])
         || path_ends_with(path, &["Commands", "Command", "Shortcut"])
         || path_ends_with(path, &["Commands", "Command", "AssociatedTableElementId"])
@@ -18058,6 +18366,7 @@ const OBJECT_STANDARD_COMMAND_ORDINALS: &[(&str, &str, u32)] = &[
     ("DataProcessor", "Open", 0),
     ("Document", "Create", 1),
     ("Document", "CreateBasedOn", 2),
+    ("ExchangePlan", "CreateBasedOn", 2),
     ("Document", "OpenList", 0),
     ("DocumentJournal", "OpenList", 0),
     ("FilterCriterion", "OpenByValue", 0),
@@ -32187,6 +32496,11 @@ fn parse_metadata_type_pattern_element(
                 type_id: source.resolve_metadata_type_id(other)?,
             })
         }
+        // Any other platform type the table knows, under whatever prefix the
+        // serialiser generated -- `d5p1:FlowchartContextType` among them.
+        other if builtin_v8_type_id(other).is_some() => Ok(MetadataTypePatternElement::Reference {
+            type_id: builtin_v8_type_id(other).unwrap_or_default().to_string(),
+        }),
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
     }
 }
@@ -32223,6 +32537,8 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
             "PDFDocument" => Some("48510817-200c-48c2-9973-06cf90840514"),
             "GeographicalSchema" => Some("95de81b0-81c3-4936-9dbb-6400e5c90378"),
             "AccountingRecordType" => Some("741ae838-6e42-4ac0-b6a4-17e5604b0669"),
+            // `d7p1:` bound to the entext namespace (1 of 1).
+            "ConditionalAppearance" => Some("7dd764b6-b22f-4712-8edc-c0d634340e60"),
             _ => None,
         };
         if generated.is_some() {
@@ -32242,6 +32558,7 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
         }
         "dcsset:ConditionalAppearance" => Some("7dd764b6-b22f-4712-8edc-c0d634340e60"),
         "dcscor:DataCompositionGroupType" => Some("0e0850cf-0634-414e-85ba-9a88a8bd44c4"),
+        "ent:ComparisonType" => Some("b1b064f3-ae38-49bf-8c6d-390c65fd94af"),
         "dcscor:Field" => Some("913e8016-6e90-47a0-b2a0-4513f4edad61"),
         "dcscor:DataCompositionPeriodAdditionType" => {
             Some("c6a52555-d20f-452c-bfc2-1b53e9a56063")
@@ -34878,7 +35195,9 @@ mod tests {
     /// left this list -- member 8 is measured now -- and refuses for the one
     /// reason left, which the test below pins.
     #[test]
-    fn refuses_a_column_that_names_a_part_the_writer_cannot_place() {
+    fn writes_a_column_view_and_edit_as_the_rights_tuple() {
+        // `<View>` and `<Edit>` are members 6 and 7 of the column record, the
+        // tuple an attribute's own rights take (rt-embedded.md §4.5, 19 of 19).
         for (part, body) in [
             ("View", "<View><Common>false</Common></View>"),
             ("Edit", "<Edit><Common>false</Common></Edit>"),
@@ -34897,13 +35216,14 @@ mod tests {
                 ),
                 part_body = body,
             );
-            let error = super::compile_native_form_body(xml.as_bytes(), None, None, None)
-                .expect_err("a column that names {part} must refuse the form")
-                .to_string();
-            assert!(
-                error.contains(&format!("an attribute column names <{part}>")),
-                "{part} was written instead of refused: {error}"
-            );
+            let body = super::compile_native_form_body(xml.as_bytes(), None, None, None)
+                .unwrap_or_else(|error| panic!("a column that names {part} must be written: {error}"));
+            let tuple = if part == "View" {
+                "{0,{0,{\"B\",0},0}},{0,{0,{\"B\",1},0}}"
+            } else {
+                "{0,{0,{\"B\",1},0}},{0,{0,{\"B\",0},0}}"
+            };
+            assert!(body.contains(tuple), "{part} was not written as its rights: {body}");
         }
     }
 
