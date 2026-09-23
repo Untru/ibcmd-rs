@@ -304,6 +304,16 @@ pub(crate) fn parse(input: &[u8]) -> Result<NativeValue, NativeError> {
     NativeParser::new(input).parse()
 }
 
+/// A body the platform may store with or without the UTF-8 BOM (HTML
+/// templates carry it, as help rows do).
+pub(crate) fn parse_optional_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
+    if input.starts_with(UTF8_BOM) {
+        parse(input)
+    } else {
+        parse_without_bom(input)
+    }
+}
+
 pub(crate) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
     let total =
         input

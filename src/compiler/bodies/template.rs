@@ -17,7 +17,7 @@ use super::mxl::{
 };
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{
-    NativeError, deflate_bytes, exact_list, exact_token, inflate, parse_without_bom, required_list,
+    NativeError, deflate_bytes, exact_list, exact_token, inflate, parse_optional_bom, required_list,
     required_text, required_token,
 };
 use crate::module_blob::{
@@ -380,7 +380,7 @@ fn compile_binary_template(bytes: &[u8]) -> Result<Vec<u8>, TemplateCodecError> 
 
 fn decode_binary_template(blob: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
     let plain = inflate(blob)?;
-    let native = parse_without_bom(&plain)?;
+    let native = parse_optional_bom(&plain)?;
     let fields = exact_list(&native, 2, "binary Template root")?;
     exact_token(&fields[0], "1", "binary Template marker")?;
     decode_base64_value(&fields[1], "binary Template payload")
@@ -388,7 +388,7 @@ fn decode_binary_template(blob: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
 
 fn decode_html_template(blob: &[u8]) -> Result<HtmlTemplateBody, TemplateCodecError> {
     let plain = inflate(blob)?;
-    let native = parse_without_bom(&plain)?;
+    let native = parse_optional_bom(&plain)?;
     let fields = required_list(&native, "HTML Template root")?;
     exact_token(
         fields
