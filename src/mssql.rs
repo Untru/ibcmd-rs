@@ -4790,6 +4790,15 @@ fn prepare_configuration_asset_body_rows(
         ..properties.clone()
     });
     let properties = owner.as_ref().unwrap_or(properties);
+    // `Configuration.xml` sits at the root of its source tree, so the names
+    // its interface assets spell resolve there even when the caller staged
+    // it without naming the tree.
+    let inferred = source
+        .is_none()
+        .then(|| xml_path.parent())
+        .flatten()
+        .map(|root| MetadataSourceContext::new(root.to_path_buf()));
+    let source = source.or(inferred.as_ref());
     let mut rows = Vec::new();
     rows.extend(prepare_configuration_ext_picture_body_row(
         sqlcmd,
