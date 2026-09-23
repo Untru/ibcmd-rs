@@ -2122,6 +2122,241 @@ fn style_body_font_node(
     Ok(StyleNode::List(values))
 }
 
+/// `Ext/AdditionalIndexes.xml` as the platform stores it (the exporter's
+/// `parse_additional_indexes` read backwards): `{1,{<count>,<record>...}}`, a
+/// record `{"#",4b3b32e1-...,{1,<id>,<indexed>,<additional>,"<name>",
+/// {0,<table uuid>},1,<nil uuid>}}`, a field list `{<n>,<field>...}` (`{0}`
+/// when empty), a field `{"#",07c5e7a4-...,{1,{0,<uuid>}}}`, or `{1,{<code>}}`
+/// for the standard Period -2, Recorder -3, LineNumber -4, Ref -5. The table
+/// is the owner or one of its tabular sections; a field resolves among that
+/// table's own fields first, then the owner's. Laid out as the platform does
+/// (the two ERP УХ registers and the document that carry indexes); anything
+/// unresolved is refused.
+pub fn pack_additional_indexes_blob_from_xml(
+    xml: &[u8],
+    owner_xml: &[u8],
+    owner_kind: &str,
+    owner_name: &str,
+    owner_uuid: &str,
+) -> Result<Vec<u8>> {
+    let indexes = parse_additional_indexes_xml(xml)?;
+    let owner = parse_owner_field_uuids(owner_xml)?;
+    let root = format!("{owner_kind}.{owner_name}");
+    let mut records = vec![StyleNode::token(indexes.len().to_string())];
+    for index in &indexes {
+        let (table_uuid, section) = if index.table == root {
+            (owner_uuid.to_string(), None)
+        } else if let Some(section) = index
+            .table
+            .strip_prefix(&format!("{root}."))
+            .filter(|section| !section.contains('.'))
+        {
+            let (uuid, _) = owner.sections.get(section).ok_or_else(|| {
+                anyhow!("AdditionalIndexes table {} is not a tabular section", index.table)
+            })?;
+            (uuid.clone(), Some(section))
+        } else {
+            return Err(anyhow!("unsupported AdditionalIndexes table {}", index.table));
+        };
+        let field_node = |name: &str| -> Result<StyleNode> {
+            let slot = match name {
+                "Period" => StyleNode::List(vec![StyleNode::token("-2")]),
+                "Recorder" => StyleNode::List(vec![StyleNode::token("-3")]),
+                "LineNumber" => StyleNode::List(vec![StyleNode::token("-4")]),
+                "Ref" => StyleNode::List(vec![StyleNode::token("-5")]),
+                _ => {
+                    let uuid = section
+                        .and_then(|section| owner.sections.get(section))
+                        .and_then(|(_, fields)| fields.get(name))
+                        .or_else(|| owner.fields.get(name))
+                        .ok_or_else(|| {
+                            anyhow!("AdditionalIndexes field {name} is not a field of {}", index.table)
+                        })?;
+                    StyleNode::List(vec![StyleNode::token("0"), StyleNode::token(uuid.clone())])
+                }
+            };
+            Ok(StyleNode::List(vec![
+                StyleNode::token("\"#\""),
+                StyleNode::token("07c5e7a4-56de-47f1-9895-724a499e8a8c"),
+                StyleNode::List(vec![StyleNode::token("1"), slot]),
+            ]))
+        };
+        let field_list = |names: &[String]| -> Result<StyleNode> {
+            let mut values = vec![StyleNode::token(names.len().to_string())];
+            for name in names {
+                values.push(field_node(name)?);
+            }
+            Ok(StyleNode::List(values))
+        };
+        records.push(StyleNode::List(vec![
+            StyleNode::token("\"#\""),
+            StyleNode::token("4b3b32e1-14f6-4ce8-b4c4-1bc85a74237e"),
+            StyleNode::List(vec![
+                StyleNode::token("1"),
+                StyleNode::token(index.id.clone()),
+                field_list(&index.indexed_fields)?,
+                field_list(&index.additional_fields)?,
+                StyleNode::token(format_1c_string(&index.name)),
+                StyleNode::List(vec![StyleNode::token("0"), StyleNode::token(table_uuid)]),
+                StyleNode::token("1"),
+                StyleNode::token("00000000-0000-0000-0000-000000000000"),
+            ]),
+        ]));
+    }
+    let mut text = String::from("\u{feff}");
+    StyleNode::List(vec![StyleNode::token("1"), StyleNode::List(records)])
+        .write_platform(&mut text, true);
+    deflate_raw(text.as_bytes())
+}
+
+#[derive(Debug, Default)]
+struct AdditionalIndexXml {
+    id: String,
+    name: String,
+    table: String,
+    indexed_fields: Vec<String>,
+    additional_fields: Vec<String>,
+}
+
+fn parse_additional_indexes_xml(xml: &[u8]) -> Result<Vec<AdditionalIndexXml>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut indexes = Vec::<AdditionalIndexXml>::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "AdditionalIndex" {
+                    let id = xml_attrs_map(&event)
+                        .remove("id")
+                        .ok_or_else(|| anyhow!("AdditionalIndex without id"))?;
+                    indexes.push(AdditionalIndexXml {
+                        id,
+                        ..AdditionalIndexXml::default()
+                    });
+                }
+                text.clear();
+                path.push(local);
+            }
+            Ok(Event::Text(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::CData(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::GeneralRef(reference)) => {
+                if let Some(ch) = reference.resolve_char_ref()? {
+                    text.push(ch);
+                } else {
+                    let entity = reference.decode()?;
+                    text.push_str(
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?,
+                    );
+                }
+            }
+            Ok(Event::End(_)) => {
+                let value = text.trim().to_string();
+                if let Some(index) = indexes.last_mut() {
+                    if path_ends_with(&path, &["AdditionalIndex", "Name"]) {
+                        index.name = value;
+                    } else if path_ends_with(&path, &["AdditionalIndex", "Table"]) {
+                        index.table = value;
+                    } else if path_ends_with(&path, &["IndexedFields", "Field"]) {
+                        index.indexed_fields.push(value);
+                    } else if path_ends_with(&path, &["AdditionalFields", "Field"]) {
+                        index.additional_fields.push(value);
+                    }
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(indexes)
+}
+
+#[derive(Debug, Default)]
+struct OwnerFieldUuids {
+    /// Attribute, Dimension and Resource of the owner itself, by name.
+    fields: BTreeMap<String, String>,
+    /// Tabular section name -> (its uuid, its attributes by name).
+    sections: BTreeMap<String, (String, BTreeMap<String, String>)>,
+}
+
+/// The uuids of an owner's fields, read from its metadata XML: the
+/// attributes, dimensions and resources of its `ChildObjects`, and each
+/// tabular section with the attributes of the section's own `ChildObjects`.
+fn parse_owner_field_uuids(xml: &[u8]) -> Result<OwnerFieldUuids> {
+    const CHILD_TAGS: [&str; 4] = ["Attribute", "Dimension", "Resource", "TabularSection"];
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    // (tag, uuid, name) of the child objects being read, outermost first
+    let mut open = Vec::<(String, String, String)>::new();
+    let mut result = OwnerFieldUuids::default();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if CHILD_TAGS.contains(&local.as_str())
+                    && path.last().map(String::as_str) == Some("ChildObjects")
+                {
+                    let uuid = xml_attrs_map(&event).remove("uuid").unwrap_or_default();
+                    open.push((local.clone(), uuid, String::new()));
+                }
+                text.clear();
+                path.push(local);
+            }
+            Ok(Event::Text(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::End(_)) => {
+                let local = path.pop().unwrap_or_default();
+                let depth = path.len();
+                if local == "Name"
+                    && depth >= 2
+                    && path[depth - 1] == "Properties"
+                    && let Some(last) = open.last_mut()
+                    && last.2.is_empty()
+                    && path[depth - 2] == last.0
+                {
+                    last.2 = text.trim().to_string();
+                }
+                if CHILD_TAGS.contains(&local.as_str())
+                    && path.last().map(String::as_str) == Some("ChildObjects")
+                    && let Some((tag, uuid, name)) = open.pop()
+                {
+                    match open.last() {
+                        None if tag == "TabularSection" => {
+                            result.sections.entry(name).or_default().0 = uuid;
+                        }
+                        None => {
+                            result.fields.insert(name, uuid);
+                        }
+                        Some((parent_tag, _, parent_name)) if parent_tag == "TabularSection" => {
+                            result
+                                .sections
+                                .entry(parent_name.clone())
+                                .or_default()
+                                .1
+                                .insert(name, uuid);
+                        }
+                        Some(_) => {}
+                    }
+                }
+                text.clear();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(result)
+}
+
 fn style_body_item_key(value: &str) -> Result<String> {
     let fields = scan_braced_fields(value.trim(), 0)?;
     let key = fields
@@ -26526,6 +26761,21 @@ fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
             Ok(Event::CData(text)) => {
                 if is_predefined_item_property_path(&path) {
                     text_value.push_str(text.xml_content()?.as_ref());
+                }
+            }
+            // An entity (`&lt;85%`) arrives as its own event; dropping it lost
+            // the `<` / `>` of 28 ERP УХ predefined descriptions.
+            Ok(Event::GeneralRef(reference)) => {
+                if is_predefined_item_property_path(&path) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&value);
                 }
             }
             Ok(Event::End(event)) => {

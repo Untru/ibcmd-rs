@@ -4458,6 +4458,25 @@ fn prepare_additional_indexes_body_row(
     };
     let bytes = fs::read(&body_path)
         .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
+    if matches!(mapping, AdditionalIndexesMapping::Confirmed) {
+        // The platform stores brace text, not the XML: compile it.
+        let owner_xml = fs::read(xml_path)
+            .with_context(|| format!("failed to read {}", xml_path.display()))?;
+        let blob = crate::module_blob::pack_additional_indexes_blob_from_xml(
+            &bytes,
+            &owner_xml,
+            &properties.kind,
+            &properties.name,
+            &properties.uuid,
+        )
+        .with_context(|| format!("failed to compile AdditionalIndexes {}", body_path.display()))?;
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: body_path,
+            blob_sha256: hex_sha256(&blob),
+            blob,
+        }]);
+    }
     let entry = compile_mssql_source(
         axes,
         &body_id,
@@ -12363,10 +12382,12 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].body_id, "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.3");
         assert_eq!(rows[0].path, body_path);
+        // Compiled to the platform's brace text, not stored as the XML.
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(body)
+            hex_sha256("\u{feff}{1,\r\n{0}\r\n}".as_bytes())
         );
+        let _ = body;
 
         let _ = fs::remove_dir_all(root);
     }
