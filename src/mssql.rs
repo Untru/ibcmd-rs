@@ -6925,8 +6925,18 @@ fn sqlcmd_file_command_with_auth(
         .arg("-Y")
         .arg("0")
         .arg("-i")
-        .arg(script);
+        .arg(native_script_path(script));
     command
+}
+
+/// sqlcmd reads `-i F:/dir/script.sql` as the path `F:`; on Windows it gets
+/// the backslash spelling.
+fn native_script_path(script: &Path) -> PathBuf {
+    if cfg!(windows) {
+        PathBuf::from(script.to_string_lossy().replace('/', "\\"))
+    } else {
+        script.to_path_buf()
+    }
 }
 
 fn first_i32(stdout: &str) -> Option<i32> {
@@ -7328,7 +7338,7 @@ fn build_stage_metadata_objects_sql(
         ));
         for (body_index, body) in object.body_rows.iter().enumerate() {
             let body_error_number = 54501 + index * 10 + body_index;
-            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number, index, body_index);
         }
     }
 
@@ -7352,21 +7362,25 @@ fn push_insert_metadata_body_row_sql(
     sql: &mut String,
     body: &PreparedMetadataBodyStage,
     body_error_number: usize,
+    object_index: usize,
+    body_index: usize,
 ) {
     let body_blob_hex = encode_hex(&body.blob);
+    let tag = format!("{object_index}_{body_index}");
     sql.push_str(&format!(
-        "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-         SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, 0x{body_blob_hex}, PartNo\n\
+        "DECLARE @metadata_body_blob_{tag} varbinary(max) = 0x{body_blob_hex};\n\
+         INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {body_blob_len}, @metadata_body_blob_{tag}, PartNo\n\
          FROM Config\n\
          WHERE FileName = N'{body_id}' AND PartNo = 0;\n\
-         DECLARE @metadata_body_rows_{body_error_number} int = @@ROWCOUNT;\n\
-         IF @metadata_body_rows_{body_error_number} = 0\n\
+         DECLARE @metadata_body_rows_{tag} int = @@ROWCOUNT;\n\
+         IF @metadata_body_rows_{tag} = 0\n\
          BEGIN\n\
              INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-             VALUES (N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, {body_blob_len}, 0x{body_blob_hex}, 0);\n\
-             SET @metadata_body_rows_{body_error_number} = @@ROWCOUNT;\n\
+             VALUES (N'{body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, {body_blob_len}, @metadata_body_blob_{tag}, 0);\n\
+             SET @metadata_body_rows_{tag} = @@ROWCOUNT;\n\
          END;\n\
-         IF @metadata_body_rows_{body_error_number} <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
+         IF @metadata_body_rows_{tag} <> 1 THROW {body_error_number}, 'Expected to insert metadata body row into ConfigSave', 1;\n",
         body_id = quote_string(&body.body_id),
         body_blob_len = body.blob.len(),
         body_blob_hex = body_blob_hex,
@@ -7424,7 +7438,7 @@ fn build_stage_source_objects_sql(
         ));
         for (body_index, body) in object.body_rows.iter().enumerate() {
             let body_error_number = 55501 + index * 10 + body_index;
-            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number);
+            push_insert_metadata_body_row_sql(&mut sql, body, body_error_number, index, body_index);
         }
     }
 
@@ -7787,9 +7801,10 @@ fn source_stage_batch_reports(batches: &[SourceStageBatch]) -> Vec<MssqlSourcePa
             running_rows += batch.row_count;
             let include_stable_rows = index == 0;
             let include_versions_row = index + 1 == batches.len();
-            let expected_total_rows = running_rows
-                + if include_stable_rows { 2 } else { 0 }
-                + if include_versions_row { 1 } else { 0 };
+            // `root` and `version` are copied by the first batch and stay in
+            // ConfigSave for every later one.
+            let expected_total_rows =
+                running_rows + 2 + if include_versions_row { 1 } else { 0 };
             MssqlSourceParityBatchReport {
                 index,
                 metadata_objects: batch.metadata_objects.len(),
@@ -9922,7 +9937,7 @@ mod tests {
         assert_eq!(reports[1].running_staged_rows, 6);
         assert!(!reports[1].include_stable_rows);
         assert!(reports[1].include_versions_row);
-        assert_eq!(reports[1].expected_total_rows, 7);
+        assert_eq!(reports[1].expected_total_rows, 9);
     }
 
     #[test]
@@ -9980,13 +9995,13 @@ mod tests {
         assert_eq!(reports[1].running_staged_rows, 8);
         assert!(!reports[1].include_stable_rows);
         assert!(!reports[1].include_versions_row);
-        assert_eq!(reports[1].expected_total_rows, 8);
+        assert_eq!(reports[1].expected_total_rows, 10);
 
         assert_eq!(reports[2].staged_rows, 2);
         assert_eq!(reports[2].running_staged_rows, 10);
         assert!(!reports[2].include_stable_rows);
         assert!(reports[2].include_versions_row);
-        assert_eq!(reports[2].expected_total_rows, 11);
+        assert_eq!(reports[2].expected_total_rows, 13);
     }
 
     #[test]
@@ -10071,14 +10086,14 @@ mod tests {
         assert!(!middle_sql.contains("N'versions'"));
         assert!(middle_sql.contains("N'cccccccc-cccc-4ccc-cccc-cccccccccccc'"));
         assert!(middle_sql.contains("N'dddddddd-dddd-4ddd-dddd-dddddddddddd.0'"));
-        assert!(middle_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 8"));
+        assert!(middle_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 10"));
 
         assert!(!last_sql.contains("DELETE FROM ConfigSave;"));
         assert!(!last_sql.contains("WHERE FileName IN (N'root', N'version')"));
         assert!(last_sql.contains("N'versions'"));
         assert!(last_sql.contains("0xDEADBEEF"));
         assert!(last_sql.contains("N'eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee.0'"));
-        assert!(last_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 11"));
+        assert!(last_sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 13"));
     }
 
     #[test]
@@ -14212,9 +14227,11 @@ mod tests {
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0x012345"));
         assert!(sql.contains("0xAABBCC"));
-        assert!(sql.contains("DECLARE @metadata_body_rows_54501 int = @@ROWCOUNT"));
-        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
-        assert!(sql.contains("IF @metadata_body_rows_54501 <> 1 THROW 54501"));
+        assert!(sql.contains("DECLARE @metadata_body_blob_0_0 varbinary(max) = 0xAABBCC;"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_0_0 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, @metadata_body_blob_0_0, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_0_0 <> 1 THROW 54501"));
+        assert_eq!(sql.matches("0xAABBCC").count(), 1);
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
@@ -14254,9 +14271,9 @@ mod tests {
 
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0xAABBCC"));
-        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
-        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, 0xAABBCC, 0);"));
-        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_0_0 int = @@ROWCOUNT"));
+        assert!(sql.contains("VALUES (N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0', SYSUTCDATETIME(), SYSUTCDATETIME(), 0, 3, @metadata_body_blob_0_0, 0);"));
+        assert!(sql.contains("IF @metadata_body_rows_0_0 <> 1 THROW 55501"));
         assert!(sql.contains("IF (SELECT COUNT_BIG(*) FROM ConfigSave) <> 5"));
     }
 
@@ -14297,8 +14314,8 @@ mod tests {
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa'"));
         assert!(sql.contains("N'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0'"));
         assert!(sql.contains("0x102030"));
-        assert!(sql.contains("DECLARE @metadata_body_rows_55501 int = @@ROWCOUNT"));
-        assert!(sql.contains("IF @metadata_body_rows_55501 <> 1 THROW 55501"));
+        assert!(sql.contains("DECLARE @metadata_body_rows_0_0 int = @@ROWCOUNT"));
+        assert!(sql.contains("IF @metadata_body_rows_0_0 <> 1 THROW 55501"));
     }
 
     #[test]
