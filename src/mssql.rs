@@ -4710,7 +4710,7 @@ fn prepare_common_picture_body_row(
 /// `<xr:ContainedObject>` of class `9cd510cd-…` (the managed application's
 /// module group), not the configuration itself -- БСП keeps `.2` … `.f` under
 /// `f389d417-…` while `Configuration.xml` is `66193438-…`.
-fn configuration_asset_owner_uuid(xml_path: &Path) -> Option<String> {
+pub(crate) fn configuration_asset_owner_uuid(xml_path: &Path) -> Option<String> {
     let xml = fs::read_to_string(xml_path).ok()?;
     let class = xml.find("<xr:ClassId>9cd510cd-abfc-11d4-9434-004095e12fc7</xr:ClassId>")?;
     let rest = &xml[class..];

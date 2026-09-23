@@ -970,6 +970,7 @@ mod dynamic_generation;
 mod fetch;
 mod form_body;
 mod forms;
+pub mod interface_audit;
 mod metadata;
 #[cfg(test)]
 mod metadata_order_tests;

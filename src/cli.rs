@@ -53,6 +53,9 @@ pub enum Commands {
     /// exporter and parity with the rows the platform stored.
     #[command(hide = true)]
     AuditRoleRightsWriter(AuditRoleRightsWriterArgs),
+    /// Measure the base-free command-interface family writers against the stored rows.
+    #[command(hide = true)]
+    AuditInterfaceWriter(AuditInterfaceWriterArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -928,6 +931,21 @@ pub struct AuditNativeFormWriterArgs {
     /// Folder with the inflated form bodies of the same database.
     pub bodies: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditInterfaceWriterArgs {
+    /// Root folder with the native 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated Config rows of the same database
+    /// (`<file name>__part0.txt`).
+    pub inflated: PathBuf,
+    /// XML dialect the native tree was exported in.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Optional JSON output file with every difference.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }

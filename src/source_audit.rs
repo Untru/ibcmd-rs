@@ -1721,6 +1721,301 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
     Ok(report)
 }
 
+/// How far the base-free interface writers reproduce the rows the platform
+/// stored, one family at a time.
+///
+/// Every `Ext/CommandInterface.xml` (a subsystem's, a common command's, the
+/// configuration's), `Ext/MainSectionCommandInterface.xml`,
+/// `Ext/HomePageWorkArea.xml`, `Ext/ClientApplicationInterface.xml` and
+/// `Ext/StandaloneConfigurationContent.bin` is compiled from the source tree
+/// alone; the body is compared with the stored row's plain text, and read back
+/// by the exporter's own reader and formatter into the file the platform
+/// exported. `stored_round_trip` runs the stored row through the same reader: a
+/// file it misses is a gap of the harness or the exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every file that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct InterfaceWriterFamilyReport {
+    pub files: usize,
+    pub compiled: usize,
+    /// Refusals by reason, with the names a reason quotes folded away.
+    pub refused: BTreeMap<String, usize>,
+    pub no_stored_row: usize,
+    pub plain_identical: usize,
+    pub round_trip_identical: usize,
+    pub stored_round_trip_identical: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterDifference {
+    pub family: String,
+    pub file: String,
+    pub row: String,
+    /// `refused`, `plain`, `round_trip` or `stored_round_trip`.
+    pub check: &'static str,
+    pub detail: String,
+}
+
+/// One file of the family, where the platform stores it and how the exporter
+/// reads it back.
+struct InterfaceWriterTarget {
+    family: &'static str,
+    path: PathBuf,
+    row: String,
+    source: crate::module_blob::InterfaceAssetSource,
+    render: crate::mssql_dump::interface_audit::InterfaceAssetKind,
+}
+
+fn interface_writer_targets(root: &Path) -> Result<Vec<InterfaceWriterTarget>> {
+    use crate::module_blob::InterfaceAssetSource as Source;
+    use crate::mssql_dump::interface_audit::InterfaceAssetKind as Render;
+
+    let mut targets = Vec::new();
+    let configuration = root.join("Configuration.xml");
+    if let Some(owner) = crate::mssql::configuration_asset_owner_uuid(&configuration) {
+        for (file, suffix, family, source, render) in [
+            (
+                "CommandInterface.xml",
+                "a",
+                "configuration CommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "MainSectionCommandInterface.xml",
+                "9",
+                "MainSectionCommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "HomePageWorkArea.xml",
+                "8",
+                "HomePageWorkArea",
+                Source::HomePageWorkArea,
+                Render::HomePageWorkArea,
+            ),
+            (
+                "ClientApplicationInterface.xml",
+                "b",
+                "ClientApplicationInterface",
+                Source::ClientApplicationInterface,
+                Render::ClientApplicationInterface,
+            ),
+            (
+                "StandaloneConfigurationContent.bin",
+                "f",
+                "StandaloneConfigurationContent",
+                Source::StandaloneContent,
+                Render::StandaloneContent,
+            ),
+        ] {
+            let path = root.join("Ext").join(file);
+            if path.is_file() {
+                targets.push(InterfaceWriterTarget {
+                    family,
+                    path,
+                    row: format!("{owner}.{suffix}"),
+                    source,
+                    render,
+                });
+            }
+        }
+    }
+    for folder in ["Subsystems", "CommonCommands"] {
+        let base = root.join(folder);
+        if !base.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&base).follow_links(false) {
+            let entry = entry.with_context(|| format!("failed to walk {}", base.display()))?;
+            if !entry.file_type().is_file() || entry.file_name() != "CommandInterface.xml" {
+                continue;
+            }
+            let path = entry.into_path();
+            let Some(holder) = path
+                .parent()
+                .and_then(Path::parent)
+                .map(|object| object.with_extension("xml"))
+            else {
+                continue;
+            };
+            let properties = fs::read(&holder)
+                .with_context(|| format!("failed to read {}", holder.display()))
+                .and_then(|xml| parse_simple_metadata_xml_properties(&xml))?;
+            let suffix = match properties.kind.as_str() {
+                "Subsystem" => "1",
+                "CommonCommand" => "0",
+                _ => continue,
+            };
+            targets.push(InterfaceWriterTarget {
+                family: if suffix == "1" {
+                    "subsystem CommandInterface"
+                } else {
+                    "common command CommandInterface"
+                },
+                path,
+                row: format!("{}.{suffix}", properties.uuid),
+                source: Source::CommandInterface,
+                render: Render::ObjectCommandInterface,
+            });
+        }
+    }
+    targets.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(targets)
+}
+
+/// Where two byte strings first differ, as a window of each.
+fn first_difference(wrote: &[u8], expected: &[u8]) -> String {
+    let at = wrote
+        .iter()
+        .zip(expected)
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.len().min(expected.len()));
+    let window = |bytes: &[u8]| {
+        let start = at.saturating_sub(60);
+        let end = (at + 120).min(bytes.len());
+        String::from_utf8_lossy(&bytes[start.min(end)..end]).to_string()
+    };
+    format!(
+        "at byte {at} (wrote {} bytes, expected {}): wrote `{}` | expected `{}`",
+        wrote.len(),
+        expected.len(),
+        window(wrote),
+        window(expected)
+    )
+}
+
+pub fn audit_interface_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<InterfaceWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = interface_writer_targets(root)?;
+    let context =
+        crate::mssql_dump::interface_audit::OfflineInterfaceContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} files; the exporter's indexes read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        refused: Option<String>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let native = fs::read(&target.path).unwrap_or_default();
+                let stored = fs::read(inflated.join(format!("{}__part0.txt", target.row))).ok();
+                let stored_round_trip = stored.as_ref().map(|stored| {
+                    match context.render(target.render, stored, source_version) {
+                        Ok(xml) if xml == native => None,
+                        Ok(xml) => Some(first_difference(&xml, &native)),
+                        Err(error) => Some(format!("{error:#}")),
+                    }
+                });
+                let wrote = crate::module_blob::interface_asset_plaintext(
+                    target.source,
+                    &native,
+                    Some(&source),
+                );
+                let mut outcome = Outcome {
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                };
+                match wrote {
+                    Err(error) => outcome.refused = Some(format!("{error:#}")),
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_difference(&plain, stored));
+                        }
+                        outcome.round_trip =
+                            match context.render(target.render, &plain, source_version) {
+                                Ok(xml) if xml == native => None,
+                                Ok(xml) => Some(first_difference(&xml, &native)),
+                                Err(error) => Some(format!("{error:#}")),
+                            };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = InterfaceWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.path);
+        let family = report
+            .families
+            .entry(target.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: target.family.to_string(),
+                file: file.clone(),
+                row: target.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some(reason) = outcome.refused {
+            *family
+                .refused
+                .entry(form_blocker_reason_shape(&reason))
+                .or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
 /// Audits every `Form.xml` of a source tree against the base-free form body
 /// model, and reports what stands between the tree and a load.
 pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {
