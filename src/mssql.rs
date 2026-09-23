@@ -12546,6 +12546,10 @@ mod tests {
         let rows = super::prepare_template_body_row(
             Path::new("missing-sqlcmd-dcs-template-must-not-fetch"),
             "missing-server",
+            super::SqlAuth {
+                user: None,
+                password: None,
+            },
             "missing-database",
             &template_xml,
             owner,
@@ -12818,6 +12822,10 @@ mod tests {
         let error = super::prepare_template_body_row(
             Path::new("missing-sqlcmd-unknown-template-must-not-run"),
             "missing-server",
+            super::SqlAuth {
+                user: None,
+                password: None,
+            },
             "missing-database",
             &template_xml,
             owner,
