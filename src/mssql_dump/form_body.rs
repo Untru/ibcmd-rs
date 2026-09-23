@@ -23002,6 +23002,14 @@ pub(super) fn parse_form_child_item_data_path(
         } else {
             &input_slots
         };
+    // The same item states it shows no data of its own, so nothing is inferred
+    // for it from its parent either: the fallback below named
+    // `Объект.Требуется.ТребуетсяПеренесеноРезерв` for it whenever the parent
+    // path reached it, which the platform never writes.
+    let footer_only = fields.get(input_slots[0]).map(|field| field.trim()) == Some("{0}")
+        && fields
+            .get(input_slots[1])
+            .is_some_and(|field| field.trim() != "{0}");
     // Both bound slots spelling the empty binding `{0}` is the platform's own
     // statement that the item shows no data, and it then writes no `DataPath`
     // at all -- 280 such items across UT 11.5.27.75, every one of them without
@@ -23094,7 +23102,7 @@ pub(super) fn parse_form_child_item_data_path(
         | "TrackBarField"
         | "ChartField" => resolve_slots(primary_slots, &parse_bound).or_else(|| {
             FormChildItemDataPathResolution::from_option(
-                parent_data_path.map(|parent| {
+                parent_data_path.filter(|_| !footer_only).map(|parent| {
                     let name = normalize_form_data_path_child_name(parent, name);
                     format!("{parent}.{name}")
                 }),

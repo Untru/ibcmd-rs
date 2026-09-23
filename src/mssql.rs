@@ -64,7 +64,7 @@ use crate::module_blob::{
     module_blob_text_sha256, pack_business_process_flowchart_blob_from_xml,
     pack_command_interface_blob_from_xml, pack_common_module_metadata_blob_from_xml,
     pack_exchange_plan_content_blob_from_xml, pack_ext_picture_blob_from_bytes,
-    pack_form_body_blob_from_form_xml_base_free,
+    pack_form_body_blob_from_form_xml_base_free, pack_native_form_body_blob,
     pack_form_body_blob_from_form_xml_with_source_and_assets, pack_help_blob_from_parts,
     pack_module_blob_container_bytes, pack_predefined_data_blob_from_xml,
     pack_role_rights_blob_from_xml_with_source, pack_schedule_blob_from_xml,
@@ -5033,7 +5033,44 @@ fn prepare_form_body_row(
         None
     };
     let form_item_assets_root = form_path.with_extension("").join("Items");
+    // The native writer compiles a Form.xml from the source alone. It is the
+    // first choice for a form that is new or changed; one it refuses falls
+    // back to the older paths below. `IBCMD_RS_NATIVE_FORM_WRITER=always`
+    // also recompiles the forms that did not change, which is what a full
+    // load-and-export round trip measures.
+    let native_items_root = form_path.with_file_name("Form").join("Items");
+    let native = || {
+        (!form_xml.is_empty())
+            .then(|| {
+                pack_native_form_body_blob(
+                    &form_xml,
+                    module_text.as_deref(),
+                    source,
+                    Some(native_items_root.as_path()),
+                )
+                .ok()
+            })
+            .flatten()
+    };
+    let force_native =
+        std::env::var("IBCMD_RS_NATIVE_FORM_WRITER").is_ok_and(|value| value == "always");
+    if force_native && let Some(packed) = native() {
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: form_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        }]);
+    }
     if !form_xml.is_empty() && !form_item_assets_root.exists() {
+        if let Some(packed) = native() {
+            return Ok(vec![PreparedMetadataBodyStage {
+                body_id,
+                path: form_path,
+                blob: packed.blob,
+                blob_sha256: packed.output_sha256,
+            }]);
+        }
         let blockers = form_body_base_free_compilation_blockers(
             &form_xml,
             module_text.is_some(),
@@ -5096,6 +5133,14 @@ fn prepare_form_body_row(
                 blob_sha256: hex_sha256(&base_body),
             }]);
         }
+    }
+    if let Some(packed) = native() {
+        return Ok(vec![PreparedMetadataBodyStage {
+            body_id,
+            path: form_path,
+            blob: packed.blob,
+            blob_sha256: packed.output_sha256,
+        }]);
     }
     let packed = pack_form_body_blob_from_form_xml_with_source_and_assets(
         &base_body,

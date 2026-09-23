@@ -3095,6 +3095,9 @@ pub(crate) struct NativeTableTail<'a> {
     /// `<CurrentRowUse>`: `Choice`, `SelectionPresentation` or
     /// `SelectionPresentationAndChoice`.
     pub(crate) current_row_use: Option<&'a str>,
+    /// The member after it, `<BehaviorOnHorizontalCompression>`: absent 0,
+    /// `MoveItemsByImportance` 2 (the exporter's reverse offset 4).
+    pub(crate) behavior_on_horizontal_compression: Option<&'a str>,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
     pub(crate) file_drag_mode: Option<&'a str>,
     /// Tail members 27, 28 and 34: `<GroupHorizontalAlign>`,
@@ -3128,6 +3131,7 @@ impl Default for NativeTableTail<'_> {
             auto_max_rows_count: true,
             max_rows_count: None,
             current_row_use: None,
+            behavior_on_horizontal_compression: None,
             file_drag_mode: None,
             group_horizontal_align: None,
             group_vertical_align: None,
@@ -3207,7 +3211,12 @@ pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
          {search_string},{view_status},{search_control},1,{first},1,{second},1,{third},\
          {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},\
          {group_horizontal},{group_vertical},{height_variant},{auto_max_rows},{max_rows},\
-         {current_row_use},0,{display_importance},{drag},0",
+         {current_row_use},{compression},{display_importance},{drag},0",
+        compression = root_code(
+            tail.behavior_on_horizontal_compression,
+            &[("MoveItemsByImportance", "2")],
+            "0",
+        )?,
         group_horizontal = root_code(
             tail.group_horizontal_align,
             &[("Left", "0"), ("Center", "1"), ("Right", "2")],
@@ -3269,6 +3278,10 @@ pub(crate) struct NativeTableAddition<'a> {
     pub(crate) extended_tooltip: &'a str,
     /// Member 19: the id of the item `<AdditionSource><Item>` names.
     pub(crate) source_item: &'a str,
+    /// Member 20: the count of the addition's own children, then a
+    /// `<kind uuid>,<record>` pair per child -- the group child grammar (1 of
+    /// 1; `0` in 36 349).
+    pub(crate) children: &'a str,
     /// Member 21, `<GroupHorizontalAlign>`: `Left` 0, `Right` 2, absent 3.
     pub(crate) group_horizontal_align: Option<&'a str>,
     /// Member 23, the `DisplayImportance` **attribute** -- not a child
@@ -3295,7 +3308,7 @@ pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Optio
     Some(format!(
         "{{5,{{{id},{ns}}},0,0,0,{kind},{name},{title},{tooltip_title},{visible},{enabled},\
          {tooltip_representation},1,{payload},1,{context_menu},1,{extended_tooltip},2,\
-         {{{source},{kind}}},0,{align},3,{importance}}}",
+         {{{source},{kind}}},{children},{align},3,{importance}}}",
         id = addition.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = addition.kind,
@@ -3308,6 +3321,7 @@ pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Optio
         context_menu = addition.context_menu,
         extended_tooltip = addition.extended_tooltip,
         source = addition.source_item,
+        children = addition.children,
     ))
 }
 
@@ -5955,6 +5969,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("AccountingRegister", "AccountCr", "-7"),
     ("AccountingRegister", "Account", "-10"),
     ("AccountingRegister", "PeriodAdjustment", "-30"),
+    ("AccountingRegister", "Filter", "-60001"),
     ("AccumulationRegister", "Period", "-2"),
     ("AccumulationRegister", "LineNumber", "-4"),
     ("AccumulationRegister", "RecordType", "-9"),
@@ -6075,6 +6090,9 @@ pub(crate) struct ConfigurationObject {
     pub(crate) fields: BTreeMap<String, Vec<ConfigurationField>>,
     /// Each tabular section's own fields.
     pub(crate) sections: BTreeMap<String, BTreeMap<String, Vec<ConfigurationField>>>,
+    /// A defined type's own `<Properties><Type>`, which a data path walks on
+    /// in as if the attribute had declared it.
+    pub(crate) types: Vec<String>,
 }
 
 /// The configuration source tree, as the data-path walk asks it questions.
@@ -6306,6 +6324,22 @@ fn data_path_context_for_types(types: &[String]) -> DataPathContext {
     }
 }
 
+/// `data_path_context_for_types`, with a `cfg:DefinedType.<X>` expanded to
+/// the type it declares first (rt-paths.md §4.7, 1 of 1).
+fn data_path_context_expanding(
+    configuration: Option<&dyn ConfigurationObjects>,
+    types: &[String],
+) -> DataPathContext {
+    if let [only] = types
+        && let Some(name) = only.trim().strip_prefix("cfg:DefinedType.")
+        && let Some(object) = configuration.and_then(|source| source.object(&format!("DefinedType.{name}")))
+        && !object.types.is_empty()
+    {
+        return data_path_context_for_types(&object.types);
+    }
+    data_path_context_for_types(types)
+}
+
 /// What an `Items.<item>` head learns from the item's own `<DataPath>`.
 struct DataPathHead<'a> {
     context: DataPathContext,
@@ -6470,7 +6504,7 @@ fn resolve_data_path_tokens<'a>(
                 Some(entry) => {
                     attribute = Some(entry);
                     emitted.push(format!("{{{}}}", entry.id));
-                    context = data_path_context_for_types(&entry.types);
+                    context = data_path_context_expanding(configuration, &entry.types);
                 }
                 // A handful of items carry the attribute's id where the name
                 // should be; the body stores that number unchanged.
@@ -7092,6 +7126,7 @@ mod tests {
             auto_max_rows_count: false,
             max_rows_count: Some("6"),
             current_row_use: Some("SelectionPresentationAndChoice"),
+            behavior_on_horizontal_compression: None,
             file_drag_mode: Some("AsFile"),
             group_horizontal_align: None,
             group_vertical_align: None,
@@ -8877,6 +8912,7 @@ mod tests {
                         field("058ce803-cc68-45f4-a266-3fe076e3e96e", "Attribute", &[]),
                     )]),
                 )]),
+                types: Vec::new(),
             },
         )]);
         assert_eq!(

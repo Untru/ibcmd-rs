@@ -6618,7 +6618,13 @@ fn native_data_path_form(
             attribute.name.clone(),
             DataPathAttribute {
                 id: attribute.id.clone(),
-                types: attribute.types.clone(),
+                // An attribute typed only by a `<v8:TypeSet>` -- a defined
+                // type -- walks on in the set's context.
+                types: if attribute.types.is_empty() {
+                    attribute.type_sets.clone()
+                } else {
+                    attribute.types.clone()
+                },
                 columns,
                 additional_columns,
                 dynamic_fields,
@@ -7922,6 +7928,10 @@ fn format_native_table(
         // away for: `DontUse` is in no arm of the tail's table, so every
         // table that spelled `<CurrentRowUse>` refused whatever it spelled.
         current_row_use: item.table_current_row_use.map(FormTableCurrentRowUse::xml_value),
+        behavior_on_horizontal_compression: item
+            .scalars
+            .get("BehaviorOnHorizontalCompression")
+            .map(String::as_str),
         file_drag_mode: item.file_drag_mode.as_deref(),
         auto_add_incomplete: native_scalar_tristate(item, "AutoAddIncomplete")?,
         group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
@@ -8122,11 +8132,19 @@ fn native_root_property_bag(
                     .ok_or_else(|| anyhow!("<{name}>{value} is not measured"))?;
                 Ok(Some(format!("{{\"#\",{uuid},{code}}}")))
             };
+            // A value typed `xs:decimal` instead of an attribute name is
+            // stored as the number itself (1 form: `3` and `0`).
+            let report_value = |name: &str| -> Result<String> {
+                if !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Ok(format!("{{\"N\",{name}}}"));
+                }
+                attribute_ref(name)
+            };
             if let Some(name) = scalar("ReportResult") {
-                bag.push(("5", attribute_ref(name)?));
+                bag.push(("5", report_value(name)?));
             }
             if let Some(name) = scalar("DetailsData") {
-                bag.push(("6", attribute_ref(name)?));
+                bag.push(("6", report_value(name)?));
             }
             if let Some(value) = enumerated(
                 "ReportFormType",
@@ -8214,16 +8232,33 @@ fn native_table_addition(
     use crate::compiler::bodies::form_native as native;
 
     let mut context_menu = None;
-    let mut children = 0usize;
+    let mut child_records = Vec::new();
     for child in &item.child_items {
         match child.tag.as_str() {
             "ContextMenu" if context_menu.is_none() => context_menu = Some(child),
-            _ => children += 1,
+            _ => child_records.push(format_native_child_item(
+                child,
+                data_paths,
+                command_ids,
+                items,
+                main_attribute_class,
+                source,
+                items_root,
+            )?),
         }
     }
-    if children > 0 {
-        return Err(anyhow!("an addition with children is not measured"));
-    }
+    let children = if child_records.is_empty() {
+        "0".to_string()
+    } else {
+        let mut text = child_records.len().to_string();
+        for (kind_uuid, record) in &child_records {
+            text.push(',');
+            text.push_str(kind_uuid);
+            text.push(',');
+            text.push_str(record);
+        }
+        text
+    };
     let context_menu = match context_menu {
         Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
         None => return Err(anyhow!("an addition with no context menu is not measured")),
@@ -8287,6 +8322,7 @@ fn native_table_addition(
         context_menu: &context_menu,
         extended_tooltip: &extended_tooltip,
         source_item: &source_item,
+        children: &children,
         group_horizontal_align: item.scalars.get("GroupHorizontalAlign").map(String::as_str),
         display_importance: item.display_importance.as_deref(),
     })
@@ -10436,13 +10472,19 @@ fn native_rights(
     Ok(out)
 }
 
-/// The attribute's `<Settings xsi:type="mxl:SpreadsheetDocument">`, when it
-/// is the empty document: a fixed MOXCEL skeleton with three members taken
-/// from the source -- the language record, the default format and the
-/// template mode (rt-embedded.md §1.1, 33 of 33). The language record's third
-/// member is what a load from XML writes, 1; any other document refuses.
+/// The attribute's `<Settings xsi:type="mxl:SpreadsheetDocument">` as the
+/// MOXCEL record the body stores (rt-embedded.md §1.1).
+///
+/// The empty document -- 33 of 33 -- is a fixed skeleton with three members
+/// taken from the source: the language record, the default format and the
+/// template mode. A document with no cells but columns, a height, merges and
+/// named areas (1 of 1, `Catalogs/Номенклатура` `КарточкаНоменклатуры`) fills
+/// the column count at member 19, the height at 20, the merges at 29 and the
+/// named areas at 32, ends its language record in 1 and stores 1 and a nil
+/// uuid where the skeleton has member 40's 0. The language record's third
+/// member is what a load from XML writes, 1. Anything else refuses.
 fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<String> {
-    let refuse = || anyhow!("an embedded mxl:SpreadsheetDocument that is not empty has no writer yet");
+    let refuse = || anyhow!("an embedded mxl:SpreadsheetDocument with cells has no writer yet");
     let head = format!("<Attribute name=\"{attribute}\"");
     let start = form_text.find(&head).ok_or_else(refuse)?;
     let end = form_text[start..].find("</Attribute>").ok_or_else(refuse)? + start;
@@ -10450,7 +10492,7 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     let open = block.find("<Settings").ok_or_else(refuse)?;
     let body_start = block[open..].find('>').ok_or_else(refuse)? + open + 1;
     let body_end = block.rfind("</Settings>").ok_or_else(refuse)?;
-    // The XML with the whitespace between tags and the `mxl:` prefix gone.
+    // The XML with the whitespace before each tag and the `mxl:` prefix gone.
     let mut inner = String::new();
     let mut pending = String::new();
     for character in block[body_start..body_end].chars() {
@@ -10458,62 +10500,124 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
             pending.push(character);
             continue;
         }
-        if character != '<' && !inner.ends_with('>') {
-            inner.push_str(&pending);
-        } else if character != '<' {
+        if character != '<' {
             inner.push_str(&pending);
         }
         pending.clear();
         inner.push(character);
     }
     let inner = inner.replace("<mxl:", "<").replace("</mxl:", "</");
+    // The top-level elements, in order: (name, the open tag's rest, body).
+    let mut elements = Vec::new();
     let mut rest = inner.as_str();
-    const RU: &str = "<languageSettings><currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo></languageSettings>";
-    let language = match rest.strip_prefix(RU) {
-        Some(tail) => {
-            rest = tail;
-            "{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",0}"
+    while !rest.is_empty() {
+        let tail = rest.strip_prefix('<').ok_or_else(refuse)?;
+        let tag_end = tail.find('>').ok_or_else(refuse)?;
+        let tag = &tail[..tag_end];
+        let (name, attributes) = tag.split_once(' ').unwrap_or((tag, ""));
+        let close = format!("</{name}>");
+        let body_and_rest = &tail[tag_end + 1..];
+        let close_at = body_and_rest.find(&close).ok_or_else(refuse)?;
+        elements.push((name, attributes, &body_and_rest[..close_at]));
+        rest = &body_and_rest[close_at + close.len()..];
+    }
+    let number = |text: &str| -> Result<u32> { text.parse::<u32>().map_err(|_| refuse()) };
+    let child = |body: &str, name: &str| -> Option<String> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let from = body.find(&open)? + open.len();
+        let to = body[from..].find(&close)? + from;
+        Some(body[from..to].to_string())
+    };
+    const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
+    let mut ru = false;
+    let mut columns = 0u32;
+    let mut rows_seen = false;
+    let mut template = "0";
+    let mut default_format = false;
+    let mut height = 0u32;
+    let mut vg_rows = 0u32;
+    let mut width = None::<u32>;
+    let mut merges = Vec::new();
+    let mut names = Vec::new();
+    for (name, attributes, body) in elements {
+        match name {
+            "languageSettings" if body == RU => ru = true,
+            "columns" => {
+                columns = number(&child(body, "size").ok_or_else(refuse)?)?;
+                if body != format!("<size>{columns}</size>") {
+                    return Err(refuse());
+                }
+            }
+            "rowsItem" if body == "<index>0</index><row><empty>true</empty></row>" => rows_seen = true,
+            "templateMode" if body == "true" => template = "1",
+            "defaultFormatIndex" if body == "1" => default_format = true,
+            "height" => height = number(body)?,
+            "vgRows" => vg_rows = number(body)?,
+            "merge" => {
+                let row = number(&child(body, "r").ok_or_else(refuse)?)?;
+                let column = number(&child(body, "c").ok_or_else(refuse)?)?;
+                let across = child(body, "w").map(|value| number(&value)).transpose()?.unwrap_or(0);
+                let down = child(body, "h").map(|value| number(&value)).transpose()?.unwrap_or(0);
+                merges.push(format!("{{{column},{row},{},{},0}}", column + across, row + down));
+            }
+            "namedItem" if attributes.contains("NamedItemCells") => {
+                let item_name = child(body, "name").ok_or_else(refuse)?;
+                let area = child(body, "area").ok_or_else(refuse)?;
+                if child(&area, "type").as_deref() != Some("Rectangle") {
+                    return Err(refuse());
+                }
+                let value = |name: &str| -> Result<u32> { number(&child(&area, name).ok_or_else(refuse)?) };
+                names.push(format!(
+                    "{},{{1,{{3,{},{},{},{},00000000-0000-0000-0000-000000000000}},0}}",
+                    format_1c_string(&item_name),
+                    value("beginColumn")?,
+                    value("beginRow")?,
+                    value("endColumn")?,
+                    value("endRow")?,
+                ));
+            }
+            "format" => {
+                let text = child(body, "width").ok_or_else(refuse)?;
+                if body != format!("<width>{text}</width>") {
+                    return Err(refuse());
+                }
+                width = Some(number(&text)?);
+            }
+            _ => return Err(refuse()),
         }
-        None => "{\"#\",\"\",1,1,\"#\",\"Язык по умолчанию\",\"Язык по умолчанию\",0}",
-    };
-    rest = rest
-        .strip_prefix("<columns><size>0</size></columns><rowsItem><index>0</index><row><empty>true</empty></row></rowsItem>")
-        .ok_or_else(refuse)?;
-    let template = match rest.strip_prefix("<templateMode>true</templateMode>") {
-        Some(tail) => {
-            rest = tail;
-            "1"
-        }
-        None => "0",
-    };
-    let default_format = match rest.strip_prefix("<defaultFormatIndex>1</defaultFormatIndex>") {
-        Some(tail) => {
-            rest = tail;
-            true
-        }
-        None => false,
-    };
-    rest = rest.strip_prefix("<vgRows>0</vgRows>").ok_or_else(refuse)?;
-    let format = if default_format {
-        let width = rest
-            .strip_prefix("<format><width>")
-            .and_then(|tail| tail.strip_suffix("</width></format>"))
-            .filter(|width| !width.is_empty() && width.bytes().all(|byte| byte.is_ascii_digit()))
-            .ok_or_else(refuse)?;
-        rest = "";
-        format!("{{128,{width}}}")
-    } else {
-        "{0}".to_string()
-    };
-    if !rest.is_empty() {
+    }
+    if !rows_seen || vg_rows != height || default_format != width.is_some() {
         return Err(refuse());
     }
+    let filled = columns > 0 || height > 0 || !merges.is_empty() || !names.is_empty();
+    let language_tail = if filled { 1 } else { 0 };
+    let language = if ru {
+        format!("{{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",{language_tail}}}")
+    } else {
+        format!("{{\"#\",\"\",1,1,\"#\",\"Язык по умолчанию\",\"Язык по умолчанию\",{language_tail}}}")
+    };
+    let format = match width {
+        Some(width) => format!("{{128,{width}}}"),
+        None => "{0}".to_string(),
+    };
+    let merges = if merges.is_empty() {
+        "{0}".to_string()
+    } else {
+        format!("{{{},{}}}", merges.len(), merges.join(","))
+    };
+    let names = if names.is_empty() {
+        "{0}".to_string()
+    } else {
+        format!("{{{},{}}}", names.len(), names.join(","))
+    };
+    let member_40 = if filled { "1,00000000-0000-0000-0000-000000000000" } else { "0" };
     Ok(format!(
         "{{0,1,\"Moxel\",{{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,{{8,1,12,{language},{format},{{0}},0,\
          {{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{template},2,1,0,0,0,\
-         {{0,0,00000000-0000-0000-0000-000000000000,0}},0,0,0,0,0,0,0,0,0,{{0}},{{0}},{{0}},{{0}},\"\",\
+         {{{columns},0,00000000-0000-0000-0000-000000000000,0}},{height},0,0,0,0,0,0,0,0,{merges},{{0}},{{0}},{names},\"\",\
          {{{{0,6,6,{{\"N\",1000}},7,{{\"N\",1000}},8,{{\"N\",1000}},9,{{\"N\",1000}},10,{{\"N\",1000}},\
-         11,{{\"N\",1000}}}}}},{{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000}},0,0,0,0,0,0,0,1,0,\
+         11,{{\"N\",1000}}}}}},{{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000}},0,0,0,0,{member_40},0,0,1,0,\
          1,0,0,0,0,0,2,{{3,3,{{-1}}}},{{3,3,{{-3}}}},0,0,0,\"\",0,\
          {{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0}},{{0}},0,0,0,1,0,0,0}}}}}}"
     ))
@@ -11455,6 +11559,28 @@ pub fn compile_native_form_body(
         None => String::new(),
     };
     format_native_form_body(std::str::from_utf8(form_xml).ok(), &properties, &module, source, items_root)
+}
+
+/// The stored blob of one Form.xml through the native writer: the body text
+/// with the BOM the platform writes, raw-deflated. The loader's first choice;
+/// a form the writer refuses falls back to the older paths.
+pub fn pack_native_form_body_blob(
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<PackedRawDeflatedBlob> {
+    let body = compile_native_form_body(form_xml, module_text, source, items_root)?;
+    // What the exporter cannot read back would load as a form nobody can open.
+    parse_form_body_plain(&body).context("the native Form body does not parse back")?;
+    let plain = format!("\u{feff}{body}");
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
 }
 
 /// Builds a managed Form body from source XML and a profile-known empty
@@ -33788,6 +33914,14 @@ fn parse_configuration_object_xml(xml: &[u8]) -> Result<Option<ConfigurationObje
                 if depth == 5 && path[2] == "Properties" && path[3] == "Owners" {
                     if !value.is_empty() {
                         object.owners.push(value);
+                    }
+                } else if depth == 5
+                    && path[2] == "Properties"
+                    && path[3] == "Type"
+                    && matches!(path[4].as_str(), "Type" | "TypeSet")
+                {
+                    if !value.is_empty() {
+                        object.types.push(value);
                     }
                 } else if depth == 6
                     && path[2] == "ChildObjects"

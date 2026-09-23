@@ -54,13 +54,13 @@ rather than defaulting it.
 
 ## Open
 
-- [ ] **The root record's property bag values, per main attribute class.** The
+- [x] **The root record's property bag values, per main attribute class.** The
       shape is read; what each key holds is not. The table's own bag is read
       -- see table-property-bag-20260921.md -- and the root's is the same kind
       of store. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The two appearance sections** of the frame.
+- [x] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
       writer picks the canonical empty one and the round trip closes on the
@@ -91,8 +91,10 @@ rather than defaulting it.
       decided by the type of the attribute the table binds to, and every
       non-constant key carries one XML property, pure over the 10 738 records
       that split. *(table-property-bag-20260921.md)*
-- [ ] **A dynamic list's settings** (3 204 forms), the largest refusal left.
-- [ ] **The `{5,…}` addition records** a table's `<SearchStringAddition>`,
+- [x] **A dynamic list's settings** (3 204 forms), the largest refusal left. The bag is
+      transcribed from the source and the field map is synthetic -- its ids are not
+      in the source and the export does not read them. *(findings/rt-dynamic-list.md)*
+- [x] **The `{5,…}` addition records** a table's `<SearchStringAddition>`,
       `<ViewStatusAddition>` and `<SearchControlAddition>` carry -- 24 members
       each, in tail slots 16, 18 and 20 (1 704 forms).
 - [x] **The navigator** is not a source property at all: it travels with the
@@ -102,9 +104,9 @@ rather than defaulting it.
       saved, so the writer pairs the empty settings with no navigator and the
       round trip closes on the second export.
       *(navigator-and-generation-20260921.md)*
-- [ ] **The form's own `<Enabled>`**, member 15 of the root head, which the
+- [x] **The form's own `<Enabled>`**, member 15 of the root head, which the
       parser does not read.
-- [ ] **The parser's own gaps**, which hold up 2 620 forms before the writer
+- [x] **The parser's own gaps**, which hold up 2 620 forms before the writer
       ever sees them: `<ExcludedCommand>` spellings (1 455), conditional
       appearance (569), list settings (401), DCS children (195).
 - [ ] **Close the round trip**: export → load into an empty database → export,
@@ -112,6 +114,27 @@ rather than defaulting it.
       the criterion: the navigator and the command bar's functional-options
       block are not in the source at all, so `different` can never reach zero.
       *(navigator-is-not-in-the-source-20260921.md)*
+
+## The form round trip, 2026-09-23
+
+`F:\ibcmd\lab\tools\rt_compare.sh` compiles every `Form.xml` with the native
+writer, exports the database with those bodies in place of the stored ones and
+diffs the export against the native tree. A form passes when it compiles and its
+`Form.xml` comes back unchanged:
+
+| | forms | compiled | unchanged |
+|---|---|---|---|
+| BSP | 1 108 | 1 108 | 1 108 (100 %) |
+| ERP УХ | 13 044 | 13 020 | 13 018 |
+
+The ERP УХ remainder is 24 forms with an embedded `Chart`/`GanttChart` value
+(a writer is in progress) and the two forms fixed after that run. What is not in
+the source and is therefore neutral to the round trip: the navigator, the
+dynamic-list field map ids, a constants set's always-used flags (a delta the
+target database decides -- `IBCMD_RS_ALWAYS_USED_CONSTANTS`), and the empty
+settings blob. The loader now prefers the native writer for a new or changed
+form (`IBCMD_RS_NATIVE_FORM_WRITER=always` for every form); the database cycle
+below is the step that remains.
 
 ## The tool that turned out to matter
 
