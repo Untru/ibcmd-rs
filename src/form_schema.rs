@@ -5017,6 +5017,10 @@ impl FormButtonShapeSchema {
         match fields.get(slot)?.trim() {
             "1" => Some("Left"),
             "2" => Some("Right"),
+            // 8.5.1.1150 BSP `DataProcessors/ПомощникСозданияОбменаДанными/
+            // Forms/НастройкаСинхронизации` `ОтобразитьПодсказку`: the one
+            // button of the corpus that stores `3` writes `Top`.
+            "3" => Some("Top"),
             _ => None,
         }
     }
@@ -7225,6 +7229,17 @@ impl FormSpecialFieldSchema {
             FormSpecialFieldKind::ProgressBar => form_group_vertical_align_xml(fields.get(54)?),
             _ => None,
         }
+    }
+
+    /// Progress-bar option member 12 is its `MaxWidth`: `40` on the one
+    /// 8.5.1.1150 BSP bar written `<MaxWidth>40</MaxWidth>`, `0` on the 20
+    /// others (the member beside `AutoMaxWidth`, as on the other kinds).
+    pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
+        if self.kind != FormSpecialFieldKind::ProgressBar {
+            return None;
+        }
+        let value = options.get(12)?.trim();
+        (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
     pub(crate) fn max_value(self, options: &[&str]) -> Option<String> {

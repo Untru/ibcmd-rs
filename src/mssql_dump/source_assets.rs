@@ -717,6 +717,9 @@ pub(crate) enum SourceAssetKind {
     InflatedBase64OrBinary,
     InflatedBinary,
     MoxelSpreadsheet,
+    /// A vendor configuration kept for support: the row holds the `.cf`
+    /// deflated once more than the storage layer's own deflate.
+    ParentConfigurationFile,
     PredefinedData {
         model: PredefinedDataSourceModel,
         /// The metadata object that owns the body. A chart of accounts names
@@ -1046,6 +1049,14 @@ pub(super) fn source_asset_paths_with_indexes(
             }
         }
     }
+    let list_texts = parent_configuration_list_ids(&paths)
+        .into_iter()
+        .filter_map(|list_id| {
+            let bytes = rows_by_file_name.get(list_id.as_str())?.binary_bytes().ok()?;
+            Some((list_id, inflated_row_text(&bytes)?))
+        })
+        .collect::<BTreeMap<_, _>>();
+    insert_parent_configuration_assets(&mut paths, &list_texts, &file_names);
     let discoveries = parallel::install(|| {
         metadata_texts
             .par_iter()
@@ -1350,6 +1361,80 @@ pub(super) fn form_body_asset_paths(
     }
 
     paths
+}
+
+/// The vendor configurations a configuration on support keeps, each
+/// exported whole as `Ext/ParentConfigurations/<name>.cf`.
+///
+/// `Ext/ParentConfigurations.bin` lists them: `{6,0,<count>,<uuid>,0,<uuid>,
+/// "<version>","<vendor>","<name>",...}`, and the configuration root keeps
+/// each one's `.cf` in the row suffixed by that first uuid. 8.5.1.1150 BSP
+/// 3.2.1.356: one entry, `БиблиотекаСтандартныхПодсистемДемо`, whose row
+/// inflates to the native file byte for byte. A record naming more than one
+/// vendor configuration is left alone: where the next entry starts is not on
+/// record.
+pub(super) fn insert_parent_configuration_assets(
+    paths: &mut BTreeMap<String, SourceAsset>,
+    list_texts: &BTreeMap<String, String>,
+    file_names: &BTreeSet<&str>,
+) {
+    for (list_id, text) in list_texts {
+        if !paths
+            .get(list_id)
+            .is_some_and(|asset| asset.primary_path == Path::new("Ext/ParentConfigurations.bin"))
+        {
+            continue;
+        }
+        let text = text.trim_start_matches('\u{feff}');
+        let Some(fields) = split_1c_braced_fields(text, 0) else {
+            continue;
+        };
+        if fields.first().map(|field| field.trim()) != Some("6")
+            || fields.get(2).map(|field| field.trim()) != Some("1")
+        {
+            continue;
+        }
+        let (Some(uuid), Some(name)) = (
+            fields.get(3).and_then(|field| parse_uuid_field(field.trim())),
+            fields.get(8).and_then(|field| parse_1c_quoted_string(field.trim())),
+        ) else {
+            continue;
+        };
+        if name.is_empty() || name.contains(['/', '\\']) {
+            continue;
+        }
+        let suffix = format!(".{uuid}");
+        let bodies = file_names
+            .iter()
+            .filter(|file_name| file_name.ends_with(suffix.as_str()))
+            .collect::<Vec<_>>();
+        let [body] = bodies.as_slice() else {
+            continue;
+        };
+        paths.insert(
+            (*body).to_string(),
+            SourceAsset {
+                primary_path: PathBuf::from("Ext/ParentConfigurations").join(format!("{name}.cf")),
+                kind: SourceAssetKind::ParentConfigurationFile,
+            },
+        );
+    }
+}
+
+/// The rows that hold a configuration's `Ext/ParentConfigurations.bin`.
+pub(super) fn parent_configuration_list_ids(paths: &BTreeMap<String, SourceAsset>) -> Vec<String> {
+    paths
+        .iter()
+        .filter(|(_, asset)| asset.primary_path == Path::new("Ext/ParentConfigurations.bin"))
+        .map(|(id, _)| id.clone())
+        .collect()
+}
+
+/// A deflated row's text, when it inflates to UTF-8 with any content.
+pub(super) fn inflated_row_text(bytes: &[u8]) -> Option<String> {
+    let inflated = inflate_raw_deflate(bytes).ok()?;
+    let text = String::from_utf8(inflated).ok()?;
+    (!text.is_empty()).then_some(text)
 }
 
 fn configuration_source_asset_kind(
@@ -2462,19 +2547,6 @@ fn write_source_asset_inner(
                             diagnostics: extraction_diagnostics,
                         });
                     }
-                    // A whole-form refusal carries no per-slot diagnostic, but
-                    // its variant is still a stable code: the diagnostic export
-                    // records it and keeps traversing, nothing is emitted.
-                    if context.collect_all_source_asset_diagnostics {
-                        return Ok(WrittenSourceAsset::TypedRejectionNotEmitted {
-                            primary_path: asset.primary_path.clone(),
-                            family: "form",
-                            code: error.diagnostic_code(),
-                            classification: error.diagnostic_reason(),
-                            raw_length: bytes.len(),
-                            raw_sha256: raw_body_sha256(bytes),
-                        });
-                    }
                     let diagnostic_codes = extraction_diagnostics
                         .iter()
                         .map(|diagnostic| diagnostic.code)
@@ -2689,6 +2761,24 @@ fn write_source_asset_inner(
                 "form source asset {} declares no form-type discriminator",
                 asset.primary_path.display()
             );
+        }
+        SourceAssetKind::ParentConfigurationFile => {
+            // 8.5.1.1150 BSP: inflating the row twice gives the native
+            // `БиблиотекаСтандартныхПодсистемДемо.cf`, all 103 199 340 bytes.
+            let cf = inflate_raw_deflate(bytes)
+                .and_then(|once| inflate_raw_deflate(&once))
+                .with_context(|| {
+                    format!(
+                        "failed to inflate parent configuration {}",
+                        asset.primary_path.display()
+                    )
+                })?;
+            let path = output_dir.join(&asset.primary_path);
+            if let Some(parent) = path.parent() {
+                fs::create_dir_all(parent)
+                    .with_context(|| format!("failed to create {}", parent.display()))?;
+            }
+            fs::write(&path, cf).with_context(|| format!("failed to write {}", path.display()))?;
         }
         SourceAssetKind::InflatedBinary => {
             let inflated = inflate_raw_deflate(bytes).with_context(|| {

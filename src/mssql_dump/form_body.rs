@@ -14637,6 +14637,11 @@ fn parse_form_child_item_with_metadata_owners(
             picture_decoration_properties
                 .as_ref()
                 .and_then(|properties| properties.max_width().map(str::to_owned))
+        } else if let Some(value) = special_field_layout
+            .as_ref()
+            .and_then(|(schema, options)| schema.max_width(options))
+        {
+            Some(value)
         } else if let Some(value) =
             parse_form_table_max_extent(tag, fields, FORM_TABLE_MAX_WIDTH_FROM_END)
         {
@@ -16505,9 +16510,11 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
         // field written `<MaxHeight>7</MaxHeight>` and
         // `<VerticalStretch>false</VerticalStretch>` and a twin written
         // neither. Their 16-member `5` tuples agree member for member except
-        // at slot 4 -- `0` against `1` -- and slot 14 -- `7` against `0`. Slot
-        // 3 reads `1` on both, so the horizontal flag beside it stays
-        // unclaimed rather than guessed from the sibling shape.
+        // at slot 4 -- `0` against `1` -- and slot 14 -- `7` against `0`.
+        // Slot 3 is the horizontal flag beside it: the 8.5.1.1150 BSP text
+        // document field written `<HorizontalStretch>false</HorizontalStretch>`
+        // (`Catalogs/_ДемоБанковскиеСчета` `ТекстНазначенияПлатежа`) is the
+        // one of its 33 that holds `0` there.
         "TextDocumentField",
         FormDocumentFieldGeometry {
             discriminator: "5",
@@ -16518,7 +16525,7 @@ const FORM_DOCUMENT_FIELD_GEOMETRY: &[(&str, FormDocumentFieldGeometry)] = &[
             max_height: Some(14),
             auto_max_width: Some(10),
             auto_max_height: Some(13),
-            horizontal_stretch: None,
+            horizontal_stretch: Some(3),
             vertical_stretch: Some(4),
             edit: None,
             enable_start_drag: None,
@@ -23228,10 +23235,54 @@ pub(super) fn parse_form_child_item_data_path(
             FormChildItemDataPathProvenance::InferredFallback,
         ),
     };
+    let data_path = data_path.into_option();
+    // A field bound to a table names the multiple-value column as one of the
+    // additional columns its attribute declares for that very table: one
+    // `{<column id>,<additional-column marker>}` segment, and the platform
+    // writes the field's own path plus that column's name. 8.5.1.1150 BSP
+    // `Documents/ЭлектронноеПисьмоИсходящее/Forms/ФормаДокумента`: `Кому`,
+    // `Копия` and `СкрытаяКопия` over `Объект.ПолучателиПисьма` and its two
+    // siblings, each the additional column `Значение` (id 3) of its table.
+    let multiple_value = multiple_value_paths.0.or_else(|| {
+        if tag != "InputField" {
+            return None;
+        }
+        let primary = data_path.as_ref()?.data_path.as_str();
+        let primary_chain = parse_form_bound_chain_segments(fields.get(input_slots[0])?.trim())?;
+        let [attribute_id] = primary_chain.first()?.as_slice() else {
+            return None;
+        };
+        let attribute_id = parse_form_chain_numeric_id(attribute_id)?.to_string();
+        let options = form_input_field_extended_options(fields)?;
+        let members = split_1c_braced_fields(options.get(62)?.trim(), 0)?;
+        if members.len() != 20 {
+            return None;
+        }
+        let segments = parse_form_bound_chain_segments(members.get(9)?.trim())?;
+        let [segment] = segments.as_slice() else {
+            return None;
+        };
+        let [column_id, marker] = segment.as_slice() else {
+            return None;
+        };
+        if !marker
+            .trim()
+            .eq_ignore_ascii_case(FORM_VALUE_TABLE_COLUMN_BINDING_UUID)
+        {
+            return None;
+        }
+        let key = FormAttributeAdditionalColumnKey {
+            attribute_id,
+            table_path: primary.to_owned(),
+            column_id: parse_form_chain_numeric_id(column_id)?.to_string(),
+        };
+        let column = owner_scoped_bindings.additional_columns.get(&key)?.as_ref()?;
+        Some(format!("{primary}.{column}"))
+    });
     let paths = FormChildItemDataPaths {
-        primary: data_path.into_option(),
+        primary: data_path,
         footer: footer_data_path,
-        multiple_value: multiple_value_paths.0,
+        multiple_value,
         multiple_value_picture: multiple_value_paths.1,
         multiple_value_present: multiple_value_paths.2,
     };

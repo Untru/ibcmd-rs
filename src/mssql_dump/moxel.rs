@@ -859,6 +859,10 @@ pub(super) struct MoxelGanttChart {
 }
 
 pub(super) struct MoxelChart {
+    /// `labelsColor`, `bkgColor`, `ttlColor`, `legColor`, `chColor`,
+    /// `ttlTxtColor`, `legTxtColor` and `chTxtColor`, read from `tail[8]`,
+    /// `[21]`, `[23]`, `[25]`, `[27]`, `[28]`, `[29]` and `[30]`.
+    front_colors: Vec<String>,
     series_cur_id: usize,
     points_cur_id: usize,
     is_series_design: bool,
@@ -5701,9 +5705,25 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
     // is `base + 3*series + points + series*points` with `base` 91 for 73 and
     // 97 for 74, with no exception; the highest `post` slot this reader ever
     // reads is `rectangle_start + 11`, far ahead of the six.
+    //
+    // Platform 8.5 writes 75: the 74 record plus eight trailing colours
+    // (8.5.1.1150 BSP, both `GanttChart` templates: all eight automatic,
+    // and the native tree prints nothing for them). Only that all-automatic
+    // tail is read; any other colour there refuses the chart rather than
+    // dropping a value the platform would print.
     let post_base_len = match data.first()?.trim() {
         "73" => 91usize,
         "74" => 97usize,
+        "75" => {
+            let appended = data.get(data.len().checked_sub(8)?..)?;
+            if !appended
+                .iter()
+                .all(|member| compact_moxel_chart_token(member) == "{3,4,{0}}")
+            {
+                return None;
+            }
+            105usize
+        }
         _ => return None,
     };
     if data.len() > MAX_MOXEL_CHART_POINTS * 16 {
@@ -5925,6 +5945,15 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
     // (end of the historical note)
     let elements_is_init = parse_moxel_chart_bool(tail.get(81)?)?;
     validate_moxel_chart_v74_front(tail)?;
+    // The chart's own label, background and text colours were literals every
+    // 8.3.27 stand record agreed on (`style:FormTextColor`,
+    // `style:FormBackColor`, `#FFFFFF`); the 8.5.1.1150 BSP Gantt templates
+    // store the automatic colour in all eight and the platform prints `auto`,
+    // so they are read like any other chart colour.
+    let front_colors = MOXEL_CHART_FRONT_COLOR_SLOTS
+        .iter()
+        .map(|slot| parse_moxel_chart_color(tail.get(*slot)?))
+        .collect::<Option<Vec<_>>>()?;
     let values_scale_format = parse_moxel_chart_localized(tail.get(39)?)?;
     let is_auto_series_name = parse_moxel_chart_bool(tail.get(43)?)?;
     // Evidence: the same target record publishes
@@ -6117,6 +6146,7 @@ fn parse_moxel_chart(text: &str, object_refs: &BTreeMap<String, String>) -> Opti
         parse_moxel_chart_rectangle(post.get(rectangle_start + 8..rectangle_start + 12)?)?;
 
     Some(MoxelChart {
+        front_colors,
         series_cur_id,
         points_cur_id,
         is_series_design,
@@ -7143,6 +7173,9 @@ fn parse_moxel_chart_rectangle(fields: &[&str]) -> Option<MoxelChartRectangle> {
 /// `parse_moxel_chart`) -- the two `GanttChart` templates each diverge from
 /// the pre-existing corpus's shared default at a different subset of them,
 /// which a single hard-coded literal cannot spell for both at once.
+/// The `tail` slots of the chart colours `MoxelChart::front_colors` holds.
+const MOXEL_CHART_FRONT_COLOR_SLOTS: [usize; 8] = [8, 21, 23, 25, 27, 28, 29, 30];
+
 fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
     // `tail[40]` was a literal `"0"` and is not one:
     // `МакетФакторныйАнализВодопад` stores `"1"`. It is also not
@@ -7160,22 +7193,14 @@ fn validate_moxel_chart_v74_front(tail: &[&str]) -> Option<()> {
         (4, "\", \""),
         (6, "{1,0}"),
         (7, "{1,0}"),
-        (8, "{3,3,{-3}}"),
         (9, "0"),
         (10, "0"),
         (15, "{3,3,{-22}}"),
         (17, "{3,3,{-22}}"),
         (19, "{3,3,{-22}}"),
-        (21, "{3,3,{-1}}"),
         (22, "1"),
-        (23, "{3,3,{-1}}"),
         (24, "1"),
-        (25, "{3,3,{-1}}"),
         (26, "0"),
-        (27, "{3,0,{16777215}}"),
-        (28, "{3,3,{-3}}"),
-        (29, "{3,3,{-3}}"),
-        (30, "{3,3,{-3}}"),
         (41, "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}"),
         (45, "0"),
         (47, "30"),
@@ -12909,7 +12934,7 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     push_moxel_chart_literal(xml, "labelsLocation", chart.labels_location);
     push_moxel_chart_empty(xml, "lbFormat");
     push_moxel_chart_empty(xml, "lbpFormat");
-    push_moxel_chart_literal(xml, "labelsColor", "style:FormTextColor");
+    push_moxel_chart_literal(xml, "labelsColor", &chart.front_colors[0]);
     xml.push_str("\t\t\t<d3p1:labelsFont kind=\"AutoFont\"/>\r\n");
     push_moxel_chart_bool(xml, "transparentLabelsBkg", true);
     push_moxel_chart_literal(xml, "labelsBkgColor", "auto");
@@ -12942,16 +12967,16 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     );
     push_moxel_chart_literal(xml, "chBorderColor", "style:BorderColor");
     push_moxel_chart_bool(xml, "transparent", chart.transparent);
-    push_moxel_chart_literal(xml, "bkgColor", "style:FormBackColor");
+    push_moxel_chart_literal(xml, "bkgColor", &chart.front_colors[1]);
     push_moxel_chart_bool(xml, "isTrnspTtl", true);
-    push_moxel_chart_literal(xml, "ttlColor", "style:FormBackColor");
+    push_moxel_chart_literal(xml, "ttlColor", &chart.front_colors[2]);
     push_moxel_chart_bool(xml, "isTrnspLeg", true);
-    push_moxel_chart_literal(xml, "legColor", "style:FormBackColor");
+    push_moxel_chart_literal(xml, "legColor", &chart.front_colors[3]);
     push_moxel_chart_bool(xml, "isTrnspCh", false);
-    push_moxel_chart_literal(xml, "chColor", "#FFFFFF");
-    push_moxel_chart_literal(xml, "ttlTxtColor", "style:FormTextColor");
-    push_moxel_chart_literal(xml, "legTxtColor", "style:FormTextColor");
-    push_moxel_chart_literal(xml, "chTxtColor", "style:FormTextColor");
+    push_moxel_chart_literal(xml, "chColor", &chart.front_colors[4]);
+    push_moxel_chart_literal(xml, "ttlTxtColor", &chart.front_colors[5]);
+    push_moxel_chart_literal(xml, "legTxtColor", &chart.front_colors[6]);
+    push_moxel_chart_literal(xml, "chTxtColor", &chart.front_colors[7]);
     push_moxel_chart_font_xml(xml, "ttlFont", &chart.ttl_font);
     push_moxel_chart_font_xml(xml, "legFont", &chart.leg_font);
     push_moxel_chart_font_xml(xml, "chFont", &chart.ch_font);

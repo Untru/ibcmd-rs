@@ -428,6 +428,7 @@ impl MssqlDumpTimingReport {
             SourceAssetKind::DataCompositionSchema
             | SourceAssetKind::ClientApplicationInterface
             | SourceAssetKind::InflatedBinary
+            | SourceAssetKind::ParentConfigurationFile
             | SourceAssetKind::InflatedBase64OrBinary
             | SourceAssetKind::HomePageWorkArea
             | SourceAssetKind::WsDefinition => {

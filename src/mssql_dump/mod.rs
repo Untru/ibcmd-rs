@@ -4371,7 +4371,7 @@ fn dump_table_rows_streamed(
     timings.prepare_functional_option_refs_ms += elapsed_ms(index_part_started);
     let source_asset_metadata_texts = &index_metadata_texts;
     let index_part_started = Instant::now();
-    let source_assets = source_asset_paths_with_indexes(
+    let mut source_assets = source_asset_paths_with_indexes(
         &write_index_rows,
         source_asset_metadata_texts,
         &command_refs,
@@ -4383,6 +4383,36 @@ fn dump_table_rows_streamed(
         &template_refs,
         &subsystem_refs,
     );
+    // The index rows are headers here, so the parent-configuration list the
+    // vendor `.cf` files are named from is fetched on its own.
+    let parent_list_ids = source_assets::parent_configuration_list_ids(&source_assets)
+        .into_iter()
+        .collect::<BTreeSet<_>>();
+    if !parent_list_ids.is_empty() {
+        let list_rows = fetch_config_rows_bcp(
+            sqlcmd, bcp, server, user, password, database, table, &parent_list_ids,
+        )?;
+        let list_texts = list_rows
+            .iter()
+            .filter(|row| row.part_no == 0)
+            .filter_map(|row| {
+                let bytes = row.binary_bytes().ok()?;
+                Some((
+                    row.file_name.clone(),
+                    source_assets::inflated_row_text(&bytes)?,
+                ))
+            })
+            .collect::<BTreeMap<_, _>>();
+        let index_file_names = write_index_rows
+            .iter()
+            .map(|row| row.file_name.as_str())
+            .collect::<BTreeSet<_>>();
+        source_assets::insert_parent_configuration_assets(
+            &mut source_assets,
+            &list_texts,
+            &index_file_names,
+        );
+    }
     let source_asset_diagnostics =
         build_form_owner_resolution_diagnostics_from_texts(source_asset_metadata_texts);
     let write_rows_by_file_name = write_index_rows

@@ -193,6 +193,19 @@ impl<'a> XmlEdits<'a> {
         Ok(())
     }
 
+    /// Adds `body` right after `element`, at its indentation.
+    fn insert_after(&mut self, element: usize, body: &str) {
+        let at = self.elements[element].line_end;
+        let indent = self.indent_of(element).to_owned();
+        let mut text = String::new();
+        for line in body.split_inclusive("\r\n") {
+            text.push_str(&indent);
+            text.push_str(line);
+        }
+        let seq = self.edits.len();
+        self.edits.push((at, at, text, 0, seq));
+    }
+
     fn place_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
         let parent_tag = self.elements[parent].tag.clone();
         let order = super::form_v85_order::child_order(&parent_tag)
@@ -584,14 +597,38 @@ const FACT_RULES: &[FactRule] = &[
         replaces: &[],
         values: &[("1", Some("true")), ("2", None)],
     },
-    // The 8.3.27 reader reads `EditMode` for every field kind but this one;
-    // the member is the same (1 unset, 2 `EnterOnInput`) on all 18 BSP bars.
+    // The 8.3.27 reader reads `EditMode` for every field kind but these; the
+    // member is the same on every 8.5 BSP field of any kind (0 `Directly`, 1
+    // unset, 2 `EnterOnInput`): 22 bars, 2 track bars, 1 chart.
     FactRule {
-        tags: &["ProgressBarField"],
+        tags: &["ProgressBarField", "TrackBarField", "ChartField"],
         source: FactSource::ItemMember("48", 26),
         element: "EditMode",
         replaces: &[],
-        values: &[("1", None), ("2", Some("EnterOnInput"))],
+        values: &[
+            ("0", Some("Directly")),
+            ("1", None),
+            ("2", Some("EnterOnInput")),
+        ],
+    },
+    // Field member 7: `0` on the one BSP check box written `false`, `1` on
+    // the one input field written `true`, `2` on the 8 145 others.
+    FactRule {
+        tags: FIELD_TAGS,
+        source: FactSource::Item("48", 7),
+        element: "ShowTitleInCard",
+        replaces: &[],
+        values: TRI_STATE,
+    },
+    // The last member of the 8.3.27 button record: `2` on the one BSP button
+    // written `DontChangeBehavior`; `0` and `1` on the others, which write
+    // nothing.
+    FactRule {
+        tags: &["Button"],
+        source: FactSource::ItemMember("34", 51),
+        element: "OnMainServerUnavalableBehavior",
+        replaces: &[],
+        values: &[("0", None), ("1", None), ("2", Some("DontChangeBehavior"))],
     },
     FactRule {
         tags: &["RadioButtonField"],
@@ -950,6 +987,65 @@ fn apply_group_events(edits: &mut XmlEdits<'_>, group: usize, node: &Node) -> Re
     edits.insert_child(group, "Events", &body)
 }
 
+/// The picture 8.5 appends to a choice-list value: written after the value's
+/// own `<Value>`, in document order of the values (8.5.1.1150 BSP: 17
+/// pictures over 4 forms). A body whose values the written XML does not
+/// match one for one refuses rather than pairing them on a guess.
+fn apply_choice_value_pictures(
+    edits: &mut XmlEdits<'_>,
+    facts: &FormV85Facts,
+    object_refs: &std::collections::BTreeMap<String, String>,
+) -> Result<()> {
+    let is_empty = |node: &Node| node.to_text().starts_with("{4,0,{0},");
+    if facts.choice_value_pictures.iter().all(|node| is_empty(node)) {
+        return Ok(());
+    }
+    let values = edits
+        .elements
+        .iter()
+        .enumerate()
+        .filter(|(_, element)| {
+            element.tag == "xr:Value"
+                && edits.xml[element.open_start..element.line_end]
+                    .split('>')
+                    .next()
+                    .is_some_and(|open| open.contains("xsi:type=\"FormChoiceListDesTimeValue\""))
+        })
+        .map(|(index, _)| index)
+        .collect::<Vec<_>>();
+    if values.len() != facts.choice_value_pictures.len() {
+        bail!(
+            "8.5 choice-list values carry pictures, and the written XML has {} values for {} stored",
+            values.len(),
+            facts.choice_value_pictures.len()
+        );
+    }
+    for (value, picture) in values.into_iter().zip(&facts.choice_value_pictures) {
+        if is_empty(picture) {
+            continue;
+        }
+        let text = picture.to_text();
+        let (reference, load_transparent) =
+            super::form_body::parse_form_child_item_picture_value(&text, object_refs)
+                .ok_or_else(|| anyhow!("unreadable 8.5 choice-list value picture {text}"))?;
+        let anchor = edits
+            .direct_children(value, "Value")
+            .last()
+            .copied()
+            .ok_or_else(|| anyhow!("a written choice-list value has no <Value>"))?;
+        let body = super::form_body::format_form_picture_element(
+            "Picture",
+            Some(&reference),
+            None,
+            load_transparent,
+            None,
+            0,
+        );
+        edits.insert_after(anchor, &body);
+    }
+    Ok(())
+}
+
 /// The `name` attribute of a written element's opening tag.
 fn element_name(edits: &XmlEdits<'_>, element: usize) -> Option<String> {
     let open = edits.elements[element].open_start;
@@ -1290,6 +1386,7 @@ pub(super) fn apply_v85_form_facts(
         .position(|element| element.parent.is_none() && element.tag == "Form")
         .ok_or_else(|| anyhow!("written form XML has no <Form> root"))?;
     apply_rules(&mut edits, root, facts, None, None, object_refs, &mut assets)?;
+    apply_choice_value_pictures(&mut edits, facts, object_refs)?;
     match facts.root_scale.as_deref() {
         None | Some("100") => {}
         Some(scale) => {

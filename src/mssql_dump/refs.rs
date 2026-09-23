@@ -3206,6 +3206,140 @@ fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(Strin
     Some((envelope.identity, header.name))
 }
 
+/// The configuration properties platform 8.5 adds, in the element order its
+/// `Configuration.xml` writes them.
+const V85_CONFIGURATION_AUXILIARY_FORMS: [&str; 8] = [
+    "AuxiliaryReportForm",
+    "AuxiliaryReportVariantForm",
+    "AuxiliaryReportSettingsForm",
+    "AuxiliaryDynamicListSettingsForm",
+    "AuxiliaryDataHistoryChangeHistoryForm",
+    "AuxiliaryDataHistoryVersionDataForm",
+    "AuxiliaryDataHistoryVersionDifferencesForm",
+    "AuxiliaryCollaborationSystemUsersChoiceForm",
+];
+
+/// What 8.5 writes for the properties it adds to a configuration: read from
+/// the members an 8.5 `{76,...}` tuple appends, or the platform's defaults for
+/// a configuration still in the 8.3.27 `{68,...}` tuple.
+struct V85ConfigurationProperties {
+    auxiliary_forms: Vec<Option<String>>,
+    interface_variant: &'static str,
+    theme: &'static str,
+    windows_open_variant: &'static str,
+    caption: Vec<(String, String)>,
+    short_caption: Vec<(String, String)>,
+    migration_mode: &'static str,
+}
+
+fn v85_configuration_properties(
+    text: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<V85ConfigurationProperties> {
+    let v85_tuple = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
+    if !v85_tuple {
+        // 8.5.1.1150 ERP УХ, whose configuration is still in the 8.3.27
+        // tuple: every added form empty, the navigation-left main window, the
+        // automatic theme, data opened in dialogs, no captions, no 8.5
+        // interface migration.
+        return Some(V85ConfigurationProperties {
+            auxiliary_forms: vec![None; V85_CONFIGURATION_AUXILIARY_FORMS.len()],
+            interface_variant: "NavigationLeft",
+            theme: "Auto",
+            windows_open_variant: "OpenDataInDialogs",
+            caption: Vec::new(),
+            short_caption: Vec::new(),
+            migration_mode: "DontUse",
+        });
+    }
+    let start = text.find("{76,")?;
+    let fields = split_1c_braced_fields(text, start)?;
+    if fields.len() != 77 {
+        return None;
+    }
+    // Members 61-63 and 66-68 carry the four enumerations. One 8.5 tuple is
+    // on record (BSP 3.2.1.356), so only its combination is read; any other
+    // refuses rather than attributing codes to properties on a guess.
+    let codes = [61, 62, 63, 66, 67, 68].map(|index| fields[index].trim());
+    let (interface_variant, theme, windows_open_variant, migration_mode) = match codes {
+        ["0", "6", "0", "0", "0", "0"] => ("NavigationLeft", "Auto", "OpenDataInTabs", "Use"),
+        _ => return None,
+    };
+    let mut auxiliary_forms = Vec::with_capacity(8);
+    for field in &fields[69..77] {
+        let uuid = parse_uuid_field(field.trim())?;
+        if information_register_uuid_is_zero(&uuid) {
+            auxiliary_forms.push(None);
+        } else {
+            auxiliary_forms.push(Some(object_refs.get(&uuid)?.clone()));
+        }
+    }
+    Some(V85ConfigurationProperties {
+        auxiliary_forms,
+        interface_variant,
+        theme,
+        windows_open_variant,
+        caption: parse_1c_synonyms(fields[64].trim()),
+        short_caption: parse_1c_synonyms(fields[65].trim()),
+        migration_mode,
+    })
+}
+
+/// Inserts the 8.5 properties after the elements they follow in 2.21.
+fn insert_v85_configuration_properties_xml(
+    xml: &mut String,
+    properties: &V85ConfigurationProperties,
+) -> Option<()> {
+    fn after_element(xml: &str, name: &str) -> Option<usize> {
+        let empty = format!("\t\t\t<{name}/>\r\n");
+        if let Some(at) = xml.find(&empty) {
+            return Some(at + empty.len());
+        }
+        let close = format!("</{name}>\r\n");
+        let open = xml.find(&format!("\t\t\t<{name}>"))?;
+        Some(xml[open..].find(&close)? + open + close.len())
+    }
+    let mut inserts = Vec::new();
+    let mut forms = String::new();
+    for (name, value) in V85_CONFIGURATION_AUXILIARY_FORMS
+        .iter()
+        .zip(&properties.auxiliary_forms)
+    {
+        push_optional_text_element(&mut forms, "\t\t\t", name, value.as_deref());
+    }
+    inserts.push((after_element(xml, "DefaultCollaborationSystemUsersChoiceForm")?, forms));
+    inserts.push((
+        after_element(xml, "AllowedIncomingShareRequestTypes")?,
+        format!(
+            "\t\t\t<MainClientApplicationWindowInterfaceVariant>{}</MainClientApplicationWindowInterfaceVariant>\r\n\t\t\t<ClientApplicationTheme>{}</ClientApplicationTheme>\r\n",
+            properties.interface_variant, properties.theme
+        ),
+    ));
+    inserts.push((
+        after_element(xml, "MainClientApplicationWindowMode")?,
+        format!(
+            "\t\t\t<ClientApplicationWindowsOpenVariant>{}</ClientApplicationWindowsOpenVariant>\r\n",
+            properties.windows_open_variant
+        ),
+    ));
+    let mut captions = String::new();
+    push_localized_property(&mut captions, "\t\t\t", "Caption", &properties.caption);
+    push_localized_property(&mut captions, "\t\t\t", "ShortCaption", &properties.short_caption);
+    inserts.push((after_element(xml, "DefaultInterface")?, captions));
+    inserts.push((
+        after_element(xml, "InterfaceCompatibilityMode")?,
+        format!(
+            "\t\t\t<Version85InterfaceMigrationMode>{}</Version85InterfaceMigrationMode>\r\n",
+            properties.migration_mode
+        ),
+    ));
+    inserts.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
+    for (at, text) in inserts {
+        xml.insert_str(at, &text);
+    }
+    Some(())
+}
+
 pub(super) fn extract_configuration_source_xml(
     text: &str,
     uuid: &str,
@@ -3227,13 +3361,19 @@ pub(super) fn extract_configuration_source_xml(
     let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
     header.uuid = uuid.to_string();
     let mut properties =
-        parse_configuration_properties_from_text(text, object_refs).unwrap_or_default();
+        parse_configuration_properties_from_text(text, object_refs, source_version)
+            .unwrap_or_default();
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
     let evidenced_property_fields = configuration_root_property_fields(text, uuid);
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
+        // The stored interface digit is numbered by the tuple that stores it:
+        // an 8.5 writer reads a `{76,...}` tuple's `3` as `Version8_5EnableTaxi`
+        // (BSP 3.2.1.356) and a `{68,...}` tuple's `2` as 8.3.27 does
+        // (`TaxiEnableVersion8_2`, ERP УХ).
+        let v85_tuple = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
         match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block_on(
             property_fields,
-            configuration_root_is_v85(text),
+            v85_tuple && source_version == InfobaseConfigSourceVersion::V2_21,
         ) {
             Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
             Err(
@@ -3322,6 +3462,10 @@ pub(super) fn extract_configuration_source_xml(
         .then(|| parse_configuration_child_objects(text, uuid, &header_uuid))
         .unwrap_or_default();
     let mut xml = format_configuration_source_xml(&header, &properties, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        let v85 = v85_configuration_properties(text, object_refs)?;
+        insert_v85_configuration_properties_xml(&mut xml, &v85)?;
+    }
     if let Some(root_layout) = &root_layout {
         insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects).ok()?;
         if let Some(child_objects) =
@@ -3346,6 +3490,7 @@ pub(super) fn extract_configuration_source_xml(
 pub(super) fn parse_configuration_properties_from_text(
     text: &str,
     object_refs: &BTreeMap<String, String>,
+    source_version: InfobaseConfigSourceVersion,
 ) -> Option<ConfigurationProperties> {
     let (fields, is_native_68_shape) = configuration_root_fields(text)?;
     // Field 26 mirroring field 43 (`CompatibilityMode`, below) into
@@ -3381,11 +3526,11 @@ pub(super) fn parse_configuration_properties_from_text(
     // length here tells the two apart instead of defaulting off of a match
     // that was never this record to begin with.
     let is_normalized_67_shape = !is_native_68_shape && fields.len() == 61;
-    // The platform that reads a configuration clamps its compatibility to
-    // its own edition: 8.3.27 prints `80501` as `Version8_3_27`, while 8.5
-    // (the only reader of a `{76,...}` tuple) prints it as `Version8_5_1`
-    // (8.5.1.1150 BSP 3.2.1.356, both properties).
-    let ceiling = if configuration_root_is_v85(text) {
+    // The platform that writes the export clamps a configuration's
+    // compatibility to its own edition: 8.3.27 prints `80501` as
+    // `Version8_3_27`, while 8.5 prints it as `Version8_5_1` (8.5.1.1150 BSP
+    // 3.2.1.356, both properties).
+    let ceiling = if source_version == InfobaseConfigSourceVersion::V2_21 {
         V85_PACKED_PLATFORM_VERSION
     } else {
         MAX_EVIDENCED_PACKED_PLATFORM_VERSION
@@ -4505,11 +4650,6 @@ const MAX_EVIDENCED_PACKED_PLATFORM_VERSION: u32 = 80327;
 /// Platform 8.5.1, the edition that writes the `{76,...}` configuration
 /// tuple and reads it back.
 const V85_PACKED_PLATFORM_VERSION: u32 = 80501;
-
-/// Whether a configuration root text carries the platform 8.5 tuple.
-pub(super) fn configuration_root_is_v85(text: &str) -> bool {
-    !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,")
-}
 
 pub(super) fn configuration_compatibility_mode_xml(value: &str) -> Option<String> {
     configuration_compatibility_mode_xml_under(value, MAX_EVIDENCED_PACKED_PLATFORM_VERSION)

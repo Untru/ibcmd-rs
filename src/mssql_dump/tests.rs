@@ -47169,6 +47169,7 @@ fn formats_enum_with_empty_child_objects_as_self_closing_node() {
         extended_list_presentation: vec![("en".to_string(), "Statuses".to_string())],
         explanation: Vec::new(),
         values: Vec::new(),
+        value_colors: Vec::new(),
         child_forms: Vec::new(),
         child_templates: Vec::new(),
     };
@@ -47316,6 +47317,8 @@ fn extracts_enum_child_form_and_template_refs_from_current_indexes() {
 fn ignores_report_and_indexes_task_rows_in_generated_type_index() {
     let report_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let report_object_type_id = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
+    // `20` with its header at index 3 is the platform 8.5 report record
+    // (8.5.1.1150 BSP), whose object type is indexed like the 8.3.27 `19`.
     let report_blob = deflate_for_test(
             format!(
                 "{{1,\r\n{{20,{report_object_type_id},cccccccc-cccc-4ccc-cccc-cccccccccccc,\r\n{{0,\r\n{{3,\r\n{{1,0,{report_uuid}}},\"SalesReport\",{{1,\"en\",\"Sales report\"}},\"\"}}\r\n}},0}}\r\n}}"
@@ -47348,7 +47351,10 @@ fn ignores_report_and_indexes_task_rows_in_generated_type_index() {
 
     let index = build_metadata_type_index(&rows);
 
-    assert!(!index.contains_key(report_object_type_id));
+    assert_eq!(
+        index.get(report_object_type_id).map(String::as_str),
+        Some("cfg:ReportObject.SalesReport")
+    );
     assert_eq!(
         index.get(task_object_type_id).map(String::as_str),
         Some("cfg:TaskObject.Task")
@@ -53413,8 +53419,8 @@ fn rejects_malformed_strict_filter_criterion_root_owner_and_scalar_slots() {
             &BTreeMap::new(),
             InfobaseConfigSourceVersion::V2_21,
         )
-        .is_none(),
-        "strict full V2.21 is unsupported"
+        .is_some(),
+        "strict full V2.21 reads the same record as V2.20 (8.5.1.1150 BSP)"
     );
 }
 
@@ -56274,7 +56280,9 @@ fn extracts_report_xml_with_owner_properties_from_metadata_blob() {
     let xml_v21 = String::from_utf8(extracted_v21.xml).unwrap();
     assert!(xml_v21.contains(r#"version="2.21""#));
     assert!(!xml_v21.contains(r#"version="2.20""#));
-    assert!(!xml_v21.contains("<AuxiliaryVariantForm"));
+    // 2.21 always writes the element; a `{19,...}` record prints it empty
+    // (8.5.1.1150 ERP УХ: all 1 329 reports).
+    assert!(xml_v21.contains("<AuxiliaryVariantForm/>"));
     assert!(xml_v21.contains("<Form>SettingsForm</Form>"));
 }
 

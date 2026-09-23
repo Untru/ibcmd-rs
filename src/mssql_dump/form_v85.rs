@@ -179,6 +179,9 @@ pub(super) struct FormV85ItemFacts {
 pub(super) struct FormV85Facts {
     /// The 12 members the root trailer appends.
     pub(super) root_tail: Vec<Node>,
+    /// The member 8.5 appends to every choice-list value (its picture), in
+    /// document order.
+    pub(super) choice_value_pictures: Vec<Node>,
     /// The root's scale percentage (`100` unless the form sets one), the
     /// member 20 from the end of the 8.5 root record.
     pub(super) root_scale: Option<String>,
@@ -193,13 +196,29 @@ pub(super) struct FormV85Facts {
 }
 
 pub(super) fn is_v85_form_body(body: &ParsedFormBodyBlob) -> bool {
-    body.layout
+    let declares_revision = body
+        .layout
         .trim_start()
         .strip_prefix('{')
         .map(|rest| rest.trim_start())
         .is_some_and(|rest| {
             rest.strip_prefix(V85_FORM_ROOT_REVISION)
                 .is_some_and(|after| after.trim_start().starts_with(','))
+        });
+    // The revision alone is a number any hand-made record can carry; an 8.5
+    // root also ends in its trailer, whose own `{59,...}` revision tuple sits
+    // 14 members from the end.
+    declares_revision
+        && super::split_1c_braced_fields(&body.layout, 0).is_some_and(|fields| {
+            fields.len() > V85_ROOT_TRAILER_APPENDED + 2
+                && fields[fields.len() - V85_ROOT_TRAILER_APPENDED - 2]
+                    .trim_start()
+                    .strip_prefix('{')
+                    .is_some_and(|rest| {
+                        rest.trim_start()
+                            .strip_prefix(V85_FORM_ROOT_REVISION)
+                            .is_some_and(|after| after.trim_start().starts_with(','))
+                    })
         })
 }
 
@@ -739,7 +758,8 @@ fn convert_values_and_commands(node: Node, facts: &mut FormV85Facts) -> Result<N
         if let Node::List(value) = &mut members[2] {
             match (value.first().and_then(Node::leaf), value.len()) {
                 (Some("1"), 7) => {
-                    value.truncate(6);
+                    let picture = value.pop().expect("seven members");
+                    facts.choice_value_pictures.push(picture);
                     value[0] = Node::Leaf("0".to_owned());
                 }
                 (lead, len) => bail!(

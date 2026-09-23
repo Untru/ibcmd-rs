@@ -163,6 +163,10 @@ pub(crate) fn parse_configuration_properties_evidenced_default_block(
 fn v85_interface_compatibility_mode_xml(digit: u8) -> Option<&'static str> {
     match digit {
         b'3' => Some("Version8_5EnableTaxi"),
+        // The platform keeps the modes it had: 8.5 lists `Version8_2` and
+        // `TaxiEnableVersion8_2` beside the modes it adds.
+        b'0' => Some("Version8_2"),
+        b'2' => Some("TaxiEnableVersion8_2"),
         _ => None,
     }
 }
