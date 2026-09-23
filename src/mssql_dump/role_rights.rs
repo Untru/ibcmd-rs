@@ -1079,7 +1079,7 @@ pub(super) fn parse_role_restriction_templates(
     Some(templates)
 }
 
-pub(super) fn role_right_name(uuid: &str) -> Option<&'static str> {
+pub(crate) fn role_right_name(uuid: &str) -> Option<&'static str> {
     ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied()
 }
 

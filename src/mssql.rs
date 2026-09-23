@@ -7287,7 +7287,31 @@ fn source_config_digest_parity_report(
 ) -> MssqlSourceConfigDigestParityReport {
     let expected =
         expected_source_config_digests(metadata_objects, common_modules, versions, source_root);
+    write_staged_rows_for_virtual_cycle(&expected);
     compare_expected_source_config_digests(&expected, config_blobs, source_root)
+}
+
+/// The virtual load cycle, first half: when `IBCMD_RS_WRITE_STAGED_ROWS_DIR`
+/// names a directory, every row this dry run would stage is written there as
+/// `<file name>.bin`, the exact stored bytes. `mssql-dump-config` run with
+/// `IBCMD_RS_ROW_OVERRIDE_DIR` on that directory then exports them in place
+/// of the database's rows -- a load followed by an export, without writing
+/// to SQL. The versions row is left out: its new generation uuids are the
+/// load's bookkeeping, not source content.
+fn write_staged_rows_for_virtual_cycle(expected: &[ExpectedSourceConfigDigest]) {
+    let Some(dir) = std::env::var_os("IBCMD_RS_WRITE_STAGED_ROWS_DIR").map(PathBuf::from) else {
+        return;
+    };
+    if let Err(error) = fs::create_dir_all(&dir) {
+        eprintln!("failed to create {}: {error}", dir.display());
+        return;
+    }
+    for row in expected.iter().filter(|row| row.kind != "versions") {
+        let path = dir.join(format!("{}.bin", row.file_name));
+        if let Err(error) = fs::write(&path, &row.blob) {
+            eprintln!("failed to write {}: {error}", path.display());
+        }
+    }
 }
 
 fn expected_source_config_digests(

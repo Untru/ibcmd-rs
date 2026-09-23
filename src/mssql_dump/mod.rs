@@ -978,6 +978,7 @@ mod mxl_ir;
 pub mod offline_context;
 mod refs;
 mod role_rights;
+pub(crate) use role_rights::role_right_name;
 mod selected;
 mod source_asset_diagnostics;
 mod source_assets;
