@@ -31207,6 +31207,7 @@ fn parse_constant_xml_properties(
     let mut number_digits = None::<String>;
     let mut number_fraction_digits = None::<String>;
     let mut number_allowed_sign = None::<String>;
+    let mut date_fractions = None::<String>;
     let mut use_standard_commands = None::<String>;
 
     loop {
@@ -31226,6 +31227,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -31239,6 +31241,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -31260,6 +31263,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -31280,6 +31284,7 @@ fn parse_constant_xml_properties(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        date_fractions,
         source,
     )?;
     let use_standard_commands =
@@ -31314,6 +31319,7 @@ fn parse_defined_type_xml_properties(
     let mut number_digits = None::<String>;
     let mut number_fraction_digits = None::<String>;
     let mut number_allowed_sign = None::<String>;
+    let mut date_fractions = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -31333,6 +31339,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::CData(text)) => {
@@ -31346,6 +31353,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::GeneralRef(reference)) => {
@@ -31367,6 +31375,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::End(_)) => {
@@ -31387,9 +31396,8 @@ fn parse_defined_type_xml_properties(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
-        // Unread here, as it always was; see `parse_date_fractions_mark`.
-        None,
-        StringAllowedLengthCoding::VariableIsZero,
+        date_fractions,
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         true,
     )?;
@@ -32498,6 +32506,7 @@ fn parse_constant_value_type(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<MetadataTypePatternElement> {
     let mut elements = parse_metadata_type_pattern_elements(
@@ -32508,10 +32517,8 @@ fn parse_constant_value_type(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
-        // A constant's `<DateQualifiers>` is unread here, as it always was:
-        // only the form shapes above were measured against stored bodies.
-        None,
-        StringAllowedLengthCoding::VariableIsZero,
+        date_fractions,
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         false,
     )?;
@@ -33093,10 +33100,11 @@ fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
 /// silently applied to the other's artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StringAllowedLengthCoding {
-    /// `Variable` is 0. What the constant and defined-type callers of this
-    /// module have always written; unmeasured here, and left alone.
-    VariableIsZero,
-    /// `Variable` is 1 and `Fixed` is 0, which is what a form body stores.
+    /// `Variable` is 1 and `Fixed` is 0, which is what a form body stores --
+    /// and a constant or a defined type too: every one of both corpora whose
+    /// `<Type>` is a string with a non-zero `<Length>` (БСП 21 constants
+    /// `Variable` to 1, 1 `Fixed` to 0, 3 defined types `Variable` to 1; ERP
+    /// УХ 38 + 1 constants, 81 + 1 defined types, the same way), no exception.
     ///
     /// A pure partition over the 34 164 value-table columns of ERP УХ whose
     /// `<Type>` is a lone `xs:string` with a non-zero `<Length>`: 33 782
@@ -33105,10 +33113,6 @@ enum StringAllowedLengthCoding {
     /// flag at all, which is why this went unnoticed -- 44 553 of the
     /// columns, and most of the attributes, take that branch.
     ///
-    /// The session-parameter and defined-type writers in
-    /// `compiler/families/simple.rs` already write 1 for `Variable`; only
-    /// this module's constant path writes 0, and whether that one is right
-    /// is not measured here.
     VariableIsOne,
 }
 
@@ -33126,7 +33130,6 @@ fn parse_string_allowed_length_flag(
         }
     };
     Ok(match coding {
-        StringAllowedLengthCoding::VariableIsZero => u8::from(!variable),
         StringAllowedLengthCoding::VariableIsOne => u8::from(variable),
     })
 }
@@ -33372,6 +33375,7 @@ fn append_constant_xml_text(
     number_digits: &mut Option<String>,
     number_fraction_digits: &mut Option<String>,
     number_allowed_sign: &mut Option<String>,
+    date_fractions: &mut Option<String>,
     use_standard_commands: &mut Option<String>,
 ) {
     append_metadata_type_xml_text(
@@ -33384,6 +33388,7 @@ fn append_constant_xml_text(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        date_fractions,
     );
 
     if path_ends_with(path, &["Constant", "Properties", "UseStandardCommands"]) {
@@ -33408,7 +33413,11 @@ fn append_metadata_type_xml_text(
     number_digits: &mut Option<String>,
     number_fraction_digits: &mut Option<String>,
     number_allowed_sign: &mut Option<String>,
+    date_fractions: &mut Option<String>,
 ) {
+    if path_ends_with(path, &[kind, "Properties", "Type", "DateQualifiers", "DateFractions"]) {
+        date_fractions.get_or_insert_with(String::new).push_str(value);
+    }
     if path_ends_with(path, &[kind, "Properties", "Type", "Type"]) {
         types.push(value.to_string());
     } else if path_ends_with(
@@ -36681,7 +36690,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"NewConstant\""));
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
         assert!(inflated.contains("\"New comment\""));
-        assert!(inflated.contains(r#"{"Pattern",{"S",50,0}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"S",50,1}}"#));
         assert!(inflated.contains(",1,1,{0}"));
     }
 
@@ -36715,7 +36724,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         <v8:Type>xs:string</v8:Type>
         <v8:StringQualifiers>
           <v8:Length>4</v8:Length>
-          <v8:AllowedLength>Fixed</v8:AllowedLength>
+          <v8:AllowedLength>Variable</v8:AllowedLength>
         </v8:StringQualifiers>
       </Type>
       <UseStandardCommands>true</UseStandardCommands>
@@ -36867,7 +36876,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(packed.properties.kind, "DefinedType");
         assert!(inflated.contains("\"NewType\""), "{inflated}");
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
-        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,0}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
     }
 
     #[test]
