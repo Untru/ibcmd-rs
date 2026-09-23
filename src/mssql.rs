@@ -6424,6 +6424,16 @@ fn fetch_config_blob_with_auth(
     database: &str,
     file_name: &str,
 ) -> Result<Vec<u8>> {
+    // A dry run over a large tree fetches thousands of base rows one sqlcmd
+    // call at a time (ERP УХ: over an hour). `IBCMD_RS_BASE_ROWS_DIR` names a
+    // `mssql-dump-config --write-binary-rows` table directory of the same
+    // database (`<file name>__part0.bin`), read in place of the query.
+    if let Some(dir) = std::env::var_os("IBCMD_RS_BASE_ROWS_DIR") {
+        let path = PathBuf::from(dir).join(format!("{file_name}__part0.bin"));
+        if let Ok(bytes) = fs::read(&path) {
+            return Ok(bytes);
+        }
+    }
     let sql = format!(
         "SET NOCOUNT ON; USE {db};\n\
          SELECT COALESCE((\n\
@@ -6513,17 +6523,43 @@ fn run_sql_capture_with_auth(
     sql_auth: SqlAuth<'_>,
     sql: &str,
 ) -> Result<String> {
-    let output = sqlcmd_command_with_auth(sqlcmd, server, sql_auth, sql)
-        .output()
-        .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
-    if !output.status.success() {
-        return Err(anyhow!(
-            "sqlcmd failed: stdout={} stderr={}",
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        ));
+    // A connection that never logged in ran nothing, so it is retried: an
+    // ERP УХ audit issues thousands of these calls and died after 80 minutes
+    // on one login timeout while the machine was busy.
+    let mut attempt = 0u32;
+    loop {
+        let output = sqlcmd_command_with_auth(sqlcmd, server, sql_auth, sql)
+            .output()
+            .with_context(|| format!("failed to launch sqlcmd at {}", sqlcmd.display()))?;
+        if output.status.success() {
+            return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+        }
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        attempt += 1;
+        if attempt < 6 && sqlcmd_failed_before_login(&stdout, &stderr) {
+            std::thread::sleep(std::time::Duration::from_secs(u64::from(attempt) * 2));
+            continue;
+        }
+        return Err(anyhow!("sqlcmd failed: stdout={stdout} stderr={stderr}"));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+/// True when sqlcmd reports that it could not open or log in to the server
+/// connection at all (as opposed to a statement that ran and failed).
+fn sqlcmd_failed_before_login(stdout: &str, stderr: &str) -> bool {
+    let text = format!("{stdout}\n{stderr}");
+    [
+        "Login timeout expired",
+        "HYT00",
+        "08001",
+        "TCP Provider",
+        "Не удается завершить вход в систему",
+        "Истекло время ожидания входа",
+        "Named Pipes Provider",
+    ]
+    .iter()
+    .any(|marker| text.contains(marker))
 }
 
 fn run_sql_file_with_auth(
