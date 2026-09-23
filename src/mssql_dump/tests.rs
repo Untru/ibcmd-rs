@@ -47824,6 +47824,14 @@ fn flat_configuration_properties_text(
     if code == 68 && field_count > 60 {
         fields[60] = "1".to_string();
     }
+    // An 8.5 tuple carries its four interface enumerations in members 61-68;
+    // the one tuple on record (BSP 3.2.1.356) stores `6` in member 62.
+    if code == 76 && field_count == 77 {
+        fields[62] = "6".to_string();
+        for index in 69..77 {
+            fields[index] = zero_uuid.to_string();
+        }
+    }
     for (index, value) in replacements {
         fields[*index] = (*value).to_string();
     }

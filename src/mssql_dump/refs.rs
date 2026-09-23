@@ -3285,7 +3285,9 @@ fn v85_configuration_properties(
     })
 }
 
-/// Inserts the 8.5 properties after the elements they follow in 2.21.
+/// Inserts the 8.5 properties after the elements they follow in 2.21. A
+/// neighbour the record did not let the writer spell (a partial record) takes
+/// its 8.5 followers with it; a complete configuration record writes all five.
 fn insert_v85_configuration_properties_xml(
     xml: &mut String,
     properties: &V85ConfigurationProperties,
@@ -3307,32 +3309,39 @@ fn insert_v85_configuration_properties_xml(
     {
         push_optional_text_element(&mut forms, "\t\t\t", name, value.as_deref());
     }
-    inserts.push((after_element(xml, "DefaultCollaborationSystemUsersChoiceForm")?, forms));
-    inserts.push((
-        after_element(xml, "AllowedIncomingShareRequestTypes")?,
-        format!(
-            "\t\t\t<MainClientApplicationWindowInterfaceVariant>{}</MainClientApplicationWindowInterfaceVariant>\r\n\t\t\t<ClientApplicationTheme>{}</ClientApplicationTheme>\r\n",
-            properties.interface_variant, properties.theme
-        ),
-    ));
-    inserts.push((
-        after_element(xml, "MainClientApplicationWindowMode")?,
-        format!(
-            "\t\t\t<ClientApplicationWindowsOpenVariant>{}</ClientApplicationWindowsOpenVariant>\r\n",
-            properties.windows_open_variant
-        ),
-    ));
     let mut captions = String::new();
     push_localized_property(&mut captions, "\t\t\t", "Caption", &properties.caption);
     push_localized_property(&mut captions, "\t\t\t", "ShortCaption", &properties.short_caption);
-    inserts.push((after_element(xml, "DefaultInterface")?, captions));
-    inserts.push((
-        after_element(xml, "InterfaceCompatibilityMode")?,
-        format!(
-            "\t\t\t<Version85InterfaceMigrationMode>{}</Version85InterfaceMigrationMode>\r\n",
-            properties.migration_mode
+    let candidates = [
+        ("DefaultCollaborationSystemUsersChoiceForm", forms),
+        (
+            "AllowedIncomingShareRequestTypes",
+            format!(
+                "\t\t\t<MainClientApplicationWindowInterfaceVariant>{}</MainClientApplicationWindowInterfaceVariant>\r\n\t\t\t<ClientApplicationTheme>{}</ClientApplicationTheme>\r\n",
+                properties.interface_variant, properties.theme
+            ),
         ),
-    ));
+        (
+            "MainClientApplicationWindowMode",
+            format!(
+                "\t\t\t<ClientApplicationWindowsOpenVariant>{}</ClientApplicationWindowsOpenVariant>\r\n",
+                properties.windows_open_variant
+            ),
+        ),
+        ("DefaultInterface", captions),
+        (
+            "InterfaceCompatibilityMode",
+            format!(
+                "\t\t\t<Version85InterfaceMigrationMode>{}</Version85InterfaceMigrationMode>\r\n",
+                properties.migration_mode
+            ),
+        ),
+    ];
+    for (anchor, text) in candidates {
+        if let Some(at) = after_element(xml, anchor) {
+            inserts.push((at, text));
+        }
+    }
     inserts.sort_by_key(|(at, _)| std::cmp::Reverse(*at));
     for (at, text) in inserts {
         xml.insert_str(at, &text);
