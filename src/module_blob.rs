@@ -4519,8 +4519,12 @@ fn native_root_property_bag(
                     .iter()
                     .find(|attribute| attribute.name == name)
                     .ok_or_else(|| anyhow!("the report names {name}, which is not a form attribute"))?;
+                // `{1,{<id>},""}`: all 218 stored report references of both
+                // corpora end with the empty string, and native ibcmd refuses
+                // a body without it («Ошибка формата потока») although our
+                // exporter reads both.
                 Ok(format!(
-                    "{{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{{1,{{{}}}}}}}",
+                    "{{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{{1,{{{}}},\"\"}}}}",
                     attribute.id
                 ))
             };

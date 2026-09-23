@@ -4389,15 +4389,7 @@ fn prepare_metadata_body_rows(
             "XDTOPackage body",
             axes,
         ),
-        "WSReference" => prepare_raw_deflated_body_row(
-            sqlcmd,
-            server,
-            database,
-            infer_ws_reference_definition_path(xml_path),
-            properties,
-            "WSReference definition",
-            axes,
-        ),
+        "WSReference" => prepare_ws_reference_body_row(xml_path, properties),
         "CommonTemplate" | "Template" => prepare_template_body_row(
             sqlcmd, server, database, xml_path, xml, properties, source, axes,
         ),
@@ -4539,6 +4531,67 @@ fn prepare_scheduled_job_body_row(
         .with_context(|| format!("failed to pack JobSchedule {}", body_path.display()))?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
+        path: body_path,
+        blob: packed.blob,
+        blob_sha256: packed.output_sha256,
+    }])
+}
+
+/// A `WSReference` body is a Format15 container, not the bare WSDL: a
+/// `0.wsdl` member holding `Ext/WSDefinition.xml` without its BOM, then every
+/// other file of `Ext` (the imported schemas) under its own name, in name
+/// order -- the four ERP УХ references store exactly that
+/// (`WSСборОтчетностиРосстата`: `0.wsdl`, `1.xsd` ... `4.xsd`, each member
+/// byte-equal to its file). The exporter refuses anything else.
+fn prepare_ws_reference_body_row(
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
+    let body_path = infer_ws_reference_definition_path(xml_path);
+    if !body_path.exists() {
+        return Ok(Vec::new());
+    }
+    let definition = fs::read(&body_path)
+        .with_context(|| format!("failed to read WSReference definition {}", body_path.display()))?;
+    let definition = definition
+        .strip_prefix(b"\xEF\xBB\xBF")
+        .unwrap_or(&definition)
+        .to_vec();
+    let mut elements = vec![V8Element {
+        name: "0.wsdl".to_string(),
+        header: make_v8_element_header("0.wsdl"),
+        data: definition,
+    }];
+    let ext = body_path
+        .parent()
+        .ok_or_else(|| anyhow!("WSReference definition has no folder: {}", body_path.display()))?;
+    let mut imports = fs::read_dir(ext)
+        .with_context(|| format!("failed to list {}", ext.display()))?
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path != &body_path)
+        .collect::<Vec<_>>();
+    imports.sort();
+    for path in imports {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .ok_or_else(|| anyhow!("WSReference import has no UTF-8 name: {}", path.display()))?
+            .to_string();
+        let data = fs::read(&path)
+            .with_context(|| format!("failed to read WSReference import {}", path.display()))?;
+        elements.push(V8Element {
+            header: make_v8_element_header(&name),
+            name,
+            data,
+        });
+    }
+    let container = build_v8_container(&elements)
+        .with_context(|| format!("failed to build WSReference container {}", body_path.display()))?;
+    let packed = crate::module_blob::pack_raw_deflated_blob_from_bytes(&container)?;
+    Ok(vec![PreparedMetadataBodyStage {
+        body_id: format!("{}.0", properties.uuid),
         path: body_path,
         blob: packed.blob,
         blob_sha256: packed.output_sha256,
@@ -7199,7 +7252,7 @@ fn build_stage_common_modules_sql(
     modules: &[PreparedCommonModuleStage],
     versions_blob: &[u8],
 ) -> String {
-    let versions_blob_hex = encode_hex(versions_blob);
+    let versions_blob_hex = sql_hex(versions_blob);
     let expected_stable_rows = modules.len() + 2;
     let expected_total_rows = modules.len() * 2 + 3;
     let module_ids = modules
@@ -7228,7 +7281,7 @@ fn build_stage_common_modules_sql(
     );
 
     for (index, module) in modules.iter().enumerate() {
-        let module_blob_hex = encode_hex(&module.blob);
+        let module_blob_hex = sql_hex(&module.blob);
         let error_number = 51001 + index;
         sql.push_str(&format!(
             "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
@@ -7265,8 +7318,8 @@ fn build_stage_common_module_metadata_sql(
     metadata_blob: &[u8],
     versions_blob: &[u8],
 ) -> String {
-    let metadata_blob_hex = encode_hex(metadata_blob);
-    let versions_blob_hex = encode_hex(versions_blob);
+    let metadata_blob_hex = sql_hex(metadata_blob);
+    let versions_blob_hex = sql_hex(versions_blob);
     format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -7304,7 +7357,7 @@ fn build_stage_common_module_objects_sql(
     modules: &[PreparedCommonModuleObjectStage],
     versions_blob: &[u8],
 ) -> String {
-    let versions_blob_hex = encode_hex(versions_blob);
+    let versions_blob_hex = sql_hex(versions_blob);
     let expected_total_rows = modules
         .iter()
         .map(PreparedCommonModuleObjectStage::row_count)
@@ -7325,8 +7378,8 @@ fn build_stage_common_module_objects_sql(
     );
 
     for (index, module) in modules.iter().enumerate() {
-        let metadata_blob_hex = encode_hex(&module.metadata_blob);
-        let module_blob_hex = encode_hex(&module.module_blob);
+        let metadata_blob_hex = sql_hex(&module.metadata_blob);
+        let module_blob_hex = sql_hex(&module.module_blob);
         let metadata_error = 53001 + index * 2;
         let body_error = metadata_error + 1;
         sql.push_str(&format!(
@@ -7376,7 +7429,7 @@ fn build_stage_metadata_objects_sql(
     objects: &[PreparedMetadataObjectStage],
     versions_blob: &[u8],
 ) -> String {
-    let versions_blob_hex = encode_hex(versions_blob);
+    let versions_blob_hex = sql_hex(versions_blob);
     let body_row_count = objects
         .iter()
         .map(|object| object.body_rows.len())
@@ -7397,7 +7450,7 @@ fn build_stage_metadata_objects_sql(
     );
 
     for (index, object) in objects.iter().enumerate() {
-        let metadata_blob_hex = encode_hex(&object.metadata_blob);
+        let metadata_blob_hex = sql_hex(&object.metadata_blob);
         let error_number = 54001 + index;
         sql.push_str(&format!(
             "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
@@ -7432,6 +7485,27 @@ fn build_stage_metadata_objects_sql(
     sql
 }
 
+/// The hex digits of a binary constant in a staging script, broken into
+/// lines of at most 64 KiB with T-SQL's backslash continuation. sqlcmd spends
+/// time quadratic in a line's length -- one 43.6 MB add-in body took 18
+/// minutes of a real БСП load -- and SQL Server joins the lines back into one
+/// constant (`0x0102\<CRLF>0304` is `0x01020304`).
+fn sql_hex(bytes: &[u8]) -> String {
+    const LINE: usize = 64 * 1024;
+    let hex = encode_hex(bytes);
+    if hex.len() <= LINE {
+        return hex;
+    }
+    let mut out = String::with_capacity(hex.len() + hex.len() / LINE * 3);
+    for (index, chunk) in hex.as_bytes().chunks(LINE).enumerate() {
+        if index > 0 {
+            out.push_str("\\\r\n");
+        }
+        out.push_str(std::str::from_utf8(chunk).expect("hex is ASCII"));
+    }
+    out
+}
+
 fn push_insert_metadata_body_row_sql(
     sql: &mut String,
     body: &PreparedMetadataBodyStage,
@@ -7439,7 +7513,7 @@ fn push_insert_metadata_body_row_sql(
     object_index: usize,
     body_index: usize,
 ) {
-    let body_blob_hex = encode_hex(&body.blob);
+    let body_blob_hex = sql_hex(&body.blob);
     let tag = format!("{object_index}_{body_index}");
     sql.push_str(&format!(
         "DECLARE @metadata_body_blob_{tag} varbinary(max) = 0x{body_blob_hex};\n\
@@ -7471,7 +7545,7 @@ fn build_stage_source_objects_sql(
     include_versions_row: bool,
     expected_total_rows: usize,
 ) -> String {
-    let versions_blob_hex = encode_hex(versions_blob);
+    let versions_blob_hex = sql_hex(versions_blob);
     let mut sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -7497,7 +7571,7 @@ fn build_stage_source_objects_sql(
     }
 
     for (index, object) in metadata_objects.iter().enumerate() {
-        let metadata_blob_hex = encode_hex(&object.metadata_blob);
+        let metadata_blob_hex = sql_hex(&object.metadata_blob);
         let error_number = 55001 + index;
         sql.push_str(&format!(
             "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
@@ -7517,8 +7591,8 @@ fn build_stage_source_objects_sql(
     }
 
     for (index, module) in common_modules.iter().enumerate() {
-        let metadata_blob_hex = encode_hex(&module.metadata_blob);
-        let module_blob_hex = encode_hex(&module.module_blob);
+        let metadata_blob_hex = sql_hex(&module.metadata_blob);
+        let module_blob_hex = sql_hex(&module.module_blob);
         let metadata_error = 56001 + index * 2;
         let body_error = metadata_error + 1;
         sql.push_str(&format!(
