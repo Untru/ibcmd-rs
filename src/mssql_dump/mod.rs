@@ -1101,6 +1101,13 @@ pub(crate) use form_body::form_dynamic_list_std_attribute_pairs;
 /// The one table that names a form standard command uuid, shared with the
 /// source compiler so both directions read the same fact.
 pub(crate) use form_body::form_standard_command_suffix;
+/// The exporter's reading of a chart attribute's member 14, which the form
+/// writer's chart codec checks every value it builds against.
+pub(crate) use form_body::{
+    render_form_chart_settings_value, render_form_gantt_chart_settings_value,
+};
+#[cfg(test)]
+pub(crate) use form_body::render_form_body_xml_offline;
 
 pub(crate) fn extract_standalone_metadata_source_xml(
     blob: &[u8],

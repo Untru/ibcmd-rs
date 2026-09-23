@@ -453,6 +453,10 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("FormattedDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("GanttChartField", "", "DetailProcessing", "8724b8d4-140d-4357-8ac9-46e29ba7b168"),
     ("GanttChartField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    // The exporter's own table (form_schema.rs, `FORM_GANTT_CHART_*`): ERP УХ
+    // `DataProcessors/ДиаграммаГантаОперации/Forms/Форма` stores the second.
+    ("GanttChartField", "", "Selection", "3aab5acd-9e00-4d33-8242-3cdb677bb0f3"),
+    ("GanttChartField", "", "OnIntervalEditEnd", "fe4544e7-5b1a-441c-8ab9-198137e6d3c7"),
     ("GraphicalSchemaField", "", "OnActivate", "83c14f85-ab1f-4c77-bd3b-81970b72543b"),
     ("GraphicalSchemaField", "", "Selection", "3c3da18f-fc18-4f77-8c2d-96c25bec40a5"),
     ("HTMLDocumentField", "", "DocumentComplete", "53325f0c-b112-4c44-ab12-5d1ee0b1f07b"),
@@ -877,6 +881,12 @@ pub(crate) struct NativeFieldItem<'a> {
     /// `0` for every field but a PDF document's, whose `<ViewStatusAddition>`
     /// is `1,{…}` (8 of 8).
     pub(crate) additions: &'a str,
+    /// Member 58, the count of the items nested behind the shared layout,
+    /// then the items: `0` for every field but a Gantt chart's, whose
+    /// `<Table>` is `1,{55,…}` (form_schema.rs: 17 of the 20 stand items
+    /// carry one, and slot 58 counts it on all 366 field records of their
+    /// bodies).
+    pub(crate) nested_items: &'a str,
 }
 
 /// The `DisplayImportance` XML attribute an item may carry, as every item
@@ -949,6 +959,7 @@ impl Default for NativeFieldItem<'_> {
             group_vertical_align: None,
             display_importance: "0",
             additions: "0",
+            nested_items: "0",
         }
     }
 }
@@ -1075,7 +1086,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
          {footer_picture},{a0},{a1},{a2},{a3},{a4},{a5},{picture_index},1,{payload},{events},1,\
          {context_menu},{visible},{format_one},{format_two},{string_one},{string_two},\
          {appearance_tail},{fixing},{tooltip_representation},1,{extended_tooltip},\
-         {group_horizontal},{group_vertical},{display_importance},0,{additions},0}}",
+         {group_horizontal},{group_vertical},{display_importance},0,{additions},{nested_items}}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = item.kind,
@@ -1116,6 +1127,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
         extended_tooltip = item.extended_tooltip,
         display_importance = item.display_importance,
         additions = item.additions,
+        nested_items = item.nested_items,
     ))
 }
 
@@ -1288,6 +1300,26 @@ pub(crate) fn format_chart_payload(
 ) -> String {
     format!(
         "{{1,{width},{height},{horizontal},{vertical},{events},1,0,0,1,{max_height}}}",
+        horizontal = u8::from(horizontal_stretch),
+        vertical = u8::from(vertical_stretch),
+    )
+}
+
+/// The `{3,…}` payload of a `<GanttChartField>`: width and height default 50
+/// and 10, the two stretch flags 1 unless the field turns them off, the
+/// events, then ten members that hold one value each over the whole stand
+/// (`form_schema::FormSpecialFieldSchema::gantt_dimension` and
+/// `gantt_stretch` read the first four; 18 of 18 ERP УХ records spell the
+/// bag at revision 3).
+pub(crate) fn format_gantt_chart_payload(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+) -> String {
+    format!(
+        "{{3,{width},{height},{horizontal},{vertical},{events},1,0,0,1,0,0,0,0,2,2}}",
         horizontal = u8::from(horizontal_stretch),
         vertical = u8::from(vertical_stretch),
     )

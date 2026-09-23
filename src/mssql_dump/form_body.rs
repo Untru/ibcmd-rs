@@ -37378,6 +37378,55 @@ pub(super) fn parse_and_render_form_gantt_chart_settings_for_test(text: &str) ->
     parse_form_gantt_chart_settings_xml(text, &value_types, &object_refs, 3)
 }
 
+/// The `<Settings xsi:type="d4p1:Chart">` block this exporter writes for a
+/// chart-typed attribute whose member 14 is `field`, at the indent it sits at
+/// inside `<Attribute>`. The form writer (`compiler::bodies::form_chart`) runs
+/// every chart it builds back through this and refuses one that does not
+/// export to the XML it was built from. No object list is consulted: a style
+/// colour the configuration declares is never written by that writer, and a
+/// dangling one reads back as the `<kind>:<uuid>` it was written from.
+pub(crate) fn render_form_chart_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_chart_settings_xml(field, &value_types, &BTreeMap::new(), 3)
+}
+
+/// The Gantt chart's counterpart to `render_form_chart_settings_value`.
+pub(crate) fn render_form_gantt_chart_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_GANTT_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_gantt_chart_settings_xml(field, &value_types, &BTreeMap::new(), 3)
+}
+
+/// The Form.xml this exporter writes for a whole form body, read against the
+/// offline context of a saved dump -- the form writer's whole-form harness
+/// renders a compiled body and the stored one through it and compares.
+#[cfg(test)]
+pub(crate) fn render_form_body_xml_offline(
+    body: &ParsedFormBodyBlob,
+    context: &super::offline_context::OfflineFormContext,
+    form_uuid: &str,
+) -> Option<String> {
+    let collisions = BTreeSet::new();
+    let owner = context
+        .form_owner_references
+        .get(form_uuid)
+        .map(String::as_str);
+    let parse_context = FormParseContext::new(
+        &context.type_index,
+        &collisions,
+        &context.dcs_type_index,
+        &context.object_refs,
+        &context.field_type_refs,
+        &context.information_register_field_refs,
+        &context.information_register_master_dimensions,
+        owner,
+    );
+    extract_form_body_xml_from_body_timed(body, &parse_context, None)
+}
+
 /// The `{0,{3,0,1,0,<value>,<contentCacheItem>,<autoText>,0}}` record the
 /// Gantt chart stores for its points and its series alike.
 ///

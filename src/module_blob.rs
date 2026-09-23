@@ -1375,6 +1375,50 @@ impl MetadataSourceContext {
 
     fn resolve_metadata_reference_uuid(&self, reference: &str) -> Result<String> {
         let reference = reference.trim();
+        // Objects that live in a file of their own below their owner: a
+        // nested subsystem (`Subsystems/A/Subsystems/B.xml`) and a
+        // calculation register's recalculation
+        // (`CalculationRegisters/R/Recalculations/X.xml`).
+        let nested = if let Some(rest) = reference.strip_prefix("Subsystem.")
+            && rest.contains(".Subsystem.")
+        {
+            let names = rest.split(".Subsystem.").collect::<Vec<_>>();
+            let mut path = self.source_root.join("Subsystems");
+            for (index, name) in names.iter().enumerate() {
+                path = if index + 1 == names.len() {
+                    path.join(format!("{name}.xml"))
+                } else {
+                    path.join(name).join("Subsystems")
+                };
+            }
+            Some((path, "Subsystem"))
+        } else if let Some(rest) = reference.strip_prefix("CalculationRegister.")
+            && let Some((register, recalculation)) = rest.split_once(".Recalculation.")
+        {
+            Some((
+                self.source_root
+                    .join("CalculationRegisters")
+                    .join(register)
+                    .join("Recalculations")
+                    .join(format!("{recalculation}.xml")),
+                "Recalculation",
+            ))
+        } else {
+            None
+        };
+        if let Some((path, kind)) = nested {
+            let xml = fs::read(&path)
+                .with_context(|| format!("failed to read {kind} XML {}", path.display()))?;
+            let properties = parse_simple_metadata_xml_properties(&xml)?;
+            if properties.kind != kind {
+                return Err(anyhow!(
+                    "expected {kind} XML at {}, got {}",
+                    path.display(),
+                    properties.kind
+                ));
+            }
+            return Ok(properties.uuid);
+        }
         let (prefix, folder) = metadata_reference_source_folder(reference).ok_or_else(|| {
             anyhow!("unsupported metadata reference for source resolution: {reference}")
         })?;
@@ -7329,6 +7373,33 @@ fn format_native_child_item(
         } else {
             "0".to_string()
         };
+        // A Gantt chart field nests the table it edits its rows in behind
+        // the shared layout, counted by member 58; no other field nests one.
+        let nested_items = if item.tag == "GanttChartField" {
+            match children.as_slice() {
+                [] => "0".to_string(),
+                [table] if table.tag == "Table" => format!(
+                    "1,{}",
+                    format_native_table_record(
+                        table,
+                        data_paths,
+                        command_ids,
+                        items,
+                        main_attribute_class,
+                        source,
+                        items_root,
+                        true,
+                    )?
+                ),
+                _ => {
+                    return Err(anyhow!(
+                        "a <GanttChartField> nests items other than one <Table>, which is not measured"
+                    ));
+                }
+            }
+        } else {
+            "0".to_string()
+        };
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -7442,6 +7513,7 @@ fn format_native_child_item(
             extended_tooltip: &tooltip,
             display_importance,
             additions: &additions,
+            nested_items: &nested_items,
             ..native::NativeFieldItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -7676,6 +7748,33 @@ fn format_native_table(
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
+) -> Result<String> {
+    format_native_table_record(
+        item,
+        data_paths,
+        command_ids,
+        items,
+        main_attribute_class,
+        source,
+        items_root,
+        false,
+    )
+}
+
+/// `format_native_table`, and the table a `<GanttChartField>` nests: that
+/// one's bag holds no empty `RowPictureDataPath` (key 19) -- 15 of the 16 of
+/// ERP УХ store none, the sixteenth is the one whose table spells a dozen
+/// properties; the exporter publishes nothing for the empty key either way.
+#[allow(clippy::too_many_arguments)]
+fn format_native_table_record(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+    command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+    nested_in_gantt_chart: bool,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
@@ -7941,7 +8040,10 @@ fn format_native_table(
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the tail writer cannot place"))?;
 
-    let bag = native_table_property_bag(item, items, source)?;
+    let mut bag = native_table_property_bag(item, items, source)?;
+    if nested_in_gantt_chart {
+        bag.retain(|(key, value)| !(*key == "19" && value == "{\"S\",\"\"}"));
+    }
     let events = item
         .events
         .iter()
@@ -9444,6 +9546,35 @@ fn native_field_payload(
                 item.max_height.as_deref().unwrap_or("0"),
             ))
         }
+        // A Gantt chart's `{3,…}` payload. The exporter publishes the extent
+        // and the stretch pair only where they are not the default, so a
+        // default the source spells out would not come back and refuses, as
+        // does every extent the bag has no member for.
+        "GanttChartField" => {
+            let count = |value: Option<&str>| {
+                value.is_none_or(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            };
+            if item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || !count(item.width.as_deref())
+                || !count(item.height.as_deref())
+                || item.width.as_deref() == Some("50")
+                || item.height.as_deref() == Some("10")
+                || item.horizontal_stretch == Some(true)
+                || item.vertical_stretch == Some(true)
+            {
+                return Err(anyhow!("a <GanttChartField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_gantt_chart_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                item.horizontal_stretch.unwrap_or(true),
+                item.vertical_stretch.unwrap_or(true),
+                &events,
+            ))
+        }
         "PDFDocumentField" => {
             if events != "{0,1,0}"
                 || item.max_width.is_some()
@@ -10623,6 +10754,43 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
     ))
 }
 
+/// Whether an attribute is a chart the chart codec writes: `Some(false)` for
+/// a single `Chart` type, `Some(true)` for a single `GanttChart` type, under
+/// whatever prefix the file binds the chart namespace to (`d5p1` in every
+/// export); the codec itself checks the `<Settings>` element's namespace.
+fn native_embedded_chart_kind(attribute: &FormXmlAttribute) -> Option<bool> {
+    let [single] = attribute.types.as_slice() else {
+        return None;
+    };
+    match single.trim().rsplit_once(':').map(|(_, local)| local) {
+        Some("Chart") => Some(false),
+        Some("GanttChart") => Some(true),
+        _ => None,
+    }
+}
+
+/// The attribute's `<Settings xsi:type="d4p1:Chart">` or `d4p1:GanttChart`,
+/// written by the chart codec: member 14 is the chart's own serialization
+/// (rt-embedded.md §1.2), and the codec refuses whatever it cannot place.
+fn native_embedded_chart(form_text: &str, attribute: &str, gantt: bool) -> Result<String> {
+    let missing = || anyhow!("the chart attribute {attribute} spells no <Settings> the writer can find");
+    let head = format!("<Attribute name=\"{attribute}\"");
+    let start = form_text.find(&head).ok_or_else(missing)?;
+    let end = form_text[start..].find("</Attribute>").ok_or_else(missing)? + start;
+    let block = &form_text[start..end];
+    let open = block.find("<Settings ").ok_or_else(missing)?;
+    let close = block.rfind("</Settings>").ok_or_else(missing)? + "</Settings>".len();
+    if close <= open {
+        return Err(missing());
+    }
+    let settings = &block[open..close];
+    if gantt {
+        crate::compiler::bodies::form_chart::format_form_embedded_gantt_chart(settings)
+    } else {
+        crate::compiler::bodies::form_chart::format_form_embedded_chart(settings)
+    }
+}
+
 /// A column's `<View>` and `<Edit>`, each the default tuple when absent.
 fn native_column_rights(
     column: &FormXmlAttributeColumn,
@@ -10852,9 +11020,13 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         }
         let embedded_spreadsheet =
             attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument");
+        // A chart's `<Settings>` is written by the chart codec, which refuses
+        // on its own what it cannot place (rt-embedded.md §1.2).
+        let embedded_chart = native_embedded_chart_kind(attribute).is_some();
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
             && !embedded_spreadsheet
+            && !embedded_chart
             && let Some(error) = properties.dcs_error.as_ref()
         {
             blockers.push(error.clone());
@@ -10862,6 +11034,7 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
             && !embedded_spreadsheet
+            && !embedded_chart
         {
             // One message stood for four situations, and only the first is a
             // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
@@ -11381,6 +11554,11 @@ fn format_native_form_body(
         {
             let text = form_text.ok_or_else(|| anyhow!("an embedded spreadsheet needs the Form.xml text"))?;
             Some(native_embedded_spreadsheet(text, &attribute.name)?)
+        } else if attribute.settings.is_some()
+            && let Some(gantt) = native_embedded_chart_kind(attribute)
+        {
+            let text = form_text.ok_or_else(|| anyhow!("an embedded chart needs the Form.xml text"))?;
+            Some(native_embedded_chart(text, &attribute.name, gantt)?)
         } else {
             None
         };
@@ -28696,6 +28874,7 @@ fn role_child_object_tag(tag: &str) -> Option<&'static str> {
         "Form" => Some("Form"),
         "Resource" => Some("Resource"),
         "URLTemplate" => Some("URLTemplate"),
+        "Operation" => Some("Operation"),
         _ => None,
     }
 }
@@ -33361,6 +33540,11 @@ fn append_constant_xml_text(
             .get_or_insert_with(String::new)
             .push_str(value);
     }
+    // A constant typed by a defined type spells it as a `<v8:TypeSet>`, which
+    // resolves to the defined type's own type id like a `<v8:Type>` does.
+    if path_ends_with(path, &["Constant", "Properties", "Type", "TypeSet"]) {
+        types.push(value.to_string());
+    }
 }
 
 fn append_metadata_type_xml_text(
@@ -34141,6 +34325,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "Subsystem" => Some(("Subsystem", "Subsystems")),
         "Task" => Some(("Task", "Tasks")),
         "WebService" => Some(("WebService", "WebServices")),
+        "Sequence" => Some(("Sequence", "Sequences")),
         "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
         "Enum" => Some(("Enum", "Enums")),
         _ => None,
