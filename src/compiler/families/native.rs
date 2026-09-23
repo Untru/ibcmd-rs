@@ -8,7 +8,11 @@ use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::limits::ResourceLimits;
 
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
-const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
+/// Two ERP УХ common templates (the АТОЛ and Масса-К driver packages) decode
+/// to 82 783 124 and 77 529 860 plain bytes, and the platform stores and
+/// exports both; 64 MiB refused them. The global default decode ceiling is
+/// 512 MiB.
+const MAX_PLAIN_BYTES: usize = 256 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 64;
 /// The node bound a plaintext proves about itself.
 ///

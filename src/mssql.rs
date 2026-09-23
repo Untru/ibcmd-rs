@@ -581,6 +581,10 @@ struct PreparedCommonModuleStage {
 struct PreparedCommonModuleObjectStage {
     module_id: String,
     module_body_id: String,
+    /// False for a module whose tree has no `Ext/Module.bsl`: the platform
+    /// stores no `.0` row for it at all (three ERP УХ common modules), so
+    /// only the metadata row is staged.
+    has_module_body: bool,
     xml: PathBuf,
     text: PathBuf,
     properties: CommonModuleXmlProperties,
@@ -590,6 +594,22 @@ struct PreparedCommonModuleObjectStage {
     text_bytes: usize,
     module_blob: Vec<u8>,
     module_blob_sha256: String,
+}
+
+impl PreparedCommonModuleObjectStage {
+    /// The Config rows this module stages: its metadata row, and its body row
+    /// when it has one.
+    fn row_count(&self) -> usize {
+        1 + usize::from(self.has_module_body)
+    }
+
+    fn row_ids(&self) -> Vec<String> {
+        let mut ids = vec![self.module_id.clone()];
+        if self.has_module_body {
+            ids.push(self.module_body_id.clone());
+        }
+        ids
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -1327,8 +1347,12 @@ pub fn audit_source_parity(
         .iter()
         .map(|object| object.body_rows.len())
         .sum::<usize>();
-    let prepared_total_config_rows =
-        metadata_objects.len() + prepared_metadata_body_rows + common_modules.len() * 2;
+    let prepared_total_config_rows = metadata_objects.len()
+        + prepared_metadata_body_rows
+        + common_modules
+            .iter()
+            .map(PreparedCommonModuleObjectStage::row_count)
+            .sum::<usize>();
 
     Ok(MssqlSourceParityAuditReport {
         database: args.database.clone(),
@@ -5750,16 +5774,12 @@ fn prepare_common_module_object_stage(
     let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
     let properties = parse_common_module_xml_properties(&xml)?;
     let module_id = properties.uuid.clone();
-    let text_path = match text_path {
-        Some(path) => path,
-        None => {
-            source_module_body_path(infer_common_module_text_path(&xml_path)).ok_or_else(|| {
-                anyhow!(
-                    "CommonModule body source not found: {}",
-                    infer_common_module_text_path(&xml_path).display()
-                )
-            })?
-        }
+    let (text_path, has_module_body) = match text_path {
+        Some(path) => (path, true),
+        None => match source_module_body_path(infer_common_module_text_path(&xml_path)) {
+            Some(path) => (path, true),
+            None => (infer_common_module_text_path(&xml_path), false),
+        },
     };
 
     let dependency = compile_mssql_source(
@@ -5773,20 +5793,30 @@ fn prepare_common_module_object_stage(
         fetch_config_blob_with_auth(sqlcmd, server, sql_auth, database, required.as_str())?;
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
-    let packed_module = pack_module_body_source(&text_path, &module_body_id, &axes)?;
+    let (text_bytes, module_blob, module_blob_sha256) = if has_module_body {
+        let packed_module = pack_module_body_source(&text_path, &module_body_id, &axes)?;
+        (
+            packed_module.text_bytes,
+            packed_module.blob,
+            packed_module.output_sha256,
+        )
+    } else {
+        (0, Vec::new(), String::new())
+    };
 
     Ok(PreparedCommonModuleObjectStage {
         module_id,
         module_body_id,
+        has_module_body,
         xml: xml_path,
         text: text_path,
         properties: packed_metadata.properties,
         metadata_plain_bytes: packed_metadata.plain_bytes,
         metadata_blob: packed_metadata.blob,
         metadata_blob_sha256: packed_metadata.output_sha256,
-        text_bytes: packed_module.text_bytes,
-        module_blob: packed_module.blob,
-        module_blob_sha256: packed_module.output_sha256,
+        text_bytes,
+        module_blob,
+        module_blob_sha256,
     })
 }
 
@@ -5812,7 +5842,7 @@ fn stage_prepared_common_module_objects(
 
     let changes = prepared
         .iter()
-        .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()])
+        .flat_map(PreparedCommonModuleObjectStage::row_ids)
         .collect::<Vec<_>>();
     let versions_blob = fetch_classified_versions_blob_with_auth(
         sqlcmd,
@@ -6944,7 +6974,11 @@ fn build_stage_common_module_objects_sql(
     versions_blob: &[u8],
 ) -> String {
     let versions_blob_hex = encode_hex(versions_blob);
-    let expected_total_rows = modules.len() * 2 + 3;
+    let expected_total_rows = modules
+        .iter()
+        .map(PreparedCommonModuleObjectStage::row_count)
+        .sum::<usize>()
+        + 3;
     let mut sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
@@ -6969,21 +7003,25 @@ fn build_stage_common_module_objects_sql(
              SELECT N'{module_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
              FROM Config\n\
              WHERE FileName = N'{module_id}' AND PartNo = 0;\n\
-             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n\
-             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-             SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
-             FROM Config\n\
-             WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
-             IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n",
             module_id = quote_string(&module.module_id),
-            module_body_id = quote_string(&module.module_body_id),
             metadata_blob_len = module.metadata_blob.len(),
             metadata_blob_hex = metadata_blob_hex,
-            module_blob_len = module.module_blob.len(),
-            module_blob_hex = module_blob_hex,
             metadata_error = metadata_error,
-            body_error = body_error,
         ));
+        if module.has_module_body {
+            sql.push_str(&format!(
+                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+                 SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
+                 FROM Config\n\
+                 WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
+                 IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+                module_body_id = quote_string(&module.module_body_id),
+                module_blob_len = module.module_blob.len(),
+                module_blob_hex = module_blob_hex,
+                body_error = body_error,
+            ));
+        }
     }
 
     sql.push_str(&format!(
@@ -7153,21 +7191,25 @@ fn build_stage_source_objects_sql(
              SELECT N'{module_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {metadata_blob_len}, 0x{metadata_blob_hex}, PartNo\n\
              FROM Config\n\
              WHERE FileName = N'{module_id}' AND PartNo = 0;\n\
-             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n\
-             INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
-             SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
-             FROM Config\n\
-             WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
-             IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+             IF @@ROWCOUNT <> 1 THROW {metadata_error}, 'Expected to insert common module metadata row into ConfigSave', 1;\n",
             module_id = quote_string(&module.module_id),
-            module_body_id = quote_string(&module.module_body_id),
             metadata_blob_len = module.metadata_blob.len(),
             metadata_blob_hex = metadata_blob_hex,
-            module_blob_len = module.module_blob.len(),
-            module_blob_hex = module_blob_hex,
             metadata_error = metadata_error,
-            body_error = body_error,
         ));
+        if module.has_module_body {
+            sql.push_str(&format!(
+                "INSERT INTO ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+                 SELECT N'{module_body_id}', SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, {module_blob_len}, 0x{module_blob_hex}, PartNo\n\
+                 FROM Config\n\
+                 WHERE FileName = N'{module_body_id}' AND PartNo = 0;\n\
+                 IF @@ROWCOUNT <> 1 THROW {body_error}, 'Expected to insert common module body row into ConfigSave', 1;\n",
+                module_body_id = quote_string(&module.module_body_id),
+                module_blob_len = module.module_blob.len(),
+                module_blob_hex = module_blob_hex,
+                body_error = body_error,
+            ));
+        }
     }
 
     if include_versions_row {
@@ -7237,7 +7279,7 @@ fn build_source_stage_batches(
                 current.metadata_objects.push(object);
             }
             SourceStageItem::CommonModule(module) => {
-                current.row_count += 2;
+                current.row_count += module.row_count();
                 current.common_modules.push(module);
             }
         }
@@ -7261,11 +7303,7 @@ fn source_stage_change_ids(
             std::iter::once(object.object_id.clone())
                 .chain(object.body_rows.iter().map(|body| body.body_id.clone()))
         })
-        .chain(
-            common_modules
-                .iter()
-                .flat_map(|module| [module.module_id.clone(), module.module_body_id.clone()]),
-        )
+        .chain(common_modules.iter().flat_map(|module| module.row_ids()))
         .collect()
 }
 
@@ -7347,13 +7385,15 @@ fn expected_source_config_digests(
             sha256: module.metadata_blob_sha256.clone(),
             blob: module.metadata_blob.clone(),
         });
-        rows.push(ExpectedSourceConfigDigest {
-            file_name: module.module_body_id.clone(),
-            kind: "common_module_body".to_string(),
-            path: module.text.clone(),
-            sha256: module.module_blob_sha256.clone(),
-            blob: module.module_blob.clone(),
-        });
+        if module.has_module_body {
+            rows.push(ExpectedSourceConfigDigest {
+                file_name: module.module_body_id.clone(),
+                kind: "common_module_body".to_string(),
+                path: module.text.clone(),
+                sha256: module.module_blob_sha256.clone(),
+                blob: module.module_blob.clone(),
+            });
+        }
     }
     if let Some((file_name, sha256, blob)) = versions {
         rows.push(ExpectedSourceConfigDigest {
@@ -8295,6 +8335,7 @@ mod tests {
         PreparedCommonModuleObjectStage {
             module_id: uuid.to_string(),
             module_body_id: format!("{uuid}.0"),
+            has_module_body: true,
             xml: PathBuf::from(xml),
             text: PathBuf::from(text),
             properties: test_common_module_properties(uuid, name),
@@ -9568,6 +9609,7 @@ mod tests {
         let common_modules = vec![PreparedCommonModuleObjectStage {
             module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
             module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+            has_module_body: true,
             xml: PathBuf::from("CommonModules/C.xml"),
             text: PathBuf::from("CommonModules/C/Ext/Module.bsl"),
             properties: test_common_module_properties("cccccccc-cccc-4ccc-cccc-cccccccccccc", "C"),
@@ -12603,7 +12645,8 @@ mod tests {
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
             hex_sha256(
-                b"{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+                "\u{feff}{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,2,0}"
+                    .as_bytes()
             )
         );
 
@@ -14167,6 +14210,7 @@ mod tests {
         let prepared = vec![PreparedCommonModuleObjectStage {
             module_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
             module_body_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+            has_module_body: true,
             xml: PathBuf::from("CommonModules/TestModule.xml"),
             text: PathBuf::from("CommonModules/TestModule/Ext/Module.bsl"),
             properties: CommonModuleXmlProperties {
@@ -14209,6 +14253,7 @@ mod tests {
             PreparedCommonModuleObjectStage {
                 module_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb".to_string(),
                 module_body_id: "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb.0".to_string(),
+                has_module_body: true,
                 xml: PathBuf::from("CommonModules/TestModule.xml"),
                 text: PathBuf::from("CommonModules/TestModule/Ext/Module.bsl"),
                 properties: CommonModuleXmlProperties {
@@ -14235,6 +14280,7 @@ mod tests {
             PreparedCommonModuleObjectStage {
                 module_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc".to_string(),
                 module_body_id: "cccccccc-cccc-4ccc-cccc-cccccccccccc.0".to_string(),
+                has_module_body: true,
                 xml: PathBuf::from("CommonModules/Batch.xml"),
                 text: PathBuf::from("CommonModules/Batch/Ext/Module.bsl"),
                 properties: CommonModuleXmlProperties {

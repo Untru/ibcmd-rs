@@ -1032,7 +1032,8 @@ struct CommandInterfaceXmlEntry {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ExchangePlanContentXmlItem {
     metadata: String,
-    auto_record: bool,
+    /// The stored code: `0` Deny, `1` Allow, `2` Auto (the exporter's reading).
+    auto_record: u8,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -28398,13 +28399,15 @@ pub fn pack_exchange_plan_content_blob_from_xml(
         let uuid = source
             .resolve_metadata_reference_uuid(&item.metadata)
             .with_context(|| format!("failed to resolve ExchangePlanContent {}", item.metadata))?;
-        let auto_record = if item.auto_record { "1" } else { "0" };
         plain.push(',');
         plain.push_str(&uuid);
         plain.push(',');
-        plain.push_str(auto_record);
+        plain.push_str(&item.auto_record.to_string());
     }
-    plain.push('}');
+    // Every stored content row of both corpora ends with one more `0` after
+    // the items, and opens with the UTF-8 BOM.
+    plain.push_str(",0}");
+    let plain = format!("\u{feff}{plain}");
 
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
@@ -29842,7 +29845,7 @@ fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContent
     let mut path = Vec::<String>::new();
     let mut items = Vec::<ExchangePlanContentXmlItem>::new();
     let mut metadata = None::<String>;
-    let mut auto_record = None::<bool>;
+    let mut auto_record = None::<u8>;
     let mut text_value = String::new();
 
     loop {
@@ -29916,10 +29919,11 @@ fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContent
     Ok(items)
 }
 
-fn parse_exchange_plan_auto_record_text(value: &str) -> Result<bool> {
+fn parse_exchange_plan_auto_record_text(value: &str) -> Result<u8> {
     match value {
-        "Deny" => Ok(false),
-        "Auto" => Ok(true),
+        "Deny" => Ok(0),
+        "Allow" => Ok(1),
+        "Auto" => Ok(2),
         _ => Err(anyhow!("invalid ExchangePlanContent AutoRecord: {value}")),
     }
 }
@@ -30638,8 +30642,13 @@ pub fn pack_ext_picture_blob_from_xml_and_bytes(
     bytes: &[u8],
 ) -> Result<PackedExtPictureBlob> {
     let header = ext_picture_header_from_xml(xml)?;
-    let payload = encode_base64(bytes);
-    let plain = format!("{{1,{header},{{{{#base64:{payload}}}}}}}").into_bytes();
+    // Laid out as the platform stores it: every nested record on its own line
+    // and each list that ends with one closed on its own line.
+    let plain = format!(
+        "\u{feff}{{1,\r\n{header},\r\n{{\r\n{}\r\n}}\r\n}}",
+        platform_base64_token(bytes)
+    )
+    .into_bytes();
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedExtPictureBlob {
@@ -30725,6 +30734,23 @@ pub fn pack_ext_picture_blob_from_bytes_with_base(
     })
 }
 
+/// A `{#base64:...}` payload laid out as the platform stores it: 64
+/// characters per line, lines joined by `\r\r\n` (help and picture rows of
+/// both corpora).
+fn platform_base64_token(bytes: &[u8]) -> String {
+    let encoded = encode_base64(bytes);
+    let mut token = String::with_capacity(encoded.len() + encoded.len() / 64 * 3 + 10);
+    token.push_str("{#base64:");
+    for (index, line) in encoded.as_bytes().chunks(64).enumerate() {
+        if index > 0 {
+            token.push_str("\r\r\n");
+        }
+        token.push_str(std::str::from_utf8(line).expect("base64 is ASCII"));
+    }
+    token.push('}');
+    token
+}
+
 fn replace_first_base64_payload(text: &mut String, payload: &str) -> bool {
     let prefix = "{#base64:";
     let Some(start) = text.find(prefix) else {
@@ -30807,20 +30833,27 @@ pub fn pack_help_blob_from_parts(
     if pages.is_empty() {
         return Err(anyhow!("at least one Help page is required"));
     }
-    let mut fields = Vec::with_capacity(2 + pages.len() * 2 + 1 + files.len() * 3);
-    fields.push("5".to_string());
-    fields.push(pages.len().to_string());
+    // The platform's own layout, measured on every help row of both corpora
+    // (БСП 641 + 1, ERP УХ 6 329 + 44 + 66 with files): the BOM, each
+    // `{#base64:}` payload on its own line, and the closing brace on its own
+    // line when the row ends with a file payload.
+    let mut text = format!("\u{feff}{{5,{}", pages.len());
     for (page, content) in pages {
-        fields.push(format_1c_string(page));
-        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+        text.push(',');
+        text.push_str(&format_1c_string(page));
+        text.push_str(",\r\n");
+        text.push_str(&platform_base64_token(content));
     }
-    fields.push(files.len().to_string());
+    text.push(',');
+    text.push_str(&files.len().to_string());
     for (file_name, content) in files {
-        fields.push(format_1c_string(file_name));
-        fields.push("1".to_string());
-        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+        text.push(',');
+        text.push_str(&format_1c_string(file_name));
+        text.push_str(",1,\r\n");
+        text.push_str(&platform_base64_token(content));
     }
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    text.push_str(if files.is_empty() { "}" } else { "\r\n}" });
+    let plain = text.into_bytes();
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedHelpBlob {
@@ -47582,7 +47615,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+            "\u{feff}{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,2,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -47791,7 +47824,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}"
+            "\u{feff}{5,1,\"ru\",\r\n{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,\r\n{#base64:iVBORw0KGgo=}\r\n}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
