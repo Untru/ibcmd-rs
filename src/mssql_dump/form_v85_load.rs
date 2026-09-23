@@ -63,6 +63,10 @@ pub(crate) struct V85FormLoadFacts {
     root_tail: BTreeMap<usize, String>,
     /// The root's scale percentage, when not 100.
     root_scale: Option<String>,
+    /// The root's `Group` is unset or `AutoScreenTypeSensitive`: 8.5 keeps
+    /// the 8.3.27 "group set" flag (head member 11) and group code (the tenth
+    /// member from the 8.3.27 root's end) at 1 (all 252 such BSP forms).
+    root_group_horizontal: bool,
     /// Facts by form item id.
     items: BTreeMap<String, ItemFacts>,
     /// Appended form-command members by command id.
@@ -79,6 +83,8 @@ struct ItemFacts {
     tail: BTreeMap<usize, String>,
     /// Members the item's property bag appends, by index.
     bag_tail: BTreeMap<usize, String>,
+    /// Members of the 8.3.27 part of the item's property bag, by index.
+    bag: BTreeMap<usize, String>,
     /// Members of the 8.3.27 part of the record (before the optional common
     /// prefix shifts them), by index.
     record: BTreeMap<usize, String>,
@@ -394,9 +400,9 @@ fn load_root(edits: &mut XmlEdits<'_>, root: usize, facts: &mut V85FormLoadFacts
         .root_tail
         .insert(6, code_of(TRI_STATE, bar.as_deref(), "<Form> ShowCommandBar")?);
     let group = peek(edits, root, "Group")?;
-    facts
-        .root_tail
-        .insert(7, code_of(GROUPING, group.as_deref(), "<Form> Group")?);
+    let group_code = code_of(GROUPING, group.as_deref(), "<Form> Group")?;
+    facts.root_group_horizontal = matches!(group_code.as_str(), "4" | "5");
+    facts.root_tail.insert(7, group_code);
     keep_only(
         edits,
         root,
@@ -453,7 +459,14 @@ fn load_item(
         "UsualGroup" => load_usual_group(edits, element, item)?,
         "Page" => {
             let group = peek(edits, element, "Group")?;
-            item.bag_tail.insert(0, code_of(GROUPING, group.as_deref(), "Group")?);
+            let group_code = code_of(GROUPING, group.as_deref(), "Group")?;
+            // Unset or AutoScreenTypeSensitive: 8.5 keeps both 8.3.27 group
+            // members of the page bag at 1 (184 of 184 BSP pages).
+            if matches!(group_code.as_str(), "4" | "5") {
+                item.bag.insert(2, "1".to_owned());
+                item.bag.insert(16, "1".to_owned());
+            }
+            item.bag_tail.insert(0, group_code);
             keep_only(
                 edits,
                 element,
@@ -805,8 +818,13 @@ fn load_usual_group(edits: &mut XmlEdits<'_>, element: usize, item: &mut ItemFac
     )?;
     // A usual group's 8.3.27 default is HorizontalIfPossible.
     let group = peek(edits, element, "Group")?;
-    item.bag_tail
-        .insert(7, code_of(GROUPING, group.as_deref(), "Group")?);
+    let group_code = code_of(GROUPING, group.as_deref(), "Group")?;
+    // Unset or AutoScreenTypeSensitive: 8.5 keeps the 8.3.27 group member of
+    // the bag at 1 (858 of 858 BSP usual groups).
+    if matches!(group_code.as_str(), "4" | "5") {
+        item.bag.insert(22, "1".to_owned());
+    }
+    item.bag_tail.insert(7, group_code);
     keep_only(
         edits,
         element,
@@ -1068,6 +1086,147 @@ fn up_convert_primitives(node: &mut Node) {
     }
 }
 
+/// Rewrites, in place, every 8.3.27 colour and font tuple of a stored text
+/// into the 8.5 spelling, leaving every other byte as written: the inverse of
+/// `form_v85::rewrite_v85_primitives_in_place`. For a body 8.5 stores whole
+/// (a spreadsheet template), where no 8.3.27-shaped tuple survives
+/// (`F:/ibcmd/lab/v85/tools/primcensus.py`: none in the 9 935 BSP 8.5 rows).
+pub(crate) fn up_convert_v85_primitives_in_place(text: &str) -> String {
+    const MAX_TUPLE: usize = 512;
+    let bytes = text.as_bytes();
+    let mut out = String::with_capacity(text.len() + text.len() / 16);
+    let mut cursor = 0;
+    let mut index = 0;
+    let mut in_string = false;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if in_string {
+            if byte == b'"' {
+                if bytes.get(index + 1) == Some(&b'"') {
+                    index += 2;
+                    continue;
+                }
+                in_string = false;
+            }
+            index += 1;
+            continue;
+        }
+        if byte == b'"' {
+            in_string = true;
+            index += 1;
+            continue;
+        }
+        if byte == b'{'
+            && matches!(bytes.get(index + 1), Some(b'3' | b'7'))
+            && bytes.get(index + 2) == Some(&b',')
+            && let Some(end) = tuple_end(bytes, index, MAX_TUPLE)
+            && let Ok(Node::List(members)) = parse_raw(&text[index..end])
+        {
+            let mut node = Node::List(members);
+            let converted = match &mut node {
+                Node::List(members) if is_v83_color(members) => {
+                    let space = members[1].clone();
+                    members[0] = Node::Leaf("4".to_owned());
+                    members.push(space);
+                    true
+                }
+                Node::List(members) if is_v83_font(members) => {
+                    members[0] = Node::Leaf("8".to_owned());
+                    true
+                }
+                Node::List(members) if is_v83_absolute_font(members) => {
+                    members[0] = Node::Leaf("8".to_owned());
+                    members.push(Node::Leaf("0".to_owned()));
+                    true
+                }
+                _ => false,
+            };
+            if converted {
+                out.push_str(&text[cursor..index]);
+                emit_1c(&node, &mut out);
+                cursor = end;
+                index = end;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    out.push_str(&text[cursor..]);
+    out
+}
+
+/// The chart records of a spreadsheet template the way 8.5 stores them: the
+/// 8.3.27 `{74,...}` record of 105 members becomes `{75,...}` with eight
+/// automatic colours appended (8.5.1.1150 BSP, both Gantt chart templates;
+/// the exporter reads nothing else in those eight).
+pub(crate) fn up_convert_v85_chart_records(text: &str) -> Result<String> {
+    const RECORD_LIMIT: usize = 16 * 1024 * 1024;
+    let mut out = String::with_capacity(text.len() + 256);
+    let mut cursor = 0;
+    let mut search = 0;
+    while let Some(relative) = text[search..].find("{11},") {
+        let at = search + relative + "{11},".len();
+        search = at;
+        let start = at + (text[at..].len() - text[at..].trim_start().len());
+        if !text[start..].starts_with("{74,") {
+            continue;
+        }
+        let end = tuple_end(text.as_bytes(), start, RECORD_LIMIT)
+            .ok_or_else(|| anyhow!("a chart record does not close"))?;
+        let Node::List(mut members) = parse_raw(&text[start..end])? else {
+            bail!("a chart record is not a tuple");
+        };
+        if members.len() != 105 {
+            bail!("a chart record `{{74,...}}` carries {} members, not 105", members.len());
+        }
+        members[0] = Node::Leaf("75".to_owned());
+        for _ in 0..8 {
+            members.push(parse_raw("{4,4,{0},4}")?);
+        }
+        out.push_str(&text[cursor..start]);
+        emit_1c(&Node::List(members), &mut out);
+        cursor = end;
+        search = end;
+    }
+    out.push_str(&text[cursor..]);
+    Ok(out)
+}
+
+/// The end of the brace tuple that opens at `start`, if it closes within
+/// `limit` bytes.
+fn tuple_end(bytes: &[u8], start: usize, limit: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut index = start;
+    let end = bytes.len().min(start.saturating_add(limit));
+    while index < end {
+        match bytes[index] {
+            b'"' => {
+                index += 1;
+                while index < end {
+                    if bytes[index] == b'"' {
+                        if bytes.get(index + 1) == Some(&b'"') {
+                            index += 2;
+                            continue;
+                        }
+                        break;
+                    }
+                    index += 1;
+                }
+            }
+            b'{' => depth += 1,
+            b'}' => {
+                depth = depth.checked_sub(1)?;
+                if depth == 0 {
+                    return Some(index + 1);
+                }
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
 fn node_of(text: &str) -> Result<Node> {
     let mut node = if text.trim_start().starts_with('{') {
         parse_raw(text)?
@@ -1148,6 +1307,9 @@ fn up_bag(owner: &str, kind: &str, revision: &str, len: usize) -> Option<(&'stat
         ("37", "14", "3", 14) => ("3", vec![]),
         ("37", "15", "3", 13) => ("4", vec![DEFAULT_BORDER]),
         ("37", "17", "1", 16) => ("1", vec![]),
+        // Unmeasured under 8.5 (see `form_v85::bag_revision`): kept as is.
+        ("37", "12", "3", 16) => ("3", vec![]),
+        ("37", "20", "1", 14) => ("1", vec![]),
         ("12", "0", "5", 9) => ("5", vec![]),
         ("12", "1", "4", 13) => ("6", vec!["0", UNSET_COLOR]),
         _ => return None,
@@ -1205,6 +1367,17 @@ fn up_convert_root(root: &mut Node, facts: &V85FormLoadFacts) -> Result<()> {
     }
     members[0] = Node::Leaf("59".to_owned());
     let len = members.len();
+    if facts.root_group_horizontal {
+        let group_at = len
+            .checked_sub(10)
+            .ok_or_else(|| anyhow!("form root is too short for its group"))?;
+        for at in [11, group_at] {
+            match members.get_mut(at) {
+                Some(Node::Leaf(value)) if value == "0" => *value = "1".to_owned(),
+                _ => bail!("the 8.3.27 form root keeps no group member {at} to set"),
+            }
+        }
+    }
     // The trailer's own `{50,...}` tuple sits one member before the end.
     match members.get_mut(len.checked_sub(2).ok_or_else(|| anyhow!("form root is too short"))?) {
         Some(Node::List(tuple)) if tuple.first().and_then(leaf) == Some("50") => {
@@ -1380,6 +1553,14 @@ impl UpConversion<'_> {
                         bag.len()
                     )
                 })?;
+            if let Some(facts) = facts {
+                for (index, value) in &facts.bag {
+                    let member = bag.get_mut(*index).ok_or_else(|| {
+                        anyhow!("form item {id} has no property bag member {index}")
+                    })?;
+                    *member = node_of(value)?;
+                }
+            }
             bag[0] = Node::Leaf(bag_v85.to_owned());
             for (index, default) in bag_defaults.iter().enumerate() {
                 let value = facts
@@ -1393,7 +1574,7 @@ impl UpConversion<'_> {
                 bail!("form item {id} names bag member {index}, which its 8.5 bag does not append");
             }
         } else if let Some(facts) = facts
-            && !facts.bag_tail.is_empty()
+            && (!facts.bag_tail.is_empty() || !facts.bag.is_empty())
         {
             bail!("form item {id} ({}) names bag members and has no bag", facts.tag);
         }
@@ -1509,7 +1690,7 @@ mod tests {
 
     #[test]
     fn bag_table_inverts_the_exporter_table() {
-        let owners = [("22", 0..=9), ("37", 0..=17), ("12", 0..=1)];
+        let owners = [("22", 0..=9), ("37", 0..=20), ("12", 0..=1)];
         let mut checked = 0;
         for (owner, kinds) in owners {
             for kind in kinds {
@@ -1529,7 +1710,7 @@ mod tests {
                 }
             }
         }
-        assert_eq!(checked, 25);
+        assert_eq!(checked, 27);
     }
 
     #[test]

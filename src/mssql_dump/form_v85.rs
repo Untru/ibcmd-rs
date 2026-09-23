@@ -646,6 +646,12 @@ pub(super) fn bag_revision(
         ("37", "14", "3", 14) => ("3", 0),
         ("37", "15", "4", 14) => ("3", 1),
         ("37", "17", "1", 16) => ("1", 0),
+        // A Gantt chart (12) and a PDF document (20) field: no 8.5 BSP form
+        // carries one, and ERP УХ's are all in the 8.3.27 layout, so their
+        // 8.5 bags are unmeasured; they are read, and loaded, as 8.3.27
+        // wrote them, with nothing appended.
+        ("37", "12", "3", 16) => ("3", 0),
+        ("37", "20", "1", 14) => ("1", 0),
         // Decorations: label (and extended tooltip), picture.
         ("12", "0", "5", 9) => ("5", 0),
         ("12", "1", "6", 15) => ("4", 2),

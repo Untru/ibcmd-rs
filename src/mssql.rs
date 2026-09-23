@@ -4803,12 +4803,39 @@ fn prepare_spreadsheet_template_body_row(
             body_path.display()
         )
     })?;
+    let packed = spreadsheet_template_for_platform(&xml, packed)?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
         blob_sha256: hex_sha256(&packed),
         blob: packed,
     }])
+}
+
+/// A spreadsheet written in dialect 2.21 (its root declares the palette
+/// namespace, as every 8.5 spreadsheet template does) is a platform 8.5 one:
+/// 8.5 stores its colours and fonts in its own spelling.
+fn spreadsheet_template_for_platform(xml: &[u8], packed: Vec<u8>) -> Result<Vec<u8>> {
+    let head = &xml[..xml.len().min(4096)];
+    let root_declares_palette = String::from_utf8_lossy(head)
+        .split_once("<document")
+        .and_then(|(_, rest)| rest.split_once('>'))
+        .is_some_and(|(open, _)| open.contains("xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""));
+    if !root_declares_palette {
+        return Ok(packed);
+    }
+    let plain = crate::module_blob::inflate_raw(&packed)
+        .context("failed to inflate a compiled spreadsheet template")?;
+    let Some(text_start) = plain.windows(3).position(|window| window == b"\xef\xbb\xbf") else {
+        bail!("a compiled spreadsheet template carries no text");
+    };
+    let text = std::str::from_utf8(&plain[text_start + 3..])
+        .context("a compiled spreadsheet template is not UTF-8 text")?;
+    let mut converted = plain[..text_start + 3].to_vec();
+    let text = crate::mssql_dump::up_convert_v85_primitives_in_place(text);
+    let text = crate::mssql_dump::up_convert_v85_chart_records(&text)?;
+    converted.extend_from_slice(text.as_bytes());
+    crate::module_blob::deflate_raw(&converted)
 }
 
 fn prepare_html_template_body_row(

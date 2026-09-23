@@ -8854,7 +8854,16 @@ fn form_body_base_free_blockers_with_resolver(
     }
     if crate::mssql_dump::is_v85_form_xml(form_xml) {
         let xml = std::str::from_utf8(form_xml).context("2.21 Form.xml is not valid UTF-8")?;
-        let (xml20, _) = crate::mssql_dump::down_convert_v85_form_xml(xml, None, None)?;
+        // Read without a configuration: what needs one (a style colour, a
+        // common picture) is a blocker of this model, not an error.
+        let xml20 = match crate::mssql_dump::down_convert_v85_form_xml(xml, None, None) {
+            Ok((xml20, _)) => xml20,
+            Err(error) => {
+                return Ok(vec![format!(
+                    "the 2.21 form reads into 8.3.27 terms only with the configuration at hand: {error:#}"
+                )]);
+            }
+        };
         return form_body_base_free_blockers_with_resolver(
             xml20.as_bytes(),
             has_module_text,
@@ -31395,14 +31404,14 @@ fn build_module_inner(elements: &[V8Element; 2]) -> Result<Vec<u8>> {
     build_v8_container(elements)
 }
 
-fn inflate_raw(input: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn inflate_raw(input: &[u8]) -> Result<Vec<u8>> {
     let mut decoder = DeflateDecoder::new(input);
     let mut output = Vec::new();
     decoder.read_to_end(&mut output)?;
     Ok(output)
 }
 
-fn deflate_raw(input: &[u8]) -> Result<Vec<u8>> {
+pub(crate) fn deflate_raw(input: &[u8]) -> Result<Vec<u8>> {
     let mut encoder = DeflateEncoder::new(Vec::new(), Compression::default());
     encoder.write_all(input)?;
     encoder.finish().context("failed to finish deflate stream")
