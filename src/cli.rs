@@ -56,6 +56,10 @@ pub enum Commands {
     /// Measure the base-free command-interface family writers against the stored rows.
     #[command(hide = true)]
     AuditInterfaceWriter(AuditInterfaceWriterArgs),
+    /// Measure the help and HTML template writer against the stored rows and
+    /// round-trip every row it writes through the exporter.
+    #[command(hide = true)]
+    AuditHelpWriter(AuditInterfaceWriterArgs),
     /// Round-trip every DataCompositionSchema template through the loader and the exporter.
     AuditDcsTemplateWriter(AuditDcsTemplateWriterArgs),
     /// Build a load plan by comparing manifests.

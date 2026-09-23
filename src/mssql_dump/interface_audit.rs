@@ -17,6 +17,48 @@ pub enum InterfaceAssetKind {
     StandaloneContent,
 }
 
+/// Every file name of a saved `Config_inflated` directory, and its metadata
+/// rows (file names without a dot) read the way an export reads them.
+pub(super) fn read_offline_metadata_rows(
+    dir: &Path,
+) -> Result<(BTreeSet<String>, Vec<MetadataTextRow>)> {
+    let mut file_names = BTreeSet::new();
+    for entry in fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))? {
+        let name = entry?.file_name().to_string_lossy().to_string();
+        if let Some(file_name) = name.strip_suffix("__part0.txt") {
+            file_names.insert(file_name.to_string());
+        }
+    }
+    let metadata_file_names = file_names
+        .iter()
+        .filter(|file_name| !file_name.contains('.'))
+        .collect::<Vec<_>>();
+    let row_audits = parallel::install(|| {
+        metadata_file_names
+            .par_iter()
+            .filter_map(|file_name| {
+                let text = fs::read_to_string(dir.join(format!("{file_name}__part0.txt"))).ok()?;
+                Some(metadata_text_row_audit_from_text(
+                    file_name,
+                    text.trim_start_matches('\u{feff}').to_string(),
+                ))
+            })
+            .collect::<Vec<_>>()
+    })?;
+    let mut metadata = Vec::new();
+    for audit in row_audits {
+        match audit {
+            MetadataTextRowAudit::Extracted(mut row)
+            | MetadataTextRowAudit::ExtractedWithWarning(mut row, _) => {
+                normalize_direct_form_metadata(&mut row);
+                metadata.push(row);
+            }
+            MetadataTextRowAudit::Miss(_) => {}
+        }
+    }
+    Ok((file_names, metadata))
+}
+
 /// The reference indexes the exporter names these rows with, built by the
 /// production builders from the metadata rows of a saved dump.
 pub struct OfflineInterfaceContext {
@@ -32,43 +74,7 @@ impl OfflineInterfaceContext {
     /// names without a dot) feed the builders; every file name counts as a
     /// storage record, the way the table's own file names do in an export.
     pub fn from_inflated_dir(dir: &Path) -> Result<Self> {
-        let mut file_names = BTreeSet::new();
-        for entry in
-            fs::read_dir(dir).with_context(|| format!("failed to read {}", dir.display()))?
-        {
-            let name = entry?.file_name().to_string_lossy().to_string();
-            if let Some(file_name) = name.strip_suffix("__part0.txt") {
-                file_names.insert(file_name.to_string());
-            }
-        }
-        let metadata_file_names = file_names
-            .iter()
-            .filter(|file_name| !file_name.contains('.'))
-            .collect::<Vec<_>>();
-        let row_audits = parallel::install(|| {
-            metadata_file_names
-                .par_iter()
-                .filter_map(|file_name| {
-                    let text =
-                        fs::read_to_string(dir.join(format!("{file_name}__part0.txt"))).ok()?;
-                    Some(metadata_text_row_audit_from_text(
-                        file_name,
-                        text.trim_start_matches('\u{feff}').to_string(),
-                    ))
-                })
-                .collect::<Vec<_>>()
-        })?;
-        let mut metadata = Vec::new();
-        for audit in row_audits {
-            match audit {
-                MetadataTextRowAudit::Extracted(mut row)
-                | MetadataTextRowAudit::ExtractedWithWarning(mut row, _) => {
-                    normalize_direct_form_metadata(&mut row);
-                    metadata.push(row);
-                }
-                MetadataTextRowAudit::Miss(_) => {}
-            }
-        }
+        let (file_names, metadata) = read_offline_metadata_rows(dir)?;
         let command_refs = build_command_interface_reference_index_from_texts(&metadata);
         let metadata_refs = build_metadata_command_reference_index_from_texts(&metadata);
         let form_refs = build_complete_form_source_reference_index(&metadata);

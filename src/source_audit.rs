@@ -2016,6 +2016,333 @@ pub fn audit_interface_writer(
     Ok(report)
 }
 
+/// How far the loader's help writer reproduces the rows the platform stored.
+///
+/// Every `Ext/Help.xml` of the tree (an object's, a form's, the
+/// configuration's) and every `HTMLDocument` template's `Ext/Template.xml` is
+/// compiled by the loader's own function, its row compared with the stored
+/// row's plain text byte for byte, and read back by the exporter's reader into
+/// the files the platform exported. `stored_round_trip` runs the stored row
+/// through the same reader: a file it misses is a gap of the harness or the
+/// exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct HelpWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every help that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+struct HelpWriterTarget {
+    /// The metadata XML that declares the help's owner.
+    owner_xml: PathBuf,
+    /// `Ext/Help.xml` or `Ext/Template.xml`.
+    body: PathBuf,
+    template: bool,
+}
+
+fn help_writer_targets(root: &Path) -> Result<Vec<HelpWriterTarget>> {
+    let mut targets = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let template = match entry.file_name().to_str() {
+            Some("Help.xml") => false,
+            Some("Template.xml") => true,
+            _ => continue,
+        };
+        let path = entry.into_path();
+        let Some(owner_dir) = path
+            .parent()
+            .filter(|ext| ext.file_name().is_some_and(|name| name == "Ext"))
+            .and_then(Path::parent)
+        else {
+            continue;
+        };
+        let owner_xml = if owner_dir == root {
+            root.join("Configuration.xml")
+        } else {
+            owner_dir.with_extension("xml")
+        };
+        if template {
+            let xml = fs::read(&owner_xml)
+                .with_context(|| format!("failed to read {}", owner_xml.display()))?;
+            if parse_template_type_from_xml(&xml)?.as_deref() != Some("HTMLDocument") {
+                continue;
+            }
+        }
+        targets.push(HelpWriterTarget {
+            owner_xml,
+            body: path,
+            template,
+        });
+    }
+    targets.sort_by(|left, right| left.body.cmp(&right.body));
+    Ok(targets)
+}
+
+/// The shape of a refusal, for the histogram: the chain under the first
+/// context (which names the page), with quoted names and paths folded away.
+fn help_refusal_shape(error: &anyhow::Error) -> String {
+    let chain = error.chain().map(ToString::to_string).collect::<Vec<_>>();
+    let tail = if chain.len() > 1 {
+        &chain[1..]
+    } else {
+        &chain[..]
+    };
+    tail.iter()
+        .map(|part| {
+            form_blocker_reason_shape(part)
+                .split_whitespace()
+                .map(|word| if word.contains(":\\") { "<path>" } else { word })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+/// Where the files the exporter writes for a row differ from the native ones:
+/// the XML beside the help, each page and each attachment, and a native file
+/// the row does not produce at all.
+fn rendered_help_difference(
+    rendered: &crate::mssql_dump::help_audit::RenderedHelp,
+    body: &Path,
+) -> Option<String> {
+    let native_xml = fs::read(body).unwrap_or_default();
+    if rendered.xml != native_xml {
+        return Some(format!(
+            "{}: {}",
+            body.file_name().unwrap_or_default().to_string_lossy(),
+            first_byte_difference(&rendered.xml, &native_xml)
+        ));
+    }
+    let dir = body.with_extension("");
+    let files_dir = dir.join("_files");
+    let mut produced = std::collections::BTreeSet::new();
+    for (name, content, path) in rendered
+        .pages
+        .iter()
+        .map(|(name, content)| (name, content, dir.join(name)))
+        .chain(
+            rendered
+                .files
+                .iter()
+                .map(|(name, content)| (name, content, files_dir.join(name))),
+        )
+    {
+        // Windows drops a trailing dot or space from a file name: a stored
+        // `Картинка1.` is exported as `Картинка1`.
+        let on_disk = path
+            .file_name()
+            .map(|name| path.with_file_name(name.to_string_lossy().trim_end_matches(['.', ' '])))
+            .unwrap_or_else(|| path.clone());
+        produced.insert(on_disk);
+        match fs::read(&path) {
+            Ok(native) if &native == content => {}
+            Ok(native) => {
+                return Some(format!(
+                    "{name}: {}",
+                    first_byte_difference(content, &native)
+                ));
+            }
+            Err(_) => return Some(format!("{name}: the export has no such file")),
+        }
+    }
+    for folder in [&dir, &files_dir] {
+        let Ok(entries) = fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && !produced.contains(&path) {
+                return Some(format!(
+                    "{}: the row does not produce this file",
+                    relative_path_string(&dir, &path)
+                ));
+            }
+        }
+    }
+    None
+}
+
+pub fn audit_help_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<HelpWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = help_writer_targets(root)?;
+    let context = crate::mssql_dump::help_audit::OfflineHelpContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} helps and HTML templates; the exporter's index read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        family: &'static str,
+        row: String,
+        refused: Option<(String, String)>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let properties = fs::read(&target.owner_xml)
+                    .with_context(|| format!("failed to read {}", target.owner_xml.display()))
+                    .and_then(|xml| parse_simple_metadata_xml_properties(&xml));
+                let properties = match properties {
+                    Ok(properties) => properties,
+                    Err(error) => {
+                        return Outcome {
+                            family: "unreadable owner",
+                            row: String::new(),
+                            refused: Some((help_refusal_shape(&error), format!("{error:#}"))),
+                            stored: false,
+                            plain: None,
+                            round_trip: None,
+                            stored_round_trip: None,
+                        };
+                    }
+                };
+                let family = if target.template {
+                    "HTML template"
+                } else {
+                    match properties.kind.as_str() {
+                        "Configuration" => "configuration help",
+                        "Form" | "CommonForm" => "form help",
+                        _ => "object help",
+                    }
+                };
+                let row = if target.template {
+                    format!("{}.0", properties.uuid)
+                } else {
+                    crate::mssql::object_help_body_id(&target.owner_xml, &properties)
+                };
+                let stored = fs::read(inflated.join(format!("{row}__part0.txt"))).ok();
+                let stored_round_trip =
+                    stored
+                        .as_ref()
+                        .map(|stored| match context.render(stored, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        });
+                let compiled = if target.template {
+                    crate::mssql::html_template_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                } else {
+                    crate::mssql::object_help_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                };
+                let mut outcome = Outcome {
+                    family,
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                    row,
+                };
+                let compiled = compiled.and_then(|compiled| {
+                    let compiled = compiled
+                        .ok_or_else(|| anyhow!("the loader writes no row for this help"))?;
+                    if compiled.body_id != outcome.row {
+                        return Err(anyhow!(
+                            "the loader writes row {} where the audit expects {}",
+                            compiled.body_id,
+                            outcome.row
+                        ));
+                    }
+                    crate::compiler::families::native::inflate(&compiled.blob)
+                        .map_err(|error| anyhow!("the loader's row does not inflate: {error}"))
+                });
+                match compiled {
+                    Err(error) => {
+                        outcome.refused = Some((help_refusal_shape(&error), format!("{error:#}")));
+                    }
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
+                        }
+                        outcome.round_trip = match context.render(&plain, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = HelpWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.body);
+        let family = report
+            .families
+            .entry(outcome.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: outcome.family.to_string(),
+                file: file.clone(),
+                row: outcome.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some((shape, reason)) = outcome.refused {
+            *family.refused.entry(shape).or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
 /// Audits every `Form.xml` of a source tree against the base-free form body
 /// model, and reports what stands between the tree and a load.
 pub fn audit_form_body_blockers(root: &Path) -> Result<FormBodyBlockerAuditReport> {

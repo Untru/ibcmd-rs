@@ -185,6 +185,48 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::AuditHelpWriter(args) => {
+            let report = ibcmd_rs::source_audit::audit_help_writer(
+                &args.root,
+                &args.inflated,
+                args.source_version,
+            )?;
+            for (family, counts) in &report.families {
+                println!(
+                    "{family}: files {} compiled {} plain {} round-trip {} refused {} (stored round-trip {}, no stored row {})",
+                    counts.files,
+                    counts.compiled,
+                    counts.plain_identical,
+                    counts.round_trip_identical,
+                    counts.refused.values().sum::<usize>(),
+                    counts.stored_round_trip_identical,
+                    counts.no_stored_row,
+                );
+                for (reason, count) in &counts.refused {
+                    println!("    refused {count}: {reason}");
+                }
+            }
+            let mut shown = BTreeMap::<(&str, &str), usize>::new();
+            for difference in &report.differences {
+                let seen = shown
+                    .entry((difference.family.as_str(), difference.check))
+                    .or_insert(0);
+                *seen += 1;
+                if *seen <= 3 {
+                    println!(
+                        "  {} {} {} [{}]: {}",
+                        difference.family,
+                        difference.check,
+                        difference.file,
+                        difference.row,
+                        difference.detail.chars().take(600).collect::<String>()
+                    );
+                }
+            }
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            }
+        }
         Commands::AuditInterfaceWriter(args) => {
             let report = ibcmd_rs::source_audit::audit_interface_writer(
                 &args.root,
