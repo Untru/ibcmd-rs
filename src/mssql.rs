@@ -4598,6 +4598,14 @@ fn prepare_template_body_row(
         TemplateKind::HtmlDocument => {
             prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties, axes)
         }
+        // Diagnostic switch for a real load while the spreadsheet writer's
+        // bodies are not yet platform-readable (native ibcmd refuses them):
+        // stage nothing, so the target keeps its own row for the body.
+        TemplateKind::SpreadsheetDocument
+            if std::env::var_os("IBCMD_RS_STAGE_SKIP_SPREADSHEET_TEMPLATES").is_some() =>
+        {
+            Ok(Vec::new())
+        }
         TemplateKind::SpreadsheetDocument => prepare_spreadsheet_template_body_row(
             sqlcmd, server, database, xml_path, properties, source, axes,
         ),
