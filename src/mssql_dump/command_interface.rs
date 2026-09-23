@@ -136,7 +136,7 @@ pub(super) struct ClientApplicationInterface {
 /// save, and read the stored record -- puts exactly these five under the code
 /// `2` and everything else under the code `1`, which is what makes the table
 /// usable as the code-`2` test.
-const CLIENT_APPLICATION_STANDARD_PANEL_DEFS: [&str; 5] = [
+pub(crate) const CLIENT_APPLICATION_STANDARD_PANEL_DEFS: [&str; 5] = [
     "b553047f-c9aa-4157-978d-448ecad24248",
     "13322b22-3960-4d68-93a6-fe2dd7f28ca3",
     "c933ac92-92cd-459d-81cc-e0c8a83ced99",
@@ -144,7 +144,7 @@ const CLIENT_APPLICATION_STANDARD_PANEL_DEFS: [&str; 5] = [
     "b2735bd3-d822-4430-ba59-c9e869693b24",
 ];
 
-fn client_application_panel_def_is_standard(id: &str) -> bool {
+pub(crate) fn client_application_panel_def_is_standard(id: &str) -> bool {
     CLIENT_APPLICATION_STANDARD_PANEL_DEFS
         .iter()
         .any(|standard| standard.eq_ignore_ascii_case(id))
@@ -420,12 +420,14 @@ pub(super) fn parse_command_interface_command_name_field(
     }
 }
 
+/// Stored placement codes and the names the platform exports them under.
+pub(crate) const COMMAND_INTERFACE_PLACEMENTS: [(&str, &str); 2] = [("0", "Auto"), ("1", "Manual")];
+
 pub(super) fn command_interface_placement_name(code: &str) -> Option<&'static str> {
-    match code {
-        "0" => Some("Auto"),
-        "1" => Some("Manual"),
-        _ => None,
-    }
+    COMMAND_INTERFACE_PLACEMENTS
+        .iter()
+        .find(|(stored, _)| *stored == code)
+        .map(|(_, name)| *name)
 }
 
 /// An adjustable command-visibility atom carries the common value followed by a
@@ -578,11 +580,16 @@ pub(super) fn parse_home_page_work_area_text(
     })
 }
 
+/// Stored work-area template codes and the names the platform exports them
+/// under.
+pub(crate) const HOME_PAGE_WORK_AREA_TEMPLATES: [(&str, &str); 1] =
+    [("2", "TwoColumnsVariableWidth")];
+
 pub(super) fn home_page_work_area_template_name(code: &str) -> Option<&'static str> {
-    match code {
-        "2" => Some("TwoColumnsVariableWidth"),
-        _ => None,
-    }
+    HOME_PAGE_WORK_AREA_TEMPLATES
+        .iter()
+        .find(|(stored, _)| *stored == code)
+        .map(|(_, name)| *name)
 }
 
 pub(super) fn parse_home_page_work_area_column(
@@ -844,7 +851,7 @@ pub(super) fn command_interface_standard_command(kind: &str) -> Option<&'static 
     }
 }
 
-pub(super) fn command_interface_standard_command_for_code(
+pub(crate) fn command_interface_standard_command_for_code(
     kind: &str,
     code: &str,
 ) -> Option<&'static str> {

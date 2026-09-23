@@ -9,7 +9,8 @@ use ibcmd_core::profile::EffectiveProfile;
 
 use super::dcs::{
     DcsBody, DcsCodecError, DcsCodecProfile, DcsTemplateKind,
-    compile_evidenced_dcs_with_references, decode_compatible_dcs, validate_raw_xml_root,
+    compile_evidenced_dcs_with_references, compile_evidenced_dcs_with_resolvers,
+    decode_compatible_dcs, validate_raw_xml_root,
 };
 use super::mxl::{
     MxlBody, MxlCodecError, MxlCodecProfile, compile_evidenced_mxl, decode_compatible_mxl,
@@ -17,13 +18,14 @@ use super::mxl::{
 };
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{
-    NativeError, deflate_bytes, exact_list, exact_token, inflate, parse_without_bom, required_list,
+    NativeError, deflate_bytes, exact_list, exact_token, inflate, parse_optional_bom, required_list,
     required_text, required_token,
 };
 use crate::module_blob::{
-    MetadataSourceContext, SpreadsheetNumberFormatHint, decode_base64_mime, encode_base64,
+    MetadataSourceContext, SpreadsheetNumberFormatHint, decode_base64_mime,
     pack_help_blob_from_parts,
 };
+use ibcmd_xml::DcsStorageTypeResolver;
 
 const LAYOUT_KEY: &str = "bootstrap.body.template.layout";
 const LAYOUT: &str = "template-kind-dispatch-v1";
@@ -253,12 +255,27 @@ pub(crate) fn compile_evidenced_template_with_references(
     source: TemplateSource<'_>,
     style_reference_types: &BTreeMap<String, String>,
 ) -> Result<Vec<u8>, TemplateCodecError> {
+    let unresolved = |_: &str| None::<String>;
+    compile_evidenced_template_with_resolvers(kind, source, style_reference_types, &unresolved)
+}
+
+/// Compiles like [`compile_evidenced_template_with_references`] and also
+/// resolves a `DataCompositionSchema`'s configuration types to their storage
+/// `TypeId` through `types` (see
+/// [`super::dcs::compile_evidenced_dcs_with_resolvers`]).
+pub(crate) fn compile_evidenced_template_with_resolvers(
+    kind: TemplateKind,
+    source: TemplateSource<'_>,
+    style_reference_types: &BTreeMap<String, String>,
+    types: &dyn DcsStorageTypeResolver,
+) -> Result<Vec<u8>, TemplateCodecError> {
     let blob = match (kind, source) {
         (TemplateKind::DataCompositionSchema, TemplateSource::Bytes(xml)) => {
-            compile_evidenced_dcs_with_references(
+            compile_evidenced_dcs_with_resolvers(
                 DcsTemplateKind::Schema,
                 xml,
                 style_reference_types,
+                types,
             )
             .map_err(|error| TemplateCodecError::Dcs(error.to_string()))?
         }
@@ -373,14 +390,20 @@ fn decode_evidenced_template(
     }
 }
 
+/// `{1,<payload>}` in the platform's own layout: the BOM, the payload on its
+/// own line wrapped at 64 characters, the closing brace on its own line --
+/// every stored binary and add-in template of БСП reads this way.
 fn compile_binary_template(bytes: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
-    let plain = format!("{{1,\r\n{{#base64:{}}}}}", encode_base64(bytes));
+    let plain = format!(
+        "\u{feff}{{1,\r\n{}\r\n}}",
+        crate::module_blob::platform_base64_token(bytes)
+    );
     deflate_bytes(plain.as_bytes()).map_err(Into::into)
 }
 
 fn decode_binary_template(blob: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
     let plain = inflate(blob)?;
-    let native = parse_without_bom(&plain)?;
+    let native = parse_optional_bom(&plain)?;
     let fields = exact_list(&native, 2, "binary Template root")?;
     exact_token(&fields[0], "1", "binary Template marker")?;
     decode_base64_value(&fields[1], "binary Template payload")
@@ -388,7 +411,7 @@ fn decode_binary_template(blob: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
 
 fn decode_html_template(blob: &[u8]) -> Result<HtmlTemplateBody, TemplateCodecError> {
     let plain = inflate(blob)?;
-    let native = parse_without_bom(&plain)?;
+    let native = parse_optional_bom(&plain)?;
     let fields = required_list(&native, "HTML Template root")?;
     exact_token(
         fields
@@ -606,7 +629,9 @@ impl From<MxlCodecError> for TemplateCodecError {
 mod tests {
     use super::*;
 
-    const SCHEMA: &[u8] = br#"<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dataSource><name>S</name><dataSourceType>Local</dataSourceType></dataSource><settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings/></settingsVariant></DataCompositionSchema>"#;
+    // A schema body compiles only when the exporter reads it back as the
+    // source, so the fixture is written the way the export writes one.
+    const SCHEMA: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\t<dataSource>\r\n\t\t<name>S</name>\r\n\t\t<dataSourceType>Local</dataSourceType>\r\n\t</dataSource>\r\n\t<settingsVariant>\r\n\t\t<dcsset:name>Main</dcsset:name>\r\n\t\t<dcsset:presentation xsi:type=\"xs:string\">Main</dcsset:presentation>\r\n\t\t<dcsset:settings xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"/>\r\n\t</settingsVariant>\r\n</DataCompositionSchema>";
     const APPEARANCE: &[u8] = br#"<AppearanceTemplate xmlns="http://v8.1c.ru/8.1/data-composition-system/appearance-template"/>"#;
     const GRAPHICAL: &[u8] = br#"<GraphicalSchema xmlns="http://v8.1c.ru/8.3/xcf/scheme" version="2.20"><Items/></GraphicalSchema>"#;
     const SPREADSHEET: &[u8] = br#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core"><columns><size>1</size></columns><rowsItem><index>0</index><row><c><c><f>0</f><tl><v8:item><v8:lang>en</v8:lang><v8:content>A</v8:content></v8:item></tl></c></c></row></rowsItem></document>"#;
@@ -668,7 +693,13 @@ mod tests {
         )
         .unwrap();
         let mxl = decode_template(&profile, TemplateKind::SpreadsheetDocument, &mxl).unwrap();
-        assert_eq!(mxl.spreadsheet().unwrap().declared_columns(), 1);
+        // Field 2 is the platform's constant 12 whatever the column count.
+        assert!(
+            mxl.spreadsheet()
+                .unwrap()
+                .native_body_text()
+                .starts_with("{8,1,12,")
+        );
     }
 
     #[test]
@@ -681,8 +712,7 @@ mod tests {
         )
         .unwrap();
         let plain = inflate(&blob).unwrap();
-        assert!(plain.starts_with(b"{1,"));
-        assert!(plain.windows(8).any(|window| window == b"{#base64"));
+        assert_eq!(plain, "\u{feff}{1,\r\n{#base64:YmluYXJ5}\r\n}".as_bytes());
 
         assert!(matches!(
             TemplateKind::parse("FutureTemplate"),

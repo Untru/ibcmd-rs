@@ -476,7 +476,36 @@ pub(super) fn fetch_binary_rows_bcp_query(
     let parts = parse_bcp_native_config_rows(&bytes)
         .with_context(|| format!("failed to parse native bcp rows for {database}.{table}"))?;
     assemble_binary_config_rows(parts)
+        .map(|rows| apply_row_overrides(table, rows))
         .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
+}
+
+/// The virtual load cycle, second half: when `IBCMD_RS_ROW_OVERRIDE_DIR` names
+/// a directory holding `<file name>.bin`, a `Config` row is read with those
+/// stored bytes instead of the database's. `mssql-audit-source-parity` writes
+/// the rows a load would stage there (`IBCMD_RS_WRITE_STAGED_ROWS_DIR`), so an
+/// export run this way reads exactly what a load followed by an export would.
+fn apply_row_overrides(table: &str, mut rows: Vec<BinaryConfigRow>) -> Vec<BinaryConfigRow> {
+    static DIR: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
+    let Some(dir) = DIR
+        .get_or_init(|| std::env::var_os("IBCMD_RS_ROW_OVERRIDE_DIR").map(PathBuf::from))
+        .as_ref()
+    else {
+        return rows;
+    };
+    if !table.trim_matches(['[', ']']).eq_ignore_ascii_case("Config") {
+        return rows;
+    }
+    for row in &mut rows {
+        if row.part_no != 0 {
+            continue;
+        }
+        if let Ok(bytes) = fs::read(dir.join(format!("{}.bin", row.file_name))) {
+            row.data_size = bytes.len() as i64;
+            row.binary = bytes;
+        }
+    }
+    rows
 }
 
 #[cfg_attr(not(feature = "platform-oracle"), allow(dead_code))]

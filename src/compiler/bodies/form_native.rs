@@ -70,6 +70,11 @@ pub(crate) fn format_native_color(
     let Some(value) = value else {
         return Some("{3,4,{0}}".to_string());
     };
+    // `auto`, the platform's automatic colour: `{3,4,{-1}}` on every button
+    // of both corpora that spells it.
+    if value == "auto" {
+        return Some("{3,4,{-1}}".to_string());
+    }
     if let Some(hex) = value.strip_prefix('#') {
         if hex.len() != 6 {
             return None;
@@ -85,6 +90,12 @@ pub(crate) fn format_native_color(
             .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
         return Some(format!("{{3,2,{{{code}}}}}"));
     }
+    if let Some(name) = value.strip_prefix("win:") {
+        let code = WINDOWS_COLOR_CODES
+            .iter()
+            .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
+        return Some(format!("{{3,1,{{{code}}}}}"));
+    }
     let name = value.strip_prefix("style:")?;
     if let Some(code) = PLATFORM_STYLE_COLOR_CODES
         .iter()
@@ -99,8 +110,12 @@ pub(crate) fn format_native_color(
 /// them.
 const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
     ("AccentColor", "-46"),
+    ("ActivityColor", "-44"),
     ("AuxiliaryNavigationColor", "-43"),
+    ("BorderColor", "-22"),
     ("ButtonBackColor", "-7"),
+    ("ButtonBorderColor", "-34"),
+    ("ButtonTextColor", "-21"),
     ("FieldAlternativeBackColor", "-13"),
     ("FieldBackColor", "-10"),
     ("FieldSelectedTextColor", "-15"),
@@ -114,25 +129,170 @@ const PLATFORM_STYLE_COLOR_CODES: &[(&str, &str)] = &[
     ("ReportGroup1BackColor", "-26"),
     ("ReportGroup2BackColor", "-27"),
     ("ReportHeaderBackColor", "-25"),
+    ("ReportLineColor", "-28"),
     ("SpecialTextColor", "-16"),
     ("TableFooterBackColor", "-37"),
     ("TableHeaderBackColor", "-35"),
+    ("TableHeaderTextColor", "-36"),
     ("ToolTipBackColor", "-23"),
     ("ToolTipTextColor", "-24"),
 ];
 
-/// The web colours the corpus names, with the index a body stores.
+/// A `<Shortcut>` as a body stores it: `{0,<virtual-key code>,<modifiers>}`,
+/// Shift 4, Ctrl 8 and Alt 16 summed. The inverse of the reader's table,
+/// measured on 2 451 ERP УХ and 148 BSP command records and 112 item records:
+/// letters and digits are their upper-case ASCII, `F1`..`F12` 112..123,
+/// `Num 0`..`Num 9` 96..105, `Num *` 106, `Num +` 107, `Num -` 109, `Num .`
+/// 110, `Num /` 111, `BackSpace` 8, `Enter` 13, `Esc` 27. Any other key is
+/// refused.
+pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
+    let text = text.trim();
+    // `Num +` ends in the separator itself, so it is split off first.
+    let (modifiers, key) = if let Some(prefix) = text.strip_suffix("Num +") {
+        (prefix.strip_suffix('+').unwrap_or(prefix), "Num +")
+    } else {
+        match text.rsplit_once('+') {
+            Some((prefix, key)) => (prefix, key),
+            None => ("", text),
+        }
+    };
+    let code: u32 = match key {
+        "BackSpace" => 8,
+        "Enter" => 13,
+        "Esc" => 27,
+        "Num *" => 106,
+        "Num +" => 107,
+        "Num -" => 109,
+        "Num ." => 110,
+        "Num /" => 111,
+        _ => {
+            if let Some(digit) = key.strip_prefix("Num ") {
+                let digit: u32 = digit.parse().ok()?;
+                if digit > 9 {
+                    return None;
+                }
+                96 + digit
+            } else if let Some(number) = key.strip_prefix('F').filter(|rest| !rest.is_empty()) {
+                let number: u32 = number.parse().ok()?;
+                if !(1..=12).contains(&number) {
+                    return None;
+                }
+                111 + number
+            } else {
+                let mut chars = key.chars();
+                let single = chars.next()?;
+                if chars.next().is_some() || !(single.is_ascii_uppercase() || single.is_ascii_digit()) {
+                    return None;
+                }
+                u32::from(single)
+            }
+        }
+    };
+    let mut mask = 0u32;
+    if !modifiers.is_empty() {
+        for modifier in modifiers.split('+') {
+            mask |= match modifier {
+                "Shift" => 4,
+                "Ctrl" => 8,
+                "Alt" => 16,
+                _ => return None,
+            };
+        }
+    }
+    Some(format!("{{0,{code},{mask}}}"))
+}
+
+/// The web colours, with the index a body stores: the ones measured on form
+/// items, and the rest of the table the exporter reads the index back with.
 const WEB_COLOR_CODES: &[(&str, &str)] = &[
+    ("AliceBlue", "1"),
+    ("Beige", "6"),
+    ("Black", "8"),
+    ("Blue", "10"),
+    ("CadetBlue", "14"),
+    ("Cream", "20"),
+    ("Crimson", "21"),
+    ("DarkBlue", "23"),
+    ("DarkGray", "26"),
+    ("DarkGreen", "27"),
+    ("DarkOliveGreen", "30"),
+    ("DarkOrange", "31"),
+    ("DarkRed", "33"),
+    ("DarkSlateGray", "37"),
+    ("DeepSkyBlue", "41"),
+    ("DimGray", "42"),
+    ("DodgerBlue", "43"),
     ("FireBrick", "44"),
+    ("FloralWhite", "45"),
     ("ForestGreen", "46"),
+    ("Gainsboro", "48"),
+    ("GhostWhite", "49"),
+    ("Gold", "50"),
+    ("Goldenrod", "51"),
     ("Gray", "52"),
+    ("Green", "53"),
     ("HoneyDew", "55"),
     ("IndianRed", "57"),
+    ("Lavender", "61"),
+    ("LavenderBlush", "62"),
+    ("LemonChiffon", "64"),
+    ("LightBlue", "65"),
+    ("LightCoral", "66"),
+    ("LightCyan", "67"),
+    ("LightGoldenRod", "68"),
+    ("LightGoldenRodYellow", "69"),
+    ("LightGray", "71"),
     ("LightGreen", "70"),
+    ("LightPink", "72"),
+    ("LightSalmon", "73"),
+    ("LightSkyBlue", "75"),
+    ("LightSlateGray", "77"),
+    ("LightSteelBlue", "78"),
     ("LightYellow", "79"),
+    ("Lime", "80"),
+    ("Maroon", "84"),
+    ("MediumBlue", "86"),
+    ("MediumGray", "87"),
+    ("MediumSeaGreen", "91"),
+    ("MintCream", "97"),
     ("MistyRose", "98"),
+    ("Moccasin", "96"),
+    ("NavajoWhite", "100"),
+    ("Orange", "105"),
+    ("OrangeRed", "106"),
+    ("PaleGreen", "109"),
+    ("PaleTurquoise", "110"),
+    ("PapayaWhip", "112"),
+    ("Pink", "115"),
+    ("PowderBlue", "117"),
     ("Red", "119"),
+    ("RosyBrown", "120"),
+    ("RoyalBlue", "121"),
+    ("SaddleBrown", "122"),
+    ("Salmon", "123"),
+    ("Sienna", "127"),
+    ("Silver", "128"),
+    ("SkyBlue", "129"),
+    ("SlateBlue", "130"),
+    ("SlateGray", "131"),
+    ("Snow", "132"),
+    ("SteelBlue", "134"),
+    ("Violet", "140"),
+    ("VioletRed", "141"),
+    ("White", "143"),
     ("WhiteSmoke", "144"),
+    ("Yellow", "145"),
+];
+
+/// The Windows system colours the corpus names, with the index a body stores
+/// under `{3,1,{n}}` -- the ones the form exporter reads back.
+const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
+    ("ActiveTitleBar", "2"),
+    ("ButtonDarkShadow", "21"),
+    ("ButtonText", "18"),
+    ("DisabledText", "17"),
+    ("MenuBar", "4"),
+    ("ScrollBar", "0"),
 ];
 
 /// One `<Event>` of an item, as the source names it.
@@ -244,6 +404,7 @@ fn is_uuid(value: &str) -> bool {
 /// An empty class matches any form; only `BeforeWrite` and `BeforeWriteAtServer`
 /// of a form need the class, and only a document form parts company there.
 const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
+    ("CalendarField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("CalendarField", "", "OnPeriodOutput", "1490ede6-6f33-4c6d-b971-53b2541331ea"),
     ("CalendarField", "", "Selection", "2feb1ee9-b750-4352-bb4c-67ba1c608dc6"),
     ("ChartField", "", "DetailProcessing", "650da4af-3233-4ce0-a1ae-23f87a226eee"),
@@ -292,6 +453,11 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("FormattedDocumentField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("GanttChartField", "", "DetailProcessing", "8724b8d4-140d-4357-8ac9-46e29ba7b168"),
     ("GanttChartField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    // The exporter's own table (form_schema.rs, `FORM_GANTT_CHART_*`): ERP УХ
+    // `DataProcessors/ДиаграммаГантаОперации/Forms/Форма` stores the second.
+    ("GanttChartField", "", "Selection", "3aab5acd-9e00-4d33-8242-3cdb677bb0f3"),
+    ("GanttChartField", "", "OnIntervalEditEnd", "fe4544e7-5b1a-441c-8ab9-198137e6d3c7"),
+    ("GraphicalSchemaField", "", "OnActivate", "83c14f85-ab1f-4c77-bd3b-81970b72543b"),
     ("GraphicalSchemaField", "", "Selection", "3c3da18f-fc18-4f77-8c2d-96c25bec40a5"),
     ("HTMLDocumentField", "", "DocumentComplete", "53325f0c-b112-4c44-ab12-5d1ee0b1f07b"),
     ("HTMLDocumentField", "", "OnClick", "da8dfb86-c5d1-4e35-a8a4-01b167a60ad3"),
@@ -322,6 +488,8 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("PictureField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("RadioButtonField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("SpreadSheetDocumentField", "", "AdditionalDetailProcessing", "0b8dc702-d001-4637-a215-9f35613e096c"),
+    ("SpreadSheetDocumentField", "", "BeforeWrite", "b7646583-04d3-4905-8f04-8985914bd1b7"),
+    ("Table", "", "OnCurrentParentChange", "2971b9a9-1724-4f34-aaa4-f3db584c3ca0"),
     ("SpreadSheetDocumentField", "", "BeforePrint", "61455593-0982-4415-bc2e-2e8722a7abd0"),
     ("SpreadSheetDocumentField", "", "DetailProcessing", "2988b2a5-c887-4928-94ae-5d0c9c31e999"),
     ("SpreadSheetDocumentField", "", "Drag", "8ad48496-8d0b-4f6c-ae48-99d95227884b"),
@@ -707,6 +875,34 @@ pub(crate) struct NativeFieldItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) group_horizontal_align: Option<&'a str>,
     pub(crate) group_vertical_align: Option<&'a str>,
+    /// Member 55, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
+    /// The additions a field carries in its tail, `<n>` then the records:
+    /// `0` for every field but a PDF document's, whose `<ViewStatusAddition>`
+    /// is `1,{…}` (8 of 8).
+    pub(crate) additions: &'a str,
+    /// Member 58, the count of the items nested behind the shared layout,
+    /// then the items: `0` for every field but a Gantt chart's, whose
+    /// `<Table>` is `1,{55,…}` (form_schema.rs: 17 of the 20 stand items
+    /// carry one, and slot 58 counts it on all 366 field records of their
+    /// bodies).
+    pub(crate) nested_items: &'a str,
+}
+
+/// The `DisplayImportance` XML attribute an item may carry, as every item
+/// record stores it: absent 0, `VeryHigh` 1, `High` 2, `Usual` 3, `Low` 4,
+/// `VeryLow` 5 -- pure over the button, field, decoration and group records
+/// of BSP. A spelling outside those is refused.
+pub(crate) fn native_display_importance(value: Option<&str>) -> Option<&'static str> {
+    match value {
+        None => Some("0"),
+        Some("VeryHigh") => Some("1"),
+        Some("High") => Some("2"),
+        Some("Usual") => Some("3"),
+        Some("Low") => Some("4"),
+        Some("VeryLow") => Some("5"),
+        Some(_) => None,
+    }
 }
 
 impl Default for NativeFieldItem<'_> {
@@ -761,6 +957,9 @@ impl Default for NativeFieldItem<'_> {
             extended_tooltip: "",
             group_horizontal_align: None,
             group_vertical_align: None,
+            display_importance: "0",
+            additions: "0",
+            nested_items: "0",
         }
     }
 }
@@ -778,10 +977,15 @@ pub(crate) fn native_field_kind(tag: &str) -> Option<u8> {
         "RadioButtonField" => 5,
         "SpreadSheetDocumentField" => 6,
         "TextDocumentField" => 7,
+        "CalendarField" => 8,
         "ProgressBarField" => 9,
+        "TrackBarField" => 10,
+        "ChartField" => 11,
         "GanttChartField" => 12,
+        "GraphicalSchemaField" => 14,
         "HTMLDocumentField" => 15,
         "FormattedDocumentField" => 17,
+        "PDFDocumentField" => 20,
         _ => return None,
     })
 }
@@ -882,7 +1086,7 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
          {footer_picture},{a0},{a1},{a2},{a3},{a4},{a5},{picture_index},1,{payload},{events},1,\
          {context_menu},{visible},{format_one},{format_two},{string_one},{string_two},\
          {appearance_tail},{fixing},{tooltip_representation},1,{extended_tooltip},\
-         {group_horizontal},{group_vertical},0,0,0,0}}",
+         {group_horizontal},{group_vertical},{display_importance},0,{additions},{nested_items}}}",
         id = item.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = item.kind,
@@ -921,6 +1125,9 @@ pub(crate) fn format_field_item(item: &NativeFieldItem<'_>) -> Option<String> {
         string_one = item.format_strings[0],
         string_two = item.format_strings[1],
         extended_tooltip = item.extended_tooltip,
+        display_importance = item.display_importance,
+        additions = item.additions,
+        nested_items = item.nested_items,
     ))
 }
 
@@ -961,8 +1168,14 @@ pub(crate) struct NativeLabelPayload<'a> {
     pub(crate) back_color: &'a str,
     /// Slot 10, the font.
     pub(crate) font: &'a str,
+    /// Slot 11, `<PasswordMode>`, tri-state like the stretches.
+    pub(crate) password_mode: Option<bool>,
     /// Slot 12, the item's own event bindings.
     pub(crate) events: &'a str,
+    /// Slot 13, `<BorderColor>`.
+    pub(crate) border_color: &'a str,
+    /// Slot 14, the `<Border>`.
+    pub(crate) border: &'a str,
     /// Slot 15: `0` exactly when the item says `AutoMaxWidth` is false.
     pub(crate) auto_max_width: bool,
     /// Slot 16, `0` when the item names no maximum width.
@@ -986,7 +1199,10 @@ impl NativeLabelPayload<'_> {
             text_color: "{3,4,{0}}",
             back_color: "{3,4,{0}}",
             font: "{7,3,0,1,100}",
+            password_mode: None,
             events: "{0,1,0}",
+            border_color: "{3,4,{0}}",
+            border: "{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}",
             auto_max_width: true,
             max_width: "0",
             auto_max_height: true,
@@ -1003,8 +1219,8 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
     };
     format!(
         "{{11,{width},{height},{stretch},{vertical},{mark_negatives},{format},{hyperlink},\
-         {text_color},{back_color},{font},2,{events},{{3,4,{{0}}}},\
-         {{3,0,{{0}},0,1,0,{appearance}}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {text_color},{back_color},{font},{password_mode},{events},{border_color},\
+         {border},{auto_max_width},{max_width},0,{auto_max_height},\
          {max_height}}}",
         width = payload.width,
         height = payload.height,
@@ -1019,10 +1235,100 @@ pub(crate) fn format_label_payload(payload: &NativeLabelPayload<'_>) -> String {
         back_color = payload.back_color,
         font = payload.font,
         events = payload.events,
-        appearance = DEFAULT_APPEARANCE_UUID,
+        password_mode = tristate(payload.password_mode),
+        border_color = payload.border_color,
+        border = payload.border,
         auto_max_width = u8::from(payload.auto_max_width),
         max_width = payload.max_width,
     )
+}
+
+/// Slot 62 of an input payload once the item names any of its four
+/// properties: member 2 is `<AllowInputEmptyMultipleValues>` (absent 0,
+/// `true` 1), member 4 is `<ShowCheckBoxesInDropList>` (absent 2, `false` 0,
+/// `true` 1), member 9 `<MultipleValueDataPath>` and member 15
+/// `<MultipleValuePresentDataPath>`, each `{1,{<column id>}}` or `{0}`. The
+/// rest is constant over the 5 such fields of both corpora.
+pub(crate) fn format_input_drop_list_settings(
+    allow_empty_multiple_values: bool,
+    show_check_boxes: Option<bool>,
+    value_path: &str,
+    present_path: &str,
+) -> String {
+    let check = match show_check_boxes {
+        Some(true) => "1",
+        Some(false) => "0",
+        None => "2",
+    };
+    format!(
+        "{{1,2,{allow_empty},0,{check},{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},\
+         {{4,0,{{0}},\"\",-1,-1,1,0,\"\"}},{value_path},\"\",{{\"Pattern\"}},{{0}},\"\",\
+         {{\"Pattern\"}},{present_path},\"\",{{\"Pattern\"}},0,0}}",
+        allow_empty = u8::from(allow_empty_multiple_values),
+    )
+}
+
+/// The `{3,…}` payload of a `<GraphicalSchemaField>` (rt-fields2.md §2, 11 of
+/// 11): width and height default 50 and 10, `<Output>` absent 0 and `Enable`
+/// 1, `<Edit>` 1 unless `false`, then the events and constants.
+pub(crate) fn format_graphical_schema_payload(
+    width: &str,
+    height: &str,
+    output: Option<&str>,
+    edit: bool,
+    events: &str,
+) -> Option<String> {
+    let output = match output {
+        None => "0",
+        Some("Enable") => "1",
+        Some(_) => return None,
+    };
+    Some(format!(
+        "{{3,{width},{height},{output},{edit},{{3,4,{{0}}}},{events},1,0,0,1,0,1,1}}",
+        edit = u8::from(edit),
+    ))
+}
+
+/// The `{1,…}` payload of a `<ChartField>` (rt-fields2.md §3, 9 of 9).
+pub(crate) fn format_chart_payload(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+    max_height: &str,
+) -> String {
+    format!(
+        "{{1,{width},{height},{horizontal},{vertical},{events},1,0,0,1,{max_height}}}",
+        horizontal = u8::from(horizontal_stretch),
+        vertical = u8::from(vertical_stretch),
+    )
+}
+
+/// The `{3,…}` payload of a `<GanttChartField>`: width and height default 50
+/// and 10, the two stretch flags 1 unless the field turns them off, the
+/// events, then ten members that hold one value each over the whole stand
+/// (`form_schema::FormSpecialFieldSchema::gantt_dimension` and
+/// `gantt_stretch` read the first four; 18 of 18 ERP УХ records spell the
+/// bag at revision 3).
+pub(crate) fn format_gantt_chart_payload(
+    width: &str,
+    height: &str,
+    horizontal_stretch: bool,
+    vertical_stretch: bool,
+    events: &str,
+) -> String {
+    format!(
+        "{{3,{width},{height},{horizontal},{vertical},{events},1,0,0,1,0,0,0,0,2,2}}",
+        horizontal = u8::from(horizontal_stretch),
+        vertical = u8::from(vertical_stretch),
+    )
+}
+
+/// The `{1,…}` payload of a `<PDFDocumentField>` (rt-fields2.md §4, 8 of 8):
+/// only the size varies.
+pub(crate) fn format_pdf_document_payload(width: &str, height: &str) -> String {
+    format!("{{1,{width},{height},{{3,4,{{0}}}},0,{{0,1,0}},1,0,0,1,0,1,1,0}}")
 }
 
 /// The `{36,…}` payload of an input field, member by member.
@@ -1089,6 +1395,23 @@ pub(crate) struct NativeInputPayload<'a> {
     /// Slot 43, `<EditTextUpdate>`: `DontUse` 1, `OnValueChange` 2,
     /// `Always` 3.
     pub(crate) edit_text_update: Option<&'a str>,
+    /// Slot 44, `<InputHint>`, a localized string, `{1,0}` by default.
+    pub(crate) input_hint: &'a str,
+    /// Slot 1, `<ChoiceList>`, `{3,0}` by default.
+    pub(crate) choice_list: &'a str,
+    /// Slots 26 and 64, `<ChoiceParameterLinks>`, `{5006,0}` and `{5007,0}`.
+    pub(crate) choice_parameter_links: &'a str,
+    pub(crate) choice_parameter_links_again: &'a str,
+    /// Slot 42, `<TypeLink>`, `{3,0,0}` by default.
+    pub(crate) type_link: &'a str,
+    /// Slot 27, `<ChoiceParameters>`, `{0,0}` by default.
+    pub(crate) choice_parameters: &'a str,
+    /// Slot 34, `<AvailableTypes>` as a type pattern, `{"Pattern"}` by default.
+    pub(crate) available_types: &'a str,
+    /// Slots 55 to 60: `<AutoShowClearButtonMode>`, `<AutoShowOpenButtonMode>`,
+    /// `<AutoCorrectionOnTextInput>`, `<SpellCheckingOnTextInput>`, a constant,
+    /// `<SpecialTextInputMode>` -- already coded.
+    pub(crate) text_input_tail: [&'a str; 6],
     /// Slot 45, `<CreateButton>`.
     pub(crate) create_button: Option<bool>,
     /// Slot 46, `<ChoiceButtonRepresentation>`: `ShowInDropList` 1,
@@ -1109,6 +1432,10 @@ pub(crate) struct NativeInputPayload<'a> {
     /// Slot 65, `<ExtendedEditMultipleValues>`: absent 0, `true` 1. The same,
     /// on 3 354.
     pub(crate) extended_edit_multiple_values: bool,
+    /// Slot 62, the drop-list settings: `{0}` unless the item names
+    /// `<ShowCheckBoxesInDropList>` or a multiple-value data path -- see
+    /// [`format_input_drop_list_settings`].
+    pub(crate) drop_list_settings: &'a str,
     /// Slot 18, the input mask, `""` when the item names none.
     pub(crate) mask: &'a str,
     /// Slot 49: `0` exactly when the item says `AutoMaxWidth` is false.
@@ -1164,6 +1491,14 @@ impl NativeInputPayload<'_> {
             incomplete_choice_mode: None,
             text_edit: true,
             edit_text_update: None,
+            input_hint: "{1,0}",
+            choice_list: "{3,0}",
+            choice_parameter_links: "{5006,0}",
+            choice_parameter_links_again: "{5007,0}",
+            type_link: "{3,0,0}",
+            choice_parameters: "{0,0}",
+            available_types: "{\"Pattern\"}",
+            text_input_tail: ["0", "0", "0", "0", "0", "0"],
             create_button: None,
             choice_button_representation: None,
             drop_list_button: None,
@@ -1173,6 +1508,7 @@ impl NativeInputPayload<'_> {
             height_control_variant: None,
             type_domain_enabled: true,
             extended_edit_multiple_values: false,
+            drop_list_settings: "{0}",
             mask: "",
             auto_max_width: true,
             max_width: "0",
@@ -1228,20 +1564,22 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         "0",
     )?;
     Some(format!(
-        "{{36,{{3,0}},{width},{height},{horizontal},{vertical},{wrap},{password},{multi_line},\
+        "{{36,{choice_list},{width},{height},{horizontal},{vertical},{wrap},{password},{multi_line},\
          {extended_edit},{mark_negatives},{choice_list_button},{choice_button},{clear_button},\
          {spin_button},{open_button},{min_value},{max_value},{mask},{list_choice_mode},\
          {picture},{choice_list_height},{drop_list_width},{quick_choice},{folders},\
-         {choice_form},{{5006,0}},{{0,0}},{auto_choice_incomplete},{format},{edit_format},\
-         {auto_mark_incomplete},{choose_type},{incomplete},{{\"Pattern\"}},{type_domain},{events},\
-         {text_color},{back_color},{border_color},{font},{text_edit},{{3,0,0}},\
-         {edit_text_update},{{1,0}},{create_button},{choice_representation},\
+         {choice_form},{links},{choice_parameters},{auto_choice_incomplete},{format},{edit_format},\
+         {auto_mark_incomplete},{choose_type},{incomplete},{available_types},{type_domain},{events},\
+         {text_color},{back_color},{border_color},{font},{text_edit},{type_link},\
+         {edit_text_update},{input_hint},{create_button},{choice_representation},\
          {drop_list_button},{history},{auto_max_width},{max_width},0,{auto_max_height},\
-         {max_height},{height_variant},0,0,0,0,0,0,0,{{0}},0,{{5007,0}},{multiple_values}}}",
+         {max_height},{height_variant},{tail0},{tail1},{tail2},{tail3},{tail4},{tail5},0,{drop_list_settings},0,\
+         {links_again},{multiple_values}}}",
         width = payload.width,
         height = payload.height,
         type_domain = u8::from(payload.type_domain_enabled),
         multiple_values = u8::from(payload.extended_edit_multiple_values),
+        drop_list_settings = payload.drop_list_settings,
         horizontal = tristate(payload.horizontal_stretch),
         vertical = tristate(payload.vertical_stretch),
         wrap = u8::from(payload.wrap),
@@ -1274,6 +1612,19 @@ pub(crate) fn format_input_payload(payload: &NativeInputPayload<'_>) -> Option<S
         border_color = payload.border_color,
         font = payload.font,
         text_edit = u8::from(payload.text_edit),
+        input_hint = payload.input_hint,
+        choice_list = payload.choice_list,
+        links = payload.choice_parameter_links,
+        links_again = payload.choice_parameter_links_again,
+        type_link = payload.type_link,
+        choice_parameters = payload.choice_parameters,
+        available_types = payload.available_types,
+        tail0 = payload.text_input_tail[0],
+        tail1 = payload.text_input_tail[1],
+        tail2 = payload.text_input_tail[2],
+        tail3 = payload.text_input_tail[3],
+        tail4 = payload.text_input_tail[4],
+        tail5 = payload.text_input_tail[5],
         create_button = tristate(payload.create_button),
         drop_list_button = tristate(payload.drop_list_button),
         auto_max_width = u8::from(payload.auto_max_width),
@@ -1464,6 +1815,10 @@ pub(crate) enum NativeChoiceListLiteral<'a> {
     Number(&'a str),
     /// `xs:string` -- 1 047 items.
     Text(&'a str),
+    /// `xs:boolean` -- 247 values in 124 input field lists.
+    Boolean(bool),
+    /// A literal already spelled -- a fixed array, a date.
+    Raw(&'a str),
     /// `ent:AccountType` -- 6 items, the ordinal of its three spellings.
     AccountType(u8),
     /// `xr:DesignTimeRef`, and an empty `<Value/>` with no type at all.
@@ -1475,6 +1830,8 @@ impl NativeChoiceListLiteral<'_> {
         match self {
             Self::Number(value) => format!("{{\"N\",{value}}}"),
             Self::Text(value) => format!("{{\"S\",{}}}", quoted(value)),
+            Self::Boolean(value) => format!("{{\"B\",{}}}", u8::from(*value)),
+            Self::Raw(value) => (*value).to_string(),
             Self::AccountType(ordinal) => {
                 format!("{{\"#\",{CHOICE_LIST_ACCOUNT_TYPE_UUID},{ordinal}}}")
             }
@@ -1617,8 +1974,8 @@ pub(crate) fn format_picture_payload(payload: &NativePicturePayload<'_>) -> Opti
     let drag = root_code(payload.file_drag_mode, &[("AsFile", "0")], "1")?;
     Some(format!(
         "{{10,{width},{height},{horizontal},{vertical},{picture},{size},{zoomable},{hyperlink},{title},\
-         {text_color},{back_color},{font},{border},{enable_drag},{events},{auto_max_width},\
-         {max_width},0,{auto_max_height},{max_height},{drag},0,100}}",
+         {text_color},{back_color},{font},{border},0,{enable_drag},{events},{auto_max_width},\
+         {max_width},0,{auto_max_height},{max_height},{drag},100}}",
         zoomable = u8::from(payload.zoomable),
         enable_drag = u8::from(payload.enable_drag),
         width = payload.width,
@@ -1686,6 +2043,8 @@ pub(crate) struct NativeSpreadsheetPayload<'a> {
     /// Slots 25 and 26, `<ShowCellNames>` and `<ShowRowAndColumnNames>`.
     pub(crate) show_cell_names: bool,
     pub(crate) show_row_and_column_names: bool,
+    /// Slot 31, `<DrawingSelectionShowMode>`: absent 2, `Show` 0 (1 of 1).
+    pub(crate) drawing_selection_show_mode: Option<&'a str>,
 }
 
 impl NativeSpreadsheetPayload<'_> {
@@ -1715,6 +2074,7 @@ impl NativeSpreadsheetPayload<'_> {
             max_height: "0",
             show_cell_names: false,
             show_row_and_column_names: false,
+            drawing_selection_show_mode: None,
         }
     }
 }
@@ -1748,8 +2108,9 @@ pub(crate) fn format_spreadsheet_payload(
     )?;
     let output = root_code(payload.output, &[("Enable", "1"), ("Disable", "2")], "0")?;
     let scaling = root_code(payload.view_scaling_mode, &[("Normal", "1")], "0")?;
+    let drawing_selection = root_code(payload.drawing_selection_show_mode, &[("Show", "0")], "2")?;
     Some(format!(
-        "{{13,{width},{height},{horizontal_stretch},{vertical_stretch},{show_grid},{show_headers},{vertical},{horizontal},0,{protection},{selection},{output},{edit},{show_groups},{border_color},{enable_start_drag},{enable_drag},{events},{scaling},{auto_max_width},{max_width},0,{auto_max_height},{max_height},{show_cell_names},{show_row_and_column_names},0,{vertical_tail},{horizontal_tail},{selection_tail},2}}",
+        "{{13,{width},{height},{horizontal_stretch},{vertical_stretch},{show_grid},{show_headers},{vertical},{horizontal},0,{protection},{selection},{output},{edit},{show_groups},{border_color},{enable_start_drag},{enable_drag},{events},{scaling},{auto_max_width},{max_width},0,{auto_max_height},{max_height},{show_cell_names},{show_row_and_column_names},0,{vertical_tail},{horizontal_tail},{selection_tail},{drawing_selection}}}",
         width = payload.width,
         height = payload.height,
         horizontal_stretch = u8::from(payload.horizontal_stretch),
@@ -1877,6 +2238,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("SpreadSheetDocumentField", false, "Underline", "85bd789b-0047-46f9-9b2e-845907fc1b1d"),
     ("Table", false, "Add", "b0016a68-ec64-4e6d-b905-c71fd62efc4c"),
     ("Table", false, "AddFilterItem", "fca750bc-4fb6-40e2-ae0f-e818939a32e7"),
+    ("Table", false, "AddAutoOrderItem", "48e12019-0fd6-46eb-aab6-2acba716a623"),
     ("Table", false, "AddFilterItemGroup", "a5fdef31-bbf0-4a9d-98aa-fd5fd8f1344a"),
     ("Table", false, "AddGroup", "7b70c79a-199e-4e87-a7eb-29dea9a5ad69"),
     ("Table", false, "AddOrderItem", "62ff963c-9426-43af-bb23-1d2ef3a9a0c1"),
@@ -1884,6 +2246,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "CancelSearch", "44ad3ec9-f3c2-4913-9224-5f9fb6418743"),
     ("Table", false, "Change", "b41f5bbc-ba5d-4888-8cd1-db246a371418"),
     ("Table", false, "CheckAll", "18248aa8-e621-4e19-a611-54fb8923644c"),
+    ("Table", false, "Choose", "8969c93a-23e5-4bef-941d-aaef315858d2"),
     ("Table", false, "ChooseAll", "15664824-eedc-4a92-9f6b-c89a2dead157"),
     ("Table", false, "Copy", "0ae4bea5-23be-42a7-b69e-97b11b29c453"),
     ("Table", false, "CopyToClipboard", "88078230-1f6b-415f-99e4-ad2ff73810cf"),
@@ -1900,9 +2263,11 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "OutputList", "49602716-fea6-497f-8047-726404038857"),
     ("Table", false, "Pickup", "59b4387d-f5be-4658-901f-bd3068217469"),
     ("Table", false, "SearchEverywhere", "7b683784-b474-441a-ba63-3d757bd0ffd4"),
+    ("Table", false, "SearchHistory", "d96b0c03-b209-4d01-a3fc-17a14f873b64"),
     ("Table", false, "SelectAll", "51c99108-107c-43e1-8918-e48835bf2495"),
     ("Table", false, "SetPresentation", "7d4db5ed-0981-4020-b3b8-886b7165ba05"),
     ("Table", false, "ShowMultipleSelection", "e7216412-03ac-4a81-99c2-1d7c28e88e31"),
+    ("Table", false, "ShowRowRearrangement", "8af6ebff-cd02-4bfe-a984-44a292623708"),
     ("Table", false, "SortListAsc", "2bbe4e12-06d2-409b-a972-eea585125d83"),
     ("Table", false, "SortListDesc", "58b2a785-23f6-4b0e-a324-9a1323285595"),
     ("Table", false, "Tree", "05468165-f954-45a5-84f2-6641c51f9f23"),
@@ -1910,6 +2275,75 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", false, "Ungroup", "82b88a24-2856-484a-afd9-55a15bdf9785"),
     ("Table", false, "UseFieldAsValue", "d7e55d2e-bfea-4d80-b4ad-a1bb31ec2147"),
     ("Table", false, "UserSettingItemProperties", "1f1e900a-8488-4159-81be-9704eb96906d"),
+    // rt-uuids.md: corpus-pinned, and the platform's own registration for
+    // names that only ever occur together.
+    ("Table", true, "CreateByParameter", "b59f3c87-e213-4947-abae-9dbaffaef147"),
+    ("Table", false, "Expand", "fc120c02-7f39-469b-b357-b2dd8d4b0765"),
+    ("Table", false, "AddChart", "a10f1c0b-73ec-448f-b6d2-be0c86e95712"),
+    ("Table", false, "AddNestedSchema", "e809ae75-11b6-480d-bc87-caf93b28236d"),
+    ("Table", false, "UserSettings", "329bb47c-392f-4779-a1af-347d06bb624b"),
+    ("Table", false, "Group", "33ff70c9-5df3-4907-9611-7649411f9180"),
+    ("Table", false, "LoadSettings", "358196aa-1061-458a-8fba-e9cd11081205"),
+    ("Table", false, "SaveSettings", "49a25ff2-06bc-4547-a119-a428f60bdfbf"),
+    ("Table", false, "StandardSettings", "3bd8cc97-31ca-4fad-acf4-cc8f4d648a95"),
+    ("SpreadSheetDocumentField", false, "ColumnWidth", "97407339-2c9f-400b-bd5b-3d97b6d00c21"),
+    ("SpreadSheetDocumentField", false, "Ellipse", "93d90e38-02a4-42f8-828a-2798f51c4500"),
+    ("SpreadSheetDocumentField", false, "GoToCell", "25d773e7-9961-49fc-a9c8-527079090143"),
+    ("SpreadSheetDocumentField", false, "Group", "e406e2a0-f06b-4402-b8c3-9017c95df44c"),
+    ("SpreadSheetDocumentField", false, "Hide", "b573b54a-ce87-4078-bd21-4f06709157c6"),
+    ("SpreadSheetDocumentField", false, "InsertColumnsLeft", "468dca2b-17be-4657-bae8-64b94fcf6187"),
+    ("SpreadSheetDocumentField", false, "InsertColumnsRight", "0a2d962b-5178-4fce-983b-19068b919f41"),
+    ("SpreadSheetDocumentField", false, "InsertRowsBottom", "1d6dbce7-a813-437b-89b8-450319ed13bd"),
+    ("SpreadSheetDocumentField", false, "InsertRowsTop", "4ecc8cf1-2a26-446f-9fb6-93db4ffee068"),
+    ("SpreadSheetDocumentField", false, "Line", "c9b9e671-7c9b-44b5-97e9-dd1ee51a1bfd"),
+    ("SpreadSheetDocumentField", false, "Picture", "a97ea34e-7af2-412c-aa9d-b3393b1914ac"),
+    ("SpreadSheetDocumentField", false, "Rectangle", "852f0fba-4338-4c43-a2da-851fcffd07bb"),
+    ("SpreadSheetDocumentField", false, "RowHeight", "17b9f6bb-74b3-439d-b719-eb236b2fe001"),
+    ("SpreadSheetDocumentField", false, "SearchEverywhere", "ff533ae0-46a9-4e1d-aa3a-6dffa27e076b"),
+    ("SpreadSheetDocumentField", false, "Show", "1b680da5-a5ca-4ea7-8db9-df079de39b61"),
+    ("SpreadSheetDocumentField", false, "Text", "80455469-5f1c-4817-a992-756dfee9138f"),
+    ("SpreadSheetDocumentField", false, "Ungroup", "88a56d46-abff-4925-91a2-6592a4664912"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingBottom", "9f71febd-8c22-4471-8410-31f455bb3c57"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingCenter", "f2b6b156-d929-4be2-af5b-9c9b792524bb"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingLeft", "ee0aab77-fd5f-4594-9c5e-e989a953642f"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingMiddle", "719daaab-c2d0-473d-b373-faf18ebe7d9d"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingRight", "80a0b41c-24df-40e4-8269-683fb557214d"),
+    ("SpreadSheetDocumentField", false, "AlignDrawingTop", "f9395bfa-9301-4cec-8c1e-e2b62fb3abd6"),
+    ("SpreadSheetDocumentField", false, "BringDrawingForward", "49a22a23-d2cf-4f84-97ae-66f94f863145"),
+    ("SpreadSheetDocumentField", false, "BringDrawingToFront", "b383fa5a-2324-4e7e-a166-aabb5d64aea3"),
+    ("SpreadSheetDocumentField", false, "CombineToGroup", "4402cb7a-f68e-44cd-9478-52a695b18a25"),
+    ("SpreadSheetDocumentField", false, "DistributeDrawingsHorizontally", "60abcc40-dc62-4d03-833b-7b8ab8232d2c"),
+    ("SpreadSheetDocumentField", false, "DistributeDrawingsVertically", "7f3f496d-506c-4239-98fb-58e1ea6ba54a"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingHeight", "f5773ab5-4036-49ca-8286-7a4ea2c354d7"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingSize", "fd523437-4160-4a52-a70b-9166c7eebcf0"),
+    ("SpreadSheetDocumentField", false, "EqualDrawingWidth", "5ccf1fce-3fab-4fb6-ac04-a9b2cf689cee"),
+    ("SpreadSheetDocumentField", false, "RemoveFromGroup", "69333d9f-28d1-446b-bd9a-cf8f85cf1704"),
+    ("SpreadSheetDocumentField", false, "RemoveRepeatOnEachPage", "0e8c7cb4-f146-4208-af36-b3f8c7d71b66"),
+    ("SpreadSheetDocumentField", false, "RepeatOnEachPage", "c50fd6b2-51a1-47e0-8cd3-84b16823287c"),
+    ("SpreadSheetDocumentField", false, "SendDrawingBackward", "7e79f8d3-6cab-49d5-aac0-43f5056ed958"),
+    ("SpreadSheetDocumentField", false, "SendDrawingToBack", "14bd1c58-da9d-41db-a515-75f8b39fdc52"),
+    ("SpreadSheetDocumentField", false, "BlackAndWhiteView", "9e525e9b-99ed-4d89-9f02-2bf449ba65e6"),
+    ("SpreadSheetDocumentField", false, "HeaderFooter", "2da58c85-ae4d-403f-b0e2-c50027a5467f"),
+    ("SpreadSheetDocumentField", false, "InsertPageBreak", "952af05e-0771-4c26-adb6-a3418a262e4a"),
+    ("SpreadSheetDocumentField", false, "Names", "feb51db7-bc1f-4b9f-a6e6-db24d5f812ab"),
+    ("SpreadSheetDocumentField", false, "NextComment", "3e15759b-551a-46c4-8d24-8d6df22a1a64"),
+    ("SpreadSheetDocumentField", false, "PageViewMode", "1c7e6bb5-54ac-4ebf-8823-e92b3cf629da"),
+    ("SpreadSheetDocumentField", false, "PreviousComment", "e1ae173a-22c3-4909-a72c-5454b64c6446"),
+    ("SpreadSheetDocumentField", false, "RemovePageBreak", "3a7ef674-f589-4734-9b22-954ea64dc79f"),
+    ("SpreadSheetDocumentField", false, "RemovePrintArea", "41f3fbde-476a-4984-bd12-b32e990af811"),
+    ("SpreadSheetDocumentField", false, "SetPrintArea", "6728e5c7-8f67-4b0d-bd6f-90b728218fe3"),
+    ("SpreadSheetDocumentField", false, "ShowCellNames", "0c66c888-7512-402c-941d-96bec0e5749a"),
+    ("SpreadSheetDocumentField", false, "ShowComments", "95dbc17e-d11e-4008-b9a9-24d5f5b1d061"),
+    ("SpreadSheetDocumentField", false, "ShowRowAndColumnNames", "08fdfb5b-192a-41a9-b57a-9781cd3ef7b6"),
+    ("SpreadSheetDocumentField", false, "Redo", "6f1ea963-0807-4de8-b544-b5666f500b05"),
+    ("SpreadSheetDocumentField", false, "Undo", "f5814962-2bef-43dd-b633-a193d4b0970e"),
+    ("FormattedDocumentField", false, "SearchEverywhere", "6e2f7ea0-a346-4c78-96d9-a0f512000910"),
+    ("FormattedDocumentField", false, "Char", "871100d5-049d-4b22-a46a-fabf54bd64c3"),
+    ("FormattedDocumentField", false, "Hyperlink", "6d83186a-5838-40a5-95e7-8990193adf0a"),
+    ("FormattedDocumentField", false, "LineSpacing", "408f351e-0536-46be-8916-a891db9bfbe6"),
+    ("FormattedDocumentField", false, "Redo", "6f1ea963-0807-4de8-b544-b5666f500b05"),
+    ("FormattedDocumentField", false, "Strikeout", "db1cd9b3-bdf4-43f5-abd6-c2e4bd85d709"),
+    ("FormattedDocumentField", false, "Undo", "f5814962-2bef-43dd-b633-a193d4b0970e"),
     ("Table", true, "AddFilterItem", "fca750bc-4fb6-40e2-ae0f-e818939a32e7"),
     ("Table", true, "CancelSearch", "44ad3ec9-f3c2-4913-9224-5f9fb6418743"),
     ("Table", true, "Change", "b41f5bbc-ba5d-4888-8cd1-db246a371418"),
@@ -1938,6 +2372,7 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("Table", true, "Refresh", "403bc6e6-b98e-4181-9f43-9c75cbbf82cf"),
     ("Table", true, "SaveDynamicListSettings", "95b4bc12-2ece-4d7a-b3e2-6f9293620a06"),
     ("Table", true, "SearchEverywhere", "7b683784-b474-441a-ba63-3d757bd0ffd4"),
+    ("Table", true, "SearchHistory", "d96b0c03-b209-4d01-a3fc-17a14f873b64"),
     ("Table", true, "SetDateInterval", "daa306cd-a78a-4e74-a14c-739daba624cb"),
     ("Table", true, "SetDeletionMark", "a2f737a8-0114-4e86-a214-45e5c213fa65"),
     ("Table", true, "ShowMultipleSelection", "e7216412-03ac-4a81-99c2-1d7c28e88e31"),
@@ -1969,6 +2404,8 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
     ("", "Ignore", "d7e9e72c-8fa7-430c-a3e9-aeadfd57dfc7"),
+    ("", "OpenFromStandaloneServer", "0ea1a92b-3477-44dd-b152-ea7d411f1c5d"),
+    ("", "Retry", "5174ad3f-0569-42fd-8adf-011d8206db6c"),
     ("", "No", "06ee6a21-061e-47f8-81c5-92ae8b8f3b5d"),
     ("", "OK", "f3613d5c-20c6-46e5-b4d5-7d712ece1296"),
     ("", "RestoreValues", "71e0226e-ebb2-4e33-8745-0a94a01bbf15"),
@@ -2041,6 +2478,7 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:DynamicList", "Copy", "342c531d-dc73-458a-8ac4-6a746916a33b"),
     ("cfg:DynamicList", "Create", "4f834c38-add1-45e4-a9f3-cefe3efac5c9"),
     ("cfg:DynamicList", "CreateFolder", "d8772fd1-a3bf-417d-8334-c49968dbb45e"),
+    ("cfg:DynamicList", "CreateInitialImage", "62778a6d-6114-471c-93f7-e1ccd54bd266"),
     ("cfg:DynamicList", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:DynamicList", "DynamicListStandardSettings", "d603a249-6eb3-4e38-bb2d-a8a86a8ab156"),
     ("cfg:DynamicList", "Find", "bdefa701-6685-453e-a02a-3683d0cc16d3"),
@@ -2131,6 +2569,32 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
 
 /// The uuid of `Form.Item.<item>.StandardCommand.<name>`, or `None` when the
 /// corpus never stored one for that target and name.
+/// `item_standard_command_uuid`, with the two names a plain table's own
+/// binding splits (rt-uuids.md §1): `Ungroup` on a settings-structure table
+/// (`….Settings`) is `23802256-…` and on a filter `82b88a24-…`; `Choose` on a
+/// table of available fields is `d77e5787-…` and elsewhere `8969c93a-…`.
+pub(crate) fn table_item_standard_command_uuid(
+    tag: &str,
+    dynamic_list: bool,
+    data_path: Option<&str>,
+    name: &str,
+) -> Option<&'static str> {
+    if tag == "Table" && !dynamic_list {
+        let path = data_path.unwrap_or("").trim();
+        let last = path.rsplit('.').next().unwrap_or("");
+        match name {
+            "Ungroup" if path.ends_with(".Settings") => {
+                return Some("23802256-7145-47c7-b379-8d60ca1b1262");
+            }
+            "Choose" if last.ends_with("AvailableFields") => {
+                return Some("d77e5787-b130-4355-8f8f-01ecec82f843");
+            }
+            _ => {}
+        }
+    }
+    item_standard_command_uuid(tag, dynamic_list, name)
+}
+
 pub(crate) fn item_standard_command_uuid(
     tag: &str,
     dynamic_list: bool,
@@ -2170,6 +2634,31 @@ pub(crate) fn dynamic_list_delete_command_uuid(main_table_kind: Option<&str>) ->
     }
 }
 
+/// The uuid of an item's own `Delete` -- a `<Table>`'s `<ExcludedCommand>`
+/// or a button's `Form.Item.<table>.StandardCommand.Delete` -- when the table
+/// shows a dynamic list. Measured over 445 tables and 59 buttons of both
+/// corpora: a list over an `InformationRegister` stores the plain table's
+/// `8d772f97-…` in 101 of 101 tables, and a list over a kind with a deletion
+/// mark stores `ec576e13-…` in 344 of 344.
+///
+/// A kind outside those measured gets no answer.
+pub(crate) fn dynamic_list_item_delete_command_uuid(
+    main_table_kind: Option<&str>,
+) -> Option<&'static str> {
+    match main_table_kind {
+        Some("InformationRegister") => Some("8d772f97-c0ef-47c0-9cb0-efea28c61341"),
+        Some(
+            "Document"
+            | "Catalog"
+            | "DocumentJournal"
+            | "BusinessProcess"
+            | "ChartOfCharacteristicTypes"
+            | "ExchangePlan",
+        ) => Some("ec576e13-1e76-4c33-98aa-a33204514227"),
+        _ => None,
+    }
+}
+
 /// Whether any form's class stores a uuid for a standard command of this
 /// name, which is what tells a spelling the corpus knows from one it does not.
 pub(crate) fn is_form_standard_command(name: &str) -> bool {
@@ -2180,15 +2669,29 @@ pub(crate) fn is_form_standard_command(name: &str) -> bool {
 
 /// The uuid of `Form.StandardCommand.<name>` for a form whose main attribute
 /// is of this class.
+///
+/// A pair the corpus never showed falls back to the name alone when every
+/// class that does show the name stores one uuid for it -- `Write` is
+/// `fe558fde-…` on all nine classes that have it, and a `ConstantsSet` form's
+/// button stores the same. A name whose classes disagree gets no answer.
 pub(crate) fn form_standard_command_uuid(
     main_attribute_class: &str,
     name: &str,
 ) -> Option<&'static str> {
-    FORM_STANDARD_COMMAND_UUIDS
+    if let Some(uuid) = FORM_STANDARD_COMMAND_UUIDS
         .iter()
         .find_map(|(candidate, command, uuid)| {
             (*candidate == main_attribute_class && *command == name).then_some(*uuid)
         })
+    {
+        return Some(uuid);
+    }
+    let mut uuids = FORM_STANDARD_COMMAND_UUIDS
+        .iter()
+        .filter(|(_, command, _)| *command == name)
+        .map(|(_, _, uuid)| *uuid);
+    let first = uuids.next()?;
+    uuids.all(|uuid| uuid == first).then_some(first)
 }
 
 /// The `{31,…}` record of a `<Button>` whose action is a form standard
@@ -2547,6 +3050,7 @@ pub(crate) fn format_table_record(
     head: &str,
     properties: &[(&str, String)],
     events: &str,
+    command_set: &str,
     context_menu: &str,
     command_bar: &str,
     columns: &[(&str, String)],
@@ -2567,7 +3071,7 @@ pub(crate) fn format_table_record(
         body.push_str(record);
     }
     format!(
-        "{{{head},{count}{bag},{events},{{0}},1,{context_menu},1,{command_bar},\
+        "{{{head},{count}{bag},{events},{command_set},1,{context_menu},1,{command_bar},\
          {columns}{body},{tail}}}",
         count = properties.len(),
         columns = columns.len(),
@@ -2623,8 +3127,16 @@ pub(crate) struct NativeTableTail<'a> {
     /// `<CurrentRowUse>`: `Choice`, `SelectionPresentation` or
     /// `SelectionPresentationAndChoice`.
     pub(crate) current_row_use: Option<&'a str>,
+    /// The member after it, `<BehaviorOnHorizontalCompression>`: absent 0,
+    /// `MoveItemsByImportance` 2 (the exporter's reverse offset 4).
+    pub(crate) behavior_on_horizontal_compression: Option<&'a str>,
     /// `<FileDragMode>`, of which only `AsFile` is ever stored.
     pub(crate) file_drag_mode: Option<&'a str>,
+    /// Tail members 27, 28 and 34: `<GroupHorizontalAlign>`,
+    /// `<GroupVerticalAlign>` and the `DisplayImportance` attribute.
+    pub(crate) group_horizontal_align: Option<&'a str>,
+    pub(crate) group_vertical_align: Option<&'a str>,
+    pub(crate) display_importance: &'a str,
 }
 
 impl Default for NativeTableTail<'_> {
@@ -2651,7 +3163,11 @@ impl Default for NativeTableTail<'_> {
             auto_max_rows_count: true,
             max_rows_count: None,
             current_row_use: None,
+            behavior_on_horizontal_compression: None,
             file_drag_mode: None,
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            display_importance: "0",
         }
     }
 }
@@ -2725,8 +3241,25 @@ pub(crate) fn format_table_tail(tail: &NativeTableTail<'_>) -> Option<String> {
         "{auto_mark},{auto_add},{visible},{multiple_choice},{{\"Pattern\"}},\"\",\"\",\
          {skip_on_input},{search_on_input},{tooltip_representation},1,{extended_tooltip},\
          {search_string},{view_status},{search_control},1,{first},1,{second},1,{third},\
-         {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},3,3,\
-         {height_variant},{auto_max_rows},{max_rows},{current_row_use},0,0,{drag},0",
+         {refresh},{auto_max_width},{max_width},0,{auto_max_height},{max_height},\
+         {group_horizontal},{group_vertical},{height_variant},{auto_max_rows},{max_rows},\
+         {current_row_use},{compression},{display_importance},{drag},0",
+        compression = root_code(
+            tail.behavior_on_horizontal_compression,
+            &[("MoveItemsByImportance", "2")],
+            "0",
+        )?,
+        group_horizontal = root_code(
+            tail.group_horizontal_align,
+            &[("Left", "0"), ("Center", "1"), ("Right", "2")],
+            "3",
+        )?,
+        group_vertical = root_code(
+            tail.group_vertical_align,
+            &[("Top", "0"), ("Center", "1"), ("Bottom", "2")],
+            "3",
+        )?,
+        display_importance = tail.display_importance,
         auto_mark = native_tristate(tail.auto_mark_incomplete),
         auto_add = native_tristate(tail.auto_add_incomplete),
         visible = u8::from(tail.visible),
@@ -2777,6 +3310,10 @@ pub(crate) struct NativeTableAddition<'a> {
     pub(crate) extended_tooltip: &'a str,
     /// Member 19: the id of the item `<AdditionSource><Item>` names.
     pub(crate) source_item: &'a str,
+    /// Member 20: the count of the addition's own children, then a
+    /// `<kind uuid>,<record>` pair per child -- the group child grammar (1 of
+    /// 1; `0` in 36 349).
+    pub(crate) children: &'a str,
     /// Member 21, `<GroupHorizontalAlign>`: `Left` 0, `Right` 2, absent 3.
     pub(crate) group_horizontal_align: Option<&'a str>,
     /// Member 23, the `DisplayImportance` **attribute** -- not a child
@@ -2803,7 +3340,7 @@ pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Optio
     Some(format!(
         "{{5,{{{id},{ns}}},0,0,0,{kind},{name},{title},{tooltip_title},{visible},{enabled},\
          {tooltip_representation},1,{payload},1,{context_menu},1,{extended_tooltip},2,\
-         {{{source},{kind}}},0,{align},3,{importance}}}",
+         {{{source},{kind}}},{children},{align},3,{importance}}}",
         id = addition.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = addition.kind,
@@ -2816,6 +3353,7 @@ pub(crate) fn format_table_addition(addition: &NativeTableAddition<'_>) -> Optio
         context_menu = addition.context_menu,
         extended_tooltip = addition.extended_tooltip,
         source = addition.source_item,
+        children = addition.children,
     ))
 }
 
@@ -2921,6 +3459,10 @@ pub(crate) struct NativeDecorationItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) group_horizontal_align: Option<&'a str>,
     pub(crate) group_vertical_align: Option<&'a str>,
+    /// Member 34, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
+    /// Member 16, `<Shortcut>`, `{0,0,0}` by default.
+    pub(crate) shortcut: &'a str,
 }
 
 impl Default for NativeDecorationItem<'_> {
@@ -2955,6 +3497,8 @@ impl Default for NativeDecorationItem<'_> {
             max_height: None,
             group_horizontal_align: None,
             group_vertical_align: None,
+            display_importance: "0",
+            shortcut: "{0,0,0}",
         }
     }
 }
@@ -3001,9 +3545,9 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
     Some(format!(
         "{{12,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},{enabled},\
          {width},{height},{horizontal_stretch},{vertical_stretch},{text_color},{font},\
-         {{0,0,0}},1,{payload},{menu},{visible},{skip_on_input},{content},\
+         {shortcut},1,{payload},{menu},{visible},{skip_on_input},{content},\
          {tooltip_representation},{tooltip},{auto_max_width},{max_width},0,\
-         {auto_max_height},{max_height},{horizontal},{vertical},0,0}}",
+         {auto_max_height},{max_height},{horizontal},{vertical},{display_importance},0}}",
         enabled = u8::from(decoration.enabled),
         visible = u8::from(decoration.visible),
         skip_on_input = native_tristate(decoration.skip_on_input),
@@ -3025,6 +3569,8 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
         max_width = decoration.max_width.unwrap_or("0"),
         auto_max_height = u8::from(decoration.auto_max_height),
         max_height = decoration.max_height.unwrap_or("0"),
+        display_importance = decoration.display_importance,
+        shortcut = decoration.shortcut,
     ))
 }
 
@@ -3042,7 +3588,7 @@ pub(crate) fn format_decoration_item(decoration: &NativeDecorationItem<'_>) -> O
 /// Those eight, and the two whose `<Border>` names neither a width nor a style
 /// and stores `{3,1,{-18},1,1,0}` -- a six-member tuple of a different shape
 /// entirely -- are refused by the caller rather than written with width 1.
-pub(crate) fn format_native_control_border(style: Option<&str>) -> Option<String> {
+pub(crate) fn format_native_control_border(style: Option<&str>, width: &str) -> Option<String> {
     let code = root_code(
         style,
         &[
@@ -3057,7 +3603,7 @@ pub(crate) fn format_native_control_border(style: Option<&str>) -> Option<String
         "0",
     )?;
     Some(format!(
-        "{{3,0,{{0}},{code},1,0,{DEFAULT_APPEARANCE_UUID}}}"
+        "{{3,0,{{0}},{code},{width},0,{DEFAULT_APPEARANCE_UUID}}}"
     ))
 }
 
@@ -3122,16 +3668,19 @@ pub(crate) fn format_native_inline_picture(
 /// `value` is what the name stores -- `{0,<uuid>}` for most of them, a bare
 /// negative code for a few. The rest of the reference holds one shape over
 /// all 666 of the corpus: present, the transparent pixel when the source
-/// names one, and member 6 is **1**, not the 0 a common picture takes.
+/// names one, and member 6 is **1**, not the 0 a common picture takes --
+/// unless the source says `<xr:LoadTransparent>false`, which stores 0.
 pub(crate) fn format_native_std_picture(
     value: &str,
+    load_transparent: bool,
     transparent_x: Option<&str>,
     transparent_y: Option<&str>,
 ) -> String {
     format!(
-        "{{4,1,{value},\"\",{x},{y},1,0,\"\"}}",
+        "{{4,1,{value},\"\",{x},{y},{transparent},0,\"\"}}",
         x = transparent_x.unwrap_or("-1"),
         y = transparent_y.unwrap_or("-1"),
+        transparent = u8::from(load_transparent),
     )
 }
 
@@ -3404,6 +3953,9 @@ pub(crate) struct NativeButtonItem<'a> {
     /// of the corpus name something there and the rest write 0.
     pub(crate) forty_eighth: &'a str,
     pub(crate) command_uniqueness: bool,
+    /// Member 23, `<Shortcut>`, and member 33, the command's `<Parameter>`.
+    pub(crate) shortcut: &'a str,
+    pub(crate) parameter: &'a str,
 }
 
 impl Default for NativeButtonItem<'_> {
@@ -3445,6 +3997,8 @@ impl Default for NativeButtonItem<'_> {
             picture_location: None,
             forty_eighth: "0",
             command_uniqueness: true,
+            shortcut: "{0,0,0}",
+            parameter: "{\"U\"}",
         }
     }
 }
@@ -3546,9 +4100,9 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
     Some(format!(
         "{{31,{{{id},{ns}}},0,{options},{coarse_type},{name},{title},{enabled},{command},\
          {data_path},{representation},{default_button},0,{default_item},2,{coarse_location},\
-         {width},{height},{title_height},{back},{text},{border},{font},{{0,0,0}},{check},\
+         {width},{height},{title_height},{back},{text},{border},{font},{shortcut},{check},\
          {picture},{visible},{{\"Pattern\"}},\"\",{skip_on_input},{tooltip_representation},1,\
-         {extended_tooltip},{{\"U\"}},{auto_max_width},{max_width},0,{auto_max_height},\
+         {extended_tooltip},{parameter},{auto_max_width},{max_width},0,{auto_max_height},\
          {max_height},{horizontal_stretch},{vertical_stretch},{group_horizontal},\
          {group_vertical},{in_context_menu},{shape},{shape_representation},{fine_type},\
          {picture_location},{forty_eighth},{fine_location},{command_uniqueness},0}}",
@@ -3581,6 +4135,8 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
         vertical_stretch = u8::from(button.vertical_stretch),
         forty_eighth = button.forty_eighth,
         command_uniqueness = u8::from(button.command_uniqueness),
+        shortcut = button.shortcut,
+        parameter = button.parameter,
     ))
 }
 
@@ -3701,7 +4257,24 @@ pub(crate) fn format_form_attribute(attribute: &NativeFormAttribute<'_>) -> Stri
 /// and silently swaps the uuids.
 pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
     let mut sorted = paths.to_vec();
-    sorted.sort();
+    // By the segment count, then segment by segment: the first member as a
+    // number, the rest as text -- `{1,{-30}}` before `{1,{-20}}`, `{1,{2}}`
+    // before `{1,{17}}` (271 of 271 lists).
+    let key = |path: &String| {
+        let fields = top_level_braced_fields(path);
+        let count = fields.first().and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
+        let segments = fields
+            .iter()
+            .skip(1)
+            .map(|segment| {
+                let inner = top_level_braced_fields(segment);
+                let first = inner.first().and_then(|value| value.parse::<i64>().ok()).unwrap_or(0);
+                (first, inner.get(1..).map(|rest| rest.join(",")).unwrap_or_default())
+            })
+            .collect::<Vec<_>>();
+        (count, segments)
+    };
+    sorted.sort_by(|a, b| key(a).cmp(&key(b)).then_with(|| a.cmp(b)));
     let mut out = format!("{{0,{}", sorted.len());
     for path in sorted {
         out.push(',');
@@ -3709,6 +4282,41 @@ pub(crate) fn format_form_attribute_save(paths: &[String]) -> String {
     }
     out.push('}');
     out
+}
+
+/// The top-level members of one `{…}` value, braces removed.
+fn top_level_braced_fields(text: &str) -> Vec<String> {
+    let text = text.trim();
+    let Some(inner) = text.strip_prefix('{').and_then(|rest| rest.strip_suffix('}')) else {
+        return vec![text.to_string()];
+    };
+    let mut fields = Vec::new();
+    let mut depth = 0i32;
+    let mut quoted = false;
+    let mut current = String::new();
+    for character in inner.chars() {
+        match character {
+            '"' => {
+                quoted = !quoted;
+                current.push(character);
+            }
+            '{' if !quoted => {
+                depth += 1;
+                current.push(character);
+            }
+            '}' if !quoted => {
+                depth -= 1;
+                current.push(character);
+            }
+            ',' if !quoted && depth == 0 => {
+                fields.push(current.trim().to_string());
+                current.clear();
+            }
+            _ => current.push(character),
+        }
+    }
+    fields.push(current.trim().to_string());
+    fields
 }
 
 /// One `<Column>` of a value table or a value tree, as the body stores it.
@@ -4174,6 +4782,7 @@ pub(crate) fn format_pages_payload(
         ("TabsOnTop", "1"),
         ("TabsOnBottom", "2"),
         ("TabsOnLeftHorizontal", "3"),
+        ("TabsOnRightHorizontal", "4"),
         ("Swipe", "5"),
     ];
     let first = root_code(representation, CODES, "1")?;
@@ -4594,6 +5203,10 @@ pub(crate) struct NativeGroupItem<'a> {
     /// `<GroupHorizontalAlign>` and `<GroupVerticalAlign>`.
     pub(crate) horizontal_align: Option<&'a str>,
     pub(crate) vertical_align: Option<&'a str>,
+    /// The last member, see [`native_display_importance`].
+    pub(crate) display_importance: &'a str,
+    /// Member 18, `<Shortcut>`, `{0,0,0}` by default.
+    pub(crate) shortcut: &'a str,
 }
 
 impl Default for NativeGroupItem<'_> {
@@ -4621,6 +5234,8 @@ impl Default for NativeGroupItem<'_> {
             extended_tooltip: None,
             horizontal_align: None,
             vertical_align: None,
+            display_importance: "0",
+            shortcut: "{0,0,0}",
         }
     }
 }
@@ -4695,8 +5310,9 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
     Some(format!(
         "{{22,{{{id},{ns}}},0,0,{options},{kind},{name},{title},{tooltip_title},\
          {content_change},{enabled},{read_only},{width},{height},{horizontal_stretch},\
-         {vertical_stretch},{back_color},{font},{{0,0,0}},1,{payload},{count}{children},\
-         {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},0}}",
+         {vertical_stretch},{back_color},{font},{shortcut},1,{payload},{count}{children},\
+         {visible},{tooltip_representation},{tooltip},0,{horizontal},{vertical},\
+         {display_importance}}}",
         id = group.id,
         ns = FORM_ITEM_NAMESPACE_UUID,
         kind = group.kind,
@@ -4715,6 +5331,8 @@ pub(crate) fn format_group_item(group: &NativeGroupItem<'_>) -> Option<String> {
         payload = group.payload,
         count = group.children.len(),
         visible = u8::from(group.visible),
+        display_importance = group.display_importance,
+        shortcut = group.shortcut,
     ))
 }
 
@@ -4738,7 +5356,7 @@ pub(crate) struct NativeRootHead<'a> {
     pub(crate) save_data_in_settings: Option<&'a str>,
     /// `<AutoSaveDataInSettings>`, of which only `Use` is ever stored.
     pub(crate) auto_save_data_in_settings: Option<&'a str>,
-    /// `<SettingsStorage>`. Naming one refuses the head.
+    /// The uuid of the `<SettingsStorage>` the form names.
     pub(crate) settings_storage: Option<&'a str>,
     /// `<AutoTitle>`, on unless the form turns it off.
     pub(crate) auto_title: bool,
@@ -4783,9 +5401,6 @@ impl Default for NativeRootHead<'_> {
 
 /// The root record's head, from `50` to the command bar's location.
 pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
-    if head.settings_storage.is_some() {
-        return None;
-    }
     let members = [
         "50".to_string(),
         "0".to_string(),
@@ -4803,7 +5418,11 @@ pub(crate) fn format_root_head(head: &NativeRootHead<'_>) -> Option<String> {
         root_code(head.enter_key_behavior, &[("DefaultButton", "0")], "1")?,
         root_code(head.save_data_in_settings, &[("UseList", "1")], "0")?,
         root_code(head.auto_save_data_in_settings, &[("Use", "1")], "0")?,
-        "00000000-0000-0000-0000-000000000000".to_string(),
+        // Member 8: the uuid of the `<SettingsStorage>` the form names, which
+        // the caller resolves against the configuration.
+        head.settings_storage
+            .unwrap_or("00000000-0000-0000-0000-000000000000")
+            .to_string(),
         u8::from(head.auto_title).to_string(),
         head.title.to_string(),
         u8::from(head.group.is_some()).to_string(),
@@ -5251,14 +5870,23 @@ const DATA_PATH_DEFAULT_PICTURE_MARKER: &str = "10000000";
 /// The members of the builtin (non-configuration) attribute types. Each is a
 /// fixed small table; every name maps to one number over every record.
 const DATA_PATH_VALUE_LIST_MEMBERS: &[(&str, &str)] = &[
+    ("ValueType", "-1"),
     ("Value", "0"),
     ("Presentation", "1"),
     ("Check", "2"),
     ("Picture", "3"),
+    ("RowsCount", "100000000"),
 ];
 const DATA_PATH_STANDARD_PERIOD_MEMBERS: &[(&str, &str)] =
     &[("Variant", "0"), ("StartDate", "1"), ("EndDate", "2")];
-const DATA_PATH_COMPOSER_MEMBERS: &[(&str, &str)] = &[("Settings", "0"), ("UserSettings", "1")];
+const DATA_PATH_STANDARD_BEGINNING_DATE_MEMBERS: &[(&str, &str)] =
+    &[("Variant", "0"), ("Date", "1")];
+const DATA_PATH_COMPOSER_MEMBERS: &[(&str, &str)] =
+    &[("Settings", "0"), ("UserSettings", "1"), ("FixedSettings", "2")];
+/// A bare `cfg:ReportObject` -- a common form's `Отчет` -- has one member the
+/// walk reaches, the composer, stored under the platform's own uuid.
+const DATA_PATH_REPORT_OBJECT_MEMBERS: &[(&str, &str)] =
+    &[("SettingsComposer", "0,b9754f01-29e9-11d6-a3c7-0050bae0a776")];
 const DATA_PATH_GANTT_CHART_MEMBERS: &[(&str, &str)] = &[("Point", "0"), ("Text", "1")];
 
 /// A dynamic list's own members, ahead of its query fields.
@@ -5270,10 +5898,13 @@ const DATA_PATH_DYNAMIC_LIST_MEMBERS: &[(&str, &str)] =
 /// conditional-appearance item, and splitting by parent removes every
 /// ambiguity.
 const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
+    ("DataParameters", "0"),
     ("Filter", "1"),
     ("Selection", "2"),
     ("Order", "3"),
     ("ConditionalAppearance", "4"),
+    ("OutputParameters", "5"),
+    ("UserFields", "6"),
     ("Use", "10000"),
     ("ReportStructure", "10001"),
     ("HasSelection", "10002"),
@@ -5281,12 +5912,18 @@ const DATA_PATH_DCS_SETTINGS: &[(&str, &str)] = &[
     ("HasOrder", "10004"),
     ("HasConditionalAppearance", "10005"),
     ("HasOutputParameters", "10006"),
+    ("ItemDataParameters", "10007"),
     ("ItemFilter", "10008"),
+    ("ItemGroupFields", "10009"),
     ("ItemSelection", "10010"),
     ("ItemOrder", "10011"),
     ("ItemConditionalAppearance", "10012"),
+    ("ItemOutputParameters", "10013"),
+    ("ItemUserFields", "10014"),
     ("ReportStructurePicture", "10015"),
 ];
+const DATA_PATH_DCS_SELECTION: &[(&str, &str)] = &[("SelectionAvailableFields", "0")];
+const DATA_PATH_DCS_GROUP_FIELDS: &[(&str, &str)] = &[("GroupFieldsAvailableFields", "0")];
 const DATA_PATH_DCS_FILTER: &[(&str, &str)] = &[
     ("FilterAvailableFields", "0"),
     ("Use", "10000"),
@@ -5307,9 +5944,14 @@ const DATA_PATH_DCS_CONDITIONAL_APPEARANCE: &[(&str, &str)] = &[
     ("Filter", "10002"),
     ("Fields", "10003"),
     ("Presentation", "10004"),
+    ("UseArea", "10005"),
 ];
-const DATA_PATH_DCS_ORDER: &[(&str, &str)] =
-    &[("Use", "10000"), ("Field", "10002"), ("OrderType", "10003")];
+const DATA_PATH_DCS_ORDER: &[(&str, &str)] = &[
+    ("OrderAvailableFields", "0"),
+    ("Use", "10000"),
+    ("Field", "10002"),
+    ("OrderType", "10003"),
+];
 const DATA_PATH_DCS_USER_SETTINGS: &[(&str, &str)] = &[
     ("Use", "10000"),
     ("SettingPicture", "10001"),
@@ -5318,6 +5960,10 @@ const DATA_PATH_DCS_USER_SETTINGS: &[(&str, &str)] = &[
     ("ValuePicture", "10004"),
     ("Value", "10005"),
     ("EditInReportForm", "10006"),
+    ("Filter", "10007"),
+    ("Order", "10008"),
+    ("ConditionalAppearance", "10010"),
+    ("Structure", "10011"),
 ];
 const DATA_PATH_DCS_APPEARANCE: &[(&str, &str)] = &[
     ("Use", "10000"),
@@ -5327,7 +5973,8 @@ const DATA_PATH_DCS_APPEARANCE: &[(&str, &str)] = &[
 ];
 const DATA_PATH_DCS_FILTER_AVAILABLE_FIELDS: &[(&str, &str)] =
     &[("FieldPicture", "10000"), ("Title", "10001")];
-const DATA_PATH_DCS_FIELDS: &[(&str, &str)] = &[("Use", "10000"), ("Field", "10002")];
+const DATA_PATH_DCS_FIELDS: &[(&str, &str)] =
+    &[("Use", "10000"), ("FieldPicture", "10001"), ("Field", "10002")];
 
 /// The standard-attribute table: `(scope, name)` to the negative number the
 /// body stores.
@@ -5354,6 +6001,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("AccountingRegister", "AccountCr", "-7"),
     ("AccountingRegister", "Account", "-10"),
     ("AccountingRegister", "PeriodAdjustment", "-30"),
+    ("AccountingRegister", "Filter", "-60001"),
     ("AccumulationRegister", "Period", "-2"),
     ("AccumulationRegister", "LineNumber", "-4"),
     ("AccumulationRegister", "RecordType", "-9"),
@@ -5373,6 +6021,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ChartOfAccounts", "OffBalance", "-11"),
     ("ChartOfAccounts", "ExtDimensionTypes", "-12"),
     ("ChartOfAccounts", "Order", "-17"),
+    ("ChartOfAccounts", "Ref", "-2"),
     ("ChartOfAccounts/ExtDimensionTypes", "ExtDimensionType", "-13"),
     ("ChartOfAccounts/ExtDimensionTypes", "TurnoversOnly", "-15"),
     ("ChartOfCalculationTypes", "Code", "-2"),
@@ -5403,6 +6052,7 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ChartOfCharacteristicTypes", "PredefinedDataName", "-14"),
     ("Document", "Number", "-2"),
     ("Document", "Date", "-3"),
+    ("Document", "DeletionMark", "-4"),
     ("Document", "Ref", "-5"),
     ("Document", "Posted", "-7"),
     ("Document", "RegisterRecords", "-8"),
@@ -5412,12 +6062,14 @@ const DATA_PATH_STANDARD_ATTRIBUTES: &[(&str, &str, &str)] = &[
     ("ExchangePlan", "ReceivedNo", "-10"),
     ("ExchangePlan", "ThisNode", "-13"),
     ("ExchangePlan", "ExchangeDate", "-14"),
+    ("ExchangePlan", "Ref", "-6"),
     ("InformationRegister", "Period", "-2"),
     ("InformationRegister", "Recorder", "-3"),
     ("InformationRegister", "LineNumber", "-4"),
     ("Task", "Number", "-2"),
     ("Task", "Date", "-3"),
     ("Task", "BusinessProcess", "-7"),
+    ("Task", "Ref", "-5"),
     ("Task", "RoutePoint", "-8"),
     ("Task", "Description", "-9"),
     ("Task", "Executed", "-10"),
@@ -5470,6 +6122,9 @@ pub(crate) struct ConfigurationObject {
     pub(crate) fields: BTreeMap<String, Vec<ConfigurationField>>,
     /// Each tabular section's own fields.
     pub(crate) sections: BTreeMap<String, BTreeMap<String, Vec<ConfigurationField>>>,
+    /// A defined type's own `<Properties><Type>`, which a data path walks on
+    /// in as if the attribute had declared it.
+    pub(crate) types: Vec<String>,
 }
 
 /// The configuration source tree, as the data-path walk asks it questions.
@@ -5491,6 +6146,13 @@ pub(crate) struct DataPathColumn {
 /// A form `<Attribute>`, with the two column tables a data path walks into.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(crate) struct DataPathAttribute {
+    /// A dynamic list's synthetic field map: the id each dotted prefix of a
+    /// query field stores, and the ids of the `~`-marked references by prefix
+    /// and twin (`findings/rt-dynamic-list.md` §3).
+    pub(crate) dynamic_fields: BTreeMap<String, String>,
+    pub(crate) dynamic_marked: BTreeMap<(String, Option<String>), String>,
+    /// The attribute's own name, which a marked reference's twin repeats.
+    pub(crate) list_name: Option<String>,
     pub(crate) id: String,
     pub(crate) types: Vec<String>,
     /// `<Columns><Column name= id=>`.
@@ -5581,7 +6243,9 @@ fn data_path_builtin_members(
     Some(match declared_type {
         "v8:ValueListType" => (DATA_PATH_VALUE_LIST_MEMBERS, false),
         "v8:StandardPeriod" => (DATA_PATH_STANDARD_PERIOD_MEMBERS, false),
+        "v8:StandardBeginningDate" => (DATA_PATH_STANDARD_BEGINNING_DATE_MEMBERS, false),
         "dcsset:SettingsComposer" => (DATA_PATH_COMPOSER_MEMBERS, true),
+        "cfg:ReportObject" => (DATA_PATH_REPORT_OBJECT_MEMBERS, true),
         "d4p1:GanttChart" | "d5p1:GanttChart" => (DATA_PATH_GANTT_CHART_MEMBERS, false),
         _ => return None,
     })
@@ -5590,7 +6254,11 @@ fn data_path_builtin_members(
 /// The member table of one settings-composer parent collection.
 fn data_path_dcs_members(parent: &str) -> &'static [(&'static str, &'static str)] {
     match parent {
-        "Settings" => DATA_PATH_DCS_SETTINGS,
+        // A report object's composer opens the composer's own table.
+        "SettingsComposer" => DATA_PATH_COMPOSER_MEMBERS,
+        "Settings" | "FixedSettings" => DATA_PATH_DCS_SETTINGS,
+        "Selection" | "ItemSelection" => DATA_PATH_DCS_SELECTION,
+        "GroupFields" | "ItemGroupFields" => DATA_PATH_DCS_GROUP_FIELDS,
         "Filter" | "ItemFilter" => DATA_PATH_DCS_FILTER,
         "ConditionalAppearance" | "ItemConditionalAppearance" => {
             DATA_PATH_DCS_CONDITIONAL_APPEARANCE
@@ -5688,6 +6356,22 @@ fn data_path_context_for_types(types: &[String]) -> DataPathContext {
     }
 }
 
+/// `data_path_context_for_types`, with a `cfg:DefinedType.<X>` expanded to
+/// the type it declares first (rt-paths.md §4.7, 1 of 1).
+fn data_path_context_expanding(
+    configuration: Option<&dyn ConfigurationObjects>,
+    types: &[String],
+) -> DataPathContext {
+    if let [only] = types
+        && let Some(name) = only.trim().strip_prefix("cfg:DefinedType.")
+        && let Some(object) = configuration.and_then(|source| source.object(&format!("DefinedType.{name}")))
+        && !object.types.is_empty()
+    {
+        return data_path_context_for_types(&object.types);
+    }
+    data_path_context_for_types(types)
+}
+
 /// What an `Items.<item>` head learns from the item's own `<DataPath>`.
 struct DataPathHead<'a> {
     context: DataPathContext,
@@ -5763,10 +6447,44 @@ pub(crate) fn resolve_form_data_path(
     configuration: Option<&dyn ConfigurationObjects>,
     data_path: &str,
 ) -> Option<String> {
-    let tokens = parse_data_path_tokens(data_path.trim());
+    // `~N.X` -- and `~N.X~N.Y` with a twin -- is the export's spelling of a
+    // dynamic-list field it cannot resolve; the terminal part then stores the
+    // marked entry of the list's field map.
+    let (data_path, marked) = match data_path.trim().strip_prefix('~') {
+        Some(body) => match body.split_once('~') {
+            Some((body, twin)) => (body, Some(Some(twin.to_string()))),
+            None => (body, Some(None)),
+        },
+        None => (data_path.trim(), None),
+    };
+    let tokens = parse_data_path_tokens(data_path);
     if tokens.is_empty() || tokens[0].0.is_empty() {
         return None;
     }
+    let resolved = resolve_data_path_tokens(form, configuration, &tokens, &marked, 0)?;
+    Some(format!(
+        "{{{},{}}}",
+        resolved.emitted.len(),
+        resolved.emitted.join(",")
+    ))
+}
+
+/// What a walk leaves behind: the segments, the context it ended in, the
+/// attribute it stood in and the path expanded to that attribute's root.
+struct ResolvedDataPath<'a> {
+    emitted: Vec<String>,
+    context: DataPathContext,
+    attribute: Option<&'a DataPathAttribute>,
+    prefix: Vec<String>,
+}
+
+fn resolve_data_path_tokens<'a>(
+    form: &'a DataPathForm,
+    configuration: Option<&dyn ConfigurationObjects>,
+    tokens: &[DataPathToken],
+    marked: &Option<Option<String>>,
+    depth: usize,
+) -> Option<ResolvedDataPath<'a>> {
     let mut emitted = Vec::<String>::new();
     let mut context = DataPathContext::Form;
     let mut attribute: Option<&DataPathAttribute> = None;
@@ -5790,11 +6508,27 @@ pub(crate) fn resolve_form_data_path(
                 if tokens.get(index).is_some_and(|token| token.0 == "CurrentData") {
                     index += 1;
                 }
+                // The context after the head is the one the item's own path
+                // resolves to, walked in full -- composer levels, builtins and
+                // a nested `Items.` head included -- and the additional-column
+                // prefix is that path expanded to its attribute (111 holders).
                 let inner = parse_data_path_tokens(item.data_path.as_deref()?);
-                let head = walk_data_path_context(form, configuration, &inner)?;
-                context = head.context;
-                attribute = head.attribute;
-                prefix = inner.into_iter().map(|token| token.0).collect();
+                match (depth < 8)
+                    .then(|| resolve_data_path_tokens(form, configuration, &inner, &None, depth + 1))
+                    .flatten()
+                {
+                    Some(head) => {
+                        context = head.context;
+                        attribute = head.attribute;
+                        prefix = head.prefix;
+                    }
+                    None => {
+                        let head = walk_data_path_context(form, configuration, &inner)?;
+                        context = head.context;
+                        attribute = head.attribute;
+                        prefix = inner.into_iter().map(|token| token.0).collect();
+                    }
+                }
                 dynamic_list_start = index;
                 continue;
             }
@@ -5802,7 +6536,7 @@ pub(crate) fn resolve_form_data_path(
                 Some(entry) => {
                     attribute = Some(entry);
                     emitted.push(format!("{{{}}}", entry.id));
-                    context = data_path_context_for_types(&entry.types);
+                    context = data_path_context_expanding(configuration, &entry.types);
                 }
                 // A handful of items carry the attribute's id where the name
                 // should be; the body stores that number unchanged.
@@ -5870,8 +6604,38 @@ pub(crate) fn resolve_form_data_path(
                             index += 1;
                             continue;
                         }
-                        if name != "DefaultPicture" {
-                            return None;
+                        if name != "DefaultPicture" || index != dynamic_list_start {
+                            // A query field: the id the list's own field map
+                            // gives the dotted prefix walked so far.
+                            let entry = attribute?;
+                            let dotted = tokens[dynamic_list_start..=index]
+                                .iter()
+                                .map(|token| token.0.as_str())
+                                .collect::<Vec<_>>()
+                                .join(".");
+                            let last = index + 1 == tokens.len();
+                            let id = match (marked, last) {
+                                (Some(twin), true) => {
+                                    let twin = twin.as_ref().map(|twin| {
+                                        entry
+                                            .list_name
+                                            .as_deref()
+                                            .and_then(|list| twin.strip_prefix(&format!("{list}.")))
+                                            .unwrap_or(twin)
+                                            .to_string()
+                                    });
+                                    entry.dynamic_marked.get(&(dotted, twin))?
+                                }
+                                _ => entry.dynamic_fields.get(&dotted)?,
+                            };
+                            emitted.push(format!("{{{id}}}"));
+                            context = DataPathContext::DynamicList;
+                            if let Some(subscript) = subscript {
+                                emitted.push(format!("{{{subscript},{DATA_PATH_INDEX_UUID}}}"));
+                            }
+                            prefix.push(name.to_string());
+                            index += 1;
+                            continue;
                         }
                         emitted.push(format!("{{{DATA_PATH_DEFAULT_PICTURE_MARKER}}}"));
                     }
@@ -5932,7 +6696,12 @@ pub(crate) fn resolve_form_data_path(
         index += 1;
     }
 
-    Some(format!("{{{},{}}}", emitted.len(), emitted.join(",")))
+    Some(ResolvedDataPath {
+        emitted,
+        context,
+        attribute,
+        prefix,
+    })
 }
 
 /// One segment resolved against a metadata object, and the context it opens.
@@ -5990,7 +6759,28 @@ fn resolve_metadata_data_path_part(
             DataPathContext::Stop,
         ));
     }
-    if name == "RowsCount" && section.is_some() {
+    // `ExtDimension<N>`, `ExtDimensionDr<N>` and `ExtDimensionCr<N>` of an
+    // accounting register are platform constants, one uuid per side over
+    // every register, with N-1 in front (81 of 81).
+    if object.class == "AccountingRegister" {
+        for (prefix, uuid) in [
+            ("ExtDimensionDr", "1ab44b24-3315-40a9-b495-f1f1227ac205"),
+            ("ExtDimensionCr", "f77758c9-9fcd-490f-9bbd-1e446541f536"),
+            ("ExtDimension", "91162600-3161-4326-89a0-4a7cecd5092a"),
+        ] {
+            if let Some(number) = name
+                .strip_prefix(prefix)
+                .and_then(|rest| rest.parse::<u32>().ok())
+                .filter(|number| *number >= 1)
+            {
+                return Some((format!("{{{},{uuid}}}", number - 1), DataPathContext::Stop));
+            }
+        }
+    }
+    if name == "RowsCount"
+        && (section.is_some()
+            || matches!(object.class.as_str(), "InformationRegister" | "AccountingRegister"))
+    {
         return Some((
             format!("{{{DATA_PATH_ROWS_COUNT_MARKER}}}"),
             DataPathContext::Stop,
@@ -6313,6 +7103,7 @@ mod tests {
             &head,
             &[("5", "{\"B\",0}".to_string())],
             "{0,1,0}",
+            "{0}",
             "{22,{30,x},0}",
             "{22,{31,x},0}",
             &[("77ffcc29-7f2d-4223-b22f-19666e7250ba", "{37,{32,x},0}".to_string())],
@@ -6367,7 +7158,11 @@ mod tests {
             auto_max_rows_count: false,
             max_rows_count: Some("6"),
             current_row_use: Some("SelectionPresentationAndChoice"),
+            behavior_on_horizontal_compression: None,
             file_drag_mode: Some("AsFile"),
+            group_horizontal_align: None,
+            group_vertical_align: None,
+            display_importance: "0",
         })
         .expect("a table tail");
         assert!(spoken.starts_with("1,0,0,1,{\"Pattern\"},\"\",\"\",1,1,8,1,{12,{6,x},0},6,2,2,1,"));
@@ -6496,7 +7291,7 @@ mod tests {
         // `Catalogs/ПоказателиМонитораКлючевыхПоказателей/Forms/ФормаЭлемента`
         // item 246: `<BackColor>#C0DCC0</>` at member 6 and a `Single`
         // `<Border>` at member 8.
-        let border = format_native_control_border(Some("Single")).expect("a single border");
+        let border = format_native_control_border(Some("Single"), "1").expect("a single border");
         assert_eq!(
             format_label_decoration_payload(&NativeLabelDecorationPayload {
                 back_color: "{3,0,{12639424}}",
@@ -6541,7 +7336,7 @@ mod tests {
             }),
             None
         );
-        assert_eq!(format_native_control_border(Some("Dotted")), None);
+        assert_eq!(format_native_control_border(Some("Dotted"), "1"), None);
     }
 
     /// The `{4,…}` payload of a picture decoration, against three payloads read
@@ -6604,7 +7399,7 @@ mod tests {
             }],
         )
         .expect("the click of a picture decoration");
-        let border = format_native_control_border(Some("Single")).expect("a single border");
+        let border = format_native_control_border(Some("Single"), "1").expect("a single border");
         assert_eq!(
             format_picture_decoration_payload(&NativePictureDecorationPayload {
                 picture: &format_native_item_picture(
@@ -7628,7 +8423,7 @@ mod tests {
         .expect("a picture payload");
         assert!(spoken.starts_with("{10,0,0,0,0,"));
         assert!(spoken.contains(",0,0,1,{1,0},"));
-        assert!(spoken.ends_with(",0,6,0,0,3,1,0,100}"));
+        assert!(spoken.ends_with(",{0,1,0},0,6,0,0,3,1,100}"));
         assert_eq!(
             format_picture_payload(&NativePicturePayload {
                 picture_size: Some("Tile"),
@@ -7743,14 +8538,15 @@ mod tests {
             Some("50,0,0,0,0,0,1,1,00000000-0000-0000-0000-000000000000,1,{1,0},1,5,0,0,0,0,0")
         );
 
-        // A form that names a settings storage is refused: the head would have
-        // to carry that object's uuid, which only the configuration knows.
-        assert_eq!(
+        // A form that names a settings storage carries that object's uuid,
+        // resolved by the caller, in member 8.
+        assert!(
             format_root_head(&NativeRootHead {
-                settings_storage: Some("SettingsStorage.Общие"),
+                settings_storage: Some("0f7a4e33-1c7d-4c5f-9a4b-3f0f1b8a2e61"),
                 ..NativeRootHead::default()
-            }),
-            None
+            })
+            .expect("a head")
+            .contains(",0f7a4e33-1c7d-4c5f-9a4b-3f0f1b8a2e61,")
         );
 
         // So is a spelling the corpus never showed.
@@ -8148,6 +8944,7 @@ mod tests {
                         field("058ce803-cc68-45f4-a266-3fe076e3e96e", "Attribute", &[]),
                     )]),
                 )]),
+                types: Vec::new(),
             },
         )]);
         assert_eq!(
@@ -8314,13 +9111,16 @@ mod tests {
                 ..ConfigurationObject::default()
             },
         )]);
+        // An accounting register's extra dimensions are platform constants,
+        // one uuid per side with N-1 in front (rt-paths.md §4.4, 81 of 81).
         assert_eq!(
             resolve_form_data_path(
                 &records,
                 Some(&configuration),
                 "ПроводкиСКорреспонденцией.ExtDimensionDr1"
-            ),
-            None
+            )
+            .as_deref(),
+            Some("{2,{3},{0,1ab44b24-3315-40a9-b495-f1f1227ac205}}")
         );
         // Without a configuration to read, a dotted path refuses too.
         assert_eq!(

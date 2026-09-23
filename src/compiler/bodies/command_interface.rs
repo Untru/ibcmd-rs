@@ -1,6 +1,5 @@
 //! Profile-gated base-free codec for `Ext/CommandInterface.xml` native bodies.
 
-use std::collections::BTreeSet;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -10,8 +9,8 @@ use ibcmd_core::profile::EffectiveProfile;
 
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{
-    NativeError, NativeValue, exact_list, exact_token, inflate_and_parse, inline_list, raw_deflate,
-    required_list, required_text, required_token, serialize, text, token,
+    NativeError, NativeValue, exact_list, exact_token, inflate_and_parse, platform_list,
+    raw_deflate, required_list, required_text, required_token, serialize, text, token,
 };
 
 const LAYOUT_KEY: &str = "bootstrap.body.command_interface.layout";
@@ -37,13 +36,22 @@ impl CommandInterfaceCodecProfile {
     }
 }
 
+/// The six sections of a stored command interface, in stored order.
+///
+/// The record is `{7,<visibility>,<placement>,<order>,<subsystem order>,<group
+/// order>,<subsystem visibility>}`; each section is `0` when empty and
+/// `1,<count>,<items>` otherwise -- the inverse of the exporter's
+/// `parse_command_interface_sectioned_fields`.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct CommandInterfaceModel {
     pub commands_visibility: Vec<CommandVisibility>,
     pub commands_placement: Vec<CommandPlacement>,
     pub commands_order: Vec<CommandOrder>,
+    /// The declared subsystem order. The nil uuid holds a slot that names no
+    /// subsystem; the platform exports it as a self-closed `<Subsystem/>`.
     pub subsystems_order: Vec<ObjectUuid>,
     pub groups_order: Vec<ObjectUuid>,
+    pub subsystems_visibility: Vec<SubsystemVisibility>,
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -62,10 +70,25 @@ impl CommandReference {
     }
 }
 
+/// One per-role override of an adjustable visibility, in stored order.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct VisibilityValue {
+    pub role: ObjectUuid,
+    pub value: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CommandVisibility {
     pub command: CommandReference,
     pub common: bool,
+    pub values: Vec<VisibilityValue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SubsystemVisibility {
+    pub subsystem: ObjectUuid,
+    pub common: bool,
+    pub values: Vec<VisibilityValue>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -118,6 +141,14 @@ pub(crate) fn compile_evidenced_command_interface(
     raw_deflate(&native_from_model(model)).map_err(Into::into)
 }
 
+/// The plain text the platform stores for `model`, BOM included.
+pub(crate) fn command_interface_plaintext(
+    model: &CommandInterfaceModel,
+) -> Result<Vec<u8>, CommandInterfaceCodecError> {
+    validate_model(model)?;
+    serialize(&native_from_model(model)).map_err(Into::into)
+}
+
 pub fn decode_command_interface(
     profile: &CommandInterfaceCodecProfile,
     blob: &[u8],
@@ -140,7 +171,7 @@ fn native_from_model(model: &CommandInterfaceModel) -> NativeValue {
     push_section(&mut fields, &model.commands_visibility, |entry| {
         vec![
             native_command_reference(&entry.command),
-            native_common(entry.common),
+            native_visibility(entry.common, &entry.values),
         ]
     });
     push_section(&mut fields, &model.commands_placement, |entry| {
@@ -165,8 +196,13 @@ fn native_from_model(model: &CommandInterfaceModel) -> NativeValue {
     push_section(&mut fields, &model.groups_order, |uuid| {
         vec![token(uuid.to_string())]
     });
-    fields.push(token("0"));
-    inline_list(fields)
+    push_section(&mut fields, &model.subsystems_visibility, |entry| {
+        vec![
+            token(entry.subsystem.to_string()),
+            native_visibility(entry.common, &entry.values),
+        ]
+    });
+    platform_list(fields)
 }
 
 fn push_section<T>(
@@ -187,22 +223,32 @@ fn push_section<T>(
 
 fn native_command_reference(reference: &CommandReference) -> NativeValue {
     match reference {
-        CommandReference::Empty => inline_list(vec![token("0")]),
+        CommandReference::Empty => platform_list(vec![token("0")]),
         CommandReference::Resolved { kind, uuid } => {
-            inline_list(vec![token(kind.to_string()), token(uuid.to_string())])
+            platform_list(vec![token(kind.to_string()), token(uuid.to_string())])
         }
     }
 }
 
-fn native_common(common: bool) -> NativeValue {
-    inline_list(vec![
-        token("0"),
-        inline_list(vec![
-            token("0"),
-            inline_list(vec![text("B"), token(if common { "1" } else { "0" })]),
-            token("0"),
-        ]),
-    ])
+/// `{"B",0|1}`.
+pub(crate) fn native_boolean(value: bool) -> NativeValue {
+    platform_list(vec![text("B"), token(if value { "1" } else { "0" })])
+}
+
+/// The adjustable visibility atom a command, a subsystem and a home-page item
+/// share: `{0,{0,{"B",<common>},<count>,<role uuid>,{"B",<value>},…}}`, the
+/// per-role overrides in stored order -- the inverse of the exporter's
+/// `parse_command_interface_adjustable_visibility`.
+pub(crate) fn native_visibility(common: bool, values: &[VisibilityValue]) -> NativeValue {
+    let mut inner = Vec::with_capacity(3 + values.len() * 2);
+    inner.push(token("0"));
+    inner.push(native_boolean(common));
+    inner.push(token(values.len().to_string()));
+    for value in values {
+        inner.push(token(value.role.to_string()));
+        inner.push(native_boolean(value.value));
+    }
+    platform_list(vec![token("0"), platform_list(inner)])
 }
 
 fn model_from_native(
@@ -222,15 +268,19 @@ fn model_from_native(
     for _ in 0..visibility_count {
         let command = parse_command_reference(field(fields, index, "visibility command")?, true)?;
         index += 1;
-        let common = parse_common(field(fields, index, "visibility common")?)?;
+        let (common, values) = parse_visibility(field(fields, index, "visibility common")?)?;
         index += 1;
-        commands_visibility.push(CommandVisibility { command, common });
+        commands_visibility.push(CommandVisibility {
+            command,
+            common,
+            values,
+        });
     }
 
     let placement_count = section_count(fields, &mut index, "placement")?;
     let mut commands_placement = Vec::with_capacity(placement_count);
     for _ in 0..placement_count {
-        let command = parse_command_reference(field(fields, index, "placement command")?, false)?;
+        let command = parse_command_reference(field(fields, index, "placement command")?, true)?;
         index += 1;
         let command_group = parse_uuid_allow_nil(
             field(fields, index, "placement command group")?,
@@ -270,7 +320,7 @@ fn model_from_native(
     let subsystem_count = section_count(fields, &mut index, "subsystem order")?;
     let mut subsystems_order = Vec::with_capacity(subsystem_count);
     for _ in 0..subsystem_count {
-        subsystems_order.push(parse_uuid(
+        subsystems_order.push(parse_uuid_allow_nil(
             field(fields, index, "ordered subsystem")?,
             "ordered subsystem",
         )?);
@@ -287,12 +337,23 @@ fn model_from_native(
         index += 1;
     }
 
-    exact_token(
-        field(fields, index, "CommandInterface trailing marker")?,
-        "0",
-        "CommandInterface trailing marker",
-    )?;
-    index += 1;
+    let subsystem_visibility_count = section_count(fields, &mut index, "subsystem visibility")?;
+    let mut subsystems_visibility = Vec::with_capacity(subsystem_visibility_count);
+    for _ in 0..subsystem_visibility_count {
+        let subsystem = parse_uuid(
+            field(fields, index, "visible subsystem")?,
+            "visible subsystem",
+        )?;
+        index += 1;
+        let (common, values) = parse_visibility(field(fields, index, "subsystem visibility")?)?;
+        index += 1;
+        subsystems_visibility.push(SubsystemVisibility {
+            subsystem,
+            common,
+            values,
+        });
+    }
+
     if index != fields.len() {
         return Err(CommandInterfaceCodecError::InvalidShape(
             "CommandInterface has an unsupported tail",
@@ -305,6 +366,7 @@ fn model_from_native(
         commands_order,
         subsystems_order,
         groups_order,
+        subsystems_visibility,
     })
 }
 
@@ -382,30 +444,59 @@ fn parse_uuid_allow_nil(
     Ok(uuid)
 }
 
-fn parse_common(value: &NativeValue) -> Result<bool, CommandInterfaceCodecError> {
-    let outer = exact_list(value, 2, "command visibility wrapper")?;
-    exact_token(&outer[0], "0", "command visibility wrapper marker")?;
-    let common = exact_list(&outer[1], 3, "command visibility payload")?;
-    exact_token(&common[0], "0", "command visibility payload marker")?;
-    let boolean = exact_list(&common[1], 2, "command visibility boolean")?;
+fn parse_boolean(value: &NativeValue) -> Result<bool, CommandInterfaceCodecError> {
+    let boolean = exact_list(value, 2, "command visibility boolean")?;
     if required_text(&boolean[0], "command visibility type")? != "B" {
         return Err(CommandInterfaceCodecError::InvalidShape(
             "command visibility type",
         ));
     }
-    let value = match required_token(&boolean[1], "command visibility value")? {
-        "0" => false,
-        "1" => true,
-        _ => {
-            return Err(CommandInterfaceCodecError::InvalidShape(
-                "command visibility value",
-            ));
-        }
-    };
-    exact_token(&common[2], "0", "command visibility payload tail")?;
-    Ok(value)
+    match required_token(&boolean[1], "command visibility value")? {
+        "0" => Ok(false),
+        "1" => Ok(true),
+        _ => Err(CommandInterfaceCodecError::InvalidShape(
+            "command visibility value",
+        )),
+    }
 }
 
+fn parse_visibility(
+    value: &NativeValue,
+) -> Result<(bool, Vec<VisibilityValue>), CommandInterfaceCodecError> {
+    let outer = exact_list(value, 2, "command visibility wrapper")?;
+    exact_token(&outer[0], "0", "command visibility wrapper marker")?;
+    let inner = required_list(&outer[1], "command visibility payload")?;
+    if inner.len() < 3 {
+        return Err(CommandInterfaceCodecError::InvalidShape(
+            "command visibility payload",
+        ));
+    }
+    exact_token(&inner[0], "0", "command visibility payload marker")?;
+    let common = parse_boolean(&inner[1])?;
+    let count = required_token(&inner[2], "command visibility override count")?
+        .parse::<usize>()
+        .map_err(|_| {
+            CommandInterfaceCodecError::InvalidShape("command visibility override count")
+        })?;
+    if count > MAX_SECTION_ITEMS || inner.len() != 3 + count * 2 {
+        return Err(CommandInterfaceCodecError::InvalidShape(
+            "command visibility override count",
+        ));
+    }
+    let mut values = Vec::with_capacity(count);
+    for pair in inner[3..].chunks_exact(2) {
+        values.push(VisibilityValue {
+            role: parse_uuid(&pair[0], "command visibility role")?,
+            value: parse_boolean(&pair[1])?,
+        });
+    }
+    Ok((common, values))
+}
+
+/// Bounds every section. Repeated entries are not an error: the platform
+/// stores them -- ERP УХ `Subsystems/Склад/Subsystems/КонтрольКачестваТоваров`
+/// orders two documents twice each, and two `Subsystems/ПодсистемыУХ/…` rows
+/// place one command five times -- and exports every one.
 fn validate_model(model: &CommandInterfaceModel) -> Result<(), CommandInterfaceCodecError> {
     for (name, count) in [
         ("visibility", model.commands_visibility.len()),
@@ -413,43 +504,10 @@ fn validate_model(model: &CommandInterfaceModel) -> Result<(), CommandInterfaceC
         ("command order", model.commands_order.len()),
         ("subsystem order", model.subsystems_order.len()),
         ("group order", model.groups_order.len()),
+        ("subsystem visibility", model.subsystems_visibility.len()),
     ] {
         if count > MAX_SECTION_ITEMS {
             return Err(CommandInterfaceCodecError::LimitExceeded(name));
-        }
-    }
-    unique_by(
-        model.commands_visibility.iter().map(|entry| &entry.command),
-        "duplicate visibility command",
-    )?;
-    unique_by(
-        model.commands_placement.iter().map(|entry| &entry.command),
-        "duplicate placement command",
-    )?;
-    unique_by(
-        model.commands_order.iter().map(|entry| &entry.command),
-        "duplicate ordered command",
-    )?;
-    unique_by(model.subsystems_order.iter(), "duplicate ordered subsystem")?;
-    unique_by(model.groups_order.iter(), "duplicate ordered group")?;
-    for reference in model.commands_placement.iter().map(|entry| &entry.command) {
-        if matches!(reference, CommandReference::Empty) {
-            return Err(CommandInterfaceCodecError::InvalidModel(
-                "placement command cannot use the empty sentinel",
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn unique_by<'a, T: Ord + 'a>(
-    values: impl Iterator<Item = &'a T>,
-    field: &'static str,
-) -> Result<(), CommandInterfaceCodecError> {
-    let mut seen = BTreeSet::new();
-    for value in values {
-        if !seen.insert(value) {
-            return Err(CommandInterfaceCodecError::InvalidModel(field));
         }
     }
     Ok(())
@@ -522,6 +580,7 @@ mod tests {
     const COMMAND_B: &str = "6e5307ea-8fbf-4177-bcc8-f163a6ce1b40";
     const GROUP: &str = "1af6d528-0b86-4fba-ab95-bd7475db03ba";
     const SUBSYSTEM: &str = "57f6e29d-0261-4e6d-b689-8e27eef0855a";
+    const ROLE: &str = "6e0ab1d5-108a-4cbb-92d4-aebb5ecd3af5";
 
     fn uuid(value: &str) -> ObjectUuid {
         ObjectUuid::parse(value).unwrap()
@@ -535,10 +594,15 @@ mod tests {
                 CommandVisibility {
                     command: first.clone(),
                     common: false,
+                    values: vec![VisibilityValue {
+                        role: uuid(ROLE),
+                        value: true,
+                    }],
                 },
                 CommandVisibility {
                     command: second.clone(),
                     common: true,
+                    values: Vec::new(),
                 },
             ],
             commands_placement: vec![CommandPlacement {
@@ -552,11 +616,16 @@ mod tests {
             }],
             subsystems_order: vec![uuid(SUBSYSTEM)],
             groups_order: vec![uuid(GROUP)],
+            subsystems_visibility: vec![SubsystemVisibility {
+                subsystem: uuid(SUBSYSTEM),
+                common: false,
+                values: Vec::new(),
+            }],
         }
     }
 
     #[test]
-    fn all_five_sections_roundtrip_without_a_base_blob() {
+    fn all_six_sections_roundtrip_without_a_base_blob() {
         let profile = CommandInterfaceCodecProfile::fixture();
         let model = fixture_model();
         let first = compile_command_interface(&profile, &model).unwrap();
@@ -567,15 +636,25 @@ mod tests {
     }
 
     #[test]
-    fn observed_visibility_fixture_is_preserved_semantically() {
-        let profile = CommandInterfaceCodecProfile::fixture();
-        let plain =
-            format!("\u{feff}{{7,1,1,{{0,{COMMAND_A}}},{{0,{{0,{{\"B\",0}},0}}}},0,0,0,0,0}}");
-        let blob = deflate_bytes(plain.as_bytes()).unwrap();
-        let decoded = decode_command_interface(&profile, &blob).unwrap();
-        assert_eq!(decoded.model().commands_visibility.len(), 1);
-        assert!(!decoded.model().commands_visibility[0].common);
-        assert_eq!(decoded.plaintext().unwrap(), plain.as_bytes());
+    fn writes_the_platform_layout() {
+        let model = CommandInterfaceModel {
+            commands_visibility: vec![CommandVisibility {
+                command: CommandReference::resolved(0, uuid(COMMAND_A)),
+                common: false,
+                values: vec![VisibilityValue {
+                    role: uuid(ROLE),
+                    value: true,
+                }],
+            }],
+            ..CommandInterfaceModel::default()
+        };
+        let plain = command_interface_plaintext(&model).unwrap();
+        assert_eq!(
+            String::from_utf8(plain).unwrap(),
+            format!(
+                "\u{feff}{{7,1,1,\r\n{{0,{COMMAND_A}}},\r\n{{0,\r\n{{0,\r\n{{\"B\",0}},1,{ROLE},\r\n{{\"B\",1}}\r\n}}\r\n}},0,0,0,0,0}}"
+            )
+        );
     }
 
     #[test]
@@ -602,21 +681,10 @@ mod tests {
     }
 
     #[test]
-    fn missing_bom_and_duplicate_are_rejected() {
+    fn missing_bom_is_rejected() {
         let profile = CommandInterfaceCodecProfile::fixture();
         let no_bom = format!("{{7,1,1,{{0,{COMMAND_A}}},{{0,{{0,{{\"B\",1}},0}}}},0,0,0,0,0}}");
         let blob = deflate_bytes(no_bom.as_bytes()).unwrap();
         assert!(decode_command_interface(&profile, &blob).is_err());
-
-        let mut model = fixture_model();
-        model
-            .commands_visibility
-            .push(model.commands_visibility[0].clone());
-        assert!(matches!(
-            compile_command_interface(&profile, &model),
-            Err(CommandInterfaceCodecError::InvalidModel(
-                "duplicate visibility command"
-            ))
-        ));
     }
 }

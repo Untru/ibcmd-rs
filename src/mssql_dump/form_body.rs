@@ -7499,7 +7499,7 @@ fn form_dynamic_list_main_table_children(
 /// use-always list stores. The sets are deliberately property-blind — they do
 /// not condition on hierarchy, owners, periodicity or write mode — and the
 /// whole-tree measurement above holds with them as written.
-pub(super) fn form_dynamic_list_std_attribute_pairs(
+pub(crate) fn form_dynamic_list_std_attribute_pairs(
     kind: &str,
 ) -> Option<&'static [(&'static str, &'static str)]> {
     const CATALOG: [(&str, &str); 10] = [
@@ -23094,6 +23094,14 @@ pub(super) fn parse_form_child_item_data_path(
         } else {
             &input_slots
         };
+    // The same item states it shows no data of its own, so nothing is inferred
+    // for it from its parent either: the fallback below named
+    // `Объект.Требуется.ТребуетсяПеренесеноРезерв` for it whenever the parent
+    // path reached it, which the platform never writes.
+    let footer_only = fields.get(input_slots[0]).map(|field| field.trim()) == Some("{0}")
+        && fields
+            .get(input_slots[1])
+            .is_some_and(|field| field.trim() != "{0}");
     // Both bound slots spelling the empty binding `{0}` is the platform's own
     // statement that the item shows no data, and it then writes no `DataPath`
     // at all -- 280 such items across UT 11.5.27.75, every one of them without
@@ -23186,7 +23194,7 @@ pub(super) fn parse_form_child_item_data_path(
         | "TrackBarField"
         | "ChartField" => resolve_slots(primary_slots, &parse_bound).or_else(|| {
             FormChildItemDataPathResolution::from_option(
-                parent_data_path.map(|parent| {
+                parent_data_path.filter(|_| !footer_only).map(|parent| {
                     let name = normalize_form_data_path_child_name(parent, name);
                     format!("{parent}.{name}")
                 }),
@@ -37512,6 +37520,55 @@ pub(super) fn parse_and_render_form_gantt_chart_settings_for_test(text: &str) ->
     }];
     let object_refs = BTreeMap::new();
     parse_form_gantt_chart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The `<Settings xsi:type="d4p1:Chart">` block this exporter writes for a
+/// chart-typed attribute whose member 14 is `field`, at the indent it sits at
+/// inside `<Attribute>`. The form writer (`compiler::bodies::form_chart`) runs
+/// every chart it builds back through this and refuses one that does not
+/// export to the XML it was built from. No object list is consulted: a style
+/// colour the configuration declares is never written by that writer, and a
+/// dangling one reads back as the `<kind>:<uuid>` it was written from.
+pub(crate) fn render_form_chart_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_chart_settings_xml(field, &value_types, &BTreeMap::new(), 3)
+}
+
+/// The Gantt chart's counterpart to `render_form_chart_settings_value`.
+pub(crate) fn render_form_gantt_chart_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_GANTT_CHART_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_gantt_chart_settings_xml(field, &value_types, &BTreeMap::new(), 3)
+}
+
+/// The Form.xml this exporter writes for a whole form body, read against the
+/// offline context of a saved dump -- the form writer's whole-form harness
+/// renders a compiled body and the stored one through it and compares.
+#[cfg(test)]
+pub(crate) fn render_form_body_xml_offline(
+    body: &ParsedFormBodyBlob,
+    context: &super::offline_context::OfflineFormContext,
+    form_uuid: &str,
+) -> Option<String> {
+    let collisions = BTreeSet::new();
+    let owner = context
+        .form_owner_references
+        .get(form_uuid)
+        .map(String::as_str);
+    let parse_context = FormParseContext::new(
+        &context.type_index,
+        &collisions,
+        &context.dcs_type_index,
+        &context.object_refs,
+        &context.field_type_refs,
+        &context.information_register_field_refs,
+        &context.information_register_master_dimensions,
+        owner,
+    );
+    extract_form_body_xml_from_body_timed(body, &parse_context, None)
 }
 
 /// The `{0,{3,0,1,0,<value>,<contentCacheItem>,<autoText>,0}}` record the

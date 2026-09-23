@@ -13163,6 +13163,30 @@ fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
     xml.push_str("\t\t</object>\r\n");
 }
 
+/// A chart drawing's stored object -- member 12 of its record -- as the
+/// `<object>` element the exporter publishes for it, or `None` where the
+/// reader refuses the record. The template writer checks the charts it
+/// builds against this.
+pub(crate) fn render_moxel_chart_object_xml(
+    field: &str,
+    gantt: bool,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let mut xml = String::new();
+    if gantt {
+        let wrapped = split_1c_braced_fields(field, 0)?;
+        if wrapped.len() != 1 {
+            return None;
+        }
+        let chart = parse_moxel_gantt_chart(wrapped.first()?, object_refs)?;
+        push_moxel_gantt_chart_xml(&mut xml, &chart);
+    } else {
+        let chart = parse_moxel_chart(field, object_refs)?;
+        push_moxel_chart_xml(&mut xml, &chart);
+    }
+    Some(xml)
+}
+
 /// Re-wraps `push_moxel_chart_xml`'s `<object xsi:type="d3p1:Chart">`
 /// fragment (two-tab indent, itself a `<drawing>` element's direct child) as
 /// the three-tab-indented `<d3p1:chart>` a `GanttChart` object nests it

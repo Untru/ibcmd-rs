@@ -1466,6 +1466,9 @@ pub struct NativeFormWriterReport {
     /// always shares its key frees none on its own. Ordering the work by
     /// `refused` alone over-counts every reason that travels with another.
     pub refused_sets: BTreeMap<String, usize>,
+    /// Every refused form with its reasons, which is what a refusal that
+    /// names no path is traced back by.
+    pub refused_forms: BTreeMap<String, String>,
     /// Forms the writer wrote but got wrong, with one example each.
     pub different: usize,
     /// The differing forms clustered by what the divergence looks like, so a
@@ -1570,6 +1573,26 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                     Some(items_root.as_path()),
                 )
                 .map_err(|error| error.to_string());
+                // The round-trip instrument's other half: every body the
+                // writer compiles is kept, named the way the exporter's
+                // override looks it up, so a full export can be run with the
+                // compiled bodies in place of the stored ones.
+                // A body the exporter cannot parse would make it fall back to
+                // the stored one and pass the round trip for nothing, so such
+                // a body is recorded as a failure instead of being written.
+                let wrote = match wrote {
+                    Ok(body) if crate::module_blob::parse_form_body_plain(&body).is_err() => {
+                        Err("the compiled body does not parse back".to_string())
+                    }
+                    other => other,
+                };
+                if let (Ok(body), Some(dir), Some(uuid)) = (
+                    wrote.as_ref(),
+                    std::env::var_os("IBCMD_RS_WRITE_BODIES_DIR"),
+                    form_uuid_of(path),
+                ) {
+                    let _ = fs::write(Path::new(&dir).join(format!("{uuid}.0.txt")), body);
+                }
                 (relative, wrote, stored)
             })
             .collect::<Vec<_>>()
@@ -1583,6 +1606,7 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
         exact: 0,
         refused: BTreeMap::new(),
         refused_sets: BTreeMap::new(),
+        refused_forms: BTreeMap::new(),
         achievable: 0,
         achievable_exact: 0,
         differences: Vec::new(),
@@ -1601,7 +1625,8 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                     .trim()
                     .to_string();
                 *report.refused.entry(first).or_insert(0) += 1;
-                *report.refused_sets.entry(reason).or_insert(0) += 1;
+                *report.refused_sets.entry(reason.clone()).or_insert(0) += 1;
+                report.refused_forms.insert(form.clone(), reason);
             }
             Ok(wrote) => {
                 let Some(stored) = stored else {
@@ -1690,6 +1715,1103 @@ pub fn audit_native_form_writer(root: &Path, bodies: &Path) -> Result<NativeForm
                         });
                     }
                 }
+            }
+        }
+    }
+    Ok(report)
+}
+
+/// How far the base-free interface writers reproduce the rows the platform
+/// stored, one family at a time.
+///
+/// Every `Ext/CommandInterface.xml` (a subsystem's, a common command's, the
+/// configuration's), `Ext/MainSectionCommandInterface.xml`,
+/// `Ext/HomePageWorkArea.xml`, `Ext/ClientApplicationInterface.xml` and
+/// `Ext/StandaloneConfigurationContent.bin` is compiled from the source tree
+/// alone; the body is compared with the stored row's plain text, and read back
+/// by the exporter's own reader and formatter into the file the platform
+/// exported. `stored_round_trip` runs the stored row through the same reader: a
+/// file it misses is a gap of the harness or the exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every file that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct InterfaceWriterFamilyReport {
+    pub files: usize,
+    pub compiled: usize,
+    /// Refusals by reason, with the names a reason quotes folded away.
+    pub refused: BTreeMap<String, usize>,
+    pub no_stored_row: usize,
+    pub plain_identical: usize,
+    pub round_trip_identical: usize,
+    pub stored_round_trip_identical: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct InterfaceWriterDifference {
+    pub family: String,
+    pub file: String,
+    pub row: String,
+    /// `refused`, `plain`, `round_trip` or `stored_round_trip`.
+    pub check: &'static str,
+    pub detail: String,
+}
+
+/// One file of the family, where the platform stores it and how the exporter
+/// reads it back.
+struct InterfaceWriterTarget {
+    family: &'static str,
+    path: PathBuf,
+    row: String,
+    source: crate::module_blob::InterfaceAssetSource,
+    render: crate::mssql_dump::interface_audit::InterfaceAssetKind,
+}
+
+fn interface_writer_targets(root: &Path) -> Result<Vec<InterfaceWriterTarget>> {
+    use crate::module_blob::InterfaceAssetSource as Source;
+    use crate::mssql_dump::interface_audit::InterfaceAssetKind as Render;
+
+    let mut targets = Vec::new();
+    let configuration = root.join("Configuration.xml");
+    if let Some(owner) = crate::mssql::configuration_asset_owner_uuid(&configuration) {
+        for (file, suffix, family, source, render) in [
+            (
+                "CommandInterface.xml",
+                "a",
+                "configuration CommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "MainSectionCommandInterface.xml",
+                "9",
+                "MainSectionCommandInterface",
+                Source::CommandInterface,
+                Render::ConfigurationCommandInterface,
+            ),
+            (
+                "HomePageWorkArea.xml",
+                "8",
+                "HomePageWorkArea",
+                Source::HomePageWorkArea,
+                Render::HomePageWorkArea,
+            ),
+            (
+                "ClientApplicationInterface.xml",
+                "b",
+                "ClientApplicationInterface",
+                Source::ClientApplicationInterface,
+                Render::ClientApplicationInterface,
+            ),
+            (
+                "StandaloneConfigurationContent.bin",
+                "f",
+                "StandaloneConfigurationContent",
+                Source::StandaloneContent,
+                Render::StandaloneContent,
+            ),
+        ] {
+            let path = root.join("Ext").join(file);
+            if path.is_file() {
+                targets.push(InterfaceWriterTarget {
+                    family,
+                    path,
+                    row: format!("{owner}.{suffix}"),
+                    source,
+                    render,
+                });
+            }
+        }
+    }
+    for folder in ["Subsystems", "CommonCommands"] {
+        let base = root.join(folder);
+        if !base.is_dir() {
+            continue;
+        }
+        for entry in WalkDir::new(&base).follow_links(false) {
+            let entry = entry.with_context(|| format!("failed to walk {}", base.display()))?;
+            if !entry.file_type().is_file() || entry.file_name() != "CommandInterface.xml" {
+                continue;
+            }
+            let path = entry.into_path();
+            let Some(holder) = path
+                .parent()
+                .and_then(Path::parent)
+                .map(|object| object.with_extension("xml"))
+            else {
+                continue;
+            };
+            let properties = fs::read(&holder)
+                .with_context(|| format!("failed to read {}", holder.display()))
+                .and_then(|xml| parse_simple_metadata_xml_properties(&xml))?;
+            let suffix = match properties.kind.as_str() {
+                "Subsystem" => "1",
+                "CommonCommand" => "0",
+                _ => continue,
+            };
+            targets.push(InterfaceWriterTarget {
+                family: if suffix == "1" {
+                    "subsystem CommandInterface"
+                } else {
+                    "common command CommandInterface"
+                },
+                path,
+                row: format!("{}.{suffix}", properties.uuid),
+                source: Source::CommandInterface,
+                render: Render::ObjectCommandInterface,
+            });
+        }
+    }
+    targets.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(targets)
+}
+
+/// Where two byte strings first differ, as a window of each.
+fn first_byte_difference(wrote: &[u8], expected: &[u8]) -> String {
+    let at = wrote
+        .iter()
+        .zip(expected)
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.len().min(expected.len()));
+    let window = |bytes: &[u8]| {
+        let start = at.saturating_sub(60);
+        let end = (at + 120).min(bytes.len());
+        String::from_utf8_lossy(&bytes[start.min(end)..end]).to_string()
+    };
+    format!(
+        "at byte {at} (wrote {} bytes, expected {}): wrote `{}` | expected `{}`",
+        wrote.len(),
+        expected.len(),
+        window(wrote),
+        window(expected)
+    )
+}
+
+pub fn audit_interface_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<InterfaceWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = interface_writer_targets(root)?;
+    let context =
+        crate::mssql_dump::interface_audit::OfflineInterfaceContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} files; the exporter's indexes read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        refused: Option<String>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let native = fs::read(&target.path).unwrap_or_default();
+                let stored = fs::read(inflated.join(format!("{}__part0.txt", target.row))).ok();
+                let stored_round_trip = stored.as_ref().map(|stored| {
+                    match context.render(target.render, stored, source_version) {
+                        Ok(xml) if xml == native => None,
+                        Ok(xml) => Some(first_byte_difference(&xml, &native)),
+                        Err(error) => Some(format!("{error:#}")),
+                    }
+                });
+                let wrote = crate::module_blob::interface_asset_plaintext(
+                    target.source,
+                    &native,
+                    Some(&source),
+                );
+                let mut outcome = Outcome {
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                };
+                match wrote {
+                    Err(error) => outcome.refused = Some(format!("{error:#}")),
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
+                        }
+                        outcome.round_trip =
+                            match context.render(target.render, &plain, source_version) {
+                                Ok(xml) if xml == native => None,
+                                Ok(xml) => Some(first_byte_difference(&xml, &native)),
+                                Err(error) => Some(format!("{error:#}")),
+                            };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = InterfaceWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.path);
+        let family = report
+            .families
+            .entry(target.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: target.family.to_string(),
+                file: file.clone(),
+                row: target.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some(reason) = outcome.refused {
+            *family
+                .refused
+                .entry(form_blocker_reason_shape(&reason))
+                .or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
+/// How far the loader's help writer reproduces the rows the platform stored.
+///
+/// Every `Ext/Help.xml` of the tree (an object's, a form's, the
+/// configuration's) and every `HTMLDocument` template's `Ext/Template.xml` is
+/// compiled by the loader's own function, its row compared with the stored
+/// row's plain text byte for byte, and read back by the exporter's reader into
+/// the files the platform exported. `stored_round_trip` runs the stored row
+/// through the same reader: a file it misses is a gap of the harness or the
+/// exporter, not of the writer.
+#[derive(Debug, Serialize)]
+pub struct HelpWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub families: BTreeMap<String, InterfaceWriterFamilyReport>,
+    /// Every help that is not reproduced, with its first difference or the
+    /// writer's refusal.
+    pub differences: Vec<InterfaceWriterDifference>,
+}
+
+struct HelpWriterTarget {
+    /// The metadata XML that declares the help's owner.
+    owner_xml: PathBuf,
+    /// `Ext/Help.xml` or `Ext/Template.xml`.
+    body: PathBuf,
+    template: bool,
+}
+
+fn help_writer_targets(root: &Path) -> Result<Vec<HelpWriterTarget>> {
+    let mut targets = Vec::new();
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let template = match entry.file_name().to_str() {
+            Some("Help.xml") => false,
+            Some("Template.xml") => true,
+            _ => continue,
+        };
+        let path = entry.into_path();
+        let Some(owner_dir) = path
+            .parent()
+            .filter(|ext| ext.file_name().is_some_and(|name| name == "Ext"))
+            .and_then(Path::parent)
+        else {
+            continue;
+        };
+        let owner_xml = if owner_dir == root {
+            root.join("Configuration.xml")
+        } else {
+            owner_dir.with_extension("xml")
+        };
+        if template {
+            let xml = fs::read(&owner_xml)
+                .with_context(|| format!("failed to read {}", owner_xml.display()))?;
+            if parse_template_type_from_xml(&xml)?.as_deref() != Some("HTMLDocument") {
+                continue;
+            }
+        }
+        targets.push(HelpWriterTarget {
+            owner_xml,
+            body: path,
+            template,
+        });
+    }
+    targets.sort_by(|left, right| left.body.cmp(&right.body));
+    Ok(targets)
+}
+
+/// The shape of a refusal, for the histogram: the chain under the first
+/// context (which names the page), with quoted names and paths folded away.
+fn help_refusal_shape(error: &anyhow::Error) -> String {
+    let chain = error.chain().map(ToString::to_string).collect::<Vec<_>>();
+    let tail = if chain.len() > 1 {
+        &chain[1..]
+    } else {
+        &chain[..]
+    };
+    tail.iter()
+        .map(|part| {
+            form_blocker_reason_shape(part)
+                .split_whitespace()
+                .map(|word| if word.contains(":\\") { "<path>" } else { word })
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>()
+        .join(": ")
+}
+
+/// Where the files the exporter writes for a row differ from the native ones:
+/// the XML beside the help, each page and each attachment, and a native file
+/// the row does not produce at all.
+fn rendered_help_difference(
+    rendered: &crate::mssql_dump::help_audit::RenderedHelp,
+    body: &Path,
+) -> Option<String> {
+    let native_xml = fs::read(body).unwrap_or_default();
+    if rendered.xml != native_xml {
+        return Some(format!(
+            "{}: {}",
+            body.file_name().unwrap_or_default().to_string_lossy(),
+            first_byte_difference(&rendered.xml, &native_xml)
+        ));
+    }
+    let dir = body.with_extension("");
+    let files_dir = dir.join("_files");
+    let mut produced = std::collections::BTreeSet::new();
+    for (name, content, path) in rendered
+        .pages
+        .iter()
+        .map(|(name, content)| (name, content, dir.join(name)))
+        .chain(
+            rendered
+                .files
+                .iter()
+                .map(|(name, content)| (name, content, files_dir.join(name))),
+        )
+    {
+        // Windows drops a trailing dot or space from a file name: a stored
+        // `Картинка1.` is exported as `Картинка1`.
+        let on_disk = path
+            .file_name()
+            .map(|name| path.with_file_name(name.to_string_lossy().trim_end_matches(['.', ' '])))
+            .unwrap_or_else(|| path.clone());
+        produced.insert(on_disk);
+        match fs::read(&path) {
+            Ok(native) if &native == content => {}
+            Ok(native) => {
+                return Some(format!(
+                    "{name}: {}",
+                    first_byte_difference(content, &native)
+                ));
+            }
+            Err(_) => return Some(format!("{name}: the export has no such file")),
+        }
+    }
+    for folder in [&dir, &files_dir] {
+        let Ok(entries) = fs::read_dir(folder) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_file() && !produced.contains(&path) {
+                return Some(format!(
+                    "{}: the row does not produce this file",
+                    relative_path_string(&dir, &path)
+                ));
+            }
+        }
+    }
+    None
+}
+
+pub fn audit_help_writer(
+    root: &Path,
+    inflated: &Path,
+    source_version: crate::cli::InfobaseConfigSourceVersion,
+) -> Result<HelpWriterReport> {
+    let started = std::time::Instant::now();
+    let targets = help_writer_targets(root)?;
+    let context = crate::mssql_dump::help_audit::OfflineHelpContext::from_inflated_dir(inflated)?;
+    eprintln!(
+        "{} helps and HTML templates; the exporter's index read in {:.1}s",
+        targets.len(),
+        started.elapsed().as_secs_f64()
+    );
+    let source = MetadataSourceContext::new(root.to_path_buf());
+
+    struct Outcome {
+        family: &'static str,
+        row: String,
+        refused: Option<(String, String)>,
+        stored: bool,
+        plain: Option<String>,
+        round_trip: Option<String>,
+        stored_round_trip: Option<String>,
+    }
+
+    let outcomes = parallel::install(|| {
+        targets
+            .par_iter()
+            .map(|target| {
+                let properties = fs::read(&target.owner_xml)
+                    .with_context(|| format!("failed to read {}", target.owner_xml.display()))
+                    .and_then(|xml| parse_simple_metadata_xml_properties(&xml));
+                let properties = match properties {
+                    Ok(properties) => properties,
+                    Err(error) => {
+                        return Outcome {
+                            family: "unreadable owner",
+                            row: String::new(),
+                            refused: Some((help_refusal_shape(&error), format!("{error:#}"))),
+                            stored: false,
+                            plain: None,
+                            round_trip: None,
+                            stored_round_trip: None,
+                        };
+                    }
+                };
+                let family = if target.template {
+                    "HTML template"
+                } else {
+                    match properties.kind.as_str() {
+                        "Configuration" => "configuration help",
+                        "Form" | "CommonForm" => "form help",
+                        _ => "object help",
+                    }
+                };
+                let row = if target.template {
+                    format!("{}.0", properties.uuid)
+                } else {
+                    crate::mssql::object_help_body_id(&target.owner_xml, &properties)
+                };
+                let stored = fs::read(inflated.join(format!("{row}__part0.txt"))).ok();
+                let stored_round_trip =
+                    stored
+                        .as_ref()
+                        .map(|stored| match context.render(stored, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        });
+                let compiled = if target.template {
+                    crate::mssql::html_template_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                } else {
+                    crate::mssql::object_help_source_row(
+                        &target.owner_xml,
+                        &properties,
+                        Some(&source),
+                    )
+                };
+                let mut outcome = Outcome {
+                    family,
+                    refused: None,
+                    stored: stored.is_some(),
+                    plain: None,
+                    round_trip: None,
+                    stored_round_trip: stored_round_trip.flatten(),
+                    row,
+                };
+                let compiled = compiled.and_then(|compiled| {
+                    let compiled = compiled
+                        .ok_or_else(|| anyhow!("the loader writes no row for this help"))?;
+                    if compiled.body_id != outcome.row {
+                        return Err(anyhow!(
+                            "the loader writes row {} where the audit expects {}",
+                            compiled.body_id,
+                            outcome.row
+                        ));
+                    }
+                    crate::compiler::families::native::inflate(&compiled.blob)
+                        .map_err(|error| anyhow!("the loader's row does not inflate: {error}"))
+                });
+                match compiled {
+                    Err(error) => {
+                        outcome.refused = Some((help_refusal_shape(&error), format!("{error:#}")));
+                    }
+                    Ok(plain) => {
+                        if let Some(stored) = &stored
+                            && &plain != stored
+                        {
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
+                        }
+                        outcome.round_trip = match context.render(&plain, source_version) {
+                            Ok(rendered) => rendered_help_difference(&rendered, &target.body),
+                            Err(error) => Some(format!("{error:#}")),
+                        };
+                    }
+                }
+                outcome
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = HelpWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        families: BTreeMap::new(),
+        differences: Vec::new(),
+    };
+    for (target, outcome) in targets.iter().zip(outcomes) {
+        let file = relative_path_string(root, &target.body);
+        let family = report
+            .families
+            .entry(outcome.family.to_string())
+            .or_default();
+        family.files += 1;
+        if !outcome.stored {
+            family.no_stored_row += 1;
+        }
+        let mut differ = |check: &'static str, detail: String| {
+            report.differences.push(InterfaceWriterDifference {
+                family: outcome.family.to_string(),
+                file: file.clone(),
+                row: outcome.row.clone(),
+                check,
+                detail,
+            });
+        };
+        match &outcome.stored_round_trip {
+            None if outcome.stored => family.stored_round_trip_identical += 1,
+            None => {}
+            Some(detail) => differ("stored_round_trip", detail.clone()),
+        }
+        if let Some((shape, reason)) = outcome.refused {
+            *family.refused.entry(shape).or_insert(0) += 1;
+            differ("refused", reason);
+            continue;
+        }
+        family.compiled += 1;
+        match outcome.plain {
+            None if outcome.stored => family.plain_identical += 1,
+            None => {}
+            Some(detail) => differ("plain", detail),
+        }
+        match outcome.round_trip {
+            None => family.round_trip_identical += 1,
+            Some(detail) => differ("round_trip", detail),
+        }
+    }
+    Ok(report)
+}
+
+/// How many spreadsheet templates the template writer reproduces.
+///
+/// Every `Templates/<Name>/Ext/Template.xml` and `CommonTemplates/<Name>/Ext/
+/// Template.xml` whose holder declares `SpreadsheetDocument` is compiled the
+/// way the loader compiles it, base-free. The compiled row is compared with
+/// the row the platform stored (the inflated dump of the same database), and
+/// it is read back through the exporter's own MOXCEL reader and XML writer --
+/// the round trip, which has to give the native `Template.xml` byte for byte.
+#[derive(Debug, Serialize)]
+pub struct MxlWriterReport {
+    pub root: PathBuf,
+    pub bodies: PathBuf,
+    pub templates: usize,
+    pub compiled: usize,
+    /// Templates the writer refused, by the first reason, digits folded.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_templates: BTreeMap<String, String>,
+    /// Compiled templates whose stored row the dump does not hold.
+    pub no_stored_row: usize,
+    /// The compiled plain text equals the stored one, byte for byte.
+    pub plain_identical: usize,
+    /// ... and once line breaks are ignored.
+    pub plain_identical_ignoring_breaks: usize,
+    /// ... and once the language record's two load-dependent members are
+    /// folded as well (see `normalize_moxel_plain`).
+    pub plain_identical_normalized: usize,
+    /// The compiled row reads back into the native `Template.xml`.
+    pub round_trip_identical: usize,
+    pub round_trip_unreadable: usize,
+    pub round_trip_different: usize,
+    /// The stored row itself reads back into the native `Template.xml` -- the
+    /// check that this audit's reference indexes are the dump's.
+    pub stored_round_trip_identical: usize,
+    /// Templates whose stored row does not read back into the native file.
+    pub stored_round_trip_failures: Vec<String>,
+    /// The differing templates by their first differing line pair, digits
+    /// folded, so a systematic cause shows up as one bucket.
+    pub shapes: BTreeMap<String, usize>,
+    pub differences: Vec<MxlWriterDifference>,
+    /// Templates whose normalized plain text differs from the stored one, by
+    /// the context of the first differing position.
+    pub plain_shapes: BTreeMap<String, usize>,
+    /// Those templates, as `<uuid> <path>`.
+    pub plain_different: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MxlWriterDifference {
+    pub template: String,
+    pub uuid: String,
+    /// 1-based line of the first difference.
+    pub line: usize,
+    pub ours: String,
+    pub native: String,
+    pub ours_lines: usize,
+    pub native_lines: usize,
+}
+
+fn fold_digits(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut in_digits = false;
+    for ch in text.chars() {
+        if ch.is_ascii_digit() {
+            if !in_digits {
+                out.push('#');
+            }
+            in_digits = true;
+        } else {
+            in_digits = false;
+            out.push(ch);
+        }
+    }
+    out
+}
+
+/// The generated reference types of a source tree, as the dump's MOXCEL
+/// reader receives them: `TypeId` (lowercase) to `CatalogRef.<Name>` and the
+/// like, read from every root object's `<xr:GeneratedType category="Ref">`.
+fn moxel_generated_types_from_tree(root: &Path) -> BTreeMap<String, String> {
+    const HEAD: &str = "<xr:GeneratedType name=\"";
+    let mut types = BTreeMap::new();
+    let Ok(families) = fs::read_dir(root) else {
+        return types;
+    };
+    for family in families.flatten() {
+        let family = family.path();
+        if !family.is_dir() {
+            continue;
+        }
+        let Ok(objects) = fs::read_dir(&family) else {
+            continue;
+        };
+        for object in objects.flatten() {
+            let path = object.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("xml") {
+                continue;
+            }
+            let Ok(text) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let mut rest = text.as_str();
+            while let Some(at) = rest.find(HEAD) {
+                rest = &rest[at + HEAD.len()..];
+                let Some(end) = rest.find('"') else {
+                    break;
+                };
+                let name = &rest[..end];
+                let head_end = rest.find('>').unwrap_or(rest.len());
+                let is_ref = rest[..head_end].contains("category=\"Ref\"");
+                let Some(type_at) = rest.find("<xr:TypeId>") else {
+                    break;
+                };
+                let type_rest = &rest[type_at + "<xr:TypeId>".len()..];
+                let Some(type_end) = type_rest.find("</xr:TypeId>") else {
+                    break;
+                };
+                let type_id = type_rest[..type_end].trim().to_ascii_lowercase();
+                if is_ref
+                    && name
+                        .split_once('.')
+                        .is_some_and(|(kind, _)| kind.ends_with("Ref"))
+                {
+                    types.insert(type_id, name.to_string());
+                }
+            }
+        }
+    }
+    types
+}
+
+/// `(holder, Template.xml, template uuid)` for every spreadsheet template.
+fn collect_spreadsheet_templates(root: &Path) -> Result<Vec<(PathBuf, PathBuf, String)>> {
+    let mut templates = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| !is_ignored(entry.path()))
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if !entry.file_type().is_file() || entry.file_name() != "Template.xml" {
+            continue;
+        }
+        let template_xml = entry.path();
+        let Some(metadata_xml) = template_metadata_xml_path(template_xml) else {
+            continue;
+        };
+        let Ok(metadata) = fs::read(&metadata_xml) else {
+            continue;
+        };
+        if parse_template_type_from_xml(&metadata)?.as_deref() != Some("SpreadsheetDocument") {
+            continue;
+        }
+        let properties = parse_simple_metadata_xml_properties(&metadata)
+            .with_context(|| format!("failed to parse {}", metadata_xml.display()))?;
+        templates.push((metadata_xml, template_xml.to_path_buf(), properties.uuid));
+    }
+    templates.sort();
+    Ok(templates)
+}
+
+/// One template's verdict, reduced where it is computed so that a corpus of
+/// fourteen thousand templates never holds their texts at once.
+enum MxlWriterOutcome {
+    Refused(String),
+    Compiled(MxlTemplateSummary),
+}
+
+struct MxlTemplateSummary {
+    has_stored: bool,
+    plain_identical: bool,
+    plain_identical_ignoring_breaks: bool,
+    plain_identical_normalized: bool,
+    /// The first plain divergence (normalized), where the round trip holds.
+    plain_shape: Option<String>,
+    stored_round_trip_ok: bool,
+    round_trip: MxlRoundTrip,
+}
+
+enum MxlRoundTrip {
+    Identical,
+    Unreadable,
+    Different {
+        line: usize,
+        ours: String,
+        native: String,
+        ours_lines: usize,
+        native_lines: usize,
+    },
+}
+
+/// The body text as the plain comparison reads it: line breaks dropped, and
+/// the two language-record members no source spells -- the third, which a
+/// load from XML writes as 1 and a Designer save as 0, and the last -- folded
+/// to `_`.
+fn normalize_moxel_plain(plain: &[u8]) -> String {
+    let text = String::from_utf8_lossy(plain)
+        .replace(['\r', '\n'], "");
+    let Some(start) = text.find("{8,1,12,{") else {
+        return text;
+    };
+    let record_start = start + "{8,1,12,".len();
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let mut commas = Vec::new();
+    let mut record_end = None;
+    for (offset, ch) in text[record_start..].char_indices() {
+        let at = record_start + offset;
+        if in_string {
+            if ch == '"' {
+                in_string = false;
+            }
+            continue;
+        }
+        match ch {
+            '"' => in_string = true,
+            '{' => depth += 1,
+            '}' => {
+                depth -= 1;
+                if depth == 0 {
+                    record_end = Some(at);
+                    break;
+                }
+            }
+            ',' if depth == 1 => commas.push(at),
+            _ => {}
+        }
+    }
+    let (Some(end), true) = (record_end, commas.len() >= 3) else {
+        return text;
+    };
+    let third = (commas[1] + 1, commas[2]);
+    let last = (commas[commas.len() - 1] + 1, end);
+    format!(
+        "{}_{}_{}",
+        &text[..third.0],
+        &text[third.1..last.0],
+        &text[last.1..]
+    )
+}
+
+fn audit_one_mxl_template(
+    template_xml: &Path,
+    uuid: &str,
+    bodies: &Path,
+    source: &MetadataSourceContext,
+    object_refs: &BTreeMap<String, String>,
+    generated_types: &BTreeMap<String, String>,
+    write_dir: Option<&Path>,
+) -> MxlWriterOutcome {
+    use crate::compiler::bodies::template::{
+        TemplateKind, TemplateSource, compile_evidenced_template,
+    };
+    use std::io::Read;
+
+    let native = match fs::read(template_xml) {
+        Ok(bytes) => bytes,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let blob = match compile_evidenced_template(
+        TemplateKind::SpreadsheetDocument,
+        TemplateSource::Spreadsheet {
+            xml: &native,
+            source: Some(source),
+            number_format_hint: None,
+        },
+    ) {
+        Ok(blob) => blob,
+        Err(error) => return MxlWriterOutcome::Refused(error.to_string()),
+    };
+    let mut plain = Vec::new();
+    if let Err(error) = flate2::read::DeflateDecoder::new(blob.as_slice()).read_to_end(&mut plain) {
+        return MxlWriterOutcome::Refused(format!("the compiled row does not inflate: {error}"));
+    }
+    if let Some(dir) = write_dir {
+        let _ = fs::write(dir.join(format!("{uuid}.0__part0.txt")), &plain);
+    }
+    let native_text = String::from_utf8_lossy(&native);
+    let round_trip = match crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+        &blob,
+        object_refs,
+        generated_types,
+    ) {
+        Err(_) => MxlRoundTrip::Unreadable,
+        Ok(ours) if ours == native_text => MxlRoundTrip::Identical,
+        Ok(ours) => {
+            let ours_lines = ours.split("\r\n").collect::<Vec<_>>();
+            let native_lines = native_text.split("\r\n").collect::<Vec<_>>();
+            let line = ours_lines
+                .iter()
+                .zip(native_lines.iter())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours_lines.len().min(native_lines.len()));
+            MxlRoundTrip::Different {
+                line: line + 1,
+                ours: ours_lines.get(line).copied().unwrap_or("<end>").trim().to_string(),
+                native: native_lines
+                    .get(line)
+                    .copied()
+                    .unwrap_or("<end>")
+                    .trim()
+                    .to_string(),
+                ours_lines: ours_lines.len(),
+                native_lines: native_lines.len(),
+            }
+        }
+    };
+    let stored = fs::read(bodies.join(format!("{uuid}.0__part0.txt"))).ok();
+    let mut summary = MxlTemplateSummary {
+        has_stored: stored.is_some(),
+        plain_identical: false,
+        plain_identical_ignoring_breaks: false,
+        plain_identical_normalized: false,
+        plain_shape: None,
+        stored_round_trip_ok: false,
+        round_trip,
+    };
+    if let Some(stored) = stored {
+        summary.plain_identical = stored == plain;
+        let strip = |bytes: &[u8]| {
+            bytes
+                .iter()
+                .copied()
+                .filter(|byte| *byte != b'\r' && *byte != b'\n')
+                .collect::<Vec<_>>()
+        };
+        summary.plain_identical_ignoring_breaks = strip(&stored) == strip(&plain);
+        let ours = normalize_moxel_plain(&plain);
+        let theirs = normalize_moxel_plain(&stored);
+        summary.plain_identical_normalized = ours == theirs;
+        if !summary.plain_identical_normalized {
+            let at = ours
+                .chars()
+                .zip(theirs.chars())
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| ours.chars().count().min(theirs.chars().count()));
+            summary.plain_shape = Some(format!(
+                "ours {} | stored {}",
+                fold_digits(&divergence_window(&ours, at, 12, 24)),
+                fold_digits(&divergence_window(&theirs, at, 12, 24)),
+            ));
+        }
+        summary.stored_round_trip_ok = crate::compiler::families::native::deflate_bytes(&stored)
+            .ok()
+            .and_then(|stored_blob| {
+                crate::mssql_dump::try_extract_moxel_spreadsheet_xml_with_generated_types(
+                    &stored_blob,
+                    object_refs,
+                    generated_types,
+                )
+                .ok()
+            })
+            .is_some_and(|xml| xml == native_text);
+    }
+    MxlWriterOutcome::Compiled(summary)
+}
+
+pub fn audit_mxl_writer(root: &Path, bodies: &Path) -> Result<MxlWriterReport> {
+    let mut templates = collect_spreadsheet_templates(root)?;
+    // `IBCMD_RS_MXL_AUDIT_FILTER=a|b` keeps the templates whose path contains
+    // one of the substrings -- a quick rerun of the ones a change touches.
+    if let Some(filter) = std::env::var_os("IBCMD_RS_MXL_AUDIT_FILTER") {
+        let filter = filter.to_string_lossy().to_string();
+        let needles = filter.split('|').filter(|needle| !needle.is_empty()).collect::<Vec<_>>();
+        templates.retain(|(_, template_xml, _)| {
+            let relative = relative_path_string(root, template_xml);
+            needles.iter().any(|needle| relative.contains(needle))
+        });
+    }
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let object_refs = source.moxel_object_refs()?;
+    let generated_types = moxel_generated_types_from_tree(root);
+    let write_dir = std::env::var_os("IBCMD_RS_WRITE_MXL_DIR").map(PathBuf::from);
+    let outcomes = parallel::install(|| {
+        templates
+            .par_iter()
+            .map(|(_, template_xml, uuid)| {
+                (
+                    relative_path_string(root, template_xml),
+                    uuid.clone(),
+                    audit_one_mxl_template(
+                        template_xml,
+                        uuid,
+                        bodies,
+                        &source,
+                        &object_refs,
+                        &generated_types,
+                        write_dir.as_deref(),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = MxlWriterReport {
+        root: root.to_path_buf(),
+        bodies: bodies.to_path_buf(),
+        templates: templates.len(),
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_templates: BTreeMap::new(),
+        no_stored_row: 0,
+        plain_identical: 0,
+        plain_identical_ignoring_breaks: 0,
+        plain_identical_normalized: 0,
+        round_trip_identical: 0,
+        round_trip_unreadable: 0,
+        round_trip_different: 0,
+        stored_round_trip_identical: 0,
+        stored_round_trip_failures: Vec::new(),
+        shapes: BTreeMap::new(),
+        differences: Vec::new(),
+        plain_shapes: BTreeMap::new(),
+        plain_different: Vec::new(),
+    };
+    for (template, uuid, outcome) in outcomes {
+        let summary = match outcome {
+            MxlWriterOutcome::Refused(reason) => {
+                let first = reason.split(';').next().unwrap_or(&reason).trim();
+                *report.refused.entry(fold_digits(first)).or_insert(0) += 1;
+                report.refused_templates.insert(template, reason);
+                continue;
+            }
+            MxlWriterOutcome::Compiled(summary) => summary,
+        };
+        report.compiled += 1;
+        if summary.stored_round_trip_ok {
+            report.stored_round_trip_identical += 1;
+        } else if summary.has_stored {
+            report.stored_round_trip_failures.push(template.clone());
+        }
+        if !summary.has_stored {
+            report.no_stored_row += 1;
+        }
+        report.plain_identical += usize::from(summary.plain_identical);
+        report.plain_identical_ignoring_breaks +=
+            usize::from(summary.plain_identical_ignoring_breaks);
+        report.plain_identical_normalized += usize::from(summary.plain_identical_normalized);
+        if let Some(shape) = summary.plain_shape {
+            *report.plain_shapes.entry(shape).or_insert(0) += 1;
+            report.plain_different.push(format!("{uuid} {template}"));
+        }
+        match summary.round_trip {
+            MxlRoundTrip::Identical => report.round_trip_identical += 1,
+            MxlRoundTrip::Unreadable => {
+                report.round_trip_unreadable += 1;
+                *report
+                    .shapes
+                    .entry("the compiled row does not read back".to_string())
+                    .or_insert(0) += 1;
+            }
+            MxlRoundTrip::Different {
+                line,
+                ours,
+                native,
+                ours_lines,
+                native_lines,
+            } => {
+                report.round_trip_different += 1;
+                let shape = format!("ours {} | native {}", fold_digits(&ours), fold_digits(&native));
+                *report.shapes.entry(shape).or_insert(0) += 1;
+                report.differences.push(MxlWriterDifference {
+                    template,
+                    uuid,
+                    line,
+                    ours,
+                    native,
+                    ours_lines,
+                    native_lines,
+                });
             }
         }
     }
@@ -1816,6 +2938,393 @@ fn count_form_item_asset_files(path: &Path) -> Result<usize> {
     Ok(count)
 }
 
+/// What the base-free role rights writer does with every role of a source
+/// tree, measured two ways against the database the tree was exported from:
+/// the **round trip** (the exporter reads our row back into exactly the
+/// native `Rights.xml`) and **digest parity** (our plain text equals the row
+/// the platform stored).
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub roles: usize,
+    pub without_rights_xml: usize,
+    pub compiled: usize,
+    /// Refusals by class, and every refused role with its reason.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_roles: BTreeMap<String, String>,
+    pub round_trip_identical: usize,
+    pub round_trip_different: usize,
+    pub round_trip_differences: Vec<RoleRightsWriterDifference>,
+    /// Compiled roles the loader's entry point accepts too: it repeats the
+    /// write and reads the row back through the exporter before staging it.
+    pub loader_accepted: usize,
+    pub loader_refused: BTreeMap<String, String>,
+    /// Compiled roles whose stored row is in the dump.
+    pub stored_rows: usize,
+    pub plain_identical: usize,
+    /// Stored rows that reference uuids the source tree no longer declares:
+    /// the export drops those objects, so no XML can bring them back.
+    pub stored_with_dangling: usize,
+    pub plain_identical_without_dangling: usize,
+    /// Rows whose object entries equal ours once the dangling ones are
+    /// dropped -- as a multiset, and then also in order -- and whose
+    /// templates and flags equal ours.
+    pub entries_identical: usize,
+    pub order_identical: usize,
+    pub tail_identical: usize,
+    /// First divergences of the rows that are not plain-identical, clustered
+    /// by what they look like, and the first divergence of every such role.
+    pub plain_shapes: BTreeMap<String, usize>,
+    pub plain_differences: Vec<RoleRightsWriterDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterDifference {
+    pub role: String,
+    pub at: usize,
+    pub wrote: String,
+    pub expected: String,
+}
+
+enum RoleRightsAuditOutcome {
+    WithoutRightsXml,
+    Refused(String, String),
+    Compiled(Box<RoleRightsAuditCompiled>),
+}
+
+struct RoleRightsAuditCompiled {
+    round_trip: std::result::Result<(), Option<RoleRightsWriterDifference>>,
+    loader: std::result::Result<(), String>,
+    stored: Option<RoleRightsAuditStored>,
+}
+
+struct RoleRightsAuditStored {
+    plain_identical: bool,
+    dangling: bool,
+    entries_identical: bool,
+    order_identical: bool,
+    tail_identical: bool,
+    difference: Option<RoleRightsWriterDifference>,
+}
+
+pub fn audit_role_rights_writer(root: &Path, inflated: &Path) -> Result<RoleRightsWriterReport> {
+    let roles_dir = root.join("Roles");
+    let mut roles = Vec::new();
+    for entry in fs::read_dir(&roles_dir)
+        .with_context(|| format!("failed to read {}", roles_dir.display()))?
+    {
+        let path = entry?.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let uuid = text.find("<Role uuid=\"").and_then(|at| {
+            let rest = &text[at + "<Role uuid=\"".len()..];
+            rest.find('"').map(|end| rest[..end].to_ascii_lowercase())
+        });
+        roles.push((name.to_string(), uuid));
+    }
+    roles.sort();
+    let known = source_tree_uuids(root)?;
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let outcomes = parallel::install(|| {
+        roles
+            .par_iter()
+            .map(|(name, uuid)| {
+                (
+                    name.clone(),
+                    audit_one_role_rights(root, inflated, &source, &known, name, uuid.as_deref()),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = RoleRightsWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        roles: roles.len(),
+        without_rights_xml: 0,
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_roles: BTreeMap::new(),
+        round_trip_identical: 0,
+        round_trip_different: 0,
+        round_trip_differences: Vec::new(),
+        loader_accepted: 0,
+        loader_refused: BTreeMap::new(),
+        stored_rows: 0,
+        plain_identical: 0,
+        stored_with_dangling: 0,
+        plain_identical_without_dangling: 0,
+        entries_identical: 0,
+        order_identical: 0,
+        tail_identical: 0,
+        plain_shapes: BTreeMap::new(),
+        plain_differences: Vec::new(),
+    };
+    for (role, outcome) in outcomes {
+        match outcome {
+            RoleRightsAuditOutcome::WithoutRightsXml => report.without_rights_xml += 1,
+            RoleRightsAuditOutcome::Refused(class, detail) => {
+                *report.refused.entry(class.clone()).or_default() += 1;
+                report
+                    .refused_roles
+                    .insert(role, format!("{class}: {detail}"));
+            }
+            RoleRightsAuditOutcome::Compiled(compiled) => {
+                report.compiled += 1;
+                match compiled.loader {
+                    Ok(()) => report.loader_accepted += 1,
+                    Err(reason) => {
+                        report.loader_refused.insert(role.clone(), reason);
+                    }
+                }
+                match compiled.round_trip {
+                    Ok(()) => report.round_trip_identical += 1,
+                    Err(difference) => {
+                        report.round_trip_different += 1;
+                        report.round_trip_differences.push(difference.unwrap_or(
+                            RoleRightsWriterDifference {
+                                role: role.clone(),
+                                at: 0,
+                                wrote: "the exporter refused the written row".to_string(),
+                                expected: String::new(),
+                            },
+                        ));
+                    }
+                }
+                if let Some(stored) = compiled.stored {
+                    report.stored_rows += 1;
+                    if stored.dangling {
+                        report.stored_with_dangling += 1;
+                    }
+                    if stored.plain_identical {
+                        report.plain_identical += 1;
+                        if !stored.dangling {
+                            report.plain_identical_without_dangling += 1;
+                        }
+                    }
+                    if stored.entries_identical {
+                        report.entries_identical += 1;
+                    }
+                    if stored.order_identical {
+                        report.order_identical += 1;
+                    }
+                    if stored.tail_identical {
+                        report.tail_identical += 1;
+                    }
+                    if let Some(difference) = stored.difference {
+                        let shape = format!(
+                            "wrote {} | stored {}",
+                            difference.wrote, difference.expected
+                        );
+                        *report.plain_shapes.entry(shape).or_default() += 1;
+                        report.plain_differences.push(difference);
+                    }
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn audit_one_role_rights(
+    root: &Path,
+    inflated: &Path,
+    source: &MetadataSourceContext,
+    known: &std::collections::HashSet<String>,
+    role: &str,
+    uuid: Option<&str>,
+) -> RoleRightsAuditOutcome {
+    use crate::compiler::bodies::role_rights_writer::write_role_rights;
+
+    let rights_path = root.join("Roles").join(role).join("Ext").join("Rights.xml");
+    let Ok(xml) = fs::read(&rights_path) else {
+        return RoleRightsAuditOutcome::WithoutRightsXml;
+    };
+    let written = match write_role_rights(&xml, source.role_rights_source()) {
+        Ok(written) => written,
+        Err(refusal) => {
+            return RoleRightsAuditOutcome::Refused(refusal.class.to_string(), refusal.detail);
+        }
+    };
+    let native = String::from_utf8_lossy(&xml);
+    let round_trip = match crate::compiler::families::native::deflate_bytes(&written.plain)
+        .ok()
+        .and_then(|blob| {
+            crate::mssql_dump::role_rights_xml_from_blob(
+                &blob,
+                &written.object_refs,
+                &written.field_refs,
+            )
+        }) {
+        None => Err(None),
+        Some(exported) if exported == native => Ok(()),
+        Some(exported) => Err(Some(first_difference(role, &exported, &native))),
+    };
+    let stored = uuid
+        .and_then(|uuid| fs::read(inflated.join(format!("{uuid}.0__part0.txt"))).ok())
+        .map(|stored| compare_role_rights_rows(role, &written.plain, &stored, known));
+    let loader = crate::module_blob::pack_role_rights_blob_base_free(&xml, source)
+        .map(|_| ())
+        .map_err(|error| format!("{error:#}"));
+    RoleRightsAuditOutcome::Compiled(Box::new(RoleRightsAuditCompiled {
+        round_trip,
+        loader,
+        stored,
+    }))
+}
+
+fn compare_role_rights_rows(
+    role: &str,
+    ours: &[u8],
+    stored: &[u8],
+    known: &std::collections::HashSet<String>,
+) -> RoleRightsAuditStored {
+    let plain_identical = ours == stored;
+    let ours_parts = role_rights_row_parts(ours);
+    let stored_parts = role_rights_row_parts(stored);
+    let (dangling, entries_identical, order_identical, tail_identical) =
+        match (&ours_parts, &stored_parts) {
+            (Some((ours_entries, ours_tail)), Some((stored_entries, stored_tail))) => {
+                let kept = stored_entries
+                    .iter()
+                    .filter(|(uuid, _)| known.contains(uuid))
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let dangling = kept.len() != stored_entries.len();
+                let ours = ours_entries
+                    .iter()
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let order_identical = ours == kept;
+                let mut ours_sorted = ours;
+                let mut kept_sorted = kept;
+                ours_sorted.sort();
+                kept_sorted.sort();
+                (
+                    dangling,
+                    ours_sorted == kept_sorted,
+                    order_identical,
+                    ours_tail == stored_tail,
+                )
+            }
+            _ => (false, false, false, false),
+        };
+    let difference = (!plain_identical).then(|| {
+        first_difference(
+            role,
+            &String::from_utf8_lossy(ours),
+            &String::from_utf8_lossy(stored),
+        )
+    });
+    RoleRightsAuditStored {
+        plain_identical,
+        dangling,
+        entries_identical,
+        order_identical,
+        tail_identical,
+        difference,
+    }
+}
+
+/// A row's object entries (uuid, text) in order, and the text of everything
+/// after the object table (templates and flags).
+type RoleRightsRowParts = (Vec<(String, String)>, String);
+
+fn role_rights_row_parts(plain: &[u8]) -> Option<RoleRightsRowParts> {
+    use crate::compiler::families::native::{parse, parse_without_bom, serialize_without_bom};
+
+    let root = if plain.starts_with(b"\xef\xbb\xbf") {
+        parse(plain).ok()?
+    } else {
+        parse_without_bom(plain).ok()?
+    };
+    let fields = root.as_list()?;
+    let objects = fields.get(1)?.as_list()?;
+    let mut entries = Vec::with_capacity(objects.len().saturating_sub(1));
+    for entry in objects.iter().skip(1) {
+        let uuid = entry
+            .as_list()?
+            .first()?
+            .as_list()?
+            .get(1)?
+            .as_token()?
+            .to_ascii_lowercase();
+        let text = String::from_utf8(serialize_without_bom(entry).ok()?).ok()?;
+        entries.push((uuid, text));
+    }
+    let mut tail = String::new();
+    for field in fields.iter().skip(2) {
+        tail.push_str(&String::from_utf8(serialize_without_bom(field).ok()?).ok()?);
+        tail.push(',');
+    }
+    Some((entries, tail))
+}
+
+fn first_difference(role: &str, wrote: &str, expected: &str) -> RoleRightsWriterDifference {
+    let at = wrote
+        .chars()
+        .zip(expected.chars())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.chars().count().min(expected.chars().count()));
+    RoleRightsWriterDifference {
+        role: role.to_string(),
+        at,
+        wrote: divergence_window(wrote, at, 0, 60),
+        expected: divergence_window(expected, at, 0, 60),
+    }
+}
+
+/// Every `uuid="…"` a metadata file of the tree declares (the `Ext` folders
+/// hold bodies, not declarations, and are skipped).
+fn source_tree_uuids(root: &Path) -> Result<std::collections::HashSet<String>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != "Ext")
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file()
+            && entry.path().extension().and_then(|value| value.to_str()) == Some("xml")
+        {
+            files.push(entry.into_path());
+        }
+    }
+    let sets = parallel::install(|| {
+        files
+            .par_iter()
+            .map(|path| {
+                let mut uuids = Vec::new();
+                if let Ok(bytes) = fs::read(path) {
+                    let marker = b"uuid=\"";
+                    let mut at = 0usize;
+                    while let Some(found) = bytes[at..]
+                        .windows(marker.len())
+                        .position(|window| window == marker)
+                    {
+                        let start = at + found + marker.len();
+                        if let Some(value) = bytes.get(start..start + 36)
+                            && let Ok(text) = std::str::from_utf8(value)
+                        {
+                            uuids.push(text.to_ascii_lowercase());
+                        }
+                        at = start;
+                    }
+                }
+                uuids
+            })
+            .collect::<Vec<_>>()
+    })?;
+    Ok(sets.into_iter().flatten().collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1888,7 +3397,7 @@ mod tests {
         assert!(
             report.errors[0]
                 .message
-                .contains("SpreadsheetDocument XML has no rowsItem entries")
+                .contains("the document spells no default <columns>")
         );
 
         Ok(())
@@ -1937,6 +3446,10 @@ mod tests {
 			</c>
 		</row>
 	</rowsItem>
+	<defaultFormatIndex>1</defaultFormatIndex>
+	<format>
+		<width>72</width>
+	</format>
 </document>
 "#,
         )?;

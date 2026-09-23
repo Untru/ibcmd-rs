@@ -766,11 +766,23 @@ impl SourceAssetRegistry {
         Some(source_owner_directory(metadata_xml, owner_family).join(route.relative_path))
     }
 
+    /// The row an object's `Ext/Help.xml` is stored in. Measured over every
+    /// object with a help of both corpora (2 845 ERP УХ + 312 БСП, one suffix
+    /// per class with no exception): `.0` for the registers of accumulation,
+    /// information and calculation, document journals, exchange plans and
+    /// subsystems; `.1` for catalogs, documents, data processors, reports,
+    /// charts of calculation types, common commands and forms; `.3` for the
+    /// configuration itself (under its module group); `.5` for the rest --
+    /// accounting registers, business processes, tasks and the two charts.
     pub fn help_suffix(self, owner_family: &str) -> Option<&'static str> {
-        if matches!(owner_family, "Form" | "CommonForm") {
-            return Some(".1");
-        }
-        Some(".5")
+        Some(match owner_family {
+            "AccumulationRegister" | "InformationRegister" | "CalculationRegister"
+            | "DocumentJournal" | "ExchangePlan" | "Subsystem" => ".0",
+            "Form" | "CommonForm" | "Catalog" | "Document" | "DataProcessor" | "Report"
+            | "ChartOfCalculationTypes" | "CommonCommand" => ".1",
+            "Configuration" => ".3",
+            _ => ".5",
+        })
     }
 
     pub const fn help_relative_path(self) -> &'static str {

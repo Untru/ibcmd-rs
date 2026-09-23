@@ -54,13 +54,13 @@ rather than defaulting it.
 
 ## Open
 
-- [ ] **The root record's property bag values, per main attribute class.** The
+- [x] **The root record's property bag values, per main attribute class.** The
       shape is read; what each key holds is not. The table's own bag is read
       -- see table-property-bag-20260921.md -- and the root's is the same kind
       of store. A dynamic-list form writes key 1, a
       document form 2, 3, 4 and 24, a catalog form 0 and 24, a report form 5 to
       22 with 27 and 29.
-- [ ] **The two appearance sections** of the frame.
+- [x] **The two appearance sections** of the frame.
 - [ ] **The settings blob** is *not* in the source. Two spellings account for
       11 842 of 12 507 bodies and nothing in the XML separates them, so the
       writer picks the canonical empty one and the round trip closes on the
@@ -91,8 +91,10 @@ rather than defaulting it.
       decided by the type of the attribute the table binds to, and every
       non-constant key carries one XML property, pure over the 10 738 records
       that split. *(table-property-bag-20260921.md)*
-- [ ] **A dynamic list's settings** (3 204 forms), the largest refusal left.
-- [ ] **The `{5,…}` addition records** a table's `<SearchStringAddition>`,
+- [x] **A dynamic list's settings** (3 204 forms), the largest refusal left. The bag is
+      transcribed from the source and the field map is synthetic -- its ids are not
+      in the source and the export does not read them. *(findings/rt-dynamic-list.md)*
+- [x] **The `{5,…}` addition records** a table's `<SearchStringAddition>`,
       `<ViewStatusAddition>` and `<SearchControlAddition>` carry -- 24 members
       each, in tail slots 16, 18 and 20 (1 704 forms).
 - [x] **The navigator** is not a source property at all: it travels with the
@@ -102,9 +104,9 @@ rather than defaulting it.
       saved, so the writer pairs the empty settings with no navigator and the
       round trip closes on the second export.
       *(navigator-and-generation-20260921.md)*
-- [ ] **The form's own `<Enabled>`**, member 15 of the root head, which the
+- [x] **The form's own `<Enabled>`**, member 15 of the root head, which the
       parser does not read.
-- [ ] **The parser's own gaps**, which hold up 2 620 forms before the writer
+- [x] **The parser's own gaps**, which hold up 2 620 forms before the writer
       ever sees them: `<ExcludedCommand>` spellings (1 455), conditional
       appearance (569), list settings (401), DCS children (195).
 - [ ] **Close the round trip**: export → load into an empty database → export,
@@ -112,6 +114,72 @@ rather than defaulting it.
       the criterion: the navigator and the command bar's functional-options
       block are not in the source at all, so `different` can never reach zero.
       *(navigator-is-not-in-the-source-20260921.md)*
+
+## The form round trip, 2026-09-23
+
+`F:\ibcmd\lab\tools\rt_compare.sh` compiles every `Form.xml` with the native
+writer, exports the database with those bodies in place of the stored ones and
+diffs the export against the native tree. A form passes when it compiles and its
+`Form.xml` comes back unchanged:
+
+| | forms | compiled | unchanged |
+|---|---|---|---|
+| BSP | 1 108 | 1 108 | 1 108 (100 %) |
+| ERP УХ | 13 044 | 13 044 | 13 044 (100 %) |
+
+Every export file is unchanged on both corpora. What is not in the source and
+is therefore neutral to the round trip: the navigator, the dynamic-list field
+map ids, a chart's legend layout, a constants set's always-used flags (a delta
+the target database decides -- `IBCMD_RS_ALWAYS_USED_CONSTANTS`), and the empty
+settings blob. The loader prefers the native writer for a new or changed form
+(`IBCMD_RS_NATIVE_FORM_WRITER=always` for every form); the database cycle --
+the load of every other object kind, then export -- is the step that remains.
+
+## The database cycle, measured without writing SQL (2026-09-23)
+
+`F:\ibcmd\lab\tools\vcycle.sh <bsp|uha> <run>`: `mssql-audit-source-parity`
+writes every row a load would stage (`IBCMD_RS_WRITE_STAGED_ROWS_DIR`),
+`mssql-dump-config` exports the database with those rows in place of its own
+(`IBCMD_RS_ROW_OVERRIDE_DIR`), and `source-diff` compares the export with the
+native tree. The file diff is the verdict; a row whose plain text differs but
+exports identically (forms, layout-only differences) is not a failure.
+
+First БСП result: 12 082 of 12 198 files unchanged (99.05 %). Fixed on the way,
+each measured over both corpora: help rows' per-class suffix, the configuration
+asset owner, constant/defined-type string and date qualifiers, picture
+transparency, detailed job schedules, exchange-plan AutoRecord and trailer,
+bodyless common modules, the 64 MiB template ceiling, help/picture layout.
+
+Each done in its own branch and merged into `fix/8-3-27-parity`:
+
+- [x] DCS templates compile base-free and round-trip (`feat/dcs-template-writer`)
+- [x] Role rights compile base-free and round-trip (`feat/role-rights-writer`)
+- [x] Command interface, home page, client application interface, standalone
+      content compile base-free and round-trip (`feat/interface-assets-writer`)
+- [x] Spreadsheet templates stored as the platform stores them
+      (`feat/mxl-template-writer`; MOXCEL framing -- native ibcmd refused the
+      earlier compact bodies although our exporter read them)
+- [x] Help pages and HTML templates stored with the platform's link spellings
+      and CRLF (`feat/help-links-writer`)
+- [x] БСП virtual cycle: 12 198 / 12 198 files, 0 prepare failures
+- [x] БСП real cycle on the disposable clone (2026-09-23, `F:\ibcmd\lab\realcycle\bsp_r3`):
+      stage 9 514 rows in 3 minutes, publish (dropping the dynamic-update
+      leftovers), export with ibcmd-rs and with native ibcmd 8.3.27.2214 --
+      native accepts everything, both exports reproduce 12 197 / 12 198 files
+      and agree with each other; the last one is `ConfigDumpInfo.xml`, whose
+      configVersion values are the new generation the load wrote
+- [x] ERP УХ virtual cycle (2026-09-23, run v8, commit ce082eac): 140 709 /
+      140 709 files, 0 prepare failures. On the way: style bodies in the
+      8.3.27 layout, all flowchart item shapes, StdPicture tables for command
+      pictures, WSReference Format15 containers, additional indexes compiled,
+      graphical schema templates through the flowchart grammar, entities and
+      untrimmed free text in predefined data and flowcharts, command picture
+      transparency pixels
+- [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead)
+
+Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
+existing rows; a load into an empty database needs a descriptor compiler per
+metadata class and is not part of this cycle.
 
 ## The tool that turned out to matter
 

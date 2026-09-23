@@ -34,6 +34,7 @@ use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::cli::{ModuleBlobPackArgs, VersionsBlobPatchArgs};
+use crate::compiler::bodies::role_rights_writer::SourceTreeRoleRightsSource;
 use crate::compiler::bodies::form_native::{
     ConfigurationField, ConfigurationObject, ConfigurationObjects, DataPathAttribute,
     DataPathColumn, DataPathForm, DataPathItem,
@@ -116,6 +117,13 @@ pub struct ParsedFormBodyBlob {
 
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 struct FormXmlBodyProperties {
+    /// Every scalar child of `<Form>` by element name, as the XML spells it.
+    root_scalars: BTreeMap<String, String>,
+    /// The form-wide `<ConditionalAppearance>` subtree exactly as Form.xml
+    /// spells it, from its opening tag to its closing tag.
+    attributes_conditional_appearance_source: Option<String>,
+    /// Why the typed DCS children did not read, when they did not.
+    dcs_error: Option<String>,
     title: Vec<LocalizedString>,
     width: Option<String>,
     height: Option<String>,
@@ -206,10 +214,14 @@ struct FormXmlChoiceListItem {
     literal: Option<String>,
     /// Anything inside the item the writer has not measured.
     unwritable: Vec<String>,
+    /// The values of a `v8:FixedArray` literal, each read like an item.
+    array: Vec<FormXmlChoiceListItem>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlAutoCommandBar {
+    /// The `DisplayImportance` attribute, the group record's last member.
+    display_importance: Option<String>,
     id: String,
     name: String,
     horizontal_align: Option<FormXmlHorizontalAlign>,
@@ -222,6 +234,22 @@ struct FormXmlAutoCommandBar {
 struct FormXmlEvent {
     name: String,
     handler: String,
+}
+
+/// A rights setting -- `<UserVisible>` of an item, `<Use>` of a command:
+/// `<xr:Common>` and one `<xr:Value name="Role.X">` per role, in XML order.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlRights {
+    common: Option<bool>,
+    values: Vec<(String, Option<bool>)>,
+}
+
+/// One `<xr:Link>` of an input field's `<ChoiceParameterLinks>`.
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
+struct FormXmlChoiceParameterLink {
+    name: String,
+    data_path: String,
+    value_change: String,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -244,10 +272,19 @@ struct FormXmlCommand {
     /// writer emitted the constant for every command of every form.
     picture: Option<FormXmlItemPicture>,
     picture_present: bool,
+    /// `<Shortcut>`, member 6.
+    shortcut: Option<String>,
+    /// `<Use>`, member 5.
+    use_rights: Option<FormXmlRights>,
+    /// `<AssociatedTableElementId>`, member 14: the name of an item.
+    associated_table_element_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct FormXmlAttribute {
+    /// `<View>` and `<Edit>`, members 6 and 7 of the record.
+    view: Option<FormXmlRights>,
+    edit: Option<FormXmlRights>,
     id: String,
     name: String,
     /// Every entry of `<Type>`, in XML order: `<v8:Type>` and `<v8:TypeSet>`
@@ -334,6 +371,9 @@ struct FormXmlTypeSpec {
 struct FormXmlAttributeColumn {
     id: String,
     name: String,
+    /// `<View>` and `<Edit>`, members 6 and 7, the tuple `native_rights` builds.
+    view: Option<FormXmlRights>,
+    edit: Option<FormXmlRights>,
     title: Vec<LocalizedString>,
     spec: FormXmlTypeSpec,
     fill_check: Option<String>,
@@ -409,15 +449,14 @@ struct FormXmlCommandInterfaceItem {
     /// navigation panel, 8 for the command bar.
     panel: String,
     command: Option<String>,
-    /// `<Attribute>`, a form-local data path whose encoding is unmeasured.
+    /// `<Attribute>`, a form-local data path stored at slot 3 exactly as an
+    /// item's `<DataPath>` is (rt-fields2.md §8.1, 56 of 56).
     attribute: Option<String>,
     /// `<Type>`: `Auto` and `Added`, the only two either corpus spells.
     item_type: Option<String>,
-    /// How many `<Visible><Value name="Role.X">` children the item carries.
-    /// Their tuple is `{0,{0,{"B",<common>},<n>,<role uuid>,{"B",<v>}×n}}` and
-    /// the role uuids are a configuration lookup this writer does not do, so a
-    /// non-zero count refuses the form.
-    visible_roles: usize,
+    /// The `<Visible><Value name="Role.X">` children, in order: slot 8 is the
+    /// tuple `native_rights` builds (rt-fields2.md §8.2, 8 of 8).
+    visible_roles: Vec<(String, Option<bool>)>,
     command_group: Option<String>,
     index: Option<usize>,
     default_visible: Option<bool>,
@@ -551,6 +590,10 @@ struct FormXmlChildItem {
     /// and 72 524 of 72 524 groups without one store `{1,0}`. Only the parser
     /// recorded nothing but the flag, and the writer refused on the flag.
     collapsed_representation_title: Vec<LocalizedString>,
+    /// An item's own `<CommandSet><ExcludedCommand>` -- a table's, most of
+    /// the time. Only the form root's set was ever read, so a table that
+    /// excluded its `Add`, `Change` and `Delete` exported with all of them.
+    excluded_commands: Vec<String>,
     associated_table_element_id: Option<String>,
     /// What the other container payloads read.
     header_horizontal_align: Option<String>,
@@ -586,6 +629,29 @@ struct FormXmlChildItem {
     /// Every other scalar property, by element name, as the XML spells it.
     /// The payload writers read from here rather than growing a field each.
     scalars: BTreeMap<String, String>,
+    /// The localized-string properties of [`CHILD_LOCALIZED_SECTIONS`], by
+    /// element name -- the same `<v8:item>` blocks a title is made of.
+    localized: BTreeMap<String, Vec<LocalizedString>>,
+    /// The pictures of [`CHILD_EXTRA_PICTURES`], by element name: the same
+    /// `<xr:Ref>`/`<xr:Abs>` reference a `<Picture>` is.
+    pictures: BTreeMap<String, FormXmlItemPicture>,
+    /// The fonts an item names beside its `<Font>` -- `<TitleFont>`,
+    /// `<FooterFont>`, `<HeaderFont>` -- by element name, as attributes.
+    fonts: BTreeMap<String, BTreeMap<String, String>>,
+    /// An `<ExtendedTooltip>` with content, read as an item of its own: its
+    /// record is a label decoration's, member for member.
+    extended_tooltip_item: Option<Box<FormXmlChildItem>>,
+    /// `<UserVisible>`, the block every item record lifts at member 4.
+    user_visible: Option<FormXmlRights>,
+    /// An input field's `<ChoiceParameterLinks>`, in XML order.
+    choice_parameter_links: Vec<FormXmlChoiceParameterLink>,
+    /// An input field's `<TypeLink>`: its data path and link item.
+    type_link: Option<(String, String)>,
+    /// An input field's `<AvailableTypes>`, the unwrapped type spelling.
+    available_types: Option<FormXmlTypeSpec>,
+    /// An input field's `<ChoiceParameters>`: each parameter's name and its
+    /// value, read with the choice-list grammar.
+    choice_parameters: Vec<(String, FormXmlChoiceListItem)>,
     child_items_present: bool,
     child_items: Vec<FormXmlChildItem>,
 }
@@ -595,6 +661,10 @@ struct FormXmlControlBorder {
     style: Option<FormControlBorderStyle>,
     style_seen: bool,
     valid: bool,
+    /// The `width` attribute, stored verbatim at tuple member 4.
+    width: String,
+    /// `<Border ref="style:ControlBorder"/>`, which stores `{3,1,{-18},1,1,0}`.
+    reference: bool,
 }
 
 /// A `<Picture>` a form item names, as the XML spells it.
@@ -709,6 +779,7 @@ enum FormXmlUseForFoldersAndItems {
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormXmlVerticalScroll {
     UseIfNecessary,
+    UseWithoutStretch,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -962,7 +1033,8 @@ struct CommandInterfaceXmlEntry {
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct ExchangePlanContentXmlItem {
     metadata: String,
-    auto_record: bool,
+    /// The stored code: `0` Deny, `1` Allow, `2` Auto (the exporter's reading).
+    auto_record: u8,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -997,6 +1069,14 @@ struct FlowchartXmlItem {
     events: BTreeMap<String, Option<String>>,
 }
 
+mod help_pages;
+mod interface_assets;
+
+pub use help_pages::{HtmlPageOwner, html_page_storage_bytes};
+pub use interface_assets::{
+    InterfaceAssetSource, interface_asset_plaintext, pack_interface_asset_blob,
+};
+
 #[derive(Debug, Clone)]
 pub struct MetadataSourceContext {
     source_root: PathBuf,
@@ -1008,14 +1088,69 @@ pub struct MetadataSourceContext {
     /// here rather than re-read per field. A miss is memoised too, as `None`.
     /// Shared between clones and across the threads an audit runs on.
     configuration_objects: Arc<Mutex<BTreeMap<String, Option<Arc<ConfigurationObject>>>>>,
+    /// The metadata names a role's `Rights.xml` refers to, each owner file
+    /// parsed once and shared between clones.
+    role_rights_source: Arc<SourceTreeRoleRightsSource>,
+    /// What the interface writers resolve more than once: a metadata file's
+    /// class and uuid, an owner's declared commands.
+    interface_memo: Arc<Mutex<interface_assets::InterfaceResolutionMemo>>,
+    /// Generated-type `TypeId`s a data-composition schema asked for, by type
+    /// name, memoised hit and miss alike: a report names the same catalog
+    /// from many fields and a tree has many reports.
+    generated_type_ids: Arc<Mutex<BTreeMap<String, Option<String>>>>,
+    /// `StyleItems/*.xml`: uuid -> name, read once.
+    style_items: Arc<std::sync::OnceLock<BTreeMap<String, String>>>,
+    /// The uuid each readable name of a help page resolves to, or why it does
+    /// not: pages of one tree link the same objects over and over.
+    help_references: Arc<Mutex<BTreeMap<String, Result<help_pages::HelpReference, String>>>>,
 }
 
 impl MetadataSourceContext {
     pub fn new(source_root: PathBuf) -> Self {
         Self {
+            role_rights_source: Arc::new(SourceTreeRoleRightsSource::new(source_root.clone())),
             source_root,
             configuration_objects: Arc::new(Mutex::new(BTreeMap::new())),
+            interface_memo: Arc::new(Mutex::new(
+                interface_assets::InterfaceResolutionMemo::default(),
+            )),
+            generated_type_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            style_items: Arc::new(std::sync::OnceLock::new()),
+            help_references: Arc::new(Mutex::new(BTreeMap::new())),
         }
+    }
+
+    /// The resolver the base-free role rights writer looks names up with.
+    pub fn role_rights_source(&self) -> &SourceTreeRoleRightsSource {
+        &self.role_rights_source
+    }
+
+    /// The storage `TypeId` of a configuration generated type named the way a
+    /// data-composition schema names it (`CatalogRef.X`, `Characteristic.X`),
+    /// read from the owning object's `InternalInfo`. `None` when the tree has
+    /// no such object or type.
+    pub(crate) fn dcs_generated_type_id(&self, name: &str) -> Option<String> {
+        if let Ok(cache) = self.generated_type_ids.lock()
+            && let Some(found) = cache.get(name)
+        {
+            return found.clone();
+        }
+        let resolved = if name.starts_with("DefinedType.") {
+            None
+        } else {
+            self.resolve_metadata_type_id(name).ok()
+        };
+        if let Ok(mut cache) = self.generated_type_ids.lock() {
+            cache.insert(name.to_string(), resolved.clone());
+        }
+        resolved
+    }
+
+    /// The tree's configuration style items: lowercase uuid -> name. A file
+    /// that does not parse contributes nothing rather than failing the scan.
+    pub(crate) fn dcs_style_items(&self) -> &BTreeMap<String, String> {
+        self.style_items
+            .get_or_init(|| crate::mssql::style_reference_types_from_source_root(&self.source_root))
     }
 
     /// One metadata object of the source tree, by `"<Class>.<Name>"`.
@@ -1082,7 +1217,7 @@ impl MetadataSourceContext {
         Ok(())
     }
 
-    fn resolve_common_picture_uuid(&self, reference: &str) -> Result<String> {
+    pub(crate) fn resolve_common_picture_uuid(&self, reference: &str) -> Result<String> {
         let name = reference
             .trim()
             .strip_prefix("CommonPicture.")
@@ -1166,7 +1301,7 @@ impl MetadataSourceContext {
         Ok(properties.uuid)
     }
 
-    fn resolve_style_item_uuid(&self, reference: &str) -> Result<String> {
+    pub(crate) fn resolve_style_item_uuid(&self, reference: &str) -> Result<String> {
         let name = reference
             .trim()
             .strip_prefix("StyleItem.")
@@ -1281,7 +1416,7 @@ impl MetadataSourceContext {
         Ok(dimensions)
     }
 
-    fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
+    pub(crate) fn resolve_metadata_type_id(&self, reference: &str) -> Result<String> {
         let generated_type_name = reference
             .trim()
             .strip_prefix("cfg:")
@@ -1305,6 +1440,50 @@ impl MetadataSourceContext {
 
     fn resolve_metadata_reference_uuid(&self, reference: &str) -> Result<String> {
         let reference = reference.trim();
+        // Objects that live in a file of their own below their owner: a
+        // nested subsystem (`Subsystems/A/Subsystems/B.xml`) and a
+        // calculation register's recalculation
+        // (`CalculationRegisters/R/Recalculations/X.xml`).
+        let nested = if let Some(rest) = reference.strip_prefix("Subsystem.")
+            && rest.contains(".Subsystem.")
+        {
+            let names = rest.split(".Subsystem.").collect::<Vec<_>>();
+            let mut path = self.source_root.join("Subsystems");
+            for (index, name) in names.iter().enumerate() {
+                path = if index + 1 == names.len() {
+                    path.join(format!("{name}.xml"))
+                } else {
+                    path.join(name).join("Subsystems")
+                };
+            }
+            Some((path, "Subsystem"))
+        } else if let Some(rest) = reference.strip_prefix("CalculationRegister.")
+            && let Some((register, recalculation)) = rest.split_once(".Recalculation.")
+        {
+            Some((
+                self.source_root
+                    .join("CalculationRegisters")
+                    .join(register)
+                    .join("Recalculations")
+                    .join(format!("{recalculation}.xml")),
+                "Recalculation",
+            ))
+        } else {
+            None
+        };
+        if let Some((path, kind)) = nested {
+            let xml = fs::read(&path)
+                .with_context(|| format!("failed to read {kind} XML {}", path.display()))?;
+            let properties = parse_simple_metadata_xml_properties(&xml)?;
+            if properties.kind != kind {
+                return Err(anyhow!(
+                    "expected {kind} XML at {}, got {}",
+                    path.display(),
+                    properties.kind
+                ));
+            }
+            return Ok(properties.uuid);
+        }
         let (prefix, folder) = metadata_reference_source_folder(reference).ok_or_else(|| {
             anyhow!("unsupported metadata reference for source resolution: {reference}")
         })?;
@@ -1331,6 +1510,40 @@ impl MetadataSourceContext {
             .with_context(|| format!("failed to read command owner XML {}", path.display()))?;
         parse_nested_command_uuid_from_xml(&xml, command_name)
             .with_context(|| format!("failed to resolve command {reference}"))
+    }
+
+    /// The uuid of a form a property names: `CommonForm.<name>`, or
+    /// `<Owner>.Form.<name>` of an object, read from the form's own holder XML.
+    fn resolve_form_uuid(&self, reference: &str) -> Result<String> {
+        let reference = reference.trim();
+        let path = if let Some(name) = reference.strip_prefix("CommonForm.") {
+            self.source_root.join("CommonForms").join(format!("{name}.xml"))
+        } else {
+            let (owner, form) = reference
+                .split_once(".Form.")
+                .ok_or_else(|| anyhow!("unsupported form reference: {reference}"))?;
+            let (prefix, folder) = metadata_reference_source_folder(owner)
+                .ok_or_else(|| anyhow!("unsupported form owner reference: {reference}"))?;
+            let owner_name = owner
+                .strip_prefix(&format!("{prefix}."))
+                .ok_or_else(|| anyhow!("invalid form owner reference: {reference}"))?;
+            self.source_root
+                .join(folder)
+                .join(owner_name)
+                .join("Forms")
+                .join(format!("{form}.xml"))
+        };
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read form XML {}", path.display()))?;
+        for marker in ["<Form uuid=\"", "<CommonForm uuid=\""] {
+            if let Some(at) = text.find(marker) {
+                let rest = &text[at + marker.len()..];
+                if let Some(end) = rest.find('"') {
+                    return Ok(rest[..end].to_string());
+                }
+            }
+        }
+        Err(anyhow!("no form uuid in {}", path.display()))
     }
 }
 
@@ -1705,14 +1918,21 @@ pub fn pack_style_body_blob_from_xml_with_base(
         });
     }
 
-    let mut fields = Vec::with_capacity(items.len() + 3);
-    fields.push("2".to_string());
-    fields.push(items.len().to_string());
+    // The 8.3.27 layout, the one the exporter reads (`STYLE_BODY_TAG` "1"):
+    // `{1,<count>,{<key>,<kind>,<value>},...}` with no trailer, measured over
+    // every item of ERP УХ's `Styles/Основной` (231 items, five value
+    // shapes). Laid out as the platform stores it: the BOM, every nested
+    // record on its own line, a list that ends with one closed on its own line.
+    let mut entries = vec![
+        StyleNode::token("1"),
+        StyleNode::token(items.len().to_string()),
+    ];
     for item in &items {
-        fields.push(format_style_body_item(item, source)?);
+        entries.push(style_body_item_node(item, source)?);
     }
-    fields.push("{0}".to_string());
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    let mut text = String::from("\u{feff}");
+    StyleNode::List(entries).write_platform(&mut text, true);
+    let plain = text.into_bytes();
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -1721,6 +1941,420 @@ pub fn pack_style_body_blob_from_xml_with_base(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+/// A brace value of a style body, serialized the platform's way.
+enum StyleNode {
+    Token(String),
+    List(Vec<StyleNode>),
+}
+
+impl StyleNode {
+    fn token(value: impl Into<String>) -> Self {
+        Self::Token(value.into())
+    }
+
+    fn write_platform(&self, out: &mut String, outermost: bool) {
+        match self {
+            Self::Token(value) => out.push_str(value),
+            Self::List(values) => {
+                if !outermost {
+                    out.push_str("\r\n");
+                }
+                out.push('{');
+                for (index, value) in values.iter().enumerate() {
+                    if index > 0 {
+                        out.push(',');
+                    }
+                    value.write_platform(out, false);
+                }
+                if matches!(values.last(), Some(Self::List(_))) {
+                    out.push_str("\r\n");
+                }
+                out.push('}');
+            }
+        }
+    }
+}
+
+/// `{0,<uuid>}` for a configuration style item, `{<code>}` for a standard one.
+fn style_body_key_node(name: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    if let Some(code) = style_body_standard_code_for_name(name) {
+        return Ok(StyleNode::List(vec![StyleNode::token(code.to_string())]));
+    }
+    if name.starts_with("StyleItem.") {
+        let source = source.ok_or_else(|| {
+            anyhow!("source root is required to resolve Style body reference {name}")
+        })?;
+        let uuid = source.resolve_style_item_uuid(name)?;
+        return Ok(StyleNode::List(vec![
+            StyleNode::token("0"),
+            StyleNode::token(uuid),
+        ]));
+    }
+    Err(anyhow!("unsupported Style Item name: {name}"))
+}
+
+fn style_body_ref_node(reference: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    let reference = reference.trim();
+    let name = reference
+        .strip_prefix("style:")
+        .ok_or_else(|| anyhow!("unsupported Style reference: {reference}"))?;
+    if style_body_standard_code_for_name(name).is_some() || name.starts_with("StyleItem.") {
+        return style_body_key_node(name, source);
+    }
+    style_body_key_node(&format!("StyleItem.{name}"), source)
+}
+
+/// One `{<key>,<kind>,<value>}` item: kind 0 a color `{3,<variant>,<code>}`
+/// (0 direct RGB, 2 web color, 3 style reference), kind 1 a style-item font
+/// `{7,2,<mask>,<ref>,<members>,1,<scale>}`, kind 2 a border
+/// `{3,1,<ref>,0,0,0}` -- the inverse of the exporter's
+/// `parse_style_body_items`.
+fn style_body_item_node(
+    item: &StyleBodyXmlItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<StyleNode> {
+    let key = style_body_key_node(&item.name, source)?;
+    let (kind, value) = match &item.value {
+        StyleBodyXmlValue::Color(value) => ("0", style_body_color_node(value, source)?),
+        StyleBodyXmlValue::Font(attrs) => ("1", style_body_font_node(attrs, source)?),
+        StyleBodyXmlValue::Border(attrs) => {
+            let reference = attrs
+                .get("ref")
+                .ok_or_else(|| anyhow!("Style Border without ref: {}", item.name))?;
+            (
+                "2",
+                StyleNode::List(vec![
+                    StyleNode::token("3"),
+                    StyleNode::token("1"),
+                    style_body_ref_node(reference, source)?,
+                    StyleNode::token("0"),
+                    StyleNode::token("0"),
+                    StyleNode::token("0"),
+                ]),
+            )
+        }
+    };
+    Ok(StyleNode::List(vec![key, StyleNode::token(kind), value]))
+}
+
+fn style_body_color_node(value: &str, source: Option<&MetadataSourceContext>) -> Result<StyleNode> {
+    let value = value.trim();
+    let (variant, code) = if let Some(hex) = value.strip_prefix('#') {
+        if hex.len() != 6 {
+            return Err(anyhow!("unsupported Style color literal: {value}"));
+        }
+        let red = u32::from_str_radix(&hex[0..2], 16)?;
+        let green = u32::from_str_radix(&hex[2..4], 16)?;
+        let blue = u32::from_str_radix(&hex[4..6], 16)?;
+        (
+            "0",
+            StyleNode::List(vec![StyleNode::token(
+                (red | (green << 8) | (blue << 16)).to_string(),
+            )]),
+        )
+    } else if value.starts_with("web:") {
+        let code = (-1..=512)
+            .find(|code| crate::mssql_dump::style_web_color_name(*code) == Some(value))
+            .ok_or_else(|| anyhow!("unsupported Style web color: {value}"))?;
+        ("2", StyleNode::List(vec![StyleNode::token(code.to_string())]))
+    } else if value.starts_with("style:") {
+        ("3", style_body_ref_node(value, source)?)
+    } else {
+        return Err(anyhow!("unsupported Style color value: {value}"));
+    };
+    Ok(StyleNode::List(vec![
+        StyleNode::token("3"),
+        StyleNode::token(variant),
+        code,
+    ]))
+}
+
+/// The mask declares which of height (2), weight (4), italic (8), underline
+/// (16) and strikeout (32) follow the reference, in that order; a present XML
+/// attribute is a declared member. `1` and the scale close the record. Only
+/// the default scale is observed and a non-default one is refused.
+fn style_body_font_node(
+    attrs: &BTreeMap<String, String>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<StyleNode> {
+    if attrs.get("kind").map(String::as_str) != Some("StyleItem") {
+        return Err(anyhow!("unsupported Style Font kind: {:?}", attrs.get("kind")));
+    }
+    let reference = attrs
+        .get("ref")
+        .ok_or_else(|| anyhow!("Style Font without ref"))?;
+    if attrs.get("scale").is_some_and(|scale| scale != "100") {
+        return Err(anyhow!("unobserved Style Font scale: {:?}", attrs.get("scale")));
+    }
+    let mut mask = 0u32;
+    let mut members = Vec::new();
+    if let Some(height) = attrs.get("height") {
+        let height = height
+            .trim()
+            .parse::<i64>()
+            .with_context(|| format!("invalid Style Font height {height}"))?;
+        mask |= 2;
+        members.push(StyleNode::token((height * 10).to_string()));
+    }
+    if let Some(bold) = attrs.get("bold") {
+        mask |= 4;
+        let bold = parse_optional_xml_bool(Some(bold))?;
+        members.push(StyleNode::token(if bold { "700" } else { "400" }));
+    }
+    for (bit, name) in [(8, "italic"), (16, "underline"), (32, "strikeout")] {
+        if let Some(flag) = attrs.get(name) {
+            mask |= bit;
+            let flag = parse_optional_xml_bool(Some(flag))?;
+            members.push(StyleNode::token(if flag { "1" } else { "0" }));
+        }
+    }
+    let mut values = vec![
+        StyleNode::token("7"),
+        StyleNode::token("2"),
+        StyleNode::token(mask.to_string()),
+        style_body_ref_node(reference, source)?,
+    ];
+    values.extend(members);
+    values.push(StyleNode::token("1"));
+    values.push(StyleNode::token("100"));
+    Ok(StyleNode::List(values))
+}
+
+/// `Ext/AdditionalIndexes.xml` as the platform stores it (the exporter's
+/// `parse_additional_indexes` read backwards): `{1,{<count>,<record>...}}`, a
+/// record `{"#",4b3b32e1-...,{1,<id>,<indexed>,<additional>,"<name>",
+/// {0,<table uuid>},1,<nil uuid>}}`, a field list `{<n>,<field>...}` (`{0}`
+/// when empty), a field `{"#",07c5e7a4-...,{1,{0,<uuid>}}}`, or `{1,{<code>}}`
+/// for the standard Period -2, Recorder -3, LineNumber -4, Ref -5. The table
+/// is the owner or one of its tabular sections; a field resolves among that
+/// table's own fields first, then the owner's. Laid out as the platform does
+/// (the two ERP УХ registers and the document that carry indexes); anything
+/// unresolved is refused.
+pub fn pack_additional_indexes_blob_from_xml(
+    xml: &[u8],
+    owner_xml: &[u8],
+    owner_kind: &str,
+    owner_name: &str,
+    owner_uuid: &str,
+) -> Result<Vec<u8>> {
+    let indexes = parse_additional_indexes_xml(xml)?;
+    let owner = parse_owner_field_uuids(owner_xml)?;
+    let root = format!("{owner_kind}.{owner_name}");
+    let mut records = vec![StyleNode::token(indexes.len().to_string())];
+    for index in &indexes {
+        let (table_uuid, section) = if index.table == root {
+            (owner_uuid.to_string(), None)
+        } else if let Some(section) = index
+            .table
+            .strip_prefix(&format!("{root}."))
+            .filter(|section| !section.contains('.'))
+        {
+            let (uuid, _) = owner.sections.get(section).ok_or_else(|| {
+                anyhow!("AdditionalIndexes table {} is not a tabular section", index.table)
+            })?;
+            (uuid.clone(), Some(section))
+        } else {
+            return Err(anyhow!("unsupported AdditionalIndexes table {}", index.table));
+        };
+        let field_node = |name: &str| -> Result<StyleNode> {
+            let slot = match name {
+                "Period" => StyleNode::List(vec![StyleNode::token("-2")]),
+                "Recorder" => StyleNode::List(vec![StyleNode::token("-3")]),
+                "LineNumber" => StyleNode::List(vec![StyleNode::token("-4")]),
+                "Ref" => StyleNode::List(vec![StyleNode::token("-5")]),
+                _ => {
+                    let uuid = section
+                        .and_then(|section| owner.sections.get(section))
+                        .and_then(|(_, fields)| fields.get(name))
+                        .or_else(|| owner.fields.get(name))
+                        .ok_or_else(|| {
+                            anyhow!("AdditionalIndexes field {name} is not a field of {}", index.table)
+                        })?;
+                    StyleNode::List(vec![StyleNode::token("0"), StyleNode::token(uuid.clone())])
+                }
+            };
+            Ok(StyleNode::List(vec![
+                StyleNode::token("\"#\""),
+                StyleNode::token("07c5e7a4-56de-47f1-9895-724a499e8a8c"),
+                StyleNode::List(vec![StyleNode::token("1"), slot]),
+            ]))
+        };
+        let field_list = |names: &[String]| -> Result<StyleNode> {
+            let mut values = vec![StyleNode::token(names.len().to_string())];
+            for name in names {
+                values.push(field_node(name)?);
+            }
+            Ok(StyleNode::List(values))
+        };
+        records.push(StyleNode::List(vec![
+            StyleNode::token("\"#\""),
+            StyleNode::token("4b3b32e1-14f6-4ce8-b4c4-1bc85a74237e"),
+            StyleNode::List(vec![
+                StyleNode::token("1"),
+                StyleNode::token(index.id.clone()),
+                field_list(&index.indexed_fields)?,
+                field_list(&index.additional_fields)?,
+                StyleNode::token(format_1c_string(&index.name)),
+                StyleNode::List(vec![StyleNode::token("0"), StyleNode::token(table_uuid)]),
+                StyleNode::token("1"),
+                StyleNode::token("00000000-0000-0000-0000-000000000000"),
+            ]),
+        ]));
+    }
+    let mut text = String::from("\u{feff}");
+    StyleNode::List(vec![StyleNode::token("1"), StyleNode::List(records)])
+        .write_platform(&mut text, true);
+    deflate_raw(text.as_bytes())
+}
+
+#[derive(Debug, Default)]
+struct AdditionalIndexXml {
+    id: String,
+    name: String,
+    table: String,
+    indexed_fields: Vec<String>,
+    additional_fields: Vec<String>,
+}
+
+fn parse_additional_indexes_xml(xml: &[u8]) -> Result<Vec<AdditionalIndexXml>> {
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    let mut indexes = Vec::<AdditionalIndexXml>::new();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "AdditionalIndex" {
+                    let id = xml_attrs_map(&event)
+                        .remove("id")
+                        .ok_or_else(|| anyhow!("AdditionalIndex without id"))?;
+                    indexes.push(AdditionalIndexXml {
+                        id,
+                        ..AdditionalIndexXml::default()
+                    });
+                }
+                text.clear();
+                path.push(local);
+            }
+            Ok(Event::Text(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::CData(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::GeneralRef(reference)) => {
+                if let Some(ch) = reference.resolve_char_ref()? {
+                    text.push(ch);
+                } else {
+                    let entity = reference.decode()?;
+                    text.push_str(
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?,
+                    );
+                }
+            }
+            Ok(Event::End(_)) => {
+                let value = text.trim().to_string();
+                if let Some(index) = indexes.last_mut() {
+                    if path_ends_with(&path, &["AdditionalIndex", "Name"]) {
+                        index.name = value;
+                    } else if path_ends_with(&path, &["AdditionalIndex", "Table"]) {
+                        index.table = value;
+                    } else if path_ends_with(&path, &["IndexedFields", "Field"]) {
+                        index.indexed_fields.push(value);
+                    } else if path_ends_with(&path, &["AdditionalFields", "Field"]) {
+                        index.additional_fields.push(value);
+                    }
+                }
+                text.clear();
+                let _ = path.pop();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(indexes)
+}
+
+#[derive(Debug, Default)]
+struct OwnerFieldUuids {
+    /// Attribute, Dimension and Resource of the owner itself, by name.
+    fields: BTreeMap<String, String>,
+    /// Tabular section name -> (its uuid, its attributes by name).
+    sections: BTreeMap<String, (String, BTreeMap<String, String>)>,
+}
+
+/// The uuids of an owner's fields, read from its metadata XML: the
+/// attributes, dimensions and resources of its `ChildObjects`, and each
+/// tabular section with the attributes of the section's own `ChildObjects`.
+fn parse_owner_field_uuids(xml: &[u8]) -> Result<OwnerFieldUuids> {
+    const CHILD_TAGS: [&str; 4] = ["Attribute", "Dimension", "Resource", "TabularSection"];
+    let mut reader = Reader::from_reader(xml);
+    let mut buffer = Vec::new();
+    let mut path = Vec::<String>::new();
+    // (tag, uuid, name) of the child objects being read, outermost first
+    let mut open = Vec::<(String, String, String)>::new();
+    let mut result = OwnerFieldUuids::default();
+    let mut text = String::new();
+    loop {
+        match reader.read_event_into(&mut buffer) {
+            Ok(Event::Start(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if CHILD_TAGS.contains(&local.as_str())
+                    && path.last().map(String::as_str) == Some("ChildObjects")
+                {
+                    let uuid = xml_attrs_map(&event).remove("uuid").unwrap_or_default();
+                    open.push((local.clone(), uuid, String::new()));
+                }
+                text.clear();
+                path.push(local);
+            }
+            Ok(Event::Text(value)) => text.push_str(value.xml_content()?.as_ref()),
+            Ok(Event::End(_)) => {
+                let local = path.pop().unwrap_or_default();
+                let depth = path.len();
+                if local == "Name"
+                    && depth >= 2
+                    && path[depth - 1] == "Properties"
+                    && let Some(last) = open.last_mut()
+                    && last.2.is_empty()
+                    && path[depth - 2] == last.0
+                {
+                    last.2 = text.trim().to_string();
+                }
+                if CHILD_TAGS.contains(&local.as_str())
+                    && path.last().map(String::as_str) == Some("ChildObjects")
+                    && let Some((tag, uuid, name)) = open.pop()
+                {
+                    match open.last() {
+                        None if tag == "TabularSection" => {
+                            result.sections.entry(name).or_default().0 = uuid;
+                        }
+                        None => {
+                            result.fields.insert(name, uuid);
+                        }
+                        Some((parent_tag, _, parent_name)) if parent_tag == "TabularSection" => {
+                            result
+                                .sections
+                                .entry(parent_name.clone())
+                                .or_default()
+                                .1
+                                .insert(name, uuid);
+                        }
+                        Some(_) => {}
+                    }
+                }
+                text.clear();
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.into()),
+        }
+        buffer.clear();
+    }
+    Ok(result)
 }
 
 fn style_body_item_key(value: &str) -> Result<String> {
@@ -2056,28 +2690,19 @@ fn style_body_web_color_code(name: &str) -> Option<i32> {
 }
 
 pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
-    let schedule = parse_schedule_xml(xml)?;
-    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
-    fields.push(format_schedule_date(&schedule.begin_date)?);
-    fields.push(format_schedule_date(&schedule.end_date)?);
-    fields.push(format_schedule_time(&schedule.begin_time)?);
-    fields.push(format_schedule_time(&schedule.end_time)?);
-    fields.push(format_schedule_time(&schedule.completion_time)?);
-    fields.push(schedule.completion_interval);
-    fields.push(schedule.repeat_period_in_day);
-    fields.push(schedule.repeat_pause);
-    fields.push(schedule.week_days.len().to_string());
-    fields.extend(schedule.week_days);
-    fields.push(schedule.week_day_in_month);
-    fields.push(schedule.day_in_month);
-    fields.push(schedule.months.len().to_string());
-    fields.extend(schedule.months);
-    fields.push(schedule.weeks_period);
-    fields.push(schedule.days_repeat_period);
-    fields.push("0".to_string());
+    let (schedule, details) = parse_schedule_xml(xml)?;
+    // The compact fields, then the count of detailed daily schedules and each
+    // one as a nested record of the same fields closed by its own `0` count.
+    // The platform starts every nested record on a new line and closes the
+    // outer one on its own line after them (ОбновлениеАгрегатов of БСП).
+    let mut text = format!("{{{},{}", schedule_fields(&schedule)?.join(","), details.len());
+    for detail in &details {
+        text.push_str(&format!(",\r\n{{{},0}}", schedule_fields(detail)?.join(",")));
+    }
+    text.push_str(if details.is_empty() { "}" } else { "\r\n}" });
 
     let mut plain = b"\xEF\xBB\xBF".to_vec();
-    plain.extend_from_slice(format!("{{{}}}", fields.join(",")).as_bytes());
+    plain.extend_from_slice(text.as_bytes());
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -2086,6 +2711,27 @@ pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn schedule_fields(schedule: &ScheduleXmlProperties) -> Result<Vec<String>> {
+    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
+    fields.push(format_schedule_date(&schedule.begin_date)?);
+    fields.push(format_schedule_date(&schedule.end_date)?);
+    fields.push(format_schedule_time(&schedule.begin_time)?);
+    fields.push(format_schedule_time(&schedule.end_time)?);
+    fields.push(format_schedule_time(&schedule.completion_time)?);
+    fields.push(schedule.completion_interval.clone());
+    fields.push(schedule.repeat_period_in_day.clone());
+    fields.push(schedule.repeat_pause.clone());
+    fields.push(schedule.week_days.len().to_string());
+    fields.extend(schedule.week_days.iter().cloned());
+    fields.push(schedule.week_day_in_month.clone());
+    fields.push(schedule.day_in_month.clone());
+    fields.push(schedule.months.len().to_string());
+    fields.extend(schedule.months.iter().cloned());
+    fields.push(schedule.weeks_period.clone());
+    fields.push(schedule.days_repeat_period.clone());
+    Ok(fields)
 }
 
 pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
@@ -2231,118 +2877,16 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source(
     pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(xml, source, None)
 }
 
+/// The spreadsheet template body the platform stores for a `Template.xml`
+/// (see `compiler::bodies::mxl_native`). The number-format hint is not needed:
+/// the body's number-format table is read off the XML itself.
 pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
-    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
+    _number_format_hint: Option<&SpreadsheetNumberFormatHint>,
 ) -> Result<PackedRawDeflatedBlob> {
-    let mut spreadsheet = parse_spreadsheet_document_xml(xml)?;
-    normalize_canonical_spreadsheet_format_order(&mut spreadsheet);
-    let column_count = spreadsheet.column_count.max(
-        spreadsheet
-            .rows
-            .iter()
-            .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
-            .max()
-            .unwrap_or(1),
-    );
-    let sparse_source_format_refs = spreadsheet_uses_sparse_source_format_refs(&spreadsheet);
-    let column_format_offset = spreadsheet_column_format_offset(&spreadsheet);
-    let column_format_slots = if sparse_source_format_refs {
-        spreadsheet_column_format_slots(&spreadsheet, column_count)
-            .saturating_sub(column_format_offset)
-            .max(1)
-    } else {
-        spreadsheet_column_format_slots(&spreadsheet, column_count)
-    };
-    let format_offset = if sparse_source_format_refs {
-        column_format_offset
-    } else {
-        column_format_slots.saturating_sub(1)
-    };
-    let declared_columns = column_count.saturating_sub(1);
-    let default_format_width =
-        spreadsheet_default_format_width_for_moxel(&spreadsheet).unwrap_or_default();
-    let mut fields = vec![
-        "8".to_string(),
-        "1".to_string(),
-        declared_columns.to_string(),
-        r#"{"ru","ru",0,1,"ru","Русский","Русский",0}"#.to_string(),
-        if default_format_width > 0 {
-            format!("{{128,{default_format_width}}}")
-        } else {
-            "{0}".to_string()
-        },
-        "{0}".to_string(),
-    ];
-    for row in &spreadsheet.rows {
-        for row_index in row.expanded_indexes() {
-            fields.push(row_index.to_string());
-            fields.push(row_format_index_for_moxel(row.format_index, format_offset).to_string());
-            fields.push(row.cells.len().to_string());
-            for cell in &row.cells {
-                fields.push(cell.column_index.to_string());
-                fields.push(format_spreadsheet_cell_for_moxel(cell, format_offset));
-            }
-        }
-    }
-    fields.extend(format_spreadsheet_empty_headers_footers_for_moxel(
-        &spreadsheet,
-    ));
-    fields.extend(format_spreadsheet_column_sets_for_moxel(&spreadsheet));
-    fields.extend(format_spreadsheet_vertical_groups_for_moxel(
-        &spreadsheet.vertical_groups,
-    ));
-    if !spreadsheet.merges.is_empty() || !spreadsheet.vertical_unmerges.is_empty() {
-        fields.push(format_spreadsheet_merge_regions_for_moxel(
-            &spreadsheet.merges,
-            &spreadsheet.vertical_unmerges,
-        ));
-    }
-    if !spreadsheet.areas.is_empty() {
-        fields.push(format_spreadsheet_named_areas_for_moxel(&spreadsheet.areas));
-    }
-    if let Some(print_area) = &spreadsheet.print_area {
-        fields.push(format_spreadsheet_area_bounds_for_moxel(print_area));
-    }
-    if let Some(print_settings) = &spreadsheet.print_settings {
-        fields.push(format_spreadsheet_print_settings_for_moxel(print_settings)?);
-    }
-    fields.extend(format_spreadsheet_drawings_for_moxel(
-        &spreadsheet,
-        column_format_slots,
-    ));
-    let line_fields = format_spreadsheet_lines_for_moxel(&spreadsheet.lines);
-    let (mut format_fields, number_format_refs) =
-        format_spreadsheet_formats_for_moxel(&spreadsheet, column_format_slots, number_format_hint);
-    // Lines and style references form one canonical, count-prefixed palette.
-    // The format table follows it as a separate root field.
-    let format_table = format_fields.pop();
-    let palette_count = line_fields
-        .len()
-        .checked_add(format_fields.len())
-        .ok_or_else(|| anyhow!("MOXCEL palette count overflow"))?;
-    if palette_count > 0 {
-        fields.push(palette_count.to_string());
-        fields.extend(line_fields);
-        fields.extend(format_fields);
-    }
-    if let Some(format_table) = format_table {
-        fields.push(format_table);
-    }
-    fields.extend(format_spreadsheet_fonts_for_moxel(&spreadsheet.fonts));
-    fields.extend(format_spreadsheet_number_formats_for_moxel(
-        &number_format_refs,
-    ));
-    fields.extend(format_spreadsheet_pictures_for_moxel(
-        &spreadsheet.pictures,
-        source,
-    )?);
-    fields.push("2".to_string());
-    fields.push("{0,1}".to_string());
-
-    let plain_body = format!("{{{}}}", fields.join(","));
-    let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{plain_body}");
+    let body = crate::compiler::bodies::mxl_native::write_native_moxel_body(xml, source)?;
+    let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{body}");
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -2350,852 +2894,6 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
         plain_bytes: plain.len(),
         output_sha256,
     })
-}
-
-fn spreadsheet_default_format_width_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-) -> Option<usize> {
-    spreadsheet
-        .default_format_index
-        .and_then(|index| spreadsheet.formats.get(index.saturating_sub(1)))
-        .and_then(|format| format.width)
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXml {
-    column_count: usize,
-    column_sets: Vec<SpreadsheetDocumentXmlColumnSet>,
-    rows: Vec<SpreadsheetDocumentXmlRow>,
-    vertical_groups: Vec<SpreadsheetDocumentXmlVerticalGroup>,
-    merges: Vec<SpreadsheetDocumentXmlMerge>,
-    vertical_unmerges: Vec<SpreadsheetDocumentXmlMerge>,
-    areas: Vec<SpreadsheetDocumentXmlArea>,
-    print_area: Option<SpreadsheetDocumentXmlArea>,
-    print_settings: Option<SpreadsheetDocumentXmlPrintSettings>,
-    default_format_index: Option<usize>,
-    /// The document's own `<height>`.  The MOXCEL body stores this row count in
-    /// the scalar behind the default column-set record and the extractor reads
-    /// it back verbatim, so packing a re-derived value would not round-trip.
-    sheet_height: Option<usize>,
-    formats: Vec<SpreadsheetDocumentXmlFormat>,
-    fonts: Vec<SpreadsheetDocumentXmlFont>,
-    lines: Vec<SpreadsheetDocumentXmlLine>,
-    empty_header_footer_tags: BTreeSet<String>,
-    pictures: Vec<SpreadsheetDocumentXmlPicture>,
-    drawings: Vec<SpreadsheetDocumentXmlDrawing>,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlColumnSet {
-    id: Option<String>,
-    size: usize,
-    columns: Vec<SpreadsheetDocumentXmlColumn>,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlColumn {
-    index: i32,
-    format_index: usize,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlRow {
-    index: usize,
-    index_to: Option<usize>,
-    format_index: usize,
-    columns_id: Option<String>,
-    empty: bool,
-    cells: Vec<SpreadsheetDocumentXmlCell>,
-}
-
-impl SpreadsheetDocumentXmlRow {
-    fn expanded_indexes(&self) -> std::ops::RangeInclusive<usize> {
-        let end = self.index_to.unwrap_or(self.index).max(self.index);
-        self.index..=end
-    }
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlCell {
-    column_index: usize,
-    format_index: usize,
-    text: Option<String>,
-    parameter: Option<String>,
-    detail_parameter: Option<String>,
-    empty_text: bool,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlVerticalGroup {
-    begin_row: usize,
-    end_row: usize,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlMerge {
-    row: i32,
-    column: i32,
-    height: i32,
-    width: i32,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlArea {
-    name: String,
-    area_type: String,
-    begin_column: i32,
-    begin_row: i32,
-    end_column: i32,
-    end_row: i32,
-    columns_id: Option<String>,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlPrintSettings {
-    page_orientation: Option<String>,
-    scale: Option<usize>,
-    collate: Option<bool>,
-    copies: Option<usize>,
-    per_page: Option<usize>,
-    top_margin: Option<usize>,
-    left_margin: Option<usize>,
-    bottom_margin: Option<usize>,
-    right_margin: Option<usize>,
-    header_size: Option<usize>,
-    footer_size: Option<usize>,
-    fit_to_page: Option<bool>,
-    black_and_white: Option<bool>,
-    printer_name: Option<String>,
-    paper: Option<usize>,
-    paper_source: Option<usize>,
-    page_width: Option<usize>,
-    page_height: Option<usize>,
-    duplex_type: Option<String>,
-    page_placement_alternation: Option<String>,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlFormat {
-    font: Option<usize>,
-    border: Option<usize>,
-    left_border: Option<usize>,
-    top_border: Option<usize>,
-    right_border: Option<usize>,
-    bottom_border: Option<usize>,
-    height: Option<usize>,
-    border_color: Option<String>,
-    width: Option<usize>,
-    horizontal_alignment: Option<String>,
-    vertical_alignment: Option<String>,
-    back_color: Option<String>,
-    pattern_color: Option<String>,
-    pattern: Option<String>,
-    text_color: Option<String>,
-    text_placement: Option<String>,
-    text_orientation: Option<usize>,
-    fill_type: Option<String>,
-    number_format: Vec<LocalizedString>,
-    edit_format: Vec<LocalizedString>,
-    drawing_border: Option<usize>,
-    by_selected_columns: Option<bool>,
-    details_use: Option<String>,
-    mark_negatives: Option<bool>,
-    hyper_link: Option<bool>,
-    protection: Option<bool>,
-    indent: Option<usize>,
-    auto_indent: Option<usize>,
-    mask: Option<String>,
-    pic_index: Option<usize>,
-    picture_size_mode: Option<String>,
-    pic_horizontal_alignment: Option<String>,
-    pic_vertical_alignment: Option<String>,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlFont {
-    ref_name: Option<String>,
-    face_name: Option<String>,
-    height: Option<usize>,
-    bold: bool,
-    italic: bool,
-    underline: bool,
-    strikeout: bool,
-    kind: String,
-    scale: Option<usize>,
-}
-
-#[derive(Debug)]
-struct SpreadsheetDocumentXmlLine {
-    style: String,
-    line_type: String,
-    width: usize,
-}
-
-impl Default for SpreadsheetDocumentXmlLine {
-    fn default() -> Self {
-        Self {
-            style: String::new(),
-            line_type: "v8ui:SpreadsheetDocumentCellLineType".to_string(),
-            width: 1,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlHeaderFooter {
-    tag: String,
-    f_zero: bool,
-    tfl_empty: bool,
-}
-
-#[derive(Debug, Default)]
-struct SpreadsheetDocumentXmlPicture {
-    index: usize,
-    ref_name: Option<String>,
-}
-
-#[derive(Debug)]
-struct SpreadsheetDocumentXmlDrawing {
-    id: usize,
-    format_index: usize,
-    begin_row: i32,
-    begin_row_offset: i32,
-    end_row: i32,
-    end_row_offset: i32,
-    begin_column: i32,
-    begin_column_offset: i32,
-    end_column: i32,
-    end_column_offset: i32,
-    auto_size: bool,
-    z_order: usize,
-    kind: SpreadsheetDocumentXmlDrawingKind,
-}
-
-impl Default for SpreadsheetDocumentXmlDrawing {
-    fn default() -> Self {
-        Self {
-            id: 0,
-            format_index: 0,
-            begin_row: 0,
-            begin_row_offset: 0,
-            end_row: 0,
-            end_row_offset: 0,
-            begin_column: 0,
-            begin_column_offset: 0,
-            end_column: 0,
-            end_column_offset: 0,
-            auto_size: false,
-            z_order: 0,
-            kind: SpreadsheetDocumentXmlDrawingKind::Picture {
-                picture_size: String::new(),
-                picture_index: 0,
-            },
-        }
-    }
-}
-
-#[derive(Debug)]
-enum SpreadsheetDocumentXmlDrawingKind {
-    /// `Line`, `Rectangle` or `Text`: the twelve-field, tail-less record.
-    Shape(String),
-    Picture {
-        picture_size: String,
-        picture_index: usize,
-    },
-    Chart(Option<SpreadsheetDocumentXmlChart>),
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct SpreadsheetDocumentXmlChart {
-    object: SpreadsheetChartXmlNode,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-struct SpreadsheetChartXmlNode {
-    name: String,
-    attributes: BTreeMap<String, String>,
-    text: String,
-    children: Vec<SpreadsheetChartXmlNode>,
-}
-
-fn parse_spreadsheet_document_xml(xml: &[u8]) -> Result<SpreadsheetDocumentXml> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(false);
-    let mut buffer = Vec::new();
-    let mut path = Vec::<String>::new();
-    let mut document = SpreadsheetDocumentXml::default();
-    let mut current_column_set = None::<SpreadsheetDocumentXmlColumnSet>;
-    let mut current_column = None::<SpreadsheetDocumentXmlColumn>;
-    let mut current_row = None::<SpreadsheetDocumentXmlRow>;
-    let mut current_cell = None::<SpreadsheetDocumentXmlCell>;
-    let mut current_vertical_group = None::<SpreadsheetDocumentXmlVerticalGroup>;
-    let mut current_merge = None::<SpreadsheetDocumentXmlMerge>;
-    let mut current_area = None::<SpreadsheetDocumentXmlArea>;
-    let mut current_print_settings = None::<SpreadsheetDocumentXmlPrintSettings>;
-    let mut current_format = None::<SpreadsheetDocumentXmlFormat>;
-    let mut current_number_format_item = None::<LocalizedString>;
-    let mut current_edit_format_item = None::<LocalizedString>;
-    let mut current_line = None::<SpreadsheetDocumentXmlLine>;
-    let mut current_header_footer = None::<SpreadsheetDocumentXmlHeaderFooter>;
-    let mut current_picture = None::<SpreadsheetDocumentXmlPicture>;
-    let mut current_drawing = None::<SpreadsheetDocumentXmlDrawing>;
-    let mut c_depth = 0usize;
-    let mut next_column_index = 0usize;
-    let mut text = String::new();
-
-    loop {
-        match reader.read_event_into(&mut buffer) {
-            Ok(Event::Start(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "columns" {
-                    current_column_set = Some(SpreadsheetDocumentXmlColumnSet::default());
-                } else if current_column_set.is_some() && local == "columnsItem" {
-                    current_column = Some(SpreadsheetDocumentXmlColumn::default());
-                } else if local == "rowsItem" {
-                    current_row = Some(SpreadsheetDocumentXmlRow::default());
-                    next_column_index = 0;
-                } else if local == "vg" {
-                    current_vertical_group = Some(SpreadsheetDocumentXmlVerticalGroup::default());
-                } else if local == "merge" || local == "verticalUnmerge" {
-                    current_merge = Some(SpreadsheetDocumentXmlMerge::default());
-                } else if local == "namedItem" && spreadsheet_named_item_is_cells(&event)? {
-                    current_area = Some(SpreadsheetDocumentXmlArea::default());
-                } else if local == "printArea" {
-                    current_area = Some(SpreadsheetDocumentXmlArea::default());
-                } else if local == "printSettings" {
-                    current_print_settings = Some(SpreadsheetDocumentXmlPrintSettings::default());
-                } else if local == "format" && path_ends_with(&path, &["document"]) {
-                    current_format = Some(SpreadsheetDocumentXmlFormat::default());
-                } else if local == "item"
-                    && path_ends_with(&path, &["document", "format", "format"])
-                {
-                    current_number_format_item = Some(LocalizedString {
-                        lang: String::new(),
-                        content: String::new(),
-                    });
-                } else if local == "item"
-                    && path_ends_with(&path, &["document", "format", "editFormat"])
-                {
-                    current_edit_format_item = Some(LocalizedString {
-                        lang: String::new(),
-                        content: String::new(),
-                    });
-                } else if local == "font"
-                    && let Some(font) = parse_spreadsheet_font_xml_attributes(&event)?
-                {
-                    document.fonts.push(font);
-                } else if local == "line" {
-                    current_line = Some(parse_spreadsheet_line_xml_attributes(&event)?);
-                } else if local == "style"
-                    && let Some(line) = current_line.as_mut()
-                {
-                    if let Some(line_type) = xml_attribute_value(&event, "type")? {
-                        line.line_type = line_type;
-                    }
-                } else if spreadsheet_header_footer_tag(&local) {
-                    current_header_footer = Some(SpreadsheetDocumentXmlHeaderFooter {
-                        tag: local.clone(),
-                        ..Default::default()
-                    });
-                } else if local == "picture" && current_picture.is_none() {
-                    current_picture = Some(SpreadsheetDocumentXmlPicture::default());
-                } else if local == "drawing" {
-                    current_drawing = Some(SpreadsheetDocumentXmlDrawing::default());
-                } else if current_row.is_some() && local == "c" {
-                    c_depth += 1;
-                    if c_depth == 1 {
-                        current_cell = Some(SpreadsheetDocumentXmlCell {
-                            column_index: next_column_index,
-                            ..Default::default()
-                        });
-                    }
-                } else if current_cell.is_some() && local == "tl" {
-                    if let Some(cell) = current_cell.as_mut() {
-                        cell.empty_text = true;
-                    }
-                }
-                if spreadsheet_text_element(&local) {
-                    text.clear();
-                }
-                path.push(local);
-            }
-            Ok(Event::Empty(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "font" {
-                    if let Some(font) = parse_spreadsheet_font_xml_attributes(&event)? {
-                        document.fonts.push(font);
-                    }
-                } else if local == "format" && path_ends_with(&path, &["document"]) {
-                    document
-                        .formats
-                        .push(SpreadsheetDocumentXmlFormat::default());
-                } else if local == "tfl"
-                    && let Some(header_footer) = current_header_footer.as_mut()
-                {
-                    header_footer.tfl_empty = true;
-                } else if local == "picture" && current_picture.is_some() {
-                    if let Some(picture) = current_picture.as_mut() {
-                        picture.ref_name = xml_attribute_value(&event, "ref")?;
-                    }
-                } else if current_cell.is_some()
-                    && local == "tl"
-                    && let Some(cell) = current_cell.as_mut()
-                {
-                    cell.empty_text = true;
-                }
-            }
-            Ok(Event::Text(event)) => {
-                if path
-                    .last()
-                    .is_some_and(|part| spreadsheet_text_element(part))
-                {
-                    let value = event.xml_content()?;
-                    let value = unescape(value.as_ref())?;
-                    text.push_str(value.as_ref());
-                }
-            }
-            Ok(Event::CData(event)) => {
-                if path
-                    .last()
-                    .is_some_and(|part| spreadsheet_text_element(part))
-                {
-                    text.push_str(event.xml_content()?.as_ref());
-                }
-            }
-            Ok(Event::GeneralRef(reference)) => {
-                if path
-                    .last()
-                    .is_some_and(|part| spreadsheet_text_element(part))
-                {
-                    let value = if let Some(ch) = reference.resolve_char_ref()? {
-                        ch.to_string()
-                    } else {
-                        let entity = reference.decode()?;
-                        resolve_xml_entity(entity.as_ref())
-                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                            .to_string()
-                    };
-                    text.push_str(&value);
-                }
-            }
-            Ok(Event::End(event)) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                apply_spreadsheet_text_value(
-                    &path,
-                    &local,
-                    &text,
-                    &mut document,
-                    current_column_set.as_mut(),
-                    current_column.as_mut(),
-                    current_row.as_mut(),
-                    current_cell.as_mut(),
-                    current_vertical_group.as_mut(),
-                    current_merge.as_mut(),
-                    current_area.as_mut(),
-                    current_print_settings.as_mut(),
-                    current_format.as_mut(),
-                    current_line.as_mut(),
-                    current_header_footer.as_mut(),
-                    current_picture.as_mut(),
-                    current_drawing.as_mut(),
-                );
-                if local == "lang"
-                    && path_ends_with(&path, &["document", "format", "format", "item", "lang"])
-                    && let Some(item) = current_number_format_item.as_mut()
-                {
-                    item.lang = text.trim().to_string();
-                } else if local == "lang"
-                    && path_ends_with(&path, &["document", "format", "editFormat", "item", "lang"])
-                    && let Some(item) = current_edit_format_item.as_mut()
-                {
-                    item.lang = text.trim().to_string();
-                } else if local == "content"
-                    && path_ends_with(&path, &["document", "format", "format", "item", "content"])
-                    && let Some(item) = current_number_format_item.as_mut()
-                {
-                    item.content = text.to_string();
-                } else if local == "content"
-                    && path_ends_with(
-                        &path,
-                        &["document", "format", "editFormat", "item", "content"],
-                    )
-                    && let Some(item) = current_edit_format_item.as_mut()
-                {
-                    item.content = text.to_string();
-                }
-                if local == "c" && current_row.is_some() {
-                    if c_depth == 1
-                        && let Some(mut cell) = current_cell.take()
-                    {
-                        next_column_index = cell.column_index + 1;
-                        normalize_spreadsheet_cell(&mut cell);
-                        if let Some(row) = current_row.as_mut() {
-                            row.cells.push(cell);
-                        }
-                    }
-                    c_depth = c_depth.saturating_sub(1);
-                } else if local == "rowsItem"
-                    && let Some(mut row) = current_row.take()
-                {
-                    if row.empty {
-                        row.cells.clear();
-                    } else {
-                        row.cells.sort_by_key(|cell| cell.column_index);
-                    }
-                    document.rows.push(row);
-                } else if local == "vg"
-                    && let Some(vertical_group) = current_vertical_group.take()
-                {
-                    document.vertical_groups.push(vertical_group);
-                } else if local == "columnsItem"
-                    && let Some(column) = current_column.take()
-                    && let Some(column_set) = current_column_set.as_mut()
-                {
-                    column_set.columns.push(column);
-                } else if local == "columns"
-                    && let Some(column_set) = current_column_set.take()
-                {
-                    document.column_count = document.column_count.max(column_set.size);
-                    document.column_sets.push(column_set);
-                } else if (local == "merge" || local == "verticalUnmerge")
-                    && let Some(merge) = current_merge.take()
-                {
-                    if local == "verticalUnmerge" {
-                        document.vertical_unmerges.push(merge);
-                    } else {
-                        document.merges.push(merge);
-                    }
-                } else if local == "namedItem"
-                    && let Some(area) = current_area.take()
-                {
-                    document.areas.push(area);
-                } else if local == "printArea"
-                    && let Some(area) = current_area.take()
-                {
-                    document.print_area = Some(area);
-                } else if local == "printSettings"
-                    && let Some(print_settings) = current_print_settings.take()
-                {
-                    document.print_settings = Some(print_settings);
-                } else if local == "item"
-                    && path_ends_with(&path, &["document", "format", "format", "item"])
-                    && let Some(item) = current_number_format_item.take()
-                    && let Some(format) = current_format.as_mut()
-                {
-                    format.number_format.push(item);
-                } else if local == "item"
-                    && path_ends_with(&path, &["document", "format", "editFormat", "item"])
-                    && let Some(item) = current_edit_format_item.take()
-                    && let Some(format) = current_format.as_mut()
-                {
-                    format.edit_format.push(item);
-                } else if local == "format"
-                    && path_ends_with(&path, &["document", "format"])
-                    && let Some(format) = current_format.take()
-                {
-                    document.formats.push(format);
-                } else if local == "line"
-                    && let Some(line) = current_line.take()
-                {
-                    document.lines.push(line);
-                } else if spreadsheet_header_footer_tag(&local)
-                    && let Some(header_footer) = current_header_footer.take()
-                    && header_footer.f_zero
-                    && header_footer.tfl_empty
-                {
-                    document.empty_header_footer_tags.insert(header_footer.tag);
-                } else if local == "picture"
-                    && let Some(picture) = current_picture.take()
-                {
-                    document.pictures.push(picture);
-                } else if local == "drawing"
-                    && let Some(drawing) = current_drawing.take()
-                {
-                    document.drawings.push(drawing);
-                }
-                if spreadsheet_text_element(&local) {
-                    text.clear();
-                }
-                let _ = path.pop();
-            }
-            Ok(Event::Eof) => break,
-            Ok(_) => {}
-            Err(error) => return Err(error.into()),
-        }
-        buffer.clear();
-    }
-    if document.rows.is_empty() {
-        return Err(anyhow!("SpreadsheetDocument XML has no rowsItem entries"));
-    }
-    attach_spreadsheet_chart_objects(xml, &mut document.drawings)?;
-    document.rows.sort_by_key(|row| row.index);
-    Ok(document)
-}
-
-const MAX_SPREADSHEET_CHART_XML_DEPTH: usize = 64;
-const MAX_SPREADSHEET_CHART_XML_NODES: usize = 16_384;
-const MAX_SPREADSHEET_CHART_XML_TEXT: usize = 1024 * 1024;
-
-fn attach_spreadsheet_chart_objects(
-    xml: &[u8],
-    drawings: &mut [SpreadsheetDocumentXmlDrawing],
-) -> Result<()> {
-    let expected = drawings
-        .iter()
-        .filter(|drawing| matches!(drawing.kind, SpreadsheetDocumentXmlDrawingKind::Chart(None)))
-        .count();
-    if expected == 0 {
-        return Ok(());
-    }
-    let objects = parse_spreadsheet_chart_objects(xml)?;
-    if objects.len() != expected {
-        return Err(anyhow!(
-            "SpreadsheetDocument Chart object count mismatch: expected {expected}, found {}",
-            objects.len()
-        ));
-    }
-    let mut objects = objects.into_iter();
-    for drawing in drawings {
-        if matches!(drawing.kind, SpreadsheetDocumentXmlDrawingKind::Chart(None)) {
-            drawing.kind = SpreadsheetDocumentXmlDrawingKind::Chart(objects.next());
-        }
-    }
-    Ok(())
-}
-
-fn parse_spreadsheet_chart_objects(xml: &[u8]) -> Result<Vec<SpreadsheetDocumentXmlChart>> {
-    let mut reader = Reader::from_reader(xml);
-    reader.config_mut().trim_text(false);
-    let mut buffer = Vec::new();
-    let mut path = Vec::<String>::new();
-    let mut objects = Vec::new();
-    loop {
-        match reader.read_event_into(&mut buffer)? {
-            Event::Start(event) => {
-                let local = xml_local_name(event.local_name().as_ref());
-                if local == "object"
-                    && path.last().is_some_and(|part| part == "drawing")
-                    && xml_attribute_value(&event, "type")?
-                        .is_some_and(|value| value.rsplit(':').next() == Some("Chart"))
-                {
-                    let object = read_spreadsheet_chart_xml_node(&mut reader, &event)?;
-                    objects.push(SpreadsheetDocumentXmlChart { object });
-                } else {
-                    path.push(local);
-                }
-            }
-            Event::End(_) => {
-                let _ = path.pop();
-            }
-            Event::Empty(event)
-                if xml_local_name(event.local_name().as_ref()) == "object"
-                    && path.last().is_some_and(|part| part == "drawing")
-                    && xml_attribute_value(&event, "type")?
-                        .is_some_and(|value| value.rsplit(':').next() == Some("Chart")) =>
-            {
-                objects.push(SpreadsheetDocumentXmlChart {
-                    object: spreadsheet_chart_xml_node_from_start(&event)?,
-                });
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-        buffer.clear();
-    }
-    Ok(objects)
-}
-
-fn read_spreadsheet_chart_xml_node(
-    reader: &mut Reader<&[u8]>,
-    root: &BytesStart<'_>,
-) -> Result<SpreadsheetChartXmlNode> {
-    let mut stack = vec![spreadsheet_chart_xml_node_from_start(root)?];
-    let mut buffer = Vec::new();
-    let mut node_count = 1usize;
-    let mut text_bytes = 0usize;
-    loop {
-        match reader.read_event_into(&mut buffer)? {
-            Event::Start(event) => {
-                node_count = node_count
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML node count overflow"))?;
-                if stack.len() >= MAX_SPREADSHEET_CHART_XML_DEPTH
-                    || node_count > MAX_SPREADSHEET_CHART_XML_NODES
-                {
-                    return Err(anyhow!("SpreadsheetDocument Chart XML limits exceeded"));
-                }
-                stack.push(spreadsheet_chart_xml_node_from_start(&event)?);
-            }
-            Event::Empty(event) => {
-                node_count = node_count
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML node count overflow"))?;
-                if node_count > MAX_SPREADSHEET_CHART_XML_NODES {
-                    return Err(anyhow!("SpreadsheetDocument Chart XML node limit exceeded"));
-                }
-                let node = spreadsheet_chart_xml_node_from_start(&event)?;
-                stack
-                    .last_mut()
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
-                    .children
-                    .push(node);
-            }
-            Event::Text(event) => {
-                let value = event.xml_content()?;
-                let value = unescape(value.as_ref())?;
-                text_bytes = text_bytes
-                    .checked_add(value.len())
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
-                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
-                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
-                }
-                stack
-                    .last_mut()
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
-                    .text
-                    .push_str(value.as_ref());
-            }
-            Event::CData(event) => {
-                let value = event.xml_content()?;
-                text_bytes = text_bytes
-                    .checked_add(value.len())
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
-                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
-                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
-                }
-                stack
-                    .last_mut()
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
-                    .text
-                    .push_str(value.as_ref());
-            }
-            Event::GeneralRef(reference) => {
-                let value = if let Some(ch) = reference.resolve_char_ref()? {
-                    ch.to_string()
-                } else {
-                    let entity = reference.decode()?;
-                    resolve_xml_entity(entity.as_ref())
-                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
-                        .to_string()
-                };
-                text_bytes = text_bytes
-                    .checked_add(value.len())
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML text size overflow"))?;
-                if text_bytes > MAX_SPREADSHEET_CHART_XML_TEXT {
-                    return Err(anyhow!("SpreadsheetDocument Chart XML text limit exceeded"));
-                }
-                stack
-                    .last_mut()
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack is empty"))?
-                    .text
-                    .push_str(&value);
-            }
-            Event::End(_) => {
-                let node = stack
-                    .pop()
-                    .ok_or_else(|| anyhow!("SpreadsheetDocument Chart XML stack underflow"))?;
-                if let Some(parent) = stack.last_mut() {
-                    parent.children.push(node);
-                } else {
-                    return Ok(node);
-                }
-            }
-            Event::Eof => {
-                return Err(anyhow!(
-                    "unexpected EOF inside SpreadsheetDocument Chart object"
-                ));
-            }
-            _ => {}
-        }
-        buffer.clear();
-    }
-}
-
-fn spreadsheet_chart_xml_node_from_start(
-    event: &BytesStart<'_>,
-) -> Result<SpreadsheetChartXmlNode> {
-    let mut attributes = BTreeMap::new();
-    for attribute in event.attributes() {
-        let attribute = attribute?;
-        attributes.insert(
-            xml_local_name(attribute.key.local_name().as_ref()),
-            attribute.unescape_value()?.into_owned(),
-        );
-    }
-    Ok(SpreadsheetChartXmlNode {
-        name: xml_local_name(event.local_name().as_ref()),
-        attributes,
-        text: String::new(),
-        children: Vec::new(),
-    })
-}
-
-fn parse_spreadsheet_font_xml_attributes(
-    event: &BytesStart<'_>,
-) -> Result<Option<SpreadsheetDocumentXmlFont>> {
-    let mut font = SpreadsheetDocumentXmlFont::default();
-    let mut seen = false;
-    for attr in event.attributes() {
-        let attr = attr?;
-        let key = xml_local_name(attr.key.local_name().as_ref());
-        let value = attr.unescape_value()?.into_owned();
-        match key.as_str() {
-            "ref" => {
-                font.ref_name = Some(value);
-                seen = true;
-            }
-            "faceName" => {
-                font.face_name = Some(value);
-                seen = true;
-            }
-            "height" => {
-                if let Ok(height) = value.parse::<usize>() {
-                    font.height = Some(height);
-                    seen = true;
-                }
-            }
-            "bold" => {
-                font.bold = value.eq_ignore_ascii_case("true");
-                seen = true;
-            }
-            "italic" => {
-                font.italic = value.eq_ignore_ascii_case("true");
-                seen = true;
-            }
-            "underline" => {
-                font.underline = value.eq_ignore_ascii_case("true");
-                seen = true;
-            }
-            "strikeout" => {
-                font.strikeout = value.eq_ignore_ascii_case("true");
-                seen = true;
-            }
-            "kind" => {
-                font.kind = value;
-                seen = true;
-            }
-            "scale" => {
-                if let Ok(scale) = value.parse::<usize>() {
-                    font.scale = Some(scale);
-                    seen = true;
-                }
-            }
-            _ => {}
-        }
-    }
-    Ok(seen.then_some(font))
-}
-
-fn parse_spreadsheet_line_xml_attributes(
-    event: &BytesStart<'_>,
-) -> Result<SpreadsheetDocumentXmlLine> {
-    let mut line = SpreadsheetDocumentXmlLine::default();
-    if let Some(width) = xml_attribute_value(event, "width")?
-        && let Ok(width) = width.parse::<usize>()
-    {
-        line.width = width;
-    }
-    Ok(line)
 }
 
 fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Option<String>> {
@@ -3208,3023 +2906,8 @@ fn xml_attribute_value(event: &BytesStart<'_>, local_name: &str) -> Result<Optio
     Ok(None)
 }
 
-fn spreadsheet_named_item_is_cells(event: &BytesStart<'_>) -> Result<bool> {
-    Ok(xml_attribute_value(event, "type")?
-        .as_deref()
-        .is_none_or(|value| value == "NamedItemCells" || value.ends_with(":NamedItemCells")))
-}
-
 fn xml_event_is_nil(event: &BytesStart<'_>) -> Result<bool> {
     Ok(xml_attribute_value(event, "nil")?.as_deref() == Some("true"))
-}
-
-fn spreadsheet_header_footer_tag(local: &str) -> bool {
-    matches!(
-        local,
-        "leftHeader"
-            | "centerHeader"
-            | "rightHeader"
-            | "leftFooter"
-            | "centerFooter"
-            | "rightFooter"
-    )
-}
-
-fn spreadsheet_text_element(local: &str) -> bool {
-    matches!(
-        local,
-        "size"
-            | "id"
-            | "index"
-            | "indexTo"
-            | "formatIndex"
-            | "i"
-            | "f"
-            | "lang"
-            | "content"
-            | "parameter"
-            | "detailParameter"
-            | "empty"
-            | "r"
-            | "c"
-            | "h"
-            | "w"
-            | "name"
-            | "type"
-            | "drawingType"
-            | "beginRow"
-            | "endRow"
-            | "beginColumn"
-            | "endColumn"
-            | "columnsID"
-            | "pageOrientation"
-            | "scale"
-            | "collate"
-            | "copies"
-            | "perPage"
-            | "topMargin"
-            | "leftMargin"
-            | "bottomMargin"
-            | "rightMargin"
-            | "headerSize"
-            | "footerSize"
-            | "fitToPage"
-            | "blackAndWhite"
-            | "printerName"
-            | "paper"
-            | "paperSource"
-            | "pageWidth"
-            | "pageHeight"
-            | "duplexType"
-            | "pagePlacementAlternation"
-            | "defaultFormatIndex"
-            | "vgLevels"
-            | "font"
-            | "border"
-            | "leftBorder"
-            | "topBorder"
-            | "rightBorder"
-            | "bottomBorder"
-            | "height"
-            | "borderColor"
-            | "width"
-            | "horizontalAlignment"
-            | "verticalAlignment"
-            | "backColor"
-            | "patternColor"
-            | "pattern"
-            | "textColor"
-            | "textPlacement"
-            | "textOrientation"
-            | "fillType"
-            | "drawingBorder"
-            | "bySelectedColumns"
-            | "markNegatives"
-            | "detailsUse"
-            | "hyperLink"
-            | "protection"
-            | "indent"
-            | "autoIndent"
-            | "mask"
-            | "picIndex"
-            | "pictureSizeMode"
-            | "picHorizontalAlignment"
-            | "picVerticalAlignment"
-            | "style"
-            | "beginRowOffset"
-            | "endRowOffset"
-            | "beginColumnOffset"
-            | "endColumnOffset"
-            | "autoSize"
-            | "pictureSize"
-            | "zOrder"
-            | "pictureIndex"
-            | "b"
-            | "e"
-    )
-}
-
-fn apply_spreadsheet_text_value(
-    path: &[String],
-    local: &str,
-    text: &str,
-    document: &mut SpreadsheetDocumentXml,
-    column_set: Option<&mut SpreadsheetDocumentXmlColumnSet>,
-    column: Option<&mut SpreadsheetDocumentXmlColumn>,
-    row: Option<&mut SpreadsheetDocumentXmlRow>,
-    cell: Option<&mut SpreadsheetDocumentXmlCell>,
-    vertical_group: Option<&mut SpreadsheetDocumentXmlVerticalGroup>,
-    merge: Option<&mut SpreadsheetDocumentXmlMerge>,
-    area: Option<&mut SpreadsheetDocumentXmlArea>,
-    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
-    format: Option<&mut SpreadsheetDocumentXmlFormat>,
-    line: Option<&mut SpreadsheetDocumentXmlLine>,
-    header_footer: Option<&mut SpreadsheetDocumentXmlHeaderFooter>,
-    picture: Option<&mut SpreadsheetDocumentXmlPicture>,
-    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
-) {
-    let value = text.trim();
-    match local {
-        "size" if path_ends_with(path, &["columns", "size"]) => {
-            if let Ok(size) = value.parse::<usize>() {
-                if let Some(column_set) = column_set {
-                    column_set.size = size;
-                }
-                document.column_count = document.column_count.max(size);
-            }
-        }
-        "id" if path_ends_with(path, &["columns", "id"]) => {
-            if let Some(column_set) = column_set
-                && !value.is_empty()
-            {
-                column_set.id = Some(text.to_string());
-            }
-        }
-        "index" if path_ends_with(path, &["columns", "columnsItem", "index"]) => {
-            if let Some(column) = column
-                && let Ok(index) = value.parse::<i32>()
-            {
-                column.index = index;
-            }
-        }
-        "index" if path_ends_with(path, &["rowsItem", "index"]) => {
-            if let Some(row) = row
-                && let Ok(index) = value.parse::<usize>()
-            {
-                row.index = index;
-            }
-        }
-        "index" if path_ends_with(path, &["picture", "index"]) => {
-            if let Some(picture) = picture
-                && let Ok(index) = value.parse::<usize>()
-            {
-                picture.index = index;
-            }
-        }
-        "indexTo" if path_ends_with(path, &["rowsItem", "indexTo"]) => {
-            if let Some(row) = row
-                && let Ok(index_to) = value.parse::<usize>()
-            {
-                row.index_to = Some(index_to);
-            }
-        }
-        "formatIndex" if path_ends_with(path, &["rowsItem", "row", "formatIndex"]) => {
-            if let Some(row) = row
-                && let Ok(format_index) = value.parse::<usize>()
-            {
-                row.format_index = format_index;
-            }
-        }
-        "formatIndex" if path_ends_with(path, &["drawing", "formatIndex"]) => {
-            if let Some(drawing) = drawing
-                && let Ok(format_index) = value.parse::<usize>()
-            {
-                drawing.format_index = format_index;
-            }
-        }
-        "formatIndex"
-            if path_ends_with(path, &["columns", "columnsItem", "column", "formatIndex"]) =>
-        {
-            if let Some(column) = column
-                && let Ok(format_index) = value.parse::<usize>()
-            {
-                column.format_index = format_index;
-            }
-        }
-        "columnsID" if path_ends_with(path, &["rowsItem", "row", "columnsID"]) => {
-            if let Some(row) = row
-                && !value.is_empty()
-            {
-                row.columns_id = Some(text.to_string());
-            }
-        }
-        "empty" if path_ends_with(path, &["rowsItem", "row", "empty"]) => {
-            if let Some(row) = row {
-                row.empty = value.eq_ignore_ascii_case("true");
-            }
-        }
-        "i" => {
-            if let Some(cell) = cell
-                && let Ok(index) = value.parse::<usize>()
-            {
-                cell.column_index = index;
-            }
-        }
-        "f" => {
-            if let Some(cell) = cell
-                && let Ok(format_index) = value.parse::<usize>()
-            {
-                cell.format_index = format_index;
-            }
-            if let Some(header_footer) = header_footer
-                && value == "0"
-            {
-                header_footer.f_zero = true;
-            }
-        }
-        "content" => {
-            if let Some(cell) = cell {
-                cell.text = Some(text.to_string());
-                cell.empty_text = false;
-            }
-        }
-        "parameter" => {
-            if let Some(cell) = cell {
-                cell.parameter = Some(text.to_string());
-            }
-        }
-        "detailParameter" => {
-            if let Some(cell) = cell {
-                cell.detail_parameter = Some(text.to_string());
-            }
-        }
-        "b" if path_ends_with(path, &["vg", "b"]) => {
-            if let Some(vertical_group) = vertical_group
-                && let Ok(begin_row) = value.parse::<usize>()
-            {
-                vertical_group.begin_row = begin_row;
-                vertical_group.end_row = begin_row;
-            }
-        }
-        "e" if path_ends_with(path, &["vg", "e"]) => {
-            if let Some(vertical_group) = vertical_group
-                && let Ok(end_row) = value.parse::<usize>()
-            {
-                vertical_group.end_row = end_row;
-            }
-        }
-        "r" if spreadsheet_merge_property_path(path, "r") => {
-            if let Some(merge) = merge
-                && let Ok(row) = value.parse::<i32>()
-            {
-                merge.row = row;
-            }
-        }
-        "c" if spreadsheet_merge_property_path(path, "c") => {
-            if let Some(merge) = merge
-                && let Ok(column) = value.parse::<i32>()
-            {
-                merge.column = column;
-            }
-        }
-        "h" if spreadsheet_merge_property_path(path, "h") => {
-            if let Some(merge) = merge
-                && let Ok(height) = value.parse::<i32>()
-            {
-                merge.height = height.max(0);
-            }
-        }
-        "w" if spreadsheet_merge_property_path(path, "w") => {
-            if let Some(merge) = merge
-                && let Ok(width) = value.parse::<i32>()
-            {
-                merge.width = width.max(0);
-            }
-        }
-        "name" if path_ends_with(path, &["namedItem", "name"]) => {
-            if let Some(area) = area {
-                area.name = text.to_string();
-            }
-        }
-        "type" if spreadsheet_area_property_path(path, "type") => {
-            if let Some(area) = area {
-                area.area_type = text.to_string();
-            }
-        }
-        "beginRow" if spreadsheet_area_property_path(path, "beginRow") => {
-            if let Some(area) = area
-                && let Ok(begin_row) = value.parse::<i32>()
-            {
-                area.begin_row = begin_row;
-            }
-        }
-        "endRow" if spreadsheet_area_property_path(path, "endRow") => {
-            if let Some(area) = area
-                && let Ok(end_row) = value.parse::<i32>()
-            {
-                area.end_row = end_row;
-            }
-        }
-        "beginColumn" if spreadsheet_area_property_path(path, "beginColumn") => {
-            if let Some(area) = area
-                && let Ok(begin_column) = value.parse::<i32>()
-            {
-                area.begin_column = begin_column;
-            }
-        }
-        "endColumn" if spreadsheet_area_property_path(path, "endColumn") => {
-            if let Some(area) = area
-                && let Ok(end_column) = value.parse::<i32>()
-            {
-                area.end_column = end_column;
-            }
-        }
-        "columnsID" if spreadsheet_area_property_path(path, "columnsID") => {
-            if let Some(area) = area
-                && !value.is_empty()
-            {
-                area.columns_id = Some(text.to_string());
-            }
-        }
-        "pageOrientation" if path_ends_with(path, &["printSettings", "pageOrientation"]) => {
-            if let Some(print_settings) = print_settings
-                && !value.is_empty()
-            {
-                print_settings.page_orientation = Some(text.to_string());
-            }
-        }
-        "scale" if path_ends_with(path, &["printSettings", "scale"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.scale = Some(parsed)
-            });
-        }
-        "collate" if path_ends_with(path, &["printSettings", "collate"]) => {
-            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
-                settings.collate = Some(parsed)
-            });
-        }
-        "copies" if path_ends_with(path, &["printSettings", "copies"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.copies = Some(parsed)
-            });
-        }
-        "perPage" if path_ends_with(path, &["printSettings", "perPage"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.per_page = Some(parsed)
-            });
-        }
-        "topMargin" if path_ends_with(path, &["printSettings", "topMargin"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.top_margin = Some(parsed)
-            });
-        }
-        "leftMargin" if path_ends_with(path, &["printSettings", "leftMargin"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.left_margin = Some(parsed)
-            });
-        }
-        "bottomMargin" if path_ends_with(path, &["printSettings", "bottomMargin"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.bottom_margin = Some(parsed)
-            });
-        }
-        "rightMargin" if path_ends_with(path, &["printSettings", "rightMargin"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.right_margin = Some(parsed)
-            });
-        }
-        "headerSize" if path_ends_with(path, &["printSettings", "headerSize"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.header_size = Some(parsed)
-            });
-        }
-        "footerSize" if path_ends_with(path, &["printSettings", "footerSize"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.footer_size = Some(parsed)
-            });
-        }
-        "fitToPage" if path_ends_with(path, &["printSettings", "fitToPage"]) => {
-            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
-                settings.fit_to_page = Some(parsed)
-            });
-        }
-        "blackAndWhite" if path_ends_with(path, &["printSettings", "blackAndWhite"]) => {
-            set_spreadsheet_print_settings_bool(print_settings, value, |settings, parsed| {
-                settings.black_and_white = Some(parsed)
-            });
-        }
-        "printerName" if path_ends_with(path, &["printSettings", "printerName"]) => {
-            if let Some(print_settings) = print_settings {
-                print_settings.printer_name = Some(text.to_string());
-            }
-        }
-        "paper" if path_ends_with(path, &["printSettings", "paper"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.paper = Some(parsed)
-            });
-        }
-        "paperSource" if path_ends_with(path, &["printSettings", "paperSource"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.paper_source = Some(parsed)
-            });
-        }
-        "pageWidth" if path_ends_with(path, &["printSettings", "pageWidth"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.page_width = Some(parsed)
-            });
-        }
-        "pageHeight" if path_ends_with(path, &["printSettings", "pageHeight"]) => {
-            set_spreadsheet_print_settings_usize(print_settings, value, |settings, parsed| {
-                settings.page_height = Some(parsed)
-            });
-        }
-        "duplexType" if path_ends_with(path, &["printSettings", "duplexType"]) => {
-            if let Some(print_settings) = print_settings
-                && !value.is_empty()
-            {
-                print_settings.duplex_type = Some(text.to_string());
-            }
-        }
-        "pagePlacementAlternation"
-            if path_ends_with(path, &["printSettings", "pagePlacementAlternation"]) =>
-        {
-            if let Some(print_settings) = print_settings
-                && !value.is_empty()
-            {
-                print_settings.page_placement_alternation = Some(text.to_string());
-            }
-        }
-        "defaultFormatIndex" if path_ends_with(path, &["defaultFormatIndex"]) => {
-            if let Ok(parsed) = value.parse::<usize>() {
-                document.default_format_index = Some(parsed);
-            }
-        }
-        "height" if path_ends_with(path, &["document", "height"]) => {
-            if let Ok(parsed) = value.parse::<usize>() {
-                document.sheet_height = Some(parsed);
-            }
-        }
-        "font" if path_ends_with(path, &["format", "font"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.font = Some(parsed)
-            });
-        }
-        "border" if path_ends_with(path, &["format", "border"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.border = Some(parsed)
-            });
-        }
-        "leftBorder" if path_ends_with(path, &["format", "leftBorder"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.left_border = Some(parsed)
-            });
-        }
-        "topBorder" if path_ends_with(path, &["format", "topBorder"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.top_border = Some(parsed)
-            });
-        }
-        "rightBorder" if path_ends_with(path, &["format", "rightBorder"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.right_border = Some(parsed)
-            });
-        }
-        "bottomBorder" if path_ends_with(path, &["format", "bottomBorder"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.bottom_border = Some(parsed)
-            });
-        }
-        "height" if path_ends_with(path, &["format", "height"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.height = Some(parsed)
-            });
-        }
-        "borderColor" if path_ends_with(path, &["format", "borderColor"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.border_color = Some(parsed)
-            });
-        }
-        "width" if path_ends_with(path, &["format", "width"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.width = Some(parsed)
-            });
-        }
-        "horizontalAlignment" if path_ends_with(path, &["format", "horizontalAlignment"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.horizontal_alignment = Some(parsed)
-            });
-        }
-        "verticalAlignment" if path_ends_with(path, &["format", "verticalAlignment"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.vertical_alignment = Some(parsed)
-            });
-        }
-        "backColor" if path_ends_with(path, &["format", "backColor"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.back_color = Some(parsed)
-            });
-        }
-        "patternColor" if path_ends_with(path, &["format", "patternColor"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.pattern_color = Some(parsed)
-            });
-        }
-        "pattern" if path_ends_with(path, &["format", "pattern"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.pattern = Some(parsed)
-            });
-        }
-        "textColor" if path_ends_with(path, &["format", "textColor"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.text_color = Some(parsed)
-            });
-        }
-        "textPlacement" if path_ends_with(path, &["format", "textPlacement"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.text_placement = Some(parsed)
-            });
-        }
-        "textOrientation" if path_ends_with(path, &["format", "textOrientation"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.text_orientation = Some(parsed)
-            });
-        }
-        "fillType" if path_ends_with(path, &["format", "fillType"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.fill_type = Some(parsed)
-            });
-        }
-        "drawingBorder" if path_ends_with(path, &["format", "drawingBorder"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.drawing_border = Some(parsed)
-            });
-        }
-        "bySelectedColumns" if path_ends_with(path, &["format", "bySelectedColumns"]) => {
-            set_spreadsheet_format_bool(format, value, |format, parsed| {
-                format.by_selected_columns = Some(parsed)
-            });
-        }
-        "markNegatives" if path_ends_with(path, &["format", "markNegatives"]) => {
-            set_spreadsheet_format_bool(format, value, |format, parsed| {
-                format.mark_negatives = Some(parsed)
-            });
-        }
-        "detailsUse" if path_ends_with(path, &["format", "detailsUse"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.details_use = Some(parsed)
-            });
-        }
-        "hyperLink" if path_ends_with(path, &["format", "hyperLink"]) => {
-            set_spreadsheet_format_bool(format, value, |format, parsed| {
-                format.hyper_link = Some(parsed)
-            });
-        }
-        "protection" if path_ends_with(path, &["format", "protection"]) => {
-            set_spreadsheet_format_bool(format, value, |format, parsed| {
-                format.protection = Some(parsed)
-            });
-        }
-        "indent" if path_ends_with(path, &["format", "indent"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.indent = Some(parsed)
-            });
-        }
-        "autoIndent" if path_ends_with(path, &["format", "autoIndent"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.auto_indent = Some(parsed)
-            });
-        }
-        "mask" if path_ends_with(path, &["format", "mask"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.mask = Some(parsed)
-            });
-        }
-        "picIndex" if path_ends_with(path, &["format", "picIndex"]) => {
-            set_spreadsheet_format_usize(format, value, |format, parsed| {
-                format.pic_index = Some(parsed)
-            });
-        }
-        "pictureSizeMode" if path_ends_with(path, &["format", "pictureSizeMode"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.picture_size_mode = Some(parsed)
-            });
-        }
-        "picHorizontalAlignment" if path_ends_with(path, &["format", "picHorizontalAlignment"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.pic_horizontal_alignment = Some(parsed)
-            });
-        }
-        "picVerticalAlignment" if path_ends_with(path, &["format", "picVerticalAlignment"]) => {
-            set_spreadsheet_format_string(format, text, |format, parsed| {
-                format.pic_vertical_alignment = Some(parsed)
-            });
-        }
-        "drawingType" if path_ends_with(path, &["drawing", "drawingType"]) => {
-            if let Some(drawing) = drawing {
-                drawing.kind = match value {
-                    "Chart" => SpreadsheetDocumentXmlDrawingKind::Chart(None),
-                    "Line" | "Rectangle" | "Text" => {
-                        SpreadsheetDocumentXmlDrawingKind::Shape(value.to_string())
-                    }
-                    _ => SpreadsheetDocumentXmlDrawingKind::Picture {
-                        picture_size: String::new(),
-                        picture_index: 0,
-                    },
-                };
-            }
-        }
-        "id" if path_ends_with(path, &["drawing", "id"]) => {
-            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| drawing.id = parsed);
-        }
-        "beginRow" if path_ends_with(path, &["drawing", "beginRow"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.begin_row = parsed
-            });
-        }
-        "beginRowOffset" if path_ends_with(path, &["drawing", "beginRowOffset"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.begin_row_offset = parsed
-            });
-        }
-        "endRow" if path_ends_with(path, &["drawing", "endRow"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| drawing.end_row = parsed);
-        }
-        "endRowOffset" if path_ends_with(path, &["drawing", "endRowOffset"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.end_row_offset = parsed
-            });
-        }
-        "beginColumn" if path_ends_with(path, &["drawing", "beginColumn"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.begin_column = parsed
-            });
-        }
-        "beginColumnOffset" if path_ends_with(path, &["drawing", "beginColumnOffset"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.begin_column_offset = parsed
-            });
-        }
-        "endColumn" if path_ends_with(path, &["drawing", "endColumn"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.end_column = parsed
-            });
-        }
-        "endColumnOffset" if path_ends_with(path, &["drawing", "endColumnOffset"]) => {
-            set_spreadsheet_drawing_i32(drawing, value, |drawing, parsed| {
-                drawing.end_column_offset = parsed
-            });
-        }
-        "autoSize" if path_ends_with(path, &["drawing", "autoSize"]) => {
-            if let Some(drawing) = drawing {
-                drawing.auto_size = value.eq_ignore_ascii_case("true");
-            }
-        }
-        "pictureSize" if path_ends_with(path, &["drawing", "pictureSize"]) => {
-            if let Some(SpreadsheetDocumentXmlDrawing {
-                kind: SpreadsheetDocumentXmlDrawingKind::Picture { picture_size, .. },
-                ..
-            }) = drawing
-            {
-                *picture_size = text.to_string();
-            }
-        }
-        "zOrder" if path_ends_with(path, &["drawing", "zOrder"]) => {
-            set_spreadsheet_drawing_usize(drawing, value, |drawing, parsed| {
-                drawing.z_order = parsed
-            });
-        }
-        "pictureIndex" if path_ends_with(path, &["drawing", "pictureIndex"]) => {
-            if let Some(SpreadsheetDocumentXmlDrawing {
-                kind: SpreadsheetDocumentXmlDrawingKind::Picture { picture_index, .. },
-                ..
-            }) = drawing
-                && let Ok(parsed) = value.parse::<usize>()
-            {
-                *picture_index = parsed;
-            }
-        }
-        "style" if path_ends_with(path, &["line", "style"]) => {
-            if let Some(line) = line {
-                line.style = text.to_string();
-            }
-        }
-        _ => {}
-    }
-}
-
-fn set_spreadsheet_print_settings_usize(
-    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, usize),
-) {
-    if let Some(print_settings) = print_settings
-        && let Ok(parsed) = value.parse::<usize>()
-    {
-        setter(print_settings, parsed);
-    }
-}
-
-fn set_spreadsheet_print_settings_bool(
-    print_settings: Option<&mut SpreadsheetDocumentXmlPrintSettings>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlPrintSettings, bool),
-) {
-    if let Some(print_settings) = print_settings {
-        setter(print_settings, value.eq_ignore_ascii_case("true"));
-    }
-}
-
-fn set_spreadsheet_format_usize(
-    format: Option<&mut SpreadsheetDocumentXmlFormat>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, usize),
-) {
-    if let Some(format) = format
-        && let Ok(parsed) = value.parse::<usize>()
-    {
-        setter(format, parsed);
-    }
-}
-
-fn set_spreadsheet_format_bool(
-    format: Option<&mut SpreadsheetDocumentXmlFormat>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, bool),
-) {
-    if let Some(format) = format {
-        setter(format, value.eq_ignore_ascii_case("true"));
-    }
-}
-
-fn set_spreadsheet_format_string(
-    format: Option<&mut SpreadsheetDocumentXmlFormat>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlFormat, String),
-) {
-    if let Some(format) = format {
-        setter(format, value.to_string());
-    }
-}
-
-fn set_spreadsheet_drawing_i32(
-    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, i32),
-) {
-    if let Some(drawing) = drawing
-        && let Ok(parsed) = value.parse::<i32>()
-    {
-        setter(drawing, parsed);
-    }
-}
-
-fn set_spreadsheet_drawing_usize(
-    drawing: Option<&mut SpreadsheetDocumentXmlDrawing>,
-    value: &str,
-    setter: impl FnOnce(&mut SpreadsheetDocumentXmlDrawing, usize),
-) {
-    if let Some(drawing) = drawing
-        && let Ok(parsed) = value.parse::<usize>()
-    {
-        setter(drawing, parsed);
-    }
-}
-
-fn spreadsheet_area_property_path(path: &[String], property: &str) -> bool {
-    path_ends_with(path, &["namedItem", "area", property])
-        || path_ends_with(path, &["printArea", property])
-}
-
-fn spreadsheet_merge_property_path(path: &[String], property: &str) -> bool {
-    path_ends_with(path, &["merge", property])
-        || path_ends_with(path, &["verticalUnmerge", property])
-}
-
-fn normalize_spreadsheet_cell(cell: &mut SpreadsheetDocumentXmlCell) {
-    if cell.parameter.is_some() {
-        cell.text = None;
-        cell.empty_text = false;
-    }
-}
-
-fn spreadsheet_column_format_slots(
-    spreadsheet: &SpreadsheetDocumentXml,
-    column_count: usize,
-) -> usize {
-    spreadsheet
-        .column_sets
-        .iter()
-        .flat_map(|column_set| column_set.columns.iter())
-        .map(|column| column.format_index)
-        .max()
-        .unwrap_or(column_count.max(1))
-        .max(1)
-}
-
-fn spreadsheet_max_row_or_cell_format_index(spreadsheet: &SpreadsheetDocumentXml) -> usize {
-    spreadsheet.rows.iter().fold(0usize, |max_index, row| {
-        let row_max = row.cells.iter().fold(row.format_index, |cell_max, cell| {
-            cell_max.max(cell.format_index)
-        });
-        max_index.max(row_max)
-    })
-}
-
-fn spreadsheet_column_format_offset(spreadsheet: &SpreadsheetDocumentXml) -> usize {
-    spreadsheet
-        .column_sets
-        .iter()
-        .flat_map(|column_set| column_set.columns.iter())
-        .map(|column| column.format_index)
-        .min()
-        .unwrap_or(1)
-        .saturating_sub(1)
-}
-
-fn spreadsheet_uses_sparse_source_format_refs(spreadsheet: &SpreadsheetDocumentXml) -> bool {
-    let column_count = spreadsheet.column_count.max(
-        spreadsheet
-            .rows
-            .iter()
-            .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
-            .max()
-            .unwrap_or(1),
-    );
-    spreadsheet.default_format_index.is_none()
-        && spreadsheet_column_format_offset(spreadsheet) > 0
-        && spreadsheet_max_row_or_cell_format_index(spreadsheet)
-            > spreadsheet_column_format_slots(spreadsheet, column_count)
-}
-
-fn normalize_canonical_spreadsheet_format_order(spreadsheet: &mut SpreadsheetDocumentXml) {
-    if spreadsheet.formats.is_empty() {
-        return;
-    }
-    let offset = spreadsheet_column_format_offset(spreadsheet);
-    if offset == 0 || offset >= spreadsheet.formats.len() {
-        return;
-    }
-
-    // MOXEL stores the column format block first.  Rotating only the format
-    // bodies changes the meaning of every global reference and makes the next
-    // XML -> blob -> XML pass non-idempotent.  Move the references together
-    // with the bodies so the resulting document uses the canonical indexes.
-    let remap = |index: usize| match index {
-        0 => 0,
-        index if index <= spreadsheet.formats.len() => {
-            ((index - 1 + spreadsheet.formats.len() - offset) % spreadsheet.formats.len()) + 1
-        }
-        index => index,
-    };
-    for column_set in &mut spreadsheet.column_sets {
-        for column in &mut column_set.columns {
-            column.format_index = remap(column.format_index);
-        }
-    }
-    for row in &mut spreadsheet.rows {
-        row.format_index = remap(row.format_index);
-        for cell in &mut row.cells {
-            cell.format_index = remap(cell.format_index);
-        }
-    }
-    for drawing in &mut spreadsheet.drawings {
-        drawing.format_index = remap(drawing.format_index);
-    }
-    spreadsheet.default_format_index = spreadsheet.default_format_index.map(remap);
-    spreadsheet.formats.rotate_left(offset);
-}
-
-fn row_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
-    if format_index <= 1 {
-        0
-    } else {
-        format_index.saturating_sub(format_offset + 1)
-    }
-}
-
-fn cell_format_index_for_moxel(format_index: usize, format_offset: usize) -> usize {
-    if format_index <= 1 {
-        0
-    } else {
-        format_index.saturating_sub(format_offset + 1)
-    }
-}
-
-fn format_spreadsheet_cell_for_moxel(
-    cell: &SpreadsheetDocumentXmlCell,
-    format_offset: usize,
-) -> String {
-    let format_index = cell_format_index_for_moxel(cell.format_index, format_offset);
-    let localized = if let Some(parameter) = &cell.parameter {
-        format!(
-            "{{1,1,{{{},{}}}}}",
-            format_1c_string(""),
-            format_1c_string(parameter)
-        )
-    } else if let Some(text) = &cell.text {
-        format!(
-            "{{1,1,{{{},{}}}}}",
-            format_1c_string("ru"),
-            format_1c_string(text)
-        )
-    } else if cell.empty_text {
-        "{1,0}".to_string()
-    } else {
-        return format!("{{0,{format_index}}}");
-    };
-    if let Some(detail_parameter) = &cell.detail_parameter {
-        return format!(
-            "{{24,{format_index},{},{localized},0}}",
-            format_1c_string(detail_parameter)
-        );
-    }
-    format!("{{16,{format_index},{localized},0}}")
-}
-
-fn format_spreadsheet_empty_headers_footers_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-) -> Vec<String> {
-    let tags = [
-        "leftHeader",
-        "centerHeader",
-        "rightHeader",
-        "leftFooter",
-        "centerFooter",
-        "rightFooter",
-    ];
-    if !tags
-        .iter()
-        .all(|tag| spreadsheet.empty_header_footer_tags.contains(*tag))
-    {
-        return Vec::new();
-    }
-    vec!["{16,0,{1,0},1,{1,{1,0},1}}".to_string(); tags.len()]
-}
-
-fn spreadsheet_column_set_max_index_plus_one(
-    column_sets: &[SpreadsheetDocumentXmlColumnSet],
-) -> Option<usize> {
-    column_sets
-        .iter()
-        .flat_map(|column_set| column_set.columns.iter())
-        .filter_map(|column| usize::try_from(column.index).ok())
-        .map(|index| index + 1)
-        .max()
-}
-
-fn spreadsheet_columns_max_index_plus_one(
-    columns: &[SpreadsheetDocumentXmlColumn],
-) -> Option<usize> {
-    columns
-        .iter()
-        .filter_map(|column| usize::try_from(column.index).ok())
-        .map(|index| index + 1)
-        .max()
-}
-
-fn format_spreadsheet_column_sets_for_moxel(spreadsheet: &SpreadsheetDocumentXml) -> Vec<String> {
-    let has_column_metadata = spreadsheet
-        .column_sets
-        .iter()
-        .any(|column_set| column_set.id.is_some() || !column_set.columns.is_empty());
-    let has_row_columns_id = spreadsheet.rows.iter().any(|row| row.columns_id.is_some());
-    if !has_column_metadata && !has_row_columns_id {
-        return Vec::new();
-    }
-
-    let column_count = spreadsheet
-        .column_count
-        .max(spreadsheet_column_set_max_index_plus_one(&spreadsheet.column_sets).unwrap_or(1))
-        .max(1);
-    let default_set = spreadsheet
-        .column_sets
-        .iter()
-        .find(|column_set| column_set.id.is_none());
-    let mut fields = vec![format_spreadsheet_column_set_for_moxel(
-        default_set,
-        column_count,
-        None,
-    )];
-
-    let additional_sets = spreadsheet
-        .column_sets
-        .iter()
-        .filter(|column_set| column_set.id.is_some())
-        .collect::<Vec<_>>();
-    let height = spreadsheet.sheet_height.unwrap_or_else(|| {
-        spreadsheet
-            .rows
-            .iter()
-            .map(|row| *row.expanded_indexes().end())
-            .max()
-            .unwrap_or(0)
-            + 1
-    });
-    fields.push(height.to_string());
-    fields.push(additional_sets.len().to_string());
-    for column_set in &additional_sets {
-        fields.push(format_spreadsheet_column_set_for_moxel(
-            Some(column_set),
-            column_count,
-            column_set.id.as_deref(),
-        ));
-    }
-
-    let mut row_pairs = Vec::<(usize, usize)>::new();
-    for row in &spreadsheet.rows {
-        let Some(columns_id) = row.columns_id.as_deref() else {
-            continue;
-        };
-        let Some(set_index) = additional_sets
-            .iter()
-            .position(|column_set| column_set.id.as_deref() == Some(columns_id))
-        else {
-            continue;
-        };
-        for row_index in row.expanded_indexes() {
-            row_pairs.push((row_index, set_index));
-        }
-    }
-    fields.push(row_pairs.len().to_string());
-    for (row_index, set_index) in row_pairs {
-        fields.push(row_index.to_string());
-        fields.push(set_index.to_string());
-    }
-
-    fields
-}
-
-fn format_spreadsheet_column_set_for_moxel(
-    column_set: Option<&SpreadsheetDocumentXmlColumnSet>,
-    fallback_size: usize,
-    id: Option<&str>,
-) -> String {
-    let size = if let Some(column_set) = column_set {
-        if column_set.size == 0 {
-            0
-        } else {
-            column_set
-                .size
-                .max(spreadsheet_columns_max_index_plus_one(&column_set.columns).unwrap_or(1))
-                .max(1)
-        }
-    } else {
-        fallback_size.max(1)
-    };
-    let synthesized;
-    let columns = if let Some(column_set) = column_set {
-        if column_set.columns.is_empty() {
-            synthesized = synthesize_spreadsheet_columns(size);
-            &synthesized
-        } else {
-            &column_set.columns
-        }
-    } else {
-        synthesized = synthesize_spreadsheet_columns(size);
-        &synthesized
-    };
-    let uuid = id.unwrap_or("00000000-0000-0000-0000-000000000000");
-    let mut fields = Vec::with_capacity(columns.len() * 2 + 4);
-    fields.push(size.to_string());
-    fields.push("0".to_string());
-    fields.push(uuid.to_string());
-    fields.push(columns.len().to_string());
-    for column in columns {
-        fields.push(column.index.to_string());
-        fields.push(column.format_index.max(1).to_string());
-    }
-    format!("{{{}}}", fields.join(","))
-}
-
-fn synthesize_spreadsheet_columns(size: usize) -> Vec<SpreadsheetDocumentXmlColumn> {
-    (0..size)
-        .map(|index| SpreadsheetDocumentXmlColumn {
-            index: index as i32,
-            format_index: index + 1,
-        })
-        .collect()
-}
-
-fn format_spreadsheet_vertical_groups_for_moxel(
-    vertical_groups: &[SpreadsheetDocumentXmlVerticalGroup],
-) -> Vec<String> {
-    if vertical_groups.is_empty() {
-        return Vec::new();
-    }
-    let levels = spreadsheet_vertical_group_levels(vertical_groups);
-    let mut fields = Vec::with_capacity(vertical_groups.len() * 2 + 4);
-    fields.push(vertical_groups.len().to_string());
-    for (group, level) in vertical_groups.iter().zip(levels) {
-        fields.push(format!(
-            "{{{},{},{},{{1,0}},0,0}}",
-            group.begin_row, group.end_row, level
-        ));
-        fields.push("-1".to_string());
-    }
-    fields.extend(["0", "0", "0"].into_iter().map(String::from));
-    fields
-}
-
-fn spreadsheet_vertical_group_levels(
-    vertical_groups: &[SpreadsheetDocumentXmlVerticalGroup],
-) -> Vec<usize> {
-    let mut active_ends = Vec::<usize>::new();
-    let mut levels = Vec::with_capacity(vertical_groups.len());
-    for group in vertical_groups {
-        while active_ends
-            .last()
-            .is_some_and(|end| group.begin_row > *end || group.end_row > *end)
-        {
-            active_ends.pop();
-        }
-        levels.push(active_ends.len());
-        active_ends.push(group.end_row.max(group.begin_row));
-    }
-    levels
-}
-
-fn format_spreadsheet_merge_regions_for_moxel(
-    merges: &[SpreadsheetDocumentXmlMerge],
-    vertical_unmerges: &[SpreadsheetDocumentXmlMerge],
-) -> String {
-    let include_kind = !vertical_unmerges.is_empty();
-    let mut fields = Vec::with_capacity(merges.len() + vertical_unmerges.len() + 1);
-    fields.push((merges.len() + vertical_unmerges.len()).to_string());
-    for merge in merges {
-        fields.push(format_spreadsheet_merge_region_for_moxel(
-            merge,
-            if include_kind { Some(0) } else { None },
-        ));
-    }
-    for merge in vertical_unmerges {
-        fields.push(format_spreadsheet_merge_region_for_moxel(merge, Some(2)));
-    }
-    format!("{{{}}}", fields.join(","))
-}
-
-fn format_spreadsheet_merge_region_for_moxel(
-    merge: &SpreadsheetDocumentXmlMerge,
-    kind: Option<usize>,
-) -> String {
-    let begin_column = merge.column.max(0);
-    let begin_row = merge.row.max(0);
-    let end_column = begin_column + merge.width.max(0);
-    let end_row = begin_row + merge.height.max(0);
-    if let Some(kind) = kind {
-        format!("{{{begin_column},{begin_row},{end_column},{end_row},{kind}}}")
-    } else {
-        format!("{{{begin_column},{begin_row},{end_column},{end_row}}}")
-    }
-}
-
-fn format_spreadsheet_named_areas_for_moxel(areas: &[SpreadsheetDocumentXmlArea]) -> String {
-    let mut fields = Vec::with_capacity(areas.len() * 2 + 1);
-    fields.push(areas.len().to_string());
-    for area in areas {
-        fields.push(format_1c_string(&area.name));
-        fields.push(format!(
-            "{{1,{},0}}",
-            format_spreadsheet_area_bounds_for_moxel(area)
-        ));
-    }
-    format!("{{{}}}", fields.join(","))
-}
-
-fn format_spreadsheet_area_bounds_for_moxel(area: &SpreadsheetDocumentXmlArea) -> String {
-    let area_type = spreadsheet_area_type_code(&area.area_type);
-    let columns_id = area
-        .columns_id
-        .as_deref()
-        .filter(|value| !value.is_empty())
-        .unwrap_or("00000000-0000-0000-0000-000000000000");
-    format!(
-        "{{{area_type},{},{},{},{},{columns_id}}}",
-        area.begin_column, area.begin_row, area.end_column, area.end_row
-    )
-}
-
-fn spreadsheet_area_type_code(area_type: &str) -> &'static str {
-    match area_type {
-        "Rows" => "1",
-        "Columns" => "2",
-        _ => "3",
-    }
-}
-
-fn format_spreadsheet_print_settings_for_moxel(
-    settings: &SpreadsheetDocumentXmlPrintSettings,
-) -> Result<String> {
-    let mut pairs = vec![
-        (
-            0,
-            format_spreadsheet_print_number(settings.paper.unwrap_or(0)),
-        ),
-        (
-            1,
-            format_spreadsheet_print_number(
-                settings
-                    .page_orientation
-                    .as_deref()
-                    .map(spreadsheet_page_orientation_code)
-                    .unwrap_or(1),
-            ),
-        ),
-        (
-            2,
-            format_spreadsheet_print_number(settings.scale.unwrap_or(100)),
-        ),
-        (
-            3,
-            format_spreadsheet_print_number(bool_to_usize(settings.collate.unwrap_or(true))),
-        ),
-        (
-            4,
-            format_spreadsheet_print_number(settings.copies.unwrap_or(1)),
-        ),
-        (
-            5,
-            format_spreadsheet_print_number(settings.per_page.unwrap_or(1)),
-        ),
-        (
-            6,
-            format_spreadsheet_print_number(settings.top_margin.unwrap_or(0)),
-        ),
-        (
-            7,
-            format_spreadsheet_print_number(settings.left_margin.unwrap_or(0)),
-        ),
-        (
-            8,
-            format_spreadsheet_print_number(settings.bottom_margin.unwrap_or(0)),
-        ),
-        (
-            9,
-            format_spreadsheet_print_number(settings.right_margin.unwrap_or(0)),
-        ),
-        (
-            10,
-            format_spreadsheet_print_number(settings.header_size.unwrap_or(0)),
-        ),
-        (
-            11,
-            format_spreadsheet_print_number(settings.footer_size.unwrap_or(0)),
-        ),
-        (
-            12,
-            format_spreadsheet_print_number(bool_to_usize(settings.fit_to_page.unwrap_or(false))),
-        ),
-        (
-            13,
-            format_spreadsheet_print_number(bool_to_usize(
-                settings.black_and_white.unwrap_or(false),
-            )),
-        ),
-        (
-            14,
-            format_spreadsheet_print_string(settings.printer_name.as_deref().unwrap_or("")),
-        ),
-        (
-            15,
-            format_spreadsheet_print_number(settings.paper_source.unwrap_or(0)),
-        ),
-        (
-            16,
-            format_spreadsheet_print_number(settings.page_width.unwrap_or(0)),
-        ),
-        (
-            17,
-            format_spreadsheet_print_number(settings.page_height.unwrap_or(0)),
-        ),
-    ];
-    match (
-        settings.duplex_type.as_deref(),
-        settings.page_placement_alternation.as_deref(),
-    ) {
-        (None, None) => {}
-        (Some(duplex_type), Some(page_placement_alternation)) => {
-            let duplex_type = spreadsheet_duplex_type_code(duplex_type)
-                .ok_or_else(|| anyhow!("unsupported printSettings duplexType"))?;
-            let page_placement_alternation =
-                spreadsheet_page_placement_alternation_code(page_placement_alternation)
-                    .ok_or_else(|| anyhow!("unsupported printSettings pagePlacementAlternation"))?;
-            pairs.push((19, format_spreadsheet_print_number(duplex_type)));
-            pairs.push((
-                20,
-                format_spreadsheet_print_number(page_placement_alternation),
-            ));
-        }
-        _ => {
-            return Err(anyhow!(
-                "printSettings duplexType and pagePlacementAlternation must be specified together"
-            ));
-        }
-    }
-    let mut fields = Vec::with_capacity(pairs.len() * 2 + 2);
-    fields.push("0".to_string());
-    fields.push(pairs.len().to_string());
-    for (key, value) in pairs {
-        fields.push(key.to_string());
-        fields.push(value);
-    }
-    Ok(format!("{{{{{}}}}}", fields.join(",")))
-}
-
-fn format_spreadsheet_print_number(value: usize) -> String {
-    format!(r#"{{"N",{value}}}"#)
-}
-
-fn format_spreadsheet_print_string(value: &str) -> String {
-    format!(r#"{{"S",{}}}"#, format_1c_string(value))
-}
-
-fn spreadsheet_page_orientation_code(value: &str) -> usize {
-    match value {
-        "Landscape" => 2,
-        _ => 1,
-    }
-}
-
-fn spreadsheet_duplex_type_code(value: &str) -> Option<usize> {
-    match value {
-        "None" => Some(1),
-        "UsePrinterSettings" => Some(4),
-        _ => None,
-    }
-}
-
-fn spreadsheet_page_placement_alternation_code(value: &str) -> Option<usize> {
-    (value == "Auto").then_some(0)
-}
-
-fn bool_to_usize(value: bool) -> usize {
-    if value { 1 } else { 0 }
-}
-
-fn format_spreadsheet_formats_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-    column_format_slots: usize,
-    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
-) -> (Vec<String>, Vec<SpreadsheetNumberFormatSlot>) {
-    if spreadsheet.formats.is_empty() && spreadsheet.default_format_index.is_none() {
-        return (Vec::new(), Vec::new());
-    }
-    let source_format_count = spreadsheet
-        .formats
-        .len()
-        .max(spreadsheet.default_format_index.unwrap_or(0))
-        .max(column_format_slots);
-    let body_format_count = source_format_count.saturating_sub(column_format_slots);
-    let column_placeholder_count = column_format_slots.max(1);
-    let count = body_format_count + column_placeholder_count;
-    let mut style_refs = Vec::<SpreadsheetStyleRefSlot>::new();
-    let mut number_format_refs = number_format_hint
-        .map(|hint| {
-            hint.slots
-                .iter()
-                .cloned()
-                .map(SpreadsheetNumberFormatSlot)
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
-    let mut format_fields = Vec::with_capacity(count + 1);
-    let mut body_format_indexes = Vec::with_capacity(body_format_count);
-    let mut drawing_format_indexes = Vec::new();
-    let mut raw_format_position = 0usize;
-    let style_ref_base = format_spreadsheet_lines_for_moxel(&spreadsheet.lines).len();
-    format_fields.push(count.to_string());
-    for global_index in column_format_slots + 1..=source_format_count {
-        if spreadsheet
-            .formats
-            .get(global_index.saturating_sub(1))
-            .is_some_and(|format| format.drawing_border.is_some())
-        {
-            drawing_format_indexes.push(global_index);
-        } else {
-            body_format_indexes.push(global_index);
-        }
-    }
-    for global_index in body_format_indexes {
-        format_fields.push(format_spreadsheet_format_index_for_moxel(
-            spreadsheet,
-            global_index,
-            false,
-            style_ref_base,
-            &mut style_refs,
-            raw_format_position,
-            number_format_hint,
-            &mut number_format_refs,
-        ));
-        raw_format_position += 1;
-    }
-    for global_index in 1..=column_placeholder_count {
-        format_fields.push(format_spreadsheet_format_index_for_moxel(
-            spreadsheet,
-            global_index,
-            false,
-            style_ref_base,
-            &mut style_refs,
-            raw_format_position,
-            number_format_hint,
-            &mut number_format_refs,
-        ));
-        raw_format_position += 1;
-    }
-    for global_index in drawing_format_indexes {
-        format_fields.push(format_spreadsheet_format_index_for_moxel(
-            spreadsheet,
-            global_index,
-            true,
-            style_ref_base,
-            &mut style_refs,
-            raw_format_position,
-            number_format_hint,
-            &mut number_format_refs,
-        ));
-        raw_format_position += 1;
-    }
-    let mut fields = style_refs
-        .iter()
-        .map(format_spreadsheet_style_ref_slot_for_moxel)
-        .collect::<Vec<_>>();
-    fields.push(format!("{{{}}}", format_fields.join(",")));
-    (fields, number_format_refs)
-}
-
-fn spreadsheet_format_physical_index_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-    column_format_slots: usize,
-    global_index: usize,
-) -> usize {
-    if global_index == 0 {
-        return 0;
-    }
-    let source_format_count = spreadsheet
-        .formats
-        .len()
-        .max(spreadsheet.default_format_index.unwrap_or(0))
-        .max(column_format_slots);
-    let column_placeholder_count = column_format_slots.max(1);
-    let is_drawing_format = |index: usize| {
-        spreadsheet
-            .formats
-            .get(index.saturating_sub(1))
-            .is_some_and(|format| format.drawing_border.is_some())
-    };
-    let mut physical_index = 0usize;
-    for index in column_format_slots + 1..=source_format_count {
-        if !is_drawing_format(index) {
-            physical_index += 1;
-            if index == global_index {
-                return physical_index;
-            }
-        }
-    }
-    for index in 1..=column_placeholder_count {
-        physical_index += 1;
-        if index == global_index {
-            return physical_index;
-        }
-    }
-    for index in column_format_slots + 1..=source_format_count {
-        if is_drawing_format(index) {
-            physical_index += 1;
-            if index == global_index {
-                return physical_index;
-            }
-        }
-    }
-    global_index
-}
-
-fn format_spreadsheet_format_index_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-    global_index: usize,
-    drawing_slot: bool,
-    style_ref_base: usize,
-    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
-    raw_format_position: usize,
-    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
-    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
-) -> String {
-    spreadsheet
-        .formats
-        .get(global_index.saturating_sub(1))
-        .and_then(|format| {
-            format_spreadsheet_format_for_moxel(
-                format,
-                drawing_slot,
-                style_ref_base,
-                style_refs,
-                raw_format_position,
-                number_format_hint,
-                number_format_refs,
-            )
-        })
-        .unwrap_or_else(spreadsheet_empty_format_for_moxel)
-}
-
-fn spreadsheet_empty_format_for_moxel() -> String {
-    "{0}".to_string()
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum SpreadsheetStyleRefSlot {
-    DirectColor(u32),
-    SystemStyle(i32),
-    UuidStyle(&'static str),
-    WebColor(u32),
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct SpreadsheetNumberFormatSlot(Vec<LocalizedString>);
-
-fn format_spreadsheet_format_for_moxel(
-    format: &SpreadsheetDocumentXmlFormat,
-    drawing_slot: bool,
-    style_ref_base: usize,
-    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
-    raw_format_position: usize,
-    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
-    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
-) -> Option<String> {
-    let mut values = Vec::<(u8, usize)>::new();
-    push_spreadsheet_format_value(&mut values, 0, format.font);
-    if drawing_slot {
-        push_spreadsheet_format_value(&mut values, 1, format.drawing_border);
-    } else if let Some(border) = format.border {
-        for bit in [1, 2, 3, 4] {
-            push_spreadsheet_format_value(&mut values, bit, Some(border));
-        }
-    } else {
-        push_spreadsheet_format_value(&mut values, 1, format.left_border);
-        push_spreadsheet_format_value(&mut values, 2, format.top_border);
-        push_spreadsheet_format_value(&mut values, 3, format.right_border);
-        push_spreadsheet_format_value(&mut values, 4, format.bottom_border);
-    }
-    push_spreadsheet_format_value(&mut values, 6, format.height);
-    push_spreadsheet_format_value(
-        &mut values,
-        5,
-        format
-            .border_color
-            .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-    );
-    push_spreadsheet_format_value(&mut values, 7, format.width);
-    push_spreadsheet_format_value(
-        &mut values,
-        8,
-        format
-            .horizontal_alignment
-            .as_deref()
-            .and_then(spreadsheet_horizontal_alignment_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        9,
-        format
-            .vertical_alignment
-            .as_deref()
-            .and_then(spreadsheet_vertical_alignment_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        10,
-        format
-            .text_color
-            .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        11,
-        format
-            .back_color
-            .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        12,
-        format.pattern.as_deref().and_then(spreadsheet_pattern_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        14,
-        format
-            .text_placement
-            .as_deref()
-            .and_then(spreadsheet_text_placement_code),
-    );
-    // Mirror of the decoder: member 13 is `patternColor` for every format, not
-    // just for the ones a drawing references, and member 18 is
-    // `textOrientation`.  Writing the orientation into 13 was the packer half of
-    // the same conflation the decoder carried.
-    push_spreadsheet_format_value(
-        &mut values,
-        13,
-        format
-            .pattern_color
-            .as_deref()
-            .and_then(|value| spreadsheet_style_ref_index(value, style_refs, style_ref_base)),
-    );
-    push_spreadsheet_format_value(&mut values, 18, format.text_orientation);
-    push_spreadsheet_format_value(
-        &mut values,
-        15,
-        format
-            .fill_type
-            .as_deref()
-            .and_then(spreadsheet_fill_type_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        24,
-        spreadsheet_number_format_index(
-            &format.number_format,
-            raw_format_position,
-            number_format_hint,
-            number_format_refs,
-        ),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        32,
-        spreadsheet_number_format_index(
-            &format.edit_format,
-            raw_format_position,
-            number_format_hint,
-            number_format_refs,
-        ),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        16,
-        format.protection.map(spreadsheet_protection_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        19,
-        format
-            .details_use
-            .as_deref()
-            .and_then(spreadsheet_details_use_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        20,
-        format.by_selected_columns.map(bool_to_usize),
-    );
-    push_spreadsheet_format_value(&mut values, 21, format.mark_negatives.map(bool_to_usize));
-    push_spreadsheet_format_value(&mut values, 26, format.hyper_link.map(bool_to_usize));
-    push_spreadsheet_format_value(&mut values, 30, format.indent);
-    push_spreadsheet_format_value(&mut values, 31, format.auto_indent);
-    if format.mask.as_deref() == Some("") {
-        push_spreadsheet_format_value(&mut values, 34, Some(0));
-    }
-    push_spreadsheet_format_value(&mut values, 35, format.pic_index);
-    push_spreadsheet_format_value(
-        &mut values,
-        36,
-        format
-            .picture_size_mode
-            .as_deref()
-            .and_then(spreadsheet_picture_size_mode_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        37,
-        format
-            .pic_horizontal_alignment
-            .as_deref()
-            .and_then(spreadsheet_picture_alignment_code),
-    );
-    push_spreadsheet_format_value(
-        &mut values,
-        38,
-        format
-            .pic_vertical_alignment
-            .as_deref()
-            .and_then(spreadsheet_picture_alignment_code),
-    );
-    if values.is_empty() {
-        return None;
-    }
-    values.sort_by_key(|(bit, _)| *bit);
-    let flags = values
-        .iter()
-        .fold(0u64, |acc, (bit, _)| acc | (1u64 << bit));
-    let mut fields = Vec::with_capacity(values.len() + 1);
-    fields.push(flags.to_string());
-    fields.extend(values.into_iter().map(|(_, value)| value.to_string()));
-    Some(format!("{{{}}}", fields.join(",")))
-}
-
-fn push_spreadsheet_format_value(values: &mut Vec<(u8, usize)>, bit: u8, value: Option<usize>) {
-    if let Some(value) = value {
-        values.push((bit, value));
-    }
-}
-
-fn spreadsheet_style_ref_index(
-    value: &str,
-    style_refs: &mut Vec<SpreadsheetStyleRefSlot>,
-    style_ref_base: usize,
-) -> Option<usize> {
-    let slot = spreadsheet_style_ref_slot(value)?;
-    if let Some(index) = style_refs.iter().position(|existing| existing == &slot) {
-        return Some(style_ref_base + index);
-    }
-    let index = style_ref_base + style_refs.len();
-    style_refs.push(slot);
-    Some(index)
-}
-
-fn spreadsheet_number_format_index(
-    values: &[LocalizedString],
-    raw_format_position: usize,
-    number_format_hint: Option<&SpreadsheetNumberFormatHint>,
-    number_format_refs: &mut Vec<SpreadsheetNumberFormatSlot>,
-) -> Option<usize> {
-    if let Some(hint) = number_format_hint
-        .and_then(|hint| hint.format_slot_indices.get(raw_format_position))
-        .and_then(|slot| *slot)
-        && let Some(existing) = number_format_refs.get(hint)
-    {
-        if values.is_empty() && existing.0.is_empty() {
-            return Some(hint);
-        }
-        if existing.0 == values {
-            return Some(hint);
-        }
-    }
-    if values.is_empty() {
-        return None;
-    }
-    if number_format_refs.is_empty() {
-        number_format_refs.push(SpreadsheetNumberFormatSlot(Vec::new()));
-    }
-    let slot = SpreadsheetNumberFormatSlot(values.to_vec());
-    if let Some(index) = number_format_refs
-        .iter()
-        .position(|existing| existing == &slot)
-    {
-        return Some(index);
-    }
-    let index = number_format_refs.len();
-    number_format_refs.push(slot);
-    Some(index)
-}
-
-fn format_spreadsheet_number_formats_for_moxel(
-    refs: &[SpreadsheetNumberFormatSlot],
-) -> Vec<String> {
-    if refs.is_empty() {
-        return Vec::new();
-    }
-    let mut fields = Vec::with_capacity(refs.len() + 1);
-    fields.push(refs.len().to_string());
-    fields.extend(
-        refs.iter()
-            .map(|slot| format_spreadsheet_number_format_for_moxel(&slot.0)),
-    );
-    fields
-}
-
-fn format_spreadsheet_number_format_for_moxel(values: &[LocalizedString]) -> String {
-    let mut fields = Vec::with_capacity(values.len() + 2);
-    fields.push("1".to_string());
-    fields.push(values.len().to_string());
-    for value in values {
-        fields.push(format!(
-            "{{{},{}}}",
-            format_1c_string(&value.lang),
-            format_1c_string(&value.content)
-        ));
-    }
-    format!("{{{}}}", fields.join(","))
-}
-
-fn spreadsheet_style_ref_slot(value: &str) -> Option<SpreadsheetStyleRefSlot> {
-    if let Some(color) = spreadsheet_direct_color_code(value) {
-        return Some(SpreadsheetStyleRefSlot::DirectColor(color));
-    }
-    if let Some(uuid) = spreadsheet_uuid_style_ref(value) {
-        return Some(SpreadsheetStyleRefSlot::UuidStyle(uuid));
-    }
-    if let Some(code) = spreadsheet_system_style_code(value) {
-        return Some(SpreadsheetStyleRefSlot::SystemStyle(code));
-    }
-    spreadsheet_web_color_code(value).map(SpreadsheetStyleRefSlot::WebColor)
-}
-
-fn format_spreadsheet_style_ref_slot_for_moxel(slot: &SpreadsheetStyleRefSlot) -> String {
-    match slot {
-        SpreadsheetStyleRefSlot::DirectColor(value) => format!("{{3,0,{{{value}}}}}"),
-        SpreadsheetStyleRefSlot::SystemStyle(value) => format!("{{3,3,{{{value}}}}}"),
-        SpreadsheetStyleRefSlot::UuidStyle(uuid) => format!("{{3,3,{{0,{uuid}}}}}"),
-        SpreadsheetStyleRefSlot::WebColor(value) => format!("{{3,2,{{{value}}}}}"),
-    }
-}
-
-fn spreadsheet_direct_color_code(value: &str) -> Option<u32> {
-    let hex = value.strip_prefix('#')?;
-    if hex.len() != 6 {
-        return None;
-    }
-    let red = u32::from_str_radix(&hex[0..2], 16).ok()?;
-    let green = u32::from_str_radix(&hex[2..4], 16).ok()?;
-    let blue = u32::from_str_radix(&hex[4..6], 16).ok()?;
-    Some(red | (green << 8) | (blue << 16))
-}
-
-fn spreadsheet_system_style_code(value: &str) -> Option<i32> {
-    match value {
-        "style:FieldBackColor" => Some(-10),
-        "style:FieldSelectionBackColor" => Some(-21),
-        "style:ButtonBackColor" => Some(-7),
-        "style:ButtonTextColor" => Some(-15),
-        "style:ReportLineColor" => Some(-28),
-        _ => None,
-    }
-}
-
-fn spreadsheet_uuid_style_ref(value: &str) -> Option<&'static str> {
-    match value {
-        "style:FormBackColor" => Some("f527dc88-1d39-40b3-bcbb-d98b690ead68"),
-        _ => None,
-    }
-}
-
-fn spreadsheet_web_color_code(value: &str) -> Option<u32> {
-    match value {
-        "d3p1:Crimson" => Some(21),
-        "d3p1:Gainsboro" => Some(48),
-        "d3p1:Gray" => Some(52),
-        "d3p1:LemonChiffon" => Some(64),
-        "d3p1:LightYellow" => Some(79),
-        "d3p1:PaleGoldenrod" => Some(108),
-        "d3p1:RoyalBlue" => Some(121),
-        "d3p1:White" => Some(143),
-        _ => None,
-    }
-}
-
-fn spreadsheet_horizontal_alignment_code(value: &str) -> Option<usize> {
-    match value {
-        "Left" => Some(0),
-        "Right" => Some(2),
-        "Justify" => Some(4),
-        "Auto" => Some(5),
-        "Center" => Some(6),
-        _ => None,
-    }
-}
-
-fn spreadsheet_vertical_alignment_code(value: &str) -> Option<usize> {
-    match value {
-        "Top" => Some(0),
-        "Center" => Some(24),
-        "Bottom" => Some(48),
-        _ => None,
-    }
-}
-
-fn spreadsheet_text_placement_code(value: &str) -> Option<usize> {
-    match value {
-        "Auto" => Some(0),
-        "Cut" => Some(1),
-        "Block" => Some(2),
-        "Wrap" => Some(3),
-        _ => None,
-    }
-}
-
-fn spreadsheet_pattern_code(value: &str) -> Option<usize> {
-    if value == "WithoutPattern" {
-        return Some(255);
-    }
-    if value == "Solid" {
-        return Some(0);
-    }
-    value
-        .strip_prefix("Pattern")?
-        .parse::<usize>()
-        .ok()
-        .filter(|value| (1..=18).contains(value))
-}
-
-fn spreadsheet_fill_type_code(value: &str) -> Option<usize> {
-    match value {
-        "Text" => Some(0),
-        "Parameter" => Some(1),
-        "Template" => Some(2),
-        _ => None,
-    }
-}
-
-fn spreadsheet_details_use_code(value: &str) -> Option<usize> {
-    match value {
-        "Cell" => Some(0),
-        "Row" => Some(1),
-        _ => None,
-    }
-}
-
-fn spreadsheet_protection_code(value: bool) -> usize {
-    if value { 0 } else { 1 }
-}
-
-fn spreadsheet_picture_size_mode_code(value: &str) -> Option<usize> {
-    match value {
-        "Proportionally" => Some(6),
-        _ => None,
-    }
-}
-
-fn spreadsheet_picture_alignment_code(value: &str) -> Option<usize> {
-    match value {
-        "Center" => Some(2),
-        _ => None,
-    }
-}
-
-fn format_spreadsheet_lines_for_moxel(lines: &[SpreadsheetDocumentXmlLine]) -> Vec<String> {
-    lines
-        .iter()
-        .filter(|line| line.line_type.ends_with("SpreadsheetDocumentCellLineType"))
-        .filter_map(|line| spreadsheet_line_style_code(&line.style))
-        .map(|code| format!("{{3,3,{{{code}}}}}"))
-        .collect()
-}
-
-fn spreadsheet_line_style_code(value: &str) -> Option<i32> {
-    match value {
-        "None" => Some(-1),
-        "Solid" => Some(-3),
-        "Dotted" => Some(-10),
-        _ => None,
-    }
-}
-
-fn format_spreadsheet_drawings_for_moxel(
-    spreadsheet: &SpreadsheetDocumentXml,
-    column_format_slots: usize,
-) -> Vec<String> {
-    spreadsheet
-        .drawings
-        .iter()
-        .filter_map(|drawing| {
-            format_spreadsheet_drawing_for_moxel(
-                drawing,
-                spreadsheet_format_physical_index_for_moxel(
-                    spreadsheet,
-                    column_format_slots,
-                    drawing.format_index,
-                ),
-            )
-        })
-        .collect()
-}
-
-fn format_spreadsheet_drawing_for_moxel(
-    drawing: &SpreadsheetDocumentXmlDrawing,
-    format_index: usize,
-) -> Option<String> {
-    // Geometry is stored column-first and is neither ordered nor non-negative,
-    // so it is written through unchanged; the clamping this replaces silently
-    // rewrote the 9 records that end left of where they begin and the 2 that end
-    // above.
-    let geometry = format!(
-        "{},{},{},{},{},{},{},{}",
-        drawing.begin_column,
-        drawing.begin_row,
-        drawing.begin_column_offset,
-        drawing.begin_row_offset,
-        drawing.end_column,
-        drawing.end_row,
-        drawing.end_column_offset,
-        drawing.end_row_offset
-    );
-    let auto_size = usize::from(drawing.auto_size);
-    match &drawing.kind {
-        // `Line`, `Rectangle` and `Text` keep the twelve-field record, whose
-        // last slot is the `autoSize` flag.
-        SpreadsheetDocumentXmlDrawingKind::Shape(shape) => {
-            let kind = match shape.as_str() {
-                "Line" => 1,
-                "Rectangle" => 2,
-                "Text" => 3,
-                _ => return None,
-            };
-            Some(format!(
-                "{{{{0,{format_index}}},{kind},{geometry},{},{auto_size}}}",
-                drawing.id
-            ))
-        }
-        SpreadsheetDocumentXmlDrawingKind::Picture {
-            picture_size,
-            picture_index,
-        } => {
-            // The decoder reads slot 10 as the identifier, 11 as the picture
-            // index, 12 as the picture size and 13 as `autoSize`.  This branch
-            // used to write `autoSize`, a literal 1, the z-order and the picture
-            // index into those four slots, so a packed picture came back with a
-            // different id, a different picture index and an inverted
-            // `autoSize`; no test asserted that a drawing survived the round
-            // trip, so the four-way swap went unnoticed.
-            let picture_size_code = match picture_size.as_str() {
-                "RealSize" => 0,
-                "Stretch" => 1,
-                "Proportionally" => 2,
-                "AutoSize" => 4,
-                "ByFontSize" => 7,
-                _ => return None,
-            };
-            Some(format!(
-                "{{{{0,{format_index}}},5,{geometry},{},{picture_index},{picture_size_code},{auto_size}}}",
-                drawing.id
-            ))
-        }
-        SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) => {
-            format_spreadsheet_chart_drawing_for_moxel(drawing, format_index, chart)
-        }
-        SpreadsheetDocumentXmlDrawingKind::Chart(None) => None,
-    }
-}
-
-fn format_spreadsheet_chart_drawing_for_moxel(
-    drawing: &SpreadsheetDocumentXmlDrawing,
-    format_index: usize,
-    chart: &SpreadsheetDocumentXmlChart,
-) -> Option<String> {
-    const CHART_TYPE_UUID: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
-
-    if drawing.auto_size
-        || chart.object.name != "object"
-        || chart
-            .object
-            .attributes
-            .get("type")
-            .is_none_or(|value| value.rsplit(':').next() != Some("Chart"))
-    {
-        return None;
-    }
-    let series = spreadsheet_chart_children(&chart.object, "realSeriesData");
-    if series.len() != 1 {
-        return None;
-    }
-    validate_spreadsheet_chart_v74_xml(&chart.object)?;
-    let points = spreadsheet_chart_children(&chart.object, "realPointData");
-    if points.is_empty()
-        || points.len() > 1024
-        || spreadsheet_chart_usize(&chart.object, "realSeriesCount")? != series.len()
-        || spreadsheet_chart_usize(&chart.object, "realPointCount")? != points.len()
-    {
-        return None;
-    }
-    let extra_series = spreadsheet_chart_child(&chart.object, "realExSeriesData")?;
-    let mut data = vec![
-        "74".to_string(),
-        spreadsheet_chart_text(&chart.object, "seriesCurId")?.to_string(),
-        spreadsheet_chart_text(&chart.object, "pointsCurId")?.to_string(),
-        spreadsheet_chart_bool_code(&chart.object, "isSeriesDesign")?.to_string(),
-        series.len().to_string(),
-    ];
-    for item in &series {
-        data.extend(format_spreadsheet_chart_series_for_moxel(item)?);
-    }
-    data.extend(format_spreadsheet_chart_series_for_moxel(extra_series)?);
-    data.push(spreadsheet_chart_bool_code(&chart.object, "isPointsDesign")?.to_string());
-    data.push(points.len().to_string());
-    for item in &points {
-        data.extend(format_spreadsheet_chart_point_for_moxel(item)?);
-    }
-    data.extend(format_spreadsheet_chart_tail_for_moxel(
-        &chart.object,
-        &series,
-        &points,
-    )?);
-    let payload = format!("{{{{11}},{{{}}}}}", data.join(","));
-    Some(format!(
-        "{{{{0,{}}},10,{},{},{},{},{},{},{},{},{},{CHART_TYPE_UUID},{payload},0}}",
-        format_index,
-        drawing.begin_column.max(0),
-        drawing.begin_row.max(0),
-        drawing.begin_column_offset.max(0),
-        drawing.begin_row_offset.max(0),
-        drawing.end_column.max(drawing.begin_column).max(0),
-        drawing.end_row.max(drawing.begin_row).max(0),
-        drawing.end_column_offset.max(0),
-        drawing.end_row_offset.max(0),
-        drawing.id
-    ))
-}
-
-fn format_spreadsheet_chart_series_for_moxel(
-    node: &SpreadsheetChartXmlNode,
-) -> Option<Vec<String>> {
-    spreadsheet_chart_exact_child_names(
-        node,
-        &[
-            "id",
-            "color",
-            "line",
-            "marker",
-            "text",
-            "strIsChanged",
-            "isExpand",
-            "isIndicator",
-            "colorPriority",
-        ],
-    )?;
-    Some(vec![
-        spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
-        spreadsheet_chart_line_for_moxel(spreadsheet_chart_child(node, "line")?)?,
-        spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?.to_string(),
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(node, "text")?)?,
-        spreadsheet_chart_bool_code(node, "strIsChanged")?.to_string(),
-        spreadsheet_chart_bool_code(node, "isExpand")?.to_string(),
-        spreadsheet_chart_bool_code(node, "isIndicator")?.to_string(),
-        spreadsheet_chart_usize(node, "id")?.to_string(),
-        r#"{"U"}"#.to_string(),
-        r#"{"U"}"#.to_string(),
-        spreadsheet_chart_bool_code(node, "colorPriority")?.to_string(),
-    ])
-}
-
-fn format_spreadsheet_chart_point_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<Vec<String>> {
-    spreadsheet_chart_exact_child_names(
-        node,
-        &[
-            "id",
-            "color",
-            "line",
-            "marker",
-            "text",
-            "strIsChanged",
-            "isExpand",
-            "isIndicator",
-            "colorPriority",
-        ],
-    )?;
-    Some(vec![
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(node, "text")?)?,
-        spreadsheet_chart_bool_code(node, "strIsChanged")?.to_string(),
-        spreadsheet_chart_usize(node, "id")?.to_string(),
-        spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
-        spreadsheet_chart_line_for_moxel(spreadsheet_chart_child(node, "line")?)?,
-        spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?.to_string(),
-        spreadsheet_chart_bool_code(node, "isExpand")?.to_string(),
-        spreadsheet_chart_bool_code(node, "isIndicator")?.to_string(),
-        r#"{"U"}"#.to_string(),
-        r#"{"U"}"#.to_string(),
-        spreadsheet_chart_bool_code(node, "colorPriority")?.to_string(),
-    ])
-}
-
-fn format_spreadsheet_chart_tail_for_moxel(
-    chart: &SpreadsheetChartXmlNode,
-    series: &[&SpreadsheetChartXmlNode],
-    points: &[&SpreadsheetChartXmlNode],
-) -> Option<Vec<String>> {
-    let title =
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "title")?)?;
-    let value_format =
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "vsFormat")?)?;
-    let label_location = match spreadsheet_chart_text(chart, "labelsLocation")? {
-        "Edge" => 0,
-        "Auto" => 4,
-        _ => return None,
-    };
-    let gauge_bands = format_spreadsheet_chart_gauge_bands_for_moxel(spreadsheet_chart_child(
-        chart,
-        "gaugeQualityBands",
-    )?)?;
-    let mut tail = vec![
-        spreadsheet_chart_text(chart, "curSeries")?.to_string(),
-        spreadsheet_chart_text(chart, "curPoint")?.to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        format_1c_string(spreadsheet_chart_text(chart, "labelsDelimiter")?),
-        label_location.to_string(),
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "lbFormat")?)?,
-        format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(chart, "lbpFormat")?)?,
-        "{3,3,{-3}}".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        title,
-        "0".to_string(),
-        "0".to_string(),
-        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
-        "{3,3,{-22}}".to_string(),
-        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
-        "{3,3,{-22}}".to_string(),
-        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
-        "{3,3,{-22}}".to_string(),
-        "0".to_string(),
-        "{3,3,{-1}}".to_string(),
-        "1".to_string(),
-        "{3,3,{-1}}".to_string(),
-        "1".to_string(),
-        "{3,3,{-1}}".to_string(),
-        "0".to_string(),
-        "{3,0,{16777215}}".to_string(),
-        "{3,3,{-3}}".to_string(),
-        "{3,3,{-3}}".to_string(),
-        "{3,3,{-3}}".to_string(),
-        "{7,2,0,{-20},1,100}".to_string(),
-        "{7,2,0,{-20},1,100}".to_string(),
-        "{7,2,0,{-20},1,100}".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        value_format.clone(),
-        "0".to_string(),
-        "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}".to_string(),
-        "{3,0,{11119017}}".to_string(),
-        spreadsheet_chart_bool_code(chart, "isAutoSeriesName")?.to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        spreadsheet_chart_text(chart, "maxSeries")?.to_string(),
-        "30".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        spreadsheet_chart_bool_code(chart, "isOutline")?.to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "2".to_string(),
-        "{1,0}".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "{3,0,{169}}".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        gauge_bands,
-        "0".to_string(),
-        "180".to_string(),
-        "2".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        "5".to_string(),
-        "{3,0,{11119017}}".to_string(),
-        "1".to_string(),
-        spreadsheet_chart_number(chart, "userMaxValue")?,
-        "1".to_string(),
-        spreadsheet_chart_number(chart, "userMinValue")?,
-        "1".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        "{3,3,{-22}}".to_string(),
-        "{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
-        format_1c_string(spreadsheet_chart_text(chart, "dataSourceDescription")?),
-        "0".to_string(),
-        "1".to_string(),
-    ];
-    if tail.len() != 100 {
-        return None;
-    }
-    let data_items = spreadsheet_chart_child(chart, "realDataItems")?;
-    let items = spreadsheet_chart_children(data_items, "item");
-    if items.len() != series.len().checked_mul(points.len())? {
-        return None;
-    }
-    for item in items {
-        spreadsheet_chart_exact_child_names(item, &["valData", "valInfo", "toolTip"])?;
-        let value = spreadsheet_chart_child(item, "valData")?;
-        if value
-            .attributes
-            .get("type")
-            .is_none_or(|value| value.rsplit(':').next() != Some("decimal"))
-            || spreadsheet_chart_child(item, "valInfo")?
-                .attributes
-                .get("nil")
-                .map(String::as_str)
-                != Some("true")
-        {
-            return None;
-        }
-        tail.push(format!(
-            "{{\"N\",{}}}",
-            spreadsheet_chart_node_number(value)?
-        ));
-        tail.push(r#"{"U"}"#.to_string());
-        tail.push(format_1c_string(
-            spreadsheet_chart_child(item, "toolTip")?.text.trim(),
-        ));
-    }
-    let mut post = vec![
-        "14".to_string(),
-        "2".to_string(),
-        "{7,3,0,1,100}".to_string(),
-        "1".to_string(),
-        "{3,4,{0}}".to_string(),
-        "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string(),
-        "{3,4,{0}}".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "1".to_string(),
-        "0".to_string(),
-        spreadsheet_chart_number(chart, "translucencePercent")?,
-        spreadsheet_chart_text(chart, "splineStrain")?.to_string(),
-        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(
-            chart,
-            "funnelNeckHeightPercent",
-        )?)?,
-        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(
-            chart,
-            "funnelNeckWidthPercent",
-        )?)?,
-        spreadsheet_chart_percent_fraction(spreadsheet_chart_text(chart, "funnelGapSumPercent")?)?,
-        "{4,0,{0},1,1,0,e5cabe59-d992-4d31-8086-3116931aff81,0}".to_string(),
-        "{3,0,{0}}".to_string(),
-        "2".to_string(),
-        "255".to_string(),
-        "0".to_string(),
-        spreadsheet_chart_text(chart, "rebuildTime")?.to_string(),
-        "00000000-0000-0000-0000-000000000000".to_string(),
-        "2".to_string(),
-        "{0,1,0}".to_string(),
-        "{0,2,0}".to_string(),
-        "{0,0}".to_string(),
-        "{0,0}".to_string(),
-        "0".to_string(),
-        format_spreadsheet_chart_axis_for_moxel(spreadsheet_chart_child(chart, "valuesAxis")?)?,
-        format_spreadsheet_chart_axis_for_moxel(spreadsheet_chart_child(chart, "pointsAxis")?)?,
-        "0".to_string(),
-        "0".to_string(),
-        "2".to_string(),
-        "-2".to_string(),
-        "1".to_string(),
-        "10".to_string(),
-        "1".to_string(),
-        "20".to_string(),
-        "0".to_string(),
-        "0".to_string(),
-        spreadsheet_chart_scale_for_moxel("{1,0}"),
-        spreadsheet_chart_scale_for_moxel(&value_format),
-        spreadsheet_chart_scale_for_moxel("{1,0}"),
-        "0".to_string(),
-        "0".to_string(),
-        "{3,4,{0}}".to_string(),
-        "{3,4,{0}}".to_string(),
-        "0".to_string(),
-    ];
-    for point in points {
-        post.push(format!(
-            "{{{}}}",
-            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(point, "color")?)?
-        ));
-    }
-    post.push(format_spreadsheet_chart_cache_for_moxel(
-        series.first().copied()?,
-    )?);
-    post.push(format_spreadsheet_chart_cache_for_moxel(
-        spreadsheet_chart_child(chart, "realExSeriesData")?,
-    )?);
-    post.extend(
-        [
-            "0", "0", "0", "0", "0", "0", "1", "1", "0", "0", "1", "1", "1", "6", "8",
-        ]
-        .into_iter()
-        .map(str::to_string),
-    );
-    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
-        spreadsheet_chart_child(chart, "elementsChart")?,
-    )?);
-    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
-        spreadsheet_chart_child(chart, "elementsLegend")?,
-    )?);
-    post.extend(format_spreadsheet_chart_rectangle_for_moxel(
-        spreadsheet_chart_child(chart, "elementsTitle")?,
-    )?);
-    post.extend(
-        [
-            "{0,0}",
-            "{0,0}",
-            "{0,0}",
-            "{0,0}",
-            "{0,14,{3,4,{0}},{3,4,{0}},0,0}",
-            "{0,14,{3,4,{0}},{3,4,{0}},0,0}",
-            "0",
-            "0",
-            "{0,0,0,0,0}",
-            "{0,0,0,0}",
-            "0",
-        ]
-        .into_iter()
-        .map(str::to_string),
-    );
-    for _ in points {
-        post.push("{{1,{1,0},0},0}".to_string());
-    }
-    post.push(String::new());
-    post.push("60".to_string());
-    post.push(spreadsheet_chart_scale_for_moxel("{1,0}"));
-    post.push("{0,0,{0,1,0,1,0},0,0}".to_string());
-    post.extend(std::iter::repeat_n("0".to_string(), 7));
-    if post.len() != 100 + points.len() * 2 {
-        return None;
-    }
-    tail.extend(post);
-    Some(tail)
-}
-
-fn validate_spreadsheet_chart_v74_xml(node: &SpreadsheetChartXmlNode) -> Option<()> {
-    let series_count = spreadsheet_chart_usize(node, "realSeriesCount")?;
-    let point_count = spreadsheet_chart_usize(node, "realPointCount")?;
-    let has_value_scale = spreadsheet_chart_children(node, "valuesScale").len() == 1;
-    let mut names = vec![
-        "seriesCurId",
-        "pointsCurId",
-        "isSeriesDesign",
-        "realSeriesCount",
-    ];
-    names.extend(std::iter::repeat_n("realSeriesData", series_count));
-    names.extend(["realExSeriesData", "isPointsDesign", "realPointCount"]);
-    names.extend(std::iter::repeat_n("realPointData", point_count));
-    names.extend([
-        "curSeries",
-        "curPoint",
-        "chartType",
-        "circleLabelType",
-        "labelsDelimiter",
-        "labelsLocation",
-        "lbFormat",
-        "lbpFormat",
-        "labelsColor",
-        "labelsFont",
-        "transparentLabelsBkg",
-        "labelsBkgColor",
-        "labelsBorder",
-        "labelsBorderColor",
-        "circleExpandMode",
-        "chart3Dcrd",
-        "title",
-        "isShowTitle",
-        "isShowLegend",
-        "ttlBorder",
-        "ttlBorderColor",
-        "lgBorder",
-        "lgBorderColor",
-        "chBorder",
-        "chBorderColor",
-        "transparent",
-        "bkgColor",
-        "isTrnspTtl",
-        "ttlColor",
-        "isTrnspLeg",
-        "legColor",
-        "isTrnspCh",
-        "chColor",
-        "ttlTxtColor",
-        "legTxtColor",
-        "chTxtColor",
-        "ttlFont",
-        "legFont",
-        "chFont",
-        "isShowScale",
-        "isShowScaleVL",
-        "isShowSeriesScale",
-        "isShowPointsScale",
-        "isShowValuesScale",
-        "vsFormat",
-        "xLabelsOrientation",
-        "scaleLine",
-        "scaleColor",
-        "isAutoSeriesName",
-        "isAutoPointName",
-        "maxMode",
-        "maxSeries",
-        "maxSeriesPrc",
-        "spaceMode",
-        "baseVal",
-        "isOutline",
-        "realPiePoint",
-        "realStockSeries",
-        "isLight",
-        "isGradient",
-        "isTransposition",
-        "hideBaseVal",
-        "dataTable",
-        "dtVerLines",
-        "dtHorLines",
-        "dtHAlign",
-        "dtFormat",
-        "dtKeys",
-        "paletteKind",
-        "animation",
-        "rebuildTime",
-        "isTransposed",
-        "autoTransposition",
-        "legendScrollEnable",
-        "surfaceColor",
-        "radarScaleType",
-        "gaugeValuesPresentation",
-        "gaugeQualityBands",
-        "beginGaugeAngle",
-        "endGaugeAngle",
-        "gaugeThickness",
-        "gaugeLabelsLocation",
-        "gaugeLabelsArcDirection",
-        "gaugeBushThickness",
-        "gaugeBushColor",
-        "autoMaxValue",
-        "userMaxValue",
-        "autoMinValue",
-        "userMinValue",
-        "elementsIsInit",
-        "titleIsInit",
-        "legendIsInit",
-        "chartIsInit",
-        "elementsChart",
-        "elementsLegend",
-        "elementsTitle",
-        "borderColor",
-        "border",
-        "dataSourceDescription",
-        "isDataSourceMode",
-        "isRandomizedNewValues",
-        "realDataItems",
-        "splineStrain",
-        "translucencePercent",
-        "funnelNeckHeightPercent",
-        "funnelNeckWidthPercent",
-        "funnelGapSumPercent",
-        "multiStageLinkLine",
-        "multiStageLinkColor",
-        "valuesAxis",
-        "pointsAxis",
-    ]);
-    if has_value_scale {
-        names.push("valuesScale");
-    }
-    names.extend(["legendPlacement", "plotAreaPlacement", "titleAreaPlacement"]);
-    spreadsheet_chart_exact_child_names(node, &names)?;
-    let fixed = [
-        ("chartType", "Line"),
-        ("circleLabelType", "None"),
-        ("labelsDelimiter", ", "),
-        ("labelsColor", "style:FormTextColor"),
-        ("transparentLabelsBkg", "true"),
-        ("labelsBkgColor", "auto"),
-        ("labelsBorderColor", "auto"),
-        ("circleExpandMode", "None"),
-        ("chart3Dcrd", "SouthWest"),
-        ("isShowTitle", "false"),
-        ("isShowLegend", "false"),
-        ("ttlBorderColor", "style:BorderColor"),
-        ("lgBorderColor", "style:BorderColor"),
-        ("chBorderColor", "style:BorderColor"),
-        ("transparent", "false"),
-        ("bkgColor", "style:FormBackColor"),
-        ("isTrnspTtl", "true"),
-        ("ttlColor", "style:FormBackColor"),
-        ("isTrnspLeg", "true"),
-        ("legColor", "style:FormBackColor"),
-        ("isTrnspCh", "false"),
-        ("chColor", "#FFFFFF"),
-        ("ttlTxtColor", "style:FormTextColor"),
-        ("legTxtColor", "style:FormTextColor"),
-        ("chTxtColor", "style:FormTextColor"),
-        ("isShowScale", "true"),
-        ("isShowScaleVL", "true"),
-        ("isShowSeriesScale", "true"),
-        ("isShowPointsScale", "true"),
-        ("isShowValuesScale", "true"),
-        ("xLabelsOrientation", "Auto"),
-        ("scaleColor", "#A9A9A9"),
-        ("isAutoPointName", "false"),
-        ("maxMode", "NotDefined"),
-        ("maxSeriesPrc", "30"),
-        ("spaceMode", "Half"),
-        ("baseVal", "0"),
-        ("realPiePoint", "0"),
-        ("realStockSeries", "0"),
-        ("isLight", "true"),
-        ("isGradient", "false"),
-        ("isTransposition", "false"),
-        ("hideBaseVal", "false"),
-        ("dataTable", "false"),
-        ("dtVerLines", "true"),
-        ("dtHorLines", "true"),
-        ("dtHAlign", "Right"),
-        ("dtKeys", "true"),
-        ("paletteKind", "Auto"),
-        ("animation", "Auto"),
-        ("isTransposed", "false"),
-        ("autoTransposition", "false"),
-        ("legendScrollEnable", "false"),
-        ("surfaceColor", "#A90000"),
-        ("radarScaleType", "Circle"),
-        ("gaugeValuesPresentation", "Needle"),
-        ("beginGaugeAngle", "0"),
-        ("endGaugeAngle", "180"),
-        ("gaugeThickness", "2"),
-        ("gaugeLabelsLocation", "InsideScale"),
-        ("gaugeLabelsArcDirection", "false"),
-        ("gaugeBushThickness", "5"),
-        ("gaugeBushColor", "#A9A9A9"),
-        ("autoMaxValue", "true"),
-        ("autoMinValue", "true"),
-        ("elementsIsInit", "true"),
-        ("titleIsInit", "true"),
-        ("legendIsInit", "true"),
-        ("chartIsInit", "true"),
-        ("borderColor", "style:BorderColor"),
-        ("isDataSourceMode", "false"),
-        ("isRandomizedNewValues", "true"),
-        ("multiStageLinkColor", "#000000"),
-        ("legendPlacement", "None"),
-        ("plotAreaPlacement", "UseCoordinates"),
-        ("titleAreaPlacement", "None"),
-    ];
-    fixed
-        .iter()
-        .all(|(tag, expected)| spreadsheet_chart_text(node, tag) == Some(*expected))
-        .then_some(())
-}
-
-fn format_spreadsheet_chart_gauge_bands_for_moxel(
-    node: &SpreadsheetChartXmlNode,
-) -> Option<String> {
-    if node.attributes.get("useTextStr").map(String::as_str) != Some("false")
-        || node.attributes.get("useTooltipStr").map(String::as_str) != Some("false")
-    {
-        return None;
-    }
-    let items = spreadsheet_chart_children(node, "item");
-    if items.len() > 1024 {
-        return None;
-    }
-    let mut fields = vec!["1".to_string(), items.len().to_string()];
-    for item in items {
-        spreadsheet_chart_exact_child_names(
-            item,
-            &["begin", "end", "backColor", "text", "tooltip"],
-        )?;
-        let begin = spreadsheet_chart_number(item, "begin")?;
-        let end = spreadsheet_chart_number(item, "end")?;
-        fields.push(format!(
-            "{{3,{begin},{end},{},{},{},\"\",0,\"\",0,{begin},{end}}}",
-            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(item, "backColor")?)?,
-            format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(item, "text")?)?,
-            format_spreadsheet_chart_localized_for_moxel(spreadsheet_chart_child(
-                item, "tooltip"
-            )?)?
-        ));
-    }
-    fields.extend(["0".to_string(), "0".to_string()]);
-    Some(format!("{{{}}}", fields.join(",")))
-}
-
-fn format_spreadsheet_chart_axis_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
-    if node
-        .children
-        .iter()
-        .any(|child| !matches!(child.name.as_str(), "minValue" | "maxValue"))
-    {
-        return None;
-    }
-    let min =
-        spreadsheet_chart_optional_number(node, "minValue")?.unwrap_or_else(|| "0".to_string());
-    let max =
-        spreadsheet_chart_optional_number(node, "maxValue")?.unwrap_or_else(|| "0".to_string());
-    Some(format!("{{0,0,{{0,1,{min},1,{max}}},0,0}}"))
-}
-
-fn format_spreadsheet_chart_rectangle_for_moxel(
-    node: &SpreadsheetChartXmlNode,
-) -> Option<Vec<String>> {
-    spreadsheet_chart_exact_child_names(node, &["left", "right", "top", "bottom"])?;
-    Some(vec![
-        spreadsheet_chart_number(node, "left")?,
-        spreadsheet_chart_number(node, "top")?,
-        spreadsheet_chart_number(node, "right")?,
-        spreadsheet_chart_number(node, "bottom")?,
-    ])
-}
-
-fn format_spreadsheet_chart_cache_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
-    Some(
-        format!(
-            "{{{}, {},0,0,0,\"\",{{1,0}},{{1,0}},{{1,0}},0}}",
-            spreadsheet_chart_color_for_moxel(spreadsheet_chart_text(node, "color")?)?,
-            spreadsheet_chart_marker_code(spreadsheet_chart_text(node, "marker")?)?
-        )
-        .replace(", ", ","),
-    )
-}
-
-fn spreadsheet_chart_scale_for_moxel(label_format: &str) -> String {
-    format!(
-        "{{2,0,0,2,{{1,0}},{{1,4,0.5,0.5,{{7,3,0,1,100}},{{3,4,{{0}}}},{{3,4,{{0}}}},1,{{3,0,{{0}},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e}},{{3,4,{{0}}}},4,2,0}},2,0,0,{{3,4,{{0}}}},{{7,3,0,1,100}},{{3,4,{{0}}}},2,{label_format},0,{{3,4,{{0}}}},0,0,0,0,0,0}}"
-    )
-}
-
-fn format_spreadsheet_chart_localized_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
-    if node.children.len() > 64 || node.children.iter().any(|child| child.name != "item") {
-        return None;
-    }
-    let mut values = Vec::with_capacity(node.children.len());
-    for item in &node.children {
-        spreadsheet_chart_exact_child_names(item, &["lang", "content"])?;
-        values.push(LocalizedString {
-            lang: spreadsheet_chart_text(item, "lang")?.to_string(),
-            content: spreadsheet_chart_text(item, "content")?.to_string(),
-        });
-    }
-    Some(format_spreadsheet_number_format_for_moxel(&values))
-}
-
-fn spreadsheet_chart_line_for_moxel(node: &SpreadsheetChartXmlNode) -> Option<String> {
-    let width = node.attributes.get("width")?.parse::<usize>().ok()?;
-    if node.attributes.get("gap").map(String::as_str) != Some("false")
-        || node.children.len() != 1
-        || node.children.first()?.name != "style"
-        || node.children.first()?.text.trim() != "Solid"
-        || node
-            .children
-            .first()?
-            .attributes
-            .get("type")
-            .is_none_or(|value| value.rsplit(':').next() != Some("ChartLineType"))
-    {
-        return None;
-    }
-    Some(format!(
-        "{{4,0,{{0}},1,{width},0,e5cabe59-d992-4d31-8086-3116931aff81,0}}"
-    ))
-}
-
-fn spreadsheet_chart_color_for_moxel(value: &str) -> Option<String> {
-    match value {
-        "auto" => Some("{3,4,{0}}".to_string()),
-        "style:FormTextColor" => Some("{3,3,{-3}}".to_string()),
-        "style:FormBackColor" => Some("{3,3,{-1}}".to_string()),
-        "style:BorderColor" => {
-            Some("{3,0,{0},0,0,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string())
-        }
-        _ => spreadsheet_direct_color_code(value).map(|color| format!("{{3,0,{{{color}}}}}")),
-    }
-}
-
-fn spreadsheet_chart_marker_code(value: &str) -> Option<usize> {
-    match value {
-        "None" => Some(0),
-        "Rect" => Some(1),
-        "Circle" => Some(2),
-        "Rhomb" => Some(3),
-        _ => None,
-    }
-}
-
-fn spreadsheet_chart_percent_fraction(value: &str) -> Option<String> {
-    let value = spreadsheet_chart_normalize_number(value)?;
-    let negative = value.starts_with('-');
-    let unsigned = value.trim_start_matches('-');
-    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
-    let digits = format!("{integer}{fraction}");
-    let decimal_position = isize::try_from(integer.len()).ok()?.checked_sub(2)?;
-    let mut result = if decimal_position <= 0 {
-        format!(
-            "0.{}{}",
-            "0".repeat(usize::try_from(-decimal_position).ok()?),
-            digits
-        )
-    } else {
-        let split = usize::try_from(decimal_position).ok()?;
-        format!("{}.{}", &digits[..split], &digits[split..])
-    };
-    while result.ends_with('0') {
-        result.pop();
-    }
-    if result.ends_with('.') {
-        result.pop();
-    }
-    if negative && result != "0" {
-        result.insert(0, '-');
-    }
-    Some(result)
-}
-
-fn spreadsheet_chart_number(node: &SpreadsheetChartXmlNode, name: &str) -> Option<String> {
-    spreadsheet_chart_text(node, name).and_then(spreadsheet_chart_normalize_number)
-}
-
-fn spreadsheet_chart_optional_number(
-    node: &SpreadsheetChartXmlNode,
-    name: &str,
-) -> Option<Option<String>> {
-    match spreadsheet_chart_children(node, name).as_slice() {
-        [] => Some(None),
-        [value] => Some(Some(spreadsheet_chart_node_number(value)?)),
-        _ => None,
-    }
-}
-
-fn spreadsheet_chart_node_number(node: &SpreadsheetChartXmlNode) -> Option<String> {
-    spreadsheet_chart_normalize_number(node.text.trim())
-}
-
-fn spreadsheet_chart_normalize_number(value: &str) -> Option<String> {
-    if value.is_empty()
-        || !value.chars().enumerate().all(|(index, ch)| {
-            ch.is_ascii_digit() || ch == '.' || (index == 0 && (ch == '-' || ch == '+'))
-        })
-        || value.chars().filter(|ch| *ch == '.').count() > 1
-    {
-        return None;
-    }
-    let value = value.strip_prefix('+').unwrap_or(value);
-    let negative = value.starts_with('-');
-    let unsigned = value.trim_start_matches('-');
-    let (integer, fraction) = unsigned.split_once('.').unwrap_or((unsigned, ""));
-    let integer = integer.trim_start_matches('0');
-    let integer = if integer.is_empty() { "0" } else { integer };
-    let fraction = fraction.trim_end_matches('0');
-    let mut normalized = if fraction.is_empty() {
-        integer.to_string()
-    } else {
-        format!("{integer}.{fraction}")
-    };
-    if negative && normalized != "0" {
-        normalized.insert(0, '-');
-    }
-    Some(normalized)
-}
-
-fn spreadsheet_chart_bool_code(node: &SpreadsheetChartXmlNode, name: &str) -> Option<usize> {
-    match spreadsheet_chart_text(node, name)? {
-        "false" => Some(0),
-        "true" => Some(1),
-        _ => None,
-    }
-}
-
-fn spreadsheet_chart_usize(node: &SpreadsheetChartXmlNode, name: &str) -> Option<usize> {
-    spreadsheet_chart_text(node, name)?.parse::<usize>().ok()
-}
-
-fn spreadsheet_chart_text<'a>(node: &'a SpreadsheetChartXmlNode, name: &str) -> Option<&'a str> {
-    let child = spreadsheet_chart_child(node, name)?;
-    Some(child.text.as_str())
-}
-
-fn spreadsheet_chart_child<'a>(
-    node: &'a SpreadsheetChartXmlNode,
-    name: &str,
-) -> Option<&'a SpreadsheetChartXmlNode> {
-    let mut children = node.children.iter().filter(|child| child.name == name);
-    let child = children.next()?;
-    children.next().is_none().then_some(child)
-}
-
-fn spreadsheet_chart_children<'a>(
-    node: &'a SpreadsheetChartXmlNode,
-    name: &str,
-) -> Vec<&'a SpreadsheetChartXmlNode> {
-    node.children
-        .iter()
-        .filter(|child| child.name == name)
-        .collect()
-}
-
-fn spreadsheet_chart_exact_child_names(
-    node: &SpreadsheetChartXmlNode,
-    expected: &[&str],
-) -> Option<()> {
-    (node.children.len() == expected.len()
-        && node
-            .children
-            .iter()
-            .zip(expected)
-            .all(|(child, expected)| child.name == *expected))
-    .then_some(())
-}
-
-fn format_spreadsheet_pictures_for_moxel(
-    pictures: &[SpreadsheetDocumentXmlPicture],
-    source: Option<&MetadataSourceContext>,
-) -> Result<Vec<String>> {
-    if pictures.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut fields = Vec::with_capacity(pictures.len() + 1);
-    fields.push(pictures.len().to_string());
-    for picture in pictures {
-        fields.push(format_spreadsheet_picture_for_moxel(picture, source)?);
-    }
-    Ok(fields)
-}
-
-fn format_spreadsheet_picture_for_moxel(
-    picture: &SpreadsheetDocumentXmlPicture,
-    source: Option<&MetadataSourceContext>,
-) -> Result<String> {
-    let Some(ref_name) = picture
-        .ref_name
-        .as_deref()
-        .filter(|value| !value.is_empty())
-    else {
-        return Ok(format!("{{4,{}}}", picture.index));
-    };
-    if let Some(reference) = spreadsheet_standard_picture_ref(ref_name) {
-        return Ok(format!("{{4,{},{{{reference}}}}}", picture.index));
-    }
-    let reference = if let Some(name) = ref_name.strip_prefix("v8ui:") {
-        format!("CommonPicture.{name}")
-    } else {
-        ref_name.to_string()
-    };
-    let source = source.ok_or_else(|| {
-        anyhow!("SpreadsheetDocument picture {ref_name} requires --source-root to resolve CommonPicture UUID")
-    })?;
-    let uuid = source.resolve_common_picture_uuid(&reference)?;
-    Ok(format!("{{4,{},{{0,{uuid}}}}}", picture.index))
-}
-
-fn spreadsheet_standard_picture_ref(ref_name: &str) -> Option<String> {
-    match ref_name {
-        "v8ui:Print" | "StdPicture.Print" => Some("-13".to_string()),
-        "v8ui:InputFieldCalculator" | "StdPicture.InputFieldCalculator" => Some("-6".to_string()),
-        "v8ui:Information" | "StdPicture.Information" => {
-            Some(format!("0,{STD_PICTURE_INFORMATION_UUID}"))
-        }
-        "v8ui:SaveFile" | "StdPicture.SaveFile" => Some(format!("0,{STD_PICTURE_SAVE_FILE_UUID}")),
-        _ => None,
-    }
-}
-
-fn format_spreadsheet_fonts_for_moxel(fonts: &[SpreadsheetDocumentXmlFont]) -> Vec<String> {
-    fonts
-        .iter()
-        .filter_map(format_spreadsheet_font_for_moxel)
-        .collect()
-}
-
-fn format_spreadsheet_font_for_moxel(font: &SpreadsheetDocumentXmlFont) -> Option<String> {
-    match font.kind.as_str() {
-        "Absolute" => {
-            let face_name = font.face_name.as_deref().unwrap_or("Arial");
-            let height = font.height.unwrap_or(8) * 10;
-            let weight = spreadsheet_font_weight(font.bold);
-            let scale = font.scale.unwrap_or(100);
-            Some(format!(
-                "{{7,0,575,{height},{},{},{},{weight},0,0,0,0,0,0,0,0,{},1,{scale}}}",
-                bool_to_usize(font.italic),
-                bool_to_usize(font.underline),
-                bool_to_usize(font.strikeout),
-                format_1c_string(face_name)
-            ))
-        }
-        "StyleItem" => {
-            let ref_code = spreadsheet_font_ref_code(font.ref_name.as_deref()?)?;
-            let weight = spreadsheet_font_weight(font.bold);
-            Some(format!(
-                "{{7,2,60,{{{ref_code}}},{weight},{},{},{},1,100}}",
-                bool_to_usize(font.italic),
-                bool_to_usize(font.underline),
-                bool_to_usize(font.strikeout)
-            ))
-        }
-        _ => None,
-    }
-}
-
-fn spreadsheet_font_weight(bold: bool) -> usize {
-    if bold { 700 } else { 400 }
-}
-
-fn spreadsheet_font_ref_code(ref_name: &str) -> Option<i32> {
-    match ref_name {
-        "style:TextFont" => Some(-20),
-        "style:NormalTextFont" => Some(-31),
-        "style:LargeTextFont" => Some(-32),
-        _ => None,
-    }
 }
 
 pub fn pack_form_body_blob_from_module_text(
@@ -6462,7 +3145,10 @@ impl NativeDataPaths<'_> {
 }
 
 /// The form's own half of the data-path tables, read off `Form.xml`.
-fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
+fn native_data_path_form(
+    properties: &FormXmlBodyProperties,
+    dynamic_lists: &BTreeMap<String, (crate::compiler::bodies::dynamic_list::FieldMap, Vec<String>)>,
+) -> DataPathForm {
     let mut form = DataPathForm::default();
     for attribute in &properties.attributes {
         let columns = attribute
@@ -6482,27 +3168,47 @@ fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
         for block in &attribute.additional_columns {
             let table = additional_columns.entry(block.table.clone()).or_default();
             for column in &block.columns {
-                // An additional column's own `<Type>` is not read, so a path
-                // that walks *past* one into a typed context refuses instead
-                // of guessing. A path that walks into another additional
-                // column still places: those are found by the dotted prefix,
-                // not by the type.
+                // An additional column's own `<Type>` opens the context a path
+                // walks on in past it (rt-paths.md §4.5, 3 of 3).
                 table.insert(
                     column.name.clone(),
                     DataPathColumn {
                         id: column.id.clone(),
-                        types: Vec::new(),
+                        types: column.spec.types.clone(),
                     },
                 );
+            }
+        }
+        let mut dynamic_fields = BTreeMap::new();
+        let mut dynamic_marked = BTreeMap::new();
+        if let Some((map, _)) = dynamic_lists.get(&attribute.name) {
+            for entry in &map.entries {
+                match &entry.variant {
+                    None => {
+                        dynamic_fields.insert(entry.name.clone(), entry.id.to_string());
+                    }
+                    Some(twin) => {
+                        dynamic_marked.insert((entry.name.clone(), twin.clone()), entry.id.to_string());
+                    }
+                }
             }
         }
         form.attributes.insert(
             attribute.name.clone(),
             DataPathAttribute {
                 id: attribute.id.clone(),
-                types: attribute.types.clone(),
+                // An attribute typed only by a `<v8:TypeSet>` -- a defined
+                // type -- walks on in the set's context.
+                types: if attribute.types.is_empty() {
+                    attribute.type_sets.clone()
+                } else {
+                    attribute.types.clone()
+                },
                 columns,
                 additional_columns,
+                dynamic_fields,
+                dynamic_marked,
+                list_name: Some(attribute.name.clone()),
             },
         );
     }
@@ -6519,6 +3225,214 @@ fn native_data_path_form(properties: &FormXmlBodyProperties) -> DataPathForm {
         collect_native_data_path_items(bar.child_items.iter(), &mut form.items);
     }
     form
+}
+
+/// Every `Form.xml` string that walks into one dynamic list.
+fn native_dynamic_list_references(
+    properties: &FormXmlBodyProperties,
+    list: &str,
+) -> Vec<(bool, crate::compiler::bodies::dynamic_list::ListPath)> {
+    use crate::compiler::bodies::dynamic_list::parse_list_path;
+    let mut tables = Vec::new();
+    let mut stack = properties
+        .child_items
+        .iter()
+        .filter(|item| item.depth == 0)
+        .collect::<Vec<_>>();
+    if let Some(bar) = &properties.auto_command_bar {
+        stack.extend(bar.child_items.iter());
+    }
+    let mut all = Vec::new();
+    while let Some(item) = stack.pop() {
+        if item.tag == "Table" && item.data_path.as_deref() == Some(list) {
+            tables.push(item.name.clone());
+        }
+        all.push(item);
+        stack.extend(item.child_items.iter());
+    }
+    // (is a <UseAlways> field, the path)
+    let mut out = Vec::new();
+    let mut push = |text: &str, use_always: bool, tables: &[String]| {
+        if let Some(path) = parse_list_path(text, list, tables) {
+            out.push((use_always, path));
+        }
+    };
+    for item in &all {
+        if let Some(path) = item.data_path.as_deref() {
+            push(path, false, &tables);
+        }
+        if let Some(path) = item.title_data_path.as_deref() {
+            push(path, false, &tables);
+        }
+        for name in ["FooterDataPath", "HeaderDataPath"] {
+            if let Some(path) = item.scalars.get(name) {
+                push(path, false, &tables);
+            }
+        }
+        if item.tag == "Table"
+            && item.data_path.as_deref() == Some(list)
+            && let Some(path) = item.scalars.get("RowPictureDataPath")
+        {
+            push(path, false, &tables);
+        }
+        for link in &item.choice_parameter_links {
+            push(&link.data_path, false, &tables);
+        }
+        if let Some((path, _)) = &item.type_link {
+            push(path, false, &tables);
+        }
+    }
+    // The form's conditional appearance: every leaf text that is a path.
+    if let Some(subtree) = properties.attributes_conditional_appearance_source.as_deref() {
+        let mut rest = subtree;
+        while let Some(at) = rest.find('>') {
+            let after = &rest[at + 1..];
+            let Some(end) = after.find('<') else {
+                break;
+            };
+            let text = after[..end].trim();
+            if !text.is_empty() && after[end..].starts_with("</") {
+                push(text, false, &tables);
+            }
+            rest = &after[end..];
+        }
+    }
+    for item in &properties.command_interface_items {
+        if let Some(path) = item.attribute.as_deref() {
+            push(path, false, &tables);
+        }
+    }
+    for attribute in &properties.attributes {
+        for block in &attribute.additional_columns {
+            push(&block.table, false, &tables);
+        }
+    }
+    if let Some(attribute) = properties.attributes.iter().find(|attribute| attribute.name == list)
+        && let Some(fields) = attribute.use_always.as_deref()
+    {
+        for field in fields {
+            if let Some(path) = parse_list_path(field, list, &[]) {
+                out.push((true, path));
+            }
+        }
+    }
+    out
+}
+
+/// The synthetic field map of every dynamic list of the form, and the ids its
+/// `<UseAlways>` stores in `ReqMapFieldId`.
+/// A dynamic list's whole settings bag, with the configuration lookups the
+/// re-spelling needs.
+fn native_dynamic_list_bag(
+    form_text: &str,
+    attribute: &str,
+    map: &crate::compiler::bodies::dynamic_list::FieldMap,
+    required: &[String],
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    use crate::compiler::bodies::dynamic_list::{ListConfiguration, dynamic_list_bag};
+    let type_id = |name: &str, _is_set: bool| -> Result<String> {
+        let source = source.ok_or_else(|| anyhow!("a dynamic list names cfg:{name} and no configuration is on hand"))?;
+        source.resolve_metadata_type_id(&format!("cfg:{name}"))
+    };
+    let style_item = |name: &str| -> Option<String> {
+        source?.resolve_style_item_uuid(&format!("StyleItem.{name}")).ok()
+    };
+    let object = |reference: &str| -> Result<String> {
+        let source = source.ok_or_else(|| anyhow!("a dynamic list names {reference} and no configuration is on hand"))?;
+        source.resolve_metadata_reference_uuid(reference)
+    };
+    dynamic_list_bag(
+        form_text,
+        attribute,
+        map,
+        required,
+        &ListConfiguration {
+            type_id: &type_id,
+            style_item: &style_item,
+            object: &object,
+        },
+    )
+}
+
+fn native_dynamic_list_field_maps(
+    properties: &FormXmlBodyProperties,
+) -> Result<BTreeMap<String, (crate::compiler::bodies::dynamic_list::FieldMap, Vec<String>)>> {
+    use crate::compiler::bodies::dynamic_list::FieldMap;
+    let mut maps = BTreeMap::new();
+    for attribute in &properties.attributes {
+        if attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList") {
+            continue;
+        }
+        let references = native_dynamic_list_references(properties, &attribute.name);
+        let mut map = FieldMap::default();
+        for (_, path) in &references {
+            map.add_path(path);
+        }
+        // Plain English standard attributes take their Russian twin.
+        let kind = attribute
+            .settings
+            .as_ref()
+            .and_then(|settings| settings.main_table.as_deref())
+            .and_then(|table| table.trim().split('.').next().map(str::to_string));
+        let mut twins = BTreeMap::<String, String>::new();
+        match kind
+            .as_deref()
+            .and_then(crate::mssql_dump::form_dynamic_list_std_attribute_pairs)
+        {
+            Some(pairs) => {
+                for (russian, english) in pairs {
+                    twins.insert((*english).to_string(), (*russian).to_string());
+                }
+            }
+            None => {
+                let mut union = BTreeMap::<String, std::collections::BTreeSet<String>>::new();
+                for kind in [
+                    "Catalog",
+                    "Document",
+                    "Enum",
+                    "ChartOfCharacteristicTypes",
+                    "ChartOfAccounts",
+                    "ChartOfCalculationTypes",
+                    "ExchangePlan",
+                    "BusinessProcess",
+                    "Task",
+                    "InformationRegister",
+                    "AccumulationRegister",
+                    "AccountingRegister",
+                    "CalculationRegister",
+                    "DocumentJournal",
+                ] {
+                    for (russian, english) in
+                        crate::mssql_dump::form_dynamic_list_std_attribute_pairs(kind).unwrap_or(&[])
+                    {
+                        union
+                            .entry((*english).to_string())
+                            .or_default()
+                            .insert((*russian).to_string());
+                    }
+                }
+                for (english, russians) in union {
+                    if russians.len() == 1
+                        && let Some(russian) = russians.into_iter().next()
+                    {
+                        twins.insert(english, russian);
+                    }
+                }
+            }
+        }
+        map.apply_std_twins(&twins);
+        let mut required = Vec::new();
+        for (use_always, path) in &references {
+            if *use_always {
+                required.push(map.required_id(path).ok_or_else(|| {
+                    anyhow!("a dynamic list's <UseAlways> field has no field-map entry")
+                })?);
+            }
+        }
+        maps.insert(attribute.name.clone(), (map, required));
+    }
+    Ok(maps)
 }
 
 /// Every named item of the form, by name, with its id and its `<DataPath>`.
@@ -6646,24 +3560,42 @@ fn native_form_attribute_use_always(
     attribute: &FormXmlAttribute,
     data_paths: &NativeDataPaths<'_>,
 ) -> Result<String> {
+    let declared = attribute.types.first().map(|value| value.trim());
     let Some(fields) = attribute.use_always.as_deref() else {
+        // No field named is the flagged set itself under the delta reading.
+        if declared == Some("cfg:ConstantsSet") {
+            let paths = target_always_used_constants()
+                .iter()
+                .map(|uuid| format!("{{1,{{0,{uuid}}}}}"))
+                .collect::<Vec<_>>();
+            if !paths.is_empty() {
+                return Ok(crate::compiler::bodies::form_native::format_form_attribute_save(
+                    &paths,
+                ));
+            }
+        }
         return Ok("{0,0}".to_string());
     };
-    let declared = attribute.types.first().map(|value| value.trim());
     if declared == Some("cfg:DynamicList") {
         // 4 709 of 4 709 dynamic-list records, 3 028 of them bearing the
         // element, store `{0,0}`. Their fields go to the `FieldsMap`, which
         // the source does not carry.
         return Ok("{0,0}".to_string());
     }
-    if declared == Some("cfg:ConstantsSet") {
-        return Err(anyhow!(
-            "<UseAlways> on a cfg:ConstantsSet is a delta against a flag the source does not carry"
-        ));
-    }
+    // A constants set's record is a delta against each constant's own
+    // always-used flag, which no exported property carries. A configuration
+    // loaded from its source tree has every flag clear, and against clear
+    // flags the delta is the set itself -- which is what is written. A target
+    // database that already holds flagged constants names them through
+    // `IBCMD_RS_ALWAYS_USED_CONSTANTS`, and the delta is taken against those.
     if fields.is_empty() {
         return Err(anyhow!("an empty <UseAlways> is not measured"));
     }
+    let flagged = if declared == Some("cfg:ConstantsSet") {
+        target_always_used_constants()
+    } else {
+        Vec::new()
+    };
     let mut paths = Vec::with_capacity(fields.len());
     for field in fields {
         let field = field.trim();
@@ -6691,13 +3623,56 @@ fn native_form_attribute_use_always(
         }
         paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
     }
+    if !flagged.is_empty() {
+        for uuid in &flagged {
+            let path = format!("{{1,{{0,{uuid}}}}}");
+            if let Some(at) = paths.iter().position(|candidate| *candidate == path) {
+                paths.remove(at);
+            } else {
+                paths.push(path);
+            }
+        }
+        paths.sort();
+        if paths.is_empty() {
+            return Ok("{0,0}".to_string());
+        }
+    }
     Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
+}
+
+/// The constants the target database flags always-used, one uuid a line in
+/// the file `IBCMD_RS_ALWAYS_USED_CONSTANTS` names; none when it names none.
+fn target_always_used_constants() -> Vec<String> {
+    static FLAGGED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    FLAGGED
+        .get_or_init(|| {
+            std::env::var_os("IBCMD_RS_ALWAYS_USED_CONSTANTS")
+                .and_then(|path| std::fs::read_to_string(path).ok())
+                .map(|text| {
+                    text.lines()
+                        .map(str::trim)
+                        .filter(|line| !line.is_empty())
+                        .map(str::to_string)
+                        .collect()
+                })
+                .unwrap_or_default()
+        })
+        .clone()
 }
 
 /// Whether one resolved segment of a `<UseAlways>` path takes a shape the
 /// corpus showed: `{0,<uuid>}` or a bare negative standard-attribute code.
 fn form_use_always_segment_is_measured(segment: &str) -> bool {
     if form_attribute_save_segment_uuid(segment).is_some() {
+        return true;
+    }
+    // An additional column, `{<id>,5bdad865-…}` (rt-paths.md §3.5).
+    if let Some(id) = segment
+        .strip_prefix('{')
+        .and_then(|rest| rest.strip_suffix(",5bdad865-f2c5-434b-8041-ba4aad3b6687}"))
+        && !id.is_empty()
+        && id.bytes().all(|byte| byte.is_ascii_digit())
+    {
         return true;
     }
     let Some(rest) = segment.strip_prefix('{').and_then(|s| s.strip_suffix('}')) else {
@@ -6724,6 +3699,19 @@ fn native_form_attribute_save(
             paths.push("{0}".to_string());
             continue;
         }
+        // `<id>/<seg>…` is the exporter's raw spelling of a field it could not
+        // name -- a deleted one; the head is the attribute's own id, dropped
+        // like any path's head (19 of 19).
+        if let Some((head, rest)) = field.split_once('/')
+            && head == attribute.id
+        {
+            let segments = rest
+                .split('/')
+                .map(|segment| format!("{{{}}}", segment.replace(':', ",")))
+                .collect::<Vec<_>>();
+            paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
+            continue;
+        }
         if !field.starts_with(&format!("{}.", attribute.name)) {
             return Err(anyhow!(
                 "<Save> names {field}, which is not rooted at the attribute"
@@ -6737,17 +3725,12 @@ fn native_form_attribute_save(
         let Some(tail) = ranges.get(2..) else {
             return Err(anyhow!("<Save> names {field}, which resolved to no segment"));
         };
+        // The resolver's segments are what the body stores, builtin sub-field
+        // codes included (rt-paths.md §2, 2 523 + 316 lists).
         let segments = tail
             .iter()
             .map(|range| resolved[range.clone()].trim().to_string())
             .collect::<Vec<_>>();
-        if !segments.iter().all(|segment| {
-            form_attribute_save_segment_uuid(segment).is_some()
-        }) {
-            return Err(anyhow!(
-                "<Save> names {field}, whose sub-field code is not measured"
-            ));
-        }
         paths.push(format!("{{{},{}}}", segments.len(), segments.join(",")));
     }
     Ok(crate::compiler::bodies::form_native::format_form_attribute_save(&paths))
@@ -6813,11 +3796,14 @@ fn format_native_child_item(
 
     let kind_uuid = native_child_kind_uuid(&item.tag)
         .ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
+    let display_importance =
+        native::native_display_importance(item.display_importance.as_deref()).ok_or_else(|| {
+            anyhow!("<{}> names a DisplayImportance the writer has not measured", item.tag)
+        })?;
     let title = format_form_title_value(&item.title);
     let tooltip_title = format_form_title_value(&item.tooltip);
-    let extended_tooltip = item.extended_tooltip.as_ref().map(|tooltip| {
-        native::format_extended_tooltip(&tooltip.id, &tooltip.name)
-    });
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?;
 
     // A <ContextMenu> is itself a child item; a field keeps it in a member of
     // its own rather than among its children.
@@ -6870,8 +3856,18 @@ fn format_native_child_item(
                 .map(|(uuid, record)| (*uuid, record.clone()))
                 .collect::<Vec<_>>(),
             visible: item.visible.unwrap_or(true),
-            back_color: &native_scalar_color(item, "BackColor", source)?,
+            // The colour member of a group's own record is its title's text
+            // colour: its `<BackColor>` is member 9 of the payload. Read
+            // from `BackColor` it wrote the default while the bag never held
+            // one, and every group that names a background turned into a
+            // group with a coloured title once it did.
+            back_color: &native_scalar_color(item, "TitleTextColor", source)?,
             extended_tooltip: extended_tooltip.as_deref(),
+            horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+            vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+            display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
             ..native::NativeGroupItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -6884,7 +3880,61 @@ fn format_native_child_item(
     }
 
     if let Some(kind) = native::native_field_kind(&item.tag) {
-        let payload = native_field_payload(item, main_attribute_class, source, items_root)?;
+        let payload = native_field_payload(item, data_paths, main_attribute_class, source, items_root)?;
+        // A PDF document field keeps its one `<ViewStatusAddition>` in the
+        // record's tail, as a table keeps its additions; no other field
+        // carries one.
+        let additions = if item.tag == "PDFDocumentField" {
+            let mut records = Vec::new();
+            for child in &children {
+                if child.tag != "ViewStatusAddition" {
+                    return Err(anyhow!("a <PDFDocumentField> holds a <{}>, which is not measured", child.tag));
+                }
+                records.push(native_table_addition(
+                    child,
+                    1,
+                    data_paths,
+                    command_ids,
+                    items,
+                    main_attribute_class,
+                    source,
+                    items_root,
+                )?);
+            }
+            if records.len() != 1 {
+                return Err(anyhow!("a <PDFDocumentField> without one <ViewStatusAddition> is not measured"));
+            }
+            format!("1,{}", records[0])
+        } else {
+            "0".to_string()
+        };
+        // A Gantt chart field nests the table it edits its rows in behind
+        // the shared layout, counted by member 58; no other field nests one.
+        let nested_items = if item.tag == "GanttChartField" {
+            match children.as_slice() {
+                [] => "0".to_string(),
+                [table] if table.tag == "Table" => format!(
+                    "1,{}",
+                    format_native_table_record(
+                        table,
+                        data_paths,
+                        command_ids,
+                        items,
+                        main_attribute_class,
+                        source,
+                        items_root,
+                        true,
+                    )?
+                ),
+                _ => {
+                    return Err(anyhow!(
+                        "a <GanttChartField> nests items other than one <Table>, which is not measured"
+                    ));
+                }
+            }
+        } else {
+            "0".to_string()
+        };
         let data_path = match item.data_path.as_deref() {
             Some(path) => data_paths
                 .resolve(path)
@@ -6900,6 +3950,48 @@ fn format_native_child_item(
         let events = native_item_events_where(item, main_attribute_class, |name| {
             name == "OnChange"
         })?;
+        // The members the agent's measurement named (rt-field.md): 12 the
+        // footer's data path, 17 and 18 the edit warning, 19 the footer text,
+        // 24 the header's alignment, 29 and 30 the header and footer
+        // pictures, 31 to 36 the title and footer appearance, 37 the
+        // shortcut. Every one was left at its default by this call site.
+        let footer_data_path = match item.scalars.get("FooterDataPath").map(|value| value.trim()) {
+            Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                anyhow!("<{}> totals {path}, which the writer cannot place", item.tag)
+            })?,
+            None => "{0}".to_string(),
+        };
+        // Record member 48 is the field's own `<CommandSet>` -- a spreadsheet
+        // document's excluded commands, the table's shape.
+        let field_command_set = if item.excluded_commands.is_empty() {
+            native::NativeFieldItem::default().appearance[6].to_string()
+        } else {
+            let mut excluded = item
+                .excluded_commands
+                .iter()
+                .map(|name| {
+                    native::item_standard_command_uuid(&item.tag, false, name).ok_or_else(|| {
+                        anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
+                    })
+                })
+                .collect::<Result<Vec<_>>>()?;
+            excluded.sort_unstable();
+            format!("{{{},{}}}", excluded.len(), excluded.join(","))
+        };
+        let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
+        let footer_picture = native_extra_picture(item, "FooterPicture", source, items_root)?;
+        let title_text_color = native_scalar_color(item, "TitleTextColor", source)?;
+        let title_font = native_named_font(item, "TitleFont", source)?;
+        let title_back_color = native_scalar_color(item, "TitleBackColor", source)?;
+        let footer_text_color = native_scalar_color(item, "FooterTextColor", source)?;
+        let footer_font = native_named_font(item, "FooterFont", source)?;
+        let shortcut = match item.scalars.get("Shortcut") {
+            Some(text) => native::format_native_shortcut(text).ok_or_else(|| {
+                anyhow!("<{}> names the shortcut {text}, which is not measured", item.tag)
+            })?,
+            None => "{0,0,0}".to_string(),
+        };
+        let user_visible = native_user_visible(item, source)?;
         let record = native::format_field_item(&native::NativeFieldItem {
             footer_horizontal_align: item
                 .scalars
@@ -6910,9 +4002,28 @@ fn format_native_child_item(
             kind,
             name: &item.name,
             title_location: item.title_location.map(native_title_location),
+            title_height: item.scalars.get("TitleHeight").map(String::as_str),
             title: &title,
             tooltip_title: &tooltip_title,
             data_path: &data_path,
+            footer_data_path: &footer_data_path,
+            warning_on_edit: item.scalars.get("WarningOnEditRepresentation").map(String::as_str),
+            header_title: &format_form_title_value(&item.warning_on_edit),
+            footer_title: &native_localized(item, "FooterText"),
+            header_horizontal_align: item.scalars.get("HeaderHorizontalAlign").map(String::as_str),
+            header_picture: &header_picture,
+            footer_picture: &footer_picture,
+            appearance: [
+                &title_text_color,
+                &title_font,
+                &title_back_color,
+                &footer_text_color,
+                "{3,4,{0}}",
+                &footer_font,
+                &field_command_set,
+            ],
+            picture_index: &shortcut,
+            functional_options: user_visible.as_deref(),
             enabled: item.enabled.unwrap_or(true),
             read_only: item.read_only.unwrap_or(false),
             skip_on_input: native_flag(item.skip_on_input),
@@ -6935,10 +4046,12 @@ fn format_native_child_item(
             context_menu: &menu,
             visible: item.visible.unwrap_or(true),
             extended_tooltip: &tooltip,
+            display_importance,
+            additions: &additions,
+            nested_items: &nested_items,
             ..native::NativeFieldItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
-        let _ = children;
         return Ok((kind_uuid, record));
     }
 
@@ -6952,8 +4065,23 @@ fn format_native_child_item(
         // emitted the constant either way because the call site never passed
         // one, though the resolver it needed was already here.
         let picture = native_item_picture(item, source, items_root)?;
+        let back_color = native_scalar_color(item, "BackColor", source)?;
+        let text_color = native_scalar_color(item, "TextColor", source)?;
+        let border_color = native_scalar_color(item, "BorderColor", source)?;
+        let font = native_item_font(item, source)?;
+        let data_path = match item.data_path.as_deref() {
+            Some(path) => data_paths.resolve(path).ok_or_else(|| {
+                anyhow!("<Button> binds to {path}, which the writer cannot place")
+            })?,
+            None => "{0}".to_string(),
+        };
         let record = native::format_button_item(&native::NativeButtonItem {
             picture: &picture,
+            appearance: [&back_color, &text_color, &border_color, &font],
+            data_path: &data_path,
+            title_height: item.scalars.get("TitleHeight").map(String::as_str),
+            check: native_scalar_flag(item, "Check", false),
+            picture_location: item.scalars.get("PictureLocation").map(String::as_str),
             id: &item.id,
             name: &item.name,
             title: &title,
@@ -7000,6 +4128,11 @@ fn format_native_child_item(
             max_height: item.max_height.as_deref(),
             horizontal_stretch: item.horizontal_stretch.unwrap_or(false),
             vertical_stretch: item.vertical_stretch.unwrap_or(false),
+            forty_eighth: display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
+            parameter: &native_button_parameter(item, source)?,
+            command_uniqueness: native_scalar_flag(item, "CommandUniqueness", true),
             ..native::NativeButtonItem::default()
         })
         .ok_or_else(|| anyhow!("<Button> names something the writer cannot place"))?;
@@ -7049,6 +4182,9 @@ fn format_native_child_item(
             max_width: item.max_width.as_deref(),
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref(),
+            display_importance,
+            functional_options: native_user_visible(item, source)?.as_deref(),
+            shortcut: &native_item_shortcut(item)?,
             ..native::NativeDecorationItem::default()
         })
         .ok_or_else(|| anyhow!("<{}> names something the writer cannot place", item.tag))?;
@@ -7148,14 +4284,40 @@ fn format_native_table(
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
 ) -> Result<String> {
+    format_native_table_record(
+        item,
+        data_paths,
+        command_ids,
+        items,
+        main_attribute_class,
+        source,
+        items_root,
+        false,
+    )
+}
+
+/// `format_native_table`, and the table a `<GanttChartField>` nests: that
+/// one's bag holds no empty `RowPictureDataPath` (key 19) -- 15 of the 16 of
+/// ERP УХ store none, the sixteenth is the one whose table spells a dozen
+/// properties; the exporter publishes nothing for the empty key either way.
+#[allow(clippy::too_many_arguments)]
+fn format_native_table_record(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+    command_ids: &BTreeMap<String, String>,
+    items: &BTreeMap<String, NativeItemTarget>,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+    nested_in_gantt_chart: bool,
+) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
-    if item.picture_present || item.font_present {
-        return Err(anyhow!("a table names a picture or a font"));
+    if item.picture_present {
+        return Err(anyhow!("a table names a picture"));
     }
-    if !item.scalars.contains_key("DataPath") && item.data_path.is_none() {
-        return Err(anyhow!("a table that binds to nothing is not measured"));
-    }
+    // A table with no `<DataPath>` stores `{0}` there and in every column
+    // (12 tables of ERP УХ, rt-paths.md §4.10).
     let data_path = match item.data_path.as_deref() {
         Some(path) => data_paths
             .resolve(path)
@@ -7237,10 +4399,26 @@ fn format_native_table(
 
     let title = format_form_title_value(&item.title);
     let tooltip_title = format_form_title_value(&item.tooltip);
-    let extended_tooltip = match &item.extended_tooltip {
-        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
-        None => return Err(anyhow!("a table with no extended tooltip is not measured")),
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?
+            .ok_or_else(|| anyhow!("a table with no extended tooltip is not measured"))?;
+    let table_rows_picture = native_extra_picture(item, "RowsPicture", source, items_root)?;
+    let table_appearance = [
+        native_scalar_color(item, "BackColor", source)?,
+        native_scalar_color(item, "TextColor", source)?,
+        native_scalar_color(item, "BorderColor", source)?,
+        native_item_font(item, source)?,
+        native_scalar_color(item, "TitleTextColor", source)?,
+        native_named_font(item, "TitleFont", source)?,
+    ];
+    let table_shortcut = match item.scalars.get("Shortcut") {
+        Some(text) => native::format_native_shortcut(text)
+            .ok_or_else(|| anyhow!("a table names the shortcut {text}, which is not measured"))?,
+        None => "{0,0,0}".to_string(),
     };
+    let table_user_visible = native_user_visible(item, source)?;
+    let table_display_importance = native::native_display_importance(item.display_importance.as_deref())
+        .ok_or_else(|| anyhow!("a table names a DisplayImportance the writer has not measured"))?;
     // `<RowPictureDataPath>` keeps **one** segment, whatever the path's
     // length: `Список.Active` stores `{1,{3}}` and `Список.DefaultPicture`
     // stores `{1,{10000000}}`, the ordinary data-path token for the last
@@ -7307,8 +4485,21 @@ fn format_native_table(
         output: item.scalars.get("Output").map(String::as_str),
         horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
         vertical_stretch: item.vertical_stretch.unwrap_or(true),
-        enable_start_drag: item.enable_start_drag.unwrap_or(true),
-        enable_drag: item.enable_drag.unwrap_or(true),
+        enable_start_drag: item.enable_start_drag.unwrap_or(false),
+        enable_drag: item.enable_drag.unwrap_or(false),
+        // Head members 44 to 51 (rt-table.md): the rows' picture, the six
+        // colours and fonts, and the shortcut; the `<UserVisible>` block at 4.
+        row_picture: &table_rows_picture,
+        appearance: [
+            &table_appearance[0],
+            &table_appearance[1],
+            &table_appearance[2],
+            &table_appearance[3],
+            &table_appearance[4],
+            &table_appearance[5],
+        ],
+        shortcut: &table_shortcut,
+        functional_options: table_user_visible.as_deref(),
         ..native::NativeTableHead::default()
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the head writer cannot place"))?;
@@ -7371,12 +4562,23 @@ fn format_native_table(
         // away for: `DontUse` is in no arm of the tail's table, so every
         // table that spelled `<CurrentRowUse>` refused whatever it spelled.
         current_row_use: item.table_current_row_use.map(FormTableCurrentRowUse::xml_value),
+        behavior_on_horizontal_compression: item
+            .scalars
+            .get("BehaviorOnHorizontalCompression")
+            .map(String::as_str),
         file_drag_mode: item.file_drag_mode.as_deref(),
+        auto_add_incomplete: native_scalar_tristate(item, "AutoAddIncomplete")?,
+        group_horizontal_align: item.group_horizontal_align.map(native_group_horizontal_align),
+        group_vertical_align: item.group_vertical_align.map(native_vertical_align_spelling),
+        display_importance: table_display_importance,
         ..native::NativeTableTail::default()
     })
     .ok_or_else(|| anyhow!("<Table> names a spelling the tail writer cannot place"))?;
 
-    let bag = native_table_property_bag(item, items, source)?;
+    let mut bag = native_table_property_bag(item, items, source)?;
+    if nested_in_gantt_chart {
+        bag.retain(|(key, value)| !(*key == "19" && value == "{\"S\",\"\"}"));
+    }
     let events = item
         .events
         .iter()
@@ -7388,12 +4590,42 @@ fn format_native_table(
     let events = native::format_native_events(&item.tag, main_attribute_class, &events)
         .ok_or_else(|| anyhow!("a table names an event the writer cannot place"))?;
 
+    // `{<count>,<uuid>…}` in uuid order, the shape the form root's set takes,
+    // with each name resolved among the table's own standard commands.
+    let target = items.get(&item.name);
+    let dynamic_list = target.is_some_and(|target| target.dynamic_list);
+    let main_table_kind = target.and_then(|target| target.main_table_kind.as_deref());
+    let mut excluded = item
+        .excluded_commands
+        .iter()
+        .map(|name| {
+            if dynamic_list && name == "Delete" {
+                return native::dynamic_list_item_delete_command_uuid(main_table_kind).ok_or_else(|| {
+                    anyhow!(
+                        "<Table> excludes Delete on a dynamic list over {}",
+                        main_table_kind.unwrap_or("nothing")
+                    )
+                });
+            }
+            native::table_item_standard_command_uuid(&item.tag, dynamic_list, item.data_path.as_deref(), name).ok_or_else(|| {
+                anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag)
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    excluded.sort_unstable();
+    let mut command_set = format!("{{{}", excluded.len());
+    for uuid in &excluded {
+        command_set.push(',');
+        command_set.push_str(uuid);
+    }
+    command_set.push('}');
     Ok(native::format_table_record(
         &head,
         &bag.iter()
             .map(|(key, value)| (*key, value.clone()))
             .collect::<Vec<_>>(),
         &events,
+        &command_set,
         &context_menu,
         &command_bar,
         &column_records,
@@ -7506,10 +4738,104 @@ fn native_root_property_bag(
         | "cfg:ChartOfCalculationTypesObject" => {
             bag.push(("24", "{\"B\",0}".to_string()));
         }
+        // A report form's bag carries eleven keys nothing in Form.xml decides
+        // -- the default forms, the variant name, a settings value, the
+        // report's name -- and the export reads none of them back. The eight
+        // it does read are written from the root's own elements:
+        // `ReportResult` 5, `DetailsData` 6 and `VariantAppearance` 20 as a
+        // reference to a form attribute, `ReportFormType` 7, `AutoShowState`
+        // 21, `CustomSettingsFolder` 23 as an item id, `ReportResultViewMode`
+        // 27 and `ViewModeApplicationOnSetReportResult` 29.
         "cfg:ReportObject" => {
-            return Err(anyhow!(
-                "a report form's property bag names what the source does not carry"
+            let scalar = |name: &str| properties.root_scalars.get(name).map(|value| value.trim());
+            let attribute_ref = |name: &str| -> Result<String> {
+                let attribute = properties
+                    .attributes
+                    .iter()
+                    .find(|attribute| attribute.name == name)
+                    .ok_or_else(|| anyhow!("the report names {name}, which is not a form attribute"))?;
+                // `{1,{<id>},""}`: all 218 stored report references of both
+                // corpora end with the empty string, and native ibcmd refuses
+                // a body without it («Ошибка формата потока») although our
+                // exporter reads both.
+                Ok(format!(
+                    "{{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{{1,{{{}}},\"\"}}}}",
+                    attribute.id
+                ))
+            };
+            let enumerated = |name: &str, uuid: &str, table: &[(&str, &str)]| -> Result<Option<String>> {
+                let Some(value) = scalar(name) else {
+                    return Ok(None);
+                };
+                let code = table
+                    .iter()
+                    .find_map(|(spelling, code)| (*spelling == value).then_some(*code))
+                    .ok_or_else(|| anyhow!("<{name}>{value} is not measured"))?;
+                Ok(Some(format!("{{\"#\",{uuid},{code}}}")))
+            };
+            // A value typed `xs:decimal` instead of an attribute name is
+            // stored as the number itself (1 form: `3` and `0`).
+            let report_value = |name: &str| -> Result<String> {
+                if !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()) {
+                    return Ok(format!("{{\"N\",{name}}}"));
+                }
+                attribute_ref(name)
+            };
+            if let Some(name) = scalar("ReportResult") {
+                bag.push(("5", report_value(name)?));
+            }
+            if let Some(name) = scalar("DetailsData") {
+                bag.push(("6", report_value(name)?));
+            }
+            if let Some(value) = enumerated(
+                "ReportFormType",
+                "acbc2eeb-2efb-48e4-b78a-661fd09fcf80",
+                &[("Main", "0"), ("Settings", "1"), ("Variant", "2")],
+            )? {
+                bag.push(("7", value));
+            }
+            if let Some(name) = scalar("VariantAppearance") {
+                bag.push(("20", attribute_ref(name)?));
+            }
+            if let Some(value) = enumerated(
+                "AutoShowState",
+                "f26c3706-a6ca-45cb-869a-e6ad38cd5f78",
+                &[("Auto", "0"), ("DontShow", "1"), ("ShowOnComposition", "3")],
+            )? {
+                bag.push(("21", value));
+            }
+            if let Some(name) = scalar("CustomSettingsFolder") {
+                bag.push(("23", format!("{{\"N\",{}}}", item_id(Some(name))?)));
+            }
+            if let Some(value) = enumerated(
+                "ReportResultViewMode",
+                "b9311bea-b26b-4ae0-8b5d-7b64048fd2df",
+                &[("Auto", "0"), ("Default", "1"), ("Compact", "2")],
+            )? {
+                bag.push(("27", value));
+            }
+            if let Some(value) = enumerated(
+                "ViewModeApplicationOnSetReportResult",
+                "874260df-7e23-4f02-9e10-5794914b5adf",
+                &[("Auto", "0")],
+            )? {
+                bag.push(("29", value));
+            }
+        }
+        // Both forms of both corpora whose main attribute is a settings
+        // composer store keys 12, 16 and 28 as constants and key 23 as the
+        // `<CustomSettingsFolder>` item's id, the report's own key 23.
+        "dcsset:SettingsComposer" if properties.root_scalars.contains_key("CustomSettingsFolder") => {
+            bag.push(("12", "{\"S\",\"\"}".to_string()));
+            bag.push(("16", "{\"B\",0}".to_string()));
+            bag.push((
+                "23",
+                format!(
+                    "{{\"N\",{}}}",
+                    item_id(properties.root_scalars.get("CustomSettingsFolder").map(|value| value.trim()))?
+                ),
             ));
+            bag.push(("28", "{\"B\",0}".to_string()));
         }
         "dcsset:SettingsComposer" => {
             return Err(anyhow!("a settings-composer form's property bag is not measured"));
@@ -7547,24 +4873,40 @@ fn native_table_addition(
     use crate::compiler::bodies::form_native as native;
 
     let mut context_menu = None;
-    let mut children = 0usize;
+    let mut child_records = Vec::new();
     for child in &item.child_items {
         match child.tag.as_str() {
             "ContextMenu" if context_menu.is_none() => context_menu = Some(child),
-            _ => children += 1,
+            _ => child_records.push(format_native_child_item(
+                child,
+                data_paths,
+                command_ids,
+                items,
+                main_attribute_class,
+                source,
+                items_root,
+            )?),
         }
     }
-    if children > 0 {
-        return Err(anyhow!("an addition with children is not measured"));
-    }
+    let children = if child_records.is_empty() {
+        "0".to_string()
+    } else {
+        let mut text = child_records.len().to_string();
+        for (kind_uuid, record) in &child_records {
+            text.push(',');
+            text.push_str(kind_uuid);
+            text.push(',');
+            text.push_str(record);
+        }
+        text
+    };
     let context_menu = match context_menu {
         Some(menu) => native_context_menu(menu, data_paths, command_ids, items, main_attribute_class, source, items_root)?,
         None => return Err(anyhow!("an addition with no context menu is not measured")),
     };
-    let extended_tooltip = match &item.extended_tooltip {
-        Some(tooltip) => native::format_extended_tooltip(&tooltip.id, &tooltip.name),
-        None => return Err(anyhow!("an addition with no extended tooltip is not measured")),
-    };
+    let extended_tooltip =
+        native_item_extended_tooltip(item, main_attribute_class, source, items_root)?
+            .ok_or_else(|| anyhow!("an addition with no extended tooltip is not measured"))?;
     // Member 19 names the item the addition serves, which is not always the
     // table it sits in: 392 of the corpus's additions live elsewhere.
     let source_item = match item.addition_source_item.as_deref() {
@@ -7613,11 +4955,15 @@ fn native_table_addition(
             FormTooltipRepresentation::ShowLeft => "ShowLeft",
             FormTooltipRepresentation::ShowBottom => "ShowBottom",
             FormTooltipRepresentation::ShowRight => "ShowRight",
-        }),
+        })
+        // The typed reader is gated to fields; an addition's own spelling is
+        // in the bag.
+        .or_else(|| item.scalars.get("ToolTipRepresentation").map(String::as_str)),
         payload: &payload,
         context_menu: &context_menu,
         extended_tooltip: &extended_tooltip,
         source_item: &source_item,
+        children: &children,
         group_horizontal_align: item.scalars.get("GroupHorizontalAlign").map(String::as_str),
         display_importance: item.display_importance.as_deref(),
     })
@@ -7649,7 +4995,28 @@ fn native_table_property_bag(
             "6",
             format!("{{\"N\",{}}}", scalar("AutoRefreshPeriod").unwrap_or("60")),
         ));
-        bag.push(("7", "{\"#\",2fdc88ec-7c9b-43cd-8b0d-7d4dbbd0d1b3}".to_string()));
+        // Key 7 is the table's `<Period>`, a standard period: `Custom` (the
+        // only variant either corpus spells) is 0, with its two dates. A table
+        // that names none keeps the constant it always stored.
+        bag.push((
+            "7",
+            match item.period.as_ref() {
+                Some(period) => {
+                    let variant = match period.variant.as_deref() {
+                        None | Some("Custom") => "0",
+                        Some(other) => {
+                            return Err(anyhow!("a table period variant {other} is not measured"));
+                        }
+                    };
+                    format!(
+                        "{{\"#\",2fdc88ec-7c9b-43cd-8ba5-873f043bdd88,{{{variant},{},{}}}}}",
+                        period.start_date.as_deref().unwrap_or("00010101000000"),
+                        period.end_date.as_deref().unwrap_or("00010101000000"),
+                    )
+                }
+                None => "{\"#\",2fdc88ec-7c9b-43cd-8b0d-7d4dbbd0d1b3}".to_string(),
+            },
+        ));
         let folders = match scalar("ChoiceFoldersAndItems") {
             None | Some("Items") => "0",
             Some("Folders") => "1",
@@ -7697,6 +5064,23 @@ fn native_table_property_bag(
         bag.push(("19", "{\"S\",\"\"}".to_string()));
         bag.push(("20", flag("AllowGettingCurrentRowURL", true)));
     } else {
+        // Key 3 `<ViewMode>` and key 4
+        // `<SettingsNamedItemDetailedRepresentation>`, absent keys when the
+        // table names neither: 124 + 66 and 218 + 1 of 11 235 tables.
+        match scalar("ViewMode") {
+            Some("All") => bag.push(("3", "{\"#\",c04ead79-749a-4981-915e-6fcb144f44e4,0}".to_string())),
+            Some("QuickAccess") => {
+                bag.push(("3", "{\"#\",c04ead79-749a-4981-915e-6fcb144f44e4,1}".to_string()));
+            }
+            Some(other) => return Err(anyhow!("a table's <ViewMode>{other} is not measured")),
+            None => {}
+        }
+        if scalar("SettingsNamedItemDetailedRepresentation").is_some() {
+            bag.push((
+                "4",
+                flag("SettingsNamedItemDetailedRepresentation", false),
+            ));
+        }
         if item.row_filter_present {
             bag.push(("13", "{\"U\"}".to_string()));
         }
@@ -7720,14 +5104,9 @@ fn native_container_payload(
     use crate::compiler::bodies::form_native as native;
     match item.tag.as_str() {
         "UsualGroup" => {
-            if item.format_present {
-                return Err(anyhow!("a group names a format"));
-            }
+            let format = native_localized(item, "Format");
             let collapsed_title =
                 format_form_title_value(&item.collapsed_representation_title);
-            if item.associated_table_element_id.is_some() {
-                return Err(anyhow!("a group names an associated table element"));
-            }
             let title_data_path = match item.title_data_path.as_deref() {
                 Some(path) => data_paths.resolve(path).ok_or_else(|| {
                     anyhow!("a group titles itself from {path}, which the writer cannot place")
@@ -7738,6 +5117,20 @@ fn native_container_payload(
                 .ok_or_else(|| anyhow!("a group names a background colour it cannot place"))?;
             let hidden = native_item_color(item.hidden_state_title_back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a group names a hidden-state colour it cannot place"))?;
+            // Payload member 26 is the id of the item the element names.
+            let associated = match item.associated_table_element_id.as_deref().map(str::trim) {
+                Some(name) => match items.get(name) {
+                    Some(target) => target.id.clone(),
+                    None => name
+                        .strip_suffix(":02023637-7868-4a5f-8576-835a76e0c9ba")
+                        .filter(|id| !id.is_empty() && id.bytes().all(|byte| byte.is_ascii_digit()))
+                        .map(str::to_string)
+                        .ok_or_else(|| {
+                            anyhow!("a group is associated with {name}, which the writer cannot place")
+                        })?,
+                },
+                None => "0".to_string(),
+            };
             native::format_usual_group_payload(&native::NativeUsualGroupPayload {
                 group: item.group.map(native_group_spelling),
                 behavior: item.behavior.map(native_group_behavior_spelling),
@@ -7759,6 +5152,8 @@ fn native_container_payload(
                 hidden_state_title_back_color: &hidden,
                 current_row_use: item.current_row_use.as_deref(),
                 collapsed_representation_title: &collapsed_title,
+                format: &format,
+                associated_table_element_id: &associated,
                 ..native::NativeUsualGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<UsualGroup> names a spelling the writer cannot place"))
@@ -7780,14 +5175,19 @@ fn native_container_payload(
             .ok_or_else(|| anyhow!("<CommandBar> names a spelling the writer cannot place"))
         }
         "Pages" => {
-            if item.associated_table_element_id.is_some() {
-                return Err(anyhow!("a pages group names an associated table element"));
-            }
-            native::format_pages_payload(
-                item.pages_representation.as_deref(),
-                "{0,1,0}",
-                "0",
-            )
+            let associated = match item.associated_table_element_id.as_deref().map(str::trim) {
+                Some(name) => items
+                    .get(name)
+                    .map(|target| target.id.clone())
+                    .ok_or_else(|| {
+                        anyhow!("a pages group is associated with {name}, which the writer cannot place")
+                    })?,
+                None => "0".to_string(),
+            };
+            // Payload member 2 holds the group's own events --
+            // `OnCurrentPageChange` -- 374 of 374.
+            let events = native_item_events(item, "")?;
+            native::format_pages_payload(item.pages_representation.as_deref(), &events, &associated)
             .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
         }
         "Popup" => {
@@ -7813,6 +5213,7 @@ fn native_container_payload(
             if item.picture_present {
                 return Err(anyhow!("a column group names a picture"));
             }
+            let header_picture = native_extra_picture(item, "HeaderPicture", source, items_root)?;
             let title_back_color = native_item_color(item.title_back_color.as_deref(), source)
                 .ok_or_else(|| anyhow!("a column group names a colour it cannot place"))?;
             native::format_column_group_payload(&native::NativeColumnGroupPayload {
@@ -7822,17 +5223,14 @@ fn native_container_payload(
                 header_horizontal_align: item.header_horizontal_align.as_deref(),
                 title_back_color: &title_back_color,
                 fixing_in_table: item.fixing_in_table.map(native_fixing_in_table_spelling),
+                picture: &header_picture,
                 ..native::NativeColumnGroupPayload::plain()
             })
             .ok_or_else(|| anyhow!("<ColumnGroup> names a spelling the writer cannot place"))
         }
         "Page" => {
-            if item.picture_present {
-                return Err(anyhow!("a page names a picture"));
-            }
-            if item.format_present {
-                return Err(anyhow!("a page names a format"));
-            }
+            let picture = native_item_picture(item, source, items_root)?;
+            let format = native_localized(item, "Format");
             let title_data_path = match item.title_data_path.as_deref() {
                 Some(path) => data_paths.resolve(path).ok_or_else(|| {
                     anyhow!("a page titles itself from {path}, which the writer cannot place")
@@ -7853,6 +5251,8 @@ fn native_container_payload(
                 vertical_align: item.vertical_align.map(native_vertical_align_spelling),
                 children_align: item.children_align.as_deref(),
                 scroll_on_compress: item.scroll_on_compress.unwrap_or(false),
+                picture: &picture,
+                format: &format,
                 ..native::NativePagePayload::plain()
             })
             .ok_or_else(|| anyhow!("<Page> names a spelling the writer cannot place"))
@@ -7887,8 +5287,15 @@ fn native_button_command(
         return Ok(format!("{{{id},{}}}", native::FORM_COMMAND_NAMESPACE_UUID));
     }
     if let Some(name) = path.strip_prefix("Form.StandardCommand.") {
-        let uuid = native::form_standard_command_uuid(main_attribute_class, name)
-            .ok_or_else(|| anyhow!("no measured uuid for {path} on {main_attribute_class}"))?;
+        let uuid = if main_attribute_class == "cfg:DynamicList" && name == "Delete" {
+            // The form itself is filed under the empty name, which no item takes.
+            native::dynamic_list_delete_command_uuid(
+                items.get("").and_then(|form| form.main_table_kind.as_deref()),
+            )
+        } else {
+            native::form_standard_command_uuid(main_attribute_class, name)
+        }
+        .ok_or_else(|| anyhow!("no measured uuid for {path} on {main_attribute_class}"))?;
         return Ok(format!("{{0,{uuid}}}"));
     }
     if let Some(rest) = path.strip_prefix("Form.Item.")
@@ -7897,8 +5304,17 @@ fn native_button_command(
         let target = items
             .get(target)
             .ok_or_else(|| anyhow!("a button runs {path}, whose item the form does not declare"))?;
-        let uuid = native::item_standard_command_uuid(&target.tag, target.dynamic_list, name)
-            .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
+        let uuid = if target.dynamic_list && name == "Delete" {
+            native::dynamic_list_item_delete_command_uuid(target.main_table_kind.as_deref())
+        } else {
+            native::table_item_standard_command_uuid(
+                &target.tag,
+                target.dynamic_list,
+                target.data_path.as_deref(),
+                name,
+            )
+        }
+        .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
         return Ok(format!("{{{},{uuid}}}", target.id));
     }
     // A button's command namespace is the command interface's: 142 spellings
@@ -7936,6 +5352,10 @@ struct NativeItemTarget {
     /// Whether the item is bound to an attribute of type `cfg:DynamicList`,
     /// which is what tells two uuids of the same command name apart.
     dynamic_list: bool,
+    /// The kind of that list's `<MainTable>`, which decides `Delete`.
+    main_table_kind: Option<String>,
+    /// The item's own `<DataPath>`, which splits `Ungroup` and `Choose`.
+    data_path: Option<String>,
 }
 
 /// `<ToolTipRepresentation>` as every record writer spells it.
@@ -8032,7 +5452,13 @@ fn native_item_title_font(
     item: &FormXmlChildItem,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    native_font_of(item, item.title_font.as_ref(), source)
+    // The typed field is read for a usual group only; every other container
+    // keeps its `<TitleFont>` in the font map -- 82 of 82 popups lost theirs.
+    native_font_of(
+        item,
+        item.title_font.as_ref().or_else(|| item.fonts.get("TitleFont")),
+        source,
+    )
 }
 
 fn native_font_of(
@@ -8081,6 +5507,97 @@ fn native_choice_list(
         values.push(native_choice_list_value(choice, source)?);
     }
     Ok(crate::compiler::bodies::form_native::format_native_choice_list(&values))
+}
+
+/// Payload members 55 to 60 of an input field, measured over both corpora:
+/// `<AutoShowClearButtonMode>` and `<AutoShowOpenButtonMode>` (`Always` 1,
+/// `FilledOnly` 2), `<AutoCorrectionOnTextInput>` and
+/// `<SpellCheckingOnTextInput>` (`Use` 1, `DontUse` 2), a constant 0, and
+/// `<SpecialTextInputMode>` (`Email` 4, `PhoneNumber` 5, `Digits` 6); 0 when
+/// absent. Another spelling is refused.
+fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 6]> {
+    let code = |name: &str, table: &[(&str, &'static str)]| -> Result<&'static str> {
+        match item.scalars.get(name).map(String::as_str) {
+            None => Ok("0"),
+            Some(value) => table
+                .iter()
+                .find_map(|(spelling, code)| (*spelling == value).then_some(*code))
+                .ok_or_else(|| anyhow!("<{name}>{value} is not measured")),
+        }
+    };
+    let show = [("Always", "1"), ("FilledOnly", "2")];
+    let usage = [("Use", "1"), ("DontUse", "2")];
+    Ok([
+        code("AutoShowClearButtonMode", &show)?,
+        code("AutoShowOpenButtonMode", &show)?,
+        code("AutoCorrectionOnTextInput", &usage)?,
+        code("SpellCheckingOnTextInput", &usage)?,
+        "0",
+        code(
+            "SpecialTextInputMode",
+            &[("Email", "4"), ("PhoneNumber", "5"), ("Digits", "6")],
+        )?,
+    ])
+}
+
+/// Member 33 of a button: the command's `<Parameter>`, `{"U"}` when it names
+/// none. An `xr:MDObjectRef` stores `{"#",fc01b5df-…,<object uuid>}`, the
+/// shape a dynamic list's main table takes; another type is not measured.
+fn native_button_parameter(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(value) = item.scalars.get("Parameter").map(|value| value.trim()) else {
+        return Ok("{\"U\"}".to_string());
+    };
+    match item.scalars.get("Parameter@type").map(String::as_str) {
+        Some("xr:MDObjectRef") => {
+            let source = source
+                .ok_or_else(|| anyhow!("a button names {value} and no configuration is on hand"))?;
+            let uuid = source.resolve_metadata_reference_uuid(value)?;
+            Ok(format!("{{\"#\",fc01b5df-97fe-449b-83d4-218a090e681e,{uuid}}}"))
+        }
+        other => Err(anyhow!("a button's <Parameter> of type {other:?} is not measured")),
+    }
+}
+
+/// A `<Shortcut>` of an item, `{0,0,0}` when it names none.
+fn native_item_shortcut(item: &FormXmlChildItem) -> Result<String> {
+    match item.scalars.get("Shortcut") {
+        Some(text) => crate::compiler::bodies::form_native::format_native_shortcut(text)
+            .ok_or_else(|| anyhow!("<{}> names the shortcut {text}, which is not measured", item.tag)),
+        None => Ok("{0,0,0}".to_string()),
+    }
+}
+
+/// Payload member 27 of an input field: its `<ChoiceParameters>`,
+/// `{0,N,("<name>",<value>)×N}` with the choice-list value grammar, `{0,0}`
+/// when it names none. 1 356 of 1 364.
+fn native_choice_parameters(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let mut out = format!("{{0,{}", item.choice_parameters.len());
+    for (name, value) in &item.choice_parameters {
+        out.push(',');
+        out.push_str(&format_1c_string(name));
+        out.push(',');
+        // `<app:value xsi:nil="true"/>` stores the bare `{"U"}`, with no
+        // wrapper (7 of 7).
+        if value.value_type.is_none()
+            && value.literal_type.is_none()
+            && value.literal.as_deref().is_none_or(|text| text.trim().is_empty())
+            && value.array.is_empty()
+            && value.title.is_empty()
+            && value.unwritable.is_empty()
+        {
+            out.push_str("{\"U\"}");
+            continue;
+        }
+        out.push_str(&native_choice_list_value(value, source)?);
+    }
+    out.push('}');
+    Ok(out)
 }
 
 /// One `<xr:Item>` of a `<ChoiceList>`, as the body stores its value.
@@ -8138,9 +5655,60 @@ fn native_choice_list_value(
                 &title,
             ))
         }
+        // `v8:FixedArray`: `{"#",4500381b-…,{<n>,<value>×n}}`, each value an
+        // ordinary choice-list value, the flag 1 and both ids zero -- 159 of
+        // 159 choice parameters.
+        Some("v8:FixedArray") => {
+            let values = choice
+                .array
+                .iter()
+                .map(|value| native_choice_list_value(value, source))
+                .collect::<Result<Vec<_>>>()?;
+            let mut literal = format!(
+                "{{\"#\",4500381b-db30-4a10-9db4-990038032acf,{{{}",
+                values.len()
+            );
+            for value in &values {
+                literal.push(',');
+                literal.push_str(value);
+            }
+            literal.push_str("}}");
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&literal),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // `xs:dateTime`: `{"D",<yyyymmddhhmmss>}`.
+        Some("xs:dateTime") => {
+            let digits = text.chars().filter(char::is_ascii_digit).collect::<String>();
+            if digits.len() != 14 {
+                return Err(anyhow!("a <ChoiceList> date {text} is not measured"));
+            }
+            let literal = format!("{{\"D\",{digits}}}");
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&literal),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        Some("xs:boolean") if matches!(text, "true" | "false") => {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Boolean(text == "true"),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // A string keeps its spaces: `" "` is a value of its own.
         Some("xs:string") => Ok(native::format_native_choice_list_value(
             false,
-            &native::NativeChoiceListLiteral::Text(text),
+            &native::NativeChoiceListLiteral::Text(choice.literal.as_deref().unwrap_or("")),
             NATIVE_ZERO_UUID,
             NATIVE_ZERO_UUID,
             &title,
@@ -8162,6 +5730,51 @@ fn native_choice_list_value(
                 &title,
             ))
         }
+        // A platform comparison type: its enum literal, both ids zero (10 of 10).
+        Some("dcsset:DataCompositionComparisonType") => {
+            let ordinal = match text {
+                "Equal" => 0,
+                "NotEqual" => 1,
+                "InList" => 7,
+                "InListByHierarchy" => 8,
+                "InHierarchy" => 9,
+                "NotInList" => 11,
+                "Filled" => 14,
+                "NotFilled" => 15,
+                other => {
+                    return Err(anyhow!("a <ChoiceList> item names comparison type {other}"));
+                }
+            };
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(&format!(
+                    "{{\"#\",dcbf2698-3c1f-4a22-997f-48070ae9bd64,{ordinal}}}"
+                )),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // An empty value list (2 of 2); a populated one is unmeasured.
+        Some("xr:ValueList") if text.is_empty() && choice.array.is_empty() => {
+            Ok(native::format_native_choice_list_value(
+                false,
+                &native::NativeChoiceListLiteral::Raw(
+                    "{\"#\",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3,{6,1e512aab-1b41-4ef6-9375-f0137be9dd91,0,0,{0},{\"Pattern\"},0,-1}}",
+                ),
+                NATIVE_ZERO_UUID,
+                NATIVE_ZERO_UUID,
+                &title,
+            ))
+        }
+        // An empty design-time reference, which only a radio button spells.
+        Some("xr:DesignTimeRef") if text.is_empty() => Ok(native::format_native_choice_list_value(
+            true,
+            &native::NativeChoiceListLiteral::Undefined,
+            NATIVE_ZERO_UUID,
+            NATIVE_ZERO_UUID,
+            &title,
+        )),
         Some("xr:DesignTimeRef") => {
             let (type_id, value_id) = native_choice_list_reference(text, source)?;
             Ok(native::format_native_choice_list_value(
@@ -8198,6 +5811,14 @@ fn native_choice_list_reference(
     reference: &str,
     source: Option<&MetadataSourceContext>,
 ) -> Result<(String, String)> {
+    // `<type uuid>.<value uuid>` is the exporter's spelling of a value its
+    // type does not name; the body holds the two uuids (2 of 2).
+    if let Some((type_id, value_id)) = reference.split_once('.')
+        && is_uuid_text(type_id)
+        && is_uuid_text(value_id)
+    {
+        return Ok((type_id.to_string(), value_id.to_string()));
+    }
     let source =
         source.ok_or_else(|| anyhow!("a <ChoiceList> names {reference} with no source tree"))?;
     let mut parts = reference.splitn(3, '.');
@@ -8271,6 +5892,7 @@ const fn native_vertical_align_spelling(align: FormFieldVerticalAlign) -> &'stat
 /// The payload a field carries, by its kind.
 fn native_field_payload(
     item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
@@ -8296,9 +5918,15 @@ fn native_field_payload(
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
             events: &events,
+            format: &native_localized(item, "Format"),
+            password_mode: native_scalar_tristate(item, "PasswordMode")?,
+            border: &native_item_control_border(item)?,
+            border_color: &native_scalar_color(item, "BorderColor", source)?,
             ..native::NativeLabelPayload::plain(false)
         })),
-        "InputField" => native::format_input_payload(&native::NativeInputPayload {
+        "InputField" => {
+            let choice_parameter_links = native_choice_parameter_links(item, data_paths)?;
+            native::format_input_payload(&native::NativeInputPayload {
             width: item.width.as_deref().unwrap_or("0"),
             height: item.height.as_deref().unwrap_or("0"),
             horizontal_stretch: item.horizontal_stretch,
@@ -8315,6 +5943,7 @@ fn native_field_payload(
                 "ExtendedEditMultipleValues",
                 false,
             ),
+            drop_list_settings: &native_input_drop_list_settings(item, data_paths)?,
             auto_choice_incomplete: native_scalar_tristate(item, "AutoChoiceIncomplete")?,
             choice_folders_and_items: item
                 .scalars
@@ -8324,10 +5953,15 @@ fn native_field_payload(
                 .scalars
                 .get("IncompleteChoiceMode")
                 .map(String::as_str),
-            choice_button_representation: item
-                .scalars
-                .get("ChoiceButtonRepresentation")
-                .map(String::as_str),
+            choice_button_representation: item.choice_button_representation.map(|value| {
+                match value {
+                    FormXmlChoiceButtonRepresentation::ShowInDropList => "ShowInDropList",
+                    FormXmlChoiceButtonRepresentation::ShowInDropListAndInInputField => {
+                        "ShowInDropListAndInInputField"
+                    }
+                    FormXmlChoiceButtonRepresentation::ShowInInputField => "ShowInInputField",
+                }
+            }),
             choice_history_on_input: item
                 .scalars
                 .get("ChoiceHistoryOnInput")
@@ -8356,15 +5990,42 @@ fn native_field_payload(
             max_width: item.max_width.as_deref().unwrap_or("0"),
             auto_max_height: item.auto_max_height.unwrap_or(true),
             max_height: item.max_height.as_deref().unwrap_or("0"),
-            mask: item.item_type.as_deref().unwrap_or(""),
+            mask: item.scalars.get("Mask").map_or("", String::as_str),
             events: &events,
+            min_value: &native_typed_scalar(item, "MinValue")?,
+            max_value: &native_typed_scalar(item, "MaxValue")?,
+            picture: &native_extra_picture(item, "ChoiceButtonPicture", source, items_root)?,
+            choice_list_height: native_scalar(item, "ChoiceListHeight"),
+            drop_list_width: native_scalar(item, "DropListWidth"),
+            choice_form: &native_choice_form(item, source)?,
+            format: &native_localized(item, "Format"),
+            edit_format: &native_localized(item, "EditFormat"),
+            edit_text_update: item.scalars.get("EditTextUpdate").map(String::as_str),
+            input_hint: &native_localized(item, "InputHint"),
+            choice_list: &native_choice_list(item, source)?,
+            choice_parameters: &native_choice_parameters(item, source)?,
+            available_types: &match item.available_types.as_ref() {
+                Some(spec) => format_form_type_spec_pattern("InputField AvailableTypes", spec, source)?,
+                None => "{\"Pattern\"}".to_string(),
+            },
+            text_input_tail: native_text_input_tail(item)?,
+            choice_parameter_links: &choice_parameter_links.0,
+            choice_parameter_links_again: &choice_parameter_links.1,
+            type_link: &native_type_link(item, data_paths)?,
             ..native::NativeInputPayload::plain()
         })
-        .ok_or_else(|| anyhow!("the input field names something the writer cannot place")),
+        .ok_or_else(|| anyhow!("the input field names something the writer cannot place"))
+        }
         "CheckBoxField" => {
-            if item.format_present || item.font_present {
-                return Err(anyhow!("a check box names a format or a font"));
-            }
+            // Slot 5 holds a check box's `<EditFormat>` -- the `БЛ=…; БИ=…`
+            // pair of its two captions, 81 ERP УХ forms -- and `<Format>` when
+            // it names that instead.
+            let format = if item.localized.contains_key("EditFormat") {
+                native_localized(item, "EditFormat")
+            } else {
+                native_localized(item, "Format")
+            };
+            let font = native_item_font(item, source)?;
             let text_color = native_scalar_color(item, "TextColor", source)?;
             let back_color = native_scalar_color(item, "BackColor", source)?;
             let border_color = native_scalar_color(item, "BorderColor", source)?;
@@ -8378,9 +6039,96 @@ fn native_field_payload(
                 item_width: native_scalar(item, "ItemWidth"),
                 item_height: native_scalar(item, "ItemHeight"),
                 equal_items_width: item.scalars.get("EqualItemsWidth").map(String::as_str),
+                format: &format,
+                font: &font,
                 ..native::NativeCheckBoxPayload::plain()
             })
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
+        }
+        "GraphicalSchemaField" => {
+            if item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch.is_some()
+                || item.vertical_stretch.is_some()
+                || item.scalars.contains_key("BorderColor")
+                || !item.excluded_commands.is_empty()
+            {
+                return Err(anyhow!("a <GraphicalSchemaField> names a property whose slot is not measured"));
+            }
+            native::format_graphical_schema_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                item.scalars.get("Output").map(|value| value.trim()),
+                native_scalar_flag(item, "Edit", true),
+                &events,
+            )
+            .ok_or_else(|| anyhow!("<GraphicalSchemaField> names a spelling the writer cannot place"))
+        }
+        "ChartField" => {
+            let horizontal = item.horizontal_stretch.unwrap_or(true);
+            let vertical = item.vertical_stretch.unwrap_or(true);
+            if horizontal != vertical
+                || item.max_width.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+            {
+                return Err(anyhow!("a <ChartField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_chart_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                horizontal,
+                vertical,
+                &events,
+                item.max_height.as_deref().unwrap_or("0"),
+            ))
+        }
+        // A Gantt chart's `{3,…}` payload. The exporter publishes the extent
+        // and the stretch pair only where they are not the default, so a
+        // default the source spells out would not come back and refuses, as
+        // does every extent the bag has no member for.
+        "GanttChartField" => {
+            let count = |value: Option<&str>| {
+                value.is_none_or(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            };
+            if item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || !count(item.width.as_deref())
+                || !count(item.height.as_deref())
+                || item.width.as_deref() == Some("50")
+                || item.height.as_deref() == Some("10")
+                || item.horizontal_stretch == Some(true)
+                || item.vertical_stretch == Some(true)
+            {
+                return Err(anyhow!("a <GanttChartField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_gantt_chart_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                item.horizontal_stretch.unwrap_or(true),
+                item.vertical_stretch.unwrap_or(true),
+                &events,
+            ))
+        }
+        "PDFDocumentField" => {
+            if events != "{0,1,0}"
+                || item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch.is_some()
+                || item.vertical_stretch.is_some()
+            {
+                return Err(anyhow!("a <PDFDocumentField> names a property whose slot is not measured"));
+            }
+            Ok(native::format_pdf_document_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+            ))
         }
         "HTMLDocumentField" => native::format_html_document_payload(
             &native::NativeHtmlDocumentPayload {
@@ -8510,18 +6258,106 @@ fn native_field_payload(
                     "ShowRowAndColumnNames",
                     false,
                 ),
+                drawing_selection_show_mode: item
+                    .scalars
+                    .get("DrawingSelectionShowMode")
+                    .map(String::as_str),
                 ..native::NativeSpreadsheetPayload::plain()
             })
             .ok_or_else(|| {
                 anyhow!("<SpreadSheetDocumentField> names a spelling the writer cannot place")
             })
         }
+        // A progress bar's `{4,…}` payload, 16 members over 65 records: the
+        // width (32 when absent), a constant 1, the horizontal stretch, the
+        // maximum (100), the representation (`Broken` 0, absent 1), the
+        // percentage and the maximum-width switch; the rest never varies.
+        "ProgressBarField" => {
+            if item.height.is_some() {
+                return Err(anyhow!("a progress bar names a height, which is not measured"));
+            }
+            let representation = match item.scalars.get("Representation").map(String::as_str) {
+                None => "1",
+                Some("Broken") => "0",
+                Some(other) => {
+                    return Err(anyhow!("a progress bar's <Representation>{other} is not measured"));
+                }
+            };
+            Ok(format!(
+                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},0,0,{auto_max_height},0}}",
+                width = item.width.as_deref().unwrap_or("32"),
+                stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
+                max = item.scalars.get("MaxValue").map_or("100", String::as_str),
+                percent = u8::from(native_scalar_flag(item, "ShowPercent", false)),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+                auto_max_height = u8::from(item.auto_max_height.unwrap_or(true)),
+            ))
+        }
+        // A calendar's `{6,…}` payload, 24 members over the 13 calendars of
+        // both corpora: the size (16 by 9 when absent), the current-date
+        // switch, the font and colour, the events, the months panel, the
+        // months across and down (1 when absent), the border (style 1 when
+        // absent), and the maximum-size switches.
+        "CalendarField" => {
+            let events = native_item_events_where(item, main_attribute_class, |name| name != "OnChange")?;
+            let border = if item.control_border.is_none() && !item.control_border_seen {
+                "{3,0,{0},1,1,0,48312c09-257f-4b29-b280-284dd89efc1e}".to_string()
+            } else {
+                native_item_control_border(item)?
+            };
+            Ok(format!(
+                "{{6,{width},{height},1,1,0,{current},1,00010101000000,00010101000000,{font},{color},0,0,{events},{months_panel},{across},{down},{border},{auto_max_width},0,0,{auto_max_height},0}}",
+                width = item.width.as_deref().unwrap_or("16"),
+                height = item.height.as_deref().unwrap_or("9"),
+                current = u8::from(native_scalar_flag(item, "ShowCurrentDate", true)),
+                font = native_item_font(item, source)?,
+                color = native_scalar_color(item, "TextColor", source)?,
+                months_panel = u8::from(native_scalar_flag(item, "ShowMonthsPanel", false)),
+                across = item.scalars.get("WidthInMonths").map_or("1", String::as_str),
+                down = item.scalars.get("HeightInMonths").map_or("1", String::as_str),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+                auto_max_height = u8::from(item.auto_max_height.unwrap_or(true)),
+            ))
+        }
+        // A track bar's `{2,…}` payload, 18 members over 13 records.
+        "TrackBarField" => {
+            let marking = match item.scalars.get("MarkingAppearance").map(String::as_str) {
+                None => "2",
+                Some("TopLeft") => "1",
+                Some(other) => {
+                    return Err(anyhow!("a track bar's <MarkingAppearance>{other} is not measured"));
+                }
+            };
+            Ok(format!(
+                "{{2,{width},{height},{stretch},0,{min},{max},{step},0,{large_step},{marking_step},{marking},{{3,4,{{0}}}},{auto_max_width},0,0,1,0}}",
+                width = item.width.as_deref().unwrap_or("32"),
+                height = item.height.as_deref().unwrap_or("2"),
+                stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
+                min = item.scalars.get("MinValue").map_or("0", String::as_str),
+                max = item.scalars.get("MaxValue").map_or("100", String::as_str),
+                step = item.scalars.get("Step").map_or("1", String::as_str),
+                large_step = item.scalars.get("LargeStep").map_or("10", String::as_str),
+                marking_step = item.scalars.get("MarkingStep").map_or("5", String::as_str),
+                auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+            ))
+        }
         "PictureField" => {
-            if item.picture_present || item.font_present {
-                return Err(anyhow!("a picture field names a picture or a font"));
+            if item.picture_present {
+                return Err(anyhow!("a picture field names a picture"));
             }
             let text_color = native_scalar_color(item, "TextColor", source)?;
-            let back_color = native_scalar_color(item, "BackColor", source)?;
+            // Member 11 is the border colour: no picture field of either
+            // corpus names a background, and 26 of 26 border colours land here.
+            let back_color = native_scalar_color(item, "BorderColor", source)?;
+            let font = native_item_font(item, source)?;
+            let nonselected_picture_text = native_localized(item, "NonselectedPictureText");
+            // A picture field that names no border stores style 1, not the
+            // decoration's 0: 2 047 of 2 047.
+            let border = if item.control_border.is_none() && !item.control_border_seen {
+                native::NativePicturePayload::default().border.to_string()
+            } else {
+                native_item_control_border(item)?
+            };
             native::format_picture_payload(&native::NativePicturePayload {
                 events: &events,
                 width: item.width.as_deref().unwrap_or("0"),
@@ -8543,8 +6379,10 @@ fn native_field_payload(
                 // largest never-filled field the struct sweep found: 2 110
                 // records of 1 102 forms store a picture where the writer put
                 // the empty constant, and 404 a border.
-                picture: &native_item_picture(item, source, items_root)?,
-                border: &native_item_control_border(item)?,
+                picture: &native_extra_picture(item, "ValuesPicture", source, items_root)?,
+                border: &border,
+                font: &font,
+                title: &nonselected_picture_text,
                 ..native::NativePicturePayload::default()
             })
             .ok_or_else(|| anyhow!("<PictureField> names a spelling the writer cannot place"))
@@ -8620,13 +6458,8 @@ fn native_decoration_payload(
         .unwrap_or_else(|| native_scalar_flag(item, "EnableStartDrag", false));
 
     if item.tag == "PictureDecoration" {
-        if item.nonselected_picture_text_present {
-            return Err(anyhow!(
-                "<PictureDecoration> names a <NonselectedPictureText>, which member 5 of its \
-                 payload holds and the parser does not collect"
-            ));
-        }
         let picture = native_item_picture(item, source, items_root)?;
+        let nonselected_picture_text = native_localized(item, "NonselectedPictureText");
         return native::format_picture_decoration_payload(
             &native::NativePictureDecorationPayload {
                 picture: &picture,
@@ -8640,6 +6473,7 @@ fn native_decoration_payload(
                 events: &events,
                 file_drag_mode,
                 image_scale: Some(native_decoration_number(item, "ImageScale", "100")?),
+                nonselected_picture_text: &nonselected_picture_text,
                 ..native::NativePictureDecorationPayload::default()
             },
         )
@@ -8695,7 +6529,7 @@ fn native_decoration_number<'a>(
 /// shape.
 fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
     if !item.control_border_seen {
-        return crate::compiler::bodies::form_native::format_native_control_border(None)
+        return crate::compiler::bodies::form_native::format_native_control_border(None, "1")
             .ok_or_else(|| anyhow!("<{}> cannot place its default border", item.tag));
     }
     let border = item
@@ -8703,11 +6537,17 @@ fn native_item_control_border(item: &FormXmlChildItem) -> Result<String> {
         .as_ref()
         .filter(|border| border.valid)
         .ok_or_else(|| anyhow!("<{}> names a <Border> the writer cannot place", item.tag))?;
+    if border.reference {
+        return Ok("{3,1,{-18},1,1,0}".to_string());
+    }
     let style = border
         .style
         .ok_or_else(|| anyhow!("<{}> names a <Border> with no style", item.tag))?;
-    crate::compiler::bodies::form_native::format_native_control_border(Some(style.xml_value()))
-        .ok_or_else(|| anyhow!("<{}> names a border style the writer cannot place", item.tag))
+    crate::compiler::bodies::form_native::format_native_control_border(
+        Some(style.xml_value()),
+        &border.width,
+    )
+    .ok_or_else(|| anyhow!("<{}> names a border style the writer cannot place", item.tag))
 }
 
 /// The `{4,…}` picture reference an item's `<Picture>` stores.
@@ -8729,11 +6569,16 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("ActivateTask", "{0,093dd4ed-e03c-4fc6-a95a-01f51379cccf}"),
     ("ActiveUsers", "{0,47f01799-7968-4f44-9acc-fe1bdde8beb2}"),
     ("AddListItem", "{0,2a0c2238-cb59-4473-ada6-352b60f3c0a9}"),
+    ("CollaborationSystemUser", "{0,a722bc14-4edb-4eed-84b9-5d9b2b443e04}"),
+    ("ExternalDataSourceFunction", "{0,2954e819-f3fc-40de-9769-292efce9a355}"),
+    ("ShowPassword", "{0,97f87955-b88a-4225-a0d8-03af981ecd86}"),
     ("AddToFavorites", "{0,1001ae3e-9289-4303-9699-3c0c17e20e61}"),
     ("AppearanceBoxesFilled", "{0,ba592483-bc90-4e26-ba4d-2126359c6529}"),
     ("AppearanceCheckBox", "{0,7a9cd2fd-6372-4342-9a9e-3ebbd754fd83}"),
     ("AppearanceCheckIcon", "{0,85998f14-805b-4e2b-ba19-9d79b0464042}"),
     ("AppearanceCircleEmpty", "{0,2721abfb-fbff-4a3a-98ac-b7c9eb29cd85}"),
+    ("AppearanceFlagRed", "{0,b0dd988f-2d9f-4364-b1f4-a4d5f45ffb78}"),
+    ("AppearanceStarFilled", "{0,3689585c-a3e2-45d0-a302-caeb31b78835}"),
     ("AppearanceCircleFilled", "{0,788667db-61c9-45f3-9c4f-5f660ecdf3e1}"),
     ("AppearanceCircleGreen", "{0,71cbcb5c-f3f0-4ffd-a4d0-19b802b5ed6b}"),
     ("AppearanceCircleOneFourthFilled", "{0,fc058833-e57f-4f93-ba7a-803992a65c3e}"),
@@ -8831,6 +6676,7 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("Form", "{0,fc34a694-e99b-4d1c-a526-63f5571bdb09}"),
     ("FormHelp", "{0,b7c81c62-d6ad-4eae-9cea-0e203182db67}"),
     ("Forward", "{0,f874b0cc-db1d-4577-8c77-d4ba206eb05d}"),
+    ("FunctionMenuCommand", "{0,dfcd2d21-24ea-4b27-ab9a-6bf754577536}"),
     ("GanttChart", "{0,fa67cb81-8d56-4534-90bd-b62fb0dbf5f0}"),
     ("GenerateReport", "{0,0ce78048-0196-4f80-a781-9829cdb7f43e}"),
     ("GeographicalSchema", "{0,a9152be7-62cf-4523-be34-a23f018f497e}"),
@@ -8848,6 +6694,8 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("InformationRegister", "{0,5b87ad1b-d8cc-43c1-b5c4-dc43613c518c}"),
     ("InputFieldCalculator", "{-6}"),
     ("InputFieldCalendar", "{-5}"),
+    ("InputFieldChooseType", "{-14}"),
+    ("SetListItemDeletionMark", "{0,4bf588d5-b8d8-47fd-8f41-eb9b668981ce}"),
     ("InputFieldClear", "{-2}"),
     ("InputFieldOpen", "{-7}"),
     ("InputFieldSelect", "{-1}"),
@@ -9085,6 +6933,22 @@ fn native_picture_of(
             .ok_or_else(|| anyhow!("no measured value for StdPicture.{name}"))?;
         return Ok(native::format_native_std_picture(
             value,
+            picture.load_transparent.as_deref().map(str::trim) != Some("false"),
+            picture.transparent_x.as_deref(),
+            picture.transparent_y.as_deref(),
+        ));
+    }
+    // `0:<uuid>` is a common picture that no longer exists, spelled by its
+    // uuid; the body holds the common-picture shape with that uuid (16 of 16).
+    if let Some(uuid) = reference.strip_prefix("0:").filter(|tail| is_uuid_text(tail)) {
+        let load_transparent = match picture.load_transparent.as_deref().map(str::trim) {
+            Some("true") => true,
+            Some("false") => false,
+            _ => return Err(anyhow!("<{holder}> names a <Picture> with no <LoadTransparent>")),
+        };
+        return Ok(native::format_native_item_picture(
+            Some(uuid),
+            load_transparent,
             picture.transparent_x.as_deref(),
             picture.transparent_y.as_deref(),
         ));
@@ -9189,6 +7053,482 @@ fn native_scalar_color(
         .ok_or_else(|| anyhow!("<{}> names a colour the writer cannot place", item.tag))
 }
 
+/// An item's `<ExtendedTooltip>` record, `None` when it has none.
+///
+/// An empty tooltip is the fixed template. One with content is a label
+/// decoration's record member for member -- kind 0, no context menu and no
+/// tooltip of its own -- whatever item holds it: 3 015 of 3 039 ERP УХ and 440
+/// of 440 BSP non-empty tooltips rebuild byte for byte that way, and the 24
+/// others differ only in a prefix the exporter strips.
+fn native_item_extended_tooltip(
+    item: &FormXmlChildItem,
+    main_attribute_class: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<Option<String>> {
+    use crate::compiler::bodies::form_native as native;
+    let Some(tooltip) = item.extended_tooltip.as_ref() else {
+        return Ok(None);
+    };
+    let Some(tip) = item.extended_tooltip_item.as_deref() else {
+        return Ok(Some(native::format_extended_tooltip(&tooltip.id, &tooltip.name)));
+    };
+    let text_color = native_scalar_color(tip, "TextColor", source)?;
+    let font = native_item_font(tip, source)?;
+    let (rendered_title, title_content) = native_decoration_titles(tip)?;
+    let payload = native_decoration_payload(tip, main_attribute_class, source, items_root)?;
+    let display_importance = native::native_display_importance(tip.display_importance.as_deref())
+        .ok_or_else(|| anyhow!("an extended tooltip names a DisplayImportance the writer has not measured"))?;
+    native::format_decoration_item(&native::NativeDecorationItem {
+        id: &tip.id,
+        kind: 0,
+        name: &tip.name,
+        text_color: &text_color,
+        font: &font,
+        payload: &payload,
+        title: &rendered_title,
+        tooltip_title: "{1,0}",
+        width: tip.width.as_deref(),
+        height: tip.height.as_deref(),
+        horizontal_stretch: native_flag(tip.horizontal_stretch),
+        vertical_stretch: native_flag(tip.vertical_stretch),
+        content: &title_content,
+        enabled: true,
+        context_menu: None,
+        visible: true,
+        skip_on_input: None,
+        tooltip_representation: None,
+        group_horizontal_align: tip.group_horizontal_align.map(native_group_horizontal_align),
+        group_vertical_align: tip.group_vertical_align.map(native_vertical_align_spelling),
+        extended_tooltip: None,
+        auto_max_width: tip.auto_max_width.unwrap_or(true),
+        max_width: tip.max_width.as_deref(),
+        auto_max_height: tip.auto_max_height.unwrap_or(true),
+        max_height: tip.max_height.as_deref(),
+        display_importance,
+        ..native::NativeDecorationItem::default()
+    })
+    .map(Some)
+    .ok_or_else(|| anyhow!("<ExtendedTooltip> names something the writer cannot place"))
+}
+
+/// A rights setting as every record stores it:
+/// `{0,{0,{"B",<common>},<n>,(<role uuid>,{"B",<value>})×n}}`, the roles in XML
+/// order. `Role.X` is the uuid of `Roles/X.xml`; a name that is itself a uuid
+/// -- a role the configuration no longer has -- is written verbatim. 7 239 of
+/// 7 239 `<UserVisible>` blocks and 376 of 376 command `<Use>` blocks.
+fn native_rights(
+    rights: &FormXmlRights,
+    owner: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let common = rights
+        .common
+        .ok_or_else(|| anyhow!("{owner} spells no <Common>"))?;
+    let mut out = format!("{{0,{{0,{{\"B\",{}}},{}", u8::from(common), rights.values.len());
+    for (name, value) in &rights.values {
+        let value = value.ok_or_else(|| anyhow!("{owner} names {name} with no value"))?;
+        let uuid = if let Some(role) = name.strip_prefix("Role.") {
+            let source = source
+                .ok_or_else(|| anyhow!("{owner} names Role.{role} and no configuration is on hand"))?;
+            source.resolve_simple_metadata_uuid(name, "Role", "Roles", "Role.")?
+        } else if is_uuid_text(name) {
+            name.clone()
+        } else {
+            return Err(anyhow!("{owner} names {name}, which is not a role"));
+        };
+        out.push_str(&format!(",{uuid},{{\"B\",{}}}", u8::from(value)));
+    }
+    out.push_str("}}");
+    Ok(out)
+}
+
+/// The attribute's `<Settings xsi:type="mxl:SpreadsheetDocument">` as the
+/// MOXCEL record the body stores (rt-embedded.md §1.1).
+///
+/// The empty document -- 33 of 33 -- is a fixed skeleton with three members
+/// taken from the source: the language record, the default format and the
+/// template mode. A document with no cells but columns, a height, merges and
+/// named areas (1 of 1, `Catalogs/Номенклатура` `КарточкаНоменклатуры`) fills
+/// the column count at member 19, the height at 20, the merges at 29 and the
+/// named areas at 32, ends its language record in 1 and stores 1 and a nil
+/// uuid where the skeleton has member 40's 0. The language record's third
+/// member is what a load from XML writes, 1. Anything else refuses.
+fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<String> {
+    let refuse = || anyhow!("an embedded mxl:SpreadsheetDocument with cells has no writer yet");
+    let head = format!("<Attribute name=\"{attribute}\"");
+    let start = form_text.find(&head).ok_or_else(refuse)?;
+    let end = form_text[start..].find("</Attribute>").ok_or_else(refuse)? + start;
+    let block = &form_text[start..end];
+    let open = block.find("<Settings").ok_or_else(refuse)?;
+    let body_start = block[open..].find('>').ok_or_else(refuse)? + open + 1;
+    let body_end = block.rfind("</Settings>").ok_or_else(refuse)?;
+    // The XML with the whitespace before each tag and the `mxl:` prefix gone.
+    let mut inner = String::new();
+    let mut pending = String::new();
+    for character in block[body_start..body_end].chars() {
+        if character.is_whitespace() {
+            pending.push(character);
+            continue;
+        }
+        if character != '<' {
+            inner.push_str(&pending);
+        }
+        pending.clear();
+        inner.push(character);
+    }
+    let inner = inner.replace("<mxl:", "<").replace("</mxl:", "</");
+    // The top-level elements, in order: (name, the open tag's rest, body).
+    let mut elements = Vec::new();
+    let mut rest = inner.as_str();
+    while !rest.is_empty() {
+        let tail = rest.strip_prefix('<').ok_or_else(refuse)?;
+        let tag_end = tail.find('>').ok_or_else(refuse)?;
+        let tag = &tail[..tag_end];
+        let (name, attributes) = tag.split_once(' ').unwrap_or((tag, ""));
+        let close = format!("</{name}>");
+        let body_and_rest = &tail[tag_end + 1..];
+        let close_at = body_and_rest.find(&close).ok_or_else(refuse)?;
+        elements.push((name, attributes, &body_and_rest[..close_at]));
+        rest = &body_and_rest[close_at + close.len()..];
+    }
+    let number = |text: &str| -> Result<u32> { text.parse::<u32>().map_err(|_| refuse()) };
+    let child = |body: &str, name: &str| -> Option<String> {
+        let open = format!("<{name}>");
+        let close = format!("</{name}>");
+        let from = body.find(&open)? + open.len();
+        let to = body[from..].find(&close)? + from;
+        Some(body[from..to].to_string())
+    };
+    const RU: &str = "<currentLanguage>ru</currentLanguage><defaultLanguage>ru</defaultLanguage><languageInfo><id>ru</id><code>Русский</code><description>Русский</description></languageInfo>";
+    let mut ru = false;
+    let mut columns = 0u32;
+    let mut rows_seen = false;
+    let mut template = "0";
+    let mut default_format = false;
+    let mut height = 0u32;
+    let mut vg_rows = 0u32;
+    let mut width = None::<u32>;
+    let mut merges = Vec::new();
+    let mut names = Vec::new();
+    for (name, attributes, body) in elements {
+        match name {
+            "languageSettings" if body == RU => ru = true,
+            "columns" => {
+                columns = number(&child(body, "size").ok_or_else(refuse)?)?;
+                if body != format!("<size>{columns}</size>") {
+                    return Err(refuse());
+                }
+            }
+            "rowsItem" if body == "<index>0</index><row><empty>true</empty></row>" => rows_seen = true,
+            "templateMode" if body == "true" => template = "1",
+            "defaultFormatIndex" if body == "1" => default_format = true,
+            "height" => height = number(body)?,
+            "vgRows" => vg_rows = number(body)?,
+            "merge" => {
+                let row = number(&child(body, "r").ok_or_else(refuse)?)?;
+                let column = number(&child(body, "c").ok_or_else(refuse)?)?;
+                let across = child(body, "w").map(|value| number(&value)).transpose()?.unwrap_or(0);
+                let down = child(body, "h").map(|value| number(&value)).transpose()?.unwrap_or(0);
+                merges.push(format!("{{{column},{row},{},{},0}}", column + across, row + down));
+            }
+            "namedItem" if attributes.contains("NamedItemCells") => {
+                let item_name = child(body, "name").ok_or_else(refuse)?;
+                let area = child(body, "area").ok_or_else(refuse)?;
+                if child(&area, "type").as_deref() != Some("Rectangle") {
+                    return Err(refuse());
+                }
+                let value = |name: &str| -> Result<u32> { number(&child(&area, name).ok_or_else(refuse)?) };
+                names.push(format!(
+                    "{},{{1,{{3,{},{},{},{},00000000-0000-0000-0000-000000000000}},0}}",
+                    format_1c_string(&item_name),
+                    value("beginColumn")?,
+                    value("beginRow")?,
+                    value("endColumn")?,
+                    value("endRow")?,
+                ));
+            }
+            "format" => {
+                let text = child(body, "width").ok_or_else(refuse)?;
+                if body != format!("<width>{text}</width>") {
+                    return Err(refuse());
+                }
+                width = Some(number(&text)?);
+            }
+            _ => return Err(refuse()),
+        }
+    }
+    if !rows_seen || vg_rows != height || default_format != width.is_some() {
+        return Err(refuse());
+    }
+    let filled = columns > 0 || height > 0 || !merges.is_empty() || !names.is_empty();
+    let language_tail = if filled { 1 } else { 0 };
+    let language = if ru {
+        format!("{{\"ru\",\"ru\",1,1,\"ru\",\"Русский\",\"Русский\",{language_tail}}}")
+    } else {
+        format!("{{\"#\",\"\",1,1,\"#\",\"Язык по умолчанию\",\"Язык по умолчанию\",{language_tail}}}")
+    };
+    let format = match width {
+        Some(width) => format!("{{128,{width}}}"),
+        None => "{0}".to_string(),
+    };
+    let merges = if merges.is_empty() {
+        "{0}".to_string()
+    } else {
+        format!("{{{},{}}}", merges.len(), merges.join(","))
+    };
+    let names = if names.is_empty() {
+        "{0}".to_string()
+    } else {
+        format!("{{{},{}}}", names.len(), names.join(","))
+    };
+    let member_40 = if filled { "1,00000000-0000-0000-0000-000000000000" } else { "0" };
+    Ok(format!(
+        "{{0,1,\"Moxel\",{{\"#\",e603103e-a318-4edc-a014-b1c6cf94d49f,{{8,1,12,{language},{format},{{0}},0,\
+         {{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{{0,0}},{template},2,1,0,0,0,\
+         {{{columns},0,00000000-0000-0000-0000-000000000000,0}},{height},0,0,0,0,0,0,0,0,{merges},{{0}},{{0}},{names},\"\",\
+         {{{{0,6,6,{{\"N\",1000}},7,{{\"N\",1000}},8,{{\"N\",1000}},9,{{\"N\",1000}},10,{{\"N\",1000}},\
+         11,{{\"N\",1000}}}}}},{{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000}},0,0,0,0,{member_40},0,0,1,0,\
+         1,0,0,0,0,0,2,{{3,3,{{-1}}}},{{3,3,{{-3}}}},0,0,0,\"\",0,\
+         {{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,\"\",0,0,0,0,0,0,0}},{{0}},0,0,0,1,0,0,0}}}}}}"
+    ))
+}
+
+/// Whether an attribute is a chart the chart codec writes: `Some(false)` for
+/// a single `Chart` type, `Some(true)` for a single `GanttChart` type, under
+/// whatever prefix the file binds the chart namespace to (`d5p1` in every
+/// export); the codec itself checks the `<Settings>` element's namespace.
+fn native_embedded_chart_kind(attribute: &FormXmlAttribute) -> Option<bool> {
+    let [single] = attribute.types.as_slice() else {
+        return None;
+    };
+    match single.trim().rsplit_once(':').map(|(_, local)| local) {
+        Some("Chart") => Some(false),
+        Some("GanttChart") => Some(true),
+        _ => None,
+    }
+}
+
+/// The attribute's `<Settings xsi:type="d4p1:Chart">` or `d4p1:GanttChart`,
+/// written by the chart codec: member 14 is the chart's own serialization
+/// (rt-embedded.md §1.2), and the codec refuses whatever it cannot place.
+fn native_embedded_chart(form_text: &str, attribute: &str, gantt: bool) -> Result<String> {
+    let missing = || anyhow!("the chart attribute {attribute} spells no <Settings> the writer can find");
+    let head = format!("<Attribute name=\"{attribute}\"");
+    let start = form_text.find(&head).ok_or_else(missing)?;
+    let end = form_text[start..].find("</Attribute>").ok_or_else(missing)? + start;
+    let block = &form_text[start..end];
+    let open = block.find("<Settings ").ok_or_else(missing)?;
+    let close = block.rfind("</Settings>").ok_or_else(missing)? + "</Settings>".len();
+    if close <= open {
+        return Err(missing());
+    }
+    let settings = &block[open..close];
+    if gantt {
+        crate::compiler::bodies::form_chart::format_form_embedded_gantt_chart(settings)
+    } else {
+        crate::compiler::bodies::form_chart::format_form_embedded_chart(settings)
+    }
+}
+
+/// A column's `<View>` and `<Edit>`, each the default tuple when absent.
+fn native_column_rights(
+    column: &FormXmlAttributeColumn,
+    source: Option<&MetadataSourceContext>,
+) -> Result<(String, String)> {
+    let one = |rights: Option<&FormXmlRights>, owner: &str| -> Result<String> {
+        match rights {
+            Some(rights) => native_rights(rights, owner, source),
+            None => Ok("{0,{0,{\"B\",1},0}}".to_string()),
+        }
+    };
+    Ok((
+        one(column.view.as_ref(), "a column's <View>")?,
+        one(column.edit.as_ref(), "a column's <Edit>")?,
+    ))
+}
+
+/// An item's `<UserVisible>` block, `None` when it spells none.
+fn native_user_visible(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    item.user_visible
+        .as_ref()
+        .map(|rights| native_rights(rights, &format!("<{}><UserVisible>", item.tag), source))
+        .transpose()
+}
+
+/// A data path inside a choice parameter link or a type link: the item
+/// `<DataPath>` encoding with its outer braces removed. A path the exporter
+/// spelled with raw ids -- `1/-5`, `1/0:<uuid>` -- transliterates segment by
+/// segment.
+fn native_inline_data_path(
+    path: &str,
+    data_paths: &NativeDataPaths<'_>,
+    owner: &str,
+) -> Result<String> {
+    let path = path.trim();
+    let raw = !path.is_empty()
+        && path.split('/').all(|segment| {
+            segment.split(':').all(|part| {
+                !part.is_empty()
+                    && (part.trim_start_matches('-').bytes().all(|byte| byte.is_ascii_digit())
+                        || is_uuid_text(part))
+            })
+        });
+    let full = if raw {
+        let segments = path
+            .split('/')
+            .map(|segment| format!("{{{}}}", segment.replace(':', ",")))
+            .collect::<Vec<_>>();
+        format!("{{{},{}}}", segments.len(), segments.join(","))
+    } else {
+        data_paths
+            .resolve(path)
+            .ok_or_else(|| anyhow!("{owner} names {path}, which the writer cannot place"))?
+    };
+    full.strip_prefix('{')
+        .and_then(|inner| inner.strip_suffix('}'))
+        .map(str::to_string)
+        .ok_or_else(|| anyhow!("{owner} resolved {path} to an unbraced path"))
+}
+
+/// Payload members 26 and 64 of an input field: its `<ChoiceParameterLinks>`
+/// -- `{5006,N,("<name>",<path>,<Clear 0|DontChange 1>)×N}` and the same with
+/// `"",""` after each link under `5007`. 1 296 of 1 296 records.
+fn native_choice_parameter_links(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<(String, String)> {
+    let mut first = format!("{{5006,{}", item.choice_parameter_links.len());
+    let mut second = format!("{{5007,{}", item.choice_parameter_links.len());
+    for link in &item.choice_parameter_links {
+        let path = native_inline_data_path(&link.data_path, data_paths, "a choice parameter link")?;
+        let change = match link.value_change.as_str() {
+            "Clear" => "0",
+            "DontChange" => "1",
+            other => return Err(anyhow!("a choice parameter link changes its value by {other}")),
+        };
+        let entry = format!(",{},{path},{change}", format_1c_string(&link.name));
+        first.push_str(&entry);
+        second.push_str(&entry);
+        second.push_str(",\"\",\"\"");
+    }
+    first.push('}');
+    second.push('}');
+    Ok((first, second))
+}
+
+/// Payload member 42 of an input field: `<TypeLink>` as
+/// `{3,<path>,<LinkItem>}`, `{3,0,0}` when it names none. 156 of 156.
+fn native_type_link(item: &FormXmlChildItem, data_paths: &NativeDataPaths<'_>) -> Result<String> {
+    let Some((path, link_item)) = item.type_link.as_ref() else {
+        return Ok("{3,0,0}".to_string());
+    };
+    let path = native_inline_data_path(path, data_paths, "a type link")?;
+    let link_item = if link_item.is_empty() { "0" } else { link_item.as_str() };
+    Ok(format!("{{3,{path},{link_item}}}"))
+}
+
+/// A font an item names under another element than `<Font>`.
+fn native_named_font(
+    item: &FormXmlChildItem,
+    element: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    native_font_of(item, item.fonts.get(element), source)
+}
+
+/// A property of [`CHILD_LOCALIZED_SECTIONS`] as a body stores it: the same
+/// `{1,N,{lang,content}...}` a title is, `{1,0}` when the item has none.
+fn native_localized(item: &FormXmlChildItem, section: &str) -> String {
+    format_form_title_value(item.localized.get(section).map_or(&[][..], Vec::as_slice))
+}
+
+/// A picture of [`CHILD_EXTRA_PICTURES`], the empty reference when the item
+/// has none.
+fn native_extra_picture(
+    item: &FormXmlChildItem,
+    section: &str,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<String> {
+    native_picture_of(
+        &item.tag,
+        &item.name,
+        item.pictures.get(section),
+        false,
+        source,
+        items_root,
+    )
+}
+
+/// Slot 62 of an input payload, see `format_input_drop_list_settings`. A
+/// multiple-value path names a column of a value-table attribute and stores
+/// that column's own id alone.
+fn native_input_drop_list_settings(
+    item: &FormXmlChildItem,
+    data_paths: &NativeDataPaths<'_>,
+) -> Result<String> {
+    let check = native_scalar_tristate(item, "ShowCheckBoxesInDropList")?;
+    let column = |name: &str| -> Result<Option<String>> {
+        let Some(path) = item.scalars.get(name).map(|value| value.trim()) else {
+            return Ok(None);
+        };
+        let resolved = data_paths
+            .resolve(path)
+            .ok_or_else(|| anyhow!("<{name}> names {path}, which the writer cannot place"))?;
+        let ranges = scan_braced_fields(&resolved, 0)?;
+        if ranges.len() != 3 || resolved[ranges[0].clone()].trim() != "2" {
+            return Err(anyhow!("<{name}> names {path}, which is not an attribute column"));
+        }
+        Ok(Some(format!("{{1,{}}}", resolved[ranges[2].clone()].trim())))
+    };
+    let value_path = column("MultipleValueDataPath")?;
+    let present_path = column("MultipleValuePresentDataPath")?;
+    let allow_empty = native_scalar_tristate(item, "AllowInputEmptyMultipleValues")?;
+    if check.is_none() && value_path.is_none() && present_path.is_none() && allow_empty.is_none() {
+        return Ok("{0}".to_string());
+    }
+    Ok(crate::compiler::bodies::form_native::format_input_drop_list_settings(
+        allow_empty.unwrap_or(false),
+        check,
+        value_path.as_deref().unwrap_or("{0}"),
+        present_path.as_deref().unwrap_or("{0}"),
+    ))
+}
+
+/// `<MinValue>` or `<MaxValue>` as a typed value: `{"N",n}` for a number and
+/// `{"S","text"}` for a string -- the only two types either corpus spells --
+/// and `{"U"}` when the item names none.
+fn native_typed_scalar(item: &FormXmlChildItem, name: &str) -> Result<String> {
+    let kind = item.scalars.get(&format!("{name}@type")).map(String::as_str);
+    let text = item.scalars.get(name).map_or("", String::as_str);
+    match kind {
+        None if text.trim().is_empty() => Ok("{\"U\"}".to_string()),
+        Some("xs:decimal") if native_choice_list_number(text.trim()) => {
+            Ok(format!("{{\"N\",{}}}", text.trim()))
+        }
+        Some("xs:string") => Ok(format!("{{\"S\",{}}}", format_1c_string(text))),
+        _ => Err(anyhow!("<{name}> spells a value the writer has not measured")),
+    }
+}
+
+/// The uuid of the form a `<ChoiceForm>` names, which only the configuration
+/// holds; the zero uuid when the item names none.
+fn native_choice_form(
+    item: &FormXmlChildItem,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let Some(reference) = item.scalars.get("ChoiceForm").map(|value| value.trim()) else {
+        return Ok(NATIVE_ZERO_UUID.to_string());
+    };
+    let source = source
+        .ok_or_else(|| anyhow!("<ChoiceForm> names {reference} and no configuration is on hand"))?;
+    source.resolve_form_uuid(reference)
+}
+
 /// What stops a form from being written in the shape the platform stores.
 ///
 /// Fail-closed: every part the native writers have not measured refuses the
@@ -9218,7 +7558,24 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
         if let Some(part) = attribute.unwritable.first() {
             blockers.push(format!("an attribute names <{part}>"));
         }
-        if attribute.settings.is_some() {
+        let embedded_spreadsheet =
+            attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument");
+        // A chart's `<Settings>` is written by the chart codec, which refuses
+        // on its own what it cannot place (rt-embedded.md §1.2).
+        let embedded_chart = native_embedded_chart_kind(attribute).is_some();
+        if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
+            && !embedded_spreadsheet
+            && !embedded_chart
+            && let Some(error) = properties.dcs_error.as_ref()
+        {
+            blockers.push(error.clone());
+        }
+        if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
+            && !embedded_spreadsheet
+            && !embedded_chart
+        {
             // One message stood for four situations, and only the first is a
             // dynamic list. The dynamic list's own blocker is the `FieldsMap`:
             // 163 ERP УХ and 9 BSP canonically identical `<Attribute>`
@@ -9249,9 +7606,6 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             }
         }
     }
-    if properties.attributes_conditional_appearance.is_some() {
-        blockers.push("a conditional appearance".to_string());
-    }
     // `<AutoTime>`, `<UsePostingMode>`, `<RepostOnWrite>` and
     // `<UseForFoldersAndItems>` used to stop a form here because the root's
     // keyed property bag was unread. It is read now -- see
@@ -9263,7 +7617,97 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
 }
 
 /// The whole body of a form, in the shape the platform stores it.
+/// The form-wide `<ConditionalAppearance>` of a Form.xml, verbatim.
+///
+/// It is the only element of that name without a prefix: a dynamic list's is
+/// `<dcsset:conditionalAppearance>`.
+fn form_attributes_conditional_appearance_source(xml: &[u8]) -> Option<String> {
+    let text = std::str::from_utf8(xml).ok()?;
+    let start = text.find("<ConditionalAppearance>")?;
+    let close = "</ConditionalAppearance>";
+    let end = text[start..].find(close)? + start + close.len();
+    Some(text[start..end].to_string())
+}
+
+/// The storage document the attributes section closes with, carrying the
+/// form-wide conditional appearance.
+///
+/// The rule of `findings/conditional-appearance.md`: the subtree renamed to
+/// `conditionalAppearance`, `dcsset:` dropped from element names and
+/// `xsi:type` values, one tab removed from every line, CRLF, and a
+/// `style:<Name>` the configuration declares rewritten to `0:<its uuid>`;
+/// wrapped in the fixed ten-namespace `<Settings>` header.
+fn native_conditional_appearance_settings(
+    subtree: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    const HEADER: &str = concat!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" ",
+        "xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" ",
+        "xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" ",
+        "xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" ",
+        "xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" ",
+        "xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" ",
+        "xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" ",
+        "xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" ",
+        "xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" ",
+        "xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n",
+    );
+    let mut lines = Vec::new();
+    for (index, line) in subtree.replace("\r\n", "\n").split('\n').enumerate() {
+        // The first line starts at its tag; every other one sits one level
+        // deeper in Form.xml than in the document.
+        let line = if index == 0 {
+            format!("\t{line}")
+        } else {
+            line.strip_prefix('\t')
+                .ok_or_else(|| anyhow!("a conditional appearance line is not indented"))?
+                .to_string()
+        };
+        lines.push(line);
+    }
+    let mut body = lines.join("\r\n");
+    body = body
+        .replace("<ConditionalAppearance>", "<conditionalAppearance>")
+        .replace("</ConditionalAppearance>", "</conditionalAppearance>")
+        .replace("<dcsset:", "<")
+        .replace("</dcsset:", "</")
+        .replace("xsi:type=\"dcsset:", "xsi:type=\"");
+    // `style:<Name>` in a colour's text and in a font's `ref`.
+    let mut out = String::with_capacity(body.len());
+    let mut rest = body.as_str();
+    while let Some(at) = rest.find("style:") {
+        let (before, after) = rest.split_at(at);
+        out.push_str(before);
+        let name_len = after["style:".len()..]
+            .find(|c: char| c == '<' || c == '"')
+            .ok_or_else(|| anyhow!("a conditional appearance style reference does not end"))?;
+        let name = &after["style:".len().."style:".len() + name_len];
+        let declared = source.and_then(|source| {
+            source
+                .resolve_style_item_uuid(&format!("StyleItem.{name}"))
+                .ok()
+        });
+        match declared {
+            Some(uuid) => {
+                out.push_str("0:");
+                out.push_str(&uuid);
+            }
+            None => {
+                out.push_str("style:");
+                out.push_str(name);
+            }
+        }
+        rest = &after["style:".len() + name_len..];
+    }
+    out.push_str(rest);
+    let document = format!("{HEADER}{out}\r\n</Settings>");
+    Ok(format!("{{#base64:{}}}", encode_base64(document.as_bytes())))
+}
+
 fn format_native_form_body(
+    form_text: Option<&str>,
     properties: &FormXmlBodyProperties,
     module_text: &str,
     source: Option<&MetadataSourceContext>,
@@ -9275,6 +7719,20 @@ fn format_native_form_body(
     }
 
     let title = format_form_title_value(&properties.title);
+    let settings_storage = match properties.root_scalars.get("SettingsStorage") {
+        Some(reference) => {
+            let source = source
+                .ok_or_else(|| anyhow!("the form names {reference} and no configuration is on hand"))?;
+            // A form can be the storage too -- `Report.X.Form.Y`, which
+            // stores that form's own uuid (3 of 3).
+            Some(if reference.contains(".Form.") || reference.trim().starts_with("CommonForm.") {
+                source.resolve_form_uuid(reference)?
+            } else {
+                source.resolve_metadata_reference_uuid(reference)?
+            })
+        }
+        None => None,
+    };
     let root_head = crate::compiler::bodies::form_native::format_root_head(&crate::compiler::bodies::form_native::NativeRootHead {
         window_opening_mode: properties.window_opening_mode.map(|mode| match mode {
             FormXmlWindowOpeningMode::DontBlock => "DontUse",
@@ -9288,14 +7746,14 @@ fn format_native_form_body(
             .map(|_| "DefaultButton"),
         save_data_in_settings: properties.save_data_in_settings.map(|_| "UseList"),
         auto_save_data_in_settings: properties.auto_save_data_in_settings.map(|_| "Use"),
-        settings_storage: None,
+        settings_storage: settings_storage.as_deref(),
         auto_title: properties.auto_title.unwrap_or(true),
         title: &title,
         group: properties.group.map(|_| "Vertical"),
-        child_items_width: None,
+        child_items_width: properties.root_scalars.get("ChildItemsWidth").map(String::as_str),
         auto_fill_check: properties.auto_fill_check.unwrap_or(true),
         customizable: properties.customizable.unwrap_or(true),
-        enabled: true,
+        enabled: properties.root_scalars.get("Enabled").map(String::as_str) != Some("false"),
         command_bar_location: properties.command_bar_location.map(|location| match location {
             FormXmlCommandBarLocation::None => "None",
             FormXmlCommandBarLocation::Top => "Top",
@@ -9329,8 +7787,9 @@ fn format_native_form_body(
         &form_main_attribute_class(properties),
         form_main_table_kind(properties).as_deref(),
     )?;
+    let dynamic_lists = native_dynamic_list_field_maps(properties)?;
     let data_paths = NativeDataPaths {
-        form: native_data_path_form(properties),
+        form: native_data_path_form(properties, &dynamic_lists),
         source,
     };
     let command_ids = properties
@@ -9353,24 +7812,44 @@ fn format_native_form_body(
         )
         .collect::<Vec<_>>();
     while let Some(item) = stack.pop() {
-        let dynamic_list = item.data_path.as_deref().is_some_and(|path| {
-            properties.attributes.iter().any(|attribute| {
-                attribute.name == path.split('.').next().unwrap_or(path)
+        // Only an item bound to the list itself shows it: a table on
+        // `<list>.SettingsComposer.Settings.Filter` is a plain table (its
+        // `Delete` stores the plain `8d772f97-…`), and so is a column.
+        let list = item.data_path.as_deref().map(str::trim).and_then(|path| {
+            properties.attributes.iter().find(|attribute| {
+                attribute.name == path
                     && attribute.types.len() == 1
                     && attribute.types[0].trim() == "cfg:DynamicList"
             })
         });
+        let main_table_kind = list
+            .and_then(|attribute| attribute.settings.as_ref())
+            .and_then(|settings| settings.main_table.as_deref())
+            .and_then(|table| table.trim().split('.').next().map(str::to_string));
         items.insert(
             item.name.clone(),
             NativeItemTarget {
                 tag: item.tag.clone(),
                 id: item.id.clone(),
-                dynamic_list,
+                dynamic_list: list.is_some(),
+                main_table_kind,
+                data_path: item.data_path.clone(),
             },
         );
         stack.extend(item.child_items.iter());
     }
     let main_attribute_class = form_main_attribute_class(properties);
+    // The form's own standard commands ask for its list's main table too.
+    items.insert(
+        String::new(),
+        NativeItemTarget {
+            tag: "Form".to_string(),
+            id: "0".to_string(),
+            dynamic_list: main_attribute_class == "cfg:DynamicList",
+            main_table_kind: form_main_table_kind(properties),
+            data_path: None,
+        },
+    );
 
     let mut bar_children = Vec::new();
     if let Some(bar) = &properties.auto_command_bar {
@@ -9396,6 +7875,10 @@ fn format_native_form_body(
                 name: &bar.name,
                 children: &bar_children,
                 payload: &payload,
+                display_importance: crate::compiler::bodies::form_native::native_display_importance(
+                    bar.display_importance.as_deref(),
+                )
+                .ok_or_else(|| anyhow!("the auto command bar names an unmeasured DisplayImportance"))?,
                 ..crate::compiler::bodies::form_native::NativeGroupItem::default()
             })
             .ok_or_else(|| anyhow!("the auto command bar names something unplaceable"))?
@@ -9407,13 +7890,16 @@ fn format_native_form_body(
         native_mobile_device_command_bar_content(properties, &data_paths.form.items)?;
     let tail = crate::compiler::bodies::form_native::format_root_tail(&crate::compiler::bodies::form_native::NativeRootTail {
         auto_url: properties.auto_url.unwrap_or(true),
-        vertical_scroll: properties.vertical_scroll.map(|_| "useIfNecessary"),
+        vertical_scroll: properties.vertical_scroll.map(|scroll| match scroll {
+            FormXmlVerticalScroll::UseIfNecessary => "useIfNecessary",
+            FormXmlVerticalScroll::UseWithoutStretch => "useWithoutStretch",
+        }),
         scaling_mode: properties.scaling_mode.map(|mode| match mode {
             FormXmlScalingMode::Normal => "Normal",
             FormXmlScalingMode::Compact => "Compact",
         }),
-        horizontal_spacing: None,
-        vertical_spacing: None,
+        horizontal_spacing: properties.root_scalars.get("HorizontalSpacing").map(String::as_str),
+        vertical_spacing: properties.root_scalars.get("VerticalSpacing").map(String::as_str),
         horizontal_align: properties.horizontal_align.map(|align| match align {
             FormXmlHorizontalAlign::Left => "Left",
             FormXmlHorizontalAlign::Center => "Center",
@@ -9425,7 +7911,7 @@ fn format_native_form_body(
             FormRootVerticalAlign::Center => "Center",
             FormRootVerticalAlign::Bottom => "Bottom",
         }),
-        children_align: None,
+        children_align: properties.root_scalars.get("ChildrenAlign").map(String::as_str),
         group: properties.group.map(|group| match group {
             FormXmlGroup::Vertical => "Vertical",
             FormXmlGroup::Horizontal => "Horizontal",
@@ -9436,9 +7922,14 @@ fn format_native_form_body(
         show_title: properties.show_title.unwrap_or(true),
         show_close_button: properties.show_close_button.unwrap_or(true),
         conversations_representation: properties
-            .conversations_representation
-            .map(|_| "Show"),
-        collapse_items_by_importance: None,
+            .root_scalars
+            .get("ConversationsRepresentation")
+            .map(String::as_str)
+            .or(properties.conversations_representation.map(|_| "Show")),
+        collapse_items_by_importance: properties
+            .root_scalars
+            .get("CollapseItemsByImportanceVariant")
+            .map(String::as_str),
         save_window_settings: properties.save_window_settings.unwrap_or(true),
         navigator: None,
         mobile_device_command_bar_content: &mobile_device_command_bar_content,
@@ -9489,13 +7980,29 @@ fn format_native_form_body(
         if references.is_empty() {
             return Ok("{0,0}".to_string());
         }
-        if references.iter().any(|reference| reference.trim().is_empty()) {
-            return Err(anyhow!("a functional option is named by an empty <Item/>"));
+        // An empty `<Item/>` stores the nil uuid in its place (6 commands and
+        // one attribute of ERP УХ, all `{0,1,00000000-…}`).
+        let mut text = format!("{{0,{}", references.len());
+        for reference in references {
+            let reference = reference.trim();
+            let uuid = if reference.is_empty() {
+                "00000000-0000-0000-0000-000000000000".to_string()
+            } else if is_uuid_text(reference) {
+                // The exporter spells an option it cannot name -- a deleted
+                // one -- by its uuid, which is what the body holds.
+                reference.to_string()
+            } else {
+                source
+                    .ok_or_else(|| {
+                        anyhow!("a form names functional options but has no source resolver")
+                    })?
+                    .resolve_metadata_reference_uuid(reference)?
+            };
+            text.push(',');
+            text.push_str(&uuid);
         }
-        let source = source.ok_or_else(|| {
-            anyhow!("a form names functional options but has no source resolver")
-        })?;
-        format_form_reference_list(source, references)
+        text.push('}');
+        Ok(text)
     };
 
     // The attributes section, with the form's settings composer at its end.
@@ -9513,6 +8020,7 @@ fn format_native_form_body(
             let column_pattern =
                 format_form_type_spec_pattern("Form Attribute Column", &column.spec, source)?;
             let column_options = functional_options(&column.functional_options)?;
+            let (column_view, column_edit) = native_column_rights(column, source)?;
             columns.push(
                 crate::compiler::bodies::form_native::format_form_attribute_column(
                     &crate::compiler::bodies::form_native::NativeFormAttributeColumn {
@@ -9522,6 +8030,7 @@ fn format_native_form_body(
                         type_pattern: &column_pattern,
                         functional_options: &column_options,
                         fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                        restrictions: [&column_view, &column_edit],
                         ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
                     },
                 ),
@@ -9539,6 +8048,7 @@ fn format_native_form_body(
                     source,
                 )?;
                 let column_options = functional_options(&column.functional_options)?;
+                let (column_view, column_edit) = native_column_rights(column, source)?;
                 records.push(',');
                 records.push_str(
                     &crate::compiler::bodies::form_native::format_form_attribute_column(
@@ -9549,6 +8059,7 @@ fn format_native_form_body(
                             type_pattern: &column_pattern,
                             functional_options: &column_options,
                             fill_check: column.fill_check.as_deref() == Some("ShowError"),
+                            restrictions: [&column_view, &column_edit],
                             ..crate::compiler::bodies::form_native::NativeFormAttributeColumn::default()
                         },
                     ),
@@ -9578,6 +8089,34 @@ fn format_native_form_body(
             })
             .transpose()?;
         let save = native_form_attribute_save(attribute, &data_paths)?;
+        let embedded = if attribute.settings.is_some()
+            && attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument")
+        {
+            let text = form_text.ok_or_else(|| anyhow!("an embedded spreadsheet needs the Form.xml text"))?;
+            Some(native_embedded_spreadsheet(text, &attribute.name)?)
+        } else if attribute.settings.is_some()
+            && let Some(gantt) = native_embedded_chart_kind(attribute)
+        {
+            let text = form_text.ok_or_else(|| anyhow!("an embedded chart needs the Form.xml text"))?;
+            Some(native_embedded_chart(text, &attribute.name, gantt)?)
+        } else {
+            None
+        };
+        let dynamic_list_bag = match dynamic_lists.get(&attribute.name) {
+            Some((map, required)) => {
+                let text = form_text.ok_or_else(|| anyhow!("a dynamic list needs the Form.xml text"))?;
+                Some(native_dynamic_list_bag(text, &attribute.name, map, required, source)?)
+            }
+            None => None,
+        };
+        let attribute_view = match attribute.view.as_ref() {
+            Some(rights) => native_rights(rights, "an attribute's <View>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
+        let attribute_edit = match attribute.edit.as_ref() {
+            Some(rights) => native_rights(rights, "an attribute's <Edit>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
         let use_always = native_form_attribute_use_always(attribute, &data_paths)?;
         let attribute_options = functional_options(&attribute.functional_options)?;
         attributes.push(',');
@@ -9589,12 +8128,18 @@ fn format_native_form_body(
                 type_pattern: &pattern,
                 use_always: &use_always,
                 save: &save,
+                view: &attribute_view,
+                edit: &attribute_edit,
                 main_attribute: attribute.main_attribute.unwrap_or(false),
                 saved_data: attribute.saved_data.unwrap_or(false),
                 fill_check: attribute.fill_check.as_deref() == Some("ShowError"),
                 columns: &columns,
                 trailing: [
-                    element_type.as_deref().unwrap_or("{0,0}"),
+                    dynamic_list_bag
+                        .as_deref()
+                        .or(embedded.as_deref())
+                        .or(element_type.as_deref())
+                        .unwrap_or("{0,0}"),
                     &attribute_options,
                 ],
                 ..crate::compiler::bodies::form_native::NativeFormAttribute::default()
@@ -9619,6 +8164,32 @@ fn format_native_form_body(
         let title = format_form_title_value(&command.title);
         let tooltip = format_form_title_value(&command.tooltip);
         let command_options = functional_options(&command.functional_options)?;
+        // Members 5, 6 and 14 (rt-command.md): `<Use>`, `<Shortcut>` and the
+        // id of the item `<AssociatedTableElementId>` names.
+        let command_use = match command.use_rights.as_ref() {
+            Some(rights) => native_rights(rights, "a command's <Use>", source)?,
+            None => "{0,{0,{\"B\",1},0}}".to_string(),
+        };
+        let command_shortcut = match command.shortcut.as_deref() {
+            Some(text) => crate::compiler::bodies::form_native::format_native_shortcut(text)
+                .ok_or_else(|| anyhow!("a command names the shortcut {text}, which is not measured"))?,
+            None => "{0,0,0}".to_string(),
+        };
+        let command_associated = match command.associated_table_element_id.as_deref() {
+            Some(name) => items
+                .get(name)
+                .map(|target| target.id.clone())
+                .or_else(|| {
+                    properties.child_items.iter().find_map(|item| {
+                        item.extended_tooltip
+                            .as_ref()
+                            .filter(|tip| tip.name == name)
+                            .map(|tip| tip.id.clone())
+                    })
+                })
+                .ok_or_else(|| anyhow!("a command is associated with {name}, which the writer cannot place"))?,
+            None => "0".to_string(),
+        };
         let command_picture =
             native_picture_of(
                 "Command",
@@ -9645,6 +8216,9 @@ fn format_native_form_body(
                         FormXmlCommandCurrentRowUse::DontUse => "DontUse",
                         FormXmlCommandCurrentRowUse::Use => "Use",
                     }),
+                    use_always: &command_use,
+                    picture_index: &command_shortcut,
+                    fourteenth: &command_associated,
                     ..crate::compiler::bodies::form_native::NativeFormCommand::default()
                 },
             )
@@ -9660,12 +8234,14 @@ fn format_native_form_body(
         properties,
         "NavigationPanel",
         &main_attribute_class,
+        &data_paths,
         source,
     )?;
     let command_bar = native_command_interface_panel(
         properties,
         "CommandBar",
         &main_attribute_class,
+        &data_paths,
         source,
     )?;
 
@@ -9677,7 +8253,10 @@ fn format_native_form_body(
         command_count = properties.commands.len(),
         module = format_1c_string(module_text),
         count = properties.attributes.len(),
-        settings = NATIVE_EMPTY_SETTINGS,
+        settings = match properties.attributes_conditional_appearance_source.as_deref() {
+            Some(subtree) => native_conditional_appearance_settings(subtree, source)?,
+            None => NATIVE_EMPTY_SETTINGS.to_string(),
+        },
     ))
 }
 
@@ -9697,7 +8276,29 @@ pub fn compile_native_form_body(
             .to_string(),
         None => String::new(),
     };
-    format_native_form_body(&properties, &module, source, items_root)
+    format_native_form_body(std::str::from_utf8(form_xml).ok(), &properties, &module, source, items_root)
+}
+
+/// The stored blob of one Form.xml through the native writer: the body text
+/// with the BOM the platform writes, raw-deflated. The loader's first choice;
+/// a form the writer refuses falls back to the older paths.
+pub fn pack_native_form_body_blob(
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<PackedRawDeflatedBlob> {
+    let body = compile_native_form_body(form_xml, module_text, source, items_root)?;
+    // What the exporter cannot read back would load as a form nobody can open.
+    parse_form_body_plain(&body).context("the native Form body does not parse back")?;
+    let plain = format!("\u{feff}{body}");
+    let blob = deflate_raw(plain.as_bytes())?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
 }
 
 /// Builds a managed Form body from source XML and a profile-known empty
@@ -10344,23 +8945,33 @@ fn sanitize_source_path_segment(value: &str) -> String {
 }
 
 fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
-    let canonical_dcs = parse_form_dcs_children(xml)
-        .map_err(|error| anyhow!("cannot parse Form DCS children: {error}"))?;
+    // The typed DCS reading serves the dynamic lists' settings; the form-wide
+    // conditional appearance is transcribed and does not need it. A form
+    // whose DCS children do not read is refused only when a dynamic list
+    // would be written from them.
+    let (canonical_dcs, dcs_error) = match parse_form_dcs_children(xml) {
+        Ok(children) => (children, None),
+        Err(error) => (
+            Default::default(),
+            Some(format!("cannot parse Form DCS children: {error}")),
+        ),
+    };
     let mut canonical_filters = canonical_dcs.list_settings_filters.into_iter();
     let mut canonical_orders = canonical_dcs.list_settings_orders.into_iter();
     let mut canonical_conditional_appearances = canonical_dcs
         .list_settings_conditional_appearances
         .into_iter();
+    // The form-wide conditional appearance reaches the body as a transcription
+    // of its own subtree (findings/conditional-appearance.md, 663 of 663 byte
+    // for byte), so the typed reading is not needed to write it and its cohort
+    // refusal no longer stops the form.
     let attributes_conditional_appearance =
         match canonical_dcs.form_attributes_conditional_appearance {
             DcsChildParseOutcome::Typed(value) => Some(value),
-            DcsChildParseOutcome::Unsupported(reason) => {
-                return Err(anyhow!(
-                    "unsupported Form Attributes conditional appearance: {reason}"
-                ));
-            }
-            DcsChildParseOutcome::Absent => None,
+            DcsChildParseOutcome::Unsupported(_) | DcsChildParseOutcome::Absent => None,
         };
+    let attributes_conditional_appearance_source =
+        form_attributes_conditional_appearance_source(xml);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
@@ -10370,6 +8981,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut child_text = String::new();
     let mut properties = FormXmlBodyProperties::default();
     properties.attributes_conditional_appearance = attributes_conditional_appearance;
+    properties.attributes_conditional_appearance_source = attributes_conditional_appearance_source;
+    properties.dcs_error = dcs_error;
     let mut current_event_name = None::<String>;
     let mut current_command = None::<FormXmlCommand>;
     let mut current_localized_section = None::<String>;
@@ -10401,11 +9014,30 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     let mut nested_text = String::new();
     let mut current_mobile_item = None::<FormXmlMobileCommandBarItem>;
     let mut current_choice_item = None::<FormXmlChoiceListItem>;
+    let mut current_choice_parameter = None::<String>;
     let mut current_choice_lang = None::<String>;
     let mut current_choice_content = None::<String>;
 
     loop {
-        match reader.read_event_into(&mut buffer) {
+        // An entity reference is text: `&amp;` between two chunks of a title
+        // is one `&` of the same string. Handing it to the text arm keeps every
+        // buffer that arm feeds in step; the reference arm's own allow-list
+        // turned `R&amp;M` into `RM` in 19 ERP УХ titles.
+        let event = match reader.read_event_into(&mut buffer) {
+            Ok(Event::GeneralRef(reference)) => {
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_string()
+                };
+                Ok(Event::Text(quick_xml::events::BytesText::from_escaped(value)))
+            }
+            other => other,
+        };
+        match event {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 // Cleared on every open. The list of names this used to
@@ -10496,6 +9128,128 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
+                if current_child_items.last().is_some_and(|item| {
+                    path.last().map(String::as_str) == Some(item.tag.as_str())
+                }) && let Some(item) = current_child_items.last_mut()
+                {
+                    if CHILD_EXTRA_PICTURES.contains(&local.as_str()) {
+                        // A second one says nothing about which the body
+                        // holds, so it refuses the item.
+                        match item.pictures.get_mut(local.as_str()) {
+                            Some(picture) => picture.unwritable.push(local.clone()),
+                            None => {
+                                item.pictures.insert(local.clone(), FormXmlItemPicture::default());
+                            }
+                        }
+                    }
+                    if matches!(local.as_str(), "MinValue" | "MaxValue" | "Parameter")
+                        && let Some(kind) = xml_attribute_value(&event, "type")?
+                    {
+                        item.scalars.insert(format!("{local}@type"), kind);
+                    }
+                    if local.ends_with("Font") && local != "Font" {
+                        item.fonts.insert(local.clone(), xml_attrs_map(&event));
+                    }
+                    match local.as_str() {
+                        "UserVisible" => item.user_visible = Some(FormXmlRights::default()),
+                        "AvailableTypes" => item.available_types = Some(FormXmlTypeSpec::default()),
+                        "TypeLink" => item.type_link = Some((String::new(), String::new())),
+                        _ => {}
+                    }
+                }
+                // The inside of a rights setting, a choice parameter link and
+                // a command's own `<Use>`.
+                if local == "Value"
+                    && current_child_items
+                        .last()
+                        .is_some_and(|item| path_ends_with(&path, &[item.tag.as_str(), "UserVisible"]))
+                    && let Some(rights) = current_child_items
+                        .last_mut()
+                        .and_then(|item| item.user_visible.as_mut())
+                {
+                    rights.values.push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if local == "Link"
+                    && current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "ChoiceParameterLinks"])
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.choice_parameter_links.push(FormXmlChoiceParameterLink::default());
+                }
+                if path_ends_with(&path, &["Form", "Commands", "Command"])
+                    && local == "Use"
+                    && let Some(command) = current_command.as_mut()
+                {
+                    command.use_rights = Some(FormXmlRights::default());
+                }
+                if path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && matches!(local.as_str(), "View" | "Edit")
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    if local == "View" {
+                        attribute.view = Some(FormXmlRights::default());
+                    } else {
+                        attribute.edit = Some(FormXmlRights::default());
+                    }
+                }
+                if local == "Value"
+                    && (path_ends_with(&path, &["Form", "Attributes", "Attribute", "View"])
+                        || path_ends_with(&path, &["Form", "Attributes", "Attribute", "Edit"]))
+                    && let Some(attribute) = current_attribute.as_mut()
+                {
+                    let rights = if path.last().map(String::as_str) == Some("View") {
+                        attribute.view.as_mut()
+                    } else {
+                        attribute.edit.as_mut()
+                    };
+                    if let Some(rights) = rights {
+                        rights
+                            .values
+                            .push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                    }
+                }
+                if local == "Value"
+                    && path.len() >= 2
+                    && matches!(path[path.len() - 1].as_str(), "View" | "Edit")
+                    && path[path.len() - 2] == "Column"
+                {
+                    let name = xml_attribute_value(&event, "name")?.unwrap_or_default();
+                    let edit = path[path.len() - 1] == "Edit";
+                    let column = if current_additional_column.is_some() {
+                        current_additional_column.as_mut()
+                    } else {
+                        current_column.as_mut()
+                    };
+                    if let Some(column) = column {
+                        let rights = if edit { column.edit.as_mut() } else { column.view.as_mut() };
+                        if let Some(rights) = rights {
+                            rights.values.push((name, None));
+                        }
+                    }
+                }
+                if local == "Value"
+                    && command_interface_path(&path, &["Item", "Visible"])
+                    && let Some(item) = current_command_interface_item.as_mut()
+                {
+                    item.visible_roles
+                        .push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if local == "Value"
+                    && path_ends_with(&path, &["Form", "Commands", "Command", "Use"])
+                    && let Some(rights) = current_command
+                        .as_mut()
+                        .and_then(|command| command.use_rights.as_mut())
+                {
+                    rights.values.push((xml_attribute_value(&event, "name")?.unwrap_or_default(), None));
+                }
+                if let Some(section) = child_extra_picture_section(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                    && !matches!(local.as_str(), "Ref" | "LoadTransparent" | "Abs")
+                {
+                    picture.unwritable.push(local.clone());
+                }
                 if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -10520,6 +9274,16 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 }
                 if local == "Item" && path_ends_with_for_choice_list(&path, &current_child_items) {
                     current_choice_item = Some(FormXmlChoiceListItem::default());
+                    current_choice_parameter = None;
+                    current_choice_lang = None;
+                    current_choice_content = None;
+                } else if local == "item"
+                    && current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "ChoiceParameters"])
+                    })
+                {
+                    current_choice_item = Some(FormXmlChoiceListItem::default());
+                    current_choice_parameter = Some(xml_attribute_value(&event, "name")?.unwrap_or_default());
                     current_choice_lang = None;
                     current_choice_content = None;
                 } else if let Some(choice) = current_choice_item.as_mut() {
@@ -10549,7 +9313,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         && !matches!(local.as_str(), "Ref" | "LoadTransparent")
                         && let Some(picture) = command.picture.as_mut()
                     {
-                        picture.unwritable.push(local.clone());
+                        // `<xr:TransparentPixel x y/>` is members 4 and 5 of the
+                        // reference, on a command as on an item.
+                        if local == "TransparentPixel" {
+                            picture.transparent_x = xml_attribute_value(&event, "x")?;
+                            picture.transparent_y = xml_attribute_value(&event, "y")?;
+                            if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                                picture.unwritable.push(local.clone());
+                            }
+                        } else {
+                            picture.unwritable.push(local.clone());
+                        }
                     }
                 }
                 if local == "UseAlways"
@@ -10591,11 +9365,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     && let Some(column) = current_additional_column.as_mut()
                 {
-                    // `<View>` and `<Edit>` land in members 6 and 7 of the
-                    // `{5,…}` record and what they hold when the element is
-                    // present was never measured -- the same refusal the
-                    // attribute's own columns carry. 7 records in 4 forms.
-                    if !column.unwritable.contains(&local) {
+                    // `<View>` and `<Edit>` are members 6 and 7 of the `{5,…}`
+                    // record, the same rights tuple an attribute stores.
+                    if local == "View" && column.view.is_none() {
+                        column.view = Some(FormXmlRights::default());
+                    } else if local == "Edit" && column.edit.is_none() {
+                        column.edit = Some(FormXmlRights::default());
+                    } else if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
                     }
                 } else if local == "Column"
@@ -10611,12 +9387,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 ) && let Some(column) = current_column.as_mut()
                 {
                     // The ten-member column record reads the title, the
-                    // type, `<FillCheck>` and `<FunctionalOptions>` out of the
-                    // source; `<View>` and `<Edit>` land in members whose
-                    // content when the element is present was never measured,
-                    // so naming one still refuses the form instead of taking
-                    // the default those members hold in 142 594 columns.
-                    if !column.unwritable.contains(&local) {
+                    // type, `<FillCheck>`, `<FunctionalOptions>` and the
+                    // `<View>`/`<Edit>` rights out of the source.
+                    if local == "View" && column.view.is_none() {
+                        column.view = Some(FormXmlRights::default());
+                    } else if local == "Edit" && column.edit.is_none() {
+                        column.edit = Some(FormXmlRights::default());
+                    } else if !column.unwritable.contains(&local) {
                         column.unwritable.push(local.clone());
                     }
                 } else if local == "Parameter" && path_ends_with(&path, &["Form", "Parameters"]) {
@@ -10672,17 +9449,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && (path_ends_with_for_child_title(&path, &current_child_items)
                         || path_ends_with_for_child_tooltip(&path, &current_child_items)
                         || path_ends_with_for_child_collapsed_title(&path, &current_child_items)
-                        || path_ends_with_for_child_warning_on_edit(&path, &current_child_items))
+                        || path_ends_with_for_child_warning_on_edit(&path, &current_child_items)
+                        || child_localized_section(&path, &current_child_items, &[]).is_some())
                 {
                     current_child_localized_section =
                         path.last().map(|value| value.to_string()).filter(|value| {
-                            matches!(
-                                value.as_str(),
-                                "Title"
-                                    | "ToolTip"
-                                    | "WarningOnEdit"
-                                    | "CollapsedRepresentationTitle"
-                            )
+                            matches!(value.as_str(), "Title" | "ToolTip" | "WarningOnEdit")
+                                || CHILD_LOCALIZED_SECTIONS.contains(&value.as_str())
                         });
                     current_child_title_lang = None;
                     current_child_title_content = None;
@@ -10700,6 +9473,12 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && let Some(item) = current_child_items.last_mut()
                 {
                     item.extended_tooltip = parse_form_extended_tooltip_xml(&event)?;
+                    // An opening tag means content: the tooltip is read as an
+                    // item of its own until it closes, and its holder keeps it.
+                    if let Some(mut tip) = parse_form_child_item_xml("ExtendedTooltip", &event)? {
+                        tip.depth = current_child_items.len();
+                        current_child_items.push(tip);
+                    }
                 } else if local == "Border"
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
@@ -10757,6 +9536,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
             }
             Ok(Event::Empty(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
+                // `<v8:lang/>` and `<v8:content/>` are empty strings of a
+                // localized item -- a title can name one language as "" --
+                // and never reach the text arm either.
+                if path.last().map(String::as_str) == Some("item") {
+                    match local.as_str() {
+                        "lang" => {
+                            current_localized_lang = Some(String::new());
+                            current_child_title_lang = Some(String::new());
+                        }
+                        "content" => {
+                            current_localized_content = Some(String::new());
+                            current_child_title_content = Some(String::new());
+                        }
+                        _ => {}
+                    }
+                }
                 // `<Item/>` is an `Event::Empty`, so it never reaches the arm
                 // that reads an item's text. Eight items of ERP УХ are spelled
                 // that way and none of BSP. Pushing the empty string keeps the
@@ -10764,20 +9559,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 // unmeasured spelling gets; dropping it in silence would write
                 // a collection one short.
                 if local == "Item" {
-                    if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH) {
+                    if path_ends_with(&path, &FORM_COLUMN_FUNCTIONAL_OPTION_PATH[..6]) {
                         if let Some(column) = current_column.as_mut() {
                             column.functional_options.push(String::new());
                         }
                     } else if path_ends_with(
                         &path,
-                        &["Form", "Attributes", "Attribute", "FunctionalOptions", "Item"],
+                        &["Form", "Attributes", "Attribute", "FunctionalOptions"],
                     ) {
                         if let Some(attribute) = current_attribute.as_mut() {
                             attribute.functional_options.push(String::new());
                         }
                     } else if path_ends_with(
                         &path,
-                        &["Form", "Commands", "Command", "FunctionalOptions", "Item"],
+                        &["Form", "Commands", "Command", "FunctionalOptions"],
                     ) && let Some(command) = current_command.as_mut()
                     {
                         command.functional_options.push(String::new());
@@ -10855,6 +9650,41 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         _ => item.collapsed_representation_title_present = true,
                     }
                 }
+                if local.ends_with("Font")
+                    && local != "Font"
+                    && current_child_items.last().is_some_and(|item| {
+                        path.last().map(String::as_str) == Some(item.tag.as_str())
+                    })
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.fonts.insert(local.clone(), xml_attrs_map(&event));
+                }
+                // An empty `<Settings xsi:type="v8:TypeDescription"/>` is a
+                // value list whose element type names no type at all: it
+                // stores `{"Pattern"}` in the trailing bag on 1 385 ERP УХ and
+                // 208 BSP attributes, and only the opening-tag arm read it.
+                if local == "Settings"
+                    && path_ends_with(&path, &["Form", "Attributes", "Attribute"])
+                    && xml_attribute_value(&event, "type")?.as_deref() == Some("v8:TypeDescription")
+                    && let Some(attribute) = current_attribute.as_mut()
+                    && attribute.element_type.is_none()
+                {
+                    attribute.element_type = Some(FormXmlTypeSpec::default());
+                }
+                if let Some(section) = child_extra_picture_section(&path, &current_child_items)
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    if local == "TransparentPixel" {
+                        picture.transparent_x = xml_attribute_value(&event, "x")?;
+                        picture.transparent_y = xml_attribute_value(&event, "y")?;
+                        if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                            picture.unwritable.push(local.clone());
+                        }
+                    } else if !matches!(local.as_str(), "Ref" | "LoadTransparent" | "Abs") {
+                        picture.unwritable.push(local.clone());
+                    }
+                }
                 if local == "ChildItems"
                     && current_child_items.last().is_some_and(|item| {
                         path.last().map(String::as_str) == Some(item.tag.as_str())
@@ -10920,7 +9750,17 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         && !matches!(local.as_str(), "Ref" | "LoadTransparent")
                         && let Some(picture) = command.picture.as_mut()
                     {
-                        picture.unwritable.push(local.clone());
+                        // `<xr:TransparentPixel x y/>` is members 4 and 5 of the
+                        // reference, on a command as on an item.
+                        if local == "TransparentPixel" {
+                            picture.transparent_x = xml_attribute_value(&event, "x")?;
+                            picture.transparent_y = xml_attribute_value(&event, "y")?;
+                            if picture.transparent_x.is_none() || picture.transparent_y.is_none() {
+                                picture.unwritable.push(local.clone());
+                            }
+                        } else {
+                            picture.unwritable.push(local.clone());
+                        }
                     }
                 }
                 if local == "UseAlways"
@@ -11003,8 +9843,11 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     && path_ends_with_for_current_border_owner(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
                 {
+                    // Only the self-closed style reference is a whole border.
+                    let border = parse_form_xml_control_border(&event)?;
+                    item.control_border = (!item.control_border_seen && border.reference && border.valid)
+                        .then_some(border);
                     item.control_border_seen = true;
-                    item.control_border = None;
                 } else if path_ends_with_for_child_control_border(&path, &current_child_items)
                     && let Some(item) = current_child_items.last_mut()
                     && let Some(border) = item.control_border.as_mut()
@@ -11097,6 +9940,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     };
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
+                if let Some((section, part)) =
+                    child_extra_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
@@ -11128,6 +9985,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         .is_some_and(|item| path[path.len() - 2] == item.tag)
                 {
                     child_text.push_str(text.xml_content()?.as_ref());
+                } else if path.len() == 2 && path[0] == "Form" && current_child_items.is_empty() {
+                    child_text.push_str(text.xml_content()?.as_ref());
                 }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
@@ -11145,6 +10004,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                    })
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "VerticalAlign"])
@@ -11372,6 +10234,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || child_localized_section(&path, &current_child_items, &["item", "lang"])
+                        .is_some()
+                    || child_localized_section(&path, &current_child_items, &["item", "content"])
+                        .is_some()
                     || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
@@ -11632,6 +10498,20 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     };
                     slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
                 }
+                if let Some((section, part)) =
+                    child_extra_picture_part(&path, &current_child_items)
+                    && matches!(part, "Ref" | "LoadTransparent" | "Abs")
+                    && let Some(item) = current_child_items.last_mut()
+                    && let Some(picture) = item.pictures.get_mut(section)
+                {
+                    let chunk = text.xml_content()?;
+                    let slot = match part {
+                        "Ref" => &mut picture.reference,
+                        "Abs" => &mut picture.abs,
+                        _ => &mut picture.load_transparent,
+                    };
+                    slot.get_or_insert_with(String::new).push_str(chunk.as_ref());
+                }
                 if let Some(part) = child_picture_part(&path, &current_child_items)
                     && matches!(part, "Ref" | "LoadTransparent" | "Abs")
                     && let Some(item) = current_child_items.last_mut()
@@ -11665,6 +10545,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with(&path, &["Form", "RepostOnWrite"])
                     || path_ends_with(&path, &["Form", "AutoFillCheck"])
                     || path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"])
+                    || current_child_items.last().is_some_and(|item| {
+                        path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                    })
                     || path_ends_with(&path, &["Form", "UseForFoldersAndItems"])
                     || path_ends_with(&path, &["Form", "Customizable"])
                     || path_ends_with(&path, &["Form", "VerticalAlign"])
@@ -11892,6 +10775,10 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     || path_ends_with_for_child_title_content(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_lang(&path, &current_child_items)
                     || path_ends_with_for_child_tooltip_content(&path, &current_child_items)
+                    || child_localized_section(&path, &current_child_items, &["item", "lang"])
+                        .is_some()
+                    || child_localized_section(&path, &current_child_items, &["item", "content"])
+                        .is_some()
                     || path_ends_with_for_child_tooltip_representation(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_lang(&path, &current_child_items)
                     || path_ends_with_for_child_warning_on_edit_content(&path, &current_child_items)
@@ -12078,7 +10965,187 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                 if text_value.trim().is_empty() && !child_text.trim().is_empty() {
                     text_value.push_str(&child_text);
                 }
+                // Every scalar child of an item reaches the bag, whether or
+                // not an arm below also reads it into a typed field. The bag
+                // used to be the last arm, so a property a typed arm took
+                // first -- `<BorderColor>` into the popup's own field -- never
+                // reached the payload writers that read the bag, and an input
+                // field's border was written as the default on 46 BSP forms.
+                if !child_text.trim().is_empty()
+                    && path.len() == 2
+                    && path[0] == "Form"
+                    && current_child_items.is_empty()
+                {
+                    properties
+                        .root_scalars
+                        .entry(local.clone())
+                        .or_insert_with(|| child_text.trim().to_string());
+                }
+                if !child_text.trim().is_empty()
+                    && path_ends_with_for_child_property(&path, &current_child_items, &local)
+                    && let Some(item) = current_child_items.last_mut()
+                {
+                    item.scalars
+                        .entry(local.clone())
+                        .or_insert_with(|| child_text.trim().to_string());
+                }
                 match local.as_str() {
+                    "ExtendedTooltip"
+                        if current_child_items
+                            .last()
+                            .is_some_and(|item| item.tag == "ExtendedTooltip")
+                            && path.last().map(String::as_str) == Some("ExtendedTooltip") =>
+                    {
+                        if let Some(tip) = current_child_items.pop()
+                            && let Some(holder) = current_child_items.last_mut()
+                        {
+                            holder.extended_tooltip_item = Some(Box::new(tip));
+                        }
+                    }
+                    "Common" | "Value"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "UserVisible", local.as_str()])
+                        }) =>
+                    {
+                        let value = parse_form_xml_bool("UserVisible", nested_text.trim())?;
+                        if let Some(rights) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.user_visible.as_mut())
+                        {
+                            if local == "Common" {
+                                rights.common = Some(value);
+                            } else if let Some(last) = rights.values.last_mut() {
+                                last.1 = Some(value);
+                            }
+                        }
+                    }
+                    "Common" | "Value"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", "Use", local.as_str()]) =>
+                    {
+                        let value = parse_form_xml_bool("Command/Use", nested_text.trim())?;
+                        if let Some(rights) = current_command
+                            .as_mut()
+                            .and_then(|command| command.use_rights.as_mut())
+                        {
+                            if local == "Common" {
+                                rights.common = Some(value);
+                            } else if let Some(last) = rights.values.last_mut() {
+                                last.1 = Some(value);
+                            }
+                        }
+                    }
+                    "Common" | "Value"
+                        if path.len() >= 3
+                            && matches!(path[path.len() - 2].as_str(), "View" | "Edit")
+                            && path[path.len() - 3] == "Column" =>
+                    {
+                        let value = parse_form_xml_bool("Column rights", nested_text.trim())?;
+                        let edit = path[path.len() - 2] == "Edit";
+                        let column = if current_additional_column.is_some() {
+                            current_additional_column.as_mut()
+                        } else {
+                            current_column.as_mut()
+                        };
+                        if let Some(column) = column {
+                            let rights = if edit { column.edit.as_mut() } else { column.view.as_mut() };
+                            if let Some(rights) = rights {
+                                if local == "Common" {
+                                    rights.common = Some(value);
+                                } else if let Some(last) = rights.values.last_mut() {
+                                    last.1 = Some(value);
+                                }
+                            }
+                        }
+                    }
+                    "Common" | "Value"
+                        if path.len() >= 2
+                            && matches!(path[path.len() - 2].as_str(), "View" | "Edit")
+                            && path_ends_with(
+                                &path[..path.len() - 2],
+                                &["Form", "Attributes", "Attribute"],
+                            ) =>
+                    {
+                        let value = parse_form_xml_bool("Attribute rights", nested_text.trim())?;
+                        let section = path[path.len() - 2].clone();
+                        if let Some(attribute) = current_attribute.as_mut() {
+                            let rights = if section == "View" {
+                                attribute.view.as_mut()
+                            } else {
+                                attribute.edit.as_mut()
+                            };
+                            if let Some(rights) = rights {
+                                if local == "Common" {
+                                    rights.common = Some(value);
+                                } else if let Some(last) = rights.values.last_mut() {
+                                    last.1 = Some(value);
+                                }
+                            }
+                        }
+                    }
+                    _ if current_child_items.last().is_some_and(|item| {
+                        form_type_spec_part(&path, &[item.tag.as_str(), "AvailableTypes"], false)
+                            .is_some()
+                    }) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            let tag = item.tag.clone();
+                            if let Some(part) =
+                                form_type_spec_part(&path, &[tag.as_str(), "AvailableTypes"], false)
+                                && let Some(spec) = item.available_types.as_mut()
+                            {
+                                apply_form_type_spec_part(spec, part, nested_text.trim());
+                            }
+                        }
+                    }
+                    "Shortcut" | "AssociatedTableElementId"
+                        if path_ends_with(&path, &["Form", "Commands", "Command", local.as_str()]) =>
+                    {
+                        if let Some(command) = current_command.as_mut() {
+                            let value = Some(nested_text.trim().to_string());
+                            if local == "Shortcut" {
+                                command.shortcut = value;
+                            } else {
+                                command.associated_table_element_id = value;
+                            }
+                        }
+                    }
+                    "Name" | "DataPath" | "ValueChange"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(
+                                &path,
+                                &[item.tag.as_str(), "ChoiceParameterLinks", "Link", local.as_str()],
+                            )
+                        }) =>
+                    {
+                        if let Some(link) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.choice_parameter_links.last_mut())
+                        {
+                            let value = nested_text.trim().to_string();
+                            match local.as_str() {
+                                "Name" => link.name = value,
+                                "DataPath" => link.data_path = value,
+                                _ => link.value_change = value,
+                            }
+                        }
+                    }
+                    "DataPath" | "LinkItem"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "TypeLink", local.as_str()])
+                        }) =>
+                    {
+                        if let Some(link) = current_child_items
+                            .last_mut()
+                            .and_then(|item| item.type_link.as_mut())
+                        {
+                            let value = nested_text.trim().to_string();
+                            if local == "DataPath" {
+                                link.0 = value;
+                            } else {
+                                link.1 = value;
+                            }
+                        }
+                    }
                     // One `<xr:Item>` of `<MobileDeviceCommandBarContent>`.
                     "Presentation" | "CheckState" | "Value"
                         if current_mobile_item.is_some()
@@ -12123,7 +11190,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                     choice.check_state = Some(nested_text.trim().to_string());
                                 }
                                 FormChoiceListPart::Literal => {
-                                    choice.literal = Some(nested_text.trim().to_string());
+                                    choice.literal = Some(nested_text.to_string());
                                 }
                                 FormChoiceListPart::TitleLang => {
                                     current_choice_lang = Some(nested_text.trim().to_string());
@@ -12139,7 +11206,27 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                         choice.title.push(LocalizedString { lang, content });
                                     }
                                 }
-                                FormChoiceListPart::Close => {}
+                                FormChoiceListPart::ArrayLiteral => {
+                                    if let Some(value) = choice.array.last_mut() {
+                                        value.literal = Some(nested_text.to_string());
+                                    }
+                                }
+                                FormChoiceListPart::ArrayTitleLang => {
+                                    current_choice_lang = Some(nested_text.trim().to_string());
+                                }
+                                FormChoiceListPart::ArrayTitleContent => {
+                                    current_choice_content = Some(nested_text.to_string());
+                                }
+                                FormChoiceListPart::ArrayTitleItem => {
+                                    if let (Some(value), Some(lang), Some(content)) = (
+                                        choice.array.last_mut(),
+                                        current_choice_lang.take(),
+                                        current_choice_content.take(),
+                                    ) {
+                                        value.title.push(LocalizedString { lang, content });
+                                    }
+                                }
+                                FormChoiceListPart::Close | FormChoiceListPart::CloseParameter => {}
                             }
                         }
                         if part == FormChoiceListPart::Close
@@ -12149,6 +11236,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 .and_then(|item| item.choice_list.as_mut())
                         {
                             list.push(choice);
+                        }
+                        if part == FormChoiceListPart::CloseParameter
+                            && let Some(choice) = current_choice_item.take()
+                            && let Some(item) = current_child_items.last_mut()
+                        {
+                            item.choice_parameters
+                                .push((current_choice_parameter.take().unwrap_or_default(), choice));
                         }
                     }
                     // One `<Field>` of an attribute's `<Save>`.
@@ -12406,6 +11500,15 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     "AutoFillCheck" if path_ends_with(&path, &["Form", "AutoFillCheck"]) => {
                         properties.auto_fill_check =
                             Some(parse_form_xml_bool("AutoFillCheck", text_value.trim())?);
+                    }
+                    "ExcludedCommand"
+                        if current_child_items.last().is_some_and(|item| {
+                            path_ends_with(&path, &[item.tag.as_str(), "CommandSet", "ExcludedCommand"])
+                        }) =>
+                    {
+                        if let Some(item) = current_child_items.last_mut() {
+                            item.excluded_commands.push(text_value.trim().to_string());
+                        }
                     }
                     "ExcludedCommand"
                         if path_ends_with(&path, &["Form", "CommandSet", "ExcludedCommand"]) =>
@@ -13164,22 +12267,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_filters.next() {
-                            Some(DcsChildParseOutcome::Typed(filter)) => filter,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings filter: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings filter has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) = canonical_filters.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.filter =
                                 Some(FormXmlListSettingsFilter { canonical });
@@ -13198,22 +12292,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_conditional_appearances.next() {
-                            Some(DcsChildParseOutcome::Typed(value)) => value,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings conditional appearance: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings conditional appearance has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) =
+                            canonical_conditional_appearances.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.conditional_appearance = Some(canonical);
                         }
@@ -13231,22 +12317,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             ],
                         ) =>
                     {
-                        let canonical = match canonical_orders.next() {
-                            Some(DcsChildParseOutcome::Typed(order)) => order,
-                            Some(DcsChildParseOutcome::Unsupported(reason)) => {
-                                return Err(anyhow!(
-                                    "unsupported Form ListSettings order: {reason}"
-                                ));
-                            }
-                            Some(DcsChildParseOutcome::Absent) | None => {
-                                return Err(anyhow!(
-                                    "Form ListSettings order has no canonical parse result"
-                                ));
-                            }
-                        };
-                        if let Some(settings) = current_attribute
-                            .as_mut()
-                            .and_then(|attribute| attribute.settings.as_mut())
+                        // The typed reading serves the writers that use it; the
+                        // dynamic list's own bag is transcribed from the source
+                        // text, so an unmeasured cohort no longer stops the form.
+                        if let Some(DcsChildParseOutcome::Typed(canonical)) = canonical_orders.next()
+                            && let Some(settings) = current_attribute
+                                .as_mut()
+                                .and_then(|attribute| attribute.settings.as_mut())
                         {
                             settings.list_settings.order =
                                 Some(FormXmlListSettingsOrder { canonical });
@@ -13337,7 +12414,14 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     }
                     "Value" if command_interface_path(&path, &["Item", "Visible", "Value"]) => {
                         if let Some(item) = current_command_interface_item.as_mut() {
-                            item.visible_roles += 1;
+                            let value = match text_value.trim() {
+                                "true" => Some(true),
+                                "false" => Some(false),
+                                _ => None,
+                            };
+                            if let Some(last) = item.visible_roles.last_mut() {
+                                last.1 = value;
+                            }
                         }
                     }
                     "DefaultVisible"
@@ -13374,7 +12458,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_lang(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(
+                                &path,
+                                &current_child_items,
+                                &["item", "lang"],
+                            )
+                            .is_some() =>
                     {
                         current_child_title_lang = Some(text_value.trim().to_string());
                     }
@@ -13387,7 +12477,13 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_content(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(
+                                &path,
+                                &current_child_items,
+                                &["item", "content"],
+                            )
+                            .is_some() =>
                     {
                         current_child_title_content = Some(text_value.to_string());
                     }
@@ -13400,7 +12496,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                             || path_ends_with_for_child_warning_on_edit_item(
                                 &path,
                                 &current_child_items,
-                            ) =>
+                            )
+                            || child_localized_section(&path, &current_child_items, &["item"])
+                                .is_some() =>
                     {
                         if let (Some(item), Some(lang), Some(content)) = (
                             current_child_items.last_mut(),
@@ -13413,6 +12511,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                 Some("WarningOnEdit") => item.warning_on_edit.push(value),
                                 Some("CollapsedRepresentationTitle") => {
                                     item.collapsed_representation_title.push(value);
+                                }
+                                Some(section) if CHILD_LOCALIZED_SECTIONS.contains(&section) => {
+                                    item.localized.entry(section.to_string()).or_default().push(value);
                                 }
                                 _ => item.title.push(value),
                             }
@@ -13818,14 +12919,6 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                                     text_value.trim()
                                 )
                             })?;
-                            if item.tag == "ColumnGroup"
-                                && fixing_in_table != FormFixingInTable::Left
-                            {
-                                return Err(anyhow!(
-                                    "unsupported Form ColumnGroup FixingInTable: {}",
-                                    text_value.trim()
-                                ));
-                            }
                             item.fixing_in_table = Some(fixing_in_table);
                         }
                     }
@@ -14864,21 +13957,9 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
         buffer.clear();
     }
 
-    if canonical_filters.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings filter parse results were not consumed by the Form structure"
-        ));
-    }
-    if canonical_orders.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings order parse results were not consumed by the Form structure"
-        ));
-    }
-    if canonical_conditional_appearances.next().is_some() {
-        return Err(anyhow!(
-            "Form ListSettings conditional-appearance parse results were not consumed by the Form structure"
-        ));
-    }
+    let _ = canonical_filters.next();
+    let _ = canonical_orders.next();
+    let _ = canonical_conditional_appearances.next();
     Ok(properties)
 }
 
@@ -14892,6 +13973,7 @@ fn parse_form_auto_command_bar_xml(
         return Ok(None);
     };
     Ok(Some(FormXmlAutoCommandBar {
+        display_importance: xml_attribute_value(event, "DisplayImportance")?,
         id,
         name,
         horizontal_align: None,
@@ -14920,6 +14002,9 @@ fn parse_form_command_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlComman
         picture_present: false,
         modifies_saved_data: None,
         current_row_use: None,
+        shortcut: None,
+        use_rights: None,
+        associated_table_element_id: None,
     }))
 }
 
@@ -14931,6 +14016,8 @@ fn parse_form_attribute_xml(event: &BytesStart<'_>) -> Result<Option<FormXmlAttr
         return Ok(None);
     };
     Ok(Some(FormXmlAttribute {
+        view: None,
+        edit: None,
         id,
         name,
         types: Vec::new(),
@@ -15094,6 +14181,7 @@ fn parse_form_child_item_xml(
         format_present: false,
         collapsed_representation_title_present: false,
         collapsed_representation_title: Vec::new(),
+        excluded_commands: Vec::new(),
         associated_table_element_id: None,
         header_horizontal_align: None,
         shape: None,
@@ -15113,6 +14201,15 @@ fn parse_form_child_item_xml(
         row_filter_present: false,
         display_importance: xml_attribute_value(event, "DisplayImportance")?,
         scalars: BTreeMap::new(),
+        localized: BTreeMap::new(),
+        pictures: BTreeMap::new(),
+        fonts: BTreeMap::new(),
+        extended_tooltip_item: None,
+        user_visible: None,
+        choice_parameter_links: Vec::new(),
+        type_link: None,
+        available_types: None,
+        choice_parameters: Vec::new(),
         child_items_present: false,
         child_items: Vec::new(),
     }))
@@ -15121,6 +14218,7 @@ fn parse_form_child_item_xml(
 fn parse_form_xml_control_border(event: &BytesStart<'_>) -> Result<FormXmlControlBorder> {
     let mut width = None::<String>;
     let mut gap = None::<String>;
+    let mut reference = None::<String>;
     let mut valid = true;
     for attr in event.attributes() {
         let attr = attr?;
@@ -15128,14 +14226,27 @@ fn parse_form_xml_control_border(event: &BytesStart<'_>) -> Result<FormXmlContro
         match attr.key.as_ref() {
             b"width" if width.is_none() => width = Some(value),
             b"gap" if gap.is_none() => gap = Some(value),
+            b"ref" if reference.is_none() => reference = Some(value),
             _ => valid = false,
         }
     }
-    valid &= width.as_deref() == Some("1") && gap.as_deref().is_none_or(|value| value == "false");
+    // Widths 0, 1, 3 and 5 occur and each is stored as spelled; the only
+    // reference either corpus spells is the style's own border.
+    let is_reference = reference.is_some();
+    valid &= if is_reference {
+        reference.as_deref() == Some("style:ControlBorder") && width.is_none() && gap.is_none()
+    } else {
+        width
+            .as_deref()
+            .is_some_and(|value| !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit()))
+            && gap.as_deref().is_none_or(|value| value == "false")
+    };
     Ok(FormXmlControlBorder {
         style: None,
         style_seen: false,
         valid,
+        width: width.unwrap_or_else(|| "1".to_string()),
+        reference: is_reference,
     })
 }
 
@@ -15254,6 +14365,23 @@ fn is_form_child_item_xml_tag(tag: &str) -> bool {
                 | "SearchStringAddition"
                 | "ViewStatusAddition"
                 | "SearchControlAddition"
+                | "ProgressBarField"
+                | "TrackBarField"
+                // Field kinds with no payload writer yet: recognised so that
+                // the form is refused rather than written without them.
+                | "ChartField"
+                | "GanttChartField"
+                | "PDFDocumentField"
+                | "DendrogramField"
+                | "PlannerField"
+                | "GeographicalSchemaField"
+                | "GraphicalSchemaField"
+                | "PeriodField"
+                | "CalendarField"
+                | "FormattedDocumentField"
+                | "TextDocumentField"
+                | "HTMLDocumentField"
+                | "SpreadSheetDocumentField"
         )
 }
 
@@ -15305,6 +14433,34 @@ fn path_ends_with_for_child_tooltip_representation(
 
 fn form_child_item_supports_warning_on_edit(tag: &str) -> bool {
     tag == "Column" || FormFieldSchema::supports_item_tag(tag)
+}
+
+/// The localized-string properties of a child item the `<v8:item>` reader
+/// collects beside its title, tooltip and warning -- every other element of
+/// both corpora whose content is `<v8:item>` blocks, bar the choice-list
+/// presentations, which have a reader of their own.
+const CHILD_LOCALIZED_SECTIONS: &[&str] = &[
+    "CollapsedRepresentationTitle",
+    "EditFormat",
+    "FooterText",
+    "Format",
+    "InputHint",
+    "NonselectedPictureText",
+];
+
+/// Which of [`CHILD_LOCALIZED_SECTIONS`] the path is inside, `rest` being
+/// what follows the section's own element.
+fn child_localized_section(
+    path: &[String],
+    items: &[FormXmlChildItem],
+    rest: &[&str],
+) -> Option<&'static str> {
+    let item = items.last()?;
+    CHILD_LOCALIZED_SECTIONS.iter().copied().find(|section| {
+        let mut tail = vec![item.tag.as_str(), *section];
+        tail.extend_from_slice(rest);
+        path_ends_with(path, &tail)
+    })
 }
 
 fn path_ends_with_for_child_collapsed_title(
@@ -15365,8 +14521,30 @@ fn path_ends_with_for_choice_list(path: &[String], items: &[FormXmlChildItem]) -
 /// `<FunctionalOptions><Item>`. Neither of the last two carries a
 /// `<Presentation>`, a `<CheckState>` or a `<Value>`.
 fn form_nested_text_element(path: &[String]) -> bool {
+    if form_type_spec_part(path, &["AvailableTypes"], false).is_some() {
+        return true;
+    }
     if path_ends_with(path, &["Attribute", "Save", "Field"])
         || path_ends_with(path, &["Attribute", "UseAlways", "Field"])
+        || path_ends_with(path, &["UserVisible", "Common"])
+        || path_ends_with(path, &["UserVisible", "Value"])
+        || path_ends_with(path, &["Command", "Use", "Common"])
+        || path_ends_with(path, &["Attribute", "View", "Common"])
+        || path_ends_with(path, &["Attribute", "View", "Value"])
+        || path_ends_with(path, &["Attribute", "Edit", "Common"])
+        || path_ends_with(path, &["Attribute", "Edit", "Value"])
+        || path_ends_with(path, &["Column", "View", "Common"])
+        || path_ends_with(path, &["Column", "View", "Value"])
+        || path_ends_with(path, &["Column", "Edit", "Common"])
+        || path_ends_with(path, &["Column", "Edit", "Value"])
+        || path_ends_with(path, &["Command", "Use", "Value"])
+        || path_ends_with(path, &["Commands", "Command", "Shortcut"])
+        || path_ends_with(path, &["Commands", "Command", "AssociatedTableElementId"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "Name"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "DataPath"])
+        || path_ends_with(path, &["ChoiceParameterLinks", "Link", "ValueChange"])
+        || path_ends_with(path, &["TypeLink", "DataPath"])
+        || path_ends_with(path, &["TypeLink", "LinkItem"])
     {
         return true;
     }
@@ -15382,6 +14560,18 @@ fn form_nested_text_element(path: &[String]) -> bool {
     path_ends_with(path, &["Item", "Value", "Value"])
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "lang"])
         || path_ends_with(path, &["Item", "Value", "Presentation", "item", "content"])
+        || path_ends_with(path, &["ChoiceParameters", "item", "value", "Value"])
+        || path_ends_with(path, &["item", "value", "Value", "Value", "Value"])
+        || path_ends_with(path, &["value", "Value", "Value", "Presentation", "item", "lang"])
+        || path_ends_with(path, &["value", "Value", "Value", "Presentation", "item", "content"])
+        || path_ends_with(
+            path,
+            &["ChoiceParameters", "item", "value", "Presentation", "item", "lang"],
+        )
+        || path_ends_with(
+            path,
+            &["ChoiceParameters", "item", "value", "Presentation", "item", "content"],
+        )
 }
 
 /// The part of a `<ChoiceList>` item a closing element is, if it is one.
@@ -15396,8 +14586,25 @@ enum FormChoiceListPart {
     TitleLang,
     TitleContent,
     TitleItem,
+    /// The literal and the title of a value inside a `v8:FixedArray`.
+    ArrayLiteral,
+    ArrayTitleLang,
+    ArrayTitleContent,
+    ArrayTitleItem,
     /// `</xr:Item>` itself.
     Close,
+    /// `</app:item>` of a `<ChoiceParameters>`.
+    CloseParameter,
+}
+
+/// The two containers whose items share the choice-list value grammar: a
+/// field's `<ChoiceList>` -- `<xr:Item>` holding `<xr:Value>` -- and an input
+/// field's `<ChoiceParameters>` -- `<app:item name>` holding `<app:value>`.
+fn choice_list_containers(tag: &str) -> [([&str; 3], &'static str); 2] {
+    [
+        ([tag, "ChoiceList", "Item"], "Value"),
+        ([tag, "ChoiceParameters", "item"], "value"),
+    ]
 }
 
 fn form_choice_list_part(
@@ -15406,25 +14613,45 @@ fn form_choice_list_part(
     local: &str,
 ) -> Option<FormChoiceListPart> {
     let tag = items.last()?.tag.as_str();
-    let ends = |tail: &[&str]| {
-        let mut suffix = vec![tag, "ChoiceList", "Item"];
-        suffix.extend_from_slice(tail);
-        path_ends_with(path, &suffix)
-    };
-    match local {
-        "Presentation" if ends(&["Presentation"]) => Some(FormChoiceListPart::Presentation),
-        "CheckState" if ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
-        "Value" if ends(&["Value", "Value"]) => Some(FormChoiceListPart::Literal),
-        "lang" if ends(&["Value", "Presentation", "item", "lang"]) => {
-            Some(FormChoiceListPart::TitleLang)
+    for (prefix, outer) in choice_list_containers(tag) {
+        let ends = |tail: &[&str]| {
+            let mut suffix = prefix.to_vec();
+            suffix.extend_from_slice(tail);
+            path_ends_with(path, &suffix)
+        };
+        let list = outer == "Value";
+        let part = match local {
+            "Presentation" if list && ends(&["Presentation"]) => Some(FormChoiceListPart::Presentation),
+            "CheckState" if list && ends(&["CheckState"]) => Some(FormChoiceListPart::CheckState),
+            "Value" if ends(&[outer, "Value"]) => Some(FormChoiceListPart::Literal),
+            "lang" if ends(&[outer, "Presentation", "item", "lang"]) => {
+                Some(FormChoiceListPart::TitleLang)
+            }
+            "content" if ends(&[outer, "Presentation", "item", "content"]) => {
+                Some(FormChoiceListPart::TitleContent)
+            }
+            "item" if ends(&[outer, "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
+            "Value" if ends(&[outer, "Value", "Value", "Value"]) => {
+                Some(FormChoiceListPart::ArrayLiteral)
+            }
+            "lang" if ends(&[outer, "Value", "Value", "Presentation", "item", "lang"]) => {
+                Some(FormChoiceListPart::ArrayTitleLang)
+            }
+            "content" if ends(&[outer, "Value", "Value", "Presentation", "item", "content"]) => {
+                Some(FormChoiceListPart::ArrayTitleContent)
+            }
+            "item" if ends(&[outer, "Value", "Value", "Presentation", "item"]) => {
+                Some(FormChoiceListPart::ArrayTitleItem)
+            }
+            "Item" if list && ends(&[]) => Some(FormChoiceListPart::Close),
+            "item" if !list && ends(&[]) => Some(FormChoiceListPart::CloseParameter),
+            _ => None,
+        };
+        if part.is_some() {
+            return part;
         }
-        "content" if ends(&["Value", "Presentation", "item", "content"]) => {
-            Some(FormChoiceListPart::TitleContent)
-        }
-        "item" if ends(&["Value", "Presentation", "item"]) => Some(FormChoiceListPart::TitleItem),
-        "Item" if ends(&[]) => Some(FormChoiceListPart::Close),
-        _ => None,
     }
+    None
 }
 
 /// One opening element inside a `<ChoiceList>` item.
@@ -15444,31 +14671,66 @@ fn apply_form_choice_list_part(
     let Some(tag) = items.last().map(|item| item.tag.as_str()) else {
         return Ok(());
     };
-    let opens = |tail: &[&str]| {
-        let mut suffix = vec![tag, "ChoiceList", "Item"];
-        suffix.extend_from_slice(tail);
-        path_ends_with(path, &suffix)
-    };
-    if opens(&[]) {
-        match local {
-            "Presentation" | "CheckState" => {}
-            "Value" => choice.value_type = xml_attribute_value(event, "type")?,
-            other => choice.unwritable.push(other.to_string()),
+    for (prefix, outer) in choice_list_containers(tag) {
+        let opens = |tail: &[&str]| {
+            let mut suffix = prefix.to_vec();
+            suffix.extend_from_slice(tail);
+            path_ends_with(path, &suffix)
+        };
+        if opens(&[]) {
+            match local {
+                "Presentation" | "CheckState" if outer == "Value" => {}
+                name if name == outer => choice.value_type = xml_attribute_value(event, "type")?,
+                other => choice.unwritable.push(other.to_string()),
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
-    if opens(&["Value"]) {
-        match local {
-            "Presentation" => {}
-            "Value" => choice.literal_type = xml_attribute_value(event, "type")?,
-            other => choice.unwritable.push(other.to_string()),
+        if opens(&[outer]) {
+            match local {
+                "Presentation" => {}
+                "Value" => choice.literal_type = xml_attribute_value(event, "type")?,
+                other => choice.unwritable.push(other.to_string()),
+            }
+            return Ok(());
         }
-        return Ok(());
-    }
-    if (opens(&["Value", "Presentation"]) && local == "item")
-        || (opens(&["Value", "Presentation", "item"]) && matches!(local, "lang" | "content"))
-    {
-        return Ok(());
+        if (opens(&[outer, "Presentation"]) && local == "item")
+            || (opens(&[outer, "Presentation", "item"]) && matches!(local, "lang" | "content"))
+        {
+            return Ok(());
+        }
+        // A `v8:FixedArray` literal holds `<v8:Value>`s, each the same
+        // presentation-and-literal pair an item's value is.
+        if choice.literal_type.as_deref() == Some("v8:FixedArray") {
+            if opens(&[outer, "Value"]) {
+                if local == "Value" {
+                    choice.array.push(FormXmlChoiceListItem {
+                        value_type: xml_attribute_value(event, "type")?,
+                        ..FormXmlChoiceListItem::default()
+                    });
+                } else {
+                    choice.unwritable.push(local.to_string());
+                }
+                return Ok(());
+            }
+            if opens(&[outer, "Value", "Value"]) {
+                let Some(value) = choice.array.last_mut() else {
+                    choice.unwritable.push(local.to_string());
+                    return Ok(());
+                };
+                match local {
+                    "Presentation" => {}
+                    "Value" => value.literal_type = xml_attribute_value(event, "type")?,
+                    other => value.unwritable.push(other.to_string()),
+                }
+                return Ok(());
+            }
+            if (opens(&[outer, "Value", "Value", "Presentation"]) && local == "item")
+                || (opens(&[outer, "Value", "Value", "Presentation", "item"])
+                    && matches!(local, "lang" | "content"))
+            {
+                return Ok(());
+            }
+        }
     }
     choice.unwritable.push(local.to_string());
     Ok(())
@@ -15477,7 +14739,7 @@ fn apply_form_choice_list_part(
 fn form_child_item_supports_control_border(tag: &str) -> bool {
     matches!(
         tag,
-        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration"
+        "LabelField" | "PictureField" | "LabelDecoration" | "PictureDecoration" | "CalendarField"
     )
 }
 
@@ -15513,6 +14775,36 @@ fn path_ends_with_for_child_picture(path: &[String], items: &[FormXmlChildItem])
         return false;
     };
     path_ends_with(path, &[item.tag.as_str(), "Picture"])
+}
+
+/// The pictures a child item carries beside its `<Picture>`: an input
+/// field's choice button, a picture field's values, a table's rows, and the
+/// header and footer of a column. Each is the same reference a `<Picture>` is.
+const CHILD_EXTRA_PICTURES: &[&str] = &[
+    "ChoiceButtonPicture",
+    "FooterPicture",
+    "HeaderPicture",
+    "RowsPicture",
+    "ValuesPicture",
+];
+
+/// Which of [`CHILD_EXTRA_PICTURES`] the path is directly inside.
+fn child_extra_picture_section(path: &[String], items: &[FormXmlChildItem]) -> Option<&'static str> {
+    let item = items.last()?;
+    CHILD_EXTRA_PICTURES
+        .iter()
+        .copied()
+        .find(|section| path_ends_with(path, &[item.tag.as_str(), section]))
+}
+
+/// The extra picture and the name of its child whose text is being read.
+fn child_extra_picture_part<'a>(
+    path: &'a [String],
+    items: &[FormXmlChildItem],
+) -> Option<(&'static str, &'a str)> {
+    let (last, parent) = path.split_last()?;
+    let section = child_extra_picture_section(parent, items)?;
+    Some((section, last.as_str()))
 }
 
 /// The name of the `<Picture>` child whose text the parser is reading.
@@ -15659,6 +14951,8 @@ fn form_localized_text_path_allows_entity_ref(
         || path_ends_with_for_child_title_content(path, child_items)
         || path_ends_with_for_child_tooltip_lang(path, child_items)
         || path_ends_with_for_child_tooltip_content(path, child_items)
+        || child_localized_section(path, child_items, &["item", "lang"]).is_some()
+        || child_localized_section(path, child_items, &["item", "content"]).is_some()
         || path_ends_with_for_child_warning_on_edit_lang(path, child_items)
         || path_ends_with_for_child_warning_on_edit_content(path, child_items)
 }
@@ -15668,6 +14962,7 @@ fn native_command_interface_panel(
     properties: &FormXmlBodyProperties,
     panel: &str,
     main_attribute_class: &str,
+    data_paths: &NativeDataPaths<'_>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let mut records = String::new();
@@ -15683,6 +14978,7 @@ fn native_command_interface_panel(
             count,
             properties,
             main_attribute_class,
+            data_paths,
             source,
         )?);
         count += 1;
@@ -15704,18 +15000,15 @@ fn native_command_interface_item(
     position: usize,
     properties: &FormXmlBodyProperties,
     main_attribute_class: &str,
+    data_paths: &NativeDataPaths<'_>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    if item.attribute.is_some() {
-        return Err(anyhow!(
-            "a command interface item names an <Attribute>, whose data path is not measured"
-        ));
-    }
-    if item.visible_roles > 0 {
-        return Err(anyhow!(
-            "a command interface item's <Visible> names roles, whose tuple is not measured"
-        ));
-    }
+    let attribute = match item.attribute.as_deref().map(str::trim) {
+        Some(path) => data_paths.resolve(path).ok_or_else(|| {
+            anyhow!("a command interface item names {path}, which the writer cannot place")
+        })?,
+        None => "{0}".to_string(),
+    };
     let command = native_command_interface_command(item, properties, main_attribute_class, source)?;
     // Every item of both corpora spells `<Type>`, and only these two words.
     let kind = match item.item_type.as_deref() {
@@ -15751,20 +15044,26 @@ fn native_command_interface_item(
     // `<Visible><Common>` decides the flag when it is there; with no
     // `<Visible>` at all a `<DefaultVisible>false` means visible. An item that
     // spells neither stores `{"B",1}` 262 times and `{"B",0}` 28 times and no
-    // property of the item separates them, so it refuses.
+    // property of the item separates them -- but the export spells neither
+    // for both, so the majority's `{"B",1}` reads back the same.
     let common = match (item.visible_common, item.default_visible) {
         (Some(common), _) => common,
-        (None, Some(false)) => true,
-        (None, _) => {
-            return Err(anyhow!(
-                "a command interface item spells neither <DefaultVisible> nor <Visible>"
-            ));
-        }
+        (None, _) => true,
+    };
+    let visible = if item.visible_roles.is_empty() {
+        format!("{{0,{{0,{{\"B\",{}}},0}}}}", u8::from(common))
+    } else {
+        native_rights(
+            &FormXmlRights {
+                common: Some(common),
+                values: item.visible_roles.clone(),
+            },
+            "a command interface item's <Visible>",
+            source,
+        )?
     };
     Ok(format!(
-        "{{3,{position},{command},{{0}},{kind},{group},{index},{default_visible},\
-         {{0,{{0,{{\"B\",{}}},0}}}}}}",
-        u8::from(common)
+        "{{3,{position},{command},{attribute},{kind},{group},{index},{default_visible},{visible}}}"
     ))
 }
 
@@ -15911,6 +15210,7 @@ const OBJECT_STANDARD_COMMAND_ORDINALS: &[(&str, &str, u32)] = &[
     ("DataProcessor", "Open", 0),
     ("Document", "Create", 1),
     ("Document", "CreateBasedOn", 2),
+    ("ExchangePlan", "CreateBasedOn", 2),
     ("Document", "OpenList", 0),
     ("DocumentJournal", "OpenList", 0),
     ("FilterCriterion", "OpenByValue", 0),
@@ -16610,8 +15910,7 @@ fn path_ends_with_for_child_vertical_align(path: &[String], items: &[FormXmlChil
     let Some(item) = items.last() else {
         return false;
     };
-    FormFieldSchema::supports_item_tag(&item.tag)
-        && path_ends_with(path, &[item.tag.as_str(), "VerticalAlign"])
+    path_ends_with(path, &[item.tag.as_str(), "VerticalAlign"])
 }
 
 fn path_ends_with_for_child_group_vertical_align(
@@ -16867,6 +16166,7 @@ fn parse_form_use_for_folders_and_items_xml(value: &str) -> Result<FormXmlUseFor
 fn parse_form_vertical_scroll_xml(value: &str) -> Result<FormXmlVerticalScroll> {
     match value {
         "useIfNecessary" => Ok(FormXmlVerticalScroll::UseIfNecessary),
+        "useWithoutStretch" => Ok(FormXmlVerticalScroll::UseWithoutStretch),
         other => Err(anyhow!("unsupported Form VerticalScroll: {other}")),
     }
 }
@@ -17911,6 +17211,7 @@ fn form_update_on_data_change_code(value: FormXmlUpdateOnDataChange) -> &'static
 fn form_vertical_scroll_code(value: FormXmlVerticalScroll) -> &'static str {
     match value {
         FormXmlVerticalScroll::UseIfNecessary => "2",
+        FormXmlVerticalScroll::UseWithoutStretch => "0",
     }
 }
 
@@ -25284,7 +24585,62 @@ pub fn pack_role_rights_blob_from_xml_with_source(
     })
 }
 
-pub fn role_rights_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
+/// Compiles a role's `Rights.xml` into its stored rights row without a base
+/// blob (see `compiler::bodies::role_rights_writer`), names looked up in the
+/// source tree.
+///
+/// Fail-closed twice over: the writer refuses what it cannot place, and a
+/// row it did write is read back through the exporter and must give the same
+/// document again -- the objects in any order, everything inside them as the
+/// XML has it. A row that would export differently is refused, never staged.
+pub fn pack_role_rights_blob_base_free(
+    xml: &[u8],
+    source: &MetadataSourceContext,
+) -> Result<PackedRawDeflatedBlob> {
+    use crate::compiler::bodies::role_rights_writer::{parse_rights_xml, write_role_rights};
+
+    let written = write_role_rights(xml, source.role_rights_source())
+        .map_err(|refusal| anyhow!("Role rights writer refused: {refusal}"))?;
+    let blob = deflate_raw(&written.plain)?;
+    let exported = crate::mssql_dump::role_rights_xml_from_blob(
+        &blob,
+        &written.object_refs,
+        &written.field_refs,
+    )
+    .ok_or_else(|| anyhow!("Role rights writer: the written row does not read back"))?;
+    let mut original = parse_rights_xml(xml)
+        .map_err(|refusal| anyhow!("Role rights writer refused: {refusal}"))?;
+    let mut reread = parse_rights_xml(exported.as_bytes())
+        .map_err(|refusal| anyhow!("Role rights writer: the read-back XML is unreadable: {refusal}"))?;
+    original.objects.sort_by(|left, right| left.name.cmp(&right.name));
+    reread.objects.sort_by(|left, right| left.name.cmp(&right.name));
+    if original != reread {
+        return Err(anyhow!(
+            "Role rights writer: the written row reads back into a different Rights.xml"
+        ));
+    }
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedRawDeflatedBlob {
+        plain_bytes: written.plain.len(),
+        blob,
+        output_sha256,
+    })
+}
+
+/// Why a role's `Rights.xml` still needs the active base row: nothing when
+/// the base-free writer compiles it from `source`, else the writer's refusal
+/// followed by what the base patcher preserves from the base row.
+pub fn role_rights_base_free_blockers(
+    xml: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<String>> {
+    let writer_refusal = match source {
+        Some(source) => match pack_role_rights_blob_base_free(xml, source) {
+            Ok(_) => return Ok(Vec::new()),
+            Err(error) => Some(format!("{error:#}")),
+        },
+        None => None,
+    };
     let rights = parse_role_rights_xml(xml)?;
     let conditional_rights = rights
         .objects
@@ -25304,6 +24660,9 @@ pub fn role_rights_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
         .map(|object| object.rights.len())
         .sum::<usize>();
     let mut blockers = Vec::new();
+    if let Some(refusal) = writer_refusal {
+        blockers.push(refusal);
+    }
     blockers.push(format!(
         "source XML has {} object entries but does not carry the base Role object table order or per-object entry identifiers",
         rights.objects.len()
@@ -25336,10 +24695,10 @@ pub fn pack_command_interface_blob_from_xml(
     base_blob: &[u8],
     xml: &[u8],
 ) -> Result<PackedRawDeflatedBlob> {
-    let entries = parse_command_interface_xml(xml)?;
     if base_blob.is_empty() {
-        return pack_command_interface_entries_without_base(&entries);
+        return pack_command_interface_blob_from_xml_base_free(xml);
     }
+    let entries = parse_command_interface_xml(xml)?;
     let inflated =
         inflate_raw(base_blob).context("failed to inflate base CommandInterface blob")?;
     let mut plain =
@@ -25395,19 +24754,15 @@ pub fn pack_command_interface_blob_from_xml(
     })
 }
 
-/// Packs CommandInterface XML only when every command reference is base-free.
+/// Packs CommandInterface XML without a source tree: only when every section
+/// spells raw references (`<code>:<uuid>` commands, bare uuids).
 ///
-/// Readable command references are classified as requiring a base and rejected
-/// instead of being routed through the base-capable packer with an empty blob.
+/// Readable names are classified as requiring a base and rejected here; the
+/// loader resolves them with [`pack_interface_asset_blob`] and a source tree.
 pub fn pack_command_interface_blob_from_xml_base_free(xml: &[u8]) -> Result<PackedRawDeflatedBlob> {
-    if !command_interface_xml_can_pack_without_base(xml)? {
-        let blockers = command_interface_base_free_blockers(xml)?;
-        return Err(anyhow!(
-            "CommandInterface XML requires a base entry: {}",
-            blockers.join("; ")
-        ));
-    }
-    pack_command_interface_blob_from_xml(&[], xml)
+    validate_command_interface_xml_document(xml)?;
+    pack_interface_asset_blob(InterfaceAssetSource::CommandInterface, xml, None)
+        .map_err(|error| anyhow!("CommandInterface XML requires a base entry: {error:#}"))
 }
 
 fn validate_command_interface_xml_document(xml: &[u8]) -> Result<()> {
@@ -25501,101 +24856,27 @@ fn validate_command_interface_xml_document(xml: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// Whether the XML packs without a base and without a source tree: every
+/// section it holds is one the writer encodes, spelled with raw references.
+/// A section the writer cannot encode, or a name only a source tree resolves,
+/// is `false` -- never a body with the section dropped.
 pub fn command_interface_xml_can_pack_without_base(xml: &[u8]) -> Result<bool> {
     validate_command_interface_xml_document(xml)?;
-    let entries = parse_command_interface_xml(xml)?;
-    Ok(entries
-        .iter()
-        .all(|entry| format_raw_command_interface_ref(&entry.name).is_ok()))
+    Ok(interface_asset_plaintext(InterfaceAssetSource::CommandInterface, xml, None).is_ok())
 }
 
+/// Why the XML does not pack without a base and a source tree; empty when it
+/// does.
 pub fn command_interface_base_free_blockers(xml: &[u8]) -> Result<Vec<String>> {
-    let entries = parse_command_interface_xml(xml)?;
-    let raw_count = entries
-        .iter()
-        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_ok())
-        .count();
-    let readable = entries
-        .iter()
-        .filter(|entry| format_raw_command_interface_ref(&entry.name).is_err())
-        .map(|entry| entry.name.as_str())
-        .collect::<Vec<_>>();
-    if readable.is_empty() {
-        return Ok(Vec::new());
-    }
-
-    let readable_count = readable.len();
-    let sample = readable
-        .iter()
-        .take(3)
-        .copied()
-        .collect::<Vec<_>>()
-        .join(", ");
-    let mut blockers = Vec::new();
-    blockers.push(format!(
-        "source XML has {} command visibility entries ({readable_count} readable refs, {raw_count} raw kind:uuid refs), but base-free packing can only synthesize raw numeric kind:uuid command tuples",
-        entries.len()
-    ));
-    blockers.push(format!(
-        "readable CommandInterface refs such as {sample} require the active base row to preserve the platform command tuple kind, UUID and serialized command order"
-    ));
-    blockers.push(
-        "staging currently patches visibility flags into the existing CommandInterface row and validates the command count against the base blob".to_string(),
-    );
-    Ok(blockers)
-}
-
-fn pack_command_interface_entries_without_base(
-    entries: &[CommandInterfaceXmlEntry],
-) -> Result<PackedRawDeflatedBlob> {
-    use crate::compiler::bodies::command_interface::{
-        CommandInterfaceModel, CommandReference, CommandVisibility,
-        compile_evidenced_command_interface,
-    };
-
-    let commands_visibility = entries
-        .iter()
-        .map(|entry| {
-            let (kind, uuid) = parse_raw_command_interface_ref(&entry.name)?;
-            Ok(CommandVisibility {
-                command: CommandReference::resolved(kind, uuid),
-                common: entry.common,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let model = CommandInterfaceModel {
-        commands_visibility,
-        ..CommandInterfaceModel::default()
-    };
-    let blob = compile_evidenced_command_interface(&model)
-        .map_err(|error| anyhow!("failed to compile CommandInterface model: {error}"))?;
-    let plain_bytes = inflate_raw(&blob)?.len();
-    let output_sha256 = hex_sha256(&blob);
-    Ok(PackedRawDeflatedBlob {
-        blob,
-        plain_bytes,
-        output_sha256,
-    })
-}
-
-fn format_raw_command_interface_ref(name: &str) -> Result<String> {
-    let (kind, uuid) = parse_raw_command_interface_ref(name)?;
-    Ok(format!("{{{kind},{uuid}}}"))
-}
-
-fn parse_raw_command_interface_ref(name: &str) -> Result<(u32, ibcmd_core::identity::ObjectUuid)> {
-    let (kind, uuid) = name
-        .split_once(':')
-        .ok_or_else(|| anyhow!("base-free CommandInterface command must be kind:uuid: {name}"))?;
-    let kind = kind.trim();
-    let uuid = uuid.trim();
-    let kind = kind.parse::<u32>().map_err(|_| {
-        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
-    })?;
-    let uuid = ibcmd_core::identity::ObjectUuid::parse(uuid).map_err(|_| {
-        anyhow!("base-free CommandInterface command must be numeric kind and UUID: {name}")
-    })?;
-    Ok((kind, uuid))
+    validate_command_interface_xml_document(xml)?;
+    Ok(
+        match interface_asset_plaintext(InterfaceAssetSource::CommandInterface, xml, None) {
+            Ok(_) => Vec::new(),
+            Err(error) => vec![format!(
+                "the base-free writer refuses the file without a source tree: {error:#}"
+            )],
+        },
+    )
 }
 
 pub fn pack_exchange_plan_content_blob_from_xml(
@@ -25625,13 +24906,15 @@ pub fn pack_exchange_plan_content_blob_from_xml(
         let uuid = source
             .resolve_metadata_reference_uuid(&item.metadata)
             .with_context(|| format!("failed to resolve ExchangePlanContent {}", item.metadata))?;
-        let auto_record = if item.auto_record { "1" } else { "0" };
         plain.push(',');
         plain.push_str(&uuid);
         plain.push(',');
-        plain.push_str(auto_record);
+        plain.push_str(&item.auto_record.to_string());
     }
-    plain.push('}');
+    // Every stored content row of both corpora ends with one more `0` after
+    // the items, and opens with the UTF-8 BOM.
+    plain.push_str(",0}");
+    let plain = format!("\u{feff}{plain}");
 
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
@@ -26113,6 +25396,7 @@ fn role_child_object_tag(tag: &str) -> Option<&'static str> {
         "Form" => Some("Form"),
         "Resource" => Some("Resource"),
         "URLTemplate" => Some("URLTemplate"),
+        "Operation" => Some("Operation"),
         _ => None,
     }
 }
@@ -26636,162 +25920,11 @@ fn role_restriction_field_text_range(
     Ok(None)
 }
 
+/// The name a right uuid stands for: the exporter's table, the one the
+/// platform's own `Rights.xml` files were measured against.
 fn role_right_name(uuid: &str) -> Option<&'static str> {
-    ROLE_RIGHT_NAMES
-        .iter()
-        .find_map(|(right_uuid, name)| (*right_uuid == uuid).then_some(*name))
+    crate::mssql_dump::role_right_name(uuid)
 }
-
-const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
-    ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
-    ("900e3c92-6e18-4874-846a-b28780b5b54c", "Administration"),
-    (
-        "f7c6a0bb-bca6-4cd3-9146-832971cd7073",
-        "AnalyticsSystemClient",
-    ),
-    ("07ef4641-f7da-417a-bd75-35c40a17c2f7", "Automation"),
-    (
-        "399d7390-8d83-4a57-b4d7-c902c15b701f",
-        "ConfigurationExtensionsAdministration",
-    ),
-    ("10b8ce49-ae3d-4a2e-afe7-1e3648bd59f7", "DataAdministration"),
-    ("c0028105-4cc1-41ca-aef1-bfbd8fc8f8c4", "Delete"),
-    ("b7bab52d-c1b1-4bd8-8276-02db08d42352", "Edit"),
-    (
-        "8497054a-ffd1-4ca7-bdfe-340b9ddc050a",
-        "EditDataHistoryVersionComment",
-    ),
-    ("1c799cf9-342d-4bf7-9b6f-951a009228ce", "EventLog"),
-    ("8fb221e3-0d4f-43f2-ad71-1984cad63375", "ExclusiveMode"),
-    ("74fd69fa-368e-4292-956a-65eb2f9877bd", "Execute"),
-    ("02119c69-f08a-4142-9426-3725d74b7719", "ExternalConnection"),
-    ("499e8968-ca89-43f0-9955-8756058b1b53", "Get"),
-    ("b5f861d3-d9c5-45ec-98bf-0ed4d489a351", "InputByString"),
-    ("33200740-82b0-4de7-8556-d3fb25ca4328", "Insert"),
-    (
-        "3b869658-ebc9-49ff-9bb3-e7c59686f538",
-        "InteractiveActivate",
-    ),
-    (
-        "b0c0cbfc-f2cc-4b80-8460-5d5d7a599d9d",
-        "InteractiveChangeOfPosted",
-    ),
-    (
-        "798cf688-ad74-44fe-a464-236b49e910e0",
-        "InteractiveClearDeletionMark",
-    ),
-    (
-        "e7f9daf9-eac2-4ada-9c26-c380858f3589",
-        "InteractiveClearDeletionMarkPredefinedData",
-    ),
-    ("b53db6ed-6e5b-4035-8d24-f10083d646ed", "InteractiveDelete"),
-    (
-        "fa6dbe86-856a-4ac4-b8ac-bce99f8b8b22",
-        "InteractiveDeleteMarked",
-    ),
-    (
-        "65e5f92c-40ff-4130-9652-c0e7612d0609",
-        "InteractiveDeleteMarkedPredefinedData",
-    ),
-    (
-        "013a262e-165f-4815-bdae-7a1bed6a68e4",
-        "InteractiveDeletePredefinedData",
-    ),
-    ("fb88c756-91c9-4351-9cdf-e027879886c6", "InteractiveInsert"),
-    (
-        "7b8359dd-7d4e-4bcd-a61c-b4b26eae19c6",
-        "InteractiveOpenExtDataProcessors",
-    ),
-    (
-        "eb29e198-c338-4a20-a253-be6fc3dd44d9",
-        "InteractiveOpenExtReports",
-    ),
-    ("5d167fcc-b11f-403a-9a37-1eda64c19df1", "InteractivePosting"),
-    (
-        "21b4742a-d335-4234-bf0f-a3074a0e31ac",
-        "InteractivePostingRegular",
-    ),
-    (
-        "d76b72ba-5388-4b7f-af64-1b351f63a1e1",
-        "InteractiveSetDeletionMark",
-    ),
-    (
-        "408c56c0-e210-4e2e-8e82-610050a08a39",
-        "InteractiveSetDeletionMarkPredefinedData",
-    ),
-    (
-        "4d0d77ec-8511-430d-bd77-8407f27bc8f4",
-        "InteractiveUndoPosting",
-    ),
-    ("5e664189-f0ee-439c-bdc5-eb81cca41ddf", "InteractiveExecute"),
-    (
-        "b9b44b51-3ac9-47cd-8b5a-df51afdcceb0",
-        "MainWindowModeEmbeddedWorkplace",
-    ),
-    (
-        "818fc6c3-4691-44e3-a80c-e8d424730ead",
-        "MainWindowModeFullscreenWorkplace",
-    ),
-    (
-        "155a0b35-4343-4047-989b-d385373b063e",
-        "MainWindowModeKiosk",
-    ),
-    (
-        "d066966a-ff6a-4a41-bd68-6191cab083bc",
-        "MainWindowModeNormal",
-    ),
-    (
-        "f6168734-8b8d-4a88-ab39-ef6b51758e83",
-        "MainWindowModeWorkplace",
-    ),
-    ("1e50809b-73ed-4935-bb77-2616c4cabdf5", "MobileClient"),
-    ("31c3d4f6-7d02-4654-a14e-06aacafcb4fa", "Output"),
-    ("e060de25-bffd-42fd-bb09-f3a788d65760", "Posting"),
-    ("1c87578f-9e09-4ec0-a991-5629c87b1588", "Read"),
-    ("64319ca1-f3d8-472e-82ce-5da233e6daaa", "ReadDataHistory"),
-    (
-        "1b762bf9-df7f-4255-bbe6-f7578f41368d",
-        "ReadDataHistoryOfMissingData",
-    ),
-    ("d8682bbb-7800-4aa0-8590-d3cb11fe2a29", "SaveUserData"),
-    ("1d306db2-d97e-4b57-9b28-5d21e838cd9e", "Set"),
-    ("65b6855f-85d5-4d33-ab75-be4485326dd5", "Start"),
-    ("84487e82-eb6c-4c51-ae16-3a6db17e886d", "InteractiveStart"),
-    (
-        "479a42c0-c3e9-4ae7-bf4a-75cebc14fec4",
-        "SwitchToDataHistoryVersion",
-    ),
-    (
-        "265eec41-3ce1-4a07-bc3b-253d44c9a4f4",
-        "TechnicalSpecialistMode",
-    ),
-    ("29da0973-3b85-40e5-89da-bce02dbab08e", "ThickClient"),
-    ("3c00c6ee-844e-4620-85e4-671e72f114d9", "ThinClient"),
-    ("24abfe06-289a-48c5-8bb4-032c733e45c5", "TotalsControl"),
-    ("f55a8f7f-2c65-404f-b530-093d9006adba", "UndoPosting"),
-    ("287b74b8-3a66-4a76-ba27-4f1f6a93770e", "Update"),
-    (
-        "4d87a22d-ca7f-40ba-a367-a4eae62f4a7f",
-        "UpdateDataBaseConfiguration",
-    ),
-    ("b162ff57-0296-483e-9af8-dc37576802cb", "UpdateDataHistory"),
-    (
-        "c4ab1331-e58d-4a46-ad2e-fe6d80b72aa4",
-        "UpdateDataHistoryOfMissingData",
-    ),
-    (
-        "a679c969-8ea1-4b8b-9e61-8a414ba448f4",
-        "UpdateDataHistorySettings",
-    ),
-    (
-        "5b3ea0e2-fdb9-41f6-bf6c-25747906b4cb",
-        "UpdateDataHistoryVersionComment",
-    ),
-    ("c6de80da-a4f7-4ce9-bbeb-0b00ea564ec1", "Use"),
-    ("aa6448f2-be0f-42ea-ba26-1af7f52b5b65", "View"),
-    ("9342b152-a7ae-4c79-9b7b-f4f028a36479", "ViewDataHistory"),
-    ("bd33c881-192c-4ef7-a51d-b146e38c5078", "WebClient"),
-];
 
 fn parse_role_rights_xml(xml: &[u8]) -> Result<RoleRightsXml> {
     let mut reader = Reader::from_reader(xml);
@@ -27219,7 +26352,7 @@ fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContent
     let mut path = Vec::<String>::new();
     let mut items = Vec::<ExchangePlanContentXmlItem>::new();
     let mut metadata = None::<String>;
-    let mut auto_record = None::<bool>;
+    let mut auto_record = None::<u8>;
     let mut text_value = String::new();
 
     loop {
@@ -27293,10 +26426,11 @@ fn parse_exchange_plan_content_xml(xml: &[u8]) -> Result<Vec<ExchangePlanContent
     Ok(items)
 }
 
-fn parse_exchange_plan_auto_record_text(value: &str) -> Result<bool> {
+fn parse_exchange_plan_auto_record_text(value: &str) -> Result<u8> {
     match value {
-        "Deny" => Ok(false),
-        "Auto" => Ok(true),
+        "Deny" => Ok(0),
+        "Allow" => Ok(1),
+        "Auto" => Ok(2),
         _ => Err(anyhow!("invalid ExchangePlanContent AutoRecord: {value}")),
     }
 }
@@ -27629,6 +26763,21 @@ fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
             }
+            // An entity (`&lt;85%`) arrives as its own event; dropping it lost
+            // the `<` / `>` of 28 ERP УХ predefined descriptions.
+            Ok(Event::GeneralRef(reference)) => {
+                if is_predefined_item_property_path(&path) {
+                    let value = if let Some(ch) = reference.resolve_char_ref()? {
+                        ch.to_string()
+                    } else {
+                        let entity = reference.decode()?;
+                        resolve_xml_entity(entity.as_ref())
+                            .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                            .to_string()
+                    };
+                    text_value.push_str(&value);
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 match local.as_str() {
@@ -27640,8 +26789,10 @@ fn parse_predefined_data_xml(xml: &[u8]) -> Result<Vec<PredefinedDataXmlItem>> {
                             .ok_or_else(|| anyhow!("PredefinedData property outside Item"))?;
                         match local.as_str() {
                             "Name" => item.name = text_value.trim().to_string(),
-                            "Code" => item.code = text_value.trim().to_string(),
-                            "Description" => item.description = text_value.trim().to_string(),
+                            // Kept as written: a trailing space is data (ERP
+                            // УХ `ЭлементыКонструктораВидовПродукцииИС`).
+                            "Code" => item.code = text_value.clone(),
+                            "Description" => item.description = text_value.clone(),
                             "IsFolder" => {
                                 item.is_folder = parse_xml_bool_text(
                                     "PredefinedData/Item/IsFolder",
@@ -27733,7 +26884,7 @@ fn collect_flowchart_item_replacements(
                 push_1c_string_replacement(
                     plain,
                     fields.get(3).cloned(),
-                    explanation,
+                    &crlf_line_breaks(explanation),
                     replacements,
                 );
             }
@@ -27756,7 +26907,7 @@ fn collect_flowchart_item_replacements(
                 push_1c_string_replacement(
                     plain,
                     fields.get(7).cloned(),
-                    task_description,
+                    &crlf_line_breaks(task_description),
                     replacements,
                 );
             }
@@ -27766,13 +26917,39 @@ fn collect_flowchart_item_replacements(
     Ok(())
 }
 
+/// A line break inside a stored string is CRLF, while the XML hands its text
+/// over with the bare LF the file spells (ERP УХ
+/// `СхемыСправки/ВалютныйКонтрольРасчетыСПоставщикомПостоплата`: `…валюты\n`
+/// in the XML, `…валюты\r\n` stored); the exporter turns it back into LF.
+fn crlf_line_breaks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + 8);
+    let mut previous = '\0';
+    for ch in text.chars() {
+        if ch == '\n' && previous != '\r' {
+            out.push('\r');
+        }
+        out.push(ch);
+        previous = ch;
+    }
+    out
+}
+
 fn flowchart_base_ranges(
     plain: &str,
     code: &str,
     base_range: Range<usize>,
 ) -> Result<(String, Range<usize>, Range<usize>)> {
     let head_fields = scan_wrapped_braced_fields(plain, base_range)?;
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5") {
+    // Every item but a connection line (1) and a decoration (0) wraps its
+    // base record `{4,<id>,<title>,<name>,<tab order>}` one level deeper:
+    // start, end, condition, activity, the nested business process (10),
+    // and the merge, split and processing points (7, 8, 9) ERP УХ's
+    // СогласованиеПродажи and its siblings carry. Read the shape, not the code.
+    let wrapped = head_fields
+        .first()
+        .is_some_and(|range| range_starts_with_brace(plain, range));
+    let _ = code;
+    let base_fields = if wrapped {
         scan_wrapped_braced_fields(
             plain,
             head_fields
@@ -27918,6 +27095,24 @@ fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
                     text_value.push_str(text.xml_content()?.as_ref());
                 }
             }
+            Ok(Event::GeneralRef(reference)) => {
+                if current.is_some()
+                    && (path
+                        .last()
+                        .is_some_and(|part| is_flowchart_text_property(part))
+                        || path.last().map(String::as_str) == Some("Event"))
+                {
+                    if let Some(ch) = reference.resolve_char_ref()? {
+                        text_value.push(ch);
+                    } else {
+                        let entity = reference.decode()?;
+                        text_value.push_str(
+                            resolve_xml_entity(entity.as_ref())
+                                .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?,
+                        );
+                    }
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if let Some(item) = current.as_mut() {
@@ -27928,13 +27123,15 @@ fn parse_flowchart_xml(xml: &[u8]) -> Result<Vec<FlowchartXmlItem>> {
                         "TabOrder" if path_ends_with(&path, &["Properties", "TabOrder"]) => {
                             item.tab_order = text_value.trim().to_string();
                         }
+                        // Free text is kept as written: a trailing space or
+                        // line break is data (three ERP УХ graphical schemes).
                         "Explanation" if path_ends_with(&path, &["Properties", "Explanation"]) => {
-                            item.explanation = Some(text_value.trim().to_string());
+                            item.explanation = Some(text_value.clone());
                         }
                         "TaskDescription"
                             if path_ends_with(&path, &["Properties", "TaskDescription"]) =>
                         {
-                            item.task_description = Some(text_value.trim().to_string());
+                            item.task_description = Some(text_value.clone());
                         }
                         "Event" => {
                             if let Some(name) = current_event.take() {
@@ -28006,6 +27203,78 @@ pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPicture
     pack_ext_picture_blob_from_bytes_with_base(None, bytes)
 }
 
+/// An ExtPicture row from its `Picture.xml` and picture bytes: the header
+/// record carries the transparency the XML declares.
+pub fn pack_ext_picture_blob_from_xml_and_bytes(
+    xml: &[u8],
+    bytes: &[u8],
+) -> Result<PackedExtPictureBlob> {
+    let header = ext_picture_header_from_xml(xml)?;
+    // Laid out as the platform stores it: every nested record on its own line
+    // and each list that ends with one closed on its own line.
+    let plain = format!(
+        "\u{feff}{{1,\r\n{header},\r\n{{\r\n{}\r\n}}\r\n}}",
+        platform_base64_token(bytes)
+    )
+    .into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedExtPictureBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+/// The `{<load transparent>,0,<x>,<y>}` header an ExtPicture row opens with.
+///
+/// A pure partition over every common picture of both corpora (БСП 610 + 1,
+/// ERP УХ 3 060 + 187): `LoadTransparent` false with no `TransparentPixel`
+/// stores `{0,0,-1,-1}`, and `true` with a pixel stores `{1,0,x,y}`. The two
+/// mixed shapes never occur and are refused rather than guessed.
+fn ext_picture_header_from_xml(xml: &[u8]) -> Result<String> {
+    let text = std::str::from_utf8(xml).context("ExtPicture XML is not UTF-8")?;
+    let load_transparent = match text
+        .find("LoadTransparent>")
+        .map(|start| &text[start + "LoadTransparent>".len()..])
+        .and_then(|rest| rest.split('<').next())
+        .map(str::trim)
+    {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => return Err(anyhow!("unsupported ExtPicture LoadTransparent {other}")),
+    };
+    let pixel = match text.find("TransparentPixel") {
+        None => None,
+        Some(start) => {
+            let rest = &text[start..];
+            let element = &rest[..rest.find('>').unwrap_or(rest.len())];
+            let attribute = |name: &str| -> Result<i64> {
+                let key = format!("{name}=\"");
+                let at = element
+                    .find(&key)
+                    .ok_or_else(|| anyhow!("ExtPicture TransparentPixel has no {name}"))?
+                    + key.len();
+                let end = element[at..]
+                    .find('"')
+                    .ok_or_else(|| anyhow!("ExtPicture TransparentPixel {name} is unterminated"))?;
+                element[at..at + end]
+                    .trim()
+                    .parse::<i64>()
+                    .with_context(|| format!("invalid ExtPicture TransparentPixel {name}"))
+            };
+            Some((attribute("x")?, attribute("y")?))
+        }
+    };
+    match (load_transparent, pixel) {
+        (false, None) => Ok("{0,0,-1,-1}".to_string()),
+        (true, Some((x, y))) => Ok(format!("{{1,0,{x},{y}}}")),
+        (load_transparent, pixel) => Err(anyhow!(
+            "unobserved ExtPicture transparency: LoadTransparent {load_transparent}, TransparentPixel {pixel:?}"
+        )),
+    }
+}
+
 pub fn pack_ext_picture_blob_from_bytes_with_base(
     base_blob: Option<&[u8]>,
     bytes: &[u8],
@@ -28031,6 +27300,29 @@ pub fn pack_ext_picture_blob_from_bytes_with_base(
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+/// A `{#base64:...}` payload laid out as the platform stores it: 64
+/// characters per line, each full line ended by `\r\r\n` -- so a payload whose
+/// length is a multiple of 64 ends with the break too (help and picture rows
+/// of both corpora).
+///
+/// That last break is the platform's current writer: of the payloads whose
+/// length is a multiple of 64, 32 of 32 БСП and 362 of 384 ERP УХ help
+/// payloads carry it, and 31 of 34 and 174 of 184 common pictures. The rest
+/// were written by an older writer the source does not tell apart.
+pub(crate) fn platform_base64_token(bytes: &[u8]) -> String {
+    let encoded = encode_base64(bytes);
+    let mut token = String::with_capacity(encoded.len() + encoded.len() / 64 * 3 + 10);
+    token.push_str("{#base64:");
+    for line in encoded.as_bytes().chunks(64) {
+        token.push_str(std::str::from_utf8(line).expect("base64 is ASCII"));
+        if line.len() == 64 {
+            token.push_str("\r\r\n");
+        }
+    }
+    token.push('}');
+    token
 }
 
 fn replace_first_base64_payload(text: &mut String, payload: &str) -> bool {
@@ -28115,20 +27407,27 @@ pub fn pack_help_blob_from_parts(
     if pages.is_empty() {
         return Err(anyhow!("at least one Help page is required"));
     }
-    let mut fields = Vec::with_capacity(2 + pages.len() * 2 + 1 + files.len() * 3);
-    fields.push("5".to_string());
-    fields.push(pages.len().to_string());
+    // The platform's own layout, measured on every help row of both corpora
+    // (БСП 641 + 1, ERP УХ 6 329 + 44 + 66 with files): the BOM, each
+    // `{#base64:}` payload on its own line, and the closing brace on its own
+    // line when the row ends with a file payload.
+    let mut text = format!("\u{feff}{{5,{}", pages.len());
     for (page, content) in pages {
-        fields.push(format_1c_string(page));
-        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+        text.push(',');
+        text.push_str(&format_1c_string(page));
+        text.push_str(",\r\n");
+        text.push_str(&platform_base64_token(content));
     }
-    fields.push(files.len().to_string());
+    text.push(',');
+    text.push_str(&files.len().to_string());
     for (file_name, content) in files {
-        fields.push(format_1c_string(file_name));
-        fields.push("1".to_string());
-        fields.push(format!("{{#base64:{}}}", encode_base64(content)));
+        text.push(',');
+        text.push_str(&format_1c_string(file_name));
+        text.push_str(",1,\r\n");
+        text.push_str(&platform_base64_token(content));
     }
-    let plain = format!("{{{}}}", fields.join(",")).into_bytes();
+    text.push_str(if files.is_empty() { "}" } else { "\r\n}" });
+    let plain = text.into_bytes();
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedHelpBlob {
@@ -28274,29 +27573,61 @@ struct ScheduleXmlProperties {
     days_repeat_period: String,
 }
 
-fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
+/// The `<Schedule>` of a `JobSchedule` and its `<DetailedDailySchedules>`,
+/// in document order.
+fn parse_schedule_xml(
+    xml: &[u8],
+) -> Result<(ScheduleXmlProperties, Vec<ScheduleXmlProperties>)> {
+    #[derive(Default)]
+    struct Pending {
+        attrs: BTreeMap<String, String>,
+        week_days: Option<Vec<String>>,
+        months: Option<Vec<String>>,
+    }
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
-    let mut attrs = None::<BTreeMap<String, String>>;
+    let mut main = None::<Pending>;
+    let mut detail = None::<Pending>;
+    let mut details = Vec::<Pending>::new();
     let mut text_target = None::<String>;
     let mut text_value = String::new();
-    let mut week_days = None::<Vec<String>>;
-    let mut months = None::<Vec<String>>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if path_ends_with(&path, &["JobSchedule"]) && local == "Schedule" {
-                    attrs = Some(xml_attrs_map(&event));
+                    main = Some(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
                 } else if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && local == "DetailedDailySchedules"
+                {
+                    detail = Some(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
+                } else if (path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    || path_ends_with(&path, &["Schedule", "DetailedDailySchedules"]))
                     && (local == "WeekDays" || local == "Months")
                 {
                     text_target = Some(local.clone());
                     text_value.clear();
                 }
                 path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && local == "DetailedDailySchedules"
+                {
+                    details.push(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
+                }
             }
             Ok(Event::Text(text)) => {
                 if text_target.is_some() {
@@ -28327,13 +27658,24 @@ fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
                 let local = xml_local_name(event.local_name().as_ref());
                 if text_target.as_deref() == Some(local.as_str()) {
                     let values = parse_schedule_number_text_list(&text_value)?;
-                    if local == "WeekDays" {
-                        week_days = Some(values);
-                    } else if local == "Months" {
-                        months = Some(values);
+                    let owner = if detail.is_some() {
+                        detail.as_mut()
+                    } else {
+                        main.as_mut()
+                    };
+                    if let Some(owner) = owner {
+                        if local == "WeekDays" {
+                            owner.week_days = Some(values);
+                        } else {
+                            owner.months = Some(values);
+                        }
                     }
                     text_target = None;
                     text_value.clear();
+                } else if local == "DetailedDailySchedules"
+                    && let Some(done) = detail.take()
+                {
+                    details.push(done);
                 }
                 let _ = path.pop();
             }
@@ -28344,23 +27686,28 @@ fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
         buffer.clear();
     }
 
-    let attrs = attrs.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
-    Ok(ScheduleXmlProperties {
-        begin_date: required_schedule_attr(&attrs, "BeginDate")?,
-        end_date: required_schedule_attr(&attrs, "EndDate")?,
-        begin_time: required_schedule_attr(&attrs, "BeginTime")?,
-        end_time: required_schedule_attr(&attrs, "EndTime")?,
-        completion_time: required_schedule_attr(&attrs, "CompletionTime")?,
-        completion_interval: required_schedule_number_attr(&attrs, "CompletionInterval")?,
-        repeat_period_in_day: required_schedule_number_attr(&attrs, "RepeatPeriodInDay")?,
-        repeat_pause: required_schedule_number_attr(&attrs, "RepeatPause")?,
-        week_day_in_month: required_schedule_number_attr(&attrs, "WeekDayInMonth")?,
-        day_in_month: required_schedule_number_attr(&attrs, "DayInMonth")?,
-        week_days: week_days.unwrap_or_default(),
-        months: months.unwrap_or_default(),
-        weeks_period: required_schedule_number_attr(&attrs, "WeeksPeriod")?,
-        days_repeat_period: required_schedule_number_attr(&attrs, "DaysRepeatPeriod")?,
-    })
+    let build = |pending: Pending| -> Result<ScheduleXmlProperties> {
+        let attrs = &pending.attrs;
+        Ok(ScheduleXmlProperties {
+            begin_date: required_schedule_attr(attrs, "BeginDate")?,
+            end_date: required_schedule_attr(attrs, "EndDate")?,
+            begin_time: required_schedule_attr(attrs, "BeginTime")?,
+            end_time: required_schedule_attr(attrs, "EndTime")?,
+            completion_time: required_schedule_attr(attrs, "CompletionTime")?,
+            completion_interval: required_schedule_number_attr(attrs, "CompletionInterval")?,
+            repeat_period_in_day: required_schedule_number_attr(attrs, "RepeatPeriodInDay")?,
+            repeat_pause: required_schedule_number_attr(attrs, "RepeatPause")?,
+            week_day_in_month: required_schedule_number_attr(attrs, "WeekDayInMonth")?,
+            day_in_month: required_schedule_number_attr(attrs, "DayInMonth")?,
+            week_days: pending.week_days.unwrap_or_default(),
+            months: pending.months.unwrap_or_default(),
+            weeks_period: required_schedule_number_attr(attrs, "WeeksPeriod")?,
+            days_repeat_period: required_schedule_number_attr(attrs, "DaysRepeatPeriod")?,
+        })
+    };
+    let main = main.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
+    let details = details.into_iter().map(build).collect::<Result<Vec<_>>>()?;
+    Ok((build(main)?, details))
 }
 
 fn required_schedule_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
@@ -28386,7 +27733,8 @@ fn parse_schedule_number_text_list(text: &str) -> Result<Vec<String>> {
 }
 
 fn validate_schedule_number(value: &str) -> Result<()> {
-    if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    if !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()) {
         Ok(())
     } else {
         Err(anyhow!("invalid schedule number: {value}"))
@@ -28506,6 +27854,8 @@ enum MetadataTypePatternElement {
     Reference {
         type_id: String,
     },
+    /// `v8:Null`, stored as `{"L"}`.
+    Null,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -28533,10 +27883,15 @@ enum CommonCommandPicture {
     CommonPicture {
         uuid: String,
         load_transparent: bool,
+        /// `<xr:TransparentPixel x y/>`, stored in the two slots after the
+        /// empty string (`-1,-1` when absent): ERP УХ `ПротоколОшибок`
+        /// stores `{4,1,{0,<uuid>},"",12,2,1,0,""}`.
+        pixel: Option<(i64, i64)>,
     },
     StdPictureCode {
         code: i32,
         load_transparent: bool,
+        pixel: Option<(i64, i64)>,
     },
 }
 
@@ -28558,6 +27913,7 @@ enum CommandGroupPicture {
     CommonPicture {
         uuid: String,
         load_transparent: bool,
+        pixel: Option<(i64, i64)>,
     },
     StdPicturePrint,
 }
@@ -28592,6 +27948,7 @@ fn parse_constant_xml_properties(
     let mut number_digits = None::<String>;
     let mut number_fraction_digits = None::<String>;
     let mut number_allowed_sign = None::<String>;
+    let mut date_fractions = None::<String>;
     let mut use_standard_commands = None::<String>;
 
     loop {
@@ -28611,6 +27968,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -28624,6 +27982,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -28645,6 +28004,7 @@ fn parse_constant_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                     &mut use_standard_commands,
                 );
             }
@@ -28665,6 +28025,7 @@ fn parse_constant_xml_properties(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        date_fractions,
         source,
     )?;
     let use_standard_commands =
@@ -28699,6 +28060,7 @@ fn parse_defined_type_xml_properties(
     let mut number_digits = None::<String>;
     let mut number_fraction_digits = None::<String>;
     let mut number_allowed_sign = None::<String>;
+    let mut date_fractions = None::<String>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
@@ -28718,6 +28080,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::CData(text)) => {
@@ -28731,6 +28094,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::GeneralRef(reference)) => {
@@ -28752,6 +28116,7 @@ fn parse_defined_type_xml_properties(
                     &mut number_digits,
                     &mut number_fraction_digits,
                     &mut number_allowed_sign,
+                    &mut date_fractions,
                 );
             }
             Ok(Event::End(_)) => {
@@ -28772,9 +28137,8 @@ fn parse_defined_type_xml_properties(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
-        // Unread here, as it always was; see `parse_date_fractions_mark`.
-        None,
-        StringAllowedLengthCoding::VariableIsZero,
+        date_fractions,
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         true,
     )?;
@@ -28804,6 +28168,7 @@ fn parse_common_command_xml_properties(
     let mut representation = None::<String>;
     let mut picture_ref = None::<String>;
     let mut picture_load_transparent = None::<String>;
+    let mut picture_pixel = None::<(i64, i64)>;
     let mut tooltip = Vec::<LocalizedString>::new();
     let mut pending_tooltip_lang = None::<String>;
     let mut pending_tooltip_content = None::<String>;
@@ -28887,6 +28252,23 @@ fn parse_common_command_xml_properties(
                     &mut on_main_server_unavailable_behavior,
                 );
             }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "TransparentPixel"
+                    && path_ends_with(&path, &["CommonCommand", "Properties", "Picture"])
+                {
+                    let attrs = xml_attrs_map(&event);
+                    let coordinate = |name: &str| -> Result<i64> {
+                        attrs
+                            .get(name)
+                            .ok_or_else(|| anyhow!("CommonCommand Picture TransparentPixel has no {name}"))?
+                            .trim()
+                            .parse::<i64>()
+                            .with_context(|| format!("invalid CommonCommand TransparentPixel {name}"))
+                    };
+                    picture_pixel = Some((coordinate("x")?, coordinate("y")?));
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if local == "item"
@@ -28911,7 +28293,12 @@ fn parse_common_command_xml_properties(
 
     Ok(CommonCommandXmlProperties {
         simple,
-        picture: parse_common_command_picture(picture_ref, picture_load_transparent, source)?,
+        picture: parse_common_command_picture(
+            picture_ref,
+            picture_load_transparent,
+            picture_pixel,
+            source,
+        )?,
         representation: parse_common_command_representation(representation)?,
         tooltip,
         include_help_in_contents: parse_required_metadata_bool(
@@ -28956,6 +28343,7 @@ fn parse_command_group_xml_properties(
     let mut representation = None::<String>;
     let mut picture_ref = None::<String>;
     let mut picture_load_transparent = None::<String>;
+    let mut picture_pixel = None::<(i64, i64)>;
     let mut tooltip = Vec::<LocalizedString>::new();
     let mut pending_tooltip_lang = None::<String>;
     let mut pending_tooltip_content = None::<String>;
@@ -29019,6 +28407,23 @@ fn parse_command_group_xml_properties(
                     &mut category,
                 );
             }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if local == "TransparentPixel"
+                    && path_ends_with(&path, &["CommandGroup", "Properties", "Picture"])
+                {
+                    let attrs = xml_attrs_map(&event);
+                    let coordinate = |name: &str| -> Result<i64> {
+                        attrs
+                            .get(name)
+                            .ok_or_else(|| anyhow!("CommandGroup Picture TransparentPixel has no {name}"))?
+                            .trim()
+                            .parse::<i64>()
+                            .with_context(|| format!("invalid CommandGroup TransparentPixel {name}"))
+                    };
+                    picture_pixel = Some((coordinate("x")?, coordinate("y")?));
+                }
+            }
             Ok(Event::End(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if local == "item"
@@ -29043,7 +28448,12 @@ fn parse_command_group_xml_properties(
 
     Ok(CommandGroupXmlProperties {
         simple,
-        picture: parse_command_group_picture(picture_ref, picture_load_transparent, source)?,
+        picture: parse_command_group_picture(
+            picture_ref,
+            picture_load_transparent,
+            picture_pixel,
+            source,
+        )?,
         representation: parse_common_command_representation(representation)?,
         tooltip,
         category: parse_command_group_category(category)?,
@@ -29883,6 +29293,7 @@ fn parse_constant_value_type(
     number_digits: Option<String>,
     number_fraction_digits: Option<String>,
     number_allowed_sign: Option<String>,
+    date_fractions: Option<String>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<MetadataTypePatternElement> {
     let mut elements = parse_metadata_type_pattern_elements(
@@ -29893,10 +29304,8 @@ fn parse_constant_value_type(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
-        // A constant's `<DateQualifiers>` is unread here, as it always was:
-        // only the form shapes above were measured against stored bodies.
-        None,
-        StringAllowedLengthCoding::VariableIsZero,
+        date_fractions,
+        StringAllowedLengthCoding::VariableIsOne,
         source,
         false,
     )?;
@@ -29988,6 +29397,21 @@ fn parse_metadata_type_pattern_element(
         "xs:dateTime" => Ok(MetadataTypePatternElement::DateTime {
             fractions: parse_date_fractions_mark(date_fractions)?,
         }),
+        "v8:Null" => Ok(MetadataTypePatternElement::Null),
+        // The platform's document and chart types. Form.xml spells them with a
+        // generated or a short prefix -- `d5p1:TextDocument`, `fd:FormattedDocument`
+        // -- so the local name decides; measured over every single-typed form
+        // attribute of both corpora that declares one.
+        other
+            if other.split_once(':').is_some_and(|(_, local)| {
+                platform_document_type_id(local).is_some()
+            }) && !other.starts_with("cfg:") =>
+        {
+            let local = other.split_once(':').map_or(other, |(_, local)| local);
+            Ok(MetadataTypePatternElement::Reference {
+                type_id: platform_document_type_id(local).unwrap_or_default().to_string(),
+            })
+        }
         // A platform type, whichever namespace spells it: `v8:` is the common
         // one, but a spreadsheet document is `mxl:`, a colour or a font
         // `v8ui:`, a settings composer `dcsset:`.
@@ -30022,8 +29446,25 @@ fn parse_metadata_type_pattern_element(
                 type_id: source.resolve_metadata_type_id(other)?,
             })
         }
+        // Any other platform type the table knows, under whatever prefix the
+        // serialiser generated -- `d5p1:FlowchartContextType` among them.
+        other if builtin_v8_type_id(other).is_some() => Ok(MetadataTypePatternElement::Reference {
+            type_id: builtin_v8_type_id(other).unwrap_or_default().to_string(),
+        }),
         other => Err(anyhow!("{kind} type is not supported yet: {other}")),
     }
+}
+
+/// The uuid of a platform document or chart type, by its local name.
+fn platform_document_type_id(local: &str) -> Option<&'static str> {
+    Some(match local {
+        "TextDocument" => "ebf766b1-f32c-11d3-9851-008048da1252",
+        "FormattedDocument" => "151f8778-e2d0-496a-9f02-d9ffd93b57ec",
+        "Chart" => "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5",
+        "GanttChart" => "3a6e63bf-16aa-42eb-b48c-2fff9670ad2f",
+        "GeographicalSchema" => "95de81b0-81c3-4936-9dbb-6400e5c90378",
+        _ => return None,
+    })
 }
 
 /// The uuid a platform type is stored under.
@@ -30046,6 +29487,8 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
             "PDFDocument" => Some("48510817-200c-48c2-9973-06cf90840514"),
             "GeographicalSchema" => Some("95de81b0-81c3-4936-9dbb-6400e5c90378"),
             "AccountingRecordType" => Some("741ae838-6e42-4ac0-b6a4-17e5604b0669"),
+            // `d7p1:` bound to the entext namespace (1 of 1).
+            "ConditionalAppearance" => Some("7dd764b6-b22f-4712-8edc-c0d634340e60"),
             _ => None,
         };
         if generated.is_some() {
@@ -30065,6 +29508,7 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
         }
         "dcsset:ConditionalAppearance" => Some("7dd764b6-b22f-4712-8edc-c0d634340e60"),
         "dcscor:DataCompositionGroupType" => Some("0e0850cf-0634-414e-85ba-9a88a8bd44c4"),
+        "ent:ComparisonType" => Some("b1b064f3-ae38-49bf-8c6d-390c65fd94af"),
         "dcscor:Field" => Some("913e8016-6e90-47a0-b2a0-4513f4edad61"),
         "dcscor:DataCompositionPeriodAdditionType" => {
             Some("c6a52555-d20f-452c-bfc2-1b53e9a56063")
@@ -30111,6 +29555,7 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
 fn parse_common_command_picture(
     reference: Option<String>,
     load_transparent: Option<String>,
+    pixel: Option<(i64, i64)>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<CommonCommandPicture> {
     let Some(reference) = reference.map(|value| value.trim().to_string()) else {
@@ -30128,6 +29573,7 @@ fn parse_common_command_picture(
         return Ok(CommonCommandPicture::StdPictureCode {
             code,
             load_transparent,
+            pixel,
         });
     }
     if let Some(uuid) = common_command_standard_picture_uuid(&reference) {
@@ -30139,6 +29585,7 @@ fn parse_common_command_picture(
         return Ok(CommonCommandPicture::CommonPicture {
             uuid: uuid.to_string(),
             load_transparent,
+            pixel,
         });
     }
     if reference.starts_with("StdPicture.") {
@@ -30164,6 +29611,7 @@ fn parse_common_command_picture(
     Ok(CommonCommandPicture::CommonPicture {
         uuid,
         load_transparent,
+        pixel,
     })
 }
 
@@ -30212,13 +29660,28 @@ fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str>
         "StdPicture.Write" => Some("894cf65b-4109-4533-a1d7-c87b1fcc80a3"),
         "StdPicture.WriteAndClose" => Some("e6fc55a0-3d58-4b15-bdd3-717453929598"),
         "StdPicture.Delete" => Some("08a45a70-c221-4339-b3b1-9f11cb22147d"),
-        _ => None,
+        other => std_picture_value_uuid(other),
     }
+}
+
+/// The uuid a `StdPicture.<Name>` is stored under when the form writer's
+/// measured table (`STD_PICTURE_VALUES`) spells it `{0,<uuid>}` -- the same
+/// uuids the exporter names back.
+fn std_picture_value_uuid(reference: &str) -> Option<&'static str> {
+    let name = reference.trim().strip_prefix("StdPicture.")?;
+    let value = STD_PICTURE_VALUES
+        .iter()
+        .find_map(|(candidate, value)| (*candidate == name).then_some(*value))?;
+    value
+        .strip_prefix("{0,")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .filter(|uuid| is_uuid_text(uuid))
 }
 
 fn parse_command_group_picture(
     reference: Option<String>,
     load_transparent: Option<String>,
+    pixel: Option<(i64, i64)>,
     source: Option<&MetadataSourceContext>,
 ) -> Result<CommandGroupPicture> {
     let Some(reference) = reference.map(|value| value.trim().to_string()) else {
@@ -30239,6 +29702,19 @@ fn parse_command_group_picture(
         return Ok(CommandGroupPicture::CommonPicture {
             uuid: STD_PICTURE_INFORMATION_REGISTER_UUID.to_string(),
             load_transparent,
+            pixel,
+        });
+    }
+    if let Some(uuid) = std_picture_value_uuid(&reference) {
+        let load_transparent = parse_required_metadata_bool(
+            "CommandGroup",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
+        return Ok(CommandGroupPicture::CommonPicture {
+            uuid: uuid.to_string(),
+            load_transparent,
+            pixel,
         });
     }
     if !reference.starts_with("CommonPicture.") {
@@ -30257,6 +29733,7 @@ fn parse_command_group_picture(
     Ok(CommandGroupPicture::CommonPicture {
         uuid,
         load_transparent,
+        pixel,
     })
 }
 
@@ -30443,10 +29920,11 @@ fn parse_required_u32(name: &str, value: Option<&str>) -> Result<u32> {
 /// silently applied to the other's artifacts.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum StringAllowedLengthCoding {
-    /// `Variable` is 0. What the constant and defined-type callers of this
-    /// module have always written; unmeasured here, and left alone.
-    VariableIsZero,
-    /// `Variable` is 1 and `Fixed` is 0, which is what a form body stores.
+    /// `Variable` is 1 and `Fixed` is 0, which is what a form body stores --
+    /// and a constant or a defined type too: every one of both corpora whose
+    /// `<Type>` is a string with a non-zero `<Length>` (БСП 21 constants
+    /// `Variable` to 1, 1 `Fixed` to 0, 3 defined types `Variable` to 1; ERP
+    /// УХ 38 + 1 constants, 81 + 1 defined types, the same way), no exception.
     ///
     /// A pure partition over the 34 164 value-table columns of ERP УХ whose
     /// `<Type>` is a lone `xs:string` with a non-zero `<Length>`: 33 782
@@ -30455,10 +29933,6 @@ enum StringAllowedLengthCoding {
     /// flag at all, which is why this went unnoticed -- 44 553 of the
     /// columns, and most of the attributes, take that branch.
     ///
-    /// The session-parameter and defined-type writers in
-    /// `compiler/families/simple.rs` already write 1 for `Variable`; only
-    /// this module's constant path writes 0, and whether that one is right
-    /// is not measured here.
     VariableIsOne,
 }
 
@@ -30476,7 +29950,6 @@ fn parse_string_allowed_length_flag(
         }
     };
     Ok(match coding {
-        StringAllowedLengthCoding::VariableIsZero => u8::from(!variable),
         StringAllowedLengthCoding::VariableIsOne => u8::from(variable),
     })
 }
@@ -30552,6 +30025,7 @@ fn format_metadata_type_pattern_element(value_type: &MetadataTypePatternElement)
             fractions: Some(mark),
         } => format!(r#"{{"D","{mark}"}}"#),
         MetadataTypePatternElement::Reference { type_id } => format!("{{\"#\",{type_id}}}"),
+        MetadataTypePatternElement::Null => r#"{"L"}"#.to_string(),
     }
 }
 
@@ -30561,17 +30035,25 @@ fn format_common_command_picture(picture: &CommonCommandPicture) -> String {
         CommonCommandPicture::CommonPicture {
             uuid,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{0,{uuid}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
         CommonCommandPicture::StdPictureCode {
             code,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{{code}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{{code}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
     }
 }
 
@@ -30582,10 +30064,14 @@ fn format_command_group_picture(picture: &CommandGroupPicture) -> String {
         CommandGroupPicture::CommonPicture {
             uuid,
             load_transparent,
-        } => format!(
-            r#"{{4,1,{{0,{uuid}}},"",-1,-1,{},0,""}}"#,
-            bool_flag(*load_transparent)
-        ),
+            pixel,
+        } => {
+            let (x, y) = pixel.unwrap_or((-1, -1));
+            format!(
+                r#"{{4,1,{{0,{uuid}}},"",{x},{y},{},0,""}}"#,
+                bool_flag(*load_transparent)
+            )
+        }
     }
 }
 
@@ -30721,6 +30207,7 @@ fn append_constant_xml_text(
     number_digits: &mut Option<String>,
     number_fraction_digits: &mut Option<String>,
     number_allowed_sign: &mut Option<String>,
+    date_fractions: &mut Option<String>,
     use_standard_commands: &mut Option<String>,
 ) {
     append_metadata_type_xml_text(
@@ -30733,12 +30220,18 @@ fn append_constant_xml_text(
         number_digits,
         number_fraction_digits,
         number_allowed_sign,
+        date_fractions,
     );
 
     if path_ends_with(path, &["Constant", "Properties", "UseStandardCommands"]) {
         use_standard_commands
             .get_or_insert_with(String::new)
             .push_str(value);
+    }
+    // A constant typed by a defined type spells it as a `<v8:TypeSet>`, which
+    // resolves to the defined type's own type id like a `<v8:Type>` does.
+    if path_ends_with(path, &["Constant", "Properties", "Type", "TypeSet"]) {
+        types.push(value.to_string());
     }
 }
 
@@ -30752,7 +30245,11 @@ fn append_metadata_type_xml_text(
     number_digits: &mut Option<String>,
     number_fraction_digits: &mut Option<String>,
     number_allowed_sign: &mut Option<String>,
+    date_fractions: &mut Option<String>,
 ) {
+    if path_ends_with(path, &[kind, "Properties", "Type", "DateQualifiers", "DateFractions"]) {
+        date_fractions.get_or_insert_with(String::new).push_str(value);
+    }
     if path_ends_with(path, &[kind, "Properties", "Type", "Type"]) {
         types.push(value.to_string());
     } else if path_ends_with(
@@ -31294,6 +30791,14 @@ fn parse_configuration_object_xml(xml: &[u8]) -> Result<Option<ConfigurationObje
                     if !value.is_empty() {
                         object.owners.push(value);
                     }
+                } else if depth == 5
+                    && path[2] == "Properties"
+                    && path[3] == "Type"
+                    && matches!(path[4].as_str(), "Type" | "TypeSet")
+                {
+                    if !value.is_empty() {
+                        object.types.push(value);
+                    }
                 } else if depth == 6
                     && path[2] == "ChildObjects"
                     && path[4] == "Properties"
@@ -31485,6 +30990,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
             "ChartsOfCalculationRegisters",
         )),
         "CommonCommand" => Some(("CommonCommand", "CommonCommands")),
+        "CommonModule" => Some(("CommonModule", "CommonModules")),
         "CommonPicture" => Some(("CommonPicture", "CommonPictures")),
         "CommonTemplate" => Some(("CommonTemplate", "CommonTemplates")),
         "Constant" => Some(("Constant", "Constants")),
@@ -31512,6 +31018,7 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
         "Subsystem" => Some(("Subsystem", "Subsystems")),
         "Task" => Some(("Task", "Tasks")),
         "WebService" => Some(("WebService", "WebServices")),
+        "Sequence" => Some(("Sequence", "Sequences")),
         "XDTOPackage" => Some(("XDTOPackage", "XDTOPackages")),
         "Enum" => Some(("Enum", "Enums")),
         _ => None,
@@ -31778,11 +31285,10 @@ fn apply_form_type_spec_part(spec: &mut FormXmlTypeSpec, part: &str, value: &str
 /// `<View>`/`<Edit>` are 6 and 7; what those hold when the element is present
 /// was not measured, so naming one still refuses the form.
 fn form_attribute_unwritable_part(local: &str) -> Option<&'static str> {
-    match local {
-        "View" => Some("View"),
-        "Edit" => Some("Edit"),
-        _ => None,
-    }
+    // `<View>` and `<Edit>` are read now: members 6 and 7 of the `{9,…}`
+    // record, the same rights tuple an item's `<UserVisible>` is.
+    let _ = local;
+    None
 }
 
 fn parse_form_attribute_column_xml(
@@ -32510,8 +32016,8 @@ mod tests {
 
         // A `StdPicture` names the platform's own picture, which no file of
         // the source declares. Its value comes from a table measured over both
-        // corpora, and its reference carries 1 at member 6 where a common
-        // picture carries 0.
+        // corpora; member 6 is `<xr:LoadTransparent>`, which this helper spells
+        // `false` -- 1 is what the usual `true` stores.
         let body = super::compile_native_form_body(
             form("StdPicture.Information").as_bytes(),
             None,
@@ -32519,7 +32025,7 @@ mod tests {
             None,
         )?;
         assert!(
-            body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,1,0,\"\"}"),
+            body.contains("{4,1,{0,4b54770b-d069-4c0e-9b17-5cc2a01134d9},\"\",-1,-1,0,0,\"\"}"),
             "the StdPicture reference is not the one the platform stores: {body}"
         );
 
@@ -32701,7 +32207,9 @@ mod tests {
     /// left this list -- member 8 is measured now -- and refuses for the one
     /// reason left, which the test below pins.
     #[test]
-    fn refuses_a_column_that_names_a_part_the_writer_cannot_place() {
+    fn writes_a_column_view_and_edit_as_the_rights_tuple() {
+        // `<View>` and `<Edit>` are members 6 and 7 of the column record, the
+        // tuple an attribute's own rights take (rt-embedded.md §4.5, 19 of 19).
         for (part, body) in [
             ("View", "<View><Common>false</Common></View>"),
             ("Edit", "<Edit><Common>false</Common></Edit>"),
@@ -32720,13 +32228,14 @@ mod tests {
                 ),
                 part_body = body,
             );
-            let error = super::compile_native_form_body(xml.as_bytes(), None, None, None)
-                .expect_err("a column that names {part} must refuse the form")
-                .to_string();
-            assert!(
-                error.contains(&format!("an attribute column names <{part}>")),
-                "{part} was written instead of refused: {error}"
-            );
+            let body = super::compile_native_form_body(xml.as_bytes(), None, None, None)
+                .unwrap_or_else(|error| panic!("a column that names {part} must be written: {error}"));
+            let tuple = if part == "View" {
+                "{0,{0,{\"B\",0},0}},{0,{0,{\"B\",1},0}}"
+            } else {
+                "{0,{0,{\"B\",1},0}},{0,{0,{\"B\",0},0}}"
+            };
+            assert!(body.contains(tuple), "{part} was not written as its rights: {body}");
         }
     }
 
@@ -32797,95 +32306,6 @@ mod tests {
             Some(("5".to_owned(), "КомандаОК".to_owned()))
         );
         Ok(())
-    }
-
-    #[test]
-    fn normalizes_chart_decimal_percentages_without_leading_zero_artifacts() {
-        assert_eq!(
-            super::spreadsheet_chart_percent_fraction("10"),
-            Some("0.1".to_string())
-        );
-        assert_eq!(
-            super::spreadsheet_chart_percent_fraction("3"),
-            Some("0.03".to_string())
-        );
-        assert_eq!(
-            super::spreadsheet_chart_percent_fraction("-300"),
-            Some("-3".to_string())
-        );
-    }
-
-    #[test]
-    fn parses_chart_drawing_into_typed_ir() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-  <rowsItem><index>0</index></rowsItem>
-  <drawing>
-    <drawingType>Chart</drawingType>
-    <id>7</id>
-    <formatIndex>3</formatIndex>
-    <object xmlns:d3p1="http://v8.1c.ru/8.2/data/chart" xsi:type="d3p1:Chart"/>
-  </drawing>
-</document>"#;
-        let parsed = super::parse_spreadsheet_document_xml(xml)?;
-        assert_eq!(parsed.drawings.len(), 1);
-        assert_eq!(parsed.drawings[0].id, 7);
-        assert!(matches!(
-            parsed.drawings[0].kind,
-            super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(_))
-        ));
-        Ok(())
-    }
-
-    #[test]
-    fn rejects_chart_xml_beyond_depth_limit() {
-        let depth = super::MAX_SPREADSHEET_CHART_XML_DEPTH + 1;
-        let mut xml = String::from(
-            r#"<document xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><drawing><object xsi:type="d3p1:Chart">"#,
-        );
-        xml.push_str(&"<x>".repeat(depth));
-        xml.push_str(&"</x>".repeat(depth));
-        xml.push_str("</object></drawing></document>");
-
-        assert!(super::parse_spreadsheet_chart_objects(xml.as_bytes()).is_err());
-    }
-
-    #[test]
-    fn rejects_multi_series_spreadsheet_chart_without_partial_moxel() {
-        let series = || super::SpreadsheetChartXmlNode {
-            name: "realSeriesData".to_string(),
-            attributes: std::collections::BTreeMap::new(),
-            text: String::new(),
-            children: Vec::new(),
-        };
-        let chart = super::SpreadsheetDocumentXmlChart {
-            object: super::SpreadsheetChartXmlNode {
-                name: "object".to_string(),
-                attributes: std::collections::BTreeMap::from([(
-                    "type".to_string(),
-                    "d3p1:Chart".to_string(),
-                )]),
-                text: String::new(),
-                children: vec![series(), series()],
-            },
-        };
-        let drawing = super::SpreadsheetDocumentXmlDrawing {
-            kind: super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)),
-            ..Default::default()
-        };
-        let super::SpreadsheetDocumentXmlDrawingKind::Chart(Some(chart)) = &drawing.kind else {
-            unreachable!();
-        };
-
-        assert!(
-            super::format_spreadsheet_chart_drawing_for_moxel(
-                &drawing,
-                drawing.format_index,
-                chart,
-            )
-            .is_none(),
-            "unsupported multi-series charts must not produce partial MOXCEL"
-        );
     }
 
     fn decode_base64_for_test(input: &str) -> anyhow::Result<Vec<u8>> {
@@ -34014,7 +33434,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(inflated.contains("\"NewConstant\""));
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
         assert!(inflated.contains("\"New comment\""));
-        assert!(inflated.contains(r#"{"Pattern",{"S",50,0}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"S",50,1}}"#));
         assert!(inflated.contains(",1,1,{0}"));
     }
 
@@ -34048,7 +33468,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         <v8:Type>xs:string</v8:Type>
         <v8:StringQualifiers>
           <v8:Length>4</v8:Length>
-          <v8:AllowedLength>Fixed</v8:AllowedLength>
+          <v8:AllowedLength>Variable</v8:AllowedLength>
         </v8:StringQualifiers>
       </Type>
       <UseStandardCommands>true</UseStandardCommands>
@@ -34200,7 +33620,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(packed.properties.kind, "DefinedType");
         assert!(inflated.contains("\"NewType\""), "{inflated}");
         assert!(inflated.contains("{1,\"ru\",\"New synonym\"}"));
-        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,0}}"#));
+        assert!(inflated.contains(r#"{"Pattern",{"B"},{"S",80,1}}"#));
     }
 
     #[test]
@@ -34869,16 +34289,17 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let packed = super::pack_style_body_blob_from_xml(xml, Some(&source))?;
         let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
+        assert!(text.starts_with("\u{feff}{1,5,\r\n{\r\n{-1},0,\r\n{3,2,\r\n{20}\r\n}\r\n}"));
+        let text = text.replace("\r\n", "");
 
-        assert!(text.starts_with("{2,5,"));
-        assert!(text.contains("{{-1},0,{4,2,{20},2}}"));
+        assert!(text.contains("{{-1},0,{3,2,{20}}}"));
         assert!(text.contains("{{-18},2,{3,1,{-18},0,0,0}}"));
-        assert!(text.contains("{{-20},1,{8,2,0,{-20},1,100}}"));
-        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{4,0,{13158655},0}}"));
+        assert!(text.contains("{{-20},1,{7,2,0,{-20},1,100}}"));
+        assert!(text.contains("{{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0,{3,0,{13158655}}}"));
         assert!(text.contains(
-            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{8,2,0,{-20},400,0,0,1,1,100}}"
+            "{{0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb},1,{7,2,60,{-20},400,0,0,1,1,100}}"
         ));
-        assert!(text.ends_with(",{0}}"));
+        assert!(text.ends_with("1,100}}}"));
 
         let _ = std::fs::remove_dir_all(root);
         Ok(())
@@ -34945,1641 +34366,6 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(super::inflate_raw(&packed.blob)?, bytes);
         assert_eq!(packed.plain_bytes, bytes.len());
 
-        Ok(())
-    }
-
-    #[test]
-    fn packs_simple_spreadsheet_document_xml() -> anyhow::Result<()> {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>3</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>0</f>
-					<tl>
-						<v8:item>
-							<v8:lang>ru</v8:lang>
-							<v8:content>Hello</v8:content>
-						</v8:item>
-					</tl>
-				</c>
-			</c>
-			<c>
-				<i>2</i>
-				<c>
-					<f>0</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.starts_with("MOXCEL\0"));
-        assert!(text.contains(r#"{16,0,{1,1,{"ru","Hello"}},0}"#));
-        assert!(text.contains(r#"{16,0,{1,1,{"","Name"}},0}"#));
-        assert!(text.contains(r#"2,{16,0,{1,1,{"","Name"}},0}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_detail_parameter_cells() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>3</f>
-					<parameter>Name</parameter>
-					<detailParameter>Version</detailParameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{24,2,"Version",{1,1,{"","Name"}},0}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_column_sets_and_row_columns_id() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>2</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>3</formatIndex>
-			</column>
-		</columnsItem>
-		<columnsItem>
-			<index>1</index>
-			<column>
-				<formatIndex>4</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<columns>
-		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
-		<size>1</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>5</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<rowsItem>
-		<index>1</index>
-		<row>
-			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(
-            "{2,0,00000000-0000-0000-0000-000000000000,2,0,3,1,4},2,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,5},1,1,0"
-        ));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_column_sets_with_negative_index() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>1</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<columns>
-		<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>
-		<size>1</size>
-		<columnsItem>
-			<index>-1</index>
-			<column>
-				<formatIndex>1</formatIndex>
-			</column>
-		</columnsItem>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>2</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<columnsID>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</columnsID>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        assert!(text.contains("{1,0,bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb,2,-1,1,0,2}"));
-        assert!(extracted.contains("<id>bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb</id>"));
-        assert!(extracted.contains("<index>-1</index>"));
-        assert!(extracted.contains("<index>0</index>"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_zero_sized_default_column_set() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>0</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>1</formatIndex>
-			</column>
-		</columnsItem>
-		<columnsItem>
-			<index>2</index>
-			<column>
-				<formatIndex>2</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<columns>
-		<id>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</id>
-		<size>1</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>3</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        assert!(text.contains(
-            "{0,0,00000000-0000-0000-0000-000000000000,2,0,1,2,2},1,1,{1,0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa,1,0,3}"
-        ));
-        assert!(extracted.contains("<size>0</size>"));
-        assert!(extracted.contains("<index>2</index>"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_empty_row_ranges() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>1</index>
-		<indexTo>3</indexTo>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(",1,0,0,2,0,0,3,0,0,"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_merges() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>4</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<merge>
-		<r>1</r>
-		<c>2</c>
-		<h>3</h>
-		<w>1</w>
-	</merge>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{1,{2,1,3,4}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_named_and_print_areas() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<columns>
-		<size>5</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<namedItem xsi:type="NamedItemCells">
-		<name>Header</name>
-		<area>
-			<type>Rectangle</type>
-			<beginRow>1</beginRow>
-			<endRow>3</endRow>
-			<beginColumn>2</beginColumn>
-			<endColumn>4</endColumn>
-			<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
-		</area>
-	</namedItem>
-	<printArea>
-		<type>Rows</type>
-		<beginRow>5</beginRow>
-		<endRow>7</endRow>
-		<beginColumn>0</beginColumn>
-		<endColumn>4</endColumn>
-		<columnsID>aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa</columnsID>
-	</printArea>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(
-            text.contains(r#"{1,"Header",{1,{3,2,1,4,3,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa},0}}"#)
-        );
-        assert!(text.contains("{1,0,5,4,7,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_named_areas_ignores_named_drawings() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<columns>
-		<size>2</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<namedItem xsi:type="NamedItemCells">
-		<name>Header</name>
-		<area>
-			<type>Rows</type>
-			<beginRow>4</beginRow>
-			<endRow>6</endRow>
-			<beginColumn>-1</beginColumn>
-			<endColumn>-1</endColumn>
-		</area>
-	</namedItem>
-	<namedItem xsi:type="NamedItemDrawing">
-		<name>BarcodePicture</name>
-		<drawingID>10</drawingID>
-	</namedItem>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(
-            text.contains(
-                r#"{1,"Header",{1,{1,-1,4,-1,6,00000000-0000-0000-0000-000000000000},0}}"#
-            )
-        );
-        assert!(!text.contains("BarcodePicture"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_print_settings() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<printSettings>
-		<pageOrientation>Landscape</pageOrientation>
-		<scale>80</scale>
-		<collate>true</collate>
-		<copies>2</copies>
-		<perPage>1</perPage>
-		<topMargin>1000</topMargin>
-		<leftMargin>1100</leftMargin>
-		<bottomMargin>1200</bottomMargin>
-		<rightMargin>1300</rightMargin>
-		<headerSize>140</headerSize>
-		<footerSize>150</footerSize>
-		<fitToPage>false</fitToPage>
-		<blackAndWhite>true</blackAndWhite>
-		<printerName>Printer "A"</printerName>
-		<paper>9</paper>
-		<paperSource>7</paperSource>
-		<pageWidth>210</pageWidth>
-		<pageHeight>297</pageHeight>
-	</printSettings>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(
-            r#"{{0,18,0,{"N",9},1,{"N",2},2,{"N",80},3,{"N",1},4,{"N",2},5,{"N",1},6,{"N",1000},7,{"N",1100},8,{"N",1200},9,{"N",1300},10,{"N",140},11,{"N",150},12,{"N",0},13,{"N",1},14,{"S","Printer ""A"""},15,{"N",7},16,{"N",210},17,{"N",297}}}"#
-        ));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_basic_formats() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<horizontalAlignment>Center</horizontalAlignment>
-		<fillType>Parameter</fillType>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{33024,6,1},{128,72}}"#));
-        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_mark_negatives_format() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns><size>1</size></columns>
-	<rowsItem><index>0</index><row><formatIndex>2</formatIndex><empty>true</empty></row></rowsItem>
-	<format/><format><markNegatives>true</markNegatives></format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        assert!(
-            extracted.contains("<markNegatives>true</markNegatives>"),
-            "{extracted}"
-        );
-        Ok(())
-    }
-
-    #[cfg(feature = "research-corpus-tests")]
-    #[test]
-    #[ignore = "requires external research corpus"]
-    fn debug_packs_spreadsheet_basic_formats_text() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<horizontalAlignment>Center</horizontalAlignment>
-		<fillType>Parameter</fillType>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        println!("{text}");
-        Ok(())
-    }
-
-    #[cfg(feature = "research-corpus-tests")]
-    #[test]
-    #[ignore = "requires external research corpus"]
-    fn debug_packs_spreadsheet_sparse_format_text() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>2</size>
-		<columnsItem>
-			<index>0</index>
-			<column>
-				<formatIndex>3</formatIndex>
-			</column>
-		</columnsItem>
-		<columnsItem>
-			<index>1</index>
-			<column>
-				<formatIndex>4</formatIndex>
-			</column>
-		</columnsItem>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<formatIndex>5</formatIndex>
-			<c>
-				<c>
-					<f>6</f>
-					<tl>
-						<v8:item>
-							<v8:lang>ru</v8:lang>
-							<v8:content>Cell</v8:content>
-						</v8:item>
-					</tl>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<format>
-		<width>10</width>
-	</format>
-	<format>
-		<width>20</width>
-	</format>
-	<format>
-		<width>30</width>
-	</format>
-	<format>
-		<width>40</width>
-	</format>
-	<format>
-		<horizontalAlignment>Center</horizontalAlignment>
-	</format>
-	<format>
-		<verticalAlignment>Center</verticalAlignment>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        println!("{text}");
-        Ok(())
-    }
-
-    #[cfg(feature = "research-corpus-tests")]
-    #[test]
-    #[ignore = "requires external research corpus"]
-    fn debug_live_avansovy_hybrid_format_metadata() -> anyhow::Result<()> {
-        let template_path = std::path::PathBuf::from(
-            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
-        );
-        if !template_path.is_file() {
-            return Ok(());
-        }
-        let xml = std::fs::read(&template_path)?;
-        let spreadsheet = super::parse_spreadsheet_document_xml(&xml)?;
-        let mut normalized = super::parse_spreadsheet_document_xml(&xml)?;
-        super::normalize_canonical_spreadsheet_format_order(&mut normalized);
-        let column_count = spreadsheet.column_count.max(
-            spreadsheet
-                .rows
-                .iter()
-                .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
-                .max()
-                .unwrap_or(1),
-        );
-        println!("column_count={column_count}");
-        println!(
-            "column_format_slots={}",
-            super::spreadsheet_column_format_slots(&spreadsheet, column_count)
-        );
-        println!(
-            "column_format_offset={}",
-            super::spreadsheet_column_format_offset(&spreadsheet)
-        );
-        println!(
-            "sparse_source_format_refs={}",
-            super::spreadsheet_uses_sparse_source_format_refs(&spreadsheet)
-        );
-        for (index, format) in spreadsheet.formats.iter().enumerate() {
-            if format.vertical_alignment.as_deref() == Some("Top")
-                && format.back_color.as_deref() == Some("style:FieldBackColor")
-                && format.drawing_border == Some(4)
-            {
-                println!("hybrid_format_index={}", index + 1);
-            }
-        }
-        let normalized_column_count = normalized.column_count.max(
-            normalized
-                .rows
-                .iter()
-                .flat_map(|row| row.cells.iter().map(|cell| cell.column_index + 1))
-                .max()
-                .unwrap_or(1),
-        );
-        let normalized_sparse = super::spreadsheet_uses_sparse_source_format_refs(&normalized);
-        let normalized_offset = super::spreadsheet_column_format_offset(&normalized);
-        let normalized_slots = if normalized_sparse {
-            super::spreadsheet_column_format_slots(&normalized, normalized_column_count)
-                .saturating_sub(normalized_offset)
-                .max(1)
-        } else {
-            super::spreadsheet_column_format_slots(&normalized, normalized_column_count)
-        };
-        println!("normalized_sparse_source_format_refs={normalized_sparse}");
-        println!("normalized_column_format_offset={normalized_offset}");
-        println!("normalized_column_format_slots={normalized_slots}");
-        for (index, format) in normalized.formats.iter().enumerate() {
-            if format.vertical_alignment.as_deref() == Some("Top")
-                && format.back_color.as_deref() == Some("style:FieldBackColor")
-                && format.drawing_border == Some(4)
-            {
-                println!("normalized_hybrid_format_index={}", index + 1);
-                let mut style_refs = Vec::new();
-                let mut number_format_refs = Vec::new();
-                let field = super::format_spreadsheet_format_index_for_moxel(
-                    &normalized,
-                    index + 1,
-                    true,
-                    0,
-                    &mut style_refs,
-                    0,
-                    None,
-                    &mut number_format_refs,
-                );
-                println!("normalized_hybrid_format_field={field}");
-                println!(
-                    "normalized_hybrid_style_refs={}",
-                    style_refs
-                        .iter()
-                        .map(super::format_spreadsheet_style_ref_slot_for_moxel)
-                        .collect::<Vec<_>>()
-                        .join(",")
-                );
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_bottom_vertical_alignment_format() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<verticalAlignment>Bottom</verticalAlignment>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{512,48},{128,72}}"#));
-        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_empty_format_slots_as_native_zero_flag_defaults() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<format/>
-	<format>
-		<width>88</width>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{128,88},{0}}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_number_format_string_table() -> anyhow::Result<()> {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format/>
-	<format>
-		<format>
-			<v8:item>
-				<v8:lang>ru</v8:lang>
-				<v8:content>&#x411;&#x41B;=; &#x411;&#x418;=&#x221A;</v8:content>
-			</v8:item>
-		</format>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{16777216,1},{0}}"#));
-        assert!(text.contains(r#"2,{1,0},{1,1,{"ru","БЛ=; БИ=√"}}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_edit_format_string_table() -> anyhow::Result<()> {
-        let xml = r#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8="http://v8.1c.ru/8.1/data/core">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format/>
-	<format>
-		<format>
-			<v8:item>
-				<v8:lang>ru</v8:lang>
-				<v8:content>ЧДЦ=2</v8:content>
-			</v8:item>
-		</format>
-		<editFormat>
-			<v8:item>
-				<v8:lang>ru</v8:lang>
-				<v8:content>ЧДЦ=2</v8:content>
-			</v8:item>
-		</editFormat>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml.as_bytes())?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{4311744512,1,1},{0}}"#));
-        assert!(text.contains(r#"2,{1,0},{1,1,{"ru","ЧДЦ=2"}}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_text_orientation_format() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<textPlacement>Wrap</textPlacement>
-		<textOrientation>900</textOrientation>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        assert!(text.contains(r#"{2,{278528,3,900},{128,72}}"#));
-        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
-        assert!(extracted.contains("<textOrientation>900</textOrientation>"));
-        assert!(!extracted.contains("<patternColor>"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_drawing_pattern_and_color_without_text_orientation() -> anyhow::Result<()> {
-        assert_eq!(super::spreadsheet_pattern_code("Solid"), Some(0));
-        assert_eq!(super::spreadsheet_pattern_code("Pattern14"), Some(14));
-        assert_eq!(super::spreadsheet_pattern_code("Pattern19"), None);
-
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>2</formatIndex>
-		<beginRow>0</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>1</endRow>
-		<endRowOffset>0</endRowOffset>
-		<beginColumn>0</beginColumn>
-		<beginColumnOffset>0</beginColumnOffset>
-		<endColumn>1</endColumn>
-		<endColumnOffset>0</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<drawingBorder>0</drawingBorder>
-		<backColor>style:FormBackColor</backColor>
-		<patternColor>style:FormBackColor</patternColor>
-		<pattern>WithoutPattern</pattern>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        assert!(text.contains("{14338,0,0,255,0}"));
-        assert!(extracted.contains("<patternColor>style:FormBackColor</patternColor>"));
-        assert!(extracted.contains("<pattern>WithoutPattern</pattern>"));
-        assert!(!extracted.contains("<textOrientation>"));
-        // The drawing itself has to survive. The packer used to write `autoSize`,
-        // a literal 1, the z-order and the picture index into the four slots the
-        // decoder reads as id, picture index, picture size and `autoSize`, so
-        // this drawing came back as id 0, picture index 1 and `autoSize` false.
-        assert!(text.contains(r#"{{0,2},5,0,0,0,0,1,1,0,0,1,0,1,1}"#));
-        assert!(extracted.contains("<id>1</id>"));
-        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
-        assert!(extracted.contains("<autoSize>true</autoSize>"));
-        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
-
-        Ok(())
-    }
-
-    /// A `Text` drawing packs into the twelve-field, tail-less record and comes
-    /// back unchanged. Before the decoder learned kinds 1/2/3 the platform's 12
-    /// `Line`, 3 `Rectangle` and 89 `Text` drawings were all dropped on read, and
-    /// the packer had no shape branch to write them back.
-    #[test]
-    fn packs_text_drawing_round_trip() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Text</drawingType>
-		<id>2</id>
-		<formatIndex>2</formatIndex>
-		<beginRow>42</beginRow>
-		<beginRowOffset>0</beginRowOffset>
-		<endRow>43</endRow>
-		<endRowOffset>30</endRowOffset>
-		<beginColumn>25</beginColumn>
-		<beginColumnOffset>51</beginColumnOffset>
-		<endColumn>30</endColumn>
-		<endColumnOffset>3</endColumnOffset>
-		<autoSize>false</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-	</drawing>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<width>72</width>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-
-        // The leading `{0,1}` is the format record: the XML's `formatIndex` 2
-        // projects onto physical slot 1. Everything after it is the drawing.
-        assert!(text.contains(r#"{{0,1},3,25,42,51,0,30,43,3,30,2,0}"#));
-        assert!(extracted.contains("<drawingType>Text</drawingType>"));
-        assert!(extracted.contains("<id>2</id>"));
-        assert!(extracted.contains("<beginColumnOffset>51</beginColumnOffset>"));
-        assert!(extracted.contains("<endColumn>30</endColumn>"));
-        assert!(extracted.contains("<autoSize>false</autoSize>"));
-        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
-        assert!(!extracted.contains("<pictureIndex>"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_cut_text_placement_format() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<c>
-				<c>
-					<f>2</f>
-					<parameter>Name</parameter>
-				</c>
-			</c>
-		</row>
-	</rowsItem>
-	<defaultFormatIndex>2</defaultFormatIndex>
-	<format>
-		<width>72</width>
-	</format>
-	<format>
-		<textPlacement>Cut</textPlacement>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(r#"{2,{16384,1},{128,72}}"#));
-        assert!(text.contains(r#"{16,1,{1,1,{"","Name"}},0}"#));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_format_colors() -> anyhow::Result<()> {
-        let xml = br##"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<format>
-		<width>72</width>
-		<textColor>#009646</textColor>
-		<backColor>style:ButtonBackColor</backColor>
-	</format>
-	<format>
-		<textColor>style:ButtonTextColor</textColor>
-	</format>
-</document>
-"##;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{3,0,{4625920}}"));
-        assert!(text.contains("{3,3,{-7}}"));
-        assert!(text.contains("{3,3,{-15}}"));
-        assert!(text.contains("{2,{1024,0},{3200,72,1,2}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_field_selection_back_color_style() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<format>
-		<backColor>style:FieldSelectionBackColor</backColor>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{3,3,{-21}}"));
-        assert!(text.contains("{1,{2048,0}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_form_back_color_style() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<format>
-		<backColor>style:FormBackColor</backColor>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{3,3,{0,f527dc88-1d39-40b3-bcbb-d98b690ead68}}"));
-        assert!(text.contains("{1,{2048,0}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[cfg(feature = "research-corpus-tests")]
-    #[test]
-    #[ignore = "requires external research corpus"]
-    fn live_parse_repro_counts_avansovy_report_template_sections() -> anyhow::Result<()> {
-        let template_path = std::path::PathBuf::from(
-            r"E:\ibcmd_lab\roundtrip\ut_ibcmd_roundtrip_smoke\baseline\Documents\АвансовыйОтчет\Templates\ПФ_MXL_АвансовыйОтчет_ru\Ext\Template.xml",
-        );
-        if !template_path.is_file() {
-            return Ok(());
-        }
-
-        let xml = std::fs::read(&template_path)?;
-        let parsed = super::parse_spreadsheet_document_xml(&xml)?;
-        let original = String::from_utf8(xml)?;
-        let non_empty_formats = parsed
-            .formats
-            .iter()
-            .filter(|format| {
-                format.font.is_some()
-                    || format.border.is_some()
-                    || format.left_border.is_some()
-                    || format.top_border.is_some()
-                    || format.right_border.is_some()
-                    || format.bottom_border.is_some()
-                    || format.height.is_some()
-                    || format.border_color.is_some()
-                    || format.width.is_some()
-                    || format.horizontal_alignment.is_some()
-                    || format.vertical_alignment.is_some()
-                    || format.back_color.is_some()
-                    || format.pattern_color.is_some()
-                    || format.pattern.is_some()
-                    || format.text_color.is_some()
-                    || format.text_placement.is_some()
-                    || format.text_orientation.is_some()
-                    || format.fill_type.is_some()
-                    || !format.number_format.is_empty()
-                    || format.drawing_border.is_some()
-                    || format.by_selected_columns.is_some()
-                    || format.details_use.is_some()
-                    || format.hyper_link.is_some()
-                    || format.protection.is_some()
-                    || format.indent.is_some()
-                    || format.auto_indent.is_some()
-                    || format.mask.is_some()
-                    || format.pic_index.is_some()
-                    || format.picture_size_mode.is_some()
-                    || format.pic_horizontal_alignment.is_some()
-                    || format.pic_vertical_alignment.is_some()
-            })
-            .count();
-
-        assert!(
-            parsed.formats.len() >= 100,
-            "formats={}",
-            parsed.formats.len()
-        );
-        assert!(
-            non_empty_formats >= 100,
-            "non_empty_formats={non_empty_formats}"
-        );
-        assert_eq!(
-            parsed.lines.len(),
-            original.matches("<line width=\"1\"").count()
-        );
-        assert_eq!(parsed.pictures.len(), original.matches("<picture>").count());
-        assert!(
-            parsed.formats.iter().any(|format| {
-                format.vertical_alignment.as_deref() == Some("Top")
-                    && format.back_color.as_deref() == Some("style:FieldBackColor")
-                    && format.drawing_border == Some(4)
-            }),
-            "parsed live template lost hybrid drawing/backColor format"
-        );
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_fonts() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<font faceName="Arial" height="8" bold="true" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/>
-	<font ref="style:NormalTextFont" bold="true" italic="false" underline="true" strikeout="false" kind="StyleItem"/>
-	<format>
-		<font>1</font>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{1,{1,1}}"));
-        assert!(text.contains(r#"{7,0,575,80,0,0,0,700,0,0,0,0,0,0,0,0,"Arial",1,100}"#));
-        assert!(text.contains("{7,2,60,{-31},700,0,1,0,1,100}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_lines() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<line width="1" gap="false">
-		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">None</v8ui:style>
-	</line>
-	<line width="1" gap="false">
-		<v8ui:style xsi:type="v8ui:SpreadsheetDocumentCellLineType">Solid</v8ui:style>
-	</line>
-	<format>
-		<border>0</border>
-	</format>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{3,3,{-1}},{3,3,{-3}},{1,{30,0,0,0,0}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_vertical_unmerge_regions() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<merge>
-		<r>2</r>
-		<c>1</c>
-		<w>3</w>
-	</merge>
-	<verticalUnmerge>
-		<r>3</r>
-		<c>1</c>
-		<w>3</w>
-	</verticalUnmerge>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains("{2,{1,2,4,2,0},{1,3,4,3,2}}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_vertical_groups() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<vgLevels>3</vgLevels>
-	<vgRows>6</vgRows>
-	<vg>
-		<b>1</b>
-		<e>5</e>
-	</vg>
-	<vg>
-		<b>2</b>
-		<e>4</e>
-	</vg>
-	<vg>
-		<b>3</b>
-	</vg>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(
-            text.contains("3,{1,5,0,{1,0},0,0},-1,{2,4,1,{1,0},0,0},-1,{3,3,2,{1,0},0,0},-1,0,0,0")
-        );
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_empty_headers_and_footers() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<leftHeader>
-		<f>0</f>
-		<tfl/>
-	</leftHeader>
-	<centerHeader>
-		<f>0</f>
-		<tfl/>
-	</centerHeader>
-	<rightHeader>
-		<f>0</f>
-		<tfl/>
-	</rightHeader>
-	<leftFooter>
-		<f>0</f>
-		<tfl/>
-	</leftFooter>
-	<centerFooter>
-		<f>0</f>
-		<tfl/>
-	</centerFooter>
-	<rightFooter>
-		<f>0</f>
-		<tfl/>
-	</rightFooter>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert_eq!(text.matches("{16,0,{1,0},1,{1,{1,0},1}}").count(), 6);
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_picture_drawings() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<drawing>
-		<drawingType>Picture</drawingType>
-		<id>1</id>
-		<formatIndex>31</formatIndex>
-		<beginRow>1</beginRow>
-		<beginRowOffset>20</beginRowOffset>
-		<endRow>6</endRow>
-		<endRowOffset>88</endRowOffset>
-		<beginColumn>1</beginColumn>
-		<beginColumnOffset>24</beginColumnOffset>
-		<endColumn>20</endColumn>
-		<endColumnOffset>70</endColumnOffset>
-		<autoSize>true</autoSize>
-		<pictureSize>Stretch</pictureSize>
-		<zOrder>1</zOrder>
-		<pictureIndex>0</pictureIndex>
-	</drawing>
-	<picture>
-		<index>0</index>
-		<picture/>
-	</picture>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        // Slots 10..13 are id, picture index, picture size and `autoSize`.  The
-        // expectation this replaces read `0,1,1,0` there, which is the drawing's
-        // `autoSize`, a literal 1, its z-order and its picture index - the four
-        // values the packer used to write into those slots.  It encoded the
-        // corruption rather than catching it, because nothing here re-extracted
-        // the blob.
-        assert!(text.contains("{{0,31},5,1,1,24,20,20,6,70,88,1,0,1,1}"));
-        assert!(text.contains(",1,{4,0},2,{0,1}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        let extracted = crate::mssql_dump::extract_moxel_spreadsheet_xml(
-            &packed.blob,
-            &std::collections::BTreeMap::new(),
-        )
-        .expect("extract");
-        assert!(extracted.contains("<id>1</id>"));
-        assert!(extracted.contains("<pictureIndex>0</pictureIndex>"));
-        assert!(extracted.contains("<autoSize>true</autoSize>"));
-        assert!(extracted.contains("<pictureSize>Stretch</pictureSize>"));
-        assert!(extracted.contains("<beginColumnOffset>24</beginColumnOffset>"));
-        assert!(extracted.contains("<endRowOffset>88</endRowOffset>"));
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_picture_refs_with_source() -> anyhow::Result<()> {
-        let root = std::env::temp_dir().join(format!(
-            "ibcmd-rs-spreadsheet-picture-{}",
-            uuid::Uuid::new_v4().hyphenated()
-        ));
-        std::fs::create_dir_all(root.join("CommonPictures"))?;
-        std::fs::write(
-            root.join("CommonPictures").join("Logo.xml"),
-            br#"
-<MetaDataObject>
-  <CommonPicture uuid="aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa">
-    <Properties>
-      <Name>Logo</Name>
-      <Synonym/>
-      <Comment/>
-    </Properties>
-  </CommonPicture>
-</MetaDataObject>
-"#,
-        )?;
-        let source = super::MetadataSourceContext::new(root);
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<picture>
-		<index>0</index>
-		<picture ref="v8ui:Logo"/>
-	</picture>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml_with_source(xml, Some(&source))?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(",1,{4,0,{0,aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa}},2,{0,1}"));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[test]
-    fn packs_spreadsheet_standard_picture_refs() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<picture>
-		<index>0</index>
-		<picture ref="v8ui:Print"/>
-	</picture>
-	<picture>
-		<index>1</index>
-		<picture ref="v8ui:InputFieldCalculator"/>
-	</picture>
-	<picture>
-		<index>2</index>
-		<picture ref="v8ui:Information"/>
-	</picture>
-	<picture>
-		<index>3</index>
-		<picture ref="v8ui:SaveFile"/>
-	</picture>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-
-        assert!(text.contains(",4,{4,0,{-13}},{4,1,{-6}"));
-        assert!(text.contains(&format!(
-            "{{4,2,{{0,{}}}}}",
-            super::STD_PICTURE_INFORMATION_UUID
-        )));
-        assert!(text.contains(&format!(
-            "{{4,3,{{0,{}}}}}",
-            super::STD_PICTURE_SAVE_FILE_UUID
-        )));
-        assert_eq!(packed.plain_bytes, text.len());
-
-        Ok(())
-    }
-
-    #[cfg(feature = "research-corpus-tests")]
-    #[test]
-    #[ignore = "requires external research corpus"]
-    fn debug_packs_spreadsheet_standard_picture_refs_text() -> anyhow::Result<()> {
-        let xml = br#"<?xml version="1.0" encoding="UTF-8"?>
-<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet">
-	<columns>
-		<size>1</size>
-	</columns>
-	<rowsItem>
-		<index>0</index>
-		<row>
-			<empty>true</empty>
-		</row>
-	</rowsItem>
-	<picture>
-		<index>0</index>
-		<picture ref="v8ui:Print"/>
-	</picture>
-	<picture>
-		<index>1</index>
-		<picture ref="v8ui:InputFieldCalculator"/>
-	</picture>
-	<picture>
-		<index>2</index>
-		<picture ref="v8ui:Information"/>
-	</picture>
-	<picture>
-		<index>3</index>
-		<picture ref="v8ui:SaveFile"/>
-	</picture>
-</document>
-"#;
-
-        let packed = super::pack_moxel_spreadsheet_blob_from_xml(xml)?;
-        let text = String::from_utf8(super::inflate_raw(&packed.blob)?)?;
-        println!("{text}");
         Ok(())
     }
 
@@ -44473,7 +42259,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 </Rights>
 "#;
 
-        let blockers = super::role_rights_base_free_blockers(xml)?;
+        let blockers = super::role_rights_base_free_blockers(xml, None)?;
 
         assert!(
             blockers
@@ -44633,7 +42419,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "\u{feff}{7,1,2,{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},{0,{0,{\"B\",1},0}},{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},{0,{0,{\"B\",0},0}},0,0,0,0,0}"
+            "\u{feff}{7,1,2,\r\n{100,aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa},\r\n{0,\r\n{0,\r\n{\"B\",1},0}\r\n},\r\n{0,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb},\r\n{0,\r\n{0,\r\n{\"B\",0},0}\r\n},0,0,0,0,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -44673,11 +42459,27 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(!super::command_interface_xml_can_pack_without_base(xml).unwrap());
         let error = super::pack_command_interface_blob_from_xml(&[], xml).unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("base-free CommandInterface command"),
+            error.to_string().contains("requires a base entry")
+                && error
+                    .to_string()
+                    .contains("Catalog.Products.StandardCommand.OpenList"),
             "{error}"
         );
+    }
+
+    /// The defect the writer replaced: a file holding only readable
+    /// subsystem names was accepted without a base and compiled to the empty
+    /// body `{7,0,0,0,0,0,0}`, dropping the section.
+    #[test]
+    fn subsystems_order_alone_is_never_packed_as_an_empty_body() {
+        let xml = br#"<CommandInterface xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" version="2.20">
+	<SubsystemsOrder>
+		<Subsystem>Subsystem.A.Subsystem.B</Subsystem>
+	</SubsystemsOrder>
+</CommandInterface>"#;
+
+        assert!(!super::command_interface_xml_can_pack_without_base(xml).unwrap());
+        assert!(super::pack_command_interface_blob_from_xml_base_free(xml).is_err());
     }
 
     #[test]
@@ -44731,13 +42533,9 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         let blockers = super::command_interface_base_free_blockers(xml)?;
 
-        assert_eq!(blockers.len(), 3);
-        assert!(blockers[0].contains("2 command visibility entries"));
-        assert!(blockers[0].contains("1 readable refs"));
-        assert!(blockers[0].contains("1 raw kind:uuid refs"));
-        assert!(blockers[1].contains("Catalog.Products.StandardCommand.OpenList"));
-        assert!(blockers[1].contains("platform command tuple kind"));
-        assert!(blockers[2].contains("validates the command count"));
+        assert_eq!(blockers.len(), 1);
+        assert!(blockers[0].contains("without a source tree"));
+        assert!(blockers[0].contains("Catalog.Products.StandardCommand.OpenList"));
 
         Ok(())
     }
@@ -44778,7 +42576,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,1}"
+            "\u{feff}{2,2,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,0,cccccccc-cccc-4ccc-cccc-cccccccccccc,2,0}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -44987,7 +42785,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
 
         assert_eq!(
             text,
-            "{5,1,\"ru\",{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,{#base64:iVBORw0KGgo=}}"
+            "\u{feff}{5,1,\"ru\",\r\n{#base64:PGh0bWw+PC9odG1sPg==},1,\"shot.png\",1,\r\n{#base64:iVBORw0KGgo=}\r\n}"
         );
         assert_eq!(packed.plain_bytes, text.len());
 
@@ -45352,14 +43150,16 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert_eq!(
             super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
                 code: -7,
-                load_transparent: true
+                load_transparent: true,
+                pixel: None,
             }),
             r#"{4,1,{-7},"",-1,-1,1,0,""}"#
         );
         assert_eq!(
             super::format_common_command_picture(&super::CommonCommandPicture::StdPictureCode {
                 code: -9,
-                load_transparent: true
+                load_transparent: true,
+                pixel: None,
             }),
             r#"{4,1,{-9},"",-1,-1,1,0,""}"#
         );

@@ -57,7 +57,16 @@ impl OfflineFormContextFactory {
         run_root: &Path,
         source_commit: Option<String>,
     ) -> Result<OfflineFormContext> {
-        let manifest_path = run_root.join("candidate_dump/manifest.json");
+        Self::from_dump_dir(&run_root.join("candidate_dump"), source_commit)
+    }
+
+    /// Like [`Self::from_run_root`], for a dump directory itself (the one
+    /// holding `manifest.json` and `Config_inflated/`).
+    pub fn from_dump_dir(
+        dump_dir: &Path,
+        source_commit: Option<String>,
+    ) -> Result<OfflineFormContext> {
+        let manifest_path = dump_dir.join("manifest.json");
         let manifest: Value = serde_json::from_slice(
             &fs::read(&manifest_path)
                 .with_context(|| format!("read {}", manifest_path.display()))?,
@@ -102,7 +111,7 @@ impl OfflineFormContextFactory {
                 }
                 rows.push((
                     file_name.to_string(),
-                    fs::read_to_string(run_root.join("candidate_dump").join(path))
+                    fs::read_to_string(dump_dir.join(path))
                         .with_context(|| format!("read inflated {inflated}"))?,
                 ));
             }

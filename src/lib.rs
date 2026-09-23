@@ -4,6 +4,7 @@ pub mod commands;
 pub mod compatibility;
 pub mod compiler;
 pub mod conversion;
+pub mod dcs_template_audit;
 #[cfg(feature = "platform-oracle")]
 pub mod dump_sources;
 pub mod form_matrix;

@@ -8,7 +8,11 @@ use ibcmd_core::identity::ObjectUuid;
 use ibcmd_core::limits::ResourceLimits;
 
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
-const MAX_PLAIN_BYTES: usize = 64 * 1_048_576;
+/// Two ERP УХ common templates (the АТОЛ and Масса-К driver packages) decode
+/// to 82 783 124 and 77 529 860 plain bytes, and the platform stores and
+/// exports both; 64 MiB refused them. The global default decode ceiling is
+/// 512 MiB.
+const MAX_PLAIN_BYTES: usize = 256 * 1_048_576;
 const MAX_NATIVE_DEPTH: usize = 64;
 /// The node bound a plaintext proves about itself.
 ///
@@ -118,6 +122,29 @@ pub(crate) fn styled_list_with_tail(
         leading_break: false,
         line_breaks,
         trailing_break: true,
+    }
+}
+
+/// A list laid out the way the platform lays out its own plain text: a line
+/// break before every nested list that is not the list's first value, and one
+/// before the closing brace when the list ends with a nested list.
+///
+/// Read off the stored command-interface, home-page, client-interface and
+/// standalone-content rows of БСП and ERP УХ, where it holds for every list.
+pub(crate) fn platform_list(values: Vec<NativeValue>) -> NativeValue {
+    let line_breaks = values
+        .iter()
+        .enumerate()
+        .skip(1)
+        .filter(|(_, value)| matches!(value, NativeValue::List { .. }))
+        .map(|(index, _)| index)
+        .collect();
+    let trailing_break = matches!(values.last(), Some(NativeValue::List { .. }));
+    NativeValue::List {
+        values,
+        leading_break: false,
+        line_breaks,
+        trailing_break,
     }
 }
 
@@ -298,6 +325,16 @@ pub(crate) fn serialize_without_bom(value: &NativeValue) -> Result<Vec<u8>, Nati
 
 pub(crate) fn parse(input: &[u8]) -> Result<NativeValue, NativeError> {
     NativeParser::new(input).parse()
+}
+
+/// A body the platform may store with or without the UTF-8 BOM (HTML
+/// templates carry it, as help rows do).
+pub(crate) fn parse_optional_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
+    if input.starts_with(UTF8_BOM) {
+        parse(input)
+    } else {
+        parse_without_bom(input)
+    }
 }
 
 pub(crate) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {

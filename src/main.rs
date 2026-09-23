@@ -147,6 +147,136 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::AuditRoleRightsWriter(args) => {
+            let report =
+                ibcmd_rs::source_audit::audit_role_rights_writer(&args.root, &args.inflated)?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+                println!(
+                    "roles {} (no Rights.xml {}), compiled {}, refused {}, round trip {}/{}, loader accepts {}, stored {}, plain identical {} ({} without dangling refs; {} rows hold dangling refs), entries {}, order {}, tail {}",
+                    report.roles,
+                    report.without_rights_xml,
+                    report.compiled,
+                    report.refused.values().sum::<usize>(),
+                    report.round_trip_identical,
+                    report.compiled,
+                    report.loader_accepted,
+                    report.stored_rows,
+                    report.plain_identical,
+                    report.plain_identical_without_dangling,
+                    report.stored_with_dangling,
+                    report.entries_identical,
+                    report.order_identical,
+                    report.tail_identical,
+                );
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::AuditDcsTemplateWriter(args) => {
+            let report = ibcmd_rs::dcs_template_audit::audit_dcs_template_writer(
+                &args.root,
+                &args.bodies,
+                &args.dump,
+            )?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
+        Commands::AuditHelpWriter(args) => {
+            let report = ibcmd_rs::source_audit::audit_help_writer(
+                &args.root,
+                &args.inflated,
+                args.source_version,
+            )?;
+            for (family, counts) in &report.families {
+                println!(
+                    "{family}: files {} compiled {} plain {} round-trip {} refused {} (stored round-trip {}, no stored row {})",
+                    counts.files,
+                    counts.compiled,
+                    counts.plain_identical,
+                    counts.round_trip_identical,
+                    counts.refused.values().sum::<usize>(),
+                    counts.stored_round_trip_identical,
+                    counts.no_stored_row,
+                );
+                for (reason, count) in &counts.refused {
+                    println!("    refused {count}: {reason}");
+                }
+            }
+            let mut shown = BTreeMap::<(&str, &str), usize>::new();
+            for difference in &report.differences {
+                let seen = shown
+                    .entry((difference.family.as_str(), difference.check))
+                    .or_insert(0);
+                *seen += 1;
+                if *seen <= 3 {
+                    println!(
+                        "  {} {} {} [{}]: {}",
+                        difference.family,
+                        difference.check,
+                        difference.file,
+                        difference.row,
+                        difference.detail.chars().take(600).collect::<String>()
+                    );
+                }
+            }
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            }
+        }
+        Commands::AuditInterfaceWriter(args) => {
+            let report = ibcmd_rs::source_audit::audit_interface_writer(
+                &args.root,
+                &args.inflated,
+                args.source_version,
+            )?;
+            for (family, counts) in &report.families {
+                println!(
+                    "{family}: files {} compiled {} round-trip {} plain {} refused {} (stored round-trip {}, no stored row {})",
+                    counts.files,
+                    counts.compiled,
+                    counts.round_trip_identical,
+                    counts.plain_identical,
+                    counts.refused.values().sum::<usize>(),
+                    counts.stored_round_trip_identical,
+                    counts.no_stored_row,
+                );
+                for (reason, count) in &counts.refused {
+                    println!("    refused {count}: {reason}");
+                }
+            }
+            let mut shown = BTreeMap::<(&str, &str), usize>::new();
+            for difference in &report.differences {
+                let seen = shown
+                    .entry((difference.family.as_str(), difference.check))
+                    .or_insert(0);
+                *seen += 1;
+                if *seen <= 3 {
+                    println!(
+                        "  {} {} {} [{}]: {}",
+                        difference.check,
+                        difference.family,
+                        difference.file,
+                        difference.row,
+                        difference.detail
+                    );
+                }
+            }
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            }
+        }
+        Commands::AuditMxlWriter(args) => {
+            let report = ibcmd_rs::source_audit::audit_mxl_writer(&args.root, &args.bodies)?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::AuditFormBodyBlockers(args) => {
             let report = ibcmd_rs::source_audit::audit_form_body_blockers(&args.root)?;
             if let Some(output) = args.output {

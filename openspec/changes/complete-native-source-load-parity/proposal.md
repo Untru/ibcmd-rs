@@ -51,5 +51,6 @@ the reader the export side finished.
 
 ## Status
 
-Not started. This records the measured gap so it is not mistaken for parity:
-**export is complete on both corpora, load is not.**
+In progress. The form writer closes the Form.xml round trip on every BSP form and
+on all but the embedded-chart forms of ERP УХ (see tasks.md); the full database
+cycle -- export, load, export -- is the step that remains.

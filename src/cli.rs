@@ -49,6 +49,23 @@ pub enum Commands {
     AuditFormBodyBlockers(AuditFormBodyBlockersArgs),
     /// Measure the native form-body writer against the bodies the platform stored.
     AuditNativeFormWriter(AuditNativeFormWriterArgs),
+    /// Measure the base-free role rights writer: round trip through the
+    /// exporter and parity with the rows the platform stored.
+    #[command(hide = true)]
+    AuditRoleRightsWriter(AuditRoleRightsWriterArgs),
+    /// Measure the base-free command-interface family writers against the stored rows.
+    #[command(hide = true)]
+    AuditInterfaceWriter(AuditInterfaceWriterArgs),
+    /// Measure the help and HTML template writer against the stored rows and
+    /// round-trip every row it writes through the exporter.
+    #[command(hide = true)]
+    AuditHelpWriter(AuditInterfaceWriterArgs),
+    /// Round-trip every DataCompositionSchema template through the loader and the exporter.
+    AuditDcsTemplateWriter(AuditDcsTemplateWriterArgs),
+    /// Measure the spreadsheet template writer: compile, compare with the stored
+    /// row, and read the compiled row back into Template.xml.
+    #[command(hide = true)]
+    AuditMxlWriter(AuditMxlWriterArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -929,10 +946,61 @@ pub struct AuditNativeFormWriterArgs {
 }
 
 #[derive(Debug, Args)]
+pub struct AuditInterfaceWriterArgs {
+    /// Root folder with the native 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated Config rows of the same database
+    /// (`<file name>__part0.txt`).
+    pub inflated: PathBuf,
+    /// XML dialect the native tree was exported in.
+    #[arg(long, value_enum, default_value_t = InfobaseConfigSourceVersion::V2_20)]
+    pub source_version: InfobaseConfigSourceVersion,
+    /// Optional JSON output file with every difference.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditDcsTemplateWriterArgs {
+    /// Root folder with 1C XML sources exported from the database.
+    pub root: PathBuf,
+    /// Folder with the inflated Config rows of the same database.
+    pub bodies: PathBuf,
+    /// Dump directory (manifest.json + Config_inflated) the export index is built from.
+    pub dump: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditMxlWriterArgs {
+    /// Root folder with the native 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated stored rows of the same database.
+    pub bodies: PathBuf,
+    /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
 pub struct AuditFormBodyBlockersArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditRoleRightsWriterArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated Config rows of the same database
+    /// (`<role uuid>.0__part0.txt`).
+    pub inflated: PathBuf,
+    /// Optional JSON output file; a one-line summary is printed instead.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }
