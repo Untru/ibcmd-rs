@@ -1874,7 +1874,7 @@ fn interface_writer_targets(root: &Path) -> Result<Vec<InterfaceWriterTarget>> {
 }
 
 /// Where two byte strings first differ, as a window of each.
-fn first_difference(wrote: &[u8], expected: &[u8]) -> String {
+fn first_byte_difference(wrote: &[u8], expected: &[u8]) -> String {
     let at = wrote
         .iter()
         .zip(expected)
@@ -1927,7 +1927,7 @@ pub fn audit_interface_writer(
                 let stored_round_trip = stored.as_ref().map(|stored| {
                     match context.render(target.render, stored, source_version) {
                         Ok(xml) if xml == native => None,
-                        Ok(xml) => Some(first_difference(&xml, &native)),
+                        Ok(xml) => Some(first_byte_difference(&xml, &native)),
                         Err(error) => Some(format!("{error:#}")),
                     }
                 });
@@ -1949,12 +1949,12 @@ pub fn audit_interface_writer(
                         if let Some(stored) = &stored
                             && &plain != stored
                         {
-                            outcome.plain = Some(first_difference(&plain, stored));
+                            outcome.plain = Some(first_byte_difference(&plain, stored));
                         }
                         outcome.round_trip =
                             match context.render(target.render, &plain, source_version) {
                                 Ok(xml) if xml == native => None,
-                                Ok(xml) => Some(first_difference(&xml, &native)),
+                                Ok(xml) => Some(first_byte_difference(&xml, &native)),
                                 Err(error) => Some(format!("{error:#}")),
                             };
                     }

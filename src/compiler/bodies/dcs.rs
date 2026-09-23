@@ -8,10 +8,8 @@ use std::ops::Range;
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::EffectiveProfile;
 use ibcmd_xml::{
-    DcsChildParseOutcome, DcsSchemaTemplateError, DcsSettingsDocumentAnalysisError,
-    analyze_dcs_schema_template_documents_with_references, analyze_dcs_settings_document,
-    compile_dcs_schema_template_source_documents,
-    compile_dcs_schema_template_source_documents_with_references,
+    DcsSchemaTemplateError, DcsStorageTypeResolver, DcsStorageTypeSpelling,
+    analyze_dcs_schema_template_documents_with_references, compile_dcs_schema_storage_documents,
 };
 use quick_xml::NsReader;
 use quick_xml::events::Event;
@@ -19,6 +17,7 @@ use quick_xml::name::ResolveResult;
 
 use super::{BodyProfileError, SelectedBodyProfile};
 use crate::compiler::families::native::{NativeError, deflate_bytes, inflate};
+use crate::mssql_dump::{DcsTypeIndex, DcsTypeResolution};
 
 const LAYOUT_KEY: &str = "bootstrap.body.dcs.layout";
 const LAYOUT: &str = "dcs-schema-three-document-v1";
@@ -154,18 +153,99 @@ pub(crate) fn compile_evidenced_dcs_with_references(
     xml: &[u8],
     style_reference_types: &BTreeMap<String, String>,
 ) -> Result<Vec<u8>, DcsCodecError> {
-    let plain = match kind {
+    let unresolved = |_: &str| None::<String>;
+    compile_evidenced_dcs_with_resolvers(kind, xml, style_reference_types, &unresolved)
+}
+
+/// Compiles like [`compile_evidenced_dcs_with_references`] and resolves a
+/// schema's configuration types to their storage `TypeId` through `types`,
+/// the way the current platform writes them; a type it cannot resolve is
+/// stored by name, which the exporter reads back the same.
+///
+/// A schema body is accepted only when the exporter's own reader, given the
+/// compiled body, gives back the source document: the round trip is checked
+/// here rather than assumed.
+pub(crate) fn compile_evidenced_dcs_with_resolvers(
+    kind: DcsTemplateKind,
+    xml: &[u8],
+    style_reference_types: &BTreeMap<String, String>,
+    types: &dyn DcsStorageTypeResolver,
+) -> Result<Vec<u8>, DcsCodecError> {
+    match kind {
         DcsTemplateKind::Appearance => {
             validate_xml_document(xml, "AppearanceTemplate", Some(APPEARANCE_NS))?;
-            xml.to_vec()
+            let blob = deflate_bytes(xml)?;
+            decode_strict_with_references(kind, &blob, style_reference_types)?;
+            Ok(blob)
         }
         DcsTemplateKind::Schema => {
-            compile_schema_plain_with_references(xml, style_reference_types)?
+            let (plain, type_index, object_refs) =
+                compile_schema_plain(xml, style_reference_types, types)?;
+            let blob = deflate_bytes(&plain)?;
+            let body = decode_strict_with_references(kind, &blob, style_reference_types)?;
+            verify_schema_round_trip(xml, &body, &type_index, &object_refs)?;
+            Ok(blob)
         }
-    };
-    let blob = deflate_bytes(&plain)?;
-    decode_strict_with_references(kind, &blob, style_reference_types)?;
-    Ok(blob)
+    }
+}
+
+/// The type index and object references the exporter needs to read one
+/// compiled schema body back: exactly the entries the writer resolved.
+type SchemaReadBackIndexes = (DcsTypeIndex, BTreeMap<String, String>);
+
+/// Proves the compiled body reads back as the source: the exporter's own
+/// normalizer, given the body and the resolutions the writer made, has to
+/// reproduce the source document after its BOM and XML declaration.
+fn verify_schema_round_trip(
+    source: &[u8],
+    body: &DcsBody,
+    type_index: &DcsTypeIndex,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<(), DcsCodecError> {
+    let exported =
+        crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+            &body.documents(),
+            type_index,
+            object_refs,
+            &ProfileId::parse("provider:mssql-legacy")
+                .map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?,
+            &ProfileId::parse("xml-2.20")
+                .map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?,
+        )
+        .map_err(|error| {
+            DcsCodecError::RoundTrip(format!("the compiled body does not export: {error}"))
+        })?;
+    let expected = document_without_shell(source);
+    let actual = document_without_shell(&exported);
+    if expected == actual {
+        return Ok(());
+    }
+    let at = expected
+        .iter()
+        .zip(actual)
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| expected.len().min(actual.len()));
+    Err(DcsCodecError::RoundTrip(format!(
+        "the compiled body exports back differently at byte {at} of {}",
+        expected.len()
+    )))
+}
+
+/// A document after an optional UTF-8 BOM and XML declaration: the export
+/// always writes both, so only the document itself is the source's to keep.
+fn document_without_shell(document: &[u8]) -> &[u8] {
+    let mut body = document.strip_prefix(UTF8_BOM).unwrap_or(document);
+    if body.starts_with(b"<?xml")
+        && let Some(end) = body.windows(2).position(|window| window == b"?>")
+    {
+        body = &body[end + 2..];
+        while let Some((first, rest)) = body.split_first()
+            && matches!(first, b'\r' | b'\n' | b' ' | b'\t')
+        {
+            body = rest;
+        }
+    }
+    body
 }
 
 pub fn decode_dcs(
@@ -246,59 +326,33 @@ fn decode_appearance_plain(plain: Vec<u8>) -> Result<DcsBody, DcsCodecError> {
     })
 }
 
-fn compile_schema_plain_with_references(
+/// Writes the framed plaintext of a schema body, returning with it the
+/// indexes the exporter needs to read that body back.
+///
+/// Which settings shapes the body may carry is not a cohort question any
+/// more: the writer spells every settings child the way the platform does,
+/// and the caller's round trip decides whether the result is the source.
+fn compile_schema_plain(
     xml: &[u8],
     style_reference_types: &BTreeMap<String, String>,
-) -> Result<Vec<u8>, DcsCodecError> {
+    types: &dyn DcsStorageTypeResolver,
+) -> Result<(Vec<u8>, DcsTypeIndex, BTreeMap<String, String>), DcsCodecError> {
     validate_xml_document(xml, "DataCompositionSchema", Some(SCHEMA_NS))?;
 
-    let documents =
-        compile_dcs_schema_template_source_documents_with_references(xml, style_reference_types)
-            .map_err(map_template_error)?;
-    for settings_document in documents.settings() {
-        let settings_document = std::str::from_utf8(settings_document).map_err(|_| {
-            DcsCodecError::InvalidXml("native Settings document is not UTF-8".to_string())
-        })?;
-        let settings_analysis =
-            analyze_dcs_settings_document(settings_document).map_err(|error| match error {
-                DcsSettingsDocumentAnalysisError::Malformed(error) => {
-                    DcsCodecError::InvalidXml(error.to_string())
-                }
-                DcsSettingsDocumentAnalysisError::UnsupportedSource { reason, .. } => {
-                    DcsCodecError::UnsupportedSource(reason)
-                }
-            })?;
-        let typed_settings = settings_analysis.typed();
-        if matches!(
-            typed_settings.selection_outcome(),
-            DcsChildParseOutcome::Unsupported(_)
-        ) {
-            return Err(DcsCodecError::UnsupportedSource(
-                "DCS selection is outside the platform-authenticated compiler cohort",
-            ));
-        }
-        if matches!(
-            typed_settings.filter(),
-            DcsChildParseOutcome::Unsupported(_)
-        ) {
-            return Err(DcsCodecError::UnsupportedSource(
-                "DCS filter is outside the platform-authenticated compiler cohort",
-            ));
-        }
-        if matches!(typed_settings.order(), DcsChildParseOutcome::Unsupported(_)) {
-            return Err(DcsCodecError::UnsupportedSource(
-                "DCS order is outside the platform-authenticated compiler cohort",
-            ));
-        }
-        if matches!(
-            typed_settings.conditional_appearance(),
-            DcsChildParseOutcome::Unsupported(_)
-        ) {
-            return Err(DcsCodecError::UnsupportedSource(
-                "DCS conditional appearance is outside the platform-authenticated compiler cohort",
-            ));
-        }
-    }
+    let style_items = style_reference_types
+        .iter()
+        .map(|(uuid, name)| (name.clone(), uuid.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let compiled = compile_dcs_schema_storage_documents(xml, &style_items, types)
+        .map_err(map_template_error)?;
+    let (type_index, object_refs) = read_back_indexes(&compiled);
+    let documents = compiled.into_documents();
+    let borrowed = std::iter::once(documents.primary_schema_file())
+        .chain(documents.settings().iter().map(Vec::as_slice))
+        .chain(std::iter::once(documents.terminal_schema_file()))
+        .collect::<Vec<_>>();
+    analyze_dcs_schema_template_documents_with_references(&borrowed, style_reference_types)
+        .map_err(map_template_error)?;
     let first = documents.primary_schema_file();
     let settings = documents.settings();
     let third = documents.terminal_schema_file();
@@ -339,7 +393,35 @@ fn compile_schema_plain_with_references(
         plain.extend_from_slice(document);
     }
     plain.extend_from_slice(third);
-    Ok(plain)
+    Ok((plain, type_index, object_refs))
+}
+
+/// The exporter's view of the references one compiled body carries: every
+/// `TypeId` the writer put into storage under the spelling the source gives
+/// it, and every configuration style item it stored by uuid.
+fn read_back_indexes(compiled: &ibcmd_xml::DcsStorageDocuments) -> SchemaReadBackIndexes {
+    let type_index = compiled
+        .type_ids()
+        .iter()
+        .map(|(uuid, spelling)| {
+            let resolution = match spelling {
+                DcsStorageTypeSpelling::Type(name) => DcsTypeResolution::Type {
+                    qname: format!("cfg:{name}"),
+                },
+                DcsStorageTypeSpelling::TypeSet(name) => DcsTypeResolution::TypeSet {
+                    qname: format!("cfg:{name}"),
+                },
+                DcsStorageTypeSpelling::Kept => DcsTypeResolution::KeepId,
+            };
+            (uuid.clone(), resolution)
+        })
+        .collect();
+    let object_refs = compiled
+        .style_items()
+        .iter()
+        .map(|(uuid, name)| (uuid.clone(), format!("StyleItem.{name}")))
+        .collect();
+    (type_index, object_refs)
 }
 
 fn decode_schema_plain_with_references(
@@ -612,6 +694,9 @@ pub enum DcsCodecError {
     InvalidXml(String),
     UnsupportedLayout(String),
     UnsupportedSource(&'static str),
+    /// The compiled body does not read back as the source it was compiled
+    /// from, so it is refused rather than staged.
+    RoundTrip(String),
     LimitExceeded(&'static str),
 }
 
@@ -625,6 +710,12 @@ impl Display for DcsCodecError {
                 write!(formatter, "unsupported DCS body layout: {reason}")
             }
             Self::UnsupportedSource(reason) => {
+                write!(
+                    formatter,
+                    "DCS source cannot be compiled base-free: {reason}"
+                )
+            }
+            Self::RoundTrip(reason) => {
                 write!(
                     formatter,
                     "DCS source cannot be compiled base-free: {reason}"
@@ -662,6 +753,10 @@ mod tests {
 
     use super::*;
     use crate::compiler::families::native::deflate_bytes;
+    use ibcmd_xml::{
+        analyze_dcs_settings_document, compile_dcs_schema_template_source_documents,
+        compile_dcs_schema_template_source_documents_with_references,
+    };
     use sha2::{Digest, Sha256};
 
     fn decode_base64_fixture(encoded: &str) -> Vec<u8> {
@@ -694,11 +789,91 @@ mod tests {
         output
     }
 
-    const SIMPLE_SCHEMA: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings/></settingsVariant>
-</DataCompositionSchema>"#;
+    /// The namespace set the export declares on every source root.
+    const SOURCE_ROOT_OPEN: &str = "<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
+    /// The declarations an inline `dcsset:settings` carries in the source.
+    const INLINE_SETTINGS_NAMESPACES: &str = " xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\"";
+
+    /// A source document the way the export writes one: BOM, declaration,
+    /// the root namespace set, `\r\n` line breaks. `body` holds the root's
+    /// children one per `\n`-separated line, indented with tabs; `{settings}`
+    /// stands for an inline settings element's namespace declarations.
+    fn canonical_source(body: &str) -> Vec<u8> {
+        let mut text = String::from("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
+        text.push_str(SOURCE_ROOT_OPEN);
+        for line in body
+            .replace("{settings}", INLINE_SETTINGS_NAMESPACES)
+            .lines()
+        {
+            text.push_str("\r\n");
+            text.push_str(line);
+        }
+        text.push_str("\r\n</DataCompositionSchema>");
+        text.into_bytes()
+    }
+
+    fn simple_schema() -> Vec<u8> {
+        canonical_source(SIMPLE_SCHEMA_BODY)
+    }
+
+    const SIMPLE_SCHEMA_BODY: &str = "\t<dataSource>\n\t\t<name>Source1</name>\n\t\t<dataSourceType>Local</dataSourceType>\n\t</dataSource>\n\t<settingsVariant>\n\t\t<dcsset:name>Main</dcsset:name>\n\t\t<dcsset:presentation xsi:type=\"xs:string\">Main</dcsset:presentation>\n\t\t<dcsset:settings{settings}/>\n\t</settingsVariant>";
+
+    /// The platform's XML load stored some of the lab cohorts' area
+    /// appearance parameters under their English names (`Details`,
+    /// `TextColor`, `BackColor`) while its export -- and so the source --
+    /// spells them in Russian; the corpus-sized configurations (БСП, ERP УХ)
+    /// store the Russian spelling their source carries. The source cannot say
+    /// which spelling a load chose, so the writer keeps the source's, and the
+    /// rest of each body is the platform's byte for byte.
+    fn with_source_parameter_spelling(document: &[u8]) -> Vec<u8> {
+        let mut out = document.to_vec();
+        for (stored, source) in [
+            (
+                "<parameter>Details</parameter>",
+                "<parameter>Расшифровка</parameter>",
+            ),
+            (
+                "<parameter>TextColor</parameter>",
+                "<parameter>ЦветТекста</parameter>",
+            ),
+            (
+                "<parameter>BackColor</parameter>",
+                "<parameter>ЦветФона</parameter>",
+            ),
+        ] {
+            let (stored, source) = (stored.as_bytes(), source.as_bytes());
+            let mut replaced = Vec::with_capacity(out.len());
+            let mut index = 0;
+            while index < out.len() {
+                if out[index..].starts_with(stored) {
+                    replaced.extend_from_slice(source);
+                    index += stored.len();
+                } else {
+                    replaced.push(out[index]);
+                    index += 1;
+                }
+            }
+            out = replaced;
+        }
+        out
+    }
+
+    fn export_body(
+        blob: &[u8],
+        type_index: &DcsTypeIndex,
+        object_refs: &BTreeMap<String, String>,
+    ) -> Vec<u8> {
+        let decoded = decode_compatible_dcs(DcsTemplateKind::Schema, blob).unwrap();
+        crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
+            &decoded.documents(),
+            type_index,
+            object_refs,
+            &ProfileId::parse("provider:mssql-legacy").unwrap(),
+            &ProfileId::parse("xml-2.20").unwrap(),
+        )
+        .unwrap()
+    }
+
     const SIMPLE_APPEARANCE: &[u8] = br#"<?xml version="1.0" encoding="UTF-8"?>
 <AppearanceTemplate xmlns="http://v8.1c.ru/8.1/data-composition-system/appearance-template"/>"#;
 
@@ -733,21 +908,23 @@ mod tests {
     #[test]
     fn schema_compiles_to_evidenced_three_document_container() {
         let profile = DcsCodecProfile::fixture();
-        let first = compile_dcs(&profile, DcsTemplateKind::Schema, SIMPLE_SCHEMA).unwrap();
-        let second = compile_dcs(&profile, DcsTemplateKind::Schema, SIMPLE_SCHEMA).unwrap();
+        let source = simple_schema();
+        let first = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        let second = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
         assert_eq!(first, second);
 
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &first).unwrap();
         assert_eq!(decoded.layout(), DcsBodyLayout::NativeThreeDocument);
         assert_eq!(decoded.document_count(), 3);
-        // Export-round-trip coverage for this exact dataSource-only,
-        // dataSet-free shape moved to the platform-attested `dcs-core`/
-        // `dcs-filter` corpora: the live
-        // `normalize_data_composition_schema_template_documents_with_profiles`
-        // codec's typed inner-schema parser requires an admitted dataSet
-        // shape, which this minimal synthetic schema does not have (a
-        // pre-existing gap in the typed IR's admitted cohort coverage,
-        // not something this deletion-only cleanup changes).
+        assert_eq!(
+            decoded.documents()[0],
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\t\t<dataSource>\r\n\t\t\t<name>Source1</name>\r\n\t\t\t<dataSourceType>Local</dataSourceType>\r\n\t\t</dataSource>\r\n\t\t<settingsVariant>\r\n\t\t\t<name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Main</name>\r\n\t\t\t<presentation xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xsi:type=\"xs:string\">Main</presentation>\r\n\t\t</settingsVariant>\r\n\t</dataCompositionSchema>\r\n</SchemaFile>"
+                .as_bytes()
+        );
+        assert_eq!(
+            export_body(&first, &BTreeMap::new(), &BTreeMap::new()),
+            source
+        );
     }
 
     #[test]
@@ -1313,31 +1490,28 @@ mod tests {
     #[test]
     fn non_empty_settings_survive_semantic_round_trip() {
         let profile = DcsCodecProfile::fixture();
-        let source = br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcscor="http://v8.1c.ru/8.1/data-composition-system/core" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings><dcsset:selection><dcsset:item xsi:type="dcsset:SelectedItemField"><dcsset:field>SortKey</dcsset:field></dcsset:item></dcsset:selection><dcsset:filter><dcsset:item xsi:type="dcsset:FilterItemComparison"><dcsset:left xsi:type="dcscor:Field">SortKey</dcsset:left><dcsset:comparisonType>Equal</dcsset:comparisonType><dcsset:right xsi:type="xs:string">A</dcsset:right></dcsset:item></dcsset:filter></dcsset:settings></settingsVariant>
-</DataCompositionSchema>"#;
+        let source = canonical_source(
+            "\t<settingsVariant>\n\t\t<dcsset:name>Main</dcsset:name>\n\t\t<dcsset:presentation xsi:type=\"xs:string\">Main</dcsset:presentation>\n\t\t<dcsset:settings{settings}>\n\t\t\t<dcsset:selection>\n\t\t\t\t<dcsset:item xsi:type=\"dcsset:SelectedItemField\">\n\t\t\t\t\t<dcsset:field>SortKey</dcsset:field>\n\t\t\t\t</dcsset:item>\n\t\t\t</dcsset:selection>\n\t\t\t<dcsset:filter>\n\t\t\t\t<dcsset:item xsi:type=\"dcsset:FilterItemComparison\">\n\t\t\t\t\t<dcsset:left xsi:type=\"dcscor:Field\">SortKey</dcsset:left>\n\t\t\t\t\t<dcsset:comparisonType>Equal</dcsset:comparisonType>\n\t\t\t\t\t<dcsset:right xsi:type=\"xs:string\">A</dcsset:right>\n\t\t\t\t</dcsset:item>\n\t\t\t</dcsset:filter>\n\t\t</dcsset:settings>\n\t</settingsVariant>",
+        );
 
-        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, source).unwrap();
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         let documents = decoded.documents();
         assert_eq!(documents.len(), 3);
+        // Storage spells the settings namespace as the Settings document's
+        // default, so the source's `dcsset:` prefix is gone from both the
+        // element names and the `xsi:type` values.
         let settings_document = std::str::from_utf8(documents[1]).unwrap();
-        // Full-envelope export-round-trip coverage for this exact
-        // dataSource-free, dataSet-free shape moved to the platform-attested
-        // `dcs-filter` corpus: the live
-        // `normalize_data_composition_schema_template_documents_with_profiles`
-        // codec's typed inner-schema parser requires an admitted dataSet
-        // shape, which this minimal synthetic schema does not have (a
-        // pre-existing gap in the typed IR's admitted cohort coverage, not
-        // something this deletion-only cleanup changes), so the standalone
-        // Settings document's own semantic content is verified directly
-        // against the decoded (compiled) storage bytes instead.
         assert!(settings_document.contains("<Settings "));
-        assert!(settings_document.contains("<dcsset:selection>"));
-        assert!(settings_document.contains("<dcsset:comparisonType>Equal</dcsset:comparisonType>"));
-        assert!(
-            settings_document.contains("<dcsset:right xsi:type=\"xs:string\">A</dcsset:right>")
+        assert!(settings_document.contains(
+            "\r\n\t<selection>\r\n\t\t<item xsi:type=\"SelectedItemField\">\r\n\t\t\t<field>SortKey</field>"
+        ));
+        assert!(settings_document.contains("<comparisonType>Equal</comparisonType>"));
+        assert!(settings_document.contains("<right xsi:type=\"xs:string\">A</right>"));
+        assert!(!settings_document.contains("dcsset"));
+        assert_eq!(
+            export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+            source
         );
     }
 
@@ -1507,11 +1681,14 @@ mod tests {
         // minimization, the whole compiled envelope now matches
         // raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
-        assert_eq!(inflate(&blob).unwrap(), unpacked);
+        assert_eq!(
+            inflate(&blob).unwrap(),
+            with_source_parameter_spelling(&unpacked)
+        );
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
-            Some(expected_area.as_slice())
+            Some(with_source_parameter_spelling(&expected_area).as_slice())
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
@@ -1538,7 +1715,10 @@ mod tests {
         // property `body -> XML -> body == raw-unpacked` pins for the
         // terminal document).
         let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
-        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+        assert_eq!(
+            rebuilt.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
     }
 
     #[test]
@@ -1576,7 +1756,7 @@ mod tests {
     }
 
     #[test]
-    fn area_appearance_web_color_seed_order_is_rejected_fail_closed() {
+    fn area_appearance_web_color_seed_order_is_kept_as_written() {
         let profile = DcsCodecProfile::fixture();
         let seed = include_bytes!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -1585,13 +1765,15 @@ mod tests {
         // The seed is explicitly non-authoritative (manifest:
         // "hypothesis_only") and orders the appearance items
         // Расшифровка-then-ЦветТекста -- the reverse of what
-        // native-template.xml (the platform-proven order) actually uses.
-        // The compiler must reject this order, not silently accept or
-        // reorder it.
-        assert!(matches!(
-            compile_dcs(&profile, DcsTemplateKind::Schema, seed),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
+        // native-template.xml (the platform-proven order) actually uses --
+        // and spells the web colour through a `web` prefix of its own. The
+        // writer neither reorders nor re-spells it: the body keeps what the
+        // seed says, and the export gives the seed back byte for byte.
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, seed).unwrap();
+        assert_eq!(
+            export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+            seed.as_slice()
+        );
     }
 
     #[test]
@@ -1634,11 +1816,14 @@ mod tests {
         // primary shares with every other dcs-area-* corpus), the whole
         // compiled envelope now matches raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
-        assert_eq!(inflate(&blob).unwrap(), unpacked);
+        assert_eq!(
+            inflate(&blob).unwrap(),
+            with_source_parameter_spelling(&unpacked)
+        );
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
-            Some(expected_area.as_slice())
+            Some(with_source_parameter_spelling(&expected_area).as_slice())
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
@@ -1668,7 +1853,10 @@ mod tests {
         // property `body -> XML -> body == raw-unpacked` pins for the
         // terminal document).
         let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
-        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+        assert_eq!(
+            rebuilt.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
     }
 
     #[test]
@@ -1705,15 +1893,11 @@ mod tests {
         assert_eq!(exported, native_template);
     }
 
-    /// The custom-StyleItem form's raw `0:<uuid>` storage wire syntax needs
-    /// a resolver (uuid <-> semantic name) on the compile direction, exactly
-    /// like the export/decode direction already had via `object_refs` (see
-    /// `mssql_dump::dcs::tests::platform_area_style_item_uuid_exports_byte_exact_through_common_codec`).
-    /// `compile_dcs_with_references` now carries that resolver; without one
-    /// supplied (the plain `compile_dcs`, or `compile_dcs_with_references`
-    /// given an empty/irrelevant map), this coordinate still fails closed --
-    /// the negative half of the original documented gap remains intact,
-    /// only the positive half (a supplied resolver actually working) is new.
+    /// A custom-StyleItem reference is stored by the style item's uuid when
+    /// the resolver names it, and by name otherwise: the platform stores a
+    /// configuration style item as `0:<uuid>`, but a style name it cannot
+    /// resolve is a QName the exporter reads back the same, so the body
+    /// compiles either way and only the spelling differs.
     #[test]
     fn area_style_item_uuid_compile_direction_gates_resolver() {
         let profile = DcsCodecProfile::fixture();
@@ -1721,70 +1905,64 @@ mod tests {
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
             "dcs-area-style-item-uuid/native-template.xml.b64"
         )));
-        // Without a resolver: still fails closed, exactly as before this
-        // work package.
-        assert!(matches!(
-            compile_dcs(&profile, DcsTemplateKind::Schema, &source),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        assert!(matches!(
-            compile_dcs_with_references(
-                &profile,
-                DcsTemplateKind::Schema,
-                &source,
-                &BTreeMap::new()
-            ),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        // A non-empty resolver that lacks the specific uuid this coordinate
-        // needs must fail closed exactly like an empty one -- having *some*
-        // entries is not the same as having the *right* one.
+        let stored_by_uuid = |blob: &[u8]| {
+            String::from_utf8_lossy(&inflate(blob).unwrap())
+                .contains("0:4a9d8536-ff59-4a90-a1cf-646d241dc53c")
+        };
+        // Without a resolver, or with one that lacks this style item, the
+        // reference stays spelled by name.
         let mut irrelevant_only = BTreeMap::new();
         irrelevant_only.insert(
             "00000000-0000-0000-0000-000000000000".to_string(),
             "SomeOtherStyleItem".to_string(),
         );
-        assert!(matches!(
+        for blob in [
+            compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap(),
+            compile_dcs_with_references(
+                &profile,
+                DcsTemplateKind::Schema,
+                &source,
+                &BTreeMap::new(),
+            )
+            .unwrap(),
             compile_dcs_with_references(
                 &profile,
                 DcsTemplateKind::Schema,
                 &source,
                 &irrelevant_only,
-            ),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
-        // With the evidenced resolver entry: now compiles.
+            )
+            .unwrap(),
+        ] {
+            assert!(!stored_by_uuid(&blob));
+            assert_eq!(
+                export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+                source
+            );
+        }
+        // With the evidenced resolver entry the reference is stored by uuid,
+        // and an extra, unrelated entry beside it is never looked up.
         let mut style_reference_types = BTreeMap::new();
         style_reference_types.insert(
             "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
             "CorpusAccent".to_string(),
         );
-        assert!(
-            compile_dcs_with_references(
-                &profile,
-                DcsTemplateKind::Schema,
-                &source,
-                &style_reference_types,
-            )
-            .is_ok()
-        );
-        // An extra, unrelated entry alongside the needed one is silently
-        // ignored (never looked up), matching the TypeId precedent's
-        // lookup-only semantics documented on `compile_dcs_with_references`.
         let mut with_extra_entry = style_reference_types.clone();
         with_extra_entry.insert(
             "11111111-1111-1111-1111-111111111111".to_string(),
             "UnrelatedStyleItem".to_string(),
         );
-        assert!(
-            compile_dcs_with_references(
-                &profile,
-                DcsTemplateKind::Schema,
-                &source,
-                &with_extra_entry,
-            )
-            .is_ok()
+        let mut object_refs = BTreeMap::new();
+        object_refs.insert(
+            "4a9d8536-ff59-4a90-a1cf-646d241dc53c".to_string(),
+            "StyleItem.CorpusAccent".to_string(),
         );
+        for references in [&style_reference_types, &with_extra_entry] {
+            let blob =
+                compile_dcs_with_references(&profile, DcsTemplateKind::Schema, &source, references)
+                    .unwrap();
+            assert!(stored_by_uuid(&blob));
+            assert_eq!(export_body(&blob, &BTreeMap::new(), &object_refs), source);
+        }
     }
 
     /// The resolver gate this pins moved one stage later.
@@ -1944,7 +2122,10 @@ mod tests {
             &style_reference_types,
         )
         .expect("custom-StyleItem source must compile base-free with the resolver");
-        assert_eq!(inflate(&blob).unwrap(), unpacked);
+        assert_eq!(
+            inflate(&blob).unwrap(),
+            with_source_parameter_spelling(&unpacked)
+        );
         let decoded = decode_dcs_with_references(
             &profile,
             DcsTemplateKind::Schema,
@@ -1954,7 +2135,7 @@ mod tests {
         .expect("compiled body must decode base-free with the same resolver");
         assert_eq!(
             decoded.documents().last().copied(),
-            Some(expected_area.as_slice())
+            Some(with_source_parameter_spelling(&expected_area).as_slice())
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
@@ -2003,7 +2184,10 @@ mod tests {
             &style_reference_types,
         )
         .expect("re-exported custom-StyleItem source must recompile base-free");
-        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+        assert_eq!(
+            rebuilt.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
     }
 
     /// Genuine-bytes companion to the gate test above: decodes the
@@ -2065,7 +2249,7 @@ mod tests {
     }
 
     #[test]
-    fn area_style_color_reference_seed_order_is_rejected_fail_closed() {
+    fn area_style_color_reference_seed_order_is_kept_as_written() {
         let profile = DcsCodecProfile::fixture();
         let seed = include_bytes!(concat!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/",
@@ -2075,12 +2259,12 @@ mod tests {
         // "hypothesis_only") and orders the appearance items
         // Расшифровка-then-ЦветФона -- the reverse of what
         // native-template.xml (the platform-proven order) actually uses.
-        // The compiler must reject this order, not silently accept or
-        // reorder it.
-        assert!(matches!(
-            compile_dcs(&profile, DcsTemplateKind::Schema, seed),
-            Err(DcsCodecError::UnsupportedSource(_))
-        ));
+        // The writer keeps the seed's order; the export gives it back.
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, seed).unwrap();
+        assert_eq!(
+            export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+            seed.as_slice()
+        );
     }
 
     #[test]
@@ -2122,11 +2306,14 @@ mod tests {
         // minimization, the whole compiled envelope now matches
         // raw-unpacked.bin byte for byte too.
         let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
-        assert_eq!(inflate(&blob).unwrap(), unpacked);
+        assert_eq!(
+            inflate(&blob).unwrap(),
+            with_source_parameter_spelling(&unpacked)
+        );
         let decoded = decode_dcs(&profile, DcsTemplateKind::Schema, &blob).unwrap();
         assert_eq!(
             decoded.documents().last().copied(),
-            Some(expected_area.as_slice())
+            Some(with_source_parameter_spelling(&expected_area).as_slice())
         );
 
         // body -> XML: re-exporting the compiled body must reproduce the
@@ -2154,7 +2341,10 @@ mod tests {
         // property `body -> XML -> body == raw-unpacked` pins for the
         // terminal document).
         let rebuilt = compile_dcs_schema_template_source_documents(&exported).unwrap();
-        assert_eq!(rebuilt.terminal_schema_file(), expected_area);
+        assert_eq!(
+            rebuilt.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
     }
 
     #[test]
@@ -2452,82 +2642,65 @@ mod tests {
         );
     }
 
-    #[test]
-    fn schema_compiler_rejects_every_unowned_settings_child() {
-        // `outputParameters` is intentionally not in this list any more:
-        // this work package (dcs-output-parameters) admits it as a
-        // recognized typed element, so it is no longer "unowned" at the
-        // structural-audit level -- see
-        // `schema_compiler_compile_direction_does_not_yet_gate_output_parameters_cohort`
-        // below for what the compile direction currently does (and does
-        // not) enforce for it.
-        for unknown in [
-            "<dcsset:futureProbe/>",
-            "<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
-        ] {
-            let source = String::from_utf8(SIMPLE_SCHEMA.to_vec()).unwrap().replace(
-                "<dcsset:settings/>",
-                &format!("<dcsset:settings>{unknown}</dcsset:settings>"),
-            );
-            assert!(matches!(
-                compile_dcs(
-                    &DcsCodecProfile::fixture(),
-                    DcsTemplateKind::Schema,
-                    source.as_bytes()
-                ),
-                Err(DcsCodecError::UnsupportedSource(_))
-            ));
-        }
+    fn settings_variant_source(settings_children: &str) -> Vec<u8> {
+        canonical_source(&format!(
+            "\t<settingsVariant>\n\t\t<dcsset:name>Main</dcsset:name>\n\t\t<dcsset:presentation xsi:type=\"xs:string\">Main</dcsset:presentation>\n\t\t<dcsset:settings{{settings}}>\n{settings_children}\n\t\t</dcsset:settings>\n\t</settingsVariant>"
+        ))
     }
 
-    /// KNOWN GAP (out of this work package's scope -- physical adapters get
-    /// test-only additions, never production logic changes): unlike
-    /// selection/filter/order/conditionalAppearance,
-    /// `compile_schema_plain`'s explicit `Unsupported`-outcome checklist has
-    /// no `output_parameters()` arm, so a cohort violation here (here: an
-    /// empty `<dcsset:outputParameters/>`, which the shared `ibcmd-xml`
-    /// codec reports as `Unsupported("outputParameters must contain
-    /// exactly one item")`) is not rejected at compile time -- the pre
-    /// existing blind-passthrough architecture just copies the settings
-    /// document's source bytes into the compiled blob unchanged. Fail-closed
-    /// enforcement for outputParameters is proven and guaranteed on the
-    /// decode/parse direction only (see the `output_parameters_rejects_*`
-    /// tests in crates/ibcmd-xml/src/dcs.rs). This mirrors the same,
-    /// deliberate choice already made for the primary schema's scalar
-    /// parameters in db73e1e ("the compile direction's pre-existing
-    /// primary-schema passthrough is documented, not extended").
+    /// Which settings children a body may carry is no longer an enumerated
+    /// cohort: a child compiles exactly when the exporter reads it back. One
+    /// in the settings namespace the typed cohort does not know is still
+    /// spelled the platform's way and comes back; one in a namespace the
+    /// export cannot spell is refused by the round trip.
     #[test]
-    fn schema_compiler_compile_direction_does_not_yet_gate_output_parameters_cohort() {
-        let source = String::from_utf8(SIMPLE_SCHEMA.to_vec()).unwrap().replace(
-            "<dcsset:settings/>",
-            "<dcsset:settings><dcsset:outputParameters/></dcsset:settings>",
+    fn schema_compiler_admits_an_unowned_settings_child_only_when_it_reads_back() {
+        let profile = DcsCodecProfile::fixture();
+        let known_namespace = settings_variant_source("\t\t\t<dcsset:futureProbe/>");
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &known_namespace).unwrap();
+        assert_eq!(
+            export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+            known_namespace
         );
-        assert!(
+
+        let foreign_namespace = settings_variant_source(
+            "\t\t\t<probe:futureProbe xmlns:probe=\"urn:ibcmd-rs:dcs-probe\"/>",
+        );
+        assert!(matches!(
+            compile_dcs(&profile, DcsTemplateKind::Schema, &foreign_namespace),
+            Err(DcsCodecError::RoundTrip(_))
+        ));
+    }
+
+    /// An empty `outputParameters` is a placeholder storage may carry and the
+    /// export never writes, so a source spelling one cannot come back the
+    /// way it was written and is refused.
+    #[test]
+    fn schema_compiler_refuses_an_empty_output_parameters_the_export_drops() {
+        let source = settings_variant_source("\t\t\t<dcsset:outputParameters/>");
+        assert!(matches!(
             compile_dcs(
                 &DcsCodecProfile::fixture(),
                 DcsTemplateKind::Schema,
-                source.as_bytes()
-            )
-            .is_ok(),
-            "compile direction currently does not gate the outputParameters cohort; \
-             if this now fails, the gap has been closed and this test (and its doc \
-             comment) should be updated to assert rejection instead"
-        );
+                &source
+            ),
+            Err(DcsCodecError::RoundTrip(_))
+        ));
     }
 
+    /// A filter the typed cohort does not describe used to be refused for
+    /// that alone; it compiles now, because the body reads back as written.
     #[test]
-    fn schema_compiler_rejects_filter_outside_platform_authenticated_cohort() {
+    fn schema_compiler_compiles_a_filter_outside_the_typed_cohort() {
         let profile = DcsCodecProfile::fixture();
-        let source = br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="xs:string">Main</dcsset:presentation><dcsset:settings><dcsset:filter><dcsset:viewMode>Normal</dcsset:viewMode></dcsset:filter></dcsset:settings></settingsVariant>
-</DataCompositionSchema>"#;
-
-        assert!(matches!(
-            compile_dcs(&profile, DcsTemplateKind::Schema, source),
-            Err(DcsCodecError::UnsupportedSource(reason))
-                if reason == "DCS filter is outside the platform-authenticated compiler cohort"
-        ));
+        let source = settings_variant_source(
+            "\t\t\t<dcsset:filter>\n\t\t\t\t<dcsset:viewMode>Normal</dcsset:viewMode>\n\t\t\t</dcsset:filter>",
+        );
+        let blob = compile_dcs(&profile, DcsTemplateKind::Schema, &source).unwrap();
+        assert_eq!(
+            export_body(&blob, &BTreeMap::new(), &BTreeMap::new()),
+            source
+        );
     }
 
     #[test]
@@ -2538,7 +2711,7 @@ mod tests {
         assert_eq!(decoded.layout(), DcsBodyLayout::DirectXml);
         assert_eq!(decoded.plaintext(), SIMPLE_APPEARANCE);
 
-        let legacy_direct = deflate_bytes(SIMPLE_SCHEMA).unwrap();
+        let legacy_direct = deflate_bytes(&simple_schema()).unwrap();
         assert!(decode_dcs(&profile, DcsTemplateKind::Schema, &legacy_direct).is_err());
         assert_eq!(
             decode_compatible_dcs(DcsTemplateKind::Schema, &legacy_direct)

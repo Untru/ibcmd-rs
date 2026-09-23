@@ -49,7 +49,7 @@ use crate::cli::{
 };
 use crate::compiler::bodies::template::{
     TemplateKind, TemplateSource, compile_evidenced_template,
-    compile_evidenced_template_with_references,
+    compile_evidenced_template_with_resolvers,
 };
 use crate::compiler::families::assets::{SourceAssetRegistry, SourceAssetRole};
 use crate::compiler::{
@@ -1411,7 +1411,7 @@ fn source_bootstrap_readiness_report(
 ) -> Result<MssqlSourceBootstrapReadinessReport> {
     let mut rows = Vec::new();
     let mut objects = Vec::new();
-    let role_source = MetadataSourceContext::new(source_root.to_path_buf());
+    let source_context = MetadataSourceContext::new(source_root.to_path_buf());
 
     for xml_path in metadata_xmls {
         let xml = fs::read(xml_path)
@@ -1436,7 +1436,7 @@ fn source_bootstrap_readiness_report(
         ));
         rows.extend(metadata_body_bootstrap_rows(
             source_root,
-            &role_source,
+            &source_context,
             xml_path,
             &xml,
             &properties,
@@ -1559,7 +1559,7 @@ fn source_bootstrap_readiness_report(
 
 fn metadata_body_bootstrap_rows(
     source_root: &Path,
-    role_source: &MetadataSourceContext,
+    source_context: &MetadataSourceContext,
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
@@ -1613,6 +1613,7 @@ fn metadata_body_bootstrap_rows(
         )),
         "CommonTemplate" | "Template" => rows.extend(template_bootstrap_rows(
             source_root,
+            source_context,
             xml_path,
             xml,
             properties,
@@ -1748,7 +1749,7 @@ fn metadata_body_bootstrap_rows(
                     format!("failed to read Role rights XML {}", body_path.display())
                 })?;
                 let blockers =
-                    role_rights_base_free_blockers(&xml, Some(role_source)).with_context(|| {
+                    role_rights_base_free_blockers(&xml, Some(source_context)).with_context(|| {
                         format!(
                             "failed to audit Role rights base-free blockers for {}",
                             body_path.display()
@@ -1901,7 +1902,9 @@ fn metadata_module_body_base_free_reason(kind: &str) -> &'static str {
 /// is best-effort evidence gathering for one optional compile-direction
 /// coordinate, not a required precondition for the rest of the bootstrap
 /// scan.
-fn style_reference_types_from_source_root(source_root: &Path) -> BTreeMap<String, String> {
+pub(crate) fn style_reference_types_from_source_root(
+    source_root: &Path,
+) -> BTreeMap<String, String> {
     let mut style_reference_types = BTreeMap::new();
     let Ok(entries) = fs::read_dir(source_root.join("StyleItems")) else {
         return style_reference_types;
@@ -1954,8 +1957,37 @@ fn parse_style_item_root_uuid(xml: &[u8]) -> Option<String> {
     }
 }
 
+/// Compiles one `DataCompositionSchema` template body from its source XML --
+/// the one entry both the loader and the bootstrap audit go through.
+///
+/// With the source tree known, configuration types are stored by `TypeId` and
+/// configuration style items by uuid, as the platform writes them; without it
+/// both stay spelled by name, which reads back the same. Either way the codec
+/// accepts a body only once the exporter's reader gives the source back.
+pub(crate) fn compile_dcs_template_body(
+    bytes: &[u8],
+    source: Option<&MetadataSourceContext>,
+) -> std::result::Result<Vec<u8>, crate::compiler::bodies::template::TemplateCodecError> {
+    match source {
+        Some(source) => {
+            let resolver = |name: &str| source.dcs_generated_type_id(name);
+            compile_evidenced_template_with_resolvers(
+                TemplateKind::DataCompositionSchema,
+                TemplateSource::Bytes(bytes),
+                source.dcs_style_items(),
+                &resolver,
+            )
+        }
+        None => compile_evidenced_template(
+            TemplateKind::DataCompositionSchema,
+            TemplateSource::Bytes(bytes),
+        ),
+    }
+}
+
 fn template_bootstrap_rows(
     source_root: &Path,
+    source_context: &MetadataSourceContext,
     xml_path: &Path,
     xml: &[u8],
     properties: &SimpleMetadataXmlProperties,
@@ -1992,21 +2024,12 @@ fn template_bootstrap_rows(
                     let source = fs::read(&body_path).with_context(|| {
                         format!("failed to read DCS Template body {}", body_path.display())
                     })?;
-                    // A custom-StyleItem style-color reference (see
-                    // `compiler::bodies::dcs::compile_dcs_with_references`)
-                    // needs a uuid -> semantic-name resolver to compile
-                    // base-free. The source tree itself carries that fact:
-                    // each `StyleItems/<Name>.xml` object's root `uuid`
-                    // attribute paired with its own file name (the same
-                    // convention `source::infer_object_hint` already uses
-                    // for this family). Building the map is this adapter's
-                    // job, not the XML codec's.
-                    let style_reference_types = style_reference_types_from_source_root(source_root);
-                    if let Err(error) = compile_evidenced_template_with_references(
-                        kind,
-                        TemplateSource::Bytes(&source),
-                        &style_reference_types,
-                    ) {
+                    // Configuration types and custom style items are stored
+                    // by id; the source tree carries both facts (each
+                    // object's `InternalInfo` and `StyleItems/<Name>.xml`),
+                    // and resolving them is this adapter's job, not the XML
+                    // codec's.
+                    if let Err(error) = compile_dcs_template_body(&source, Some(source_context)) {
                         rows.push(bootstrap_row_report(
                             "metadata_object",
                             &properties.kind,
@@ -4570,7 +4593,7 @@ fn prepare_template_body_row(
             else {
                 return Ok(Vec::new());
             };
-            prepare_raw_template_body_row(body_path, properties, kind)
+            prepare_raw_template_body_row(body_path, properties, kind, source)
         }
         TemplateKind::HtmlDocument => {
             prepare_html_template_body_row(sqlcmd, server, database, xml_path, properties, axes)
@@ -4596,6 +4619,7 @@ fn prepare_raw_template_body_row(
     body_path: PathBuf,
     properties: &SimpleMetadataXmlProperties,
     kind: TemplateKind,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     if !body_path.exists() {
         return Ok(Vec::new());
@@ -4607,13 +4631,17 @@ fn prepare_raw_template_body_row(
             body_path.display()
         )
     })?;
-    let blob =
-        compile_evidenced_template(kind, TemplateSource::Bytes(&bytes)).with_context(|| {
-            format!(
-                "failed to compile base-free {kind} Template body {}",
-                body_path.display()
-            )
-        })?;
+    let compiled = if kind == TemplateKind::DataCompositionSchema {
+        compile_dcs_template_body(&bytes, source)
+    } else {
+        compile_evidenced_template(kind, TemplateSource::Bytes(&bytes))
+    };
+    let blob = compiled.with_context(|| {
+        format!(
+            "failed to compile base-free {kind} Template body {}",
+            body_path.display()
+        )
+    })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -8642,19 +8670,55 @@ mod tests {
 "#
     }
 
-    fn sample_data_composition_template_xml() -> &'static [u8] {
-        // Local/DataSetObject with one xs:string field: the same minimal
-        // shape the evidenced `dcs-filter` corpus proves is admitted by the
-        // live `normalize_data_composition_schema_template_documents_with_profiles`
-        // codec's typed inner-schema parser (a dataSource-only, dataSet-free
-        // schema is outside its admitted cohort shapes).
-        br#"<?xml version="1.0" encoding="UTF-8"?>
-<DataCompositionSchema xmlns="http://v8.1c.ru/8.1/data-composition-system/schema" xmlns:dcsset="http://v8.1c.ru/8.1/data-composition-system/settings" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
-	<dataSource><name>Source1</name><dataSourceType>Local</dataSourceType></dataSource>
-	<dataSet xsi:type="DataSetObject"><name>Rows</name><field xsi:type="DataSetFieldField"><dataPath>Name</dataPath><field>Name</field><valueType><v8:Type>xs:string</v8:Type><v8:StringQualifiers><v8:Length>20</v8:Length><v8:AllowedLength>Variable</v8:AllowedLength></v8:StringQualifiers></valueType></field><dataSource>Source1</dataSource><objectName>Rows</objectName></dataSet>
-	<settingsVariant><dcsset:name>Main</dcsset:name><dcsset:presentation xsi:type="v8:LocalStringType"><v8:item><v8:lang>ru</v8:lang><v8:content>Main</v8:content></v8:item></dcsset:presentation><dcsset:settings><dcsset:item xsi:type="dcsset:StructureItemGroup"><dcsset:order><dcsset:item xsi:type="dcsset:OrderItemAuto"/></dcsset:order><dcsset:selection><dcsset:item xsi:type="dcsset:SelectedItemAuto"/></dcsset:selection></dcsset:item></dcsset:settings></settingsVariant>
-</DataCompositionSchema>
-"#
+    fn sample_data_composition_template_xml() -> Vec<u8> {
+        // Local/DataSetObject with one xs:string field, written the way the
+        // export writes a source document: the loader only accepts a body
+        // the exporter reads back as the file it was compiled from.
+        let lines = [
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>",
+            "<DataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">",
+            "\t<dataSource>",
+            "\t\t<name>Source1</name>",
+            "\t\t<dataSourceType>Local</dataSourceType>",
+            "\t</dataSource>",
+            "\t<dataSet xsi:type=\"DataSetObject\">",
+            "\t\t<name>Rows</name>",
+            "\t\t<field xsi:type=\"DataSetFieldField\">",
+            "\t\t\t<dataPath>Name</dataPath>",
+            "\t\t\t<field>Name</field>",
+            "\t\t\t<valueType>",
+            "\t\t\t\t<v8:Type>xs:string</v8:Type>",
+            "\t\t\t\t<v8:StringQualifiers>",
+            "\t\t\t\t\t<v8:Length>20</v8:Length>",
+            "\t\t\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>",
+            "\t\t\t\t</v8:StringQualifiers>",
+            "\t\t\t</valueType>",
+            "\t\t</field>",
+            "\t\t<dataSource>Source1</dataSource>",
+            "\t\t<objectName>Rows</objectName>",
+            "\t</dataSet>",
+            "\t<settingsVariant>",
+            "\t\t<dcsset:name>Main</dcsset:name>",
+            "\t\t<dcsset:presentation xsi:type=\"v8:LocalStringType\">",
+            "\t\t\t<v8:item>",
+            "\t\t\t\t<v8:lang>ru</v8:lang>",
+            "\t\t\t\t<v8:content>Main</v8:content>",
+            "\t\t\t</v8:item>",
+            "\t\t</dcsset:presentation>",
+            "\t\t<dcsset:settings xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\">",
+            "\t\t\t<dcsset:item xsi:type=\"dcsset:StructureItemGroup\">",
+            "\t\t\t\t<dcsset:order>",
+            "\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:OrderItemAuto\"/>",
+            "\t\t\t\t</dcsset:order>",
+            "\t\t\t\t<dcsset:selection>",
+            "\t\t\t\t\t<dcsset:item xsi:type=\"dcsset:SelectedItemAuto\"/>",
+            "\t\t\t\t</dcsset:selection>",
+            "\t\t\t</dcsset:item>",
+            "\t\t</dcsset:settings>",
+            "\t</settingsVariant>",
+            "</DataCompositionSchema>",
+        ];
+        lines.join("\r\n").into_bytes()
     }
 
     fn sample_style_body_xml() -> &'static [u8] {
@@ -12331,16 +12395,12 @@ mod tests {
 
     /// `template_bootstrap_rows` (the dry-run bootstrap-feasibility route,
     /// distinct from the live-staging `prepare_template_body_row` pipeline)
-    /// has `source_root` in scope, so it builds a custom-StyleItem
-    /// uuid -> semantic-name resolver from the source tree's own
-    /// `StyleItems/<Name>.xml` objects and threads it into
-    /// `compile_evidenced_template_with_references`. Without a matching
-    /// `StyleItems/CorpusAccent.xml` sibling, the DCS bootstrap row stays
-    /// blocked exactly as before this work package; once that sibling
-    /// exists, the same evidenced `dcs-area-style-item-uuid` corpus
-    /// compiles base-free through the bootstrap route too, not just
-    /// through `compiler::bodies::dcs::compile_dcs_with_references`
-    /// directly.
+    /// resolves a custom-StyleItem reference through the source tree's own
+    /// `StyleItems/<Name>.xml` objects, the way the loader does. Without a
+    /// matching `StyleItems/CorpusAccent.xml` sibling the reference is stored
+    /// by name -- a spelling the exporter reads back the same, so the body
+    /// still compiles; once that sibling exists, it is stored by the style
+    /// item's uuid, as the platform stores it.
     #[test]
     fn template_bootstrap_resolves_custom_style_item_reference_from_source_root() {
         let root = std::env::temp_dir().join(format!(
@@ -12372,25 +12432,33 @@ mod tests {
             "AreaProbe",
         );
 
-        // Without a StyleItems/CorpusAccent.xml sibling in source_root, the
-        // custom-StyleItem coordinate has no resolver and the bootstrap row
-        // reports the DCS body as blocked -- unchanged pre-existing
-        // behavior (see `compiler::bodies::dcs` A6 NOT-COMPILABLE
-        // acceptance).
+        // Without a StyleItems/CorpusAccent.xml sibling in source_root the
+        // reference has no uuid to be stored by, so it is stored by name.
         let rows_without_style_item = super::template_bootstrap_rows(
             &root,
+            &MetadataSourceContext::new(root.clone()),
             &template_xml,
             owner,
             &properties,
             "CommonTemplates/AreaProbe",
         )
         .unwrap();
-        assert_eq!(rows_without_style_item.len(), 1);
         assert!(
-            rows_without_style_item[0]
-                .reason
-                .contains("DCS bootstrap is blocked")
+            rows_without_style_item
+                .iter()
+                .any(|row| row.row_kind == "template_dcs_body"
+                    && row.generation == "can_generate_without_base_blob"),
+            "a by-name style reference reads back the same: {rows_without_style_item:?}"
         );
+        let by_name = super::compile_dcs_template_body(
+            &native_template,
+            Some(&MetadataSourceContext::new(root.clone())),
+        )
+        .unwrap();
+        let by_name = crate::compiler::families::native::inflate(&by_name).unwrap();
+        let by_name = String::from_utf8_lossy(&by_name);
+        assert!(by_name.contains(":CorpusAccent</value>"));
+        assert!(!by_name.contains("0:4a9d8536-ff59-4a90-a1cf-646d241dc53c"));
 
         // With the source tree's own StyleItems/<Name>.xml object present
         // (the same genuine bytes the fixture manifest retains as
@@ -12409,12 +12477,22 @@ mod tests {
 
         let rows_with_style_item = super::template_bootstrap_rows(
             &root,
+            &MetadataSourceContext::new(root.clone()),
             &template_xml,
             owner,
             &properties,
             "CommonTemplates/AreaProbe",
         )
         .unwrap();
+        let by_uuid = super::compile_dcs_template_body(
+            &native_template,
+            Some(&MetadataSourceContext::new(root.clone())),
+        )
+        .unwrap();
+        let by_uuid = crate::compiler::families::native::inflate(&by_uuid).unwrap();
+        assert!(
+            String::from_utf8_lossy(&by_uuid).contains("0:4a9d8536-ff59-4a90-a1cf-646d241dc53c")
+        );
         assert!(
             rows_with_style_item
                 .iter()

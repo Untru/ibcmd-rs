@@ -173,6 +173,18 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::AuditDcsTemplateWriter(args) => {
+            let report = ibcmd_rs::dcs_template_audit::audit_dcs_template_writer(
+                &args.root,
+                &args.bodies,
+                &args.dump,
+            )?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::AuditInterfaceWriter(args) => {
             let report = ibcmd_rs::source_audit::audit_interface_writer(
                 &args.root,

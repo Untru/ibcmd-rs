@@ -1,60 +1,33 @@
 //! Evidence-bounded DCS schema-template envelope analysis and Settings binding.
 //!
-//! The schema subtree remains source-owned. This module owns only the
-//! platform-authenticated document roles and the positional association of
-//! external `Settings` documents with direct root `settingsVariant` nodes.
+//! This module owns the platform-authenticated document roles, the positional
+//! association of external `Settings` documents with direct root
+//! `settingsVariant` nodes, and the compile entry points; the source-to-storage
+//! spelling itself lives in [`crate::dcs_storage`].
 
 use ibcmd_core::artifact::ProfileId;
 use ibcmd_schema::{
     DcsSchemaTemplateEnvelopeDocumentRole, bundled_dcs_schema_template_envelope_policy,
 };
 use quick_xml::NsReader;
-use quick_xml::events::{BytesStart, Event};
+use quick_xml::events::Event;
 use quick_xml::name::ResolveResult;
 use std::collections::BTreeMap;
 use std::fmt::{self, Display, Formatter};
 
+use crate::dcs_storage::{DcsStorageTypeResolver, compile_dcs_schema_storage_documents};
 use crate::{
     DcsSettingsDocumentAnalysisError, analyze_dcs_settings_document,
-    emit_dcs_area_template_storage_document_with_references,
-    parse_dcs_area_template_source_document,
     parse_dcs_area_template_storage_document_with_references,
 };
 
 const UTF8_BOM: &[u8] = b"\xef\xbb\xbf";
-const XML_DECLARATION: &[u8] = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n";
-const SCHEMA_FILE_OPEN: &str = "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
 const DCS_AREA_TEMPLATE_NAMESPACE_URI: &str =
     "http://v8.1c.ru/8.1/data-composition-system/area-template";
 const MAX_XML_DEPTH: usize = 256;
 const MAX_XML_EVENTS: usize = 1_000_000;
 const EMPTY_SETTINGS_DOCUMENT: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"/>";
 const SETTINGS_DOCUMENT_OPEN: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
-
-/// The evidenced trivial `dcs-core` base schema (dataSource +
-/// `DataSetObject` "Rows" with fields Name/Amount + calculatedField
-/// DoubleAmount + two totalFields + parameter Caption + settingsVariant
-/// Main) shared byte-for-byte by every `dcs-area-*` compiler_acceptance
-/// corpus's primary document -- confirmed identical across
-/// `dcs-area-template`, `dcs-area-template-appearance`,
-/// `dcs-area-appearance-web-color`, `dcs-area-multi-cell-appearance`,
-/// `dcs-area-style-color-reference`, and `dcs-area-style-item-uuid`'s own
-/// retained `raw-unpacked.bin` (these corpora differ only in their
-/// terminal AreaTemplate document, which is compiled separately). This is
-/// the exact root-renamed, area/settings-detached source text
-/// (`native_schema`) DCS-COMPILE-NAMESPACE-MIN-01 observed for these
-/// corpora; an exact match is the routing gate -- anything else falls
-/// through to blind passthrough unchanged.
-const TRIVIAL_AREA_CHAIN_SCHEMA_SOURCE: &str = "<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\" xmlns:dcscom=\"http://v8.1c.ru/8.1/data-composition-system/common\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:dcsset=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\t<dataSource>\r\n\t\t<name>ИсточникДанных1</name>\r\n\t\t<dataSourceType>Local</dataSourceType>\r\n\t</dataSource>\r\n\t<dataSet xsi:type=\"DataSetObject\">\r\n\t\t<name>Rows</name>\r\n\t\t<field xsi:type=\"DataSetFieldField\">\r\n\t\t\t<dataPath>Name</dataPath>\r\n\t\t\t<field>Name</field>\r\n\t\t\t<valueType>\r\n\t\t\t\t<v8:Type>xs:string</v8:Type>\r\n\t\t\t\t<v8:StringQualifiers>\r\n\t\t\t\t\t<v8:Length>20</v8:Length>\r\n\t\t\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\r\n\t\t\t\t</v8:StringQualifiers>\r\n\t\t\t</valueType>\r\n\t\t</field>\r\n\t\t<field xsi:type=\"DataSetFieldField\">\r\n\t\t\t<dataPath>Amount</dataPath>\r\n\t\t\t<field>Amount</field>\r\n\t\t\t<valueType>\r\n\t\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\t\t\t\t<v8:NumberQualifiers>\r\n\t\t\t\t\t<v8:Digits>15</v8:Digits>\r\n\t\t\t\t\t<v8:FractionDigits>2</v8:FractionDigits>\r\n\t\t\t\t\t<v8:AllowedSign>Any</v8:AllowedSign>\r\n\t\t\t\t</v8:NumberQualifiers>\r\n\t\t\t</valueType>\r\n\t\t</field>\r\n\t\t<dataSource>ИсточникДанных1</dataSource>\r\n\t\t<objectName>Rows</objectName>\r\n\t</dataSet>\r\n\t<calculatedField>\r\n\t\t<dataPath>DoubleAmount</dataPath>\r\n\t\t<expression>Amount * 2</expression>\r\n\t\t<valueType>\r\n\t\t\t<v8:Type>xs:decimal</v8:Type>\r\n\t\t\t<v8:NumberQualifiers>\r\n\t\t\t\t<v8:Digits>15</v8:Digits>\r\n\t\t\t\t<v8:FractionDigits>2</v8:FractionDigits>\r\n\t\t\t\t<v8:AllowedSign>Any</v8:AllowedSign>\r\n\t\t\t</v8:NumberQualifiers>\r\n\t\t</valueType>\r\n\t</calculatedField>\r\n\t<totalField>\r\n\t\t<dataPath>Amount</dataPath>\r\n\t\t<expression>Sum(Amount)</expression>\r\n\t</totalField>\r\n\t<totalField>\r\n\t\t<dataPath>DoubleAmount</dataPath>\r\n\t\t<expression>Sum(DoubleAmount)</expression>\r\n\t</totalField>\r\n\t<parameter>\r\n\t\t<name>Caption</name>\r\n\t\t<title xsi:type=\"v8:LocalStringType\">\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>Caption</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</title>\r\n\t\t<valueType>\r\n\t\t\t<v8:Type>xs:string</v8:Type>\r\n\t\t\t<v8:StringQualifiers>\r\n\t\t\t\t<v8:Length>40</v8:Length>\r\n\t\t\t\t<v8:AllowedLength>Variable</v8:AllowedLength>\r\n\t\t\t</v8:StringQualifiers>\r\n\t\t</valueType>\r\n\t\t<value xsi:type=\"xs:string\">DCS corpus</value>\r\n\t\t<useRestriction>false</useRestriction>\r\n\t</parameter>\r\n\t<settingsVariant>\r\n\t\t<dcsset:name>Main</dcsset:name>\r\n\t\t<dcsset:presentation xsi:type=\"v8:LocalStringType\">\r\n\t\t\t<v8:item>\r\n\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t<v8:content>Main</v8:content>\r\n\t\t\t</v8:item>\r\n\t\t</dcsset:presentation>\r\n\t\t\r\n\t</settingsVariant>\r\n</dataCompositionSchema>";
-
-/// The evidenced minimized platform storage form of
-/// [`TRIVIAL_AREA_CHAIN_SCHEMA_SOURCE`], byte-identical to every
-/// `dcs-area-*` corpus's retained primary document (point-of-use namespace
-/// declarations: `Type`/`StringQualifiers`/`NumberQualifiers` get their own
-/// bare default-namespace override, and `LocalStringType` value elements
-/// get a local `d4p1:` prefix on themselves and their `item`/`lang`/
-/// `content` children, matching A6-BODY-DIFF-01's evidenced pattern).
-const TRIVIAL_AREA_CHAIN_SCHEMA_STORAGE: &str = "<SchemaFile xmlns=\"\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">\r\n\t<dataCompositionSchema xmlns=\"http://v8.1c.ru/8.1/data-composition-system/schema\">\r\n\t\t<dataSource>\r\n\t\t\t<name>ИсточникДанных1</name>\r\n\t\t\t<dataSourceType>Local</dataSourceType>\r\n\t\t</dataSource>\r\n\t\t<dataSet xsi:type=\"DataSetObject\">\r\n\t\t\t<name>Rows</name>\r\n\t\t\t<field xsi:type=\"DataSetFieldField\">\r\n\t\t\t\t<dataPath>Name</dataPath>\r\n\t\t\t\t<field>Name</field>\r\n\t\t\t\t<valueType>\r\n\t\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\r\n\t\t\t\t\t<StringQualifiers xmlns=\"http://v8.1c.ru/8.1/data/core\">\r\n\t\t\t\t\t\t<Length>20</Length>\r\n\t\t\t\t\t\t<AllowedLength>Variable</AllowedLength>\r\n\t\t\t\t\t</StringQualifiers>\r\n\t\t\t\t</valueType>\r\n\t\t\t</field>\r\n\t\t\t<field xsi:type=\"DataSetFieldField\">\r\n\t\t\t\t<dataPath>Amount</dataPath>\r\n\t\t\t\t<field>Amount</field>\r\n\t\t\t\t<valueType>\r\n\t\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:decimal</Type>\r\n\t\t\t\t\t<NumberQualifiers xmlns=\"http://v8.1c.ru/8.1/data/core\">\r\n\t\t\t\t\t\t<Digits>15</Digits>\r\n\t\t\t\t\t\t<FractionDigits>2</FractionDigits>\r\n\t\t\t\t\t\t<AllowedSign>Any</AllowedSign>\r\n\t\t\t\t\t</NumberQualifiers>\r\n\t\t\t\t</valueType>\r\n\t\t\t</field>\r\n\t\t\t<dataSource>ИсточникДанных1</dataSource>\r\n\t\t\t<objectName>Rows</objectName>\r\n\t\t</dataSet>\r\n\t\t<calculatedField>\r\n\t\t\t<dataPath>DoubleAmount</dataPath>\r\n\t\t\t<expression>Amount * 2</expression>\r\n\t\t\t<valueType>\r\n\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:decimal</Type>\r\n\t\t\t\t<NumberQualifiers xmlns=\"http://v8.1c.ru/8.1/data/core\">\r\n\t\t\t\t\t<Digits>15</Digits>\r\n\t\t\t\t\t<FractionDigits>2</FractionDigits>\r\n\t\t\t\t\t<AllowedSign>Any</AllowedSign>\r\n\t\t\t\t</NumberQualifiers>\r\n\t\t\t</valueType>\r\n\t\t</calculatedField>\r\n\t\t<totalField>\r\n\t\t\t<dataPath>Amount</dataPath>\r\n\t\t\t<expression>Sum(Amount)</expression>\r\n\t\t</totalField>\r\n\t\t<totalField>\r\n\t\t\t<dataPath>DoubleAmount</dataPath>\r\n\t\t\t<expression>Sum(DoubleAmount)</expression>\r\n\t\t</totalField>\r\n\t\t<parameter>\r\n\t\t\t<name>Caption</name>\r\n\t\t\t<title xmlns:d4p1=\"http://v8.1c.ru/8.1/data/core\" xsi:type=\"d4p1:LocalStringType\">\r\n\t\t\t\t<d4p1:item>\r\n\t\t\t\t\t<d4p1:lang>ru</d4p1:lang>\r\n\t\t\t\t\t<d4p1:content>Caption</d4p1:content>\r\n\t\t\t\t</d4p1:item>\r\n\t\t\t</title>\r\n\t\t\t<valueType>\r\n\t\t\t\t<Type xmlns=\"http://v8.1c.ru/8.1/data/core\">xs:string</Type>\r\n\t\t\t\t<StringQualifiers xmlns=\"http://v8.1c.ru/8.1/data/core\">\r\n\t\t\t\t\t<Length>40</Length>\r\n\t\t\t\t\t<AllowedLength>Variable</AllowedLength>\r\n\t\t\t\t</StringQualifiers>\r\n\t\t\t</valueType>\r\n\t\t\t<value xsi:type=\"xs:string\">DCS corpus</value>\r\n\t\t\t<useRestriction>false</useRestriction>\r\n\t\t</parameter>\r\n\t\t<settingsVariant>\r\n\t\t\t<name xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\">Main</name>\r\n\t\t\t<presentation xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:d4p1=\"http://v8.1c.ru/8.1/data/core\" xsi:type=\"d4p1:LocalStringType\">\r\n\t\t\t\t<d4p1:item>\r\n\t\t\t\t\t<d4p1:lang>ru</d4p1:lang>\r\n\t\t\t\t\t<d4p1:content>Main</d4p1:content>\r\n\t\t\t\t</d4p1:item>\r\n\t\t\t</presentation>\r\n\t\t</settingsVariant>\r\n\t</dataCompositionSchema>\r\n</SchemaFile>";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DcsSchemaTemplateDocuments<'a> {
@@ -113,6 +86,18 @@ pub struct DcsSchemaTemplateOwnedDocuments {
 }
 
 impl DcsSchemaTemplateOwnedDocuments {
+    pub(crate) fn from_parts(
+        primary_schema_file: Vec<u8>,
+        settings: Vec<Vec<u8>>,
+        terminal_schema_file: Vec<u8>,
+    ) -> Self {
+        Self {
+            primary_schema_file,
+            settings,
+            terminal_schema_file,
+        }
+    }
+
     pub fn primary_schema_file(&self) -> &[u8] {
         &self.primary_schema_file
     }
@@ -342,232 +327,56 @@ pub fn detach_dcs_settings_from_source_variants(
     })
 }
 
-/// Converts the attested source wrapper into native XML document roles. The
-/// schema subtree stays source-owned: this operation only detaches Settings,
-/// applies the evidenced root-case/wrapper mapping, and creates the evidenced
-/// empty terminal SchemaFile.
+/// Compiles a source `DataCompositionSchema` document into the native XML
+/// document roles: the primary `SchemaFile`, one `Settings` document per root
+/// `settingsVariant`, and the terminal `SchemaFile` carrying the area
+/// templates. See [`crate::dcs_storage`] for the platform writer rules.
+///
+/// Configuration types stay spelled by name: without a configuration to
+/// resolve them against, that is the one storage spelling this has.
 pub fn compile_dcs_schema_template_source_documents(
     source: &[u8],
 ) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
     compile_dcs_schema_template_source_documents_with_references(source, &BTreeMap::new())
 }
 
-/// Compiles the attested source wrapper into native XML document roles
-/// exactly like [`compile_dcs_schema_template_source_documents`], but also
-/// resolves a custom-`StyleItem` style-color reference's semantic name back
-/// to its configuration-local storage uuid via `reference_types` when the
-/// terminal AreaTemplate's `back_color_style_reference` is in that form
-/// (see [`crate::emit_dcs_area_template_storage_document_with_references`]).
-/// The standard `Named` style-reference form and every other coordinate are
-/// unaffected: an empty map behaves identically to the plain function.
+/// Compiles exactly like [`compile_dcs_schema_template_source_documents`],
+/// but also resolves a custom-`StyleItem` style reference's semantic name
+/// back to its configuration-local storage uuid via `reference_types`
+/// (uuid -> name, searched by value). An empty map behaves identically to the
+/// plain function.
 pub fn compile_dcs_schema_template_source_documents_with_references(
     source: &[u8],
     reference_types: &BTreeMap<String, String>,
 ) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
-    let policy = bundled_dcs_schema_template_envelope_policy()
-        .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
-    let text = std::str::from_utf8(source)
-        .map_err(|_| DcsSchemaTemplateError::Malformed("DCS source is not UTF-8".to_string()))?;
-    let source_body = strip_source_document_shell(text)?;
-    if !source_body.starts_with("<DataCompositionSchema") {
-        return Err(DcsSchemaTemplateError::UnsupportedSource(
-            "prefixed or indirect DataCompositionSchema roots are outside the attested compiler cohort",
-        ));
-    }
-    let source_profile = ProfileId::parse("source:designer-xml-2.20")
-        .map_err(|error| DcsSchemaTemplateError::InvalidEvidence(error.to_string()))?;
-    let area = parse_dcs_area_template_source_document(
-        source_body.as_bytes(),
-        source_profile,
-        "dcs-template:source-area-template",
+    let unresolved = |_: &str| None::<String>;
+    compile_dcs_schema_template_source_documents_with_resolvers(
+        source,
+        reference_types,
+        &unresolved,
     )
-    .map_err(|_| {
-        DcsSchemaTemplateError::UnsupportedSource(
-            "source AreaTemplate is outside the evidenced coordinate",
-        )
-    })?;
-    let schema_without_area = if area.is_some() {
-        remove_direct_area_template(source_body, policy.schema_namespace_uri())?
-    } else {
-        source_body.to_string()
-    };
-    let detached = detach_dcs_settings_from_source_variants(&schema_without_area)?;
-    let mut native_schema = detached.schema_without_settings;
-    rename_attested_source_schema_root(&mut native_schema)?;
+}
 
-    let primary = if native_schema == TRIVIAL_AREA_CHAIN_SCHEMA_SOURCE {
-        xml_document(TRIVIAL_AREA_CHAIN_SCHEMA_STORAGE)
-    } else {
-        xml_document(&format!(
-            "{SCHEMA_FILE_OPEN}\r\n{}\r\n</SchemaFile>",
-            native_schema.trim_end()
-        ))
-    };
-    let settings = detached
-        .settings_documents
+/// Compiles like [`compile_dcs_schema_template_source_documents_with_references`]
+/// and also resolves configuration types to their storage `TypeId` through
+/// `types`, which is how the current platform stores them.
+pub fn compile_dcs_schema_template_source_documents_with_resolvers(
+    source: &[u8],
+    reference_types: &BTreeMap<String, String>,
+    types: &dyn DcsStorageTypeResolver,
+) -> Result<DcsSchemaTemplateOwnedDocuments, DcsSchemaTemplateError> {
+    let style_items = reference_types
         .iter()
-        .map(|document| {
-            let minimized = minimize_dcs_settings_document(document);
-            xml_document(minimized.as_deref().unwrap_or(document))
-        })
-        .collect::<Vec<_>>();
-    let terminal = match area {
-        Some(area) => {
-            emit_dcs_area_template_storage_document_with_references(&area, reference_types)
-                .map_err(|_| {
-                    DcsSchemaTemplateError::UnsupportedSource(
-                        "source AreaTemplate is outside the evidenced storage coordinate",
-                    )
-                })?
-        }
-        None => xml_document(&format!(
-            "{SCHEMA_FILE_OPEN}\r\n\t<dataCompositionSchema xmlns=\"{}\"/>\r\n</SchemaFile>",
-            policy.schema_namespace_uri()
-        )),
-    };
-
-    let borrowed = std::iter::once(primary.as_slice())
-        .chain(settings.iter().map(Vec::as_slice))
-        .chain(std::iter::once(terminal.as_slice()))
+        .map(|(uuid, name)| (name.clone(), uuid.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let documents =
+        compile_dcs_schema_storage_documents(source, &style_items, types)?.into_documents();
+    let borrowed = std::iter::once(documents.primary_schema_file())
+        .chain(documents.settings().iter().map(Vec::as_slice))
+        .chain(std::iter::once(documents.terminal_schema_file()))
         .collect::<Vec<_>>();
     analyze_dcs_schema_template_documents_with_references(&borrowed, reference_types)?;
-    Ok(DcsSchemaTemplateOwnedDocuments {
-        primary_schema_file: primary,
-        settings,
-        terminal_schema_file: terminal,
-    })
-}
-
-fn remove_direct_area_template(
-    source: &str,
-    schema_namespace: &str,
-) -> Result<String, DcsSchemaTemplateError> {
-    let mut reader = NsReader::from_str(source);
-    reader.config_mut().trim_text(false);
-    let mut depth = 0usize;
-    let mut active = None::<usize>;
-    let mut capture = None::<(usize, usize)>;
-    loop {
-        let event = reader
-            .read_event()
-            .map_err(|error| DcsSchemaTemplateError::Malformed(error.to_string()))?;
-        let end = usize::try_from(reader.buffer_position())
-            .map_err(|_| DcsSchemaTemplateError::Malformed("XML offset overflow".to_string()))?;
-        match event {
-            Event::Start(event) => {
-                let (namespace, local) = reader.resolve_element(event.name());
-                let namespace = namespace_bytes(&namespace)?;
-                if depth == 1
-                    && namespace == Some(schema_namespace.as_bytes())
-                    && local.as_ref() == b"template"
-                {
-                    if active.is_some() || capture.is_some() {
-                        return Err(DcsSchemaTemplateError::UnsupportedSource(
-                            "more than one direct AreaTemplate is unsupported",
-                        ));
-                    }
-                    active = Some(source_event_start(source, end)?);
-                }
-                depth += 1;
-            }
-            Event::Empty(event) => {
-                let (namespace, local) = reader.resolve_element(event.name());
-                if depth == 1
-                    && namespace_bytes(&namespace)? == Some(schema_namespace.as_bytes())
-                    && local.as_ref() == b"template"
-                {
-                    return Err(DcsSchemaTemplateError::UnsupportedSource(
-                        "empty AreaTemplate is outside the evidenced coordinate",
-                    ));
-                }
-            }
-            Event::End(event) => {
-                depth = depth.checked_sub(1).ok_or_else(|| {
-                    DcsSchemaTemplateError::Malformed("XML depth underflow".to_string())
-                })?;
-                let (namespace, local) = reader.resolve_element(event.name());
-                if depth == 1
-                    && namespace_bytes(&namespace)? == Some(schema_namespace.as_bytes())
-                    && local.as_ref() == b"template"
-                {
-                    let start = active.take().ok_or_else(|| {
-                        DcsSchemaTemplateError::Malformed(
-                            "AreaTemplate closing element has no opener".to_string(),
-                        )
-                    })?;
-                    capture = Some((expand_indented_line_start(source, start), end));
-                }
-            }
-            Event::Eof => break,
-            _ => {}
-        }
-    }
-    let (start, end) = capture.ok_or(DcsSchemaTemplateError::UnsupportedSource(
-        "direct AreaTemplate is absent",
-    ))?;
-    let mut output = source.to_string();
-    output.replace_range(start..end, "");
-    Ok(output)
-}
-
-fn expand_indented_line_start(source: &str, start: usize) -> usize {
-    let line_start = source[..start].rfind('\n').map_or(0, |offset| offset + 1);
-    if source[line_start..start]
-        .bytes()
-        .all(|byte| matches!(byte, b' ' | b'\t'))
-    {
-        line_start.saturating_sub(if source[..line_start].ends_with("\r\n") {
-            2
-        } else {
-            1
-        })
-    } else {
-        start
-    }
-}
-
-fn strip_source_document_shell(source: &str) -> Result<&str, DcsSchemaTemplateError> {
-    let mut body = source.trim_start_matches('\u{feff}').trim_start();
-    if let Some(after_decl) = body.strip_prefix("<?xml") {
-        let end = after_decl.find("?>").ok_or_else(|| {
-            DcsSchemaTemplateError::Malformed("DCS XML declaration is not closed".to_string())
-        })?;
-        body = after_decl[end + 2..].trim_start_matches(['\r', '\n', ' ', '\t']);
-    }
-    Ok(body)
-}
-
-fn rename_attested_source_schema_root(xml: &mut String) -> Result<(), DcsSchemaTemplateError> {
-    const SOURCE_ROOT: &str = "DataCompositionSchema";
-    const SOURCE_CLOSE: &str = "</DataCompositionSchema>";
-    let opening = xml
-        .strip_prefix('<')
-        .is_some_and(|body| body.starts_with(SOURCE_ROOT));
-    let trimmed_len = xml.trim_end_matches(['\r', '\n', '\t', ' ']).len();
-    let closing = trimmed_len.checked_sub(SOURCE_CLOSE.len());
-    if !opening
-        || closing.is_none()
-        || xml.get(closing.unwrap_or_default()..trimmed_len) != Some(SOURCE_CLOSE)
-    {
-        return Err(DcsSchemaTemplateError::UnsupportedSource(
-            "source DataCompositionSchema root spelling is outside the attested compiler cohort",
-        ));
-    }
-    xml.replace_range(1..1 + SOURCE_ROOT.len(), "dataCompositionSchema");
-    let closing = closing.expect("closing offset is checked");
-    xml.replace_range(
-        closing + 2..closing + 2 + SOURCE_ROOT.len(),
-        "dataCompositionSchema",
-    );
-    Ok(())
-}
-
-fn xml_document(body: &str) -> Vec<u8> {
-    let mut document = Vec::with_capacity(UTF8_BOM.len() + XML_DECLARATION.len() + body.len());
-    document.extend_from_slice(UTF8_BOM);
-    document.extend_from_slice(XML_DECLARATION);
-    document.extend_from_slice(body.as_bytes());
-    document
+    Ok(documents)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -785,223 +594,6 @@ fn namespace_bytes<'a>(
             "XML uses an unresolved namespace prefix".to_string(),
         )),
     }
-}
-
-const SETTINGS_MINIMIZE_NS: &[u8] = b"http://v8.1c.ru/8.1/data-composition-system/settings";
-const MINIMIZED_SETTINGS_DOCUMENT_OPEN: &str = "<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" xmlns:web=\"http://v8.1c.ru/8.1/data/ui/colors/web\" xmlns:win=\"http://v8.1c.ru/8.1/data/ui/colors/windows\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\">";
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum SettingsMinNode {
-    Element {
-        local: String,
-        xsi_type: Option<String>,
-        children: Vec<SettingsMinNode>,
-    },
-    Text(String),
-}
-
-/// Structurally rewrites a detached, blind-passthrough-spliced Settings
-/// document (which still carries the source's own hoisted `dcsset:` prefix
-/// and the source's original embedded indentation depth) into the
-/// evidenced platform storage form: the redundant `xmlns:dcsset` alias
-/// dropped, every `dcsset:`-prefixed element name and `xsi:type` value
-/// reduced to its bare local name (the lone remaining default `xmlns`
-/// already covers the settings namespace), and freed-standing content
-/// reindented to a depth-1-relative-to-`<Settings>` baseline -- confirmed
-/// against the retained `raw-unpacked.bin` bytes of every settings-bearing
-/// compiler_acceptance corpus available at DCS-COMPILE-NAMESPACE-MIN-01
-/// time (`dcs-typeid-reference`, `dcs-link-parameter`,
-/// `dcs-link-expressions`, `dcs-query-union-link`,
-/// `dcs-query-union-link-typeid`, `dcs-parameter-scalar-types`, and every
-/// `dcs-area-*` cohort). Fails closed (returns `None`, leaving the
-/// caller's blind-passthrough document untouched) the moment content uses
-/// any namespace other than the settings namespace itself (e.g. a style or
-/// v8-core reference embedded in settings, which is not evidenced for this
-/// document role) or any structural shape this narrow rewrite does not
-/// recognize -- this is deliberately not a general namespace minimizer.
-fn minimize_dcs_settings_document(document: &str) -> Option<String> {
-    let mut reader = NsReader::from_str(document);
-    reader.config_mut().trim_text(true);
-    let root = parse_settings_min_tree(&mut reader).ok()?;
-    let SettingsMinNode::Element {
-        local, children, ..
-    } = &root
-    else {
-        return None;
-    };
-    if local != "Settings" {
-        return None;
-    }
-    let mut out = String::from(MINIMIZED_SETTINGS_DOCUMENT_OPEN);
-    for child in children {
-        emit_settings_min_node(&mut out, 1, child);
-    }
-    out.push_str("\r\n</Settings>");
-    Some(out)
-}
-
-fn parse_settings_min_tree(reader: &mut NsReader<&[u8]>) -> Result<SettingsMinNode, ()> {
-    let mut stack: Vec<(String, Option<String>, Vec<SettingsMinNode>)> = Vec::new();
-    let mut root: Option<SettingsMinNode> = None;
-    let mut buffer = Vec::new();
-    loop {
-        let event = reader.read_event_into(&mut buffer).map_err(|_| ())?;
-        match event {
-            Event::Start(start) => {
-                let (local, xsi_type) = resolve_settings_min_start(reader, &start)?;
-                stack.push((local, xsi_type, Vec::new()));
-            }
-            Event::Empty(start) => {
-                let (local, xsi_type) = resolve_settings_min_start(reader, &start)?;
-                let node = SettingsMinNode::Element {
-                    local,
-                    xsi_type,
-                    children: Vec::new(),
-                };
-                if let Some((_, _, children)) = stack.last_mut() {
-                    children.push(node);
-                } else if root.is_none() {
-                    root = Some(node);
-                } else {
-                    return Err(());
-                }
-            }
-            Event::Text(text) => {
-                let text = text.xml_content().map_err(|_| ())?.into_owned();
-                if !text.trim().is_empty() {
-                    if let Some((_, _, children)) = stack.last_mut() {
-                        children.push(SettingsMinNode::Text(text));
-                    } else {
-                        return Err(());
-                    }
-                }
-            }
-            Event::End(_) => {
-                let (local, xsi_type, children) = stack.pop().ok_or(())?;
-                let node = SettingsMinNode::Element {
-                    local,
-                    xsi_type,
-                    children,
-                };
-                if let Some((_, _, parent_children)) = stack.last_mut() {
-                    parent_children.push(node);
-                } else if root.is_none() {
-                    root = Some(node);
-                } else {
-                    return Err(());
-                }
-            }
-            Event::Eof => break,
-            Event::Comment(_) | Event::CData(_) | Event::PI(_) | Event::DocType(_) => {
-                return Err(());
-            }
-            Event::GeneralRef(_) => return Err(()),
-            Event::Decl(_) => {}
-        }
-        buffer.clear();
-    }
-    if !stack.is_empty() {
-        return Err(());
-    }
-    root.ok_or(())
-}
-
-fn resolve_settings_min_start(
-    reader: &NsReader<&[u8]>,
-    start: &BytesStart<'_>,
-) -> Result<(String, Option<String>), ()> {
-    let (namespace, local) = reader.resolve_element(start.name());
-    if namespace_bytes(&namespace).map_err(|_| ())? != Some(SETTINGS_MINIMIZE_NS) {
-        return Err(());
-    }
-    let local = String::from_utf8(local.as_ref().to_vec()).map_err(|_| ())?;
-    let mut xsi_type = None;
-    for attribute in start.attributes() {
-        let attribute = attribute.map_err(|_| ())?;
-        let raw = attribute.key.as_ref();
-        if raw == b"xmlns" || raw.starts_with(b"xmlns:") {
-            continue;
-        }
-        let (attr_namespace, attr_local) = reader.resolve_attribute(attribute.key);
-        if namespace_bytes(&attr_namespace).map_err(|_| ())?
-            == Some(b"http://www.w3.org/2001/XMLSchema-instance")
-            && attr_local.as_ref() == b"type"
-        {
-            let value = attribute.unescape_value().map_err(|_| ())?;
-            let local_value = value.split_once(':').map_or(value.as_ref(), |(_, l)| l);
-            // Resolve the xsi:type value's own qname (not just its
-            // prefix) the same way an element name resolves: quick_xml's
-            // `resolve` splits `prefix:local` internally, so the full
-            // value must be passed through, not just the prefix bytes
-            // (passing the bare prefix alone is parsed as an unprefixed
-            // *local* name and silently falls back to the default
-            // namespace, masking any non-settings prefix).
-            let (resolved, _) = reader.resolve(quick_xml::name::QName(value.as_bytes()), false);
-            if namespace_bytes(&resolved).map_err(|_| ())? != Some(SETTINGS_MINIMIZE_NS) {
-                return Err(());
-            }
-            xsi_type = Some(local_value.to_string());
-        } else {
-            // Any attribute other than xsi:type on a settings-namespace
-            // element is outside this narrow rewrite's evidenced shape.
-            return Err(());
-        }
-    }
-    Ok((local, xsi_type))
-}
-
-fn emit_settings_min_node(out: &mut String, depth: usize, node: &SettingsMinNode) {
-    let SettingsMinNode::Element {
-        local,
-        xsi_type,
-        children,
-    } = node
-    else {
-        return;
-    };
-    let open_tag = match xsi_type {
-        Some(xsi_type) => format!("<{local} xsi:type=\"{xsi_type}\">"),
-        None => format!("<{local}>"),
-    };
-    match children.as_slice() {
-        [] => {
-            let self_closed = match xsi_type {
-                Some(xsi_type) => format!("<{local} xsi:type=\"{xsi_type}\"/>"),
-                None => format!("<{local}/>"),
-            };
-            settings_min_line(out, depth, &self_closed);
-        }
-        [SettingsMinNode::Text(text)] => {
-            settings_min_line(
-                out,
-                depth,
-                &format!("{open_tag}{}</{local}>", settings_min_escape(text)),
-            );
-        }
-        _ => {
-            settings_min_line(out, depth, &open_tag);
-            for child in children {
-                emit_settings_min_node(out, depth + 1, child);
-            }
-            settings_min_line(out, depth, &format!("</{local}>"));
-        }
-    }
-}
-
-fn settings_min_line(out: &mut String, depth: usize, value: &str) {
-    out.push_str("\r\n");
-    for _ in 0..depth {
-        out.push('\t');
-    }
-    out.push_str(value);
-}
-
-fn settings_min_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 fn inspect_schema_file(
@@ -1497,7 +1089,31 @@ mod tests {
 
         let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
         assert_eq!(documents.settings().len(), 1);
-        assert_eq!(documents.terminal_schema_file(), expected_area);
+        assert_eq!(
+            documents.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
+    }
+
+    /// The platform's XML load stored two of these cohorts' appearance
+    /// parameters under their English names (`Details`, `TextColor`) while
+    /// its export -- and so the source -- spells them `Расшифровка` and
+    /// `ЦветТекста`; the corpus-sized cohorts (БСП, ERP УХ) store the Russian
+    /// spelling their source carries. The source cannot say which spelling a
+    /// load chose, so the writer keeps the source's, and the rest of the side
+    /// table is the platform's byte for byte.
+    fn with_source_parameter_spelling(document: &[u8]) -> Vec<u8> {
+        String::from_utf8(document.to_vec())
+            .unwrap()
+            .replace(
+                "<parameter>Details</parameter>",
+                "<parameter>Расшифровка</parameter>",
+            )
+            .replace(
+                "<parameter>TextColor</parameter>",
+                "<parameter>ЦветТекста</parameter>",
+            )
+            .into_bytes()
     }
 
     #[test]
@@ -1521,7 +1137,10 @@ mod tests {
 
         let documents = compile_dcs_schema_template_source_documents(&source).unwrap();
         assert_eq!(documents.settings().len(), 1);
-        assert_eq!(documents.terminal_schema_file(), expected_area);
+        assert_eq!(
+            documents.terminal_schema_file(),
+            with_source_parameter_spelling(&expected_area)
+        );
     }
 
     #[test]

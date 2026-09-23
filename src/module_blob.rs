@@ -1092,6 +1092,12 @@ pub struct MetadataSourceContext {
     /// What the interface writers resolve more than once: a metadata file's
     /// class and uuid, an owner's declared commands.
     interface_memo: Arc<Mutex<interface_assets::InterfaceResolutionMemo>>,
+    /// Generated-type `TypeId`s a data-composition schema asked for, by type
+    /// name, memoised hit and miss alike: a report names the same catalog
+    /// from many fields and a tree has many reports.
+    generated_type_ids: Arc<Mutex<BTreeMap<String, Option<String>>>>,
+    /// `StyleItems/*.xml`: uuid -> name, read once.
+    style_items: Arc<std::sync::OnceLock<BTreeMap<String, String>>>,
 }
 
 impl MetadataSourceContext {
@@ -1103,12 +1109,42 @@ impl MetadataSourceContext {
             interface_memo: Arc::new(Mutex::new(
                 interface_assets::InterfaceResolutionMemo::default(),
             )),
+            generated_type_ids: Arc::new(Mutex::new(BTreeMap::new())),
+            style_items: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
     /// The resolver the base-free role rights writer looks names up with.
     pub fn role_rights_source(&self) -> &SourceTreeRoleRightsSource {
         &self.role_rights_source
+    }
+
+    /// The storage `TypeId` of a configuration generated type named the way a
+    /// data-composition schema names it (`CatalogRef.X`, `Characteristic.X`),
+    /// read from the owning object's `InternalInfo`. `None` when the tree has
+    /// no such object or type.
+    pub(crate) fn dcs_generated_type_id(&self, name: &str) -> Option<String> {
+        if let Ok(cache) = self.generated_type_ids.lock()
+            && let Some(found) = cache.get(name)
+        {
+            return found.clone();
+        }
+        let resolved = if name.starts_with("DefinedType.") {
+            None
+        } else {
+            self.resolve_metadata_type_id(name).ok()
+        };
+        if let Ok(mut cache) = self.generated_type_ids.lock() {
+            cache.insert(name.to_string(), resolved.clone());
+        }
+        resolved
+    }
+
+    /// The tree's configuration style items: lowercase uuid -> name. A file
+    /// that does not parse contributes nothing rather than failing the scan.
+    pub(crate) fn dcs_style_items(&self) -> &BTreeMap<String, String> {
+        self.style_items
+            .get_or_init(|| crate::mssql::style_reference_types_from_source_root(&self.source_root))
     }
 
     /// One metadata object of the source tree, by `"<Class>.<Name>"`.

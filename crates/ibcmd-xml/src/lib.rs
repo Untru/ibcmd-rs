@@ -4,6 +4,7 @@
 
 pub mod dcs;
 pub mod dcs_schema;
+pub mod dcs_storage;
 pub mod dcs_template;
 mod dialect;
 mod form_choice_parameters;
@@ -53,12 +54,17 @@ pub use dcs_schema::{
     rewrite_dcs_primary_schema_storage_document,
     rewrite_dcs_terminal_area_template_storage_fragment,
 };
+pub use dcs_storage::{
+    DcsStorageDocuments, DcsStorageTypeResolver, DcsStorageTypeSpelling,
+    compile_dcs_schema_storage_documents,
+};
 pub use dcs_template::{
     DcsSchemaTemplateDocuments, DcsSchemaTemplateError, DcsSchemaTemplateOwnedDocuments,
     DetachedDcsSchemaTemplateSource, analyze_dcs_schema_template_documents,
     analyze_dcs_schema_template_documents_with_references, bind_dcs_settings_to_source_variants,
     compile_dcs_schema_template_source_documents,
     compile_dcs_schema_template_source_documents_with_references,
+    compile_dcs_schema_template_source_documents_with_resolvers,
     detach_dcs_settings_from_source_variants,
 };
 pub use dialect::{
