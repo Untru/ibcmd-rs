@@ -49,6 +49,10 @@ pub enum Commands {
     AuditFormBodyBlockers(AuditFormBodyBlockersArgs),
     /// Measure the native form-body writer against the bodies the platform stored.
     AuditNativeFormWriter(AuditNativeFormWriterArgs),
+    /// Measure the base-free role rights writer: round trip through the
+    /// exporter and parity with the rows the platform stored.
+    #[command(hide = true)]
+    AuditRoleRightsWriter(AuditRoleRightsWriterArgs),
     /// Build a load plan by comparing manifests.
     Plan(PlanArgs),
     /// Compare two 1C XML source trees by path and content hash.
@@ -933,6 +937,18 @@ pub struct AuditFormBodyBlockersArgs {
     /// Root folder with 1C XML sources.
     pub root: PathBuf,
     /// Optional JSON output file. Prints to stdout when omitted.
+    #[arg(short, long)]
+    pub output: Option<PathBuf>,
+}
+
+#[derive(Debug, Args)]
+pub struct AuditRoleRightsWriterArgs {
+    /// Root folder with 1C XML sources.
+    pub root: PathBuf,
+    /// Folder with the inflated Config rows of the same database
+    /// (`<role uuid>.0__part0.txt`).
+    pub inflated: PathBuf,
+    /// Optional JSON output file; a one-line summary is printed instead.
     #[arg(short, long)]
     pub output: Option<PathBuf>,
 }

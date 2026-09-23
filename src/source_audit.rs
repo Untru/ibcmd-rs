@@ -1841,6 +1841,393 @@ fn count_form_item_asset_files(path: &Path) -> Result<usize> {
     Ok(count)
 }
 
+/// What the base-free role rights writer does with every role of a source
+/// tree, measured two ways against the database the tree was exported from:
+/// the **round trip** (the exporter reads our row back into exactly the
+/// native `Rights.xml`) and **digest parity** (our plain text equals the row
+/// the platform stored).
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterReport {
+    pub root: PathBuf,
+    pub inflated: PathBuf,
+    pub roles: usize,
+    pub without_rights_xml: usize,
+    pub compiled: usize,
+    /// Refusals by class, and every refused role with its reason.
+    pub refused: BTreeMap<String, usize>,
+    pub refused_roles: BTreeMap<String, String>,
+    pub round_trip_identical: usize,
+    pub round_trip_different: usize,
+    pub round_trip_differences: Vec<RoleRightsWriterDifference>,
+    /// Compiled roles the loader's entry point accepts too: it repeats the
+    /// write and reads the row back through the exporter before staging it.
+    pub loader_accepted: usize,
+    pub loader_refused: BTreeMap<String, String>,
+    /// Compiled roles whose stored row is in the dump.
+    pub stored_rows: usize,
+    pub plain_identical: usize,
+    /// Stored rows that reference uuids the source tree no longer declares:
+    /// the export drops those objects, so no XML can bring them back.
+    pub stored_with_dangling: usize,
+    pub plain_identical_without_dangling: usize,
+    /// Rows whose object entries equal ours once the dangling ones are
+    /// dropped -- as a multiset, and then also in order -- and whose
+    /// templates and flags equal ours.
+    pub entries_identical: usize,
+    pub order_identical: usize,
+    pub tail_identical: usize,
+    /// First divergences of the rows that are not plain-identical, clustered
+    /// by what they look like, and the first divergence of every such role.
+    pub plain_shapes: BTreeMap<String, usize>,
+    pub plain_differences: Vec<RoleRightsWriterDifference>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct RoleRightsWriterDifference {
+    pub role: String,
+    pub at: usize,
+    pub wrote: String,
+    pub expected: String,
+}
+
+enum RoleRightsAuditOutcome {
+    WithoutRightsXml,
+    Refused(String, String),
+    Compiled(Box<RoleRightsAuditCompiled>),
+}
+
+struct RoleRightsAuditCompiled {
+    round_trip: std::result::Result<(), Option<RoleRightsWriterDifference>>,
+    loader: std::result::Result<(), String>,
+    stored: Option<RoleRightsAuditStored>,
+}
+
+struct RoleRightsAuditStored {
+    plain_identical: bool,
+    dangling: bool,
+    entries_identical: bool,
+    order_identical: bool,
+    tail_identical: bool,
+    difference: Option<RoleRightsWriterDifference>,
+}
+
+pub fn audit_role_rights_writer(root: &Path, inflated: &Path) -> Result<RoleRightsWriterReport> {
+    let roles_dir = root.join("Roles");
+    let mut roles = Vec::new();
+    for entry in fs::read_dir(&roles_dir)
+        .with_context(|| format!("failed to read {}", roles_dir.display()))?
+    {
+        let path = entry?.path();
+        if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let text = fs::read_to_string(&path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        let uuid = text.find("<Role uuid=\"").and_then(|at| {
+            let rest = &text[at + "<Role uuid=\"".len()..];
+            rest.find('"').map(|end| rest[..end].to_ascii_lowercase())
+        });
+        roles.push((name.to_string(), uuid));
+    }
+    roles.sort();
+    let known = source_tree_uuids(root)?;
+    let source = MetadataSourceContext::new(root.to_path_buf());
+    let outcomes = parallel::install(|| {
+        roles
+            .par_iter()
+            .map(|(name, uuid)| {
+                (
+                    name.clone(),
+                    audit_one_role_rights(root, inflated, &source, &known, name, uuid.as_deref()),
+                )
+            })
+            .collect::<Vec<_>>()
+    })?;
+
+    let mut report = RoleRightsWriterReport {
+        root: root.to_path_buf(),
+        inflated: inflated.to_path_buf(),
+        roles: roles.len(),
+        without_rights_xml: 0,
+        compiled: 0,
+        refused: BTreeMap::new(),
+        refused_roles: BTreeMap::new(),
+        round_trip_identical: 0,
+        round_trip_different: 0,
+        round_trip_differences: Vec::new(),
+        loader_accepted: 0,
+        loader_refused: BTreeMap::new(),
+        stored_rows: 0,
+        plain_identical: 0,
+        stored_with_dangling: 0,
+        plain_identical_without_dangling: 0,
+        entries_identical: 0,
+        order_identical: 0,
+        tail_identical: 0,
+        plain_shapes: BTreeMap::new(),
+        plain_differences: Vec::new(),
+    };
+    for (role, outcome) in outcomes {
+        match outcome {
+            RoleRightsAuditOutcome::WithoutRightsXml => report.without_rights_xml += 1,
+            RoleRightsAuditOutcome::Refused(class, detail) => {
+                *report.refused.entry(class.clone()).or_default() += 1;
+                report
+                    .refused_roles
+                    .insert(role, format!("{class}: {detail}"));
+            }
+            RoleRightsAuditOutcome::Compiled(compiled) => {
+                report.compiled += 1;
+                match compiled.loader {
+                    Ok(()) => report.loader_accepted += 1,
+                    Err(reason) => {
+                        report.loader_refused.insert(role.clone(), reason);
+                    }
+                }
+                match compiled.round_trip {
+                    Ok(()) => report.round_trip_identical += 1,
+                    Err(difference) => {
+                        report.round_trip_different += 1;
+                        report.round_trip_differences.push(difference.unwrap_or(
+                            RoleRightsWriterDifference {
+                                role: role.clone(),
+                                at: 0,
+                                wrote: "the exporter refused the written row".to_string(),
+                                expected: String::new(),
+                            },
+                        ));
+                    }
+                }
+                if let Some(stored) = compiled.stored {
+                    report.stored_rows += 1;
+                    if stored.dangling {
+                        report.stored_with_dangling += 1;
+                    }
+                    if stored.plain_identical {
+                        report.plain_identical += 1;
+                        if !stored.dangling {
+                            report.plain_identical_without_dangling += 1;
+                        }
+                    }
+                    if stored.entries_identical {
+                        report.entries_identical += 1;
+                    }
+                    if stored.order_identical {
+                        report.order_identical += 1;
+                    }
+                    if stored.tail_identical {
+                        report.tail_identical += 1;
+                    }
+                    if let Some(difference) = stored.difference {
+                        let shape = format!(
+                            "wrote {} | stored {}",
+                            difference.wrote, difference.expected
+                        );
+                        *report.plain_shapes.entry(shape).or_default() += 1;
+                        report.plain_differences.push(difference);
+                    }
+                }
+            }
+        }
+    }
+    Ok(report)
+}
+
+fn audit_one_role_rights(
+    root: &Path,
+    inflated: &Path,
+    source: &MetadataSourceContext,
+    known: &std::collections::HashSet<String>,
+    role: &str,
+    uuid: Option<&str>,
+) -> RoleRightsAuditOutcome {
+    use crate::compiler::bodies::role_rights_writer::write_role_rights;
+
+    let rights_path = root.join("Roles").join(role).join("Ext").join("Rights.xml");
+    let Ok(xml) = fs::read(&rights_path) else {
+        return RoleRightsAuditOutcome::WithoutRightsXml;
+    };
+    let written = match write_role_rights(&xml, source.role_rights_source()) {
+        Ok(written) => written,
+        Err(refusal) => {
+            return RoleRightsAuditOutcome::Refused(refusal.class.to_string(), refusal.detail);
+        }
+    };
+    let native = String::from_utf8_lossy(&xml);
+    let round_trip = match crate::compiler::families::native::deflate_bytes(&written.plain)
+        .ok()
+        .and_then(|blob| {
+            crate::mssql_dump::role_rights_xml_from_blob(
+                &blob,
+                &written.object_refs,
+                &written.field_refs,
+            )
+        }) {
+        None => Err(None),
+        Some(exported) if exported == native => Ok(()),
+        Some(exported) => Err(Some(first_difference(role, &exported, &native))),
+    };
+    let stored = uuid
+        .and_then(|uuid| fs::read(inflated.join(format!("{uuid}.0__part0.txt"))).ok())
+        .map(|stored| compare_role_rights_rows(role, &written.plain, &stored, known));
+    let loader = crate::module_blob::pack_role_rights_blob_base_free(&xml, source)
+        .map(|_| ())
+        .map_err(|error| format!("{error:#}"));
+    RoleRightsAuditOutcome::Compiled(Box::new(RoleRightsAuditCompiled {
+        round_trip,
+        loader,
+        stored,
+    }))
+}
+
+fn compare_role_rights_rows(
+    role: &str,
+    ours: &[u8],
+    stored: &[u8],
+    known: &std::collections::HashSet<String>,
+) -> RoleRightsAuditStored {
+    let plain_identical = ours == stored;
+    let ours_parts = role_rights_row_parts(ours);
+    let stored_parts = role_rights_row_parts(stored);
+    let (dangling, entries_identical, order_identical, tail_identical) =
+        match (&ours_parts, &stored_parts) {
+            (Some((ours_entries, ours_tail)), Some((stored_entries, stored_tail))) => {
+                let kept = stored_entries
+                    .iter()
+                    .filter(|(uuid, _)| known.contains(uuid))
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let dangling = kept.len() != stored_entries.len();
+                let ours = ours_entries
+                    .iter()
+                    .map(|(_, text)| text.clone())
+                    .collect::<Vec<_>>();
+                let order_identical = ours == kept;
+                let mut ours_sorted = ours;
+                let mut kept_sorted = kept;
+                ours_sorted.sort();
+                kept_sorted.sort();
+                (
+                    dangling,
+                    ours_sorted == kept_sorted,
+                    order_identical,
+                    ours_tail == stored_tail,
+                )
+            }
+            _ => (false, false, false, false),
+        };
+    let difference = (!plain_identical).then(|| {
+        first_difference(
+            role,
+            &String::from_utf8_lossy(ours),
+            &String::from_utf8_lossy(stored),
+        )
+    });
+    RoleRightsAuditStored {
+        plain_identical,
+        dangling,
+        entries_identical,
+        order_identical,
+        tail_identical,
+        difference,
+    }
+}
+
+/// A row's object entries (uuid, text) in order, and the text of everything
+/// after the object table (templates and flags).
+type RoleRightsRowParts = (Vec<(String, String)>, String);
+
+fn role_rights_row_parts(plain: &[u8]) -> Option<RoleRightsRowParts> {
+    use crate::compiler::families::native::{parse, parse_without_bom, serialize_without_bom};
+
+    let root = if plain.starts_with(b"\xef\xbb\xbf") {
+        parse(plain).ok()?
+    } else {
+        parse_without_bom(plain).ok()?
+    };
+    let fields = root.as_list()?;
+    let objects = fields.get(1)?.as_list()?;
+    let mut entries = Vec::with_capacity(objects.len().saturating_sub(1));
+    for entry in objects.iter().skip(1) {
+        let uuid = entry
+            .as_list()?
+            .first()?
+            .as_list()?
+            .get(1)?
+            .as_token()?
+            .to_ascii_lowercase();
+        let text = String::from_utf8(serialize_without_bom(entry).ok()?).ok()?;
+        entries.push((uuid, text));
+    }
+    let mut tail = String::new();
+    for field in fields.iter().skip(2) {
+        tail.push_str(&String::from_utf8(serialize_without_bom(field).ok()?).ok()?);
+        tail.push(',');
+    }
+    Some((entries, tail))
+}
+
+fn first_difference(role: &str, wrote: &str, expected: &str) -> RoleRightsWriterDifference {
+    let at = wrote
+        .chars()
+        .zip(expected.chars())
+        .position(|(left, right)| left != right)
+        .unwrap_or_else(|| wrote.chars().count().min(expected.chars().count()));
+    RoleRightsWriterDifference {
+        role: role.to_string(),
+        at,
+        wrote: divergence_window(wrote, at, 0, 60),
+        expected: divergence_window(expected, at, 0, 60),
+    }
+}
+
+/// Every `uuid="…"` a metadata file of the tree declares (the `Ext` folders
+/// hold bodies, not declarations, and are skipped).
+fn source_tree_uuids(root: &Path) -> Result<std::collections::HashSet<String>> {
+    let mut files = Vec::new();
+    for entry in WalkDir::new(root)
+        .follow_links(false)
+        .into_iter()
+        .filter_entry(|entry| entry.file_name() != "Ext")
+    {
+        let entry = entry.with_context(|| format!("failed to walk {}", root.display()))?;
+        if entry.file_type().is_file()
+            && entry.path().extension().and_then(|value| value.to_str()) == Some("xml")
+        {
+            files.push(entry.into_path());
+        }
+    }
+    let sets = parallel::install(|| {
+        files
+            .par_iter()
+            .map(|path| {
+                let mut uuids = Vec::new();
+                if let Ok(bytes) = fs::read(path) {
+                    let marker = b"uuid=\"";
+                    let mut at = 0usize;
+                    while let Some(found) = bytes[at..]
+                        .windows(marker.len())
+                        .position(|window| window == marker)
+                    {
+                        let start = at + found + marker.len();
+                        if let Some(value) = bytes.get(start..start + 36)
+                            && let Ok(text) = std::str::from_utf8(value)
+                        {
+                            uuids.push(text.to_ascii_lowercase());
+                        }
+                        at = start;
+                    }
+                }
+                uuids
+            })
+            .collect::<Vec<_>>()
+    })?;
+    Ok(sets.into_iter().flatten().collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

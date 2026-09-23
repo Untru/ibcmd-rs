@@ -147,6 +147,32 @@ fn main() -> Result<()> {
                 println!("{}", serde_json::to_string_pretty(&report)?);
             }
         }
+        Commands::AuditRoleRightsWriter(args) => {
+            let report =
+                ibcmd_rs::source_audit::audit_role_rights_writer(&args.root, &args.inflated)?;
+            if let Some(output) = args.output {
+                std::fs::write(&output, serde_json::to_string_pretty(&report)?)?;
+                println!(
+                    "roles {} (no Rights.xml {}), compiled {}, refused {}, round trip {}/{}, loader accepts {}, stored {}, plain identical {} ({} without dangling refs; {} rows hold dangling refs), entries {}, order {}, tail {}",
+                    report.roles,
+                    report.without_rights_xml,
+                    report.compiled,
+                    report.refused.values().sum::<usize>(),
+                    report.round_trip_identical,
+                    report.compiled,
+                    report.loader_accepted,
+                    report.stored_rows,
+                    report.plain_identical,
+                    report.plain_identical_without_dangling,
+                    report.stored_with_dangling,
+                    report.entries_identical,
+                    report.order_identical,
+                    report.tail_identical,
+                );
+            } else {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            }
+        }
         Commands::AuditFormBodyBlockers(args) => {
             let report = ibcmd_rs::source_audit::audit_form_body_blockers(&args.root)?;
             if let Some(output) = args.output {
