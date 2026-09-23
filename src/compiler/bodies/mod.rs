@@ -16,6 +16,7 @@ pub mod form_native;
 pub mod mxl;
 pub mod predefined;
 pub mod rights;
+pub mod role_rights_writer;
 pub mod support;
 pub mod template;
 
