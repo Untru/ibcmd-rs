@@ -12370,7 +12370,7 @@ mod tests {
         assert_eq!(rows[0].path, body_path);
         assert_eq!(
             raw_deflated_plain_sha256(&rows[0].blob).unwrap(),
-            hex_sha256(b"{1,\r\n{#base64:UEsDBA==}}")
+            hex_sha256("\u{feff}{1,\r\n{#base64:UEsDBA==}\r\n}".as_bytes())
         );
         assert_eq!(
             crate::compiler::bodies::template::decode_compatible_template(

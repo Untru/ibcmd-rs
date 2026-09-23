@@ -27018,7 +27018,7 @@ pub fn pack_ext_picture_blob_from_bytes_with_base(
 /// length is a multiple of 64, 32 of 32 БСП and 362 of 384 ERP УХ help
 /// payloads carry it, and 31 of 34 and 174 of 184 common pictures. The rest
 /// were written by an older writer the source does not tell apart.
-fn platform_base64_token(bytes: &[u8]) -> String {
+pub(crate) fn platform_base64_token(bytes: &[u8]) -> String {
     let encoded = encode_base64(bytes);
     let mut token = String::with_capacity(encoded.len() + encoded.len() / 64 * 3 + 10);
     token.push_str("{#base64:");

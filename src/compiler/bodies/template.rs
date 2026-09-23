@@ -22,7 +22,7 @@ use crate::compiler::families::native::{
     required_text, required_token,
 };
 use crate::module_blob::{
-    MetadataSourceContext, SpreadsheetNumberFormatHint, decode_base64_mime, encode_base64,
+    MetadataSourceContext, SpreadsheetNumberFormatHint, decode_base64_mime,
     pack_help_blob_from_parts,
 };
 use ibcmd_xml::DcsStorageTypeResolver;
@@ -390,8 +390,14 @@ fn decode_evidenced_template(
     }
 }
 
+/// `{1,<payload>}` in the platform's own layout: the BOM, the payload on its
+/// own line wrapped at 64 characters, the closing brace on its own line --
+/// every stored binary and add-in template of БСП reads this way.
 fn compile_binary_template(bytes: &[u8]) -> Result<Vec<u8>, TemplateCodecError> {
-    let plain = format!("{{1,\r\n{{#base64:{}}}}}", encode_base64(bytes));
+    let plain = format!(
+        "\u{feff}{{1,\r\n{}\r\n}}",
+        crate::module_blob::platform_base64_token(bytes)
+    );
     deflate_bytes(plain.as_bytes()).map_err(Into::into)
 }
 
@@ -706,8 +712,7 @@ mod tests {
         )
         .unwrap();
         let plain = inflate(&blob).unwrap();
-        assert!(plain.starts_with(b"{1,"));
-        assert!(plain.windows(8).any(|window| window == b"{#base64"));
+        assert_eq!(plain, "\u{feff}{1,\r\n{#base64:YmluYXJ5}\r\n}".as_bytes());
 
         assert!(matches!(
             TemplateKind::parse("FutureTemplate"),
