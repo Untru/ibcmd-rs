@@ -295,9 +295,22 @@ pub(super) struct MetadataFieldDeclarationIndex {
     /// `Ref` value. A member behind that value is available only when every
     /// registered document declares it.
     document_journal_documents: BTreeMap<String, BTreeSet<String>>,
+    /// Whether a constants set's `<UseAlways>` names its `v8:ValueStorage`
+    /// constants: 2.21 does (8.5.1.1150 ERP УХ, 75 forms), 2.20 never does.
+    writes_value_storage_constants: bool,
 }
 
 impl MetadataFieldDeclarationIndex {
+    /// The index as the writer of `source_version` reads it.
+    pub(super) fn written_as(mut self, source_version: InfobaseConfigSourceVersion) -> Self {
+        self.writes_value_storage_constants = source_version == InfobaseConfigSourceVersion::V2_21;
+        self
+    }
+
+    pub(super) fn writes_value_storage_constants(&self) -> bool {
+        self.writes_value_storage_constants
+    }
+
     pub(super) fn table(&self, reference: &str) -> Option<&MetadataTableStandardAttributes> {
         self.tables.get(reference)
     }

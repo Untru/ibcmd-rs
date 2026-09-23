@@ -3184,7 +3184,7 @@ fn dump_table_rows_with_options_mode(
                                                 &type_index,
                                                 &object_refs,
                                                 &form_refs,
-                                                source_version == InfobaseConfigSourceVersion::V2_21,
+                                                V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
                                             )
                                         } else {
                                             InformationRegisterMasterDimensionIndex::new()
@@ -3197,6 +3197,7 @@ fn dump_table_rows_with_options_mode(
                                                 &object_refs,
                                                 &type_index,
                                             )
+                                            .written_as(source_version)
                                         } else {
                                             MetadataFieldDeclarationIndex::default()
                                         }
@@ -4337,7 +4338,7 @@ fn dump_table_rows_streamed(
                 &type_index,
                 &object_refs,
                 &form_refs,
-                source_version == InfobaseConfigSourceVersion::V2_21,
+                V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
             )
         } else {
             InformationRegisterMasterDimensionIndex::new()
@@ -4349,6 +4350,7 @@ fn dump_table_rows_streamed(
             &object_refs,
             &type_index,
         )
+        .written_as(source_version)
     } else {
         MetadataFieldDeclarationIndex::default()
     };
@@ -15910,7 +15912,7 @@ fn parse_register_properties_from_text(
                 type_index,
                 object_refs,
                 form_refs,
-                source_version == InfobaseConfigSourceVersion::V2_21,
+                V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
             );
             let tag = strict_tag
                 .or_else(|| strict_payload.as_ref().map(|payload| payload.tag))
@@ -15927,7 +15929,7 @@ fn parse_register_properties_from_text(
                     type_index,
                     object_refs,
                     form_refs,
-                    source_version == InfobaseConfigSourceVersion::V2_21,
+                    V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
                 ) {
                     Some((value_types, properties)) => {
                         let emit_empty_type = tag == "Attribute" && value_types.is_empty();
@@ -15953,7 +15955,7 @@ fn parse_register_properties_from_text(
                     type_index,
                     object_refs,
                     form_refs,
-                    source_version == InfobaseConfigSourceVersion::V2_21,
+                    V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
                 )
             {
                 (value_types, Some(properties), None, false)
@@ -15969,7 +15971,7 @@ fn parse_register_properties_from_text(
                     type_index,
                     object_refs,
                     form_refs,
-                    source_version == InfobaseConfigSourceVersion::V2_21,
+                    V85_PRESERVES_RAW_REGISTER_DATA_PATHS && source_version == InfobaseConfigSourceVersion::V2_21,
                 )
                 .or_else(|| {
                     parse_metadata_child_properties(
@@ -20435,6 +20437,14 @@ fn classify_resolved_data_path_reference(
         _ => ResolvedDataPathSegment::Foreign(format!("0:{uuid}")),
     }
 }
+
+/// Whether the 2.21 dialect writes a register child's data-path segment as
+/// the raw `0:<uuid>` instead of the resolved name. It does not: platform
+/// 8.5.1.1150 resolves it exactly as 8.3.27 does (BSP 3.2.1.356
+/// `InformationRegister.ДополнительныеСведения.Dimension.Свойство`, ERP УХ
+/// 100 information and 39 accumulation registers), so the early assumption
+/// that it kept the raw spelling is switched off rather than guessed at.
+const V85_PRESERVES_RAW_REGISTER_DATA_PATHS: bool = false;
 
 fn parse_information_register_data_path(
     fields: &[&str],
@@ -33804,6 +33814,8 @@ fn standard_picture_name(uuid: &str) -> Option<&'static str> {
         STD_PICTURE_USER_UUID => Some("StdPicture.User"),
         STD_PICTURE_LOAD_REPORT_SETTINGS_UUID => Some("StdPicture.LoadReportSettings"),
         "942e0303-a3ec-4fe8-887c-5aea8516d424" => Some("StdPicture.ReportSettings"),
+        // Platform 8.5.1.1150 BSP: two forms, two references each.
+        "6a248caf-0a7b-46ad-a595-74890ea202f7" => Some("StdPicture.Conversations"),
         STD_PICTURE_INFORMATION_REGISTER_UUID => Some("StdPicture.InformationRegister"),
         STD_PICTURE_SHOW_DATA_UUID => Some("StdPicture.ShowData"),
         STD_PICTURE_CUSTOMIZE_LIST_UUID => Some("StdPicture.CustomizeList"),
@@ -34630,6 +34642,10 @@ fn parse_style_color_value(value: &str) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
     if fields.first()?.trim() != r##""#""## {
         return None;
+    }
+    // An 8.5 style item may name a palette colour (8.5.1.1150 BSP: 7 items).
+    if let Some(name) = form_v85::v85_palette_color(fields.get(3)?) {
+        return Some(name.to_owned());
     }
     let color_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
     if color_fields.first()?.trim() != "3" {
@@ -37830,13 +37846,20 @@ fn format_report_source_xml(
         "DefaultVariantForm",
         report.default_variant_form.as_deref(),
     );
-    if let Some(auxiliary_variant_form) = &report.auxiliary_variant_form {
-        push_optional_text_element(
+    // 2.21 always writes the element: a report record still in the 8.3.27
+    // `{19,...}` shape has no slot for it and prints it empty (all 1 329
+    // reports of the 8.5.1.1150 ERP УХ export).
+    match &report.auxiliary_variant_form {
+        Some(auxiliary_variant_form) => push_optional_text_element(
             &mut xml,
             "\t\t\t",
             "AuxiliaryVariantForm",
             auxiliary_variant_form.as_deref(),
-        );
+        ),
+        None if source_version == InfobaseConfigSourceVersion::V2_21 => {
+            push_optional_text_element(&mut xml, "\t\t\t", "AuxiliaryVariantForm", None)
+        }
+        None => {}
     }
     push_optional_text_element(
         &mut xml,
@@ -41244,9 +41267,10 @@ fn parse_filter_criterion_properties_from_text(
         return Ok(None);
     }
 
-    if source_version != InfobaseConfigSourceVersion::V2_20 {
-        return Ok(None);
-    }
+    // The 2.21 dialect (platform 8.5.1.1150, BSP 3.2.1.356) stores the same
+    // filter criterion record and prints the same XML as 2.20; only the
+    // document namespaces differ, and the shared writer adds those.
+    let _ = source_version;
     if root_fields.len() != 5
         || !root_fields
             .get(2)

@@ -2108,6 +2108,12 @@ pub(super) fn declare_palette_namespace_beside_style(bytes: Vec<u8>) -> Vec<u8> 
         if tag.contains(" xmlns:pal=") {
             continue;
         }
+        // A value that declares the style namespace alone for its own `ref`
+        // (a DCS font `dcscor:value`) gets no palette beside it: 23 of 23 in
+        // the 8.5.1.1150 ERP УХ export, against every tag that declares more.
+        if tag.matches(" xmlns:").count() == 1 {
+            continue;
+        }
         let mut insert_at = style_at;
         let mut scan = tag_start;
         while let Some(offset) = text[scan..style_at].find(" xmlns:") {
@@ -2360,7 +2366,7 @@ fn write_source_asset_inner(
                     xml,
                     diagnostics: extraction_diagnostics,
                 } => {
-                    let xml = match &v85_facts {
+                    let (xml, v85_item_assets) = match &v85_facts {
                         Some(facts) => super::form_v85_writer::apply_v85_form_facts(
                             xml,
                             facts,
@@ -2379,7 +2385,24 @@ fn write_source_asset_inner(
                                     asset.primary_path.display()
                                 )
                             })?,
-                        None => xml,
+                        None if context.source_version == InfobaseConfigSourceVersion::V2_21 => (
+                            super::form_v85_writer::apply_v85_upgrade_defaults(xml)
+                                .map_err(|error| {
+                                    anyhow::Error::new(SourceAssetRefusal::new(
+                                        "source.form.v85.upgrade",
+                                        MetadataSourceFailureClass::Unsupported,
+                                        format!("{error:#}"),
+                                    ))
+                                })
+                                .with_context(|| {
+                                    format!(
+                                        "failed to upgrade the 8.3.27 form body of source asset {} to 2.21",
+                                        asset.primary_path.display()
+                                    )
+                                })?,
+                            Vec::new(),
+                        ),
+                        None => (xml, Vec::new()),
                     };
                     diagnostics = extraction_diagnostics;
                     let path = output_dir.join(&asset.primary_path);
@@ -2390,7 +2413,21 @@ fn write_source_asset_inner(
                     write_source_xml_file(&path, xml, context.source_version)?;
 
                     let form_items_started = Instant::now();
-                    for item_asset in extract_form_item_assets(bytes) {
+                    // An 8.5 body's item records carry 8.5 revisions the
+                    // picture-owner scan does not know; its down-converted
+                    // layout names the same owners in the 8.3.27 shape.
+                    let item_assets = if v85_facts.is_some() {
+                        let mut text = body.layout.clone();
+                        for block in &body.trailing {
+                            text.push_str(block);
+                        }
+                        let mut assets = extract_form_item_assets_from_text(&text);
+                        assets.extend(v85_item_assets);
+                        dedup_form_item_assets(assets)
+                    } else {
+                        extract_form_item_assets(bytes)
+                    };
+                    for item_asset in item_assets {
                         let item_path = output_dir
                             .join(asset.primary_path.with_extension(""))
                             .join("Items")

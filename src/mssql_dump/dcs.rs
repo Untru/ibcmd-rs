@@ -33,6 +33,10 @@ const STYLE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/style";
 const SYS_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/fonts/system";
 const WEB_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/web";
 const WIN_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/windows";
+/// Platform 8.5's palette colours. Every 8.5.1.1150 storage document declares
+/// it on its root and every 2.21 `Form.xml` root declares it as `pal`; no
+/// 8.3.27 document names it, so admitting it changes nothing there.
+const PALETTE_NS: &[u8] = b"http://v8.1c.ru/8.1/data/ui/colors/palette";
 const XSI_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema-instance";
 const XS_NS: &[u8] = b"http://www.w3.org/2001/XMLSchema";
 const MANAGED_APPLICATION_CORE_NS: &[u8] = b"http://v8.1c.ru/8.2/managed-application/core";
@@ -2796,6 +2800,7 @@ impl<'a> DataCompositionXmlWriter<'a> {
             Some(SYS_NS) => Some(Some("sys")),
             Some(WEB_NS) => Some(Some("web")),
             Some(WIN_NS) => Some(Some("win")),
+            Some(PALETTE_NS) => Some(Some("pal")),
             Some(XSI_NS) => Some(Some("xsi")),
             Some(XS_NS) => Some(Some("xs")),
             _ => None,
@@ -3182,6 +3187,7 @@ fn form_root_declared_data_composition_prefix(namespace: &[u8]) -> Option<&'stat
             | SYS_NS
             | WEB_NS
             | WIN_NS
+            | PALETTE_NS
             | XSI_NS
             | XS_NS
     )
@@ -3217,6 +3223,7 @@ fn form_root_declared_prefix(namespace: &[u8]) -> Option<&'static str> {
         DATA_UI_NS => Some("v8ui"),
         WEB_NS => Some("web"),
         WIN_NS => Some("win"),
+        PALETTE_NS => Some("pal"),
         XCF_READABLE_NS => Some("xr"),
         XS_NS => Some("xs"),
         XSI_NS => Some("xsi"),
@@ -3703,6 +3710,7 @@ fn canonical_form_data_ui_value_prefix(namespace: &[u8]) -> Option<&'static str>
         SYS_NS => Some("sys"),
         WEB_NS => Some("web"),
         WIN_NS => Some("win"),
+        PALETTE_NS => Some("pal"),
         _ => None,
     }
 }
@@ -3719,6 +3727,7 @@ fn reserved_data_composition_namespace_uri(prefix: &str) -> Option<&'static str>
         "sys" => SYS_NS,
         "web" => WEB_NS,
         "win" => WIN_NS,
+        "pal" => PALETTE_NS,
         "xsi" => XSI_NS,
         "xs" => XS_NS,
         _ => return None,
@@ -3751,6 +3760,7 @@ fn canonical_data_composition_name(namespace: Option<&[u8]>, local: &[u8]) -> Op
         Some(SYS_NS) => Some(format!("sys:{local}")),
         Some(WEB_NS) => Some(format!("web:{local}")),
         Some(WIN_NS) => Some(format!("win:{local}")),
+        Some(PALETTE_NS) => Some(format!("pal:{local}")),
         Some(XSI_NS) => Some(format!("xsi:{local}")),
         Some(XS_NS) => Some(format!("xs:{local}")),
         Some(_) => None,

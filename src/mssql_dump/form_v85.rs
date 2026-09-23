@@ -179,6 +179,9 @@ pub(super) struct FormV85ItemFacts {
 pub(super) struct FormV85Facts {
     /// The 12 members the root trailer appends.
     pub(super) root_tail: Vec<Node>,
+    /// The root's scale percentage (`100` unless the form sets one), the
+    /// member 20 from the end of the 8.5 root record.
+    pub(super) root_scale: Option<String>,
     /// Item facts by form item id.
     pub(super) items: BTreeMap<String, FormV85ItemFacts>,
     /// Appended form-command members by command id.
@@ -227,6 +230,12 @@ pub(super) fn down_convert_v85_form_body(
         .checked_sub(V85_ROOT_TRAILER_APPENDED)
         .ok_or_else(|| anyhow!("8.5 form root is shorter than its appended trailer"))?;
     facts.root_tail = root_members.split_off(kept);
+    facts.root_scale = kept
+        .checked_sub(8)
+        .and_then(|index| root_members.get(index))
+        .and_then(Node::leaf)
+        .filter(|value| is_int(value))
+        .map(str::to_owned);
     // The trailer's own revision tuple sits one member before its end.
     let revision_index = root_members
         .len()

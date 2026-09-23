@@ -6391,7 +6391,7 @@ fn form_constants_set_use_always<'a>(
     let mut named = Vec::new();
     for uuid in effective {
         let declared = declarations.constant(&uuid)?;
-        if declared.value_storage {
+        if declared.value_storage && !declarations.writes_value_storage_constants() {
             continue;
         }
         let reference = object_refs.get(&uuid)?;
@@ -21835,6 +21835,34 @@ fn parse_form_embedded_picture_file_name(
     })
 }
 
+/// An inline picture read from a platform 8.5 appended member: its `<xr:Abs>`
+/// file name (the owning property plus the payload's extension), transparency,
+/// transparent pixel and the payload itself, which the 2.21 writer publishes
+/// beside the form because the item record no longer holds it.
+pub(super) fn parse_form_embedded_picture_payload(
+    field: &str,
+    property_name: &str,
+) -> Option<(String, bool, Option<(i64, i64)>, Vec<u8>)> {
+    let value = split_1c_braced_fields(field.trim(), 0)?;
+    let schema = FormPictureValueSchema::from_raw_layout(&value)?;
+    if schema.kind() != FormPictureValueKind::Embedded {
+        return None;
+    }
+    let payload = value
+        .get(7)
+        .and_then(|field| extract_base64_payload(field))?;
+    let content = decode_base64_mime(payload)?;
+    if !is_form_item_picture_content(&content) {
+        return None;
+    }
+    Some((
+        form_item_picture_file_name(property_name, &content),
+        schema.load_transparent(),
+        schema.transparent_pixel(),
+        content,
+    ))
+}
+
 /// A control's inline picture: the file name the asset writer gives the payload,
 /// the transparency flag and the transparent pixel the record declares.
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -28443,6 +28471,9 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         // Platform 8.5: the one identifier every 8.5 BSP table that excludes
         // `ClearTableMarksAppearance` stores, and no other table does.
         "daf40cdf-c477-48c5-9627-57d5450e1f3d" => Some("ClearTableMarksAppearance"),
+        // Platform 8.5 (BSP 3.2.1.356 `InformationRegisters/НастройкиОчисткиФайлов`
+        // `ФормаЗаписи`, `Form.Item.ПравилоНастройкиОтбор.StandardCommand.AddMultiple`).
+        "6db04d66-8367-4b9d-a368-16742c09f654" => Some("AddMultiple"),
         "04ac7211-e74f-4776-9749-35a9282b1d52" => Some("UndoPosting"),
         "01833a5a-6553-4c49-b445-095018107bb5" => Some("HierarchicalList"),
         "05468165-f954-45a5-84f2-6641c51f9f23" => Some("Tree"),
@@ -32748,14 +32779,10 @@ pub(super) fn format_form_child_item_xml(
     // `TextColor` first; seed `hg7-c` writes the same order. Nothing pairs
     // `TextColor` with `ValuesPicture` or `Border`, so moving it ahead of the
     // colour that does is unconstrained.
-    if item.tag == "PictureField"
-        && let Some(text_color) = &item.text_color
-    {
-        xml.push_str(&format!(
-            "{tab}\t<TextColor>{}</TextColor>\r\n",
-            escape_xml_text(text_color)
-        ));
-    }
+    // `ValuesPicture` leads `TextColor`: the one field of the 8.5.1.1150 BSP
+    // that writes both (`DocumentJournals/Взаимодействия/Forms/ФормаСписка`
+    // `ВажностьНомерКартинки`) spells them in that order, and no 8.3.27 stand
+    // pairs them at all.
     if item.tag == "PictureField" {
         xml.push_str(&format_form_picture_element(
             "ValuesPicture",
@@ -32765,6 +32792,12 @@ pub(super) fn format_form_child_item_xml(
             item.picture_transparent_pixel,
             indent + 1,
         ));
+        if let Some(text_color) = &item.text_color {
+            xml.push_str(&format!(
+                "{tab}\t<TextColor>{}</TextColor>\r\n",
+                escape_xml_text(text_color)
+            ));
+        }
         // A `PictureField` writes `BorderColor` between its `ValuesPicture` and
         // its `Border`. UT 11.5.27.75 native tree, all 24 picture fields that
         // carry one: `ValuesPicture` (24), `DataPath` (24), `TitleLocation`

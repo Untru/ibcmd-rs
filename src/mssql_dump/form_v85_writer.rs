@@ -348,6 +348,7 @@ fn fact_object_xml(
     element: &str,
     node: &Node,
     object_refs: &std::collections::BTreeMap<String, String>,
+    payload: &mut Option<(String, Vec<u8>)>,
 ) -> Result<Option<String>> {
     let text = node.to_text();
     Ok(match object {
@@ -357,24 +358,39 @@ fn fact_object_xml(
             }
             let value = super::form_body::parse_form_control_color(&text, object_refs)
                 .ok_or_else(|| anyhow!("<{element}>: unreadable 8.5 colour {text}"))?;
-            Some(format!("<{element}>{value}</{element}>
-"))
+            Some(format!("<{element}>{value}</{element}>\r\n"))
         }
         FactObject::Picture => {
             if text.starts_with("{4,0,{0},") {
                 return Ok(None);
             }
-            let (reference, load_transparent) =
+            if let Some((reference, load_transparent)) =
                 super::form_body::parse_form_child_item_picture_value(&text, object_refs)
+            {
+                return Ok(Some(super::form_body::format_form_picture_element(
+                    element,
+                    Some(&reference),
+                    None,
+                    load_transparent,
+                    None,
+                    0,
+                )));
+            }
+            // An inline picture: the element names the file the platform
+            // writes beside the form (`Items/<item>/<element>.<ext>`).
+            let (file_name, load_transparent, transparent_pixel, content) =
+                super::form_body::parse_form_embedded_picture_payload(&text, element)
                     .ok_or_else(|| anyhow!("<{element}>: unreadable 8.5 picture {text}"))?;
-            Some(super::form_body::format_form_picture_element(
+            let xml = super::form_body::format_form_picture_element(
                 element,
-                Some(&reference),
                 None,
+                Some(&file_name),
                 load_transparent,
-                None,
+                transparent_pixel,
                 0,
-            ))
+            );
+            *payload = Some((file_name, content));
+            Some(xml)
         }
         FactObject::Localized => {
             if text == "{1,0}" {
@@ -455,7 +471,11 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Root(5),
         element: "WindowViewMode",
         replaces: &[],
-        values: &[("0", None), ("1", Some("InMainWindow"))],
+        values: &[
+            ("0", None),
+            ("1", Some("InMainWindow")),
+            ("2", Some("InDialogWindow")),
+        ],
     },
     FactRule {
         tags: &["Form"],
@@ -505,7 +525,12 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Item("48", 12),
         element: "AutoWidthInTable",
         replaces: &[],
-        values: &[("0", None), ("1", Some("ByData")), ("2", Some("None"))],
+        values: &[
+            ("0", None),
+            ("1", Some("ByData")),
+            ("2", Some("None")),
+            ("3", Some("ByDataAndTitle")),
+        ],
     },
     // Members 13 and 14 read the same code on every BSP item that carries
     // either element; which element each names follows the elements' own
@@ -597,7 +622,7 @@ const FACT_RULES: &[FactRule] = &[
         source: FactSource::Item("73", 6),
         element: "InitialRowActivation",
         replaces: &[],
-        values: &[("0", None), ("1", Some("Activate"))],
+        values: &[("0", None), ("1", Some("Activate")), ("2", Some("NoActivate"))],
     },
     FactRule {
         tags: &["Table"],
@@ -835,6 +860,112 @@ fn fact_node<'f>(
     })
 }
 
+/// The type of the enumeration value an 8.5 table keeps in member 58 when it
+/// shows a settings composer's user settings.
+const COMPLEX_SETTINGS_VIEW_MODE_TYPE: &str = "2eb62aaa-e6c1-48b6-a047-435354d5ae82";
+
+/// `ComplexSettingsViewMode`: member 58 of the 8.5 table record holds the
+/// value `{"#",<type>,<index>}` on exactly the three BSP tables that bind a
+/// `*.UserSettings` path, each writing `Show` for index 0; every other table
+/// keeps an unrelated member there and writes nothing.
+fn apply_complex_settings_view_mode(
+    edits: &mut XmlEdits<'_>,
+    table: usize,
+    item: &FormV85ItemFacts,
+) -> Result<()> {
+    let Some(Node::List(members)) = item.record.get(58 + item.prefix_offset) else {
+        return Ok(());
+    };
+    if members.len() != 3
+        || members[0].as_leaf() != Some("\"#\"")
+        || members[1].as_leaf() != Some(COMPLEX_SETTINGS_VIEW_MODE_TYPE)
+    {
+        return Ok(());
+    }
+    let value = match members[2].as_leaf() {
+        Some("0") => "Show",
+        other => bail!("<Table> ComplexSettingsViewMode: unknown 8.5 code {other:?}"),
+    };
+    for child in edits.direct_children(table, "ComplexSettingsViewMode") {
+        edits.remove(child);
+    }
+    edits.insert_child(
+        table,
+        "ComplexSettingsViewMode",
+        &format!("<ComplexSettingsViewMode>{value}</ComplexSettingsViewMode>\r\n"),
+    )
+}
+
+/// The events 8.5 lets a usual group handle, by the identifier its event
+/// record stores (8.5.1.1150 BSP: three `Click` handlers).
+fn v85_group_event_name(id: &str) -> Option<&'static str> {
+    match id {
+        "a3da1388-983a-4d28-87f2-5096d7e3a4ef" => Some("Click"),
+        _ => None,
+    }
+}
+
+/// A usual group's event record, the member its 8.5 property bag appends:
+/// `{<count>,(<id>,"<handler>")*,1,0,(<id>,0,1)*}`, or `{0,1,0}` for none.
+fn apply_group_events(edits: &mut XmlEdits<'_>, group: usize, node: &Node) -> Result<()> {
+    let Node::List(members) = node else {
+        bail!("<UsualGroup> events: the 8.5 member is not a tuple");
+    };
+    let count: usize = members
+        .first()
+        .and_then(Node::as_leaf)
+        .and_then(|value| value.parse().ok())
+        .ok_or_else(|| anyhow!("<UsualGroup> events: unreadable 8.5 count"))?;
+    if members.len() != 3 + count * 5
+        || members[1 + 2 * count].as_leaf() != Some("1")
+        || members[2 + 2 * count].as_leaf() != Some("0")
+    {
+        bail!("<UsualGroup> events: unexpected 8.5 record {}", node.to_text());
+    }
+    if count == 0 {
+        return Ok(());
+    }
+    let mut body = String::from("<Events>\r\n");
+    for index in 0..count {
+        let id = members[1 + 2 * index]
+            .as_leaf()
+            .ok_or_else(|| anyhow!("<UsualGroup> events: unreadable 8.5 event id"))?;
+        let name = v85_group_event_name(id)
+            .ok_or_else(|| anyhow!("<UsualGroup> events: unknown 8.5 event {id}"))?;
+        let handler = members[2 + 2 * index]
+            .as_leaf()
+            .and_then(|value| value.strip_prefix('"'))
+            .and_then(|value| value.strip_suffix('"'))
+            .ok_or_else(|| anyhow!("<UsualGroup> events: unreadable 8.5 handler"))?
+            .replace("\"\"", "\"");
+        body.push_str(&format!(
+            "\t<Event name=\"{name}\">{}</Event>\r\n",
+            super::escape_xml_text(&handler)
+        ));
+    }
+    body.push_str("</Events>\r\n");
+    for child in edits.direct_children(group, "Events") {
+        edits.remove(child);
+    }
+    edits.insert_child(group, "Events", &body)
+}
+
+/// The `name` attribute of a written element's opening tag.
+fn element_name(edits: &XmlEdits<'_>, element: usize) -> Option<String> {
+    let open = edits.elements[element].open_start;
+    let tag_end = edits.xml[open..].find('>')? + open;
+    let inner = &edits.xml[open..tag_end];
+    let at = inner.find(" name=\"")? + 7;
+    let end = inner[at..].find('"')? + at;
+    Some(
+        inner[at..end]
+            .replace("&quot;", "\"")
+            .replace("&lt;", "<")
+            .replace("&gt;", ">")
+            .replace("&amp;", "&"),
+    )
+}
+
 fn apply_rules(
     edits: &mut XmlEdits<'_>,
     element: usize,
@@ -842,6 +973,7 @@ fn apply_rules(
     item: Option<&FormV85ItemFacts>,
     command: Option<&[Node]>,
     object_refs: &std::collections::BTreeMap<String, String>,
+    assets: &mut Vec<super::FormItemAsset>,
 ) -> Result<()> {
     let tag = edits.elements[element].tag.clone();
     for rule in FACT_OBJECT_RULES {
@@ -851,13 +983,34 @@ fn apply_rules(
         let Some(node) = fact_node(rule.source, facts, item, command)? else {
             continue;
         };
-        let body = fact_object_xml(rule.object, rule.element, node, object_refs)
+        let mut payload = None;
+        let body = fact_object_xml(rule.object, rule.element, node, object_refs, &mut payload)
             .map_err(|error| anyhow!("<{tag}> {error}"))?;
+        if let Some((file_name, content)) = payload {
+            let item_name = element_name(edits, element)
+                .ok_or_else(|| anyhow!("<{tag}> with an inline picture has no name"))?;
+            assets.push(super::FormItemAsset {
+                item_name,
+                file_name,
+                content,
+            });
+        }
         for child in edits.direct_children(element, rule.element) {
             edits.remove(child);
         }
         if let Some(body) = body {
             edits.insert_child(element, rule.element, &body)?;
+        }
+    }
+    if let Some(item) = item {
+        match tag.as_str() {
+            "Table" if item.revision == "73" => apply_complex_settings_view_mode(edits, element, item)?,
+            "UsualGroup" if item.bag_revision.as_deref() == Some("38") => {
+                if let Some(node) = item.bag_tail.get(4) {
+                    apply_group_events(edits, element, node)?;
+                }
+            }
+            _ => {}
         }
     }
     for rule in FACT_RULES {
@@ -913,19 +1066,239 @@ fn apply_rules(
     Ok(())
 }
 
-/// Applies to a written 8.5 `Form.xml` what the appended members say.
+/// The value of a written one-line element `<Tag ...>value</Tag>`.
+fn simple_text<'x>(edits: &XmlEdits<'x>, element: usize) -> Option<&'x str> {
+    let element = &edits.elements[element];
+    if element.self_closing {
+        return Some("");
+    }
+    let line = &edits.xml[element.open_start..element.line_end];
+    let open_end = line.find('>')? + 1;
+    let close = line[open_end..].find("</")? + open_end;
+    let value = &line[open_end..close];
+    (!value.contains('<')).then_some(value)
+}
+
+/// The value of the one direct child `tag` of `parent`, when it is a
+/// one-line element.
+fn child_text<'x>(edits: &XmlEdits<'x>, parent: usize, tag: &str) -> Result<Option<(usize, &'x str)>> {
+    let children = edits.direct_children(parent, tag);
+    match children.as_slice() {
+        [] => Ok(None),
+        [child] => {
+            let value = simple_text(edits, *child).ok_or_else(|| {
+                anyhow!("<{tag}> of <{}> is not a one-line element", edits.elements[parent].tag)
+            })?;
+            Ok(Some((*child, value)))
+        }
+        _ => bail!("<{}> writes <{tag}> twice", edits.elements[parent].tag),
+    }
+}
+
+fn add_simple(edits: &mut XmlEdits<'_>, parent: usize, tag: &str, value: &str) -> Result<()> {
+    edits.insert_child(parent, tag, &format!("<{tag}>{value}</{tag}>\r\n"))
+}
+
+/// The 2.21 reading of a form body still in the 8.3.27 layout.
+///
+/// Platform 8.5 upgrades such a body in memory before it writes it: the
+/// members 8.5 appends take their defaults, some of them derived from an
+/// 8.3.27 property, and a few properties change their spelling. Each rule is
+/// a total function over the 13 044 forms the 8.5.1.1150 ERP УХ export writes
+/// from bodies its 8.3.27.2214 export wrote the same way, measured element by
+/// element against the 8.3.27 property it follows
+/// (`F:/ibcmd/lab/v85/tools/upg.py`). A value outside a rule's evidence
+/// refuses the form rather than guessing a spelling.
+pub(super) fn apply_v85_upgrade_defaults(xml: String) -> Result<String> {
+    let mut edits = XmlEdits::new(&xml)?;
+    for index in 0..edits.elements.len() {
+        let tag = edits.elements[index].tag.clone();
+        let is_root = edits.elements[index].parent.is_none();
+        let is_item = edits.elements[index].id.is_some();
+        match tag.as_str() {
+            "Form" if is_root => upgrade_form_root(&mut edits, index)?,
+            "Table" if is_item => upgrade_table(&mut edits, index)?,
+            "Button" if is_item => upgrade_button(&mut edits, index)?,
+            "Page" if is_item => {
+                if child_text(&edits, index, "ScrollOnCompress")?.is_none() {
+                    add_simple(&mut edits, index, "ScrollOnCompress", "false")?;
+                }
+                if child_text(&edits, index, "Group")?.is_none() {
+                    add_simple(&mut edits, index, "Group", "Vertical")?;
+                }
+            }
+            "UsualGroup" if is_item => upgrade_usual_group(&mut edits, index)?,
+            "PictureDecoration" if is_item => upgrade_picture_color(&mut edits, index)?,
+            tag if is_item && FIELD_TAGS.contains(&tag) => upgrade_field(&mut edits, index, tag)?,
+            _ => {}
+        }
+    }
+    edits.finish()
+}
+
+fn upgrade_form_root(edits: &mut XmlEdits<'_>, form: usize) -> Result<()> {
+    if child_text(edits, form, "Group")?.is_none() {
+        add_simple(edits, form, "Group", "Vertical")?;
+    }
+    match child_text(edits, form, "WindowOpeningMode")? {
+        None => add_simple(edits, form, "WindowOpeningMode", "DontBlock")?,
+        Some((child, "LockOwnerWindow")) => {
+            edits.remove(child);
+            add_simple(edits, form, "WindowOpeningMode", "LockOwner")?;
+        }
+        Some((_, "LockWholeInterface")) => {}
+        Some((_, value)) => bail!("<Form> WindowOpeningMode {value} has no 2.21 upgrade"),
+    }
+    if child_text(edits, form, "ShowCommandBar")?.is_none() {
+        match child_text(edits, form, "CommandBarLocation")?.map(|(_, value)| value) {
+            None => {}
+            Some("Top" | "Bottom") => add_simple(edits, form, "ShowCommandBar", "true")?,
+            Some("None") => add_simple(edits, form, "ShowCommandBar", "false")?,
+            Some(value) => bail!("<Form> CommandBarLocation {value} has no 2.21 upgrade"),
+        }
+    }
+    Ok(())
+}
+
+fn upgrade_table(edits: &mut XmlEdits<'_>, table: usize) -> Result<()> {
+    if child_text(edits, table, "RowSelectionMode")?.is_none() {
+        add_simple(edits, table, "RowSelectionMode", "Cell")?;
+    }
+    match child_text(edits, table, "UseAlternationRowColor")? {
+        None => add_simple(edits, table, "UseAlternationRowColorBWA", "false")?,
+        Some((child, "true")) => edits.remove(child),
+        Some((_, value)) => bail!("<Table> UseAlternationRowColor {value} has no 2.21 upgrade"),
+    }
+    for (old, new) in [
+        ("HorizontalLines", "HorizontalLinesBWA"),
+        ("VerticalLines", "VerticalLinesBWA"),
+    ] {
+        if let Some((child, value)) = child_text(edits, table, old)? {
+            let value = value.to_owned();
+            edits.remove(child);
+            add_simple(edits, table, new, &value)?;
+        }
+    }
+    let user_settings = child_text(edits, table, "DataPath")?
+        .is_some_and(|(_, path)| path.ends_with(".UserSettings"));
+    if user_settings && child_text(edits, table, "ComplexSettingsViewMode")?.is_none() {
+        add_simple(edits, table, "ComplexSettingsViewMode", "Show")?;
+    }
+    Ok(())
+}
+
+fn upgrade_button(edits: &mut XmlEdits<'_>, button: usize) -> Result<()> {
+    if child_text(edits, button, "ButtonImportance")?.is_none() {
+        let default = child_text(edits, button, "DefaultButton")?.map(|(_, value)| value);
+        let shape = child_text(edits, button, "ShapeRepresentation")?.map(|(_, value)| value);
+        match (default, shape) {
+            (Some("true"), _) => add_simple(edits, button, "ButtonImportance", "Main")?,
+            (None, Some("None")) => add_simple(edits, button, "ButtonImportance", "Supplementary")?,
+            (None, _) => {}
+            (Some(value), _) => bail!("<Button> DefaultButton {value} has no 2.21 upgrade"),
+        }
+    }
+    if let Some((child, "auto")) = child_text(edits, button, "BackColor")? {
+        edits.remove(child);
+    }
+    Ok(())
+}
+
+fn upgrade_usual_group(edits: &mut XmlEdits<'_>, group: usize) -> Result<()> {
+    if child_text(edits, group, "Representation")?.is_none() {
+        add_simple(edits, group, "Representation", "WeakSeparation")?;
+    }
+    if child_text(edits, group, "Group")?.is_none() {
+        add_simple(edits, group, "Group", "HorizontalIfPossible")?;
+    }
+    match child_text(edits, group, "ControlRepresentation")? {
+        None => {}
+        Some((child, "Picture")) => {
+            edits.remove(child);
+            add_simple(edits, group, "ControlRepresentation", "Button")?;
+        }
+        Some((_, value)) => bail!("<UsualGroup> ControlRepresentation {value} has no 2.21 upgrade"),
+    }
+    Ok(())
+}
+
+/// 2.21 colours a picture with its own `PictureColor`, which an upgraded
+/// body takes from the item's text colour.
+fn upgrade_picture_color(edits: &mut XmlEdits<'_>, item: usize) -> Result<()> {
+    if child_text(edits, item, "PictureColor")?.is_none()
+        && let Some((_, color)) = child_text(edits, item, "TextColor")?
+    {
+        let color = color.to_owned();
+        add_simple(edits, item, "PictureColor", &color)?;
+    }
+    Ok(())
+}
+
+fn upgrade_field(edits: &mut XmlEdits<'_>, field: usize, tag: &str) -> Result<()> {
+    if child_text(edits, field, "AutoEditMode")?.is_none() {
+        match child_text(edits, field, "EditMode")?.map(|(_, value)| value) {
+            Some("EnterOnInput") => add_simple(edits, field, "AutoEditMode", "true")?,
+            None | Some("Directly") => {}
+            Some(value) => bail!("<{tag}> EditMode {value} has no 2.21 upgrade"),
+        }
+    }
+    if tag == "InputField" && child_text(edits, field, "MarkRequiredComplete")?.is_none() {
+        match child_text(edits, field, "AutoMarkIncomplete")?.map(|(_, value)| value) {
+            None => {}
+            Some(value @ ("true" | "false")) => {
+                let value = value.to_owned();
+                add_simple(edits, field, "MarkRequiredComplete", &value)?;
+            }
+            Some(value) => bail!("<{tag}> AutoMarkIncomplete {value} has no 2.21 upgrade"),
+        }
+    }
+    match child_text(edits, field, "CellHyperlink")?.map(|(_, value)| value) {
+        None => {}
+        Some("true") => {
+            if child_text(edits, field, "CellHyperlinkRepresentation")?.is_none() {
+                add_simple(edits, field, "CellHyperlinkRepresentation", "Show")?;
+            }
+            if child_text(edits, field, "CellHyperlinkDisplayVariant")?.is_none() {
+                add_simple(edits, field, "CellHyperlinkDisplayVariant", "Always")?;
+            }
+        }
+        Some(value) => bail!("<{tag}> CellHyperlink {value} has no 2.21 upgrade"),
+    }
+    if tag == "CheckBoxField"
+        && let Some((child, "Auto")) = child_text(edits, field, "CheckBoxType")?
+    {
+        edits.remove(child);
+    }
+    if tag == "PictureField" {
+        upgrade_picture_color(edits, field)?;
+    }
+    Ok(())
+}
+
+/// Applies to a written 8.5 `Form.xml` what the appended members say, and
+/// returns the inline pictures those members carry (files beside the form).
 pub(super) fn apply_v85_form_facts(
     xml: String,
     facts: &FormV85Facts,
     object_refs: &std::collections::BTreeMap<String, String>,
-) -> Result<String> {
+) -> Result<(String, Vec<super::FormItemAsset>)> {
+    let mut assets = Vec::new();
     let mut edits = XmlEdits::new(&xml)?;
     let root = edits
         .elements
         .iter()
         .position(|element| element.parent.is_none() && element.tag == "Form")
         .ok_or_else(|| anyhow!("written form XML has no <Form> root"))?;
-    apply_rules(&mut edits, root, facts, None, None, object_refs)?;
+    apply_rules(&mut edits, root, facts, None, None, object_refs, &mut assets)?;
+    match facts.root_scale.as_deref() {
+        None | Some("100") => {}
+        Some(scale) => {
+            for child in edits.direct_children(root, "Scale") {
+                edits.remove(child);
+            }
+            edits.insert_child(root, "Scale", &format!("<Scale>{scale}</Scale>\r\n"))?;
+        }
+    }
     // Items by id outside the attribute, command and parameter sections,
     // whose ids number different spaces; commands by id inside theirs.
     let mut items = Vec::new();
@@ -955,13 +1328,13 @@ pub(super) fn apply_v85_form_facts(
     }
     for (element, id) in items {
         if let Some(item) = facts.items.get(&id) {
-            apply_rules(&mut edits, element, facts, Some(item), None, object_refs)?;
+            apply_rules(&mut edits, element, facts, Some(item), None, object_refs, &mut assets)?;
         }
     }
     for (element, id) in commands {
         if let Some(tail) = facts.commands.get(&id) {
-            apply_rules(&mut edits, element, facts, None, Some(tail), object_refs)?;
+            apply_rules(&mut edits, element, facts, None, Some(tail), object_refs, &mut assets)?;
         }
     }
-    edits.finish()
+    Ok((edits.finish()?, assets))
 }
