@@ -10394,6 +10394,7 @@ const STD_PICTURE_VALUES: &[(&str, &str)] = &[
     ("Form", "{0,fc34a694-e99b-4d1c-a526-63f5571bdb09}"),
     ("FormHelp", "{0,b7c81c62-d6ad-4eae-9cea-0e203182db67}"),
     ("Forward", "{0,f874b0cc-db1d-4577-8c77-d4ba206eb05d}"),
+    ("FunctionMenuCommand", "{0,dfcd2d21-24ea-4b27-ab9a-6bf754577536}"),
     ("GanttChart", "{0,fa67cb81-8d56-4534-90bd-b62fb0dbf5f0}"),
     ("GenerateReport", "{0,0ce78048-0196-4f80-a781-9829cdb7f43e}"),
     ("GeographicalSchema", "{0,a9152be7-62cf-4523-be34-a23f018f497e}"),
@@ -30623,9 +30624,16 @@ fn flowchart_base_ranges(
     base_range: Range<usize>,
 ) -> Result<(String, Range<usize>, Range<usize>)> {
     let head_fields = scan_wrapped_braced_fields(plain, base_range)?;
-    // A typed item -- start, end, condition, activity, and a nested
-    // business process (code 10) -- wraps its base record one level deeper.
-    let base_fields = if matches!(code, "2" | "3" | "4" | "5" | "10") {
+    // Every item but a connection line (1) and a decoration (0) wraps its
+    // base record `{4,<id>,<title>,<name>,<tab order>}` one level deeper:
+    // start, end, condition, activity, the nested business process (10),
+    // and the merge, split and processing points (7, 8, 9) ERP УХ's
+    // СогласованиеПродажи and its siblings carry. Read the shape, not the code.
+    let wrapped = head_fields
+        .first()
+        .is_some_and(|range| range_starts_with_brace(plain, range));
+    let _ = code;
+    let base_fields = if wrapped {
         scan_wrapped_braced_fields(
             plain,
             head_fields
@@ -33254,8 +33262,22 @@ fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str>
         "StdPicture.Write" => Some("894cf65b-4109-4533-a1d7-c87b1fcc80a3"),
         "StdPicture.WriteAndClose" => Some("e6fc55a0-3d58-4b15-bdd3-717453929598"),
         "StdPicture.Delete" => Some("08a45a70-c221-4339-b3b1-9f11cb22147d"),
-        _ => None,
+        other => std_picture_value_uuid(other),
     }
+}
+
+/// The uuid a `StdPicture.<Name>` is stored under when the form writer's
+/// measured table (`STD_PICTURE_VALUES`) spells it `{0,<uuid>}` -- the same
+/// uuids the exporter names back.
+fn std_picture_value_uuid(reference: &str) -> Option<&'static str> {
+    let name = reference.trim().strip_prefix("StdPicture.")?;
+    let value = STD_PICTURE_VALUES
+        .iter()
+        .find_map(|(candidate, value)| (*candidate == name).then_some(*value))?;
+    value
+        .strip_prefix("{0,")
+        .and_then(|rest| rest.strip_suffix('}'))
+        .filter(|uuid| is_uuid_text(uuid))
 }
 
 fn parse_command_group_picture(
@@ -33280,6 +33302,17 @@ fn parse_command_group_picture(
         )?;
         return Ok(CommandGroupPicture::CommonPicture {
             uuid: STD_PICTURE_INFORMATION_REGISTER_UUID.to_string(),
+            load_transparent,
+        });
+    }
+    if let Some(uuid) = std_picture_value_uuid(&reference) {
+        let load_transparent = parse_required_metadata_bool(
+            "CommandGroup",
+            "Picture/LoadTransparent",
+            load_transparent,
+        )?;
+        return Ok(CommandGroupPicture::CommonPicture {
+            uuid: uuid.to_string(),
             load_transparent,
         });
     }
