@@ -1706,13 +1706,14 @@ fn metadata_body_bootstrap_rows(
                 } else {
                     &module_path
                 };
+                // A form the readiness model cannot read is a blocker of that
+                // form, not a reason to abandon the whole report.
                 let blockers = form_body_base_free_blockers_for_paths(&form_path, &module_path)
-                    .with_context(|| {
-                        format!(
-                            "failed to audit Form body base-free blockers for {}",
-                            source_path.display()
-                        )
-                    })?;
+                    .unwrap_or_else(|error| {
+                        vec![format!(
+                            "Form body base-free blockers could not be audited: {error:#}"
+                        )]
+                    });
                 let (generation, current_staging_fetches_base_blob, reason) =
                     if blockers.is_empty() {
                         (

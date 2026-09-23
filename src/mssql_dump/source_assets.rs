@@ -2167,7 +2167,7 @@ const PALETTE_NAMESPACE_DECLARATION: &str =
 /// prefix, so `pal` goes before the first prefixed declaration that sorts after
 /// it -- `style` on most roots, `sch` on a graphical schema. A tag that already
 /// declares the prefix is left as it is.
-pub(super) fn declare_palette_namespace_beside_style(bytes: Vec<u8>) -> Vec<u8> {
+pub(crate) fn declare_palette_namespace_beside_style(bytes: Vec<u8>) -> Vec<u8> {
     let Ok(text) = std::str::from_utf8(&bytes) else {
         return bytes;
     };
@@ -2451,7 +2451,13 @@ fn write_source_asset_inner(
                     xml,
                     diagnostics: extraction_diagnostics,
                 } => {
+                    // Diagnostic: `IBCMD_RS_V85_FORM_PASS=off` writes what the 8.3.27
+                    // codec reads from the (down-converted) body, without the 2.21
+                    // pass -- the XML a 2.21 load hands the 8.3.27 form writer.
+                    let v85_pass_off = std::env::var("IBCMD_RS_V85_FORM_PASS")
+                        .is_ok_and(|value| value == "off");
                     let (xml, v85_item_assets) = match &v85_facts {
+                        _ if v85_pass_off => (xml, Vec::new()),
                         Some(facts) => super::form_v85_writer::apply_v85_form_facts(
                             xml,
                             facts,

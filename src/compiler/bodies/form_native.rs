@@ -90,6 +90,14 @@ pub(crate) fn format_native_color(
             .find_map(|(candidate, code)| (*candidate == name).then_some(*code))?;
         return Some(format!("{{3,2,{{{code}}}}}"));
     }
+    // `pal:<name>`, a platform 8.5 palette colour: space 4 with kind 5, the
+    // index the 2.21 exporter names (`form_v85::v85_palette_color_name`).
+    if let Some(name) = value.strip_prefix("pal:") {
+        let index = V85_PALETTE_COLORS
+            .iter()
+            .find_map(|(candidate, index)| (*candidate == name).then_some(*index))?;
+        return Some(format!("{{4,4,{{{index}}},5}}"));
+    }
     if let Some(name) = value.strip_prefix("win:") {
         let code = WINDOWS_COLOR_CODES
             .iter()
@@ -105,6 +113,19 @@ pub(crate) fn format_native_color(
     }
     style_item_uuid(name).map(|uuid| format!("{{3,3,{{0,{uuid}}}}}"))
 }
+
+/// The platform 8.5 palette, by the index a colour tuple stores.
+const V85_PALETTE_COLORS: &[(&str, u8)] = &[
+    ("FirstBrand", 0),
+    ("SecondBrand", 1),
+    ("Red", 2),
+    ("Orange", 3),
+    ("Yellow", 4),
+    ("Green", 5),
+    ("LightBlue", 6),
+    ("Blue", 7),
+    ("Gray", 15),
+];
 
 /// The codes the platform's own style colours carry, as the corpus spells
 /// them.
@@ -468,6 +489,8 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("InputField", "", "EditTextChange", "14256303-d2b7-4a58-bfab-e77493d10a59"),
     ("InputField", "", "MultipleValuesDelete", "49ede602-af78-4a50-b821-ec81f6778f2d"),
     ("InputField", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
+    // Platform 8.5 (8.5.1.1150 BSP: 6 bindings).
+    ("InputField", "", "MultipleValuesAdd", "9d59f117-9183-4044-be98-829c9cd48754"),
     ("InputField", "", "Opening", "ac5a9c5a-5f1d-4fc5-b88c-a187038c16d1"),
     ("InputField", "", "StartChoice", "1960479b-4d89-4eba-8b39-0aa802020558"),
     ("InputField", "", "StartListChoice", "b3b65989-73ac-4db3-b6cb-398cb41a062f"),
@@ -521,6 +544,9 @@ const FORM_EVENT_UUIDS: &[(&str, &str, &str, &str)] = &[
     ("Table", "", "OnActivateCell", "f228b12f-d892-4925-b338-695617357b32"),
     ("Table", "", "OnActivateField", "6e973761-8683-47fa-a609-4e230950294d"),
     ("Table", "", "OnActivateRow", "60edb81d-887b-478e-94ee-7fef2b13393d"),
+    // Platform 8.5 (8.5.1.1150 BSP: 79 and 5 bindings).
+    ("Table", "", "OnHover", "c676f87f-6c33-4dba-aad8-0526726d1bcf"),
+    ("Table", "", "OnSelectedRowsSetChange", "147fd867-8f22-4463-939d-4b48c5860c89"),
     ("Table", "", "OnChange", "fe115cc8-9e33-4684-a166-bd5136fe7a9f"),
     ("Table", "", "OnEditEnd", "01d80ddd-dce5-4db3-beb5-f63c97cb05b9"),
     ("Table", "", "OnGetDataAtServer", "97365900-eadf-4dfd-a9aa-fbb9ecabd079"),
@@ -739,6 +765,15 @@ const PLATFORM_STYLE_FONT_CODES: &[(&str, &str)] = &[
     ("NormalTextFont", "-31"),
     ("SmallTextFont", "-30"),
     ("TextFont", "-20"),
+    // Platform 8.5 style fonts: 8.5.1.1150 BSP pairs each code with its name
+    // on every item and style item that carries exactly one.
+    ("TitleLevel2", "-59"),
+    ("TitleLevel3", "-50"),
+    ("TitleLevel5", "-52"),
+    ("TextLevel1", "-53"),
+    ("TextLevel2", "-54"),
+    ("TextLevel3", "-55"),
+    ("SubtitleLevel1", "-56"),
 ];
 
 /// The `{12,…}` record of an item's `<ExtendedTooltip>`, as the platform
@@ -2237,6 +2272,12 @@ const ITEM_STANDARD_COMMAND_UUIDS: &[(&str, bool, &str, &str)] = &[
     ("SpreadSheetDocumentField", false, "ThickBorderTop", "a01654df-d7f1-4ec5-8b03-258d953de2e7"),
     ("SpreadSheetDocumentField", false, "Underline", "85bd789b-0047-46f9-9b2e-845907fc1b1d"),
     ("Table", false, "Add", "b0016a68-ec64-4e6d-b905-c71fd62efc4c"),
+    // Platform 8.5 (8.5.1.1150 BSP), read back by the exporter's
+    // `form_table_standard_command_suffix` whatever the table shows.
+    ("Table", false, "ClearTableMarksAppearance", "daf40cdf-c477-48c5-9627-57d5450e1f3d"),
+    ("Table", true, "ClearTableMarksAppearance", "daf40cdf-c477-48c5-9627-57d5450e1f3d"),
+    ("Table", false, "AddMultiple", "6db04d66-8367-4b9d-a368-16742c09f654"),
+    ("Table", true, "AddMultiple", "6db04d66-8367-4b9d-a368-16742c09f654"),
     ("Table", false, "AddFilterItem", "fca750bc-4fb6-40e2-ae0f-e818939a32e7"),
     ("Table", false, "AddAutoOrderItem", "48e12019-0fd6-46eb-aab6-2acba716a623"),
     ("Table", false, "AddFilterItemGroup", "a5fdef31-bbf0-4a9d-98aa-fd5fd8f1344a"),
@@ -2443,6 +2484,9 @@ const FORM_STANDARD_COMMAND_UUIDS: &[(&str, &str, &str)] = &[
     ("cfg:ConstantsSet", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
     ("cfg:ConstantsSet", "CustomizeForm", "198ea630-fda2-4cda-8a23-f999f4c67ee6"),
     ("cfg:ConstantsSet", "Help", "39bb0fe9-771d-4dd5-8a6e-2d16984523af"),
+    // 8.5.1.1150 BSP `ПолнотекстовыйПоискВДанных` form, the uuid the
+    // exporter names back (`form_standard_command_suffix`).
+    ("cfg:ConstantsSet", "ChangeHistory", "174e58ce-82ad-4787-b956-9367937f7971"),
     ("cfg:ConstantsSet", "WriteAndClose", "32df4349-2607-4c2b-a4b9-bca4a1a28bd7"),
     ("cfg:DataProcessorObject", "Cancel", "679b62d9-ff72-4329-bf3a-c0c32b311dd2"),
     ("cfg:DataProcessorObject", "Close", "3772996b-41f4-4c47-a5a8-ea397db424ae"),
@@ -4094,7 +4138,8 @@ pub(crate) fn format_button_item(button: &NativeButtonItem<'_>) -> Option<String
     )?;
     let picture_location = root_code(
         button.picture_location,
-        &[("Left", "1"), ("Right", "2")],
+        // `Top` is 3 (8.5.1.1150 BSP, the one button that spells it).
+        &[("Left", "1"), ("Right", "2"), ("Top", "3")],
         "0",
     )?;
     Some(format!(
@@ -4915,6 +4960,9 @@ pub(crate) fn format_formatted_document_payload(
 pub(crate) struct NativeTextDocumentPayload<'a> {
     pub(crate) width: &'a str,
     pub(crate) height: &'a str,
+    /// Member 3: 0 only on the 8.5.1.1150 BSP field written
+    /// `<HorizontalStretch>false` (`Catalogs/_ДемоБанковскиеСчета`).
+    pub(crate) horizontal_stretch: bool,
     pub(crate) vertical_stretch: bool,
     pub(crate) back_color: &'a str,
     pub(crate) font: &'a str,
@@ -4927,10 +4975,11 @@ pub(crate) struct NativeTextDocumentPayload<'a> {
 
 pub(crate) fn format_text_document_payload(payload: &NativeTextDocumentPayload<'_>) -> String {
     format!(
-        "{{5,{width},{height},1,{vertical},0,{{3,4,{{0}}}},{back_color},{{3,4,{{0}}}},{font},\
+        "{{5,{width},{height},{horizontal},{vertical},0,{{3,4,{{0}}}},{back_color},{{3,4,{{0}}}},{font},\
          {auto_width},{max_width},0,{auto_height},{max_height},{events}}}",
         width = payload.width,
         height = payload.height,
+        horizontal = u8::from(payload.horizontal_stretch),
         vertical = u8::from(payload.vertical_stretch),
         back_color = payload.back_color,
         font = payload.font,

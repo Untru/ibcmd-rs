@@ -202,32 +202,68 @@ fn verify_schema_round_trip(
     type_index: &DcsTypeIndex,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<(), DcsCodecError> {
-    let exported =
+    let export = |dialect: &str| {
         crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
             &body.documents(),
             type_index,
             object_refs,
             &ProfileId::parse("provider:mssql-legacy")
                 .map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?,
-            &ProfileId::parse("xml-2.20")
-                .map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?,
+            &ProfileId::parse(dialect).map_err(|error| DcsCodecError::RoundTrip(error.to_string()))?,
         )
         .map_err(|error| {
             DcsCodecError::RoundTrip(format!("the compiled body does not export: {error}"))
-        })?;
+        })
+    };
     let expected = document_without_shell(source);
+    let exported = export("xml-2.20")?;
     let actual = document_without_shell(&exported);
     if expected == actual {
         return Ok(());
     }
-    let at = expected
-        .iter()
-        .zip(actual)
-        .position(|(left, right)| left != right)
-        .unwrap_or_else(|| expected.len().min(actual.len()));
+    // A platform 8.5 source is written in dialect 2.21, which declares the
+    // palette namespace beside the style one; it reads back under 2.21.
+    let exported_v85 =
+        crate::mssql_dump::declare_palette_namespace_beside_style(export("xml-2.21")?);
+    let actual_v85 = document_without_shell(&exported_v85);
+    if expected == actual_v85 {
+        return Ok(());
+    }
+    // Diagnostic: both readings of a refused schema, beside its source.
+    if let Some(dir) = std::env::var_os("IBCMD_RS_DCS_GATE_DUMP_DIR") {
+        let dir = std::path::Path::new(&dir);
+        let key = format!("{:016x}", {
+            use std::hash::{Hash, Hasher};
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            expected.hash(&mut hasher);
+            hasher.finish()
+        });
+        let _ = std::fs::create_dir_all(dir);
+        let _ = std::fs::write(dir.join(format!("{key}.source.xml")), expected);
+        let _ = std::fs::write(dir.join(format!("{key}.v20.xml")), actual);
+        let _ = std::fs::write(dir.join(format!("{key}.v21.xml")), actual_v85);
+    }
+    // The reading that got further is the one to report.
+    let first_difference = |actual: &[u8]| {
+        expected
+            .iter()
+            .zip(actual)
+            .position(|(left, right)| left != right)
+            .unwrap_or_else(|| expected.len().min(actual.len()))
+    };
+    let (at, actual) = [actual, actual_v85]
+        .into_iter()
+        .map(|actual| (first_difference(actual), actual))
+        .max_by_key(|(at, _)| *at)
+        .expect("two readings");
+    let window = |text: &[u8]| {
+        String::from_utf8_lossy(&text[at.min(text.len())..(at + 48).min(text.len())]).into_owned()
+    };
     Err(DcsCodecError::RoundTrip(format!(
-        "the compiled body exports back differently at byte {at} of {}",
-        expected.len()
+        "the compiled body exports back differently at byte {at} of {}: source `{}`, export `{}`",
+        expected.len(),
+        window(expected),
+        window(actual),
     )))
 }
 

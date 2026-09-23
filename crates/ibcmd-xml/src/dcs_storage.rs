@@ -60,6 +60,7 @@ const STYLE: &str = "http://v8.1c.ru/8.1/data/ui/style";
 const FONTS_SYSTEM: &str = "http://v8.1c.ru/8.1/data/ui/fonts/system";
 const COLORS_WEB: &str = "http://v8.1c.ru/8.1/data/ui/colors/web";
 const COLORS_WINDOWS: &str = "http://v8.1c.ru/8.1/data/ui/colors/windows";
+const PALETTE: &str = "http://v8.1c.ru/8.1/data/ui/colors/palette";
 const XS: &str = "http://www.w3.org/2001/XMLSchema";
 const XSI: &str = "http://www.w3.org/2001/XMLSchema-instance";
 const CURRENT_CONFIG: &str = "http://v8.1c.ru/8.1/data/enterprise/current-config";
@@ -912,9 +913,21 @@ impl Writer<'_> {
                 "an inline settings element carries attributes",
             ));
         }
+        // A platform 8.5 source (dialect 2.21) declares the palette namespace
+        // on the inline settings; the 8.5 writer declares it on the stored
+        // root too, between `dcscor` and `style` (all 132 settings documents
+        // of the 8.5.1.1150 BSP schema templates).
+        let v85 = settings
+            .declarations()
+            .iter()
+            .any(|(prefix, uri)| prefix == "pal" && uri == PALETTE);
+        let mut namespaces = SETTINGS_NAMESPACES.to_vec();
+        if v85 {
+            namespaces.insert(2, ("pal", PALETTE));
+        }
         let mut out = String::from(DOCUMENT_HEAD);
         out.push_str("<Settings");
-        for (prefix, uri) in SETTINGS_NAMESPACES {
+        for &(prefix, uri) in &namespaces {
             if prefix.is_empty() {
                 out.push_str(" xmlns=\"");
             } else {
@@ -937,7 +950,7 @@ impl Writer<'_> {
         }
         out.push('>');
         let mut storage_scopes = vec![
-            SETTINGS_NAMESPACES
+            namespaces
                 .iter()
                 .map(|(prefix, uri)| ((*prefix).to_string(), (*uri).to_string()))
                 .collect::<Vec<_>>(),
@@ -1131,8 +1144,17 @@ impl Writer<'_> {
         if element.local() == "settings"
             && (uri == SETTINGS || (uri == SCHEMA && parent_local == "nestedSchema"))
         {
-            // A `Settings` object re-declares its writer's namespace set.
-            for (prefix, settings_uri) in &SETTINGS_NAMESPACES[1..] {
+            // A `Settings` object re-declares its writer's namespace set; a
+            // platform 8.5 source (the palette namespace declared on the
+            // element) has the palette between `dcscor` and `style`.
+            let v85 = own_source
+                .iter()
+                .any(|(prefix, bound)| prefix == "pal" && bound == PALETTE);
+            let mut namespaces = SETTINGS_NAMESPACES[1..].to_vec();
+            if v85 {
+                namespaces.insert(1, ("pal", PALETTE));
+            }
+            for (prefix, settings_uri) in &namespaces {
                 if declarations.resolve(prefix) != Some(*settings_uri) {
                     declarations
                         .own

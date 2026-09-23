@@ -582,7 +582,7 @@ fn item_identity(members: &[Node]) -> Option<&str> {
 }
 
 /// 8.5 item revision -> (8.3.27 revision, appended members).
-fn item_revision(revision: &str) -> Option<(&'static str, usize)> {
+pub(super) fn item_revision(revision: &str) -> Option<(&'static str, usize)> {
     Some(match revision {
         "48" => ("37", 15),
         "34" => ("31", 7),
@@ -596,7 +596,7 @@ fn item_revision(revision: &str) -> Option<(&'static str, usize)> {
 
 /// The property-bag slot of a record that carries one, before the optional
 /// common prefix shifts it.
-fn bag_base_slot(v83_revision: &str) -> Option<usize> {
+pub(super) fn bag_base_slot(v83_revision: &str) -> Option<usize> {
     match v83_revision {
         "22" => Some(20),
         "37" => Some(39),
@@ -613,7 +613,7 @@ fn bag_base_slot(v83_revision: &str) -> Option<usize> {
 /// members, while a `CommandBar` (kind 0) moves from `{1,...}` of three to
 /// `{2,...}` of four. Every (kind, shape) pair of the 8.5 BSP bodies is listed;
 /// each maps onto the one shape the 8.3.27 BSP bodies give that kind.
-fn bag_revision(
+pub(super) fn bag_revision(
     v83_owner: &str,
     kind: &str,
     revision: &str,

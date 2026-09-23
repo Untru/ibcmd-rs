@@ -17,16 +17,16 @@ use super::form_v85::{FormV85Facts, FormV85ItemFacts, Node};
 /// One element of a written `Form.xml`, located by byte offsets. The writer
 /// puts every element on its own line, indented with tabs.
 #[derive(Debug, Clone)]
-struct XmlElement {
-    tag: String,
-    id: Option<String>,
+pub(super) struct XmlElement {
+    pub(super) tag: String,
+    pub(super) id: Option<String>,
     line_start: usize,
-    open_start: usize,
+    pub(super) open_start: usize,
     close_line_start: usize,
-    line_end: usize,
-    self_closing: bool,
-    parent: Option<usize>,
-    children: Vec<usize>,
+    pub(super) line_end: usize,
+    pub(super) self_closing: bool,
+    pub(super) parent: Option<usize>,
+    pub(super) children: Vec<usize>,
 }
 
 fn line_start_of(xml: &str, offset: usize) -> usize {
@@ -137,26 +137,54 @@ fn scan_elements(xml: &str) -> Result<Vec<XmlElement>> {
 }
 
 /// Pending text edits against one written XML, applied in one pass.
-struct XmlEdits<'a> {
-    xml: &'a str,
-    elements: Vec<XmlElement>,
+pub(super) struct XmlEdits<'a> {
+    pub(super) xml: &'a str,
+    pub(super) elements: Vec<XmlElement>,
     removed: BTreeSet<usize>,
     /// (start, end, replacement, child-order rank, sequence).
     edits: Vec<(usize, usize, String, usize, usize)>,
     /// Elements to add: (parent, tag, body), placed once every removal is
     /// known, so no element is anchored on a sibling a later rule removes.
     inserts: Vec<(usize, String, String)>,
+    /// The loader's reading: an element the child order does not place goes
+    /// last among its siblings instead of refusing (the 8.3.27 writer reads
+    /// properties, not positions).
+    lenient: bool,
 }
 
 impl<'a> XmlEdits<'a> {
-    fn new(xml: &'a str) -> Result<Self> {
+    pub(super) fn new(xml: &'a str) -> Result<Self> {
         Ok(Self {
             xml,
             elements: scan_elements(xml)?,
             removed: BTreeSet::new(),
             edits: Vec::new(),
             inserts: Vec::new(),
+            lenient: false,
         })
+    }
+
+    pub(super) fn new_lenient(xml: &'a str) -> Result<Self> {
+        let mut edits = Self::new(xml)?;
+        edits.lenient = true;
+        Ok(edits)
+    }
+
+    /// Replaces an element with `body` (CRLF-terminated lines) at its own
+    /// place and indentation.
+    pub(super) fn replace(&mut self, element: usize, body: &str) {
+        if self.removed.insert(element) {
+            let start = self.elements[element].line_start;
+            let end = self.elements[element].line_end;
+            let indent = self.indent_of(element).to_owned();
+            let mut text = String::new();
+            for line in body.split_inclusive("\r\n") {
+                text.push_str(&indent);
+                text.push_str(line);
+            }
+            let seq = self.edits.len();
+            self.edits.push((start, end, text, usize::MAX, seq));
+        }
     }
 
     fn indent_of(&self, element: usize) -> &'a str {
@@ -164,7 +192,7 @@ impl<'a> XmlEdits<'a> {
         &self.xml[element.line_start..element.open_start]
     }
 
-    fn direct_children(&self, parent: usize, tag: &str) -> Vec<usize> {
+    pub(super) fn direct_children(&self, parent: usize, tag: &str) -> Vec<usize> {
         self.elements[parent]
             .children
             .iter()
@@ -173,7 +201,7 @@ impl<'a> XmlEdits<'a> {
             .collect()
     }
 
-    fn remove(&mut self, element: usize) {
+    pub(super) fn remove(&mut self, element: usize) {
         if self.removed.insert(element) {
             let start = self.elements[element].line_start;
             let end = self.elements[element].line_end;
@@ -187,7 +215,7 @@ impl<'a> XmlEdits<'a> {
 
     /// Adds `body` (CRLF-terminated lines, relative indentation) as a child of
     /// `parent`, at the place the 2.21 child order gives `tag`.
-    fn insert_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
+    pub(super) fn insert_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
         self.inserts
             .push((parent, tag.to_owned(), body.to_owned()));
         Ok(())
@@ -208,23 +236,36 @@ impl<'a> XmlEdits<'a> {
 
     fn place_child(&mut self, parent: usize, tag: &str, body: &str) -> Result<()> {
         let parent_tag = self.elements[parent].tag.clone();
-        let order = super::form_v85_order::child_order(&parent_tag)
-            .ok_or_else(|| anyhow!("no 2.21 child order is known for <{parent_tag}>"))?;
+        let order = super::form_v85_order::child_order(&parent_tag);
+        let order = match order {
+            Some(order) => order,
+            None if self.lenient => &[],
+            None => bail!("no 2.21 child order is known for <{parent_tag}>"),
+        };
         let rank = |name: &str| order.iter().position(|known| *known == name);
-        let new_rank =
-            rank(tag).ok_or_else(|| anyhow!("<{tag}> has no known place in <{parent_tag}>"))?;
         let mut before = None;
-        for &child in &self.elements[parent].children {
-            if self.removed.contains(&child) {
-                continue;
+        let mut new_rank = usize::MAX - 1;
+        match rank(tag) {
+            Some(known) => {
+                new_rank = known;
+                for &child in &self.elements[parent].children {
+                    if self.removed.contains(&child) {
+                        continue;
+                    }
+                    let child_tag = &self.elements[child].tag;
+                    let child_rank = match rank(child_tag) {
+                        Some(child_rank) => child_rank,
+                        None if self.lenient => continue,
+                        None => bail!("<{child_tag}> has no known place in <{parent_tag}>"),
+                    };
+                    if child_rank > new_rank {
+                        before = Some(child);
+                        break;
+                    }
+                }
             }
-            let child_tag = &self.elements[child].tag;
-            let child_rank = rank(child_tag)
-                .ok_or_else(|| anyhow!("<{child_tag}> has no known place in <{parent_tag}>"))?;
-            if child_rank > new_rank {
-                before = Some(child);
-                break;
-            }
+            None if self.lenient => {}
+            None => bail!("<{tag}> has no known place in <{parent_tag}>"),
         }
         let (at, indent) = match before {
             Some(child) => (
@@ -253,7 +294,7 @@ impl<'a> XmlEdits<'a> {
         Ok(())
     }
 
-    fn finish(mut self) -> Result<String> {
+    pub(super) fn finish(mut self) -> Result<String> {
         for (parent, tag, body) in std::mem::take(&mut self.inserts) {
             self.place_child(parent, &tag, &body)?;
         }
@@ -431,7 +472,7 @@ struct FactRule {
     values: &'static [(&'static str, Option<&'static str>)],
 }
 
-const FIELD_TAGS: &[&str] = &[
+pub(super) const FIELD_TAGS: &[&str] = &[
     "InputField",
     "LabelField",
     "CheckBoxField",
@@ -450,7 +491,7 @@ const FIELD_TAGS: &[&str] = &[
     "PDFDocumentField",
 ];
 
-const GROUPING: &[(&str, Option<&str>)] = &[
+pub(super) const GROUPING: &[(&str, Option<&str>)] = &[
     ("0", Some("Vertical")),
     ("1", Some("Horizontal")),
     ("2", Some("HorizontalIfPossible")),
@@ -460,7 +501,7 @@ const GROUPING: &[(&str, Option<&str>)] = &[
 ];
 
 /// `0` false, `1` true, `2` unset.
-const TRI_STATE: &[(&str, Option<&str>)] =
+pub(super) const TRI_STATE: &[(&str, Option<&str>)] =
     &[("0", Some("false")), ("1", Some("true")), ("2", None)];
 
 const FACT_RULES: &[FactRule] = &[
@@ -1047,7 +1088,7 @@ fn apply_choice_value_pictures(
 }
 
 /// The `name` attribute of a written element's opening tag.
-fn element_name(edits: &XmlEdits<'_>, element: usize) -> Option<String> {
+pub(super) fn element_name(edits: &XmlEdits<'_>, element: usize) -> Option<String> {
     let open = edits.elements[element].open_start;
     let tag_end = edits.xml[open..].find('>')? + open;
     let inner = &edits.xml[open..tag_end];
@@ -1163,7 +1204,7 @@ fn apply_rules(
 }
 
 /// The value of a written one-line element `<Tag ...>value</Tag>`.
-fn simple_text<'x>(edits: &XmlEdits<'x>, element: usize) -> Option<&'x str> {
+pub(super) fn simple_text<'x>(edits: &XmlEdits<'x>, element: usize) -> Option<&'x str> {
     let element = &edits.elements[element];
     if element.self_closing {
         return Some("");
@@ -1177,7 +1218,7 @@ fn simple_text<'x>(edits: &XmlEdits<'x>, element: usize) -> Option<&'x str> {
 
 /// The value of the one direct child `tag` of `parent`, when it is a
 /// one-line element.
-fn child_text<'x>(edits: &XmlEdits<'x>, parent: usize, tag: &str) -> Result<Option<(usize, &'x str)>> {
+pub(super) fn child_text<'x>(edits: &XmlEdits<'x>, parent: usize, tag: &str) -> Result<Option<(usize, &'x str)>> {
     let children = edits.direct_children(parent, tag);
     match children.as_slice() {
         [] => Ok(None),

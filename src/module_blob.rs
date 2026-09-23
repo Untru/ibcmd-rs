@@ -5428,7 +5428,7 @@ const fn native_fixing_in_table_spelling(fixing: FormFixingInTable) -> &'static 
 
 /// A colour the way every native payload writes one, with the configuration's
 /// own style items resolved when the caller can reach them.
-fn native_item_color(value: Option<&str>, source: Option<&MetadataSourceContext>) -> Option<String> {
+pub(crate) fn native_item_color(value: Option<&str>, source: Option<&MetadataSourceContext>) -> Option<String> {
     crate::compiler::bodies::form_native::format_native_color(value, |name| {
         source?
             .resolve_style_item_uuid(&format!("StyleItem.{name}"))
@@ -6149,16 +6149,11 @@ fn native_field_payload(
         )
         .ok_or_else(|| anyhow!("<HTMLDocumentField> names a spelling the writer cannot place")),
         "FormattedDocumentField" => {
-            // The stretch pair is the one fact the corpora do not decide:
-            // no item spells one without the other, so which member is
-            // horizontal is unmeasured and only matters when the two differ.
+            // Members 3 and 4, horizontal then vertical: the exporter reads
+            // them so, and the 8.5.1.1150 BSP field that stretches one way
+            // only exports byte for byte through it.
             let horizontal = item.horizontal_stretch.unwrap_or(true);
             let vertical = item.vertical_stretch.unwrap_or(true);
-            if horizontal != vertical {
-                return Err(anyhow!(
-                    "a <FormattedDocumentField> stretches one way only, and the order of its                      payload members 3 and 4 is not measured"
-                ));
-            }
             Ok(native::format_formatted_document_payload(
                 &native::NativeFormattedDocumentPayload {
                     width: item.width.as_deref().unwrap_or("50"),
@@ -6175,19 +6170,11 @@ fn native_field_payload(
             ))
         }
         "TextDocumentField" => {
-            // Member 3 is constant 1 over all 159 records because no field of
-            // either corpus spells `<HorizontalStretch>`; one that does would
-            // decide between a constant and the flag its neighbour is, and
-            // nothing measures which.
-            if item.horizontal_stretch.is_some() {
-                return Err(anyhow!(
-                    "a <TextDocumentField> names <HorizontalStretch>, whose member is not measured"
-                ));
-            }
             Ok(native::format_text_document_payload(
                 &native::NativeTextDocumentPayload {
                     width: item.width.as_deref().unwrap_or("50"),
                     height: item.height.as_deref().unwrap_or("10"),
+                    horizontal_stretch: item.horizontal_stretch.unwrap_or(true),
                     vertical_stretch: item.vertical_stretch.unwrap_or(true),
                     back_color: &native_scalar_color(item, "BackColor", source)?,
                     font: &native_item_font(item, source)?,
@@ -6283,9 +6270,12 @@ fn native_field_payload(
                     return Err(anyhow!("a progress bar's <Representation>{other} is not measured"));
                 }
             };
+            // Member 12 is the `<MaxWidth>` beside `AutoMaxWidth`, as on the
+            // other kinds: 40 on the one 8.5.1.1150 BSP bar that writes it.
             Ok(format!(
-                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},0,0,{auto_max_height},0}}",
+                "{{4,{width},1,{stretch},0,0,{max},0,{representation},{percent},{{3,4,{{0}}}},{auto_max_width},{max_width},0,{auto_max_height},0}}",
                 width = item.width.as_deref().unwrap_or("32"),
+                max_width = item.max_width.as_deref().unwrap_or("0"),
                 stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
                 max = item.scalars.get("MaxValue").map_or("100", String::as_str),
                 percent = u8::from(native_scalar_flag(item, "ShowPercent", false)),
@@ -6873,6 +6863,30 @@ fn native_item_picture(
     )
 }
 
+/// A `<Picture>` read element by element, for the 2.21 form loader.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn native_picture_from_parts(
+    holder: &str,
+    item_name: &str,
+    abs: Option<String>,
+    reference: Option<String>,
+    load_transparent: Option<String>,
+    transparent_x: Option<String>,
+    transparent_y: Option<String>,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<String> {
+    let picture = FormXmlItemPicture {
+        abs,
+        reference,
+        load_transparent,
+        transparent_x,
+        transparent_y,
+        unwritable: Vec::new(),
+    };
+    native_picture_of(holder, item_name, Some(&picture), true, source, items_root)
+}
+
 /// The same `<Picture>`, on a holder that is not a child item.
 fn native_picture_of(
     holder: &str,
@@ -6927,12 +6941,17 @@ fn native_picture_of(
     // A `StdPicture` names the platform's own picture, which no file of the
     // source declares, so its stored value has to come from a table.
     if let Some(name) = reference.strip_prefix("StdPicture.") {
+        // The platform's own pictures the exporter names by uuid (including
+        // 8.5's), stored `{0,<uuid>}` like every uuid entry of the table.
         let value = STD_PICTURE_VALUES
             .iter()
-            .find_map(|(candidate, value)| (*candidate == name).then_some(*value))
+            .find_map(|(candidate, value)| (*candidate == name).then(|| (*value).to_owned()))
+            .or_else(|| {
+                crate::mssql_dump::standard_picture_uuid(reference).map(|uuid| format!("{{0,{uuid}}}"))
+            })
             .ok_or_else(|| anyhow!("no measured value for StdPicture.{name}"))?;
         return Ok(native::format_native_std_picture(
-            value,
+            &value,
             picture.load_transparent.as_deref().map(str::trim) != Some("false"),
             picture.transparent_x.as_deref(),
             picture.transparent_y.as_deref(),
@@ -7480,6 +7499,15 @@ fn native_input_drop_list_settings(
             .resolve(path)
             .ok_or_else(|| anyhow!("<{name}> names {path}, which the writer cannot place"))?;
         let ranges = scan_braced_fields(&resolved, 0)?;
+        // A field bound to a table names an additional column its attribute
+        // declares for that table: the column's own `{<id>,<marker>}`
+        // segment (8.5.1.1150 BSP `ЭлектронноеПисьмоИсходящее`, three fields).
+        if let Some(last) = ranges.last().map(|range| resolved[range.clone()].trim())
+            && ranges.len() > 3
+            && last.ends_with(",5bdad865-f2c5-434b-8041-ba4aad3b6687}")
+        {
+            return Ok(Some(format!("{{1,{last}}}")));
+        }
         if ranges.len() != 3 || resolved[ranges[0].clone()].trim() != "2" {
             return Err(anyhow!("<{name}> names {path}, which is not an attribute column"));
         }
@@ -8267,6 +8295,26 @@ pub fn compile_native_form_body(
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
 ) -> Result<String> {
+    // A 2.21 Form.xml is a platform 8.5 form: it is compiled through its
+    // 8.3.27 reading and stored in the 8.5 layout.
+    if crate::mssql_dump::is_v85_form_xml(form_xml) {
+        return crate::mssql_dump::compile_v85_native_form_body(
+            form_xml,
+            module_text,
+            source,
+            items_root,
+        );
+    }
+    compile_native_form_body_v83(form_xml, module_text, source, items_root)
+}
+
+/// The 8.3.27 (dialect 2.20) native form writer.
+pub(crate) fn compile_native_form_body_v83(
+    form_xml: &[u8],
+    module_text: Option<&[u8]>,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<String> {
     validate_form_xml_document(form_xml)?;
     let properties = parse_form_xml_body_properties(form_xml)?;
     let module = match module_text {
@@ -8803,6 +8851,16 @@ fn form_body_base_free_blockers_with_resolver(
             "Form body source is absent, so the marker-50 source model cannot be validated"
                 .to_string(),
         ]);
+    }
+    if crate::mssql_dump::is_v85_form_xml(form_xml) {
+        let xml = std::str::from_utf8(form_xml).context("2.21 Form.xml is not valid UTF-8")?;
+        let (xml20, _) = crate::mssql_dump::down_convert_v85_form_xml(xml, None, None)?;
+        return form_body_base_free_blockers_with_resolver(
+            xml20.as_bytes(),
+            has_module_text,
+            form_item_asset_files,
+            has_source_resolver,
+        );
     }
     validate_form_xml_document(form_xml)?;
     let properties = parse_form_xml_body_properties(form_xml)?;

@@ -7,7 +7,21 @@ use ibcmd_rs::cli::{Cli, Commands};
 use ibcmd_rs::cli::{InfobaseCommands, InfobaseConfigCommands};
 use ibcmd_rs::plan::SourceDiffSignatureOptions;
 
+/// The commands walk deeply nested sources (form item trees, brace bodies) on
+/// the calling thread, whose default stack on Windows is 1 MiB; they run on a
+/// thread with room for the deepest of them instead.
 fn main() -> Result<()> {
+    const STACK_BYTES: usize = 256 * 1024 * 1024;
+    std::thread::Builder::new()
+        .name("ibcmd-rs".to_string())
+        .stack_size(STACK_BYTES)
+        .spawn(run)
+        .map_err(|error| anyhow::anyhow!("failed to start the command thread: {error}"))?
+        .join()
+        .unwrap_or_else(|panic| std::panic::resume_unwind(panic))
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
