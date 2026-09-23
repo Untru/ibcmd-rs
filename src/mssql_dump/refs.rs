@@ -3544,17 +3544,35 @@ pub(super) fn parse_configuration_properties_from_text(
     } else {
         MAX_EVIDENCED_PACKED_PLATFORM_VERSION
     };
-    let configuration_extension_compatibility_mode = if is_native_68_shape {
+    let stored_compatibility_mode = if is_native_68_shape {
         fields
             .get(26)
             .and_then(|field| configuration_compatibility_mode_xml_under(field.trim(), ceiling))
+    } else {
+        None
+    };
+    // A configuration still in an 8.3.27 tuple keeps no extension
+    // compatibility 8.5 reads as its own, and 8.5 substitutes its own edition
+    // -- exactly as 8.3.27 does for the older `{67,...}` shape below. ERP УХ
+    // stores `80327` in field 26 and 8.5.1.1150 writes `Version8_5_1` for
+    // `ConfigurationExtensionCompatibilityMode` beside `Version8_3_27` for
+    // `CompatibilityMode`.
+    let v85_tuple = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
+    let configuration_extension_compatibility_mode = if source_version
+        == InfobaseConfigSourceVersion::V2_21
+        && !v85_tuple
+        && (is_native_68_shape || is_normalized_67_shape)
+    {
+        configuration_compatibility_mode_xml_under(&V85_PACKED_PLATFORM_VERSION.to_string(), ceiling)
+    } else if is_native_68_shape {
+        stored_compatibility_mode.clone()
     } else if is_normalized_67_shape {
         configuration_compatibility_mode_xml(&MAX_EVIDENCED_PACKED_PLATFORM_VERSION.to_string())
     } else {
         None
     };
     let compatibility_mode = if is_native_68_shape {
-        configuration_extension_compatibility_mode.clone()
+        stored_compatibility_mode
     } else if is_normalized_67_shape {
         fields
             .get(43)

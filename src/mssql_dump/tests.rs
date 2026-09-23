@@ -49124,9 +49124,15 @@ fn extracts_configuration_xml_with_native_scalar_properties() {
         assert!(xml.contains(r#"xmlns:app="http://v8.1c.ru/8.2/managed-application/core""#));
         assert!(xml.contains("<Comment/>"));
         assert!(xml.contains("<NamePrefix>CF</NamePrefix>"));
-        assert!(xml.contains(
-                "<ConfigurationExtensionCompatibilityMode>Version8_3_27</ConfigurationExtensionCompatibilityMode>"
-            ));
+        // 8.5 writes its own edition for a configuration still in the 8.3.27
+        // tuple (ERP УХ stores `80327` and 8.5.1.1150 writes `Version8_5_1`).
+        let extension_compatibility = match source_version {
+            InfobaseConfigSourceVersion::V2_20 => "Version8_3_27",
+            InfobaseConfigSourceVersion::V2_21 => "Version8_5_1",
+        };
+        assert!(xml.contains(&format!(
+            "<ConfigurationExtensionCompatibilityMode>{extension_compatibility}</ConfigurationExtensionCompatibilityMode>"
+        )));
         assert!(xml.contains("<DefaultRunMode>ManagedApplication</DefaultRunMode>"));
         assert!(xml.contains("<ScriptVariant>Russian</ScriptVariant>"));
         assert!(xml.contains("<Vendor>Vendor \"Name\"</Vendor>"));
