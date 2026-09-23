@@ -1154,7 +1154,7 @@ pub use moxel::try_extract_moxel_spreadsheet_xml;
 pub(crate) use moxel::{
     MoxelLineTraceEvent, MoxelLineTraceSink,
     extract_inflated_moxel_spreadsheet_xml_with_line_trace, extract_moxel_spreadsheet_xml,
-    extract_moxel_spreadsheet_xml_with_line_trace,
+    extract_moxel_spreadsheet_xml_with_line_trace, render_moxel_chart_object_xml,
     try_extract_moxel_spreadsheet_xml_with_generated_types,
 };
 #[cfg(all(test, feature = "mssql-live-tests"))]

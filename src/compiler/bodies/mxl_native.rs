@@ -58,11 +58,15 @@ pub(crate) fn write_native_moxel_body(
     xml: &[u8],
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
+    // Element spans index the text behind the byte-order mark.
+    let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let root = parse_dom(xml)?;
     if root.name != "document" {
         bail!("SpreadsheetDocument XML root is <{}>, not <document>", root.name);
     }
-    let document = Document::collect(&root)?;
+    let source_text =
+        std::str::from_utf8(xml).context("SpreadsheetDocument XML is not UTF-8")?;
+    let document = Document::collect(&root, source_text)?;
     let mut writer = BodyWriter::new(&document, source);
     let body = writer.write()?;
     Ok(layout(&body).replace('\n', "\r\n"))
@@ -80,6 +84,8 @@ struct Node {
     attributes: Vec<(String, String)>,
     children: Vec<Node>,
     text: String,
+    /// The element's byte span in the source, start tag to end tag.
+    span: (usize, usize),
 }
 
 impl Node {
@@ -157,22 +163,31 @@ fn parse_dom(xml: &[u8]) -> Result<Node> {
     let mut stack: Vec<Node> = Vec::new();
     let mut root = None;
     loop {
+        // Text is an event of its own (nothing is trimmed), so the position
+        // in front of a tag event is that tag's `<`.
+        let before = reader.buffer_position() as usize;
         match reader
             .read_event_into(&mut buffer)
             .context("SpreadsheetDocument XML is not well-formed")?
         {
-            Event::Start(start) => stack.push(start_node(&start)?),
+            Event::Start(start) => {
+                let mut node = start_node(&start)?;
+                node.span.0 = before;
+                stack.push(node);
+            }
             Event::Empty(start) => {
-                let node = start_node(&start)?;
+                let mut node = start_node(&start)?;
+                node.span = (before, reader.buffer_position() as usize);
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
                     None => root = Some(node),
                 }
             }
             Event::End(_) => {
-                let node = stack
+                let mut node = stack
                     .pop()
                     .ok_or_else(|| anyhow!("SpreadsheetDocument XML closes an unopened element"))?;
+                node.span.1 = reader.buffer_position() as usize;
                 match stack.last_mut() {
                     Some(parent) => parent.children.push(node),
                     None => root = Some(node),
@@ -227,6 +242,7 @@ fn start_node(start: &BytesStart<'_>) -> Result<Node> {
         attributes,
         children: Vec::new(),
         text: String::new(),
+        span: (0, 0),
     })
 }
 
@@ -392,6 +408,8 @@ const HEADER_FOOTER_BLOCK: [&str; 6] = [
 
 #[derive(Default)]
 struct Document<'a> {
+    /// The source, which a chart drawing is handed to the chart codec from.
+    source_text: &'a str,
     language: Option<&'a Node>,
     column_sets: Vec<&'a Node>,
     rows: Vec<&'a Node>,
@@ -419,8 +437,11 @@ struct Document<'a> {
 }
 
 impl<'a> Document<'a> {
-    fn collect(root: &'a Node) -> Result<Self> {
-        let mut document = Document::default();
+    fn collect(root: &'a Node, source_text: &'a str) -> Result<Self> {
+        let mut document = Document {
+            source_text,
+            ..Document::default()
+        };
         for child in &root.children {
             match child.name.as_str() {
                 "languageSettings" => {
@@ -1150,6 +1171,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 "pictureSize",
                 "zOrder",
                 "pictureIndex",
+                "object",
             ],
             "drawing",
         )?;
@@ -1232,9 +1254,138 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 };
                 format!("{{{head},5,{geometry},{id},{picture},{size},{auto_size}}}")
             }
+            "Chart" | "GanttChart" => {
+                if picture_size != "Stretch"
+                    || auto_size != 0
+                    || drawing.child("pictureIndex").is_some()
+                {
+                    bail!("a {kind} drawing spells a picture");
+                }
+                let object = drawing
+                    .child("object")
+                    .ok_or_else(|| anyhow!("a {kind} drawing has no <object>"))?;
+                let (type_uuid, chart) = self.chart(object, kind == "GanttChart")?;
+                format!("{{{head},10,{geometry},{id},{type_uuid},{chart},0}}")
+            }
             other => bail!("a {other} drawing has no writer"),
         };
+        if kind != "Chart" && kind != "GanttChart" && drawing.child("object").is_some() {
+            bail!("a {kind} drawing carries an <object>");
+        }
         Ok((record, id))
+    }
+
+    /// A chart drawing's object, written by the form chart codec: the same
+    /// serialization a `Chart`/`GanttChart` form attribute stores, whose
+    /// `<Settings>` spells the chart one namespace level deeper (`d4p1`
+    /// where the template's `<object>` sits at `d3p1`). The template keeps
+    /// the chart's own members -- `{11},{74,…}` for a chart, `{19,…}` for a
+    /// Gantt chart -- in one more pair of braces.
+    fn chart(&self, object: &Node, gantt: bool) -> Result<(&'static str, String)> {
+        const CHART_TYPE: &str = "a8b97779-1a4b-4059-b09c-807f86d2a461";
+        const GANTT_CHART_TYPE: &str = "e5fdc112-5c84-4a16-9728-72b85692b6e2";
+        const CHART_VALUE: &str = "{0,1,\"Chart\",{\"#\",3543ef08-3316-4f7e-9447-0cd0a1cbf1d5,";
+        const GANTT_CHART_VALUE: &str =
+            "{0,1,\"GanttChart\",{\"#\",3a6e63bf-16aa-42eb-b48c-2fff9670ad2f,";
+        let expected = if gantt { "d3p1:GanttChart" } else { "d3p1:Chart" };
+        if object.xsi_type() != Some(expected) {
+            bail!("a chart drawing's <object> is not {expected}");
+        }
+        let raw = self
+            .document
+            .source_text
+            .get(object.span.0..object.span.1)
+            .ok_or_else(|| anyhow!("a chart drawing's <object> has no source span"))?;
+        let settings = deepen_generated_prefixes(raw)?;
+        // The chart codec spells a configuration style colour by its uuid
+        // (`0:<uuid>`, what it stores as `{3,3,{0,<uuid>}}`); the name is
+        // resolved here, against the configuration the loader reads.
+        let settings = self.resolve_chart_style_items(&settings)?;
+        let settings = settings
+            .strip_prefix("<object ")
+            .and_then(|rest| rest.strip_suffix("</object>"))
+            .map(|body| format!("<Settings {body}</Settings>"))
+            .ok_or_else(|| anyhow!("a chart drawing's <object> is not one element"))?;
+        let (value, head) = if gantt {
+            (
+                crate::compiler::bodies::form_chart::gantt_chart_value(
+                    &settings,
+                    crate::compiler::bodies::form_chart::ChartHost::SpreadsheetTemplate,
+                )?,
+                GANTT_CHART_VALUE,
+            )
+        } else {
+            (
+                crate::compiler::bodies::form_chart::chart_value(
+                    &settings,
+                    crate::compiler::bodies::form_chart::ChartHost::SpreadsheetTemplate,
+                )?,
+                CHART_VALUE,
+            )
+        };
+        let members = value
+            .strip_prefix(head)
+            .and_then(|rest| rest.strip_suffix("}}"))
+            .ok_or_else(|| anyhow!("the chart codec wrote an unexpected value"))?;
+        let field = format!("{{{members}}}");
+        // The chart has to read back into the very element it came from,
+        // through the template exporter's own chart reader.
+        let object_refs = match self.source {
+            Some(source) => source.moxel_object_refs()?,
+            None => std::collections::BTreeMap::new(),
+        };
+        let rendered = crate::mssql_dump::render_moxel_chart_object_xml(&field, gantt, &object_refs)
+            .ok_or_else(|| anyhow!("the exporter cannot read back the chart the writer built"))?;
+        let significant = |text: &str| {
+            text.lines()
+                .map(|line| line.trim_start_matches([' ', '\t']).trim_end_matches('\r').to_string())
+                .filter(|line| !line.is_empty())
+                .collect::<Vec<_>>()
+        };
+        let expected = significant(raw);
+        let actual = significant(&rendered);
+        if expected != actual {
+            let at = expected
+                .iter()
+                .zip(&actual)
+                .position(|(left, right)| left != right)
+                .unwrap_or_else(|| expected.len().min(actual.len()));
+            bail!(
+                "the chart does not export back to its own XML: line {} would read {:?} where the source reads {:?}",
+                at + 1,
+                actual.get(at).map(String::as_str).unwrap_or("<end>"),
+                expected.get(at).map(String::as_str).unwrap_or("<end>"),
+            );
+        }
+        Ok((if gantt { GANTT_CHART_TYPE } else { CHART_TYPE }, field))
+    }
+
+    /// Every `style:<name>` element text naming a configuration style item,
+    /// rewritten as `0:<uuid>`.
+    fn resolve_chart_style_items(&self, xml: &str) -> Result<String> {
+        const HEAD: &str = ">style:";
+        let Some(source) = self.source else {
+            return Ok(xml.to_string());
+        };
+        let mut out = String::with_capacity(xml.len());
+        let mut rest = xml;
+        while let Some(at) = rest.find(HEAD) {
+            out.push_str(&rest[..=at]);
+            let tail = &rest[at + 1..];
+            let end = tail
+                .find('<')
+                .ok_or_else(|| anyhow!("a chart colour is not closed"))?;
+            let name = &tail["style:".len()..end];
+            match source.resolve_style_item_uuid(&format!("StyleItem.{name}")) {
+                Ok(uuid) if platform_style_color(name).is_none() => {
+                    out.push_str(&format!("0:{}", uuid.to_ascii_lowercase()));
+                }
+                _ => out.push_str(&tail[..end]),
+            }
+            rest = &tail[end..];
+        }
+        out.push_str(rest);
+        Ok(out)
     }
 
     fn picture_ref(&mut self, xml_index: usize) -> Result<usize> {
@@ -2381,6 +2532,42 @@ fn localized_items(node: &Node, owner: &str) -> Result<String> {
     }
     record.push('}');
     Ok(record)
+}
+
+/// The same XML one element deeper: every generated `d<N>p1` prefix becomes
+/// `d<N+1>p1`, in names, declarations and the QName values that use them.
+fn deepen_generated_prefixes(xml: &str) -> Result<String> {
+    let bytes = xml.as_bytes();
+    let mut out = String::with_capacity(xml.len() + 64);
+    let mut index = 0usize;
+    let mut copied = 0usize;
+    while index < bytes.len() {
+        let starts_word = index == 0 || !bytes[index - 1].is_ascii_alphanumeric();
+        if starts_word && bytes[index] == b'd' {
+            let digits_start = index + 1;
+            let mut digits_end = digits_start;
+            while digits_end < bytes.len() && bytes[digits_end].is_ascii_digit() {
+                digits_end += 1;
+            }
+            if digits_end > digits_start
+                && xml[digits_end..].starts_with("p1")
+                && xml[digits_end + 2..]
+                    .chars()
+                    .next()
+                    .is_some_and(|next| next == ':' || next == '=')
+            {
+                let depth = xml[digits_start..digits_end].parse::<usize>()?;
+                out.push_str(&xml[copied..index]);
+                out.push_str(&format!("d{}p1", depth + 1));
+                index = digits_end + 2;
+                copied = index;
+                continue;
+            }
+        }
+        index += 1;
+    }
+    out.push_str(&xml[copied..]);
+    Ok(out)
 }
 
 /// The plain copy a formatted text stores beside its formatted one: the same
