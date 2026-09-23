@@ -2204,28 +2204,19 @@ fn style_body_web_color_code(name: &str) -> Option<i32> {
 }
 
 pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
-    let schedule = parse_schedule_xml(xml)?;
-    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
-    fields.push(format_schedule_date(&schedule.begin_date)?);
-    fields.push(format_schedule_date(&schedule.end_date)?);
-    fields.push(format_schedule_time(&schedule.begin_time)?);
-    fields.push(format_schedule_time(&schedule.end_time)?);
-    fields.push(format_schedule_time(&schedule.completion_time)?);
-    fields.push(schedule.completion_interval);
-    fields.push(schedule.repeat_period_in_day);
-    fields.push(schedule.repeat_pause);
-    fields.push(schedule.week_days.len().to_string());
-    fields.extend(schedule.week_days);
-    fields.push(schedule.week_day_in_month);
-    fields.push(schedule.day_in_month);
-    fields.push(schedule.months.len().to_string());
-    fields.extend(schedule.months);
-    fields.push(schedule.weeks_period);
-    fields.push(schedule.days_repeat_period);
-    fields.push("0".to_string());
+    let (schedule, details) = parse_schedule_xml(xml)?;
+    // The compact fields, then the count of detailed daily schedules and each
+    // one as a nested record of the same fields closed by its own `0` count.
+    // The platform starts every nested record on a new line and closes the
+    // outer one on its own line after them (ОбновлениеАгрегатов of БСП).
+    let mut text = format!("{{{},{}", schedule_fields(&schedule)?.join(","), details.len());
+    for detail in &details {
+        text.push_str(&format!(",\r\n{{{},0}}", schedule_fields(detail)?.join(",")));
+    }
+    text.push_str(if details.is_empty() { "}" } else { "\r\n}" });
 
     let mut plain = b"\xEF\xBB\xBF".to_vec();
-    plain.extend_from_slice(format!("{{{}}}", fields.join(",")).as_bytes());
+    plain.extend_from_slice(text.as_bytes());
     let blob = deflate_raw(&plain)?;
     let output_sha256 = hex_sha256(&blob);
 
@@ -2234,6 +2225,27 @@ pub fn pack_schedule_blob_from_xml(xml: &[u8]) -> Result<PackedScheduleBlob> {
         plain_bytes: plain.len(),
         output_sha256,
     })
+}
+
+fn schedule_fields(schedule: &ScheduleXmlProperties) -> Result<Vec<String>> {
+    let mut fields = Vec::with_capacity(16 + schedule.week_days.len() + schedule.months.len());
+    fields.push(format_schedule_date(&schedule.begin_date)?);
+    fields.push(format_schedule_date(&schedule.end_date)?);
+    fields.push(format_schedule_time(&schedule.begin_time)?);
+    fields.push(format_schedule_time(&schedule.end_time)?);
+    fields.push(format_schedule_time(&schedule.completion_time)?);
+    fields.push(schedule.completion_interval.clone());
+    fields.push(schedule.repeat_period_in_day.clone());
+    fields.push(schedule.repeat_pause.clone());
+    fields.push(schedule.week_days.len().to_string());
+    fields.extend(schedule.week_days.iter().cloned());
+    fields.push(schedule.week_day_in_month.clone());
+    fields.push(schedule.day_in_month.clone());
+    fields.push(schedule.months.len().to_string());
+    fields.extend(schedule.months.iter().cloned());
+    fields.push(schedule.weeks_period.clone());
+    fields.push(schedule.days_repeat_period.clone());
+    Ok(fields)
 }
 
 pub fn pack_raw_deflated_blob_from_bytes(bytes: &[u8]) -> Result<PackedRawDeflatedBlob> {
@@ -30619,6 +30631,73 @@ pub fn pack_ext_picture_blob_from_bytes(bytes: &[u8]) -> Result<PackedExtPicture
     pack_ext_picture_blob_from_bytes_with_base(None, bytes)
 }
 
+/// An ExtPicture row from its `Picture.xml` and picture bytes: the header
+/// record carries the transparency the XML declares.
+pub fn pack_ext_picture_blob_from_xml_and_bytes(
+    xml: &[u8],
+    bytes: &[u8],
+) -> Result<PackedExtPictureBlob> {
+    let header = ext_picture_header_from_xml(xml)?;
+    let payload = encode_base64(bytes);
+    let plain = format!("{{1,{header},{{{{#base64:{payload}}}}}}}").into_bytes();
+    let blob = deflate_raw(&plain)?;
+    let output_sha256 = hex_sha256(&blob);
+    Ok(PackedExtPictureBlob {
+        blob,
+        plain_bytes: plain.len(),
+        output_sha256,
+    })
+}
+
+/// The `{<load transparent>,0,<x>,<y>}` header an ExtPicture row opens with.
+///
+/// A pure partition over every common picture of both corpora (БСП 610 + 1,
+/// ERP УХ 3 060 + 187): `LoadTransparent` false with no `TransparentPixel`
+/// stores `{0,0,-1,-1}`, and `true` with a pixel stores `{1,0,x,y}`. The two
+/// mixed shapes never occur and are refused rather than guessed.
+fn ext_picture_header_from_xml(xml: &[u8]) -> Result<String> {
+    let text = std::str::from_utf8(xml).context("ExtPicture XML is not UTF-8")?;
+    let load_transparent = match text
+        .find("LoadTransparent>")
+        .map(|start| &text[start + "LoadTransparent>".len()..])
+        .and_then(|rest| rest.split('<').next())
+        .map(str::trim)
+    {
+        None | Some("false") => false,
+        Some("true") => true,
+        Some(other) => return Err(anyhow!("unsupported ExtPicture LoadTransparent {other}")),
+    };
+    let pixel = match text.find("TransparentPixel") {
+        None => None,
+        Some(start) => {
+            let rest = &text[start..];
+            let element = &rest[..rest.find('>').unwrap_or(rest.len())];
+            let attribute = |name: &str| -> Result<i64> {
+                let key = format!("{name}=\"");
+                let at = element
+                    .find(&key)
+                    .ok_or_else(|| anyhow!("ExtPicture TransparentPixel has no {name}"))?
+                    + key.len();
+                let end = element[at..]
+                    .find('"')
+                    .ok_or_else(|| anyhow!("ExtPicture TransparentPixel {name} is unterminated"))?;
+                element[at..at + end]
+                    .trim()
+                    .parse::<i64>()
+                    .with_context(|| format!("invalid ExtPicture TransparentPixel {name}"))
+            };
+            Some((attribute("x")?, attribute("y")?))
+        }
+    };
+    match (load_transparent, pixel) {
+        (false, None) => Ok("{0,0,-1,-1}".to_string()),
+        (true, Some((x, y))) => Ok(format!("{{1,0,{x},{y}}}")),
+        (load_transparent, pixel) => Err(anyhow!(
+            "unobserved ExtPicture transparency: LoadTransparent {load_transparent}, TransparentPixel {pixel:?}"
+        )),
+    }
+}
+
 pub fn pack_ext_picture_blob_from_bytes_with_base(
     base_blob: Option<&[u8]>,
     bytes: &[u8],
@@ -30887,29 +30966,61 @@ struct ScheduleXmlProperties {
     days_repeat_period: String,
 }
 
-fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
+/// The `<Schedule>` of a `JobSchedule` and its `<DetailedDailySchedules>`,
+/// in document order.
+fn parse_schedule_xml(
+    xml: &[u8],
+) -> Result<(ScheduleXmlProperties, Vec<ScheduleXmlProperties>)> {
+    #[derive(Default)]
+    struct Pending {
+        attrs: BTreeMap<String, String>,
+        week_days: Option<Vec<String>>,
+        months: Option<Vec<String>>,
+    }
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
-    let mut attrs = None::<BTreeMap<String, String>>;
+    let mut main = None::<Pending>;
+    let mut detail = None::<Pending>;
+    let mut details = Vec::<Pending>::new();
     let mut text_target = None::<String>;
     let mut text_value = String::new();
-    let mut week_days = None::<Vec<String>>;
-    let mut months = None::<Vec<String>>;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
                 if path_ends_with(&path, &["JobSchedule"]) && local == "Schedule" {
-                    attrs = Some(xml_attrs_map(&event));
+                    main = Some(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
                 } else if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && local == "DetailedDailySchedules"
+                {
+                    detail = Some(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
+                } else if (path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    || path_ends_with(&path, &["Schedule", "DetailedDailySchedules"]))
                     && (local == "WeekDays" || local == "Months")
                 {
                     text_target = Some(local.clone());
                     text_value.clear();
                 }
                 path.push(local);
+            }
+            Ok(Event::Empty(event)) => {
+                let local = xml_local_name(event.local_name().as_ref());
+                if path_ends_with(&path, &["JobSchedule", "Schedule"])
+                    && local == "DetailedDailySchedules"
+                {
+                    details.push(Pending {
+                        attrs: xml_attrs_map(&event),
+                        ..Pending::default()
+                    });
+                }
             }
             Ok(Event::Text(text)) => {
                 if text_target.is_some() {
@@ -30940,13 +31051,24 @@ fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
                 let local = xml_local_name(event.local_name().as_ref());
                 if text_target.as_deref() == Some(local.as_str()) {
                     let values = parse_schedule_number_text_list(&text_value)?;
-                    if local == "WeekDays" {
-                        week_days = Some(values);
-                    } else if local == "Months" {
-                        months = Some(values);
+                    let owner = if detail.is_some() {
+                        detail.as_mut()
+                    } else {
+                        main.as_mut()
+                    };
+                    if let Some(owner) = owner {
+                        if local == "WeekDays" {
+                            owner.week_days = Some(values);
+                        } else {
+                            owner.months = Some(values);
+                        }
                     }
                     text_target = None;
                     text_value.clear();
+                } else if local == "DetailedDailySchedules"
+                    && let Some(done) = detail.take()
+                {
+                    details.push(done);
                 }
                 let _ = path.pop();
             }
@@ -30957,23 +31079,28 @@ fn parse_schedule_xml(xml: &[u8]) -> Result<ScheduleXmlProperties> {
         buffer.clear();
     }
 
-    let attrs = attrs.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
-    Ok(ScheduleXmlProperties {
-        begin_date: required_schedule_attr(&attrs, "BeginDate")?,
-        end_date: required_schedule_attr(&attrs, "EndDate")?,
-        begin_time: required_schedule_attr(&attrs, "BeginTime")?,
-        end_time: required_schedule_attr(&attrs, "EndTime")?,
-        completion_time: required_schedule_attr(&attrs, "CompletionTime")?,
-        completion_interval: required_schedule_number_attr(&attrs, "CompletionInterval")?,
-        repeat_period_in_day: required_schedule_number_attr(&attrs, "RepeatPeriodInDay")?,
-        repeat_pause: required_schedule_number_attr(&attrs, "RepeatPause")?,
-        week_day_in_month: required_schedule_number_attr(&attrs, "WeekDayInMonth")?,
-        day_in_month: required_schedule_number_attr(&attrs, "DayInMonth")?,
-        week_days: week_days.unwrap_or_default(),
-        months: months.unwrap_or_default(),
-        weeks_period: required_schedule_number_attr(&attrs, "WeeksPeriod")?,
-        days_repeat_period: required_schedule_number_attr(&attrs, "DaysRepeatPeriod")?,
-    })
+    let build = |pending: Pending| -> Result<ScheduleXmlProperties> {
+        let attrs = &pending.attrs;
+        Ok(ScheduleXmlProperties {
+            begin_date: required_schedule_attr(attrs, "BeginDate")?,
+            end_date: required_schedule_attr(attrs, "EndDate")?,
+            begin_time: required_schedule_attr(attrs, "BeginTime")?,
+            end_time: required_schedule_attr(attrs, "EndTime")?,
+            completion_time: required_schedule_attr(attrs, "CompletionTime")?,
+            completion_interval: required_schedule_number_attr(attrs, "CompletionInterval")?,
+            repeat_period_in_day: required_schedule_number_attr(attrs, "RepeatPeriodInDay")?,
+            repeat_pause: required_schedule_number_attr(attrs, "RepeatPause")?,
+            week_day_in_month: required_schedule_number_attr(attrs, "WeekDayInMonth")?,
+            day_in_month: required_schedule_number_attr(attrs, "DayInMonth")?,
+            week_days: pending.week_days.unwrap_or_default(),
+            months: pending.months.unwrap_or_default(),
+            weeks_period: required_schedule_number_attr(attrs, "WeeksPeriod")?,
+            days_repeat_period: required_schedule_number_attr(attrs, "DaysRepeatPeriod")?,
+        })
+    };
+    let main = main.ok_or_else(|| anyhow!("JobSchedule/Schedule element is missing"))?;
+    let details = details.into_iter().map(build).collect::<Result<Vec<_>>>()?;
+    Ok((build(main)?, details))
 }
 
 fn required_schedule_attr(attrs: &BTreeMap<String, String>, name: &str) -> Result<String> {
@@ -30999,7 +31126,8 @@ fn parse_schedule_number_text_list(text: &str) -> Result<Vec<String>> {
 }
 
 fn validate_schedule_number(value: &str) -> Result<()> {
-    if !value.is_empty() && value.chars().all(|ch| ch.is_ascii_digit()) {
+    let digits = value.strip_prefix('-').unwrap_or(value);
+    if !digits.is_empty() && digits.chars().all(|ch| ch.is_ascii_digit()) {
         Ok(())
     } else {
         Err(anyhow!("invalid schedule number: {value}"))
