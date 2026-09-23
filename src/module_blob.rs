@@ -30973,17 +30973,23 @@ pub fn pack_ext_picture_blob_from_bytes_with_base(
 }
 
 /// A `{#base64:...}` payload laid out as the platform stores it: 64
-/// characters per line, lines joined by `\r\r\n` (help and picture rows of
-/// both corpora).
+/// characters per line, each full line ended by `\r\r\n` -- so a payload whose
+/// length is a multiple of 64 ends with the break too (help and picture rows
+/// of both corpora).
+///
+/// That last break is the platform's current writer: of the payloads whose
+/// length is a multiple of 64, 32 of 32 БСП and 362 of 384 ERP УХ help
+/// payloads carry it, and 31 of 34 and 174 of 184 common pictures. The rest
+/// were written by an older writer the source does not tell apart.
 fn platform_base64_token(bytes: &[u8]) -> String {
     let encoded = encode_base64(bytes);
     let mut token = String::with_capacity(encoded.len() + encoded.len() / 64 * 3 + 10);
     token.push_str("{#base64:");
-    for (index, line) in encoded.as_bytes().chunks(64).enumerate() {
-        if index > 0 {
+    for line in encoded.as_bytes().chunks(64) {
+        token.push_str(std::str::from_utf8(line).expect("base64 is ASCII"));
+        if line.len() == 64 {
             token.push_str("\r\r\n");
         }
-        token.push_str(std::str::from_utf8(line).expect("base64 is ASCII"));
     }
     token.push('}');
     token
