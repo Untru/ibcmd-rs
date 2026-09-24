@@ -2281,6 +2281,10 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,
+    /// Write every batch script without running it: the database is only
+    /// read. The usual confirmations are still required.
+    #[arg(long)]
+    pub script_only: bool,
 }
 
 #[derive(Debug, Args)]

@@ -3471,14 +3471,16 @@ pub fn stage_source_objects(
             batch_report.expected_total_rows,
         );
         fs::write(&script, sql).with_context(|| format!("failed to write {}", script.display()))?;
-        run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
-        after = storage_table_stats_with_auth(
-            &args.sqlcmd,
-            &args.server,
-            sql_auth,
-            &args.database,
-            "ConfigSave",
-        )?;
+        if !args.script_only {
+            run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &script)?;
+            after = storage_table_stats_with_auth(
+                &args.sqlcmd,
+                &args.server,
+                sql_auth,
+                &args.database,
+                "ConfigSave",
+            )?;
+        }
         scripts.push(script);
     }
 
