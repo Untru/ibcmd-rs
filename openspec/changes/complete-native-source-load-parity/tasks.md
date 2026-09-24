@@ -175,17 +175,39 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       graphical schema templates through the flowchart grammar, entities and
       untrimmed free text in predefined data and flowcharts, command picture
       transparency pixels
-- [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead).
-      Checked without writing (2026-09-24): `mssql-stage-source-objects
-      --script-only` (77e4246c) writes the 112 batch scripts a load would run
-      (3.2 GB, 8 min 46 s, longest line 54 KB); they insert 116 652 rows, and
-      every one but `versions` is byte-identical to the rows the ERP УХ
-      virtual cycle staged and exported unchanged. Of those rows 88 886 are
-      plain-identical to what the platform stored and 4 452 differ in layout
-      only; the rest are forms, spreadsheets as a load from XML spells them,
-      legacy DCS placeholders, roles, module containers and list orders --
-      kinds native ibcmd accepted in the БСП run -- plus 4 WS references and
-      one style (the same 231 items in another order).
+- [x] ERP УХ real cycle on a disposable УХ clone (2026-09-24,
+      `F:\ibcmd\lab\realcycle\uha_r1`; clone `ibcmd_rs_uha_8327_rtcycle_20260924`
+      restored from a copy-only backup of `ibcmd_rs_uha_8327_parity2_20260920`).
+      Checked first without writing: `mssql-stage-source-objects --script-only`
+      (77e4246c) writes batch scripts whose rows, all but `versions`, are
+      byte-identical to the rows the virtual cycle staged and exported
+      unchanged (88 886 plain-identical to the platform's, 4 452 layout-only;
+      the rest forms, spreadsheets as a load from XML spells them, DCS
+      placeholders, roles, module containers, list orders, 4 WS references,
+      one style). The real stage then died on batch 30: 500 objects carrying
+      743 MB of add-in templates made a 1.49 GB script, beyond SQL Server's
+      batch limit of 65 536 packets -- batches are now capped at 32 MiB of rows
+      and sqlcmd asks for the largest packet (c82decea; 139 batches, the
+      largest 122 MB). Stage 116 652 rows in 44 min beside other load, every
+      one byte-identical to the virtual cycle's; publish in 3.4 min (the 156
+      orphaned `_dynupdate_` rows stay: no `DynamicallyUpdated`, inert). Native
+      8.3.27.2214 accepts the load (full export in 10 min, nothing refused).
+      ibcmd-rs exports 140 708 / 140 709 files unchanged, native 140 701:
+      both differ in `ConfigDumpInfo.xml` (new configVersion ids only,
+      byte-identical between the two exports), and native read 7 dynamic-list
+      forms with a valid Russian path marked broken (`~Список.Ссылка`,
+      `~Список.ПометкаУдаления`, `~Подразделения.Владелец`): a claim-only
+      English entry carried the Russian twin ahead of the manual-query field
+      of that spelling, and native lets a field be claimed once, first in map
+      order. Fixed in 0f64ac47 (36 of 116 651 rows change, every other row is
+      byte-identical); restaged, published and exported, native and ibcmd-rs
+      give all 36 forms identical to the reference. Full native 8.3.27.2214
+      export of the fixed clone (13 min): **140 708 / 140 709 files
+      unchanged**, the last being `ConfigDumpInfo.xml`, identical to the
+      reference once the configVersion values are blanked -- the ERP УХ real
+      cycle closes at 100 % on content, as БСП did. The fixes leave every БСП
+      row byte-identical (vcycle `bsp_fix`: 9 514 / 9 514 rows as `bsp_v8`,
+      12 198 / 12 198 files).
 - [x] Platform 8.5 (2.21) virtual cycles on the 8.5 clones (branch
       `feat/8-5-source-export`): БСП 12 337 / 12 337, ERP УХ 140 709 /
       140 709 files, 0 prepare failures
