@@ -7097,8 +7097,15 @@ fn sqlcmd_file_command_with_auth(
             command.arg("-E");
         }
     }
+    // `-a 32767`: the largest network packet sqlcmd can ask for (the server
+    // grants 16 KiB on an encrypted connection). A batch may be 65 536 packets,
+    // so the ceiling rises from 256 MiB to about 1 GiB on the wire -- room for
+    // a staged batch holding one 61 MB add-in template alone (~250 MB as
+    // UTF-16 hex text).
     command
         .arg("-C")
+        .arg("-a")
+        .arg("32767")
         .arg("-f")
         .arg("65001")
         .arg("-b")
@@ -7705,10 +7712,38 @@ struct SourceStageBatch {
     row_count: usize,
 }
 
+/// Bytes of staged row data one batch script may carry before the next
+/// object starts a new batch. SQL Server drops the connection on a batch
+/// larger than 65 536 network packets (256 MiB at sqlcmd's default 4 KiB
+/// packet), and a batch travels as UTF-16 text in which every row byte is two
+/// hex digits, so N bytes of rows are about 4N bytes on the wire. ERP УХ's
+/// common templates (add-in drivers of 20-61 MB each) put 743 MB of rows into
+/// one batch of 500 objects: a 1.49 GB script the server refused. An object
+/// larger than the cap gets a batch of its own (sqlcmd then runs with the
+/// largest packet it can negotiate; see `sqlcmd_file_command_with_auth`).
+const SOURCE_STAGE_BATCH_MAX_ROW_BYTES: usize = 32 * 1024 * 1024;
+
 fn build_source_stage_batches(
     metadata_objects: Vec<PreparedMetadataObjectStage>,
     common_modules: Vec<PreparedCommonModuleObjectStage>,
     batch_size: usize,
+) -> Vec<SourceStageBatch> {
+    build_source_stage_batches_within(
+        metadata_objects,
+        common_modules,
+        batch_size,
+        SOURCE_STAGE_BATCH_MAX_ROW_BYTES,
+    )
+}
+
+/// Objects in source-path order, at most `batch_size` per batch, and a batch
+/// closes before its rows would pass `max_row_bytes` (a single larger object
+/// still gets a batch, alone).
+fn build_source_stage_batches_within(
+    metadata_objects: Vec<PreparedMetadataObjectStage>,
+    common_modules: Vec<PreparedCommonModuleObjectStage>,
+    batch_size: usize,
+    max_row_bytes: usize,
 ) -> Vec<SourceStageBatch> {
     let mut items = metadata_objects
         .into_iter()
@@ -7728,9 +7763,12 @@ fn build_source_stage_batches(
         row_count: 0,
     };
     let mut current_items = 0usize;
+    let mut current_bytes = 0usize;
 
     for item in items {
-        if current_items == batch_size {
+        let item_bytes = item.row_bytes();
+        let over_bytes = current_items > 0 && current_bytes + item_bytes > max_row_bytes;
+        if current_items == batch_size || over_bytes {
             batches.push(current);
             current = SourceStageBatch {
                 metadata_objects: Vec::new(),
@@ -7738,7 +7776,9 @@ fn build_source_stage_batches(
                 row_count: 0,
             };
             current_items = 0;
+            current_bytes = 0;
         }
+        current_bytes += item_bytes;
         match item {
             SourceStageItem::Metadata(object) => {
                 current.row_count += 1 + object.body_rows.len();
@@ -8069,6 +8109,25 @@ impl SourceStageItem {
             SourceStageItem::CommonModule(module) => &module.xml,
         }
     }
+
+    /// Bytes of the rows this object stages (what its batch script carries
+    /// as hex literals).
+    fn row_bytes(&self) -> usize {
+        match self {
+            SourceStageItem::Metadata(object) => {
+                object.metadata_blob.len()
+                    + object.body_rows.iter().map(|body| body.blob.len()).sum::<usize>()
+            }
+            SourceStageItem::CommonModule(module) => {
+                module.metadata_blob.len()
+                    + if module.has_module_body {
+                        module.module_blob.len()
+                    } else {
+                        0
+                    }
+            }
+        }
+    }
 }
 
 fn default_stage_script_path(database: &str, name: &str) -> PathBuf {
@@ -8301,9 +8360,10 @@ mod tests {
     use super::{
         BinaryBlobRow, ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest,
         DeltaBundleManifest, PreparedCommonModuleObjectStage, PreparedCommonModuleStage,
-        PreparedMetadataBodyStage, PreparedMetadataObjectStage, StorageBundleManifest,
+        PreparedMetadataBodyStage, PreparedMetadataObjectStage, SqlAuth, StorageBundleManifest,
         StorageTableManifest, TableShape, activate_staged_main, build_source_stage_batches,
-        compare_shapes, compare_storage_table_manifests, diff_activation_rows, encode_hex,
+        build_source_stage_batches_within, compare_shapes, compare_storage_table_manifests,
+        diff_activation_rows, encode_hex, sqlcmd_file_command_with_auth,
         filter_source_paths_by_prefix, infer_common_module_text_path, is_root_common_module_xml,
         is_root_metadata_xml, is_stage_metadata_xml, quote_ident, quote_string,
         require_non_lab_confirmation, source_common_module_xmls, source_metadata_xmls,
@@ -10207,6 +10267,123 @@ mod tests {
         assert!(!reports[2].include_stable_rows);
         assert!(reports[2].include_versions_row);
         assert_eq!(reports[2].expected_total_rows, 13);
+    }
+
+    fn five_stage_objects_of_7_5_3_5_5_bytes() -> (
+        Vec<PreparedMetadataObjectStage>,
+        Vec<PreparedCommonModuleObjectStage>,
+    ) {
+        // Row bytes: metadata blob 3 + 2 per body row; module 2 + 3.
+        let metadata_objects = vec![
+            test_metadata_stage_object(
+                "Catalog",
+                "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+                "A",
+                "Catalogs/A.xml",
+                &["Catalogs/A/Ext/Predefined.xml", "Catalogs/A/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Catalog",
+                "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb",
+                "B",
+                "Catalogs/B.xml",
+                &["Catalogs/B/Ext/Help.xml"],
+            ),
+            test_metadata_stage_object(
+                "Enum",
+                "cccccccc-cccc-4ccc-cccc-cccccccccccc",
+                "C",
+                "Catalogs/C.xml",
+                &[],
+            ),
+        ];
+        let common_modules = vec![
+            test_common_module_stage_object(
+                "dddddddd-dddd-4ddd-dddd-dddddddddddd",
+                "D",
+                "CommonModules/D.xml",
+                "CommonModules/D/Ext/Module.bsl",
+            ),
+            test_common_module_stage_object(
+                "eeeeeeee-eeee-4eee-eeee-eeeeeeeeeeee",
+                "E",
+                "CommonModules/E.xml",
+                "CommonModules/E/Ext/Module.bsl",
+            ),
+        ];
+        (metadata_objects, common_modules)
+    }
+
+    #[test]
+    fn closes_a_source_stage_batch_before_its_rows_pass_the_byte_cap() {
+        let (metadata_objects, common_modules) = five_stage_objects_of_7_5_3_5_5_bytes();
+        let batches = build_source_stage_batches_within(metadata_objects, common_modules, 500, 10);
+        let reports = source_stage_batch_reports(&batches);
+
+        // A (7) | B + C (5 + 3) | D + E (5 + 5): the object count never caps.
+        let ids = batches
+            .iter()
+            .map(|batch| {
+                batch
+                    .metadata_objects
+                    .iter()
+                    .map(|object| object.properties.name.clone())
+                    .chain(batch.common_modules.iter().map(|module| module.properties.name.clone()))
+                    .collect::<Vec<_>>()
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(ids, vec![vec!["A"], vec!["B", "C"], vec!["D", "E"]]);
+        assert_eq!(
+            reports.iter().map(|report| report.staged_rows).collect::<Vec<_>>(),
+            vec![3, 3, 4]
+        );
+        assert_eq!(
+            reports.iter().map(|report| report.expected_total_rows).collect::<Vec<_>>(),
+            vec![5, 8, 13]
+        );
+        assert!(reports[0].include_stable_rows);
+        assert!(reports[2].include_versions_row);
+    }
+
+    #[test]
+    fn gives_an_object_larger_than_the_byte_cap_a_batch_of_its_own() {
+        let (metadata_objects, common_modules) = five_stage_objects_of_7_5_3_5_5_bytes();
+        let batches = build_source_stage_batches_within(metadata_objects, common_modules, 500, 4);
+        let reports = source_stage_batch_reports(&batches);
+
+        assert_eq!(batches.len(), 5);
+        assert!(batches
+            .iter()
+            .all(|batch| batch.metadata_objects.len() + batch.common_modules.len() == 1));
+        assert_eq!(reports.last().unwrap().running_staged_rows, 10);
+        assert_eq!(reports.last().unwrap().expected_total_rows, 13);
+    }
+
+    #[test]
+    fn default_source_stage_batches_keep_small_objects_together() {
+        let (metadata_objects, common_modules) = five_stage_objects_of_7_5_3_5_5_bytes();
+        let batches = build_source_stage_batches(metadata_objects, common_modules, 500);
+        assert_eq!(batches.len(), 1);
+        assert_eq!(batches[0].row_count, 10);
+    }
+
+    #[test]
+    fn sqlcmd_script_command_asks_for_the_largest_packet() {
+        let command = sqlcmd_file_command_with_auth(
+            Path::new("sqlcmd.exe"),
+            "localhost",
+            SqlAuth {
+                user: None,
+                password: None,
+            },
+            Path::new("F:/scripts/batch1.sql"),
+        );
+        let args = command
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let packet = args.iter().position(|arg| arg == "-a").expect("-a is passed");
+        assert_eq!(args[packet + 1], "32767");
     }
 
     #[test]
