@@ -1103,6 +1103,8 @@ pub struct MetadataSourceContext {
     /// The uuid each readable name of a help page resolves to, or why it does
     /// not: pages of one tree link the same objects over and over.
     help_references: Arc<Mutex<BTreeMap<String, Result<help_pages::HelpReference, String>>>>,
+    /// `Configuration.xml`'s own uuid, read once (`None` when it cannot be).
+    configuration_uuid: Arc<std::sync::OnceLock<Option<String>>>,
 }
 
 impl MetadataSourceContext {
@@ -1117,7 +1119,19 @@ impl MetadataSourceContext {
             generated_type_ids: Arc::new(Mutex::new(BTreeMap::new())),
             style_items: Arc::new(std::sync::OnceLock::new()),
             help_references: Arc::new(Mutex::new(BTreeMap::new())),
+            configuration_uuid: Arc::new(std::sync::OnceLock::new()),
         }
+    }
+
+    /// The uuid `Configuration.xml` declares for the configuration itself.
+    pub(crate) fn configuration_uuid(&self) -> Option<String> {
+        self.configuration_uuid
+            .get_or_init(|| {
+                let xml = fs::read(self.source_root.join("Configuration.xml")).ok()?;
+                let properties = parse_simple_metadata_xml_properties(&xml).ok()?;
+                (properties.kind == "Configuration").then_some(properties.uuid)
+            })
+            .clone()
     }
 
     /// The resolver the base-free role rights writer looks names up with.

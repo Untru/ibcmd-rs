@@ -73,6 +73,20 @@ pub(crate) struct V85FormLoadFacts {
     commands: BTreeMap<String, BTreeMap<usize, String>>,
     /// The picture 8.5 appends to every choice-list value, in document order.
     choice_value_pictures: Vec<String>,
+    /// A report form's state in the root bag, when 8.5 stores it
+    /// ([`report_state_of`]).
+    report_state: Option<ReportState>,
+}
+
+/// What a report form's root bag says about the report beyond `Form.xml`'s
+/// own elements ([`add_report_state`]).
+#[derive(Debug, Clone)]
+struct ReportState {
+    /// `Отчет.<name>` of the report the main attribute holds; empty for the
+    /// generic `cfg:ReportObject` of a common report form.
+    report: String,
+    /// `Configuration.xml`'s uuid, which the default report form URNs name.
+    configuration: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -286,6 +300,7 @@ pub(crate) fn down_convert_v85_form_xml(
         .iter()
         .position(|element| element.parent.is_none() && element.tag == "Form")
         .ok_or_else(|| anyhow!("2.21 form XML has no <Form> root"))?;
+    facts.report_state = report_state_of(&edits, root, source, items_root)?;
     load_root(&mut edits, root, &mut facts)?;
 
     // Items by id outside the attribute, command and parameter sections,
@@ -360,6 +375,78 @@ pub(crate) fn down_convert_v85_form_xml(
         .ok_or_else(|| anyhow!("the 2.21 <Form> root does not declare version 2.21"))?;
     xml20.replace_range(version..version + "version=\"2.21\"".len(), "version=\"2.20\"");
     Ok((xml20, facts))
+}
+
+/// Whether 8.5 stores a report form's state in the root bag, and what names
+/// it. The state is not in `Form.xml` and the export reads none of it back;
+/// which forms carry it is the forms' history. Measured on the stored rows
+/// of both corpora (8.5.1.1150 BSP and ERP УХ; the 8.3.27 bodies of both hold
+/// the same keys), for forms whose main attribute holds a report object:
+///
+/// * every form whose `<ReportFormType>` is `Main` or `Variant` carries it
+///   (BSP 7 of 7, ERP УХ 206 of 208), and so does a common settings form
+///   (4 of 4); a report's own settings form does not (BSP 1 of 1, ERP УХ 8 of
+///   12) -- the rule this follows;
+/// * key 12 names the main attribute's report (`Отчет.<name>`, empty for a
+///   common form's `cfg:ReportObject`): BSP 9 of 9, ERP УХ 186 of 212, the
+///   rest the names of external reports the forms were copied from;
+/// * keys 8-11 are `urn:form:md:14/13/16/15:<configuration uuid>`: BSP 9 of
+///   9, ERP УХ 161 of 212 (the rest external-report URNs).
+fn report_state_of(
+    edits: &XmlEdits<'_>,
+    root: usize,
+    source: Option<&MetadataSourceContext>,
+    items_root: Option<&Path>,
+) -> Result<Option<ReportState>> {
+    let Some(form_type) = peek(edits, root, "ReportFormType")? else {
+        return Ok(None);
+    };
+    let mut report = None;
+    'attributes: for attributes in edits.direct_children(root, "Attributes") {
+        for attribute in edits.direct_children(attributes, "Attribute") {
+            if peek(edits, attribute, "MainAttribute")?.as_deref() != Some("true") {
+                continue;
+            }
+            for types in edits.direct_children(attribute, "Type") {
+                for value in edits.direct_children(types, "v8:Type") {
+                    let text = simple_text(edits, value).unwrap_or_default().trim();
+                    if text == "cfg:ReportObject" {
+                        report = Some(String::new());
+                    } else if let Some(name) = text.strip_prefix("cfg:ReportObject.") {
+                        report = Some(format!("Отчет.{name}"));
+                    }
+                    if report.is_some() {
+                        break 'attributes;
+                    }
+                }
+            }
+            break 'attributes;
+        }
+    }
+    let Some(report) = report else {
+        return Ok(None);
+    };
+    // `<tree>/CommonForms/<form>/Ext/Form/Items` or
+    // `<tree>/<kind>/<owner>/Forms/<form>/Ext/Form/Items`.
+    let folder = items_root
+        .and_then(|path| path.ancestors().nth(4))
+        .and_then(Path::file_name)
+        .and_then(|folder| folder.to_str());
+    let common = match folder {
+        Some("CommonForms") => true,
+        Some("Forms") => false,
+        _ => return Ok(None),
+    };
+    if form_type == "Settings" && !common {
+        return Ok(None);
+    }
+    let Some(configuration) = source.and_then(MetadataSourceContext::configuration_uuid) else {
+        return Ok(None);
+    };
+    Ok(Some(ReportState {
+        report,
+        configuration,
+    }))
 }
 
 fn load_root(edits: &mut XmlEdits<'_>, root: usize, facts: &mut V85FormLoadFacts) -> Result<()> {
@@ -1355,9 +1442,87 @@ pub(crate) fn up_convert_v83_form_body(body: &str, facts: &V85FormLoadFacts) -> 
         );
     }
     up_convert_primitives(&mut container);
+    up_convert_leaves(&mut container);
     let mut out = String::with_capacity(text.len() + text.len() / 4);
     emit_1c(&container, &mut out);
     Ok(out)
+}
+
+/// Spells the leaves of a form body the way 8.5 stores them (all 1 120 BSP
+/// 8.5.1.1150 bodies; the 8.3.27 writer spells them the 8.3.27 way):
+///
+/// * a line break inside a quoted string is CR LF -- not one lone LF in the
+///   strings of those bodies, where the 8.3.27 writer keeps the LF the XML
+///   reader gives it;
+/// * a base64 payload runs 64 characters a line, each full line followed by
+///   CR CR LF (1 523 of 1 523 payloads, the nine whose length is a multiple
+///   of 64 included), where 8.3.27 writes CR LF or one line;
+/// * an embedded XML document declares the palette namespace wherever it
+///   declares the style one, as the exporter's 2.21 files do: the settings
+///   document of the attributes section, `<Settings ... xmlns:dcscor=...
+///   xmlns:pal=... xmlns:style=...>` in all 1 120 bodies, the only embedded
+///   documents that declare the style namespace.
+fn up_convert_leaves(node: &mut Node) {
+    match node {
+        Node::List(members) => {
+            for member in members.iter_mut() {
+                up_convert_leaves(member);
+            }
+        }
+        Node::Leaf(text) => {
+            if text.starts_with('"') {
+                if text.contains('\n') {
+                    *text = crlf_line_breaks(text);
+                }
+            } else if let Some(payload) = text.strip_prefix("#base64:") {
+                *text = v85_base64_leaf(payload);
+            }
+        }
+    }
+}
+
+/// Every line feed not preceded by a carriage return becomes CR LF.
+fn crlf_line_breaks(text: &str) -> String {
+    let mut out = String::with_capacity(text.len() + text.len() / 32);
+    let mut previous = '\0';
+    for character in text.chars() {
+        if character == '\n' && previous != '\r' {
+            out.push('\r');
+        }
+        out.push(character);
+        previous = character;
+    }
+    out
+}
+
+/// A base64 leaf as 8.5 stores it; see [`up_convert_leaves`]. A payload that
+/// does not decode is only laid out; one that is not base64 text is kept.
+fn v85_base64_leaf(payload: &str) -> String {
+    let compact: String = payload.chars().filter(|c| !c.is_ascii_whitespace()).collect();
+    if !compact.is_ascii() {
+        return format!("#base64:{payload}");
+    }
+    let declared = crate::module_blob::decode_base64_mime(&compact).and_then(|bytes| {
+        let document = bytes.strip_prefix(b"\xEF\xBB\xBF".as_slice()).unwrap_or(&bytes);
+        if !document.starts_with(b"<?xml") {
+            return None;
+        }
+        let declared = super::declare_palette_namespace_beside_style(bytes.clone());
+        (declared != bytes).then_some(declared)
+    });
+    let encoded = match declared {
+        Some(bytes) => crate::module_blob::encode_base64(&bytes),
+        None => compact,
+    };
+    let mut out = String::with_capacity(8 + encoded.len() + encoded.len() / 64 * 3);
+    out.push_str("#base64:");
+    for chunk in encoded.as_bytes().chunks(64) {
+        out.push_str(std::str::from_utf8(chunk).expect("base64 is ASCII"));
+        if chunk.len() == 64 {
+            out.push_str("\r\r\n");
+        }
+    }
+    out
 }
 
 fn up_convert_root(root: &mut Node, facts: &V85FormLoadFacts) -> Result<()> {
@@ -1368,6 +1533,9 @@ fn up_convert_root(root: &mut Node, facts: &V85FormLoadFacts) -> Result<()> {
         bail!("the 8.3.27 form layout does not declare revision 50");
     }
     members[0] = Node::Leaf("59".to_owned());
+    if let Some(state) = &facts.report_state {
+        add_report_state(members, state)?;
+    }
     let len = members.len();
     if facts.root_group_horizontal {
         let group_at = len
@@ -1596,6 +1764,77 @@ impl UpConversion<'_> {
     }
 }
 
+/// The report state of a report form's root bag (member 18: a count, then
+/// that many key/value pairs, keys ascending), as the 8.5.1.1150 BSP forms
+/// store it beside the keys the 8.3.27 writer takes from `Form.xml` (5, 6,
+/// 20 references, 7, 21, 23, 27, 29): the default report forms 8-11, the
+/// report 12, the variant `Основной` (13, 18 and the one-item variant list
+/// 17), flags 14 and 16, 15 undefined, 19 empty, 22 the empty uuid, and the
+/// empty references 5, 6, 20 and item 0 in 23 where the XML names none. All
+/// but 8-12 are one spelling in every form of both corpora that carries the
+/// state (ERP УХ: 210 of 212, the other two external-report copies).
+fn add_report_state(members: &mut Vec<Node>, state: &ReportState) -> Result<()> {
+    const BAG: usize = 18;
+    const EMPTY_REFERENCE: &str = "{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,\"\"}}";
+    const VARIANT: &str = "{\"S\",\"Основной\"}";
+    const VARIANTS: &str = "{\"#\",4772b3b4-f4a3-49c0-a1a5-8cb5961511a3,{6,1e512aab-1b41-4ef6-9375-f0137be9dd91,0,0,\
+{1,{1e512aab-1b41-4ef6-9375-f0137be9dd91,{\"Основной\",0,{\"S\",\"Основной\"},{4,0,{0},\"\",-1,-1,0,0,\"\"},0,0,\"\"}}},\
+{\"Pattern\"},0,0}}";
+    let count: usize = members
+        .get(BAG)
+        .and_then(leaf)
+        .and_then(|count| count.parse().ok())
+        .ok_or_else(|| anyhow!("the report form root carries no property bag count at member {BAG}"))?;
+    let mut pairs = BTreeMap::new();
+    for index in 0..count {
+        let key = members
+            .get(BAG + 1 + 2 * index)
+            .and_then(leaf)
+            .and_then(|key| key.parse::<u32>().ok())
+            .ok_or_else(|| anyhow!("the report form root bag has no key {index}"))?;
+        let value = members
+            .get(BAG + 2 + 2 * index)
+            .cloned()
+            .ok_or_else(|| anyhow!("the report form root bag has no value {index}"))?;
+        pairs.insert(key, value);
+    }
+    if !pairs.contains_key(&7) {
+        bail!("the report form root bag holds no report form type (key 7)");
+    }
+    let urn = |property: u8| format!("{{\"S\",\"urn:form:md:{property}:{}\"}}", state.configuration);
+    let defaults = [
+        (5, EMPTY_REFERENCE.to_owned()),
+        (6, EMPTY_REFERENCE.to_owned()),
+        (8, urn(14)),
+        (9, urn(13)),
+        (10, urn(16)),
+        (11, urn(15)),
+        (12, format!("{{\"S\",{}}}", quote_1c(&state.report))),
+        (13, VARIANT.to_owned()),
+        (14, "{\"B\",0}".to_owned()),
+        (15, "{\"U\"}".to_owned()),
+        (16, "{\"B\",0}".to_owned()),
+        (17, VARIANTS.to_owned()),
+        (18, VARIANT.to_owned()),
+        (19, "{\"S\",\"\"}".to_owned()),
+        (20, EMPTY_REFERENCE.to_owned()),
+        (22, "{\"S\",\"00000000-0000-0000-0000-000000000000\"}".to_owned()),
+        (23, "{\"N\",0}".to_owned()),
+    ];
+    for (key, value) in defaults {
+        if !pairs.contains_key(&key) {
+            pairs.insert(key, node_of(&value)?);
+        }
+    }
+    let mut replacement = vec![Node::Leaf(pairs.len().to_string())];
+    for (key, value) in pairs {
+        replacement.push(Node::Leaf(key.to_string()));
+        replacement.push(value);
+    }
+    members.splice(BAG..BAG + 1 + 2 * count, replacement);
+    Ok(())
+}
+
 /// Key 21 of a table's keyed property bag (member 54: a count, then that many
 /// key/value pairs, keys ascending): `ComplexSettingsViewMode` `Show`. The
 /// three 8.5.1.1150 BSP tables that write it hold no empty key 19 beside it.
@@ -1713,6 +1952,59 @@ mod tests {
             }
         }
         assert_eq!(checked, 27);
+    }
+
+    #[test]
+    fn spells_strings_and_base64_the_85_way() {
+        let settings = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Settings xmlns=\"http://v8.1c.ru/8.1/data-composition-system/settings\" xmlns:dcscor=\"http://v8.1c.ru/8.1/data-composition-system/core\" xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"/>";
+        let with_pal = settings.replace(
+            " xmlns:style=",
+            " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" xmlns:style=",
+        );
+        let body = format!(
+            "{{\"a\nb\",\"c\r\nd\",{{#base64:{}}}}}",
+            crate::module_blob::encode_base64(settings.as_bytes())
+        );
+        let mut node = parse_raw(&body).unwrap();
+        up_convert_leaves(&mut node);
+        let Node::List(members) = &node else { panic!() };
+        assert_eq!(leaf(&members[0]), Some("\"a\r\nb\""));
+        assert_eq!(leaf(&members[1]), Some("\"c\r\nd\""));
+        let Node::List(document) = &members[2] else { panic!() };
+        let text = leaf(&document[0]).unwrap();
+        let encoded = crate::module_blob::encode_base64(with_pal.as_bytes());
+        let lines: Vec<&str> = text["#base64:".len()..].split("\r\r\n").collect();
+        assert_eq!(lines.concat(), encoded);
+        assert!(lines[..lines.len() - 1].iter().all(|line| line.len() == 64));
+        assert!(!lines.last().unwrap().is_empty() || encoded.len() % 64 == 0);
+        // A payload of exactly 64 characters keeps the break after it.
+        assert_eq!(v85_base64_leaf(&"A".repeat(64)), format!("#base64:{}\r\r\n", "A".repeat(64)));
+    }
+
+    #[test]
+    fn writes_the_report_state_beside_the_xml_keys() {
+        let mut members = vec![Node::Leaf("59".to_owned())];
+        members.extend((1..18).map(|_| Node::Leaf("0".to_owned())));
+        members.push(Node::Leaf("2".to_owned()));
+        members.push(Node::Leaf("7".to_owned()));
+        members.push(parse_raw("{\"#\",acbc2eeb-2efb-48e4-b78a-661fd09fcf80,0}").unwrap());
+        members.push(Node::Leaf("23".to_owned()));
+        members.push(parse_raw("{\"N\",3}").unwrap());
+        members.push(Node::Leaf("tail".to_owned()));
+        let state = ReportState {
+            report: "Отчет.Пример".to_owned(),
+            configuration: "11111111-2222-3333-4444-555555555555".to_owned(),
+        };
+        add_report_state(&mut members, &state).unwrap();
+        let mut out = String::new();
+        emit_1c(&Node::List(members.clone()), &mut out);
+        let flat = out.replace("\r\n", "");
+        // Keys 7 and 23 from the XML, sixteen added: 5, 6, 8-20, 22.
+        assert!(flat.contains(",18,5,{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{0,\"\"}},6,"));
+        assert!(flat.contains(",8,{\"S\",\"urn:form:md:14:11111111-2222-3333-4444-555555555555\"},9,"));
+        assert!(flat.contains(",12,{\"S\",\"Отчет.Пример\"},13,{\"S\",\"Основной\"},14,{\"B\",0},15,{\"U\"},16,{\"B\",0},17,"));
+        assert!(flat.contains(",22,{\"S\",\"00000000-0000-0000-0000-000000000000\"},23,{\"N\",3},tail}"));
+        assert_eq!(leaf(&members[18]), Some("18"));
     }
 
     #[test]

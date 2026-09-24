@@ -186,6 +186,13 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       rows, every Config row the scripts require present. Steps, expected
       counts, disk and risks: `F:\ibcmd\lab\v85\findings\STATUS.md`,
       "8.5 real cycle -- ready to launch"
+- [x] 8.5 form gaps of the pre-flight (2026-09-24): the loader spells a form
+      body's leaves the 8.5 way (palette namespace in embedded settings
+      documents, 64-character base64 lines with CR CR LF, CR LF in strings)
+      and writes a report form's state (default report form URNs, report
+      name, variant `Основной`) -- БСП 8.5 plain-identical rows 8 487 ->
+      9 226 of 9 619, the 9 report forms' root bags equal the stored ones;
+      virtual cycles stay at 100 %
 - [ ] 8.5 real cycle on disposable 8.5 clones (needs Pavel's go-ahead)
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
