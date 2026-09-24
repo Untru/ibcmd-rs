@@ -212,8 +212,19 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       files unchanged -- the last is ConfigDumpInfo.xml, identical after
       blanking the configVersion values the load renewed -- and agree with
       each other on all 12 337
-- [ ] ERP УХ 8.5 real cycle on a disposable copy of its 8.5 clone (approved;
-      runs after the ERP УХ 8.3.27 real cycle)
+- [x] ERP УХ 8.5 real cycle (2026-09-24, approved by Pavel,
+      `F:\ibcmd\lab\v85\realcycle\uha_r1`): copy-only backup of
+      `ibcmd_rs_uha_85_src_20260922` restored as the disposable
+      `ibcmd_rs_uha_85_rtcycle_20260924`; stage 139 batches (after the
+      batch-size cap c82decea), publish 116 654 rows. Native ibcmd 8.5.1.1150
+      accepts the load; ours exports 140 708 / 140 709 unchanged
+      (ConfigDumpInfo.xml configVersion only). Native first read 7
+      dynamic-list forms with valid standard-attribute paths shadowed by a
+      marked English twin (`~Список.Ref` next to `Список.Ссылка`) -- the
+      same 7 as on 8.3.27; after the field-map fix 0f64ac47 (merged as
+      844d297c) the 29 owner objects were restaged and native 8.5 exports all
+      36 forms that fix touches identical to the reference, so the cycle
+      closes at 140 708 / 140 709 on both exporters
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
