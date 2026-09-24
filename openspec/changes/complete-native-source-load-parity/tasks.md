@@ -175,7 +175,17 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       graphical schema templates through the flowchart grammar, entities and
       untrimmed free text in predefined data and flowcharts, command picture
       transparency pixels
-- [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead)
+- [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead).
+      Checked without writing (2026-09-24): `mssql-stage-source-objects
+      --script-only` (77e4246c) writes the 112 batch scripts a load would run
+      (3.2 GB, 8 min 46 s, longest line 54 KB); they insert 116 652 rows, and
+      every one but `versions` is byte-identical to the rows the ERP УХ
+      virtual cycle staged and exported unchanged. Of those rows 88 886 are
+      plain-identical to what the platform stored and 4 452 differ in layout
+      only; the rest are forms, spreadsheets as a load from XML spells them,
+      legacy DCS placeholders, roles, module containers and list orders --
+      kinds native ibcmd accepted in the БСП run -- plus 4 WS references and
+      one style (the same 231 items in another order).
 - [x] Platform 8.5 (2.21) virtual cycles on the 8.5 clones (branch
       `feat/8-5-source-export`): БСП 12 337 / 12 337, ERP УХ 140 709 /
       140 709 files, 0 prepare failures
