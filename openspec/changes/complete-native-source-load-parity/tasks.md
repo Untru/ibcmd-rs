@@ -176,6 +176,17 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       untrimmed free text in predefined data and flowcharts, command picture
       transparency pixels
 - [ ] ERP УХ real cycle on a disposable УХ clone (needs Pavel's go-ahead)
+- [x] Platform 8.5 (2.21) virtual cycles on the 8.5 clones (branch
+      `feat/8-5-source-export`): БСП 12 337 / 12 337, ERP УХ 140 709 /
+      140 709 files, 0 prepare failures
+- [x] 8.5 real cycle pre-flight (2026-09-24, read-only):
+      `mssql-stage-source-objects --script-only` writes every batch of both
+      8.5 clones -- БСП 10 batches, 206.7 MB, 9 618 rows; ERP УХ 112 batches,
+      3.36 GB, 116 651 rows -- byte-identical to the virtual cycles' staged
+      rows, every Config row the scripts require present. Steps, expected
+      counts, disk and risks: `F:\ibcmd\lab\v85\findings\STATUS.md`,
+      "8.5 real cycle -- ready to launch"
+- [ ] 8.5 real cycle on disposable 8.5 clones (needs Pavel's go-ahead)
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
