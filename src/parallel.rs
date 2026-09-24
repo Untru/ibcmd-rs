@@ -2,9 +2,10 @@ use anyhow::Result;
 use rayon::ThreadPoolBuilder;
 use std::sync::OnceLock;
 
-// The pool follows the machine up to this bound (IBCMD_RS_WORKERS overrides):
-// a 16-worker cap left a third of a 24-thread workstation idle while ERP УХ
-// exported.
+// The default pool is at most 16 workers: the export's heavy rows are memory
+// bound, and on a 24-thread workstation 24 workers made ERP УХ's export slower
+// (every row cost 3-4x more). IBCMD_RS_WORKERS may ask for up to 64.
+const DEFAULT_MAX_WORKERS: usize = 16;
 const MAX_WORKERS: usize = 64;
 const MAX_MEMORY_BOUND_WORKERS: usize = 4;
 static THREAD_POOL: OnceLock<Result<rayon::ThreadPool, String>> = OnceLock::new();
@@ -68,8 +69,10 @@ fn memory_bound_thread_pool() -> Result<&'static rayon::ThreadPool> {
 }
 
 fn bounded_worker_count_from(override_value: Option<usize>, available: usize) -> usize {
-    let requested = override_value.unwrap_or(available);
-    requested.clamp(1, MAX_WORKERS)
+    match override_value {
+        Some(requested) => requested.clamp(1, MAX_WORKERS),
+        None => available.clamp(1, DEFAULT_MAX_WORKERS),
+    }
 }
 
 #[cfg(test)]
@@ -81,7 +84,8 @@ mod tests {
         assert_eq!(bounded_worker_count_from(None, 1), 1);
         assert_eq!(bounded_worker_count_from(None, 4), 4);
         assert_eq!(bounded_worker_count_from(None, 16), 16);
-        assert_eq!(bounded_worker_count_from(None, 24), 24);
+        assert_eq!(bounded_worker_count_from(None, 24), 16);
+        assert_eq!(bounded_worker_count_from(Some(24), 24), 24);
         assert_eq!(bounded_worker_count_from(Some(0), 16), 1);
         assert_eq!(bounded_worker_count_from(Some(2), 16), 2);
         assert_eq!(bounded_worker_count_from(Some(64), 16), 64);
