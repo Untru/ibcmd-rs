@@ -336,6 +336,9 @@ pub fn apply_source_change(
                 script_output: None,
                 script_only: false,
                 bulk: false,
+                // One object: a bulk read of every Config row would cost more
+                // than the handful of per-object queries it replaces.
+                per_row: true,
                 bcp_executable: None,
             },
         )?)?

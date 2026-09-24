@@ -3388,7 +3388,7 @@ pub fn stage_source_objects(
     };
     // A bulk stage reads the base rows it patches with one bcp query instead
     // of one sqlcmd call per object (ERP УХ: over an hour without it).
-    if args.bulk && std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").is_none() {
+    if !args.per_row && std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").is_none() {
         let bcp = args
             .bcp_executable
             .clone()
@@ -3450,7 +3450,7 @@ pub fn stage_source_objects(
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
-    let batches = if args.bulk {
+    let batches = if !args.per_row {
         Vec::new()
     } else {
         build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size)
@@ -3466,7 +3466,7 @@ pub fn stage_source_objects(
     let mut running_rows = 0usize;
     let mut after = before.clone();
 
-    if args.bulk {
+    if !args.per_row {
         scripts = stage_source_rows_bulk(
             args,
             sql_auth,

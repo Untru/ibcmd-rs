@@ -848,6 +848,7 @@ fn build_import_stage_args(
         script_output: args.script_output.clone(),
         script_only: false,
         bulk: false,
+        per_row: false,
         bcp_executable: None,
     })
 }

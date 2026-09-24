@@ -2286,10 +2286,14 @@ pub struct MssqlStageSourceObjectsArgs {
     #[arg(long)]
     pub script_only: bool,
     /// Load the staged rows with one bulk copy (bcp) into a tempdb table and
-    /// one set-based transaction, instead of per-row SQL batches. Writes the
-    /// same ConfigSave rows.
+    /// one set-based transaction, reading the base rows with one bcp query:
+    /// the default. Writes the same ConfigSave rows as --per-row.
     #[arg(long)]
     pub bulk: bool,
+    /// Stage with per-row SQL batches and per-object base-row queries instead
+    /// of the bulk load (cheaper for a handful of objects).
+    #[arg(long, conflicts_with = "bulk")]
+    pub per_row: bool,
     /// bcp executable for --bulk. Defaults to bcp beside --sqlcmd.
     #[arg(long)]
     pub bcp_executable: Option<PathBuf>,
