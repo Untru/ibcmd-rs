@@ -193,7 +193,17 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       name, variant `Основной`) -- БСП 8.5 plain-identical rows 8 487 ->
       9 226 of 9 619, the 9 report forms' root bags equal the stored ones;
       virtual cycles stay at 100 %
-- [ ] 8.5 real cycle on disposable 8.5 clones (needs Pavel's go-ahead)
+- [x] БСП 8.5 real cycle (2026-09-24, approved by Pavel,
+      `F:\ibcmd\lab\v85\realcycle\bsp_r1`, binary 4ab71540): copy-only
+      backup of `ibcmd_rs_bsp_85_src_20260922` restored as the disposable
+      `ibcmd_rs_bsp_85_rtcycle_20260924`; stage 168 s (9 618 rows, every one
+      byte-identical to the virtual cycle's), publish 41 s; native ibcmd
+      8.5.1.1150 accepts the load and both exports give 12 336 / 12 337
+      files unchanged -- the last is ConfigDumpInfo.xml, identical after
+      blanking the configVersion values the load renewed -- and agree with
+      each other on all 12 337
+- [ ] ERP УХ 8.5 real cycle on a disposable copy of its 8.5 clone (approved;
+      runs after the ERP УХ 8.3.27 real cycle)
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
