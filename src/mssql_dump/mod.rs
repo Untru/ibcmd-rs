@@ -1080,8 +1080,7 @@ pub(crate) fn fetch_extension_activation_rows_sqlcmd(
     .collect()
 }
 
-#[cfg(feature = "platform-oracle")]
-pub(crate) use fetch::bcp_executable_for_sqlcmd;
+pub(crate) use fetch::{bcp_executable_for_sqlcmd, fetch_config_part0_rows_bcp};
 
 use command_interface::*;
 pub(crate) use command_interface::{
@@ -4799,11 +4798,7 @@ fn dump_table_rows_streamed(
             }
         }
         let process_started = Instant::now();
-        let dumped_rows = parallel::install(|| {
-            rows.par_iter()
-                .map(|row| dump_table_binary_row(&context, row))
-                .collect::<Vec<_>>()
-        })?;
+        let dumped_rows = dump_rows_largest_first(&context, &rows)?;
         timings.process_rows_wall_ms += elapsed_ms(process_started);
         for dumped in dumped_rows {
             let dumped = dumped?;
@@ -5430,6 +5425,42 @@ fn dump_table_row(context: &DumpRowContext<'_>, row: &ConfigRow) -> Result<Dumpe
         .binary_bytes()
         .with_context(|| format!("failed to decode {} row {}", context.table, row.file_name))?;
     dump_table_row_bytes(context, &row.file_name, row.part_no, row.data_size, &bytes)
+}
+
+/// Dumps one fetched chunk on the pool, the largest rows first, and returns
+/// the results in the rows' own order. A chunk ends when its slowest row does:
+/// with plain `par_iter` a 60 MB spreadsheet taken late ran alone at the end,
+/// and range splitting would even put all the largest rows on one thread. Each
+/// worker instead takes the next row from one queue sorted by size.
+fn dump_rows_largest_first(
+    context: &DumpRowContext<'_>,
+    rows: &[BinaryConfigRow],
+) -> Result<Vec<Result<DumpedRow>>> {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    let mut order = (0..rows.len()).collect::<Vec<_>>();
+    order.sort_by_key(|&index| std::cmp::Reverse(rows[index].binary.len()));
+    let next = AtomicUsize::new(0);
+    let slots = (0..rows.len())
+        .map(|_| std::sync::OnceLock::new())
+        .collect::<Vec<std::sync::OnceLock<Result<DumpedRow>>>>();
+    parallel::install(|| {
+        rayon::scope(|scope| {
+            for _ in 0..rayon::current_num_threads() {
+                scope.spawn(|_| {
+                    while let Some(&index) = order.get(next.fetch_add(1, Ordering::Relaxed)) {
+                        let _ = slots[index].set(dump_table_binary_row(context, &rows[index]));
+                    }
+                });
+            }
+        })
+    })?;
+    Ok(slots
+        .into_iter()
+        .map(|slot| {
+            slot.into_inner()
+                .unwrap_or_else(|| Err(anyhow!("a fetched row was not dumped")))
+        })
+        .collect())
 }
 
 fn dump_table_binary_row(context: &DumpRowContext<'_>, row: &BinaryConfigRow) -> Result<DumpedRow> {

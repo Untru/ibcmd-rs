@@ -389,6 +389,45 @@ pub(super) fn fetch_binary_rows_bcp_query(
     table: &str,
     query: &str,
 ) -> Result<Vec<BinaryConfigRow>> {
+    let parts = fetch_binary_row_parts_bcp_query(bcp, server, user, password, database, table, query)?;
+    assemble_binary_config_rows(parts)
+        .map(|rows| apply_row_overrides(table, rows))
+        .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
+}
+
+/// Part 0 of every Config row of a database, keyed by file name, read with
+/// one `bcp queryout` -- what staging otherwise fetches one sqlcmd call per
+/// object (and what `IBCMD_RS_BASE_ROWS_DIR`'s `<name>__part0.bin` files hold).
+pub(crate) fn fetch_config_part0_rows_bcp(
+    bcp: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+) -> Result<std::collections::HashMap<String, Vec<u8>>> {
+    let query = format!(
+        "SELECT FileName, PartNo, DataSize, BinaryData FROM {}.dbo.Config WHERE PartNo = 0",
+        super::quote_ident(database)
+    );
+    Ok(
+        fetch_binary_row_parts_bcp_query(bcp, server, user, password, database, "Config", &query)?
+            .into_iter()
+            .map(|part| (part.file_name, part.binary))
+            .collect(),
+    )
+}
+
+/// Runs one `bcp queryout` of `FileName, PartNo, DataSize, BinaryData` rows
+/// and returns the parts as stored, unassembled.
+fn fetch_binary_row_parts_bcp_query(
+    bcp: &Path,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    database: &str,
+    table: &str,
+    query: &str,
+) -> Result<Vec<BinaryConfigRow>> {
     let output_path = std::env::temp_dir().join(format!(
         "ibcmd-rs-bcp-{}-{}.bcp",
         std::process::id(),
@@ -473,11 +512,8 @@ pub(super) fn fetch_binary_rows_bcp_query(
     let bytes = fs::read(&output_path)
         .with_context(|| format!("failed to read {}", output_path.display()))?;
     let _ = fs::remove_file(&output_path);
-    let parts = parse_bcp_native_config_rows(&bytes)
-        .with_context(|| format!("failed to parse native bcp rows for {database}.{table}"))?;
-    assemble_binary_config_rows(parts)
-        .map(|rows| apply_row_overrides(table, rows))
-        .with_context(|| format!("failed to assemble native bcp rows for {database}.{table}"))
+    parse_bcp_native_config_rows(&bytes)
+        .with_context(|| format!("failed to parse native bcp rows for {database}.{table}"))
 }
 
 /// The virtual load cycle, second half: when `IBCMD_RS_ROW_OVERRIDE_DIR` names

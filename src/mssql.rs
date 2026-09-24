@@ -3386,6 +3386,23 @@ pub fn stage_source_objects(
         user: args.sql_user.as_deref(),
         password: sql_password.as_deref(),
     };
+    // A bulk stage reads the base rows it patches with one bcp query instead
+    // of one sqlcmd call per object (ERP УХ: over an hour without it).
+    if args.bulk && std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").is_none() {
+        let bcp = args
+            .bcp_executable
+            .clone()
+            .unwrap_or_else(|| crate::mssql_dump::bcp_executable_for_sqlcmd(&args.sqlcmd));
+        let rows = crate::mssql_dump::fetch_config_part0_rows_bcp(
+            &bcp,
+            &args.server,
+            sql_auth.user,
+            sql_auth.password,
+            &args.database,
+        )
+        .context("failed to read the target's Config rows in bulk")?;
+        let _ = PREFETCHED_BASE_ROWS.set((args.database.clone(), rows));
+    }
     let metadata_objects = parallel::install(|| {
         metadata_xmls
             .par_iter()
@@ -3433,8 +3450,11 @@ pub fn stage_source_objects(
         patch_versions_blob_bytes_allowing_additions(&versions_blob, &changes, true)?;
 
     let batch_size = args.batch_size.unwrap_or(500).max(1);
-    let batches =
-        build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size);
+    let batches = if args.bulk {
+        Vec::new()
+    } else {
+        build_source_stage_batches(metadata_objects.clone(), common_modules.clone(), batch_size)
+    };
     let before = storage_table_stats_with_auth(
         &args.sqlcmd,
         &args.server,
@@ -3442,9 +3462,28 @@ pub fn stage_source_objects(
         &args.database,
         "ConfigSave",
     )?;
-    let mut scripts = Vec::with_capacity(batches.len());
+    let mut scripts = Vec::with_capacity(batches.len().max(2));
     let mut running_rows = 0usize;
     let mut after = before.clone();
+
+    if args.bulk {
+        scripts = stage_source_rows_bulk(
+            args,
+            sql_auth,
+            &metadata_objects,
+            &common_modules,
+            &patched_versions.blob,
+        )?;
+        if !args.script_only {
+            after = storage_table_stats_with_auth(
+                &args.sqlcmd,
+                &args.server,
+                sql_auth,
+                &args.database,
+                "ConfigSave",
+            )?;
+        }
+    }
 
     let batch_reports = source_stage_batch_reports(&batches);
     for (index, batch) in batches.iter().enumerate() {
@@ -6840,6 +6879,11 @@ fn fetch_config_blobs_for_files(
     Ok(rows)
 }
 
+/// Part 0 of every Config row of one database, read in bulk before a
+/// `--bulk` stage; `fetch_config_blob_with_auth` answers from it first.
+static PREFETCHED_BASE_ROWS: std::sync::OnceLock<(String, std::collections::HashMap<String, Vec<u8>>)> =
+    std::sync::OnceLock::new();
+
 fn fetch_config_blob_with_auth(
     sqlcmd: &Path,
     server: &str,
@@ -6847,6 +6891,14 @@ fn fetch_config_blob_with_auth(
     database: &str,
     file_name: &str,
 ) -> Result<Vec<u8>> {
+    if let Some((prefetched_database, rows)) = PREFETCHED_BASE_ROWS.get()
+        && prefetched_database == database
+    {
+        return rows
+            .get(file_name)
+            .cloned()
+            .ok_or_else(|| anyhow!("Config row not found: {file_name}"));
+    }
     // A dry run over a large tree fetches thousands of base rows one sqlcmd
     // call at a time (ERP УХ: over an hour). `IBCMD_RS_BASE_ROWS_DIR` names a
     // `mssql-dump-config --write-binary-rows` table directory of the same
@@ -7733,6 +7785,258 @@ fn build_stage_source_objects_sql(
     sql
 }
 
+/// One staged row on the bulk path: its Config file name, whether the target
+/// must already hold a Config row to lend it its Attributes (metadata, common
+/// module and versions rows; the per-row script throws without one) or may
+/// fall back to 0 (metadata body rows), and its stored bytes.
+struct BulkStageRow<'a> {
+    file_name: &'a str,
+    requires_config_row: bool,
+    blob: &'a [u8],
+}
+
+/// Every row the per-row batches insert, in the same order, versions last.
+fn bulk_stage_rows<'a>(
+    metadata_objects: &'a [PreparedMetadataObjectStage],
+    common_modules: &'a [PreparedCommonModuleObjectStage],
+    versions_blob: &'a [u8],
+) -> Vec<BulkStageRow<'a>> {
+    let mut rows = Vec::new();
+    for object in metadata_objects {
+        rows.push(BulkStageRow {
+            file_name: &object.object_id,
+            requires_config_row: true,
+            blob: &object.metadata_blob,
+        });
+        for body in &object.body_rows {
+            rows.push(BulkStageRow {
+                file_name: &body.body_id,
+                requires_config_row: false,
+                blob: &body.blob,
+            });
+        }
+    }
+    for module in common_modules {
+        rows.push(BulkStageRow {
+            file_name: &module.module_id,
+            requires_config_row: true,
+            blob: &module.metadata_blob,
+        });
+        if module.has_module_body {
+            rows.push(BulkStageRow {
+                file_name: &module.module_body_id,
+                requires_config_row: true,
+                blob: &module.module_blob,
+            });
+        }
+    }
+    rows.push(BulkStageRow {
+        file_name: "versions",
+        requires_config_row: true,
+        blob: versions_blob,
+    });
+    rows
+}
+
+/// Writes the rows in bcp's native format for a table of
+/// `FileName nvarchar(128), Kind tinyint, DataSize bigint,
+/// BinaryData varbinary(max)`, all NOT NULL: a 2-byte byte count and the
+/// UTF-16LE name, one byte, eight bytes, then an 8-byte byte count and the
+/// bytes -- the layout `bcp queryout -n` gives and
+/// `parse_bcp_native_config_rows` reads.
+fn write_bulk_stage_rows(path: &Path, rows: &[BulkStageRow<'_>]) -> Result<()> {
+    use std::io::Write;
+    let file =
+        fs::File::create(path).with_context(|| format!("failed to create {}", path.display()))?;
+    let mut out = std::io::BufWriter::with_capacity(8 << 20, file);
+    for row in rows {
+        let name = row.file_name.encode_utf16().collect::<Vec<_>>();
+        if name.len() > 128 {
+            bail!("Config file name longer than 128 characters: {}", row.file_name);
+        }
+        out.write_all(&((name.len() * 2) as u16).to_le_bytes())?;
+        for unit in name {
+            out.write_all(&unit.to_le_bytes())?;
+        }
+        out.write_all(&[u8::from(row.requires_config_row)])?;
+        let len = row.blob.len() as i64;
+        out.write_all(&len.to_le_bytes())?;
+        out.write_all(&len.to_le_bytes())?;
+        out.write_all(row.blob)?;
+    }
+    out.flush()
+        .with_context(|| format!("failed to write {}", path.display()))
+}
+
+fn bulk_stage_table_name(database: &str) -> String {
+    format!(
+        "ibcmd_rs_stage_{}_{}",
+        sanitize_file_part(database),
+        std::process::id()
+    )
+}
+
+fn build_bulk_stage_prepare_sql(table: &str) -> String {
+    format!(
+        "SET NOCOUNT ON;\n\
+         USE tempdb;\n\
+         IF OBJECT_ID(N'tempdb.dbo.{name}', N'U') IS NOT NULL DROP TABLE dbo.{table};\n\
+         CREATE TABLE dbo.{table} (FileName nvarchar(128) NOT NULL, Kind tinyint NOT NULL, DataSize bigint NOT NULL, BinaryData varbinary(max) NOT NULL);\n",
+        name = quote_string(&quote_ident(table)),
+        table = quote_ident(table),
+    )
+}
+
+/// The per-row batches' semantics in one statement: `root` and `version`
+/// copied from Config, every staged row taking its Attributes from the Config
+/// row of the same name (required for Kind 1, else 0), PartNo 0, and the
+/// same final row count.
+fn build_bulk_stage_apply_sql(
+    database: &str,
+    table: &str,
+    staged_rows: usize,
+    expected_total_rows: usize,
+) -> String {
+    let stage = format!("tempdb.dbo.{}", quote_ident(table));
+    format!(
+        "SET NOCOUNT ON;\n\
+         SET XACT_ABORT ON;\n\
+         USE {db};\n\
+         IF (SELECT COUNT_BIG(*) FROM {stage}) <> {staged_rows}\n\
+             THROW 55002, 'bcp loaded an unexpected number of staged rows', 1;\n\
+         IF EXISTS (SELECT 1 FROM {stage} WHERE DATALENGTH(BinaryData) <> DataSize)\n\
+             THROW 55003, 'A staged row lost bytes on its way in', 1;\n\
+         IF EXISTS (SELECT 1 FROM {stage} s WHERE s.Kind = 1 AND NOT EXISTS\n\
+                    (SELECT 1 FROM dbo.Config c WHERE c.FileName = s.FileName AND c.PartNo = 0))\n\
+             THROW 55001, 'A staged metadata row has no Config row to take its attributes from', 1;\n\
+         BEGIN TRAN;\n\
+         DELETE FROM dbo.ConfigSave;\n\
+         INSERT INTO dbo.ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), Attributes, DataSize, BinaryData, PartNo\n\
+         FROM dbo.Config\n\
+         WHERE FileName IN (N'root', N'version') AND PartNo = 0;\n\
+         IF @@ROWCOUNT <> 2 THROW 55000, 'Unexpected number of stable Config rows copied into ConfigSave', 1;\n\
+         INSERT INTO dbo.ConfigSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo)\n\
+         SELECT s.FileName, SYSUTCDATETIME(), SYSUTCDATETIME(), ISNULL(c.Attributes, 0), s.DataSize, s.BinaryData, 0\n\
+         FROM {stage} s\n\
+         LEFT JOIN dbo.Config c ON c.FileName = s.FileName AND c.PartNo = 0;\n\
+         IF (SELECT COUNT_BIG(*) FROM dbo.ConfigSave) <> {expected_total_rows}\n\
+             THROW 56999, 'Unexpected ConfigSave row count after source tree staging', 1;\n\
+         COMMIT;\n\
+         DROP TABLE {stage};\n",
+        db = quote_ident(database),
+    )
+}
+
+fn bulk_stage_paths(base: Option<&PathBuf>, database: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let first = batch_stage_script_path(base, database, "source_objects", 0);
+    let parent = first.parent().map(Path::to_path_buf).unwrap_or_default();
+    let stem = first
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("stage_source_objects")
+        .trim_end_matches("_batch1")
+        .to_string();
+    (
+        parent.join(format!("{stem}_bulk_rows.bcp")),
+        parent.join(format!("{stem}_bulk_prepare.sql")),
+        parent.join(format!("{stem}_bulk_apply.sql")),
+    )
+}
+
+fn bcp_in_with_auth(
+    bcp: &Path,
+    table: &str,
+    file: &Path,
+    server: &str,
+    sql_auth: SqlAuth<'_>,
+) -> Result<()> {
+    let mut command = Command::new(bcp);
+    command
+        .arg(table)
+        .arg("in")
+        .arg(file)
+        .arg("-S")
+        .arg(server)
+        .arg("-n")
+        .arg("-u")
+        .arg("-a")
+        .arg("65535")
+        .arg("-b")
+        .arg("2000")
+        .arg("-h")
+        .arg("TABLOCK");
+    match sql_auth.user {
+        Some(user) => {
+            command.arg("-U").arg(user);
+            if let Some(password) = sql_auth.password {
+                command.arg("-P").arg(password);
+            }
+        }
+        None => {
+            command.arg("-T");
+        }
+    }
+    run_bcp(command)
+}
+
+/// The bulk load: every staged row in one native bcp file, loaded into a
+/// tempdb table (the 1C database's own schema is never touched), then moved
+/// into ConfigSave by one guarded transaction. With `--script-only` the file
+/// and both scripts are written and nothing runs.
+fn stage_source_rows_bulk(
+    args: &MssqlStageSourceObjectsArgs,
+    sql_auth: SqlAuth<'_>,
+    metadata_objects: &[PreparedMetadataObjectStage],
+    common_modules: &[PreparedCommonModuleObjectStage],
+    versions_blob: &[u8],
+) -> Result<Vec<PathBuf>> {
+    let rows = bulk_stage_rows(metadata_objects, common_modules, versions_blob);
+    let (rows_path, prepare_path, apply_path) =
+        bulk_stage_paths(args.script_output.as_ref(), &args.database);
+    if let Some(parent) = rows_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let table = bulk_stage_table_name(&args.database);
+    write_bulk_stage_rows(&rows_path, &rows)?;
+    fs::write(&prepare_path, build_bulk_stage_prepare_sql(&table))
+        .with_context(|| format!("failed to write {}", prepare_path.display()))?;
+    // `root` and `version` join the staged rows in ConfigSave.
+    let expected_total_rows = rows.len() + 2;
+    fs::write(
+        &apply_path,
+        build_bulk_stage_apply_sql(&args.database, &table, rows.len(), expected_total_rows),
+    )
+    .with_context(|| format!("failed to write {}", apply_path.display()))?;
+    if !args.script_only {
+        let bcp = args
+            .bcp_executable
+            .clone()
+            .unwrap_or_else(|| crate::mssql_dump::bcp_executable_for_sqlcmd(&args.sqlcmd));
+        run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &prepare_path)?;
+        let loaded = bcp_in_with_auth(
+            &bcp,
+            &format!("tempdb.dbo.{}", quote_ident(&table)),
+            &rows_path,
+            &args.server,
+            sql_auth,
+        )
+        .and_then(|()| run_sql_file_with_auth(&args.sqlcmd, &args.server, sql_auth, &apply_path));
+        if let Err(error) = loaded {
+            let drop = format!(
+                "IF OBJECT_ID(N'tempdb.dbo.{name}', N'U') IS NOT NULL DROP TABLE tempdb.dbo.{table};",
+                name = quote_string(&quote_ident(&table)),
+                table = quote_ident(&table),
+            );
+            let _ = run_sql_capture_with_auth(&args.sqlcmd, &args.server, sql_auth, &drop);
+            return Err(error);
+        }
+        let _ = fs::remove_file(&rows_path);
+    }
+    Ok(vec![prepare_path, apply_path])
+}
+
 #[derive(Debug, Clone)]
 struct SourceStageBatch {
     metadata_objects: Vec<PreparedMetadataObjectStage>,
@@ -8386,7 +8690,8 @@ fn quote_string_path(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::{
-        BinaryBlobRow, ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest,
+        BinaryBlobRow, BulkStageRow, ColumnShape, CommonModuleStageSpec, ConfigSaveRowDigest,
+        build_bulk_stage_apply_sql, write_bulk_stage_rows,
         DeltaBundleManifest, PreparedCommonModuleObjectStage, PreparedCommonModuleStage,
         PreparedMetadataBodyStage, PreparedMetadataObjectStage, SqlAuth, StorageBundleManifest,
         StorageTableManifest, TableShape, activate_staged_main, build_source_stage_batches,
@@ -9289,6 +9594,41 @@ mod tests {
     fn quotes_sql_identifier_and_string() {
         assert_eq!(quote_ident("a]b"), "[a]]b]");
         assert_eq!(quote_string("a'b"), "a''b");
+    }
+
+    #[test]
+    fn bulk_stage_rows_are_written_in_bcp_native_layout() {
+        let path = std::env::temp_dir().join(format!(
+            "ibcmd-rs-bulk-layout-{}.bcp",
+            std::process::id()
+        ));
+        let rows = [
+            BulkStageRow { file_name: "ab", requires_config_row: true, blob: &[1, 2, 3] },
+            BulkStageRow { file_name: "Я", requires_config_row: false, blob: &[] },
+        ];
+        write_bulk_stage_rows(&path, &rows).unwrap();
+        let bytes = fs::read(&path).unwrap();
+        let _ = fs::remove_file(&path);
+        let mut expected = vec![4, 0, b'a', 0, b'b', 0, 1];
+        expected.extend_from_slice(&3i64.to_le_bytes());
+        expected.extend_from_slice(&3i64.to_le_bytes());
+        expected.extend_from_slice(&[1, 2, 3]);
+        expected.extend_from_slice(&[2, 0, 0x2f, 0x04, 0]);
+        expected.extend_from_slice(&0i64.to_le_bytes());
+        expected.extend_from_slice(&0i64.to_le_bytes());
+        assert_eq!(bytes, expected);
+    }
+
+    #[test]
+    fn bulk_stage_apply_sql_keeps_the_per_row_guards() {
+        let sql = build_bulk_stage_apply_sql("Db", "ibcmd_rs_stage_Db_1", 10, 12);
+        assert!(sql.contains("USE [Db];"));
+        assert!(sql.contains("FROM tempdb.dbo.[ibcmd_rs_stage_Db_1]) <> 10"));
+        assert!(sql.contains("WHERE FileName IN (N'root', N'version') AND PartNo = 0;"));
+        assert!(sql.contains("ISNULL(c.Attributes, 0)"));
+        assert!(sql.contains("s.Kind = 1 AND NOT EXISTS"));
+        assert!(sql.contains("FROM dbo.ConfigSave) <> 12"));
+        assert!(sql.trim_end().ends_with("DROP TABLE tempdb.dbo.[ibcmd_rs_stage_Db_1];"));
     }
 
     #[test]

@@ -335,6 +335,8 @@ pub fn apply_source_change(
                 path_prefix: vec![path_prefix.clone()],
                 script_output: None,
                 script_only: false,
+                bulk: false,
+                bcp_executable: None,
             },
         )?)?
     };

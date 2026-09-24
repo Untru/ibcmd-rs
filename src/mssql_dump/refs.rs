@@ -2279,11 +2279,19 @@ pub(super) fn build_metadata_field_reference_index(rows: &[ConfigRow]) -> BTreeM
 pub(super) fn build_metadata_field_reference_index_from_texts(
     rows: &[MetadataTextRow],
 ) -> BTreeMap<String, String> {
+    // Rows are parsed in parallel and inserted in their own order, so a later
+    // row still wins a shared key exactly as the sequential walk had it.
+    let per_row = |row: &MetadataTextRow| {
+        nested_metadata_headers_from_text(&row.text, &row.file_name)
+            .into_iter()
+            .map(|header| (header.uuid, header.name))
+            .collect::<Vec<_>>()
+    };
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
     let mut index = BTreeMap::new();
-    for row in rows {
-        for header in nested_metadata_headers_from_text(&row.text, &row.file_name) {
-            index.insert(header.uuid, header.name);
-        }
+    for pairs in found {
+        index.extend(pairs);
     }
     index
 }
@@ -2317,8 +2325,8 @@ pub(super) fn build_metadata_field_type_reference_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
 ) -> BTreeMap<String, String> {
-    let mut index = BTreeMap::new();
-    for row in rows {
+    let per_row = |row: &MetadataTextRow| {
+        let mut pairs = Vec::new();
         for (header, marker_start) in
             nested_headers_with_offsets_from_text(&row.text, &row.file_name, |_| true)
         {
@@ -2332,8 +2340,15 @@ pub(super) fn build_metadata_field_type_reference_index_from_texts(
             let [ConstantValueType::Reference { reference }] = value_types.as_slice() else {
                 continue;
             };
-            index.insert(header.uuid, reference.clone());
+            pairs.push((header.uuid, reference.clone()));
         }
+        pairs
+    };
+    let found = parallel::install(|| rows.par_iter().map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().map(per_row).collect());
+    let mut index = BTreeMap::new();
+    for pairs in found {
+        index.extend(pairs);
     }
     index
 }
@@ -2357,22 +2372,58 @@ pub(super) fn build_information_register_master_dimension_index_from_texts(
     form_refs: &BTreeMap<String, FormSourceReference>,
     preserve_raw_data_paths: bool,
 ) -> InformationRegisterMasterDimensionIndex {
+    // The dimensions every register declares, counted in one pass over the
+    // owner graph: filtering all of it once per register was quadratic, and
+    // ERP УХ spent most of its field-index time there.
+    let mut declared_dimensions = std::collections::HashMap::<&str, usize>::new();
+    for reference in object_refs.values() {
+        if let Some((register, name)) = reference
+            .strip_prefix("InformationRegister.")
+            .and_then(|rest| rest.split_once(".Dimension."))
+            && !name.is_empty()
+            && !name.contains('.')
+        {
+            *declared_dimensions.entry(register).or_default() += 1;
+        }
+    }
+    let entries = |row: &MetadataTextRow| {
+        information_register_master_dimension_entry(
+            row,
+            &declared_dimensions,
+            type_index,
+            object_refs,
+            form_refs,
+            preserve_raw_data_paths,
+        )
+    };
+    let found = parallel::install(|| rows.par_iter().filter_map(entries).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().filter_map(entries).collect());
     let mut index = InformationRegisterMasterDimensionIndex::new();
-    for row in rows {
+    for (register_uuid, masters) in found {
+        index.insert(register_uuid, masters);
+    }
+    index
+}
+
+fn information_register_master_dimension_entry(
+    row: &MetadataTextRow,
+    declared_dimensions: &std::collections::HashMap<&str, usize>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+    form_refs: &BTreeMap<String, FormSourceReference>,
+    preserve_raw_data_paths: bool,
+) -> Option<(String, Vec<String>)> {
+    {
         let (Some("InformationRegister"), Some(register)) =
             (row.kind.as_deref(), row.header.as_ref())
         else {
-            continue;
+            return None;
         };
         let dimension_prefix = format!("InformationRegister.{}.Dimension.", register.name);
-        let expected_dimensions = object_refs
-            .values()
-            .filter(|reference| {
-                reference
-                    .strip_prefix(&dimension_prefix)
-                    .is_some_and(|name| !name.is_empty() && !name.contains('.'))
-            })
-            .count();
+        let expected_dimensions = declared_dimensions
+            .get(register.name.as_str())
+            .copied()
+            .unwrap_or(0);
         let mut decoded_dimensions = 0usize;
         let mut dimension_scan = Vec::new();
         for (field, marker_start) in
@@ -2407,15 +2458,13 @@ pub(super) fn build_information_register_master_dimension_index_from_texts(
         // has no master dimensions. It is inserted only when every dimension
         // the owner graph declares was decoded, so parser silence can never be
         // mistaken for an empty declaration.
-        if let Some(masters) = information_register_known_master_dimension_prefix(
+        information_register_known_master_dimension_prefix(
             &dimension_scan,
             expected_dimensions,
             decoded_dimensions,
-        ) {
-            index.insert(register.uuid.clone(), masters);
-        }
+        )
+        .map(|masters| (register.uuid.clone(), masters))
     }
-    index
 }
 
 /// The master-dimension positions proven by a left-to-right declaration scan.
@@ -2544,7 +2593,20 @@ pub(super) fn build_metadata_type_set_leaf_index_from_texts(
     rows: &[MetadataTextRow],
     type_index: &BTreeMap<String, String>,
 ) -> MetadataTypeSetLeafIndex {
-    rows.iter()
+    let per_row = |row: &MetadataTextRow| {
+        type_set_leaf_entry(row, type_index)
+    };
+    parallel::install(|| rows.par_iter().filter_map(per_row).collect::<Vec<_>>())
+        .unwrap_or_else(|_| rows.iter().filter_map(per_row).collect())
+        .into_iter()
+        .collect()
+}
+
+fn type_set_leaf_entry(
+    row: &MetadataTextRow,
+    type_index: &BTreeMap<String, String>,
+) -> Option<(String, Vec<ConstantValueType>)> {
+    std::iter::once(row)
         .filter_map(|row| {
             let header = row.header.as_ref()?;
             // A defined type is recognised the way its own writer recognises
@@ -2577,7 +2639,7 @@ pub(super) fn build_metadata_type_set_leaf_index_from_texts(
             }
             None
         })
-        .collect()
+        .next()
 }
 
 /// Whether the declared leaves of a type list provably exclude the `String`

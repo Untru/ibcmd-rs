@@ -847,6 +847,8 @@ fn build_import_stage_args(
         path_prefix: args.path_prefix.clone(),
         script_output: args.script_output.clone(),
         script_only: false,
+        bulk: false,
+        bcp_executable: None,
     })
 }
 
