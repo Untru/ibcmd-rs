@@ -223,8 +223,13 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       marked English twin (`~Список.Ref` next to `Список.Ссылка`) -- the
       same 7 as on 8.3.27; after the field-map fix 0f64ac47 (merged as
       844d297c) the 29 owner objects were restaged and native 8.5 exports all
-      36 forms that fix touches identical to the reference, so the cycle
-      closes at 140 708 / 140 709 on both exporters
+      36 forms that fix touches identical to the reference. Full native 8.5
+      export of the fixed copy (13 min): **140 708 / 140 709 files
+      unchanged**, the last being `ConfigDumpInfo.xml`, identical to the
+      reference once the configVersion values are blanked -- 100 % on
+      content. The fixes leave every БСП 8.5 row byte-identical (vcycle
+      `bsp_fix`: 9 618 / 9 618 rows as `bsp_v10`, 12 337 / 12 337 files), so
+      the БСП 8.5 real cycle stands for the final build
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
