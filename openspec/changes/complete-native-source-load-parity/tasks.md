@@ -201,7 +201,13 @@ Each done in its own branch and merged into `fix/8-3-27-parity`:
       of that spelling, and native lets a field be claimed once, first in map
       order. Fixed in 0f64ac47 (36 of 116 651 rows change, every other row is
       byte-identical); restaged, published and exported, native and ibcmd-rs
-      give all 36 forms identical to the reference.
+      give all 36 forms identical to the reference. Full native 8.3.27.2214
+      export of the fixed clone (13 min): **140 708 / 140 709 files
+      unchanged**, the last being `ConfigDumpInfo.xml`, identical to the
+      reference once the configVersion values are blanked -- the ERP УХ real
+      cycle closes at 100 % on content, as БСП did. The fixes leave every БСП
+      row byte-identical (vcycle `bsp_fix`: 9 514 / 9 514 rows as `bsp_v8`,
+      12 198 / 12 198 files).
 
 Metadata descriptor rows (3 902 in БСП) are still patched onto the target's
 existing rows; a load into an empty database needs a descriptor compiler per
