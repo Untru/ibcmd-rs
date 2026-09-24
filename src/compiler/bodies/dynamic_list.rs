@@ -129,6 +129,9 @@ pub(crate) struct FieldEntry {
     pub(crate) name: String,
     pub(crate) secondary: Option<String>,
     pub(crate) variant: Variant,
+    /// A plain entry no plain reference walks through: it exists only so the
+    /// marked (`~`) entry of its name reads as shadowed.
+    pub(crate) claim_only: bool,
 }
 
 /// The synthetic field map of one dynamic list.
@@ -145,19 +148,30 @@ pub(crate) struct FieldMap {
 
 impl FieldMap {
     fn add(&mut self, name: &str, variant: Variant, secondary: Option<String>) -> usize {
+        self.add_entry(name, variant, secondary, false)
+    }
+
+    /// `claim`: the plain entry a marked one needs before it, added for that
+    /// alone; a plain reference to the same name later makes it a real one.
+    fn add_entry(&mut self, name: &str, variant: Variant, secondary: Option<String>, claim: bool) -> usize {
         let key = (name.to_string(), variant.clone());
         if let Some(index) = self.by_key.get(&key) {
+            if !claim {
+                self.entries[*index].claim_only = false;
+            }
             return self.entries[*index].id;
         }
         if variant.is_some() && !self.by_key.contains_key(&(name.to_string(), None)) {
-            self.add(name, None, None);
+            self.add_entry(name, None, None, true);
         }
         let id = self.entries.len() + 1;
+        let claim_only = claim && variant.is_none();
         self.entries.push(FieldEntry {
             id,
             name: name.to_string(),
             secondary,
             variant,
+            claim_only,
         });
         self.by_key.insert(key, self.entries.len() - 1);
         id
@@ -197,12 +211,32 @@ impl FieldMap {
     /// Russian spelling as their secondary name: a manual query's field
     /// universe holds only that spelling, and without it the export marks the
     /// field `~`.
+    ///
+    /// Not a claim-only entry whose Russian spelling is an entry of its own:
+    /// the form keeps the broken `~Список.Ref` (only marked references walk
+    /// into `Ref`) beside the valid `Список.Ссылка` of a manual query that
+    /// selects `Спр.Ссылка КАК Ссылка`. Native ibcmd lets each field of the
+    /// list's universe be claimed once, by the first entry in map order that
+    /// names it by its name or its secondary name, and reads every later
+    /// claimant as shadowed -- so a claim-only `Ref` twinned `Ссылка` ahead of
+    /// the `Ссылка` entry made native export `~Список.Ссылка` (7 ERP УХ forms
+    /// in the first real cycle: `Ссылка`, `ПометкаУдаления`, `Владелец`). The
+    /// platform's own maps give such an entry no twin. A `Ref` a plain
+    /// reference walks through keeps its twin: a manual query's universe
+    /// holds only `Ссылка`, and `Список.Ref` resolves through it.
     pub(crate) fn apply_std_twins(&mut self, twins: &BTreeMap<String, String>) {
+        let names = self
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect::<std::collections::BTreeSet<_>>();
         for entry in &mut self.entries {
             if entry.secondary.is_some() || entry.variant.is_some() {
                 continue;
             }
-            if let Some(twin) = twins.get(&entry.name) {
+            if let Some(twin) = twins.get(&entry.name)
+                && !(entry.claim_only && names.contains(twin))
+            {
                 entry.secondary = Some(twin.clone());
             }
         }
@@ -1271,4 +1305,99 @@ pub(crate) fn dynamic_list_bag(
     }
     out.push('}');
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn list_path(text: &str) -> ListPath {
+        parse_list_path(text, "Список", &[]).expect("a list path")
+    }
+
+    fn twins() -> BTreeMap<String, String> {
+        BTreeMap::from([
+            ("Ref".to_string(), "Ссылка".to_string()),
+            ("Code".to_string(), "Код".to_string()),
+            ("DeletionMark".to_string(), "ПометкаУдаления".to_string()),
+        ])
+    }
+
+    #[test]
+    fn a_plain_standard_attribute_takes_its_russian_twin() {
+        let mut map = FieldMap::default();
+        map.add_path(&list_path("Список.Ref"));
+        map.add_path(&list_path("Список.Code"));
+        map.apply_std_twins(&twins());
+        let secondary = map
+            .entries
+            .iter()
+            .map(|entry| (entry.name.as_str(), entry.secondary.as_deref()))
+            .collect::<Vec<_>>();
+        assert_eq!(secondary, vec![("Ref", Some("Ссылка")), ("Code", Some("Код"))]);
+    }
+
+    fn twin_of<'a>(map: &'a FieldMap, name: &str) -> Option<&'a str> {
+        map.entries
+            .iter()
+            .find(|entry| entry.name == name && entry.variant.is_none())
+            .and_then(|entry| entry.secondary.as_deref())
+    }
+
+    #[test]
+    fn a_claim_only_entry_takes_no_twin_that_is_an_entry_of_its_own() {
+        // Documents/Лот/Forms/ЛотыДоступныеПоставщику: a manual query selects
+        // `Лоты.Ссылка КАК Ссылка`; <UseAlways> keeps `~Список.Ref` and
+        // `Список.Ссылка`. Native ibcmd exported `~Список.Ссылка` while the
+        // claim-only `Ref` entry carried the secondary name `Ссылка`.
+        let mut map = FieldMap::default();
+        map.add_path(&list_path("~Список.Ref"));
+        map.add_path(&list_path("Список.Ссылка"));
+        map.add_path(&list_path("~Список.DeletionMark"));
+        map.add_path(&list_path("Список.ПометкаУдаления"));
+        map.add_path(&list_path("Список.Code"));
+        map.apply_std_twins(&twins());
+
+        assert_eq!(twin_of(&map, "Ref"), None);
+        assert_eq!(twin_of(&map, "DeletionMark"), None);
+        assert_eq!(twin_of(&map, "Code"), Some("Код"));
+        let pairs = map.pairs(&[]);
+        let secondary = pairs
+            .iter()
+            .filter(|(key, _)| key.starts_with("FieldsMapItemSecondaryName"))
+            .map(|(_, value)| value.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(secondary, vec!["{\"S\",\"Код\"}"]);
+        // The references still resolve to their own entries.
+        assert_eq!(map.required_id(&list_path("Список.Ссылка")).as_deref(), Some("3"));
+        assert_eq!(map.required_id(&list_path("~Список.Ref")).as_deref(), Some("2"));
+    }
+
+    #[test]
+    fn a_claim_only_entry_keeps_its_twin_when_that_spelling_is_no_entry() {
+        let mut map = FieldMap::default();
+        map.add_path(&list_path("~Список.Ref"));
+        map.apply_std_twins(&twins());
+        assert_eq!(twin_of(&map, "Ref"), Some("Ссылка"));
+    }
+
+    #[test]
+    fn a_plainly_referenced_entry_keeps_its_twin_beside_an_entry_of_that_spelling() {
+        // Catalogs/Должности/Forms/ФормаСписка: `Список.Ref` resolves through
+        // `Ссылка` in the manual query's universe; the conditional appearance
+        // adds a `Ссылка` entry after it. Native reads this map as the source.
+        let mut map = FieldMap::default();
+        map.add_path(&list_path("Список.Ref"));
+        map.add_path(&list_path("Список.Ссылка"));
+        map.apply_std_twins(&twins());
+        assert_eq!(twin_of(&map, "Ref"), Some("Ссылка"));
+
+        // A marked reference first, a plain one after it: the entry is real.
+        let mut map = FieldMap::default();
+        map.add_path(&list_path("~Список.Ref"));
+        map.add_path(&list_path("Список.Ссылка"));
+        map.add_path(&list_path("Список.Ref"));
+        map.apply_std_twins(&twins());
+        assert_eq!(twin_of(&map, "Ref"), Some("Ссылка"));
+    }
 }
