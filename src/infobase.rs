@@ -846,6 +846,7 @@ fn build_import_stage_args(
         source_version: Some(config.legacy_source_version()?),
         path_prefix: args.path_prefix.clone(),
         script_output: args.script_output.clone(),
+        script_only: false,
     })
 }
 
