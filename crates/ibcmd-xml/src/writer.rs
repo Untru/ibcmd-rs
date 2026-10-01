@@ -335,7 +335,10 @@ fn escaped_output_len(value: &str, attribute: bool) -> Result<usize, WriteError>
     })
 }
 
-fn document_output_len(document: &XmlDocument, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn document_output_len(
+    document: &XmlDocument,
+    policy: LexicalPolicy,
+) -> Result<usize, WriteError> {
     let mut total = if policy == LexicalPolicy::Preserve && document.has_utf8_bom() {
         UTF8_BOM.len_utf8()
     } else {
@@ -362,7 +365,7 @@ fn document_output_len(document: &XmlDocument, policy: LexicalPolicy) -> Result<
     Ok(total)
 }
 
-fn node_output_len(node: &XmlNode, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn node_output_len(node: &XmlNode, policy: LexicalPolicy) -> Result<usize, WriteError> {
     if policy == LexicalPolicy::Preserve
         && let Some(raw) = node.raw()
     {
@@ -423,7 +426,10 @@ fn use_raw_start(element: &XmlElement, policy: LexicalPolicy) -> bool {
         && (element.children().is_empty() || element.raw_end().is_some())
 }
 
-fn element_output_len(element: &XmlElement, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn element_output_len(
+    element: &XmlElement,
+    policy: LexicalPolicy,
+) -> Result<usize, WriteError> {
     let mut total = 0usize;
     let mut pending = vec![element];
     while let Some(element) = pending.pop() {
