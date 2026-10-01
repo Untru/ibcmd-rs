@@ -16,6 +16,21 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_validation_tsv_retains_source_errors_and_unknown_categories(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "validation.tsv"
+            path.write_text("2026-10-01T11:18:24+0300\tMajor\tConfiguration error\tproject\tvalidator\tmodule\tline 39\tWill not compile\n"
+                            "2026-10-01T11:18:24+0300\tMinor\tWarning\tproject\tvalidator\tmodule\tline 78\tUnused method\n"
+                            "2026-10-01T11:18:24+0300\tMajor\tNew category\tproject\tvalidator\tmodule\tline 90\tUnknown\n"
+                            "truncated\trow\n", encoding="utf-8")
+            result = oracle.summarize_validation_tsv(path)
+            self.assertTrue(result["unresolved_source_diagnostics"])
+            self.assertEqual(result["configuration_error_count"], 1)
+            self.assertEqual(result["configuration_errors"][0]["position"], "line 39")
+            self.assertEqual(len(result["malformed_rows"]), 1)
+            self.assertEqual(len(result["unclassified_rows"]), 1)
+            self.assertEqual(result["tsv_sha256"], oracle.digest(path))
+
     def test_zero_exit_validation_without_tsv_is_rejected(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

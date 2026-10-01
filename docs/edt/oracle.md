@@ -80,6 +80,9 @@ The installed `help validate` positively documents `validate --file TSV
 The separate `validate` mode copies a prepared authentic project, captures this
 raw TSV and workspace logs, and checks that the original project remains intact.
 Its `CAPTURED` status is an evidence capture, never a validation or acceptance PASS.
+The TSV summary preserves its raw hash and every configuration-error row.
+Unknown categories and malformed rows remain unresolved source diagnostics;
+they cannot silently become a clean result.
 
 ```powershell
 $edt = 'C:\Program Files\1C\1CE\components\1c-edt-2025.2.3+30-x86_64\1cedtcli.exe'
@@ -130,6 +133,14 @@ On 2026-10-01 the installed tool positively reported `2025.2.3.30`. Exact help
 and launcher output are preserved under
 `F:\ibcmd\lab\07\edt-discovery`; the native BSP85 import with `--build true`
 completed with exit 0 under `F:\ibcmd\lab\07\oracle-bsp85-r1`.
+The separate genuine validation capture under
+`F:\ibcmd\lab\07\validate-bsp85-r1` completed with exit 0 but reported five
+`Major / Configuration error` rows in the ordinary application module, concerning
+execution environments and compilation. The raw TSV and derived summary are
+retained. The UH85 import under `F:\ibcmd\lab\07\oracle-uha85-r2` also logged
+`Unsupported version of file MobileDigiSign.bin` in the installed EDT workspace.
+These actual source diagnostics are unresolved failures, independently of
+startup, headless and shutdown log messages.
 
 The source issue remains subject to the completed BSP and ERP UH acceptance
 reports, review of diagnostics and complete differences. Neither an import

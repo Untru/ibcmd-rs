@@ -196,6 +196,33 @@ def has_error_diagnostics(values) -> bool:
     return any(item["error_count"] or item.get("workspace_error_count", 0) for item in values)
 
 
+def summarize_validation_tsv(path: Path) -> dict:
+    # Installed 2025.2.3.30 emits headerless TSV. Preserve every original byte;
+    # classify only observed categories and mark unfamiliar/malformed rows.
+    severities, categories, errors, malformed, unknown = {}, {}, [], [], []
+    lines = path.read_bytes().decode("utf-8-sig", errors="strict").splitlines()
+    for number, line in enumerate(lines, 1):
+        fields = line.split("\t")
+        if len(fields) < 8 or not re.match(r"^\d{4}-\d{2}-\d{2}T", fields[0]):
+            malformed.append({"line": number, "columns": len(fields), "text": line})
+            continue
+        severity, category = fields[1:3]
+        severities[severity] = severities.get(severity, 0) + 1
+        categories[category] = categories.get(category, 0) + 1
+        row = {"line": number, "severity": severity, "category": category,
+               "project": fields[3], "validator": fields[4], "object": fields[5],
+               "position": fields[6], "message": "\t".join(fields[7:])}
+        if category == "Configuration error":
+            errors.append(row)
+        elif category not in ("Code style", "Warning"):
+            unknown.append(row)
+    return {"tsv_sha256": digest(path), "raw_line_count": len(lines),
+            "severity_counts": severities, "category_counts": categories,
+            "configuration_error_count": len(errors), "configuration_errors": errors,
+            "malformed_rows": malformed, "unclassified_rows": unknown,
+            "unresolved_source_diagnostics": bool(errors or malformed or unknown)}
+
+
 def require_xml(root: Path, *, require_dump_info=True) -> None:
     names = ("Configuration.xml", "ConfigDumpInfo.xml") if require_dump_info else ("Configuration.xml",)
     for name in names:
@@ -289,6 +316,8 @@ def validate_project(args, run: Path) -> None:
     no_links(output)
     diagnostics = command_diagnostics(run, ["edt-validate"])
     write_json(run / "edt-diagnostics.json", diagnostics)
+    source_diagnostics = summarize_validation_tsv(output)
+    write_json(run / "validation-tsv-summary.json", source_diagnostics)
     after = snapshot(project)
     write_json(run / "authentic-project-after.json", after)
     if before != after:
@@ -297,6 +326,7 @@ def validate_project(args, run: Path) -> None:
     write_json(run / "validation.json", {"status": "CAPTURED",
         "tsv": str(output), "tsv_sha256": digest(output), "tsv_bytes": output.stat().st_size,
         "prepared_project_unchanged": True,
+        "unresolved_source_diagnostics": source_diagnostics["unresolved_source_diagnostics"],
         "unresolved_edt_error_diagnostics": has_error_diagnostics(diagnostics.values()),
         "note": "Raw installed-EDT TSV and workspace diagnostics require inspection; this capture is not acceptance PASS"})
 
