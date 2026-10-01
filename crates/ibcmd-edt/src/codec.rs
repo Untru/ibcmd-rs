@@ -330,6 +330,17 @@ fn inventory_accounting(
         .map(|e| (e.path().as_str(), e))
         .collect::<BTreeMap<_, _>>();
     let mut accounting = Vec::new();
+    let mut failure_count = 0usize;
+    let mut failures = Vec::new();
+    let mut reject = |path: &str, reason: &str| {
+        failure_count += 1;
+        // Inventory can contain hundreds of thousands of entries. Keep the
+        // complete count without allocating an unbounded diagnostic per entry.
+        if failures.len() < 128 {
+            let reason = reason.chars().take(1024).collect::<String>();
+            failures.push(format!("{path}: {reason}"));
+        }
+    };
     for e in source.entries() {
         let path = e.path().as_str();
         if let Some(new) = index.get(path) {
@@ -337,10 +348,21 @@ fn inventory_accounting(
             // Lexical differences are represented by provenance. Every other artifact
             // must regenerate byte-exactly, so unclaimed body fragments fail closed.
             let descriptor = path.ends_with(".mdo") || metadata_file(e)?;
-            if !descriptor && !same_body(e, new)? {
-                return Err(EdtError::new(format!(
-                    "{path}: body codec did not regenerate all source bytes/semantics"
-                )));
+            if !descriptor {
+                match same_body(e, new) {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        reject(
+                            path,
+                            "body codec did not regenerate all source bytes/semantics",
+                        );
+                        continue;
+                    }
+                    Err(error) => {
+                        reject(path, &error.to_string());
+                        continue;
+                    }
+                }
             }
             accounting.push(FileAccounting {
                 path: e.path().clone(),
@@ -352,10 +374,18 @@ fn inventory_accounting(
                 disposition: Disposition::Retained,
             });
         } else {
-            return Err(EdtError::new(format!(
-                "{path}: source file has no complete descriptor/body codec; refusing to skip"
-            )));
+            reject(
+                path,
+                "source file has no complete descriptor/body codec; refusing to skip",
+            );
         }
+    }
+    if failure_count != 0 {
+        return Err(EdtError::new(format!(
+            "{failure_count} source files failed complete body accounting (showing first {}):\n{}",
+            failures.len(),
+            failures.join("\n")
+        )));
     }
     Ok(accounting)
 }
@@ -908,6 +938,60 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn inventory_reports_missing_and_changed_bodies_together() {
+        let entry = |path: &str, bytes: &[u8]| {
+            SourceEntry::from_bytes(SourcePath::new(path).unwrap(), bytes.to_vec()).unwrap()
+        };
+        let source = SourceTree::new(vec![
+            entry("Configuration/Help/ru.html", b"<html>help</html>"),
+            entry(
+                "CommonModules/Logic/Module.bsl",
+                b"Procedure Original() EndProcedure",
+            ),
+        ])
+        .unwrap();
+        let rebuilt = SourceTree::new(vec![entry(
+            "CommonModules/Logic/Module.bsl",
+            b"Procedure Changed() EndProcedure",
+        )])
+        .unwrap();
+        let error = inventory_accounting(&source, &rebuilt, Format::Edt)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("2 source files failed"), "{error}");
+        assert!(error.contains("Configuration/Help/ru.html"), "{error}");
+        assert!(error.contains("CommonModules/Logic/Module.bsl"), "{error}");
+        assert!(error.contains("refusing to skip"), "{error}");
+        assert!(error.contains("did not regenerate"), "{error}");
+    }
+
+    #[test]
+    fn inventory_diagnostic_is_bounded_but_counts_every_rejected_file() {
+        let source = SourceTree::new(
+            (0..130)
+                .map(|index| {
+                    SourceEntry::from_bytes(
+                        SourcePath::new(format!("Bodies/{index:03}.bsl")).unwrap(),
+                        b"body".to_vec(),
+                    )
+                    .unwrap()
+                })
+                .collect(),
+        )
+        .unwrap();
+        let rebuilt = SourceTree::new(Vec::new()).unwrap();
+        let error = inventory_accounting(&source, &rebuilt, Format::Edt)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("130 source files failed"), "{error}");
+        assert!(error.contains("showing first 128"), "{error}");
+        assert_eq!(error.matches("refusing to skip").count(), 128);
+        assert!(error.contains("Bodies/127.bsl"));
+        assert!(!error.contains("Bodies/128.bsl"));
+        assert!(!error.contains("Bodies/129.bsl"));
+    }
+
     #[test]
     #[ignore = "requires genuine F laboratory form corpus"]
     fn strict_form_regeneration_census() {
