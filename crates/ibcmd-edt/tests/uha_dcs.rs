@@ -268,3 +268,72 @@ fn authentic_uha_dcs_witnesses_decode_and_reencode() {
     assert!(failures.is_empty());
     assert_eq!(complete, report["cases"].as_array().unwrap().len() * 3);
 }
+#[test]
+fn repeated_parameter_values_remain_ordered_and_unknown_values_fail() {
+    let ns = "xmlns:core_1=\"http://g5.1c.ru/v8/dt/data-composition-system/core\" ";
+    let content = r#"<parameters><name>TaxModes</name><values xsi:type="core_1:DesignTimeValueValue"><value><value>Enum.Tax.Export</value></value></values><values xsi:type="core_1:DesignTimeValueValue"><value><value>Enum.Tax.Raw</value></value></values><values xsi:type="core_1:DesignTimeValueValue"><value><value>Enum.Tax.Other</value></value></values><valueListAllowed>true</valueListAllowed></parameters>"#;
+    let body = read_form(FormDialect::Edt, &form(content, ns)).unwrap();
+    let param = &dl(&body).parameters[0];
+    assert_eq!(
+        param.value,
+        Some(DcsParamValue::DesignTimeValue("Enum.Tax.Export".into()))
+    );
+    assert_eq!(
+        param.additional_values,
+        vec![
+            DcsParamValue::DesignTimeValue("Enum.Tax.Raw".into()),
+            DcsParamValue::DesignTimeValue("Enum.Tax.Other".into())
+        ]
+    );
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let bytes = write_form(dialect, &body).unwrap();
+        let decoded = read_form(dialect, &bytes).unwrap();
+        assert_eq!(dl(&decoded).parameters, dl(&body).parameters);
+    }
+    assert!(
+        read_form(
+            FormDialect::Edt,
+            &form(
+                &content.replacen("Enum.Tax.Raw</value>", "Enum.Tax.Raw</value><unknown/>", 1),
+                ns
+            )
+        )
+        .is_err()
+    );
+    assert!(
+        read_form(
+            FormDialect::Edt,
+            &form(
+                &content.replacen("core_1:DesignTimeValueValue", "core_1:UnsupportedValue", 1),
+                ns
+            )
+        )
+        .is_err()
+    );
+}
+#[test]
+#[ignore = "requires genuine read-only UH case 8 witness"]
+fn genuine_repeated_parameter_values_survive_both_formats() {
+    let source = std::env::var("IBCMD_DCS_REPEATED_WITNESS").unwrap();
+    let body = read_form(FormDialect::Edt, &std::fs::read(source).unwrap()).unwrap();
+    let original = body
+        .data_attributes
+        .iter()
+        .filter_map(|a| a.dynamic_list.as_ref())
+        .flat_map(|d| d.parameters.iter())
+        .find(|p| p.name == "НалогообложенияНДСЭкспорт")
+        .unwrap();
+    assert_eq!(original.additional_values.len(), 2);
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let bytes = write_form(dialect, &body).unwrap();
+        let decoded = read_form(dialect, &bytes).unwrap();
+        let result = decoded
+            .data_attributes
+            .iter()
+            .filter_map(|a| a.dynamic_list.as_ref())
+            .flat_map(|d| d.parameters.iter())
+            .find(|p| p.name == original.name)
+            .unwrap();
+        assert_eq!(result, original);
+    }
+}

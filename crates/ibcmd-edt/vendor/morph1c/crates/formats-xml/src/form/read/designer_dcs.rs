@@ -300,10 +300,11 @@ pub(crate) fn read_designer_dcs_parameter(p: &Element) -> Result<DcsParameter, F
     // `<dcssch:value>` — ОПЦИОНАЛЕН (8 параметров ВариантыОтчетов несут лишь name/title/флаги).
     // Вариации: `xsi:nil="true"` (Undefined) / `xs:boolean` / `xs:string` (пустой ⇒
     // самозакрытие) / `xs:dateTime` / `v8:UUID` — тексты.
-    let value = match p.child("value").filter(|c| c.prefix == "dcssch") {
-        None => None,
-        Some(v) => Some(read_designer_dcs_param_value(v)?),
-    };
+    let mut values = p.children.iter()
+        .filter(|c| c.local == "value" && c.prefix == "dcssch")
+        .map(read_designer_dcs_param_value).collect::<Result<Vec<_>, _>>()?;
+    let value = if values.is_empty() { None } else { Some(values.remove(0)) };
+    let additional_values = values;
     // useRestriction — три-состояние: Designer НЕРЕГУЛЯРНО эмитит явный `false`
     // (SSL absent×1492/true×72/false×19; mixed внутри одной формы — МашиночитаемыеДоверенности)
     // ⇒ presence-точное чтение {true→Some(true), false→Some(false), absent→None}.
@@ -356,6 +357,7 @@ pub(crate) fn read_designer_dcs_parameter(p: &Element) -> Result<DcsParameter, F
         title,
         value_type,
         value,
+        additional_values,
         use_restriction,
         value_list_allowed,
         available_as_field,

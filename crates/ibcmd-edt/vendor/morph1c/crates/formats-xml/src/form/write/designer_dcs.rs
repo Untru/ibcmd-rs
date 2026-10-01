@@ -294,6 +294,9 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
     if let Some(v) = &p.value {
         el.push(designer_dcs_param_value("value", v));
     }
+    for v in &p.additional_values {
+        el.push(designer_dcs_param_value("value", v));
+    }
     // useRestriction — presence-точная реконструкция три-состояния (true/false/absent).
     if let Some(b) = p.use_restriction {
         el.push(OutElement::leaf(

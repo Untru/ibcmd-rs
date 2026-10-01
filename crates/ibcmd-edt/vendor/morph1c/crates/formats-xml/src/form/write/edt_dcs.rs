@@ -207,6 +207,9 @@ pub(crate) fn edt_dcs_parameter(p: &DcsParameter) -> Result<OutElement, FormErro
     if let Some(v) = &p.value {
         el.push(edt_dcs_param_value("values", v));
     }
+    for v in &p.additional_values {
+        el.push(edt_dcs_param_value("values", v));
+    }
     // useRestriction — три-состояние (см. IR-док): EDT эмитит ТОЛЬКО `true` (Some(false) =
     // designer-явный false, EDT-аналог — омиссия).
     if p.use_restriction == Some(true) {

@@ -319,10 +319,11 @@ pub(crate) fn read_edt_dcs_parameter(p: &Element) -> Result<DcsParameter, FormEr
     // С полезной нагрузкой: StringValue/DateValue — `<value>текст</value>`-ребёнок;
     // UuidValue — `value=`-АТРИБУТ (витнессы МашиночитаемыеДоверенности/ВнешниеПользователи).
     // ОПЦИОНАЛЕН: 12 DCS-параметров корпуса несут лишь name/title/флаги без `<values>` ⇒ None.
-    let value = match p.child("values").filter(|c| c.prefix.is_empty()) {
-        Some(values) => Some(read_edt_dcs_param_value(values)?),
-        None => None,
-    };
+    let mut values = p.children.iter()
+        .filter(|c| c.local == "values" && c.prefix == "")
+        .map(read_edt_dcs_param_value).collect::<Result<Vec<_>, _>>()?;
+    let value = if values.is_empty() { None } else { Some(values.remove(0)) };
+    let additional_values = values;
     // useRestriction — три-состояние (см. IR-док): EDT несёт ТОЛЬКО `true` (sparse) ⇒
     // present-true→Some(true), absent→None (Some(false) на EDT-стороне не возникает).
     let use_restriction = if read_presence_true(p, "useRestriction")? {
@@ -364,6 +365,7 @@ pub(crate) fn read_edt_dcs_parameter(p: &Element) -> Result<DcsParameter, FormEr
         title,
         value_type,
         value,
+        additional_values,
         use_restriction,
         value_list_allowed,
         available_as_field,

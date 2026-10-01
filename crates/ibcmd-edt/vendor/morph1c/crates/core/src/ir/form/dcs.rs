@@ -169,6 +169,9 @@ pub struct DcsParameter {
     /// `<values>`); на write не эмитим.
     #[serde(default)]
     pub value: Option<DcsParamValue>,
+    /// Additional parameter values in original order, after the first value.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub additional_values: Vec<DcsParamValue>,
     /// Использовать ограничение (`useRestriction` ⟺ `dcssch:useRestriction`) — ТРИ-состояние
     /// {`Some(true)`, `Some(false)`, `None`=absent}: Designer НЕРЕГУЛЯРНО эмитит явный `false`
     /// (SSL: absent×1492 / true×72 / false×19 — МашиночитаемыеДоверенности.ФормаСписка несёт
