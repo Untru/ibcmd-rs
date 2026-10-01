@@ -267,14 +267,14 @@ def workspace_error_multiset(log: Path) -> Counter:
     if not log.is_file():
         raise OracleError(f"Missing captured workspace diagnostics: {log}")
     result = Counter()
-    for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION) )", log.read_bytes().decode("utf-8")):
+    for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION)(?:\s|$))", log.read_bytes().decode("utf-8")):
         match = re.match(r"!ENTRY (\S+) ([48]) (\S+) [^\r\n]+\r?\n", block)
         if match:
             # Full plugin/severity/code/message/stack; exclude only header time
             # and separator blank lines. Never collapse message/stack whitespace.
             key = (match[1], match[2], match[3], block[match.end():].rstrip("\r\n"))
             result[key] += 1
-        elif block.startswith("!ENTRY "):
+        elif block.startswith("!ENTRY"):
             header = block.splitlines()[0].split()
             # A missing timestamp/newline cannot make an error disappear. Even
             # an unreadable severity is a malformed diagnostic, not evidence

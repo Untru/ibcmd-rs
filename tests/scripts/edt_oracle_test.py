@@ -21,7 +21,8 @@ class EvidenceControls(unittest.TestCase):
             path = Path(folder) / "workspace.log"
             for content in ("!ENTRY plugin 4 0\n!MESSAGE real error\n",
                             "!ENTRY plugin 8 0", "!ENTRY plugin unknown 0\n!MESSAGE error\n",
-                            "!ENTRY plugin 12 0\n!MESSAGE unknown severity\n", "!ENTRY plugin\n"):
+                            "!ENTRY plugin 12 0\n!MESSAGE unknown severity\n", "!ENTRY plugin\n",
+                            "!ENTRY\tplugin\t4\t0\n!MESSAGE tab-delimited error\n", "!ENTRY\n"):
                 with self.subTest(content=content):
                     path.write_bytes(content.encode("utf-8"))
                     records = oracle.workspace_error_multiset(path)
