@@ -184,7 +184,19 @@ the four exact environment record classes described above. Its source inventory
 then showed EDT had added `.settings/org.eclipse.core.resources.prefs`, so that
 capture fails the strict control immutability binding. The replacement
 `F:\ibcmd\lab\07\empty-edt-control83-r2` copies the authentic template's encoding
-settings before taking the source snapshot; the earlier evidence remains intact.
+settings before taking the source snapshot. Its genuine validate/export completed,
+TSV is empty and all source/template/export inventories pass binding. The earlier
+evidence remains intact.
+
+The genuine UH83 capture under `F:\ibcmd\lab\07\oracle-uha83-r1` completed
+build-enabled import and export, with unchanged native input. Its native input
+is a fresh SHA-256 verified mirror of the historical E: native SDK export;
+`F:\ibcmd\lab\07\uha83-native-mirror-evidence` preserves every file hash and
+the original export command. The final workspace logs also contain the
+unsupported mobile-signature diagnostic and a BSL index transaction error.
+Choosing the 8.3.27 profile alone therefore does not make this corpus clean.
+These records remain outside the ambient control classes and block strict
+acceptance; the full UH83 structured validation is captured separately.
 
 Acceptance binds the empty control's current TSV to its captured summary and
 SHA-256, its template before/after/current inventories, its source before/current
