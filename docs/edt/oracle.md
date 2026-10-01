@@ -212,6 +212,20 @@ literal is only a grammar control: rewriting the genuine version-2 artifact to
 that schema would discard typed/converted fields. This investigation neither
 changes the source nor relaxes the acceptance gate.
 
+The follow-up bounded sandbox examined 3,736 short synthetic version-2 inputs
+using the genuine installed text-list reader. It preserved empty key/digest,
+four zero-count leaf groups and the false converted flag while varying zero
+spelling, whitespace and balanced containers. All 2,429 inputs that reached the
+tail check failed it; the other inputs were rejected earlier. No supported
+variant was found. Actual installed model-factory inspection confirms that the
+version-0 basic object and version-2 converted object have different EClasses;
+the synthetic version-0 project was prepared but never submitted to EDT. Raw
+serialization of a constructed full version-2 model succeeds but differs from
+the native file's framing, so it is not an exact native acceptance result.
+`bounded-variant-search-result.json` preserves the candidate set, command,
+model/source/plugin hashes and unchanged-source proof. The sandbox stopped
+without an adaptation or broader diagnostic waiver.
+
 Acceptance binds the empty control's current TSV to its captured summary and
 SHA-256, its template before/after/current inventories, its source before/current
 inventory and its installed-export inventory. New captures additionally record
