@@ -391,6 +391,7 @@ pub(crate) fn xml_to_edt(
     let config = read_codec(Format::Designer, &src, v)?;
     let rebuilt = render(Format::Designer, &config, &stage.path().join("rebuilt"), v)?;
     let accounting = inventory_accounting(source, &rebuilt, Format::Designer)?;
+    drop(rebuilt);
     let converted = render(Format::Edt, &config, &stage.path().join("generated"), v)?;
     let mut entries = Vec::new();
     for e in converted.entries() {
@@ -402,6 +403,7 @@ pub(crate) fn xml_to_edt(
             .map_err(EdtError::source)?,
         );
     }
+    drop(converted);
     entries.push(
         SourceEntry::from_bytes(
             SourcePath::new("DT-INF/PROJECT.PMF").map_err(EdtError::source)?,
@@ -488,6 +490,8 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
     )
     .map_err(EdtError::source)?;
     let mut accounting = inventory_accounting(&src_tree, &rebuilt, Format::Edt)?;
+    drop(src_tree);
+    drop(rebuilt);
     for a in &mut accounting {
         a.path = SourcePath::new(format!("src/{}", a.path)).map_err(EdtError::source)?;
     }
@@ -555,6 +559,7 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
     let mut owners = BTreeMap::new();
     let mut uuids = BTreeSet::new();
     let mut metadata_paths = BTreeSet::new();
+    let mut named_owners = Vec::new();
     for e in tree.entries() {
         if !metadata_file(e)? {
             continue;
@@ -576,6 +581,53 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             .strip_suffix(".xml")
             .unwrap_or(e.path().as_str());
         owners.insert(stem.to_string(), root);
+        // Link separately stored metadata only through validated, explicit
+        // ChildObjects references. An incidental neighbouring path is no proof
+        // of ownership. The source decoder above rejects unknown bare kinds.
+        if let Some(descriptor) = doc.root().children().iter().find_map(|node| match node {
+            ibcmd_xml::XmlNode::Element(element) => Some(element),
+            _ => None,
+        }) && descriptor.name().local() != "Configuration"
+        {
+            for child in descriptor
+                .children()
+                .iter()
+                .filter_map(|node| match node {
+                    ibcmd_xml::XmlNode::Element(element)
+                        if element.name().local() == "ChildObjects" =>
+                    {
+                        Some(element)
+                    }
+                    _ => None,
+                })
+                .flat_map(|children| children.children())
+                .filter_map(|node| match node {
+                    ibcmd_xml::XmlNode::Element(element) if element.attributes().is_empty() => {
+                        Some(element)
+                    }
+                    _ => None,
+                })
+            {
+                let collection = match child.name().local() {
+                    "Form" => "Forms",
+                    "Template" => "Templates",
+                    "Subsystem" => "Subsystems",
+                    "Recalculation" => "Recalculations",
+                    _ => continue,
+                };
+                let name = child
+                    .children()
+                    .iter()
+                    .filter_map(|node| match node {
+                        ibcmd_xml::XmlNode::Text(text) => Some(text.value()),
+                        _ => None,
+                    })
+                    .collect::<String>();
+                if !name.is_empty() {
+                    named_owners.push((format!("{stem}/{collection}/{name}"), root));
+                }
+            }
+        }
         for object in std::iter::once(envelope.root()).chain(envelope.descendants()) {
             if uuids.insert(object.identity().uuid()) {
                 objects.push(object.clone());
@@ -616,6 +668,15 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             );
         }
     }
+    let mut declared_owners = BTreeMap::new();
+    for (stem, owner) in named_owners {
+        if let Some(child) = owners.get(&stem)
+            && let Some(previous) = declared_owners.insert(*child, owner)
+            && previous != owner
+        {
+            return Err(EdtError::new("conflicting declared metadata ownership"));
+        }
+    }
     let objects = objects
         .into_iter()
         .map(|obj| {
@@ -624,7 +685,9 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
                 obj.kind().clone(),
                 obj.provenance().clone(),
             );
-            parts.owner = obj.owner();
+            parts.owner = obj
+                .owner()
+                .or_else(|| declared_owners.get(&obj.identity().uuid()).copied());
             parts.properties = obj.properties().to_vec();
             parts.references = obj.references().to_vec();
             parts.generated_types = obj.generated_types().to_vec();
@@ -792,7 +855,7 @@ mod tests {
     }
     #[test]
     fn canonical_retains_name_only_form_and_template_references() {
-        let tree = SourceTree::new(vec![body("Catalogs/Test.xml", r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><Catalog uuid="11111111-1111-1111-1111-111111111111"><Properties><Name>Test</Name></Properties><ChildObjects><Form>MainForm</Form><Template>Print</Template></ChildObjects></Catalog></MetaDataObject>"#)]).unwrap();
+        let tree = SourceTree::new(vec![body("Catalogs/Test.xml", r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><Catalog uuid="11111111-1111-1111-1111-111111111111"><Properties><Name>Test</Name></Properties><ChildObjects><Form>MainForm</Form><Template>Print</Template></ChildObjects></Catalog></MetaDataObject>"#), body("Catalogs/Test/Forms/MainForm.xml", r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><Form uuid="22222222-2222-2222-2222-222222222222"><Properties><Name>MainForm</Name></Properties></Form></MetaDataObject>"#), body("Catalogs/Test/Templates/Print.xml", r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><Template uuid="33333333-3333-3333-3333-333333333333"><Properties><Name>Print</Name></Properties></Template></MetaDataObject>"#)]).unwrap();
         let canonical = canonical(
             &tree,
             &ConversionOptions {
@@ -802,6 +865,13 @@ mod tests {
             },
         )
         .unwrap();
+        assert_eq!(canonical.objects().len(), 3);
+        for child in canonical.objects().iter().skip(1) {
+            assert_eq!(
+                child.owner(),
+                Some(canonical.objects()[0].identity().uuid())
+            );
+        }
         let references = canonical.objects()[0]
             .opaque_facets()
             .as_slice()

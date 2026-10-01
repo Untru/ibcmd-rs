@@ -29,7 +29,10 @@ decoder, preserving only its exact family-specific named Form/Template/Subsystem
 and Recalculation references beside UUID-bearing children: ordered scalar/typed
 properties, child identities/owners/references,
 generated types and explicit opaque complex facets stay in the established
-canonical contracts. Module/form/template/binary bodies are content-addressed
+canonical contracts. Standalone Form/Template/Subsystem/Recalculation owners are
+linked only through validated explicit ChildObjects references and exact descriptor
+paths; neighbouring paths alone do not establish ownership.
+Module/form/template/binary bodies are content-addressed
 asset references, with bytes retained by the source tree. Physical import
 family-codec restrictions are not used as a second EDT format gate.
 
