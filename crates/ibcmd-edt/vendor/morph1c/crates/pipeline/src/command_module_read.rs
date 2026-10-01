@@ -82,10 +82,7 @@ pub fn attach_command_modules(
         }
         // Command modules are text sidecars (no protected command module is witnessed;
         // a non-UTF-8 one would surface as a typed read error rather than silently pass).
-        let source = std::fs::read_to_string(&path).map_err(|e| ConvertError::Io {
-            path: path.display().to_string(),
-            reason: e.to_string(),
-        })?;
+        let source = crate::module_read::read_module_text(&path)?;
         child.modules.push(Module::text(COMMAND_MODULE_SLOT, source));
     }
     Ok(())

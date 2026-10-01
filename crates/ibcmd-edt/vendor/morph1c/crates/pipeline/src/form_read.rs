@@ -250,17 +250,7 @@ pub fn attach_form_body(
         // The form MODULE is optional (present ⇒ read its source; absent ⇒ no module in IR).
         let module = match form_module_path(format, &anchor) {
             Some(p) if p.is_file() => {
-                let mut src = std::fs::read_to_string(&p).map_err(|e| ConvertError::Io {
-                    path: p.display().to_string(),
-                    reason: e.to_string(),
-                })?;
-                // Designer's UTF-8 signature is a file encoding convention,
-                // not BSL text. Strip exactly one known prefix, matching the
-                // existing writer which restores Designer's BOM. Preserve all
-                // whitespace, interior U+FEFF and EDT-origin text unchanged.
-                if format == Format::Designer && src.starts_with('\u{feff}') {
-                    src.drain(..'\u{feff}'.len_utf8());
-                }
+                let src = crate::module_read::read_module_text(&p)?;
                 Some(src)
             }
             _ => None,

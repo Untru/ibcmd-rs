@@ -48,7 +48,7 @@ fn read_module_body(path: &Path) -> Result<ModuleBody, ConvertError> {
         return Ok(ModuleBody::Binary(bytes));
     }
     match String::from_utf8(bytes) {
-        Ok(s) => Ok(ModuleBody::Text(s)),
+        Ok(s) => Ok(ModuleBody::Text(decode_module_text(s))),
         Err(e) => Err(ConvertError::Io {
             path: path.display().to_string(),
             reason: format!(
@@ -158,7 +158,7 @@ const BOM: char = '\u{FEFF}';
 
 /// Write-side mirror of [`attach_module_body`]: emit each module body `obj` carries beside its
 /// just-written descriptor `descriptor_out`, in the target format's layout. TEXT bodies →
-/// `<Slot>.bsl` (canonicalised: strip a leading BOM, re-emit per format — Designer prepends the
+/// `<Slot>.bsl` (canonical BSL, re-emit per format — Designer prepends the
 /// BOM, EDT bare). PROTECTED (binary) bodies → the opaque image VERBATIM: EDT `<Slot>.bsl`,
 /// Designer `<Name>/Ext/<Slot>.bin` (never `.bsl`). Kinds without module slots and objects with
 /// no module are no-ops; cf (container) never reaches here (`convert.rs` routes it to the assembler, which
@@ -196,22 +196,38 @@ pub fn write_module_bodies(
     Ok(())
 }
 
-/// Canonicalise a module source (strip a leading BOM) and re-encode it for `format`'s on-disk
-/// text-sidecar convention: Designer modules carry a UTF-8 BOM, EDT ones do not (cf has no
-/// file-per-object module sidecar → bare). Shared by the metadata-object modules
-/// ([`write_module_bodies`]) and the FORM module (`crate::form_write::write_form_bodies`) so both
-/// re-emit the per-format BOM convention identically.
-pub(crate) fn reencode_module_for_format(source: &str, format: Format) -> Vec<u8> {
-    let canonical = source.strip_prefix(BOM).unwrap_or(source);
-    match format {
-        Format::Designer => {
-            let mut b = String::with_capacity(canonical.len() + 3);
-            b.push(BOM);
-            b.push_str(canonical);
-            b.into_bytes()
-        }
-        Format::Edt | Format::Cf => canonical.as_bytes().to_vec(),
+/// Remove exactly one UTF-8 file encoding signature, preserving every body character.
+/// Shared by all text module families. SourceTree/provenance retain original file bytes.
+fn decode_module_text(mut text: String) -> String {
+    if text.starts_with(BOM) {
+        text.drain(..BOM.len_utf8());
     }
+    text
+}
+
+/// Read a text-only sidecar. Non-UTF-8/protected bytes remain errors for families
+/// whose contract is text-only; regular object protected images use read_module_body.
+pub(crate) fn read_module_text(path: &Path) -> Result<String, ConvertError> {
+    std::fs::read_to_string(path)
+        .map(decode_module_text)
+        .map_err(|e| ConvertError::Io {
+            path: path.display().to_string(),
+            reason: e.to_string(),
+        })
+}
+
+/// Encode canonical BSL without trimming body text. Designer carries a file signature.
+/// EDT normally omits it; a leading body U+FEFF requires an additional encoding signature
+/// so the next reader removes only the signature and retains the actual body character.
+pub(crate) fn reencode_module_for_format(source: &str, format: Format) -> Vec<u8> {
+    let signature =
+        format == Format::Designer || (format == Format::Edt && source.starts_with(BOM));
+    let mut bytes = Vec::with_capacity(source.len() + if signature { 3 } else { 0 });
+    if signature {
+        bytes.extend_from_slice(&[0xef, 0xbb, 0xbf]);
+    }
+    bytes.extend_from_slice(source.as_bytes());
+    bytes
 }
 
 /// Re-encode a module BODY (text or protected binary) for `format`'s on-disk sidecar.
