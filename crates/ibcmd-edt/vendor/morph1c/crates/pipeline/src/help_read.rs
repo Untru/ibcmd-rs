@@ -232,7 +232,10 @@ pub(crate) fn write_help_sidecar(
     }
     let mut languages = std::collections::BTreeSet::new();
     for page in pages {
-        if !valid_language(&page.lang) || !languages.insert(&page.lang) || page.body.len() as u64 > MAX_HELP_FILE_BYTES {
+        if !valid_language(&page.lang)
+            || !languages.insert(&page.lang)
+            || page.body.len() as u64 > MAX_HELP_FILE_BYTES
+        {
             return Err(ConvertError::Write {
                 kind: kind.to_string(),
                 object: owner_name.to_string(),
@@ -287,8 +290,21 @@ fn write_help_resources(pages_dir: &Path, resources: &[HelpResource]) -> Result<
     let files_dir = pages_dir.join(FILES_DIR);
     let mut seen = std::collections::BTreeSet::new();
     for res in resources {
-        if res.rel_path.is_empty() || res.rel_path.contains('\\') || res.rel_path.contains(':') || res.rel_path.split('/').any(|part| part.is_empty() || part == "." || part == "..") || !seen.insert(&res.rel_path) || res.bytes.len() as u64 > MAX_HELP_FILE_BYTES {
-            return Err(ConvertError::Write { kind: "HelpResource".into(), object: res.rel_path.clone(), reason: "unsafe, duplicate, or oversized help resource".into() });
+        if res.rel_path.is_empty()
+            || res.rel_path.contains('\\')
+            || res.rel_path.contains(':')
+            || res
+                .rel_path
+                .split('/')
+                .any(|part| part.is_empty() || part == "." || part == "..")
+            || !seen.insert(&res.rel_path)
+            || res.bytes.len() as u64 > MAX_HELP_FILE_BYTES
+        {
+            return Err(ConvertError::Write {
+                kind: "HelpResource".into(),
+                object: res.rel_path.clone(),
+                reason: "unsafe, duplicate, or oversized help resource".into(),
+            });
         }
         // `rel_path` — `/`-разделённый канон; `join` на Windows принимает `/` как разделитель.
         crate::form_write::write_file(&files_dir.join(&res.rel_path), &res.bytes)?;

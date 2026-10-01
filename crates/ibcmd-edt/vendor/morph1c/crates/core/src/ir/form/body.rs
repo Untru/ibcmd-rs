@@ -218,6 +218,10 @@ pub const FOLDERS_AND_ITEMS_DEFAULT: &str = "Items";
 ///   и её сайдкар лежит по объектному якорю; здесь она НЕ дублируется (см. `form_read`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct NamedFormBody {
+    /// Whole opaque ordinary form body, including its embedded module. Exclusive with
+    /// a populated managed body or external module; transported verbatim, never rebuilt.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ordinary_body: Option<Vec<u8>>,
     /// Имя формы (идентификатор 1С; для CommonForm == имя объекта).
     pub name: String,
     /// Каноническое тело формы (весь под-IR L1f).
