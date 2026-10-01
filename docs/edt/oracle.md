@@ -240,6 +240,13 @@ the source after inventory. Command evidence must name the exact disposable
 workspace, project and export destination. Malformed or unknown workspace error
 records remain unmatched errors instead of disappearing during parsing.
 
+The harness records the candidate executable SHA-256 before conversion and
+saves the direct EDT-to-XML tree comparison and raw three-way report before
+starting XML-to-EDT. A later route rejection therefore retains the completed
+route's evidence. Partial reports do not create an acceptance PASS; the final
+verdict still requires every route, diagnostic gate and immutable-input check.
+Both conversion and raw three-way commands share the lab heavy FIFO.
+
 The source issue remains subject to the completed BSP and ERP UH acceptance
 reports, review of diagnostics and complete differences. Neither an import
 success, upstream's corpus assertions nor unit tests close that requirement.

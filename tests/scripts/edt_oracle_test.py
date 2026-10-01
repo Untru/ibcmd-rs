@@ -16,6 +16,32 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_partial_route_keeps_raw_divergences_and_uses_heavy_fifo(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run = Path(folder)
+            args = SimpleNamespace(lock_script=Path("fixture-lock.ps1"), lock_track="edt-oracle",
+                timeout=120, ours_exe=Path("fixture.exe"), source_version="2.20",
+                native_tool_version="8.3.27.2214")
+            report = {"rows": [{"path": "Configuration.xml", "agreement": "edt_ours_not_native"}],
+                "summary": {"all_equal": 0, "edt_ours_not_native": 1},
+                "native": {"file_count": 1}, "edt": {"file_count": 1}, "ours": {"file_count": 1}}
+            calls = []
+            def command(root, label, argv, timeout):
+                calls.append((label, argv))
+                if "source-three-way-oracle" in argv:
+                    oracle.write_json(Path(argv[argv.index("--output") + 1]), report)
+                return b"captured"
+            with patch.object(oracle, "run_command", side_effect=command):
+                result = oracle.capture_raw_comparison(args, run, "direct", Path("candidate"),
+                    Path("native-reference"), Path("installed-baseline"), "0.4.0", "2025.2.3.30")
+            self.assertEqual([row[0] for row in calls],
+                ["direct-oracle-lock-acquire", "direct-oracle", "direct-oracle-lock-release"])
+            self.assertFalse(result["raw_all_equal"])
+            self.assertFalse(result["configuration_data_all_equal"])
+            self.assertEqual(result["derived_comparison"]["different_rows"], 1)
+            self.assertEqual(json.loads((run / "direct.three-way.json").read_text()), report)
+            self.assertFalse((run / "acceptance.json").exists())
+
     def test_conversion_fifo_is_released_on_success_and_failure(self):
         args = SimpleNamespace(lock_script=Path("fixture-lock.ps1"), lock_track="edt-oracle", timeout=120)
         run = Path("fixture-run")

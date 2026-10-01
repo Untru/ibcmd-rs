@@ -731,6 +731,20 @@ def validate_native_reference(reference: Path, baseline: dict, native_build: str
             "native_reference_tree_sha256": current_reference["tree_sha256"]}
 
 
+def capture_raw_comparison(args, run: Path, label: str, candidate: Path,
+                           reference: Path, baseline: Path, ours_version: str,
+                           edt_version: str) -> dict:
+    report_path = run / f"{label}.three-way.json"
+    run_conversion(args, run, f"{label}-oracle", [str(args.ours_exe), "source-three-way-oracle",
+        "--native", str(reference), "--edt", str(baseline), "--ours", str(candidate),
+        "--source-version", args.source_version, "--native-tool-version", args.native_tool_version,
+        "--edt-tool-version", edt_version, "--ours-tool-version", ours_version,
+        "--max-files", "500000", "--max-total-bytes", str(32 * 1024**3),
+        "--max-file-bytes", str(1024**3), "--output", str(report_path),
+        "--markdown", str(run / f"{label}.three-way.md")])
+    return validate_raw_report(report_path)
+
+
 def accept(args, run: Path) -> None:
     if not args.prepared or not args.ours_exe or not args.reference or not args.validation_capture or not args.ambient_control:
         raise OracleError("accept requires --prepared, --ours-exe, --reference, --validation-capture and --ambient-control")
@@ -778,11 +792,14 @@ def accept(args, run: Path) -> None:
     write_json(run / "authentic-project-before.json", project_before)
     ours_hash = digest(args.ours_exe)
     ours_version = run_command(run, "ours-version", [str(args.ours_exe), "--version"], 60).decode("utf-8").strip()
+    write_json(run / "candidate.json", {"executable": str(args.ours_exe),
+        "executable_sha256": ours_hash, "version": ours_version})
     actual_edt_version = check_edt_version(args, run)
     profile_xml = f"xml-{args.source_version}"
     profile_edt = f"edt-{args.edt_version}-xml-{args.source_version}"
     converted_xml = run / "ours-authentic-edt-xml"
     generated = run / "ours-generated-edt"
+    verdicts = {}
     for label, source, target, source_format, target_format, source_profile, target_profile in (
         ("convert-authentic-edt", project, converted_xml, "edt", "xml", profile_edt, profile_xml),
         ("convert-native-xml", args.native, generated, "xml", "edt", profile_xml, profile_edt),
@@ -791,12 +808,22 @@ def accept(args, run: Path) -> None:
             "--source-format", source_format, "--target-format", target_format,
             "--source-profile", source_profile, "--target-profile", target_profile,
             "--report", str(run / f"{label}.report.json")])
+        if label == "convert-authentic-edt":
+            # Preserve this route's evidence before starting the independent
+            # reverse route, which may reject an unsupported source artifact.
+            require_xml(converted_xml, require_dump_info=False)
+            converted_before = snapshot(converted_xml)
+            write_json(run / "ours-authentic-edt-xml.json", converted_before)
+            direct_comparison = compare_tree_snapshots(reference_before, converted_before,
+                                                       excluded_paths=("ConfigDumpInfo.xml",))
+            write_json(run / "direct-edt-native-sdk-comparison.json", direct_comparison)
+            verdicts["authentic-edt-to-xml"] = capture_raw_comparison(args, run,
+                "authentic-edt-to-xml", converted_xml, reference, baseline_xml,
+                ours_version, actual_edt_version)
     # Authentic EDT carries no native storage-generation dump manifest. Direct
     # conversion is complete configuration data without inventing such a file.
     require_xml(converted_xml, require_dump_info=False)
     require_project(generated, args.runtime)
-    converted_before = snapshot(converted_xml)
-    write_json(run / "ours-authentic-edt-xml.json", converted_before)
     write_json(run / "ours-generated-edt.json", snapshot(generated))
     returned_xml = run / "ours-unchanged-return-xml"
     run_conversion(args, run, "convert-generated-edt-unchanged", [str(args.ours_exe), "convert", str(generated), str(returned_xml),
@@ -836,18 +863,9 @@ def accept(args, run: Path) -> None:
     write_json(run / "generated-validation-summary.json", summarize_validation_tsv(generated_tsv))
     write_json(run / "validation-differential.json", validation_comparison)
     write_json(run / "stripped-project-after.json", snapshot(stripped))
-    verdicts = {}
-    for label, candidate in (("authentic-edt-to-xml", converted_xml),
-                             ("generated-edt-installed-export", generated_xml)):
-        report_path = run / f"{label}.three-way.json"
-        run_command(run, f"{label}-oracle", [str(args.ours_exe), "source-three-way-oracle",
-            "--native", str(reference), "--edt", str(baseline_xml), "--ours", str(candidate),
-            "--source-version", args.source_version, "--native-tool-version", args.native_tool_version,
-            "--edt-tool-version", actual_edt_version, "--ours-tool-version", ours_version,
-            "--max-files", "500000", "--max-total-bytes", str(32 * 1024**3),
-            "--max-file-bytes", str(1024**3), "--output", str(report_path),
-            "--markdown", str(run / f"{label}.three-way.md")], args.timeout)
-        verdicts[label] = validate_raw_report(report_path)
+    verdicts["generated-edt-installed-export"] = capture_raw_comparison(args, run,
+        "generated-edt-installed-export", generated_xml, reference, baseline_xml,
+        ours_version, actual_edt_version)
     if snapshot(args.native) != native_before or snapshot(project) != project_before \
             or snapshot(baseline_xml) != baseline_before or snapshot(reference) != reference_before:
         raise OracleError("An immutable input changed during acceptance")
@@ -867,9 +885,7 @@ def accept(args, run: Path) -> None:
         [(prepared_root, "edt-import-native"), (prepared_root, "edt-export-native"), (validation_capture, "edt-validate")],
         [(run, "edt-export-generated"), (run, "edt-validate-generated")])
     write_json(run / "ambient-diagnostic-differential.json", ambient_comparison)
-    direct_comparison = compare_tree_snapshots(reference_before, converted_before, excluded_paths=("ConfigDumpInfo.xml",))
     generated_comparison = compare_tree_snapshots(baseline_before, generated_before)
-    write_json(run / "direct-edt-native-sdk-comparison.json", direct_comparison)
     write_json(run / "generated-edt-same-serializer-comparison.json", generated_comparison)
     diagnostic_failure = not ambient_comparison["no_unmatched_error_diagnostics"] or not validation_comparison["no_new_diagnostics"]
     passed = not diagnostic_failure and direct_comparison["equal"] and generated_comparison["equal"] and unchanged_return["equal"]
