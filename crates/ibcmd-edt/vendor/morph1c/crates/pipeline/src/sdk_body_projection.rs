@@ -128,100 +128,217 @@ pub(crate) fn text_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, Conve
     Ok(out)
 }
 
-pub(crate) fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError> {
-    if body.len() > MAX_SOURCE_ASSET_BYTES {
-        return Err(error("MXL source asset exceeds 256 MiB"));
+// A lexical cursor owns no per-element inventory. The current markup window
+// and ancestor namespace deltas are the only auxiliary state for large MXL.
+struct MarkupCursor<'a> {
+    body: &'a [u8],
+    offset: usize,
+}
+impl MarkupCursor<'_> {
+    fn next(&mut self) -> Result<Option<(usize, usize)>, ConvertError> {
+        let Some(relative) = self.body[self.offset..].iter().position(|b| *b == b'<') else {
+            return Ok(None);
+        };
+        let start = self.offset + relative;
+        let tail = &self.body[start..];
+        let end = if tail.starts_with(b"<!--") {
+            start
+                + 4
+                + tail[4..]
+                    .windows(3)
+                    .position(|w| w == b"-->")
+                    .ok_or_else(|| error("unterminated comment"))?
+                + 3
+        } else if tail.starts_with(b"<?") {
+            start
+                + 2
+                + tail[2..]
+                    .windows(2)
+                    .position(|w| w == b"?>")
+                    .ok_or_else(|| error("unterminated processing instruction"))?
+                + 2
+        } else {
+            if tail.starts_with(b"<!") {
+                return Err(error(
+                    "CDATA/DTD is outside the witnessed SDK sidecar projection",
+                ));
+            }
+            let mut quote = None;
+            let mut end = None;
+            for (i, &byte) in tail.iter().enumerate().skip(1) {
+                match (quote, byte) {
+                    (Some(q), b) if q == b => quote = None,
+                    (None, b'\'' | b'"') => quote = Some(byte),
+                    (None, b'>') => {
+                        end = Some(start + i + 1);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            end.ok_or_else(|| error("unterminated markup"))?
+        };
+        self.offset = end;
+        Ok(Some((start, end)))
     }
-    let ranges = markup(body)?;
-    // Retain only the ancestor scopes, never a DOM of a potentially large MXL.
-    let mut stack: Vec<(String, BTreeMap<String, String>, bool)> = Vec::new();
-    let mut leaves = Vec::new();
+}
+
+fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) {
+    let mut i = 0;
+    while i < text.len() {
+        match text[i] {
+            b'\r' if text.get(i + 1) == Some(&b'\n') => {
+                out.extend_from_slice(if to_crlf { b"\r\n" } else { b"\n" });
+                i += 2;
+            }
+            b'\n' => {
+                out.extend_from_slice(if to_crlf { b"\r\n" } else { b"\n" });
+                i += 1;
+            }
+            b => {
+                out.push(b);
+                i += 1;
+            }
+        }
+    }
+}
+
+/// Project only plain qualified MXL localized-content line endings, preserving
+/// all other source bytes. Used by the private adapter's streaming body guard.
+#[doc(hidden)]
+pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError> {
+    struct Frame {
+        name: String,
+        namespace_undo: Vec<(String, Option<String>)>,
+        projected: bool,
+    }
+    fn restore(ns: &mut BTreeMap<String, String>, undo: Vec<(String, Option<String>)>) {
+        for (key, previous) in undo.into_iter().rev() {
+            if let Some(value) = previous {
+                ns.insert(key, value);
+            } else {
+                ns.remove(&key);
+            }
+        }
+    }
+    let mut cursor = MarkupCursor { body, offset: 0 };
+    let mut stack: Vec<Frame> = Vec::new();
+    let mut ns = BTreeMap::new();
+    let mut out = Vec::with_capacity(body.len());
+    let mut previous_end = 0;
     let mut root_seen = false;
-    for &(start, end) in &ranges {
+    while let Some((start, end)) = cursor.next()? {
+        let text = &body[previous_end..start];
+        if stack.last().is_some_and(|frame| frame.projected) {
+            append_newlines(&mut out, text, to_crlf);
+        } else {
+            if stack.is_empty()
+                && text.iter().any(|b| !b.is_ascii_whitespace())
+                && !(previous_end == 0
+                    && text
+                        .strip_prefix(b"\xef\xbb\xbf")
+                        .is_some_and(|rest| rest.iter().all(u8::is_ascii_whitespace)))
+            {
+                return Err(error("MXL has text outside its document root"));
+            }
+            out.extend_from_slice(text);
+        }
         let token = &body[start..end];
         match token.get(1) {
-            Some(b'!' | b'?') => continue,
+            Some(b'!' | b'?') => {
+                if stack.last().is_some_and(|frame| frame.projected) {
+                    return Err(error("MXL localized content has non-text markup"));
+                }
+            }
             Some(b'/') => {
                 let name = std::str::from_utf8(&token[2..token.len() - 1])
                     .map_err(|e| error(e.to_string()))?
                     .trim();
-                let previous = stack
+                let frame = stack
                     .pop()
                     .ok_or_else(|| error("MXL closing tag has no owner"))?;
-                if previous.0 != name {
+                if frame.name != name {
                     return Err(error("MXL closing tag mismatch"));
                 }
-                continue;
+                restore(&mut ns, frame.namespace_undo);
             }
-            _ => {}
-        }
-        if stack.last().is_some_and(|entry| entry.2) {
-            return Err(error("MXL localized content has child markup"));
-        }
-        let empty = token.ends_with(b"/>");
-        let mut single = token.to_vec();
-        if !empty {
-            single.pop();
-            single.extend_from_slice(b"/>");
-        }
-        // Parse one start tag for correctly unescaped attributes/QNames. Memory
-        // depends on this tag and depth64, not total document element count.
-        let el = formats_xml::parse(&single)
-            .map_err(|e| error(e.to_string()))?
-            .root;
-        let mut ns = stack
-            .last()
-            .map(|entry| entry.1.clone())
-            .unwrap_or_default();
-        for a in &el.attrs {
-            if a.name == "xmlns" {
-                ns.insert(String::new(), a.value.clone());
+            _ => {
+                if stack.last().is_some_and(|frame| frame.projected) {
+                    return Err(error("MXL localized content has child markup"));
+                }
+                let empty = token.ends_with(b"/>");
+                let mut single = token.to_vec();
+                if !empty {
+                    single.pop();
+                    single.extend_from_slice(b"/>");
+                }
+                // Parse only this start tag. No full MXL DOM, count-dependent
+                // ranges, leaf inventory, replacements or content copies exist.
+                let el = formats_xml::parse(&single)
+                    .map_err(|e| error(e.to_string()))?
+                    .root;
+                let mut undo = Vec::new();
+                for a in &el.attrs {
+                    let key = if a.name == "xmlns" {
+                        Some("")
+                    } else if a.name == "xml:space" {
+                        Some("xml:space")
+                    } else {
+                        a.name.strip_prefix("xmlns:")
+                    };
+                    if let Some(key) = key {
+                        undo.push((key.to_owned(), ns.insert(key.to_owned(), a.value.clone())));
+                    }
+                }
+                if stack.is_empty() {
+                    if root_seen
+                        || el.local != "document"
+                        || ns.get(&el.prefix).map(String::as_str)
+                            != Some("http://v8.1c.ru/8.2/data/spreadsheet")
+                    {
+                        return Err(error("unexpected typed MXL root/namespace"));
+                    }
+                    root_seen = true;
+                }
+                let projected = el.local == "content"
+                    && ns.get(&el.prefix).map(String::as_str)
+                        == Some("http://v8.1c.ru/8.1/data/core");
+                if projected && (!el.attrs.is_empty() || ns.contains_key("xml:space")) {
+                    return Err(error("MXL localized content must be a plain text leaf"));
+                }
+                if empty {
+                    restore(&mut ns, undo);
+                } else {
+                    stack.push(Frame {
+                        name: if el.prefix.is_empty() {
+                            el.local
+                        } else {
+                            format!("{}:{}", el.prefix, el.local)
+                        },
+                        namespace_undo: undo,
+                        projected,
+                    });
+                }
             }
-            if let Some(prefix) = a.name.strip_prefix("xmlns:") {
-                ns.insert(prefix.to_string(), a.value.clone());
-            }
-            if a.name == "xml:space" {
-                ns.insert("xml:space".into(), a.value.clone());
-            }
         }
-        if stack.is_empty() {
-            if root_seen
-                || el.local != "document"
-                || ns.get(&el.prefix).map(String::as_str)
-                    != Some("http://v8.1c.ru/8.2/data/spreadsheet")
-            {
-                return Err(error("unexpected typed MXL root/namespace"));
-            }
-            root_seen = true;
-        }
-        let projected = el.local == "content"
-            && ns.get(&el.prefix).map(String::as_str) == Some("http://v8.1c.ru/8.1/data/core");
-        if projected && (!el.attrs.is_empty() || ns.contains_key("xml:space")) {
-            return Err(error("MXL localized content must be a plain text leaf"));
-        }
-        leaves.push(if projected {
-            Some(Change::Newlines(to_crlf))
-        } else {
-            None
-        });
-        if !empty {
-            let name = if el.prefix.is_empty() {
-                el.local
-            } else {
-                format!("{}:{}", el.prefix, el.local)
-            };
-            stack.push((name, ns, projected));
-        }
+        out.extend_from_slice(token);
+        previous_end = end;
     }
     if !root_seen || !stack.is_empty() {
         return Err(error("incomplete MXL root"));
     }
-    replace_leaves(body, leaves)
+    if body[previous_end..]
+        .iter()
+        .any(|b| !b.is_ascii_whitespace())
+    {
+        return Err(error("MXL has text after its document root"));
+    }
+    out.extend_from_slice(&body[previous_end..]);
+    Ok(out)
 }
 
 enum Change {
     Alias(String, String),
-    Newlines(bool),
 }
 
 /// EDT's current-config AnyRef spelling has the existing canonical/Designer
@@ -234,7 +351,9 @@ pub(crate) fn dcs_alias(body: &[u8], to_edt: bool) -> Result<Vec<u8>, ConvertErr
         "http://v8.1c.ru/8.1/data-composition-system/schema",
     )?;
     if formats_xml::type_codec::canon_for_config_local("AnyIBRef") != Some("AnyRef") {
-        return Err(error("DCS projection alias is absent from the type codec registry"));
+        return Err(error(
+            "DCS projection alias is absent from the type codec registry",
+        ));
     }
     let mut leaves = Vec::new();
     fn walk(
@@ -316,9 +435,6 @@ fn replace_leaves(body: &[u8], leaves: Vec<Option<Change>>) -> Result<Vec<u8>, C
                         return Err(error("TypeSet QName has unwitnessed lexical content"));
                     }
                     new.as_bytes().to_vec()
-                }
-                Change::Newlines(to_crlf) => {
-                    crate::template_read::normalize_newlines(&body[end..text_end], *to_crlf)
                 }
             };
             replacements.push((end, text_end, new));

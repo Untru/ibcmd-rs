@@ -158,6 +158,119 @@ fn mxl_projects_only_text_newlines_and_preserves_native_source() {
         empty.as_bytes()
     );
 }
+
+#[test]
+fn mxl_stream_keeps_namespace_scopes_and_has_no_fixed_depth_budget() {
+    let root = "<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\">";
+    let source = format!(
+        "{root}<region xmlns:v8=\"urn:other\"><v8:content>other\nnamespace</v8:content></region><v8:content>actual\ncontent\rretained</v8:content><picture>A\nB\r\nC</picture></document>"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    write_config(
+        Format::Edt,
+        &config("SpreadsheetDocument", source.as_bytes()),
+        dir.path(),
+    )
+    .unwrap();
+    let target = std::fs::read(dir.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap();
+    assert_eq!(
+        target,
+        source
+            .replace("actual\ncontent", "actual\r\ncontent")
+            .as_bytes()
+    );
+    let deep = format!(
+        "{root}{}<v8:content>deep\nleaf</v8:content>{}</document>",
+        "<region>".repeat(512),
+        "</region>".repeat(512)
+    );
+    write_config(
+        Format::Edt,
+        &config("SpreadsheetDocument", deep.as_bytes()),
+        dir.path(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap(),
+        deep.replace("deep\nleaf", "deep\r\nleaf").as_bytes()
+    );
+    for invalid in [
+        source.replace(
+            "<region xmlns:v8=\"urn:other\">",
+            "<region xml:space=\"preserve\">",
+        ),
+        source.replace("</region>", "</mismatch>"),
+        format!("unknown{source}"),
+        format!("{source}unknown"),
+        format!("{source}{source}"),
+        source.replace("<picture>", "<picture><![CDATA[unknown]]>"),
+        source.replace(
+            root,
+            &format!("<!DOCTYPE document [<!ENTITY unknown 'data'>]>{root}"),
+        ),
+    ] {
+        assert!(
+            write_config(
+                Format::Edt,
+                &config("SpreadsheetDocument", invalid.as_bytes()),
+                tempfile::tempdir().unwrap().path()
+            )
+            .is_err()
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires hash-bound genuine 127 MB UH MXL asset in F lab"]
+fn genuine_uha127mb_mxl_stream_projects_and_returns_all_bytes() {
+    use sha2::{Digest, Sha256};
+    let path = std::path::PathBuf::from(std::env::var_os("IBCMD_LARGE_MXL").unwrap());
+    let source = std::fs::read(&path).unwrap();
+    assert_eq!(source.len(), 127_569_579);
+    assert_eq!(
+        format!("{:x}", Sha256::digest(&source)),
+        "bc3438a4e0c8d477a068b9018495a8291065d7eb3f830c659dfb960f6c7dabd4"
+    );
+    let dir = tempfile::tempdir().unwrap();
+    let descriptor_cfg = config(
+        "SpreadsheetDocument",
+        b"<document xmlns=\"http://v8.1c.ru/8.2/data/spreadsheet\"/>",
+    );
+    write_config(Format::Edt, &descriptor_cfg, dir.path()).unwrap();
+    std::fs::write(
+        dir.path().join("CommonTemplates/Witness/Template.mxlx"),
+        &source,
+    )
+    .unwrap();
+    let loaded = read_config(Format::Edt, dir.path(), &ConvertOptions::default())
+        .unwrap()
+        .0;
+    let canonical_sha = format!("{:x}", Sha256::digest(body(&loaded)));
+    write_config(Format::Edt, &loaded, dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap(),
+        source
+    );
+    let native = tempfile::tempdir().unwrap();
+    write_config(Format::Designer, &loaded, native.path()).unwrap();
+    let native_loaded = read_config(Format::Designer, native.path(), &ConvertOptions::default())
+        .unwrap()
+        .0;
+    assert_eq!(
+        format!("{:x}", Sha256::digest(body(&native_loaded))),
+        canonical_sha
+    );
+    write_config(Format::Edt, &native_loaded, dir.path()).unwrap();
+    assert_eq!(
+        std::fs::read(dir.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap(),
+        source
+    );
+    assert_eq!(std::fs::read(&path).unwrap(), source);
+    eprintln!(
+        "genuine MXL bytes={} native canonical sha={canonical_sha}; EDT return byte-exact",
+        source.len()
+    );
+}
 #[test]
 fn dcs_projects_resolved_inline_typeset_alias_and_never_query_text() {
     let inner = "<valueType><v8:TypeSet xmlns:p=\"http://v8.1c.ru/8.1/data/enterprise/current-config\">p:AnyIBRef</v8:TypeSet></valueType><query marker=\"a > b\r\nc\">p:AnyIBRef\nSELECT AnyRef</query>";
