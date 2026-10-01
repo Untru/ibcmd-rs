@@ -27,7 +27,7 @@
     "Typed form wire-order facets retain only validated known slot names and same-dialect placement; arrays preserve semantic order, legal repeated groups may be interleaved, and edited or unknown fields never replay source values",
     "DCS typed right QName aliases retain same-dialect lexical spelling and bind opposite-dialect output to the actual physical XML depth, with URI/local-type semantics independently compared",
     "Strict complete v2 mobile signature framing validates all four UUID/name groups, quoted key/digest values and the converted flag; model-bound reader carrier changes only typed empty top-level group counts and official-export-preferred sibling retains exact native bytes",
-    "Per-use picture semantics use a closed typed form resource keyed by declared form UUID, slot and current binding; pixel/ref/localized-text values enter semantic comparison and are rebuilt from current typed values",
+    "Per-use picture semantics use a closed typed form resource keyed by declared form UUID, slot and current binding; pixel/ref/load-transparent values enter semantic comparison and are rebuilt from current typed values",
     "Installed SDK event-owner tables partition ordered handlers between Form and extInfo; native source ordering is replayed only when current ordered names and extension kind match, and edits emit current handlers using witnessed physical event GUIDs",
     "Dynamic-list Table handlers use installed SDK base/extInfo ownership and guarded ordered-name facets; native event order is preserved without replaying handler values",
     "Source ordinary-form and help bodies use fallible actual 64 KiB reads without payload-size quotas or file-size-hint allocations, retaining type, language, regular-file and source-change validation",
@@ -38,7 +38,7 @@
     "Configuration incoming share-request records preserve ordered MIME, UTI, extension, processing-mode and custom-flag values; native localized language names emit every authored language block",
     "Installed metadata defaults retain omitted WebService operation lock modes as Automatic; FilterCriterion accepts only witnessed namespace declarations and custom parameter QNames use their actual physical depth",
     "Every form-reference kind retains the current ordered application-use-purpose subset instead of a constant desktop-and-mobile pair",
-    "Metadata command pictures preserve per-owner UUID, kind, current reference, localized-text and transparent-pixel semantics through a strict typed resource; changed or deleted owners cannot replay stale values",
+    "Metadata command pictures preserve per-owner UUID, kind, current reference, load-transparent and transparent-pixel semantics through a strict typed resource; changed or deleted owners cannot replay stale values",
     "Metadata and form help preserve current ordered language identifiers and complete page resources; explicit markers and owned pages must agree, with no fixed Russian-only replacement"
   ],
   "files": [
