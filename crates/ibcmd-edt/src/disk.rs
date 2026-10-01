@@ -268,28 +268,16 @@ fn inspect(
     path: &str,
     physical: &Path,
 ) -> Result<(SourceKind, bool, Option<ObjectUuid>), EdtError> {
-    // Both lexical inspection and filename preflight use seekable private files.
-    let mut input = File::open(physical).map_err(EdtError::source)?;
-    let mut prefix = [0u8; 1024];
-    let length = input.read(&mut prefix).map_err(EdtError::source)?;
-    let prefix = &prefix[..length];
+    // Declared XML documents are validated completely. A prefix such as
+    // <?xml inside BinaryData/TextDocument/image/module bytes is data; only
+    // complete typed read/regeneration accounting can accept such carriers.
     let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    let structured = !matches!(ext.as_str(), "bsl" | "html" | "json")
-        && (path == ".project"
-            || matches!(
-                ext.as_str(),
-                "xml" | "mdo" | "form" | "rights" | "dcs" | "style" | "xdto" | "geos" | "flowchart"
-            )
-            || prefix
-                .strip_prefix(b"\xef\xbb\xbf")
-                .unwrap_or(prefix)
-                .trim_ascii_start()
-                .starts_with(b"<?xml"));
+    let structured = crate::bounded::declared_xml(path);
     let mut kind = ibcmd_xml::source_tree::classify_source_path(path);
     let mut descriptor = false;
     let mut uuid = None;
     if structured {
-        crate::bounded::validate_xml_reader(
+        crate::bounded::validate_xml_source_reader(
             path,
             std::io::BufReader::new(File::open(physical).map_err(EdtError::source)?),
         )?;
@@ -374,9 +362,18 @@ mod tests {
             ),
             expected
         );
+        binary_template_roundtrip(owner.path(), &original);
+    }
+    fn binary_template_roundtrip(owner: &Path, original: &[u8]) {
+        opaque_template_roundtrip(owner, original, "BinaryData", "Template.bin");
+    }
+    fn opaque_template_roundtrip(owner: &Path, original: &[u8], kind: &str, carrier: &str) {
         // A known BinaryData template actually consumes and regenerates this
         // entire body. The label exception grants no unclaimed-file waiver.
-        use morph1c_core::ir::{MetadataObject, ObjectKind, PropertyValue, Template, Token, Uuid};
+        use morph1c_core::ir::{
+            HelpPage, HelpResource, MetadataObject, ObjectKind, PictureBody, PropertyValue,
+            Template, Token, Uuid,
+        };
         let options = morph1c_pipeline::ConvertOptions::default()
             .with_target_version(morph1c_core::version::FormatVersion::new(2, 21));
         let fixture = Path::new(concat!(
@@ -388,24 +385,53 @@ mod tests {
                 .unwrap()
                 .0;
         let field = morph1c_core::spec::metadata::common_template::F_TEMPLATE_TYPE;
-        let properties = vec![(field, PropertyValue::Enum(Token::new("BinaryData")))];
+        let properties = vec![(field, PropertyValue::Enum(Token::new(kind)))];
         let mut template = MetadataObject::new(
             ObjectKind::new("CommonTemplate"),
             "OpaqueSoap",
             Uuid([0x71; 16]),
         );
         template.properties = properties.clone();
+        let mut help_owner = config
+            .objects
+            .iter()
+            .find(|object| object.kind.as_str() == "Catalog")
+            .unwrap()
+            .clone();
+        help_owner.name = "OpaqueHelp".into();
+        help_owner.uuid = Uuid([0x72; 16]);
+        help_owner.help.push(HelpPage {
+            lang: "ru".into(),
+            body: "<html>help</html>".into(),
+        });
+        help_owner.help_resources.push(HelpResource {
+            rel_path: "nested/payload.xml".into(),
+            bytes: original.to_vec(),
+        });
         template.templates.push(Template {
             name: "OpaqueSoap".into(),
             properties,
-            body: Some(original.clone()),
+            body: Some(original.to_vec()),
             pages: Vec::new(),
             resources: Vec::new(),
         });
         config.objects.push(template);
-        let native = owner.path().join("native-template");
+        config.objects.push(help_owner);
+        let mut picture = MetadataObject::new(
+            ObjectKind::new("CommonPicture"),
+            "OpaquePicture",
+            Uuid([0x73; 16]),
+        );
+        picture.picture = Some(PictureBody {
+            file_name: "Picture.xml".into(),
+            bytes: original.to_vec(),
+        });
+        config.objects.push(picture);
+        let native = owner.join("native-template");
         morph1c_pipeline::write_config(morph1c_pipeline::Format::Designer, &config, &native)
             .unwrap();
+        let native_path = format!("CommonTemplates/OpaqueSoap/Ext/{carrier}");
+        let original_native = fs::read(native.join(&native_path)).unwrap();
         let conversion_options = crate::ConversionOptions {
             edt_version: "2025.2.3".into(),
             xml_dialect: "2.21".into(),
@@ -415,25 +441,134 @@ mod tests {
             .unwrap()
             .xml_to_edt(&conversion_options)
             .unwrap();
-        assert!(converted.accounting.iter().any(|file| file.path
-            == "CommonTemplates/OpaqueSoap/Ext/Template.bin"
-            && file.disposition == crate::Disposition::Converted));
-        let edt = owner.path().join("edt-template");
+        assert!(
+            converted
+                .accounting
+                .iter()
+                .any(|file| file.path == native_path
+                    && file.disposition == crate::Disposition::Converted)
+        );
+        let edt = owner.join("edt-template");
         converted.publish_new(&edt).unwrap();
         assert_eq!(
-            fs::read(edt.join("src/CommonTemplates/OpaqueSoap/Template.bin")).unwrap(),
+            fs::read(edt.join(format!("src/CommonTemplates/OpaqueSoap/{carrier}"))).unwrap(),
             original
         );
+        assert_eq!(
+            fs::read(edt.join("src/Catalogs/OpaqueHelp/Help/_files/nested/payload.xml")).unwrap(),
+            original
+        );
+        assert_eq!(
+            fs::read(edt.join("src/CommonPictures/OpaquePicture/Picture.xml")).unwrap(),
+            original
+        );
+        // Independent typed body read, without the original XML transport.
+        fs::remove_dir_all(edt.join(".ibcmd-provenance")).unwrap();
         let returned = crate::read_directory_source(&edt)
             .unwrap()
             .edt_to_xml(&conversion_options)
             .unwrap();
-        let xml = owner.path().join("returned-template");
+        let xml = owner.join("returned-template");
         returned.publish_new(&xml).unwrap();
+        assert_eq!(fs::read(xml.join(native_path)).unwrap(), original_native);
         assert_eq!(
-            fs::read(xml.join("CommonTemplates/OpaqueSoap/Ext/Template.bin")).unwrap(),
+            fs::read(xml.join("Catalogs/OpaqueHelp/Ext/Help/_files/nested/payload.xml")).unwrap(),
             original
         );
+        assert_eq!(
+            fs::read(xml.join("CommonPictures/OpaquePicture/Ext/Picture/Picture.xml")).unwrap(),
+            original
+        );
+    }
+    #[test]
+    fn xml_looking_binary_payloads_remain_opaque_and_unknown_files_still_fail() {
+        for bytes in [
+            b"<?xml version='1.0'?><broken>".as_slice(),
+            b"<?xml version='1.0'?><!DOCTYPE payload [<!ENTITY e 'literal'>]><payload>&e;</payload>",
+            b"<?xml version='1.0'?><payload>\0\xff</payload>",
+        ] {
+            let owner = tempfile::tempdir().unwrap();
+            binary_template_roundtrip(owner.path(), bytes);
+            let text_owner = tempfile::tempdir().unwrap();
+            opaque_template_roundtrip(text_owner.path(), bytes, "TextDocument", "Template.txt");
+        }
+        let owner = tempfile::tempdir().unwrap();
+        let fixture = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        ));
+        let source = Inventory::snapshot(fixture, &owner.path().join("native")).unwrap();
+        fs::write(
+            source.root.join("orphan.bin"),
+            b"<?xml version='1.0'?><broken>",
+        )
+        .unwrap();
+        let options = crate::ConversionOptions {
+            edt_version: "2025.2.3".into(),
+            xml_dialect: "2.21".into(),
+            runtime_version: Some("8.5.1".into()),
+        };
+        assert!(
+            crate::read_directory_source(&source.root)
+                .unwrap()
+                .xml_to_edt(&options)
+                .is_err()
+        );
+        fs::remove_file(source.root.join("orphan.bin")).unwrap();
+        let orphan = source
+            .root
+            .join("CommonTemplates/Unknown/Help/_files/payload.xml");
+        fs::create_dir_all(orphan.parent().unwrap()).unwrap();
+        fs::write(&orphan, b"<?xml version='1.0'?><broken>").unwrap();
+        assert!(
+            crate::read_directory_source(&source.root)
+                .unwrap()
+                .xml_to_edt(&options)
+                .is_err()
+        );
+        fs::remove_file(orphan).unwrap();
+        let orphan_picture = source
+            .root
+            .join("CommonPictures/Unknown/Ext/Picture/Picture.xml");
+        fs::create_dir_all(orphan_picture.parent().unwrap()).unwrap();
+        fs::write(orphan_picture, b"<?xml version='1.0'?><broken>").unwrap();
+        assert!(
+            crate::read_directory_source(&source.root)
+                .unwrap()
+                .xml_to_edt(&options)
+                .is_err()
+        );
+        fs::write(
+            source.root.join("Configuration.xml"),
+            b"<?xml version='1.0'?><broken>",
+        )
+        .unwrap();
+        assert!(crate::read_directory_source(&source.root).is_err());
+    }
+    #[test]
+    fn source_operation_opaque_deep_xml_is_fully_accounted_in_both_routes() {
+        let owner = tempfile::tempdir().unwrap();
+        let mut xml = String::from("<?xml version='1.0' encoding='UTF-8'?><payload");
+        for index in 0..300 {
+            xml.push_str(&format!(" a{index}='value'"));
+        }
+        xml.push('>');
+        for _ in 0..400 {
+            xml.push_str("<nested>");
+        }
+        xml.push_str("<name>../human label</name>");
+        for _ in 0..400 {
+            xml.push_str("</nested>");
+        }
+        xml.push_str("</payload>");
+        assert!(
+            crate::bounded::validate_xml(
+                "CommonTemplates/OpaqueSoap/Ext/Template.bin",
+                xml.as_bytes()
+            )
+            .is_err()
+        );
+        binary_template_roundtrip(owner.path(), xml.as_bytes());
     }
     #[test]
     #[ignore = "whole native host canonical disk census; F report, shared heavy FIFO"]
@@ -449,6 +584,16 @@ mod tests {
                 && !output.exists()
         );
         let started = std::time::Instant::now();
+        let progress_path = output.with_extension("progress.json");
+        let phase = |name: &str, files: Option<usize>| {
+            let progress = serde_json::json!({"phase": name, "elapsed_seconds": started.elapsed().as_secs_f64(), "files": files});
+            fs::write(
+                &progress_path,
+                serde_json::to_vec_pretty(&progress).unwrap(),
+            )
+            .unwrap();
+        };
+        phase("inventory", None);
         let inventory = Inventory::scan(&root).unwrap();
         let inventory_seconds = started.elapsed().as_secs_f64();
         #[derive(serde::Serialize)]
@@ -475,8 +620,10 @@ mod tests {
                 .unwrap_or_else(|_| "2.20".into()),
             runtime_version: None,
         };
+        phase("canonical_model", Some(inventory.entries.len()));
         let result = codec::canonical_inventory(&inventory, &options);
         // Re-scan the complete source after the authoritative model operation.
+        phase("source_verification", Some(inventory.entries.len()));
         let unchanged = inventory.verify();
         let mut report = serde_json::json!({ "source": root, "files": inventory.entries.len(), "source_bytes": inventory.bytes, "source_tree_sha256": source_tree_sha256, "inventory_seconds": inventory_seconds, "elapsed_seconds": started.elapsed().as_secs_f64(), "source_unchanged": unchanged.is_ok() });
         match &result {
@@ -503,6 +650,7 @@ mod tests {
         file.write_all(&serde_json::to_vec_pretty(&report).unwrap())
             .unwrap();
         file.sync_all().unwrap();
+        phase("complete", Some(inventory.entries.len()));
         unchanged.unwrap();
         result.unwrap();
     }

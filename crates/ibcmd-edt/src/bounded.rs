@@ -13,9 +13,24 @@ const MAX_XML_ATTRIBUTES: usize = 256;
 pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
     validate_xml_reader(path, std::io::Cursor::new(bytes))
 }
-pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PreflightPolicy {
+    Legacy,
+    DiskSource,
+}
+pub(crate) fn validate_xml_reader<R: BufRead + Seek>(path: &str, input: R) -> Result<(), EdtError> {
+    validate_xml_with_policy(path, input, PreflightPolicy::Legacy)
+}
+pub(crate) fn validate_xml_source_reader<R: BufRead + Seek>(
+    path: &str,
+    input: R,
+) -> Result<(), EdtError> {
+    validate_xml_with_policy(path, input, PreflightPolicy::DiskSource)
+}
+fn validate_xml_with_policy<R: BufRead + Seek>(
     path: &str,
     mut input: R,
+    policy: PreflightPolicy,
 ) -> Result<(), EdtError> {
     let origin = input.stream_position().map_err(EdtError::source)?;
     ibcmd_xml::XmlReader::inspect_reader(&mut input).map_err(EdtError::source)?;
@@ -30,6 +45,9 @@ pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
     let mut form_body = false;
     let mut dump_info = false;
     let mut streamed_mxl = false;
+    // These asset carriers are consumed as complete opaque bytes or text;
+    // their XML nesting/attribute counts never drive a recursive typed model.
+    let opaque_asset = policy == PreflightPolicy::DiskSource && !declared_xml(path);
     // Opaque XML-backed templates, Rights and DCS contain arbitrary human labels.
     // Only these known document roles derive physical paths from name facets.
     let mut metadata_names = path.ends_with(".mdo");
@@ -82,8 +100,11 @@ pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
                     html_pages = path.ends_with(".htmldoc")
                         && local == "HtmlDocument"
                         && uri == "http://g5.1c.ru/v8/dt/html-document";
-                    graph_items =
-                        local == "GraphicalSchema" && uri == "http://v8.1c.ru/8.3/xcf/scheme";
+                    graph_items = (path.ends_with(".xml")
+                        || path.ends_with(".scheme")
+                        || path.ends_with(".flowchart"))
+                        && local == "GraphicalSchema"
+                        && uri == "http://v8.1c.ru/8.3/xcf/scheme";
                     picture_files = path.ends_with(".xml") && local == "ExtPicture"
                         || path.ends_with(".flowchart")
                         || path.ends_with(".geos")
@@ -143,7 +164,7 @@ pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
                     *has_picture = true;
                 }
                 for (n, a) in e.attributes().enumerate() {
-                    if !streamed_mxl && n >= MAX_XML_ATTRIBUTES {
+                    if !streamed_mxl && !opaque_asset && n >= MAX_XML_ATTRIBUTES {
                         return Err(EdtError::new(format!(
                             "{path}: XML attribute budget exceeded"
                         )));
@@ -180,7 +201,7 @@ pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
                 }
                 if matches!(event, Event::Start(_)) {
                     depth += 1;
-                    if !streamed_mxl && depth > MAX_XML_DEPTH {
+                    if !streamed_mxl && !opaque_asset && depth > MAX_XML_DEPTH {
                         return Err(EdtError::new(format!("{path}: XML depth budget exceeded")));
                     }
                     names.push(local);
@@ -291,27 +312,70 @@ fn logical_form_name(value: &str) -> Result<(), EdtError> {
     component(value)
 }
 
-fn structured(path: &str, bytes: &[u8]) -> bool {
+/// XML is declared by the adapter document role, never guessed from payload.
+/// Raw carriers receive no acceptance exemption: full typed read/re-emission
+/// and complete accounting must claim their bytes before conversion succeeds.
+pub(crate) fn declared_xml(path: &str) -> bool {
     if path == ".project" {
         return true;
     }
-    let ext = path.rsplit('.').next().unwrap_or("").to_ascii_lowercase();
-    if matches!(ext.as_str(), "bsl" | "html" | "json") {
+    let path = path.strip_prefix(".ibcmd-provenance/xml/").unwrap_or(path);
+    let path = path.strip_prefix("src/").unwrap_or(path);
+    // The help codec claims the complete `_files` subtree as raw resources,
+    // regardless of resource filename. Conversion still requires a real help
+    // owner/page and byte-complete read/re-emission; an orphan is never accepted.
+    if path.starts_with("Help/_files/") || path.contains("/Help/_files/") {
         return false;
     }
+    let parts = path.split('/').collect::<Vec<_>>();
+    if matches!(parts.as_slice(), ["CommonPictures", _, "Ext", "Picture", _])
+        || matches!(parts.as_slice(), ["CommonPictures", _, file] if file.starts_with("Picture.") && !file.ends_with(".mdo"))
+    {
+        // Raw image bytes still require their real owner/wrapper, typed image
+        // membership and complete byte-for-byte read/re-emission accounting.
+        return false;
+    }
+    if matches!(
+        path,
+        "Ext/StandaloneConfigurationContent.bin" | "Configuration/MobileApplicationContent.scc"
+    ) {
+        return true;
+    }
     matches!(
-        ext.as_str(),
-        "xml" | "mdo" | "form" | "rights" | "dcs" | "style" | "xdto" | "geos" | "flowchart"
-    ) || std::str::from_utf8(bytes).is_ok_and(|s| {
-        s.trim_start_matches('\u{feff}')
-            .trim_start()
-            .starts_with("<?xml")
-    })
+        path.rsplit('.')
+            .next()
+            .map(str::to_ascii_lowercase)
+            .as_deref(),
+        Some(
+            "xml"
+                | "mdo"
+                | "form"
+                | "rights"
+                | "dcs"
+                | "style"
+                | "xdto"
+                | "geos"
+                | "flowchart"
+                | "scheme"
+                | "htmldoc"
+                | "cmi"
+                | "cai"
+                | "hpwa"
+                | "dcss"
+                | "dcssca"
+                | "chart"
+                | "mxlx"
+                | "dcsat"
+                | "schedule"
+                | "wsdl"
+                | "xsd"
+        )
+    )
 }
 
 pub(crate) fn validate_tree(tree: &SourceTree) -> Result<(), EdtError> {
     for e in tree.entries() {
-        if structured(e.path().as_str(), e.bytes()) {
+        if declared_xml(e.path().as_str()) {
             validate_xml(e.path().as_str(), e.bytes())?;
         }
     }
@@ -412,7 +476,7 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Edt
                 )));
             }
             s.bytes += data.len();
-            if structured(&name, &data) {
+            if declared_xml(&name) {
                 validate_xml(&name, &data)?;
             }
             s.files.push(
@@ -436,6 +500,40 @@ fn reparse(_: &fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_operation_opaque_assets_keep_complete_xml_without_shape_quotas() {
+        let mut xml = String::from("<payload");
+        for index in 0..300 {
+            xml.push_str(&format!(" a{index}='value'"));
+        }
+        xml.push('>');
+        for _ in 0..400 {
+            xml.push_str("<nested>");
+        }
+        xml.push_str("<name>../human label</name>");
+        for _ in 0..400 {
+            xml.push_str("</nested>");
+        }
+        xml.push_str("</payload>");
+        let asset = "DataProcessors/P/Templates/T/Ext/Template.bin";
+        assert!(validate_xml(asset, xml.as_bytes()).is_err()); // legacy quota remains explicit.
+        validate_xml_source_reader(asset, std::io::Cursor::new(xml.as_bytes())).unwrap();
+        assert!(
+            validate_xml_source_reader("Descriptor.mdo", std::io::Cursor::new(xml.as_bytes()))
+                .is_err()
+        );
+        let corrupt = xml.replace("</payload>", "</different>");
+        assert!(
+            validate_xml_source_reader(asset, std::io::Cursor::new(corrupt.as_bytes())).is_err()
+        );
+        assert!(
+            validate_xml_source_reader(
+                asset,
+                std::io::Cursor::new(b"<payload>&unknown;</payload>".as_slice())
+            )
+            .is_err()
+        );
+    }
     #[test]
     fn path_derived_names_use_lexical_safety_not_utf8_byte_quotas() {
         let physical = "Имя".repeat(50); //150 UTF16 characters /300 UTF8 bytes.
