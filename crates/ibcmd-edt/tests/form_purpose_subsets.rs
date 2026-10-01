@@ -5,7 +5,7 @@ use ibcmd_xml::source_tree::{SourceEntry, SourcePath, SourceTree};
 use morph1c_core::{
     ir::{FormBody, MetadataObject, NamedFormBody, ObjectKind, PropertyValue, Uuid},
     spec::metadata::report_form_ref,
-    version::FormatVersion,
+    version::{FormatVersion, with_roundtrip_target},
 };
 use morph1c_pipeline::{
     ConvertOptions, Format, read_config, registry::FormatRegistry, write_config,
@@ -15,7 +15,11 @@ use sha2::{Digest, Sha256};
 const EDT_PATH: &str = "src/Reports/PurposeReport/PurposeReport.mdo";
 
 fn source(purposes: &[&str]) -> SourceTree {
-    let options = ConvertOptions::default().with_target_version(FormatVersion::new(2, 21));
+    source_version(purposes, 21)
+}
+
+fn source_version(purposes: &[&str], minor: u16) -> SourceTree {
+    let options = ConvertOptions::default().with_target_version(FormatVersion::new(2, minor));
     let mut config = read_config(
         Format::Designer,
         std::path::Path::new(concat!(
@@ -53,7 +57,9 @@ fn source(purposes: &[&str]) -> SourceTree {
     });
     config.objects.push(owner);
     let directory = tempfile::tempdir().unwrap();
-    write_config(Format::Designer, &config, directory.path()).unwrap();
+    with_roundtrip_target(FormatVersion::new(2, minor), || {
+        write_config(Format::Designer, &config, directory.path()).unwrap();
+    });
     let root_path = directory.path().join("Configuration.xml");
     let root = String::from_utf8(std::fs::read(&root_path).unwrap())
         .unwrap()
@@ -65,10 +71,14 @@ fn source(purposes: &[&str]) -> SourceTree {
     read_xml_source(directory.path(), ReaderLimits::default()).unwrap()
 }
 fn options() -> ConversionOptions {
+    version_options(21)
+}
+
+fn version_options(minor: u16) -> ConversionOptions {
     ConversionOptions {
         edt_version: "2025.2.3".into(),
-        xml_dialect: "2.21".into(),
-        runtime_version: Some("8.5.1".into()),
+        xml_dialect: format!("2.{minor}"),
+        runtime_version: Some(if minor == 20 { "8.3.27" } else { "8.5.1" }.into()),
     }
 }
 fn strip(tree: &SourceTree) -> SourceTree {
@@ -123,38 +133,41 @@ fn native_purposes(tree: &SourceTree) -> PropertyValue {
 
 #[test]
 fn actual_report_form_purposes_survive_both_routes_without_provenance() {
-    for purposes in [
-        &[][..],
-        &["PersonalComputer"][..],
-        &["MobileDevice"][..],
-        &["PersonalComputer", "MobileDevice"][..],
-        &["MobileDevice", "PersonalComputer"][..],
-    ] {
-        let original = source(purposes);
-        let expected = native_purposes(&original);
-        let generated = xml_to_edt(&original, &options()).unwrap().tree;
-        let bytes = generated
-            .entries()
-            .iter()
-            .find(|entry| entry.path().as_str() == EDT_PATH)
-            .unwrap()
-            .bytes();
-        let registry = FormatRegistry::for_format(Format::Edt).unwrap();
-        let owner = (registry.get("Report").unwrap().read)(bytes).unwrap();
-        assert_eq!(
-            owner.children[0].get(report_form_ref::F_USE_PURPOSES),
-            Some(&expected)
-        );
-        assert_eq!(
-            edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &options())
+    for minor in [20, 21] {
+        let options = version_options(minor);
+        for purposes in [
+            &[][..],
+            &["PersonalComputer"][..],
+            &["MobileDevice"][..],
+            &["PersonalComputer", "MobileDevice"][..],
+            &["MobileDevice", "PersonalComputer"][..],
+        ] {
+            let original = source_version(purposes, minor);
+            let expected = native_purposes(&original);
+            let generated = xml_to_edt(&original, &options).unwrap().tree;
+            let bytes = generated
+                .entries()
+                .iter()
+                .find(|entry| entry.path().as_str() == EDT_PATH)
                 .unwrap()
-                .tree,
-            original
-        );
-        let regenerated = edt_to_xml(&Project::from_tree(strip(&generated)).unwrap(), &options())
-            .unwrap()
-            .tree;
-        assert_eq!(native_purposes(&regenerated), expected);
+                .bytes();
+            let registry = FormatRegistry::for_format(Format::Edt).unwrap();
+            let owner = (registry.get("Report").unwrap().read)(bytes).unwrap();
+            assert_eq!(
+                owner.children[0].get(report_form_ref::F_USE_PURPOSES),
+                Some(&expected)
+            );
+            assert_eq!(
+                edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &options)
+                    .unwrap()
+                    .tree,
+                original
+            );
+            let regenerated = edt_to_xml(&Project::from_tree(strip(&generated)).unwrap(), &options)
+                .unwrap()
+                .tree;
+            assert_eq!(native_purposes(&regenerated), expected);
+        }
     }
 }
 
