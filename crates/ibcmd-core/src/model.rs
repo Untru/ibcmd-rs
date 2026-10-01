@@ -659,11 +659,9 @@ fn measure_object_retained_bytes(object: &CanonicalObject) -> Result<usize, Mode
 }
 
 fn measure_opaque_facet(facet: &OpaqueFacet) -> Result<usize, ModelBuildError> {
-    let bytes = usize::try_from(facet.byte_len())
-        .map_err(|_| ModelBuildError::RetainedByteCountOverflow)?;
-    let retained = checked_add_retained(bytes, 32 + facet.media_kind().as_str().len())?;
-    let retained = checked_add_retained(retained, facet.placement().kind().as_str().len())?;
-    checked_add_retained(retained, facet.provenance().retained_byte_len())
+    facet
+        .retained_byte_len()
+        .map_err(|_| ModelBuildError::RetainedByteCountOverflow)
 }
 
 struct BoundedVec<T, const MAXIMUM: usize> {
@@ -1158,6 +1156,48 @@ mod tests {
             &serde_json::to_vec(&source).unwrap(),
         ).unwrap(), source);
         crate::validate::validate_configuration(&source).unwrap();
+    }
+
+    #[test]
+    fn external_opaque_reference_counts_retained_metadata_in_the_complete_graph() {
+        let mut with_reference = parts();
+        let facet = OpaqueFacet::from_reference(
+            with_reference.provenance.clone(),
+            crate::opaque::OpaquePlacement::new("xml:child", 0).unwrap(),
+            AssetReference::new(
+                crate::storage::Sha256Digest::for_bytes(b"x"),
+                u64::MAX,
+                crate::asset::MediaKind::octet_stream(),
+            )
+            .unwrap(),
+        );
+        let expected_bytes = facet.retained_byte_len().unwrap();
+        let plain = CanonicalObject::new(parts()).unwrap();
+        with_reference.opaque_facets = OpaqueFacets::new(vec![facet]).unwrap();
+        let bounded = CanonicalObject::new(with_reference.clone()).unwrap();
+        let source =
+            CanonicalObject::new_with_policy(with_reference, SourceOperationPolicy::Source)
+                .unwrap();
+        assert_eq!(source, bounded);
+        assert_eq!(
+            measure_object_retained_bytes(&source).unwrap()
+                - measure_object_retained_bytes(&plain).unwrap(),
+            expected_bytes
+        );
+        let graph =
+            CanonicalConfiguration::new_with_policy(vec![source], SourceOperationPolicy::Source)
+                .unwrap();
+        crate::validate::validate_configuration(&graph).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<CanonicalConfiguration>(&serde_json::to_vec(&graph).unwrap())
+                .unwrap(),
+            graph
+        );
+        assert!(
+            graph.objects()[0].opaque_facets().as_slice()[0]
+                .resolve_emit_permit(&ProfileId::parse("profile:test").unwrap(), b"x")
+                .is_err()
+        );
     }
 
     #[test]

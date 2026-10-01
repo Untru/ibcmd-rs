@@ -4,17 +4,24 @@ use crate::source_policy::SourceOperationPolicy;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
-use serde::de::{IgnoredAny, SeqAccess, Visitor};
+use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
+use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::artifact::ProfileId;
-use crate::asset::{Asset, AssetBuildError, MediaKind};
+use crate::asset::{
+    Asset, AssetBuildError, AssetReference, BoundedBytes, MAX_ASSET_BYTES, MediaKind,
+};
 use crate::diagnostic::{Diagnostic, DiagnosticCode, Severity};
 use crate::provenance::{CanonicalAnchor, SourceProvenance};
 use crate::storage::Sha256Digest;
 
 /// Stable diagnostic code for an opaque same-profile boundary violation.
 pub const CROSS_PROFILE_OPAQUE_EMIT_CODE: &str = "opaque.cross-profile-emit-forbidden";
+/// Emission requires explicitly resolved content for an external facet.
+pub const OPAQUE_CONTENT_REQUIRED_CODE: &str = "opaque.external-content-required";
+/// Resolved content did not match the facet's declared digest or length.
+pub const OPAQUE_CONTENT_MISMATCH_CODE: &str = "opaque.external-content-mismatch";
 /// Maximum encoded length of an open placement-kind token.
 pub const MAX_OPAQUE_PLACEMENT_KIND_BYTES: usize = 128;
 /// Maximum number of ordered opaque facets in one collection.
@@ -221,13 +228,115 @@ impl OpaquePlacement {
     }
 }
 
-/// Anchored unknown bytes that are safe to pass through only to their source profile.
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum OpaqueAsset {
+    Inline(Asset),
+    Reference(AssetReference),
+}
+
+impl Serialize for OpaqueAsset {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Inline(asset) => asset.serialize(serializer),
+            Self::Reference(reference) => {
+                let mut map = serializer.serialize_map(Some(1))?;
+                map.serialize_entry("reference", reference)?;
+                map.end()
+            }
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(field_identifier, rename_all = "snake_case")]
+enum OpaqueAssetField {
+    ByteLen,
+    Sha256,
+    MediaKind,
+    Bytes,
+    Reference,
+}
+
+struct OpaqueAssetVisitor;
+
+impl<'de> Visitor<'de> for OpaqueAssetVisitor {
+    type Value = OpaqueAsset;
+
+    fn expecting(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter.write_str("a bounded inline asset or an explicit external reference")
+    }
+
+    fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+        let (mut byte_len, mut sha256, mut media_kind, mut bytes, mut reference) =
+            (None, None, None, None, None);
+        while let Some(field) = map.next_key::<OpaqueAssetField>()? {
+            match field {
+                OpaqueAssetField::ByteLen => {
+                    if byte_len.is_some() {
+                        return Err(de::Error::duplicate_field("byte_len"));
+                    }
+                    byte_len = Some(map.next_value::<u64>()?);
+                }
+                OpaqueAssetField::Sha256 => {
+                    if sha256.is_some() {
+                        return Err(de::Error::duplicate_field("sha256"));
+                    }
+                    sha256 = Some(map.next_value::<Sha256Digest>()?);
+                }
+                OpaqueAssetField::MediaKind => {
+                    if media_kind.is_some() {
+                        return Err(de::Error::duplicate_field("media_kind"));
+                    }
+                    media_kind = Some(map.next_value::<MediaKind>()?);
+                }
+                OpaqueAssetField::Bytes => {
+                    if bytes.is_some() {
+                        return Err(de::Error::duplicate_field("bytes"));
+                    }
+                    bytes = Some(map.next_value::<BoundedBytes<MAX_ASSET_BYTES>>()?);
+                }
+                OpaqueAssetField::Reference => {
+                    if reference.is_some() {
+                        return Err(de::Error::duplicate_field("reference"));
+                    }
+                    reference = Some(map.next_value::<AssetReference>()?);
+                }
+            }
+        }
+        if let Some(reference) = reference {
+            if byte_len.is_some() || sha256.is_some() || media_kind.is_some() || bytes.is_some() {
+                return Err(de::Error::custom(
+                    "external and inline opaque asset fields cannot be mixed",
+                ));
+            }
+            return Ok(OpaqueAsset::Reference(reference));
+        }
+        Asset::from_serialized(
+            byte_len.ok_or_else(|| de::Error::missing_field("byte_len"))?,
+            sha256.ok_or_else(|| de::Error::missing_field("sha256"))?,
+            media_kind.ok_or_else(|| de::Error::missing_field("media_kind"))?,
+            bytes
+                .ok_or_else(|| de::Error::missing_field("bytes"))?
+                .into_boxed_slice(),
+        )
+        .map(OpaqueAsset::Inline)
+        .map_err(de::Error::custom)
+    }
+}
+
+impl<'de> Deserialize<'de> for OpaqueAsset {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        deserializer.deserialize_map(OpaqueAssetVisitor)
+    }
+}
+
+/// Anchored unknown content that is safe to pass through only to its source profile.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct OpaqueFacet {
     provenance: SourceProvenance,
     placement: OpaquePlacement,
-    asset: Asset,
+    asset: OpaqueAsset,
 }
 
 impl OpaqueFacet {
@@ -254,7 +363,29 @@ impl OpaqueFacet {
         Self {
             provenance,
             placement,
-            asset,
+            asset: OpaqueAsset::Inline(asset),
+        }
+    }
+
+    /// Attaches external content metadata without loading or trusting its bytes.
+    /// Emission requires [`Self::resolve_emit_permit`] with verified content.
+    pub const fn from_reference(
+        provenance: SourceProvenance,
+        placement: OpaquePlacement,
+        reference: AssetReference,
+    ) -> Self {
+        Self {
+            provenance,
+            placement,
+            asset: OpaqueAsset::Reference(reference),
+        }
+    }
+
+    /// Returns an external content reference when this facet is not inline.
+    pub const fn asset_reference(&self) -> Option<&AssetReference> {
+        match &self.asset {
+            OpaqueAsset::Inline(_) => None,
+            OpaqueAsset::Reference(reference) => Some(reference),
         }
     }
 
@@ -278,23 +409,28 @@ impl OpaqueFacet {
         &self.placement
     }
 
-    fn bytes(&self) -> &[u8] {
-        self.asset.bytes()
-    }
-
     /// Returns exact byte length metadata.
     pub const fn byte_len(&self) -> u64 {
-        self.asset.byte_len()
+        match &self.asset {
+            OpaqueAsset::Inline(asset) => asset.byte_len(),
+            OpaqueAsset::Reference(reference) => reference.byte_len(),
+        }
     }
 
     /// Returns the stable SHA-256 digest.
     pub const fn sha256(&self) -> Sha256Digest {
-        self.asset.sha256()
+        match &self.asset {
+            OpaqueAsset::Inline(asset) => asset.sha256(),
+            OpaqueAsset::Reference(reference) => reference.sha256(),
+        }
     }
 
     /// Returns the exact open media kind.
     pub const fn media_kind(&self) -> &MediaKind {
-        self.asset.media_kind()
+        match &self.asset {
+            OpaqueAsset::Inline(asset) => asset.media_kind(),
+            OpaqueAsset::Reference(reference) => reference.media_kind(),
+        }
     }
 
     /// Grants byte emission only when the requested profile exactly matches the source.
@@ -306,12 +442,64 @@ impl OpaqueFacet {
         &self,
         target_profile: &ProfileId,
     ) -> Result<OpaqueEmitPermit<'_>, OpaqueEmitError> {
-        if self.source_profile() == target_profile {
-            return Ok(OpaqueEmitPermit { facet: self });
+        if self.source_profile() != target_profile {
+            return Err(OpaqueEmitError {
+                diagnostic: Box::new(self.cross_profile_diagnostic(target_profile)),
+            });
         }
-        Err(OpaqueEmitError {
-            diagnostic: Box::new(self.cross_profile_diagnostic(target_profile)),
-        })
+        match &self.asset {
+            OpaqueAsset::Inline(asset) => Ok(OpaqueEmitPermit {
+                facet: self,
+                bytes: asset.bytes(),
+            }),
+            OpaqueAsset::Reference(_) => Err(self.content_error(
+                target_profile,
+                OPAQUE_CONTENT_REQUIRED_CODE,
+                "external opaque content must be resolved and verified before emission",
+            )),
+        }
+    }
+
+    /// Grants emission only after both the profile and exact content match.
+    /// The permit borrows the verified immutable bytes, so they cannot change
+    /// while the emitter uses it. A declared length never drives allocation.
+    pub fn resolve_emit_permit<'a>(
+        &'a self,
+        target_profile: &ProfileId,
+        bytes: &'a [u8],
+    ) -> Result<OpaqueEmitPermit<'a>, OpaqueEmitError> {
+        if self.source_profile() != target_profile {
+            return Err(OpaqueEmitError {
+                diagnostic: Box::new(self.cross_profile_diagnostic(target_profile)),
+            });
+        }
+        let reference = match &self.asset {
+            OpaqueAsset::Inline(asset) => asset.as_reference(),
+            OpaqueAsset::Reference(reference) => reference.clone(),
+        };
+        reference.verify_bytes(bytes).map_err(|_| {
+            self.content_error(
+                target_profile,
+                OPAQUE_CONTENT_MISMATCH_CODE,
+                "resolved opaque content differs from its declared byte length or SHA-256",
+            )
+        })?;
+        Ok(OpaqueEmitPermit { facet: self, bytes })
+    }
+
+    fn content_error(&self, target: &ProfileId, code: &str, message: &str) -> OpaqueEmitError {
+        let diagnostic = Diagnostic::new(
+            DiagnosticCode::new(code).expect("static opaque diagnostic code is valid"),
+            Severity::Error,
+            self.anchor().object_path().clone(),
+            self.anchor().property_path().clone(),
+            message,
+        )
+        .expect("static opaque diagnostic message is bounded")
+        .with_profiles(Some(self.source_profile().clone()), Some(target.clone()));
+        OpaqueEmitError {
+            diagnostic: Box::new(diagnostic),
+        }
     }
 
     fn cross_profile_diagnostic(&self, target_profile: &ProfileId) -> Diagnostic {
@@ -336,9 +524,12 @@ impl OpaqueFacet {
             .expect("validated placement context is bounded")
     }
 
-    fn retained_byte_len(&self) -> Result<usize, OpaqueBuildError> {
-        self.asset
-            .retained_byte_len()
+    pub(crate) fn retained_byte_len(&self) -> Result<usize, OpaqueBuildError> {
+        let asset_bytes = match &self.asset {
+            OpaqueAsset::Inline(asset) => asset.retained_byte_len(),
+            OpaqueAsset::Reference(reference) => reference.retained_byte_len(),
+        };
+        asset_bytes
             .checked_add(self.provenance.retained_byte_len())
             .and_then(|value| value.checked_add(self.placement.retained_byte_len()))
             .ok_or(OpaqueBuildError::RetainedByteCountOverflow)
@@ -352,6 +543,7 @@ impl OpaqueFacet {
 #[derive(Clone, Copy, Debug)]
 pub struct OpaqueEmitPermit<'a> {
     facet: &'a OpaqueFacet,
+    bytes: &'a [u8],
 }
 
 impl<'a> OpaqueEmitPermit<'a> {
@@ -362,7 +554,7 @@ impl<'a> OpaqueEmitPermit<'a> {
 
     /// Returns exact bytes covered by this same-profile permit.
     pub fn bytes(self) -> &'a [u8] {
-        self.facet.bytes()
+        self.bytes
     }
 
     /// Returns the only target profile for which the permit is valid.
@@ -688,5 +880,132 @@ mod tests {
             checked_retained_bytes(usize::MAX, 1, usize::MAX),
             Err(OpaqueBuildError::RetainedByteCountOverflow)
         ));
+    }
+
+    #[test]
+    fn external_facets_require_exact_resolved_content_and_source_profile() {
+        let bytes = b"external opaque XML";
+        let reference = AssetReference::new(
+            Sha256Digest::for_bytes(bytes),
+            bytes.len() as u64,
+            MediaKind::octet_stream(),
+        )
+        .unwrap();
+        let facet = OpaqueFacet::from_reference(
+            provenance("profile:source"),
+            OpaquePlacement::new("xml:child", 1).unwrap(),
+            reference.clone(),
+        );
+        let target = ProfileId::parse("profile:source").unwrap();
+        assert_eq!(facet.asset_reference(), Some(&reference));
+        assert_eq!(
+            facet
+                .emit_permit(&target)
+                .unwrap_err()
+                .diagnostic()
+                .code()
+                .as_str(),
+            OPAQUE_CONTENT_REQUIRED_CODE
+        );
+        assert_eq!(
+            facet.resolve_emit_permit(&target, bytes).unwrap().bytes(),
+            bytes
+        );
+        for wrong in [&bytes[..bytes.len() - 1], b"EXTERNAL opaque XML"] {
+            assert_eq!(
+                facet
+                    .resolve_emit_permit(&target, wrong)
+                    .unwrap_err()
+                    .diagnostic()
+                    .code()
+                    .as_str(),
+                OPAQUE_CONTENT_MISMATCH_CODE
+            );
+        }
+        let other = ProfileId::parse("profile:other").unwrap();
+        assert_eq!(
+            facet
+                .resolve_emit_permit(&other, bytes)
+                .unwrap_err()
+                .diagnostic()
+                .code()
+                .as_str(),
+            CROSS_PROFILE_OPAQUE_EMIT_CODE
+        );
+        let json = serde_json::to_string(&facet).unwrap();
+        let decoded = serde_json::from_str::<OpaqueFacet>(&json).unwrap();
+        assert_eq!(decoded, facet);
+        assert!(decoded.emit_permit(&target).is_err());
+        assert_eq!(
+            decoded.resolve_emit_permit(&target, bytes).unwrap().bytes(),
+            bytes
+        );
+    }
+
+    #[test]
+    fn external_source_facet_exceeds_inline_cap_without_relaxing_inline_wire() {
+        let bytes = vec![b'x'; MAX_ASSET_BYTES + 1];
+        assert!(Asset::new(bytes.clone(), MediaKind::octet_stream()).is_err());
+        let reference = AssetReference::new(
+            Sha256Digest::for_bytes(&bytes),
+            bytes.len() as u64,
+            MediaKind::octet_stream(),
+        )
+        .unwrap();
+        let facet = OpaqueFacet::from_reference(
+            provenance("profile:source"),
+            OpaquePlacement::new("xml:child", 0).unwrap(),
+            reference,
+        );
+        let target = ProfileId::parse("profile:source").unwrap();
+        assert_eq!(
+            facet.resolve_emit_permit(&target, &bytes).unwrap().bytes(),
+            &bytes
+        );
+        assert!(facet.retained_byte_len().unwrap() < 1024);
+        let json = serde_json::to_string(&facet).unwrap();
+        assert!(json.len() < 2048);
+        assert_eq!(serde_json::from_str::<OpaqueFacet>(&json).unwrap(), facet);
+        let inline = super::tests::facet("profile:source", 0, b"inline");
+        let json = serde_json::to_value(&inline).unwrap();
+        let expected = Asset::from_bytes(b"inline".to_vec(), "application/x-vendor+xml").unwrap();
+        assert_eq!(json["asset"], serde_json::to_value(expected).unwrap());
+        let oversized_inline = format!(
+            "{{\"byte_len\":{},\"sha256\":\"{}\",\"media_kind\":\"application/octet-stream\",\"bytes\":[]}}",
+            MAX_ASSET_BYTES + 1,
+            Sha256Digest::for_bytes(&[])
+        );
+        assert!(serde_json::from_str::<OpaqueAsset>(&oversized_inline).is_err());
+    }
+
+    #[test]
+    fn opaque_asset_stream_rejects_ambiguous_missing_duplicate_and_unknown_fields() {
+        let reference = AssetReference::new(
+            Sha256Digest::for_bytes(b"x"),
+            u64::MAX,
+            MediaKind::octet_stream(),
+        )
+        .unwrap();
+        let reference_json = serde_json::to_string(&reference).unwrap();
+        for malformed in [
+            format!("{{\"reference\":{reference_json},\"bytes\":[]}}"),
+            format!("{{\"reference\":{reference_json},\"reference\":{reference_json}}}"),
+            format!("{{\"reference\":{reference_json},\"future\":true}}"),
+            "{\"bytes\":[]}".into(),
+            "{\"bytes\":[],\"bytes\":[]}".into(),
+            "{\"reference\":null}".into(),
+        ] {
+            assert!(serde_json::from_str::<OpaqueAsset>(&malformed).is_err());
+        }
+        let facet = OpaqueFacet::from_reference(
+            provenance("profile:source"),
+            OpaquePlacement::new("xml:child", 0).unwrap(),
+            reference,
+        );
+        assert!(
+            facet
+                .resolve_emit_permit(&ProfileId::parse("profile:source").unwrap(), b"x")
+                .is_err()
+        );
     }
 }

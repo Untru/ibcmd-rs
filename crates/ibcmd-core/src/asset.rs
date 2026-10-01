@@ -277,6 +277,26 @@ impl AssetReference {
         &self.media_kind
     }
 
+    /// Verifies externally resolved content before any bytes are emitted.
+    /// No allocation is requested from the reference's declared length.
+    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<(), AssetBuildError> {
+        let actual = bytes.len() as u64;
+        if self.byte_len != actual {
+            return Err(AssetBuildError::LengthMismatch {
+                declared: self.byte_len,
+                actual,
+            });
+        }
+        let actual = Sha256Digest::for_bytes(bytes);
+        if self.sha256 != actual {
+            return Err(AssetBuildError::DigestMismatch {
+                declared: self.sha256,
+                actual,
+            });
+        }
+        Ok(())
+    }
+
     pub(crate) fn retained_byte_len(&self) -> usize {
         32 + self.media_kind.as_str().len()
     }
@@ -332,7 +352,7 @@ impl Asset {
         Self::new(bytes, MediaKind::new(media_kind)?)
     }
 
-    fn from_serialized(
+    pub(crate) fn from_serialized(
         byte_len: u64,
         sha256: Sha256Digest,
         media_kind: MediaKind,
