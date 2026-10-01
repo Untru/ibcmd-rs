@@ -25,6 +25,7 @@ pub mod opaque;
 pub mod profile;
 pub mod provenance;
 pub mod semantic;
+pub mod source_policy;
 pub mod storage;
 pub mod validate;
 pub mod value;
