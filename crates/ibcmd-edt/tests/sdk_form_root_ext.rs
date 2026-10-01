@@ -22,6 +22,67 @@ fn sha(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
+// Identical streaming serde policy to the private configuration fingerprint:
+// existing IR serializers sort FieldId property bags; all other order/presence
+// and values remain intact. No census-specific normalization is applied.
+fn semantic_sha(value: &impl serde::Serialize) -> String {
+    struct Hash(Sha256);
+    impl std::io::Write for Hash {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut hash = Hash(Sha256::new());
+    serde_json::to_writer(&mut hash, value).unwrap();
+    format!("{:x}", hash.0.finalize())
+}
+
+fn differences(
+    a: &serde_json::Value,
+    b: &serde_json::Value,
+    path: &str,
+    out: &mut Vec<serde_json::Value>,
+) {
+    if a == b {
+        return;
+    }
+    assert!(out.len() < 65_536);
+    match (a, b) {
+        (serde_json::Value::Object(a), serde_json::Value::Object(b)) => {
+            for key in a
+                .keys()
+                .chain(b.keys())
+                .collect::<std::collections::BTreeSet<_>>()
+            {
+                differences(
+                    a.get(key).unwrap_or(&serde_json::Value::Null),
+                    b.get(key).unwrap_or(&serde_json::Value::Null),
+                    &format!("{path}.{key}"),
+                    out,
+                );
+            }
+        }
+        (serde_json::Value::Array(a), serde_json::Value::Array(b)) if a.len() == b.len() => {
+            for (i, (a, b)) in a.iter().zip(b).enumerate() {
+                differences(a, b, &format!("{path}[{i}]"), out);
+            }
+        }
+        _ => {
+            let abbreviated = |value: &serde_json::Value| {
+                let text = value.to_string();
+                serde_json::json!({"serialized_sha256":sha(text.as_bytes()),"characters":text.chars().count(),"prefix":text.chars().take(160).collect::<String>()})
+            };
+            out.push(
+                serde_json::json!({"path":path,"before":abbreviated(a),"after":abbreviated(b)}),
+            );
+        }
+    }
+}
+
 #[test]
 fn unknown_root_ext_info_placeholder_and_child_remain_rejected() {
     let mut body = FormBody::new();
@@ -213,5 +274,347 @@ fn genuine_object_root_kinds_roundtrip_without_placeholder() {
             "form:ExchangePlanObjectFormExtInfo?",
         );
         assert!(read(FormDialect::Edt, bad.as_bytes()).is_err());
+    }
+}
+
+#[test]
+#[ignore = "requires genuine BSP native sources; materializes only disposable F-lab sidecars"]
+fn genuine_bsp83_all_forms_semantic_digest_census() {
+    use formats_xml::registry::Format;
+    use morph1c_core::ir::{MetadataObject, ObjectKind, Uuid};
+    use morph1c_pipeline::{attach_form_body, write_form_bodies};
+    let start = std::time::Instant::now();
+    let native = PathBuf::from(std::env::var_os("IBCMD_FORM_NATIVE").unwrap());
+    let edt = PathBuf::from(std::env::var_os("IBCMD_FORM_EDT").unwrap());
+    let report = PathBuf::from(std::env::var_os("IBCMD_FORM_SEMANTIC_REPORT").unwrap());
+    let lab = PathBuf::from(std::env::var_os("IBCMD_FORM_SCRATCH").unwrap());
+    let (pictures, picture_bindings) = picture_context(&edt);
+    let mut all = vec![];
+    files(&native, 0, &mut 0, &mut all);
+    all.sort();
+    assert_eq!(all.len(), 1108);
+    let mut rows = vec![];
+    let mut errors = 0;
+    let mut semantic_differences = 0;
+    let mut pure_asset_differences = 0;
+    let mut body_semantic_differences = 0;
+    let mut module_bom_only_differences = 0;
+    for path in all {
+        let form_dir = path.parent().unwrap().parent().unwrap();
+        let name = form_dir.file_name().unwrap().to_string_lossy().to_string();
+        let anchor = form_dir.parent().unwrap().join(&name).with_extension("xml");
+        let mut row = serde_json::json!({"native":path,"native_sha256":sha(&bounded_bytes(&path))});
+        let result = (|| -> Result<(), String> {
+            let mut source =
+                MetadataObject::new(ObjectKind::new("CommonForm"), &name, Uuid([9; 16]));
+            with_source_version(Some(version()), || {
+                attach_form_body(Format::Designer, "CommonForm", &anchor, &mut source)
+            })
+            .map_err(|e| format!("native body/sidecar read: {e}"))?;
+            if source.form_bodies.len() != 1 {
+                return Err("native did not attach exactly one managed body".into());
+            }
+            resolve_common_picture_transparency(&mut source.form_bodies[0].body, &pictures, false)
+                .map_err(|e| format!("native picture context: {e}"))?;
+            let scratch = tempfile::tempdir_in(&lab).unwrap();
+            let target_anchor = scratch.path().join(&name).join(format!("{name}.mdo"));
+            with_roundtrip_target(version(), || {
+                write_form_bodies(Format::Edt, &target_anchor, &source)
+            })
+            .map_err(|e| format!("EDT body/sidecar write: {e}"))?;
+            let mut returned =
+                MetadataObject::new(ObjectKind::new("CommonForm"), &name, Uuid([9; 16]));
+            with_source_version(Some(version()), || {
+                attach_form_body(Format::Edt, "CommonForm", &target_anchor, &mut returned)
+            })
+            .map_err(|e| format!("generated EDT body/sidecar read: {e}"))?;
+            if returned.form_bodies.len() != 1 {
+                return Err("generated EDT did not attach exactly one managed body".into());
+            }
+            resolve_common_picture_transparency(&mut returned.form_bodies[0].body, &pictures, true)
+                .map_err(|e| format!("EDT picture context: {e}"))?;
+            let before = semantic_sha(&source.form_bodies);
+            let after = semantic_sha(&returned.form_bodies);
+            let body_before = semantic_sha(&source.form_bodies[0].body);
+            let body_after = semantic_sha(&returned.form_bodies[0].body);
+            row["source_body_semantic_sha256"] = serde_json::json!(body_before);
+            row["returned_body_semantic_sha256"] = serde_json::json!(body_after);
+            if body_before != body_after {
+                body_semantic_differences += 1;
+            }
+            // Classify the exact observed byte-encoding difference separately;
+            // raw module strings and whole digests are never rewritten or masked.
+            let bom_only = match (
+                &source.form_bodies[0].module,
+                &returned.form_bodies[0].module,
+            ) {
+                (Some(before), Some(after)) => {
+                    before.strip_prefix('\u{feff}') == Some(after.as_str())
+                }
+                _ => false,
+            };
+            row["module_exact_leading_bom_only_difference"] = serde_json::json!(bom_only);
+            if bom_only {
+                module_bom_only_differences += 1;
+            }
+            row["source_semantic_sha256"] = serde_json::json!(before);
+            row["returned_semantic_sha256"] = serde_json::json!(after);
+            if before != after {
+                let mut delta = vec![];
+                differences(
+                    &serde_json::to_value(&source.form_bodies).unwrap(),
+                    &serde_json::to_value(&returned.form_bodies).unwrap(),
+                    "forms",
+                    &mut delta,
+                );
+                assert!(!delta.is_empty());
+                let assets_only = delta.iter().all(|d| {
+                    let p = d["path"].as_str().unwrap();
+                    p.contains(".pictures[")
+                        || p.contains(".help_resources[")
+                        || p.contains(".ordinary_body")
+                });
+                if assets_only {
+                    pure_asset_differences += 1;
+                } else {
+                    semantic_differences += 1;
+                }
+                row["result"] = serde_json::json!(if assets_only {
+                    "ASSET_DIFFERENCE"
+                } else {
+                    "SEMANTIC_DIFFERENCE"
+                });
+                row["differences"] = serde_json::json!(delta);
+            } else {
+                row["result"] = serde_json::json!("PASS");
+            }
+            Ok(())
+        })();
+        if let Err(error) = result {
+            errors += 1;
+            row["result"] = serde_json::json!("ERROR");
+            row["error"] = serde_json::json!(error);
+        }
+        rows.push(row);
+    }
+    std::fs::write(report,serde_json::to_vec_pretty(&serde_json::json!({"scope":"all1108 native managed bodies with pipeline sidecars and modules -> disposable EDT -> pipeline read; CommonForm stand-in excludes metadata and owner-level help acceptance; private streaming serde semantic fingerprints, no extra normalization; body and exact module BOM-only differences reported separately","seconds":start.elapsed().as_secs_f64(),"files":rows.len(),"errors":errors,"semantic_differences":semantic_differences,"pure_asset_differences":pure_asset_differences,"body_semantic_differences":body_semantic_differences,"module_bom_only_differences":module_bom_only_differences,"picture_context":picture_bindings,"rows":rows})).unwrap()).unwrap();
+    eprintln!(
+        "forms=1108 errors={errors} semantic_differences={semantic_differences} pure_asset_differences={pure_asset_differences} seconds={}",
+        start.elapsed().as_secs_f64()
+    );
+    assert_eq!(
+        (errors, semantic_differences, pure_asset_differences),
+        (0, 0, 0),
+        "all differences retained in report"
+    );
+}
+
+fn dynamic_body() -> FormBody {
+    read(FormDialect::Edt, b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\"><attributes><name>List</name><valueType><types>DynamicList</types></valueType><view><common>true</common></view><edit><common>true</common></edit><extInfo xsi:type=\"form:DynamicListExtInfo\"/></attributes></form:Form>\r\n").unwrap()
+}
+
+#[test]
+fn exact_empty_settings_only_are_semantically_absent() {
+    use morph1c_core::ir::{DcsListSettings, DcsSettingsGroup};
+    let mut body = dynamic_body();
+    let absent = semantic_sha(&body);
+    body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .list_settings = Some(DcsListSettings::default());
+    assert_eq!(semantic_sha(&body), absent);
+    assert!(
+        body.data_attributes[0]
+            .dynamic_list
+            .as_ref()
+            .unwrap()
+            .list_settings
+            .is_some()
+    );
+    let native = String::from_utf8(write(FormDialect::Designer, &body).unwrap()).unwrap();
+    assert!(native.contains("<ListSettings/>"));
+    for settings in [
+        DcsListSettings {
+            envelope_without_pal: true,
+            ..Default::default()
+        },
+        DcsListSettings {
+            items_view_mode: Some("".into()),
+            ..Default::default()
+        },
+        DcsListSettings {
+            items_user_setting_id: Some("id".into()),
+            ..Default::default()
+        },
+        DcsListSettings {
+            filter: Some(DcsSettingsGroup {
+                view_mode: None,
+                user_setting_id: None,
+                user_setting_presentation: None,
+                items: vec![],
+            }),
+            ..Default::default()
+        },
+    ] {
+        body.data_attributes[0]
+            .dynamic_list
+            .as_mut()
+            .unwrap()
+            .list_settings = Some(settings);
+        assert_ne!(semantic_sha(&body), absent);
+    }
+}
+
+#[test]
+fn form_module_read_strips_only_one_designer_encoding_signature() {
+    use formats_xml::registry::Format;
+    use morph1c_core::ir::{MetadataObject, ObjectKind, Uuid};
+    use morph1c_pipeline::attach_form_body;
+    let dir = tempfile::tempdir().unwrap();
+    let native = dir.path().join("Witness/Ext");
+    std::fs::create_dir_all(native.join("Form")).unwrap();
+    std::fs::write(
+        native.join("Form.xml"),
+        write(FormDialect::Designer, &FormBody::new()).unwrap(),
+    )
+    .unwrap();
+    let anchor = dir.path().join("Witness.xml");
+    for text in [
+        "\u{feff} \t// source\r\n\u{feff}Interior",
+        " \t// bare\r\n",
+        "\u{feff}\u{feff}Double",
+    ] {
+        std::fs::write(native.join("Form/Module.bsl"), text.as_bytes()).unwrap();
+        let mut obj = MetadataObject::new(ObjectKind::new("CommonForm"), "Witness", Uuid([8; 16]));
+        with_source_version(Some(version()), || {
+            attach_form_body(Format::Designer, "CommonForm", &anchor, &mut obj)
+        })
+        .unwrap();
+        assert_eq!(
+            obj.form_bodies[0].module.as_deref(),
+            Some(text.strip_prefix('\u{feff}').unwrap_or(text))
+        );
+        assert_eq!(
+            std::fs::read(native.join("Form/Module.bsl")).unwrap(),
+            text.as_bytes()
+        );
+    }
+}
+
+#[test]
+fn public_empty_settings_and_module_return_exact_and_edits_reject_forged_hash() {
+    use ibcmd_edt::{
+        ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
+    };
+    use ibcmd_xml::source_tree::{SourceEntry, SourcePath, SourceTree};
+    use morph1c_core::ir::{
+        DcsListSettings, MetadataObject, NamedFormBody, ObjectKind, PropertyValue, Token, Uuid,
+    };
+    use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
+    let mut cfg = read_config(
+        Format::Designer,
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        )),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let mut body = dynamic_body();
+    body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .list_settings = Some(DcsListSettings::default());
+    let mut obj = MetadataObject::new(ObjectKind::new("CommonForm"), "Settings", Uuid([77; 16]));
+    let form_type = morph1c_core::spec::registry::spec_for("CommonForm")
+        .unwrap()
+        .fields()
+        .iter()
+        .find(|f| f.name == "formType")
+        .unwrap()
+        .id;
+    obj.properties
+        .push((form_type, PropertyValue::Enum(Token::new("Managed"))));
+    obj.form_bodies.push(NamedFormBody {
+        name: "Settings".into(),
+        body,
+        ordinary_body: None,
+        module: Some(" // BSL\r\n\u{feff}Interior".into()),
+        help: vec![],
+        help_resources: vec![],
+    });
+    cfg.objects.push(obj);
+    let dir = tempfile::tempdir().unwrap();
+    write_config(Format::Designer, &cfg, dir.path()).unwrap();
+    let path = dir.path().join("Configuration.xml");
+    let root = String::from_utf8(std::fs::read(&path).unwrap())
+        .unwrap()
+        .replace(
+            "</Language>",
+            "</Language>\r\n\t\t\t<CommonForm>Settings</CommonForm>",
+        );
+    std::fs::write(path, root).unwrap();
+    let options = ConversionOptions {
+        edt_version: "2025.2.3".into(),
+        xml_dialect: "2.21".into(),
+        runtime_version: Some("8.5.1".into()),
+    };
+    let original = read_xml_source(dir.path(), ReaderLimits::default()).unwrap();
+    let generated = xml_to_edt(&original, &options).unwrap().tree;
+    assert!(
+        !generated
+            .entries()
+            .iter()
+            .any(|e| e.path().as_str().ends_with("ListSettings.dcss"))
+    );
+    assert_eq!(
+        edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &options)
+            .unwrap()
+            .tree,
+        original
+    );
+    for (path, edited) in [
+        (
+            "src/CommonForms/Settings/Module.bsl",
+            b" // edited\r\n".to_vec(),
+        ),
+        (
+            "src/CommonForms/Settings/Attributes/List/ExtInfo/ListSettings.dcss",
+            formats_xml::form::write_list_settings_dcss(&DcsListSettings {
+                items_view_mode: Some("Normal".into()),
+                ..Default::default()
+            }),
+        ),
+    ] {
+        let manifest_path = ".ibcmd-provenance/manifest.json";
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            generated
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == manifest_path)
+                .unwrap()
+                .bytes(),
+        )
+        .unwrap();
+        manifest["generated"][path] = serde_json::json!(sha(&edited));
+        let mut entries = generated
+            .entries()
+            .iter()
+            .filter(|e| e.path().as_str() != path && e.path().as_str() != manifest_path)
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.push(SourceEntry::from_bytes(SourcePath::new(path).unwrap(), edited).unwrap());
+        entries.push(
+            SourceEntry::from_bytes(
+                SourcePath::new(manifest_path).unwrap(),
+                serde_json::to_vec(&manifest).unwrap(),
+            )
+            .unwrap(),
+        );
+        let changed = SourceTree::new(entries).unwrap();
+        assert!(edt_to_xml(&Project::from_tree(changed).unwrap(), &options).is_err());
     }
 }

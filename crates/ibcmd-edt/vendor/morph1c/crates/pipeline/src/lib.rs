@@ -74,6 +74,12 @@ mod ws_definition_read;
 mod xdto_read;
 
 pub use convert::{read_config, write_config};
+// Private adapter lab access to the same typed form/sidecar pipeline as whole
+// configuration conversion. This adds no ibcmd public canonical model surface.
+#[doc(hidden)]
+pub use form_read::attach_form_body;
+#[doc(hidden)]
+pub use form_write::write_form_bodies;
 pub use preflight::{check, preflight, KindStatus, KindSupport, PreflightEntry, PreflightReport};
 
 /// Honest note surfaced by `convert`/`check`: what a whole-config conversion actually carries,

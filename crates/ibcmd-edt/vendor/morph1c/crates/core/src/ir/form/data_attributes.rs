@@ -388,8 +388,10 @@ pub struct DynamicListAttrExt {
     /// X-сравнимы. См. [`DcsCalculatedField`].
     #[serde(default)]
     pub calculated_fields: Vec<DcsCalculatedField>,
-    /// Designer-only DCS-настройки списка (`<ListSettings>`); `None` у EDT-стороны. Норм. ДО X.
-    #[serde(default)]
+    /// Typed list settings. Exactly empty native `<ListSettings/>` has no EDT
+    /// sidecar. Keep native presence in the IR for emission; only the exact
+    /// all-field default is equivalent to absence in the semantic fingerprint.
+    #[serde(default, serialize_with = "serialize_semantic_list_settings")]
     pub list_settings: Option<DcsListSettings>,
     /// Поля схемы набора данных DCS (EDT `<fields xsi:type="schema:DataCompositionSchemaDataSetField">`
     /// ⟺ Designer `<Field xsi:type="dcssch:DataSetFieldField">`) — EXTENDED-форма динсписка. ОБА
@@ -400,4 +402,11 @@ pub struct DynamicListAttrExt {
     /// EXTENDED-форма. ОБА формата несут ⇒ X-сравнимы. Пусто ⇒ без явных параметров. См. [`DcsParameter`].
     #[serde(default)]
     pub parameters: Vec<DcsParameter>,
+}
+
+fn serialize_semantic_list_settings<S: serde::Serializer>(
+    value: &Option<DcsListSettings>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    value.as_ref().filter(|settings| !settings.is_empty()).serialize(serializer)
 }
