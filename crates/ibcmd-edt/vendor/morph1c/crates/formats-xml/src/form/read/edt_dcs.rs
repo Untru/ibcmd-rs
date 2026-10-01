@@ -367,6 +367,7 @@ pub(crate) fn read_edt_dcs_parameter(p: &Element) -> Result<DcsParameter, FormEr
         value,
         additional_values,
         use_restriction,
+        designer_omitted_use_restriction: false,
         value_list_allowed,
         available_as_field,
     })

@@ -383,3 +383,127 @@ fn public_conversion_accounts_root_help_and_whole_ordinary_body() {
         );
     }
 }
+
+#[test]
+fn public_dcs_parameter_presence_is_exact_and_edits_cannot_restore_stale_xml() {
+    use ibcmd_edt::{
+        ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
+    };
+    use ibcmd_xml::source_tree::{SourceEntry, SourcePath, SourceTree};
+    use sha2::{Digest, Sha256};
+    let bytes = br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:form="http://g5.1c.ru/v8/dt/form" xmlns:schema="http://g5.1c.ru/v8/dt/data-composition-system/schema" xmlns:settings="http://g5.1c.ru/v8/dt/data-composition-system/settings"><attributes><name>List</name><valueType><types>DynamicList</types></valueType><view><common>true</common></view><edit><common>true</common></edit><extInfo xsi:type="form:DynamicListExtInfo"><parameters><name>Restriction</name></parameters></extInfo></attributes></form:Form>"#;
+    let mut cfg = ordinary();
+    let obj = cfg.objects.last_mut().unwrap();
+    obj.properties[0].1 = PropertyValue::Enum(Token::new("Managed"));
+    obj.form_bodies[0].ordinary_body = None;
+    obj.form_bodies[0].body = formats_xml::form::read_form(
+        formats_xml::form::FormDialect::Edt,
+        &[
+            b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n".as_slice(),
+            bytes.as_slice(),
+            b"\r\n",
+        ]
+        .concat(),
+    )
+    .unwrap();
+    obj.form_bodies[0].body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .list_settings = Some(morph1c_core::ir::DcsListSettings {
+        items_view_mode: Some("Normal".into()),
+        ..Default::default()
+    });
+    let options = ConversionOptions {
+        edt_version: "2025.2.3".into(),
+        xml_dialect: "2.21".into(),
+        runtime_version: Some("8.5.1".into()),
+    };
+    fn mutate(tree: &SourceTree, path: &str, bytes: Vec<u8>) -> SourceTree {
+        SourceTree::new(
+            tree.entries()
+                .iter()
+                .map(|entry| {
+                    if entry.path().as_str() == path {
+                        SourceEntry::from_bytes(SourcePath::new(path).unwrap(), bytes.clone())
+                            .unwrap()
+                    } else {
+                        entry.clone()
+                    }
+                })
+                .collect(),
+        )
+        .unwrap()
+    }
+    for value in [None, Some(false), Some(true)] {
+        let dir = tempfile::tempdir().unwrap();
+        write_config(Format::Designer, &cfg, dir.path()).unwrap();
+        let path = dir.path().join("Configuration.xml");
+        let text = String::from_utf8(std::fs::read(&path).unwrap())
+            .unwrap()
+            .replace(
+                "</Language>",
+                "</Language>\r\n\t\t\t<CommonForm>OpaqueOrdinary</CommonForm>",
+            );
+        std::fs::write(path, text).unwrap();
+        let form_path = dir.path().join("CommonForms/OpaqueOrdinary/Ext/Form.xml");
+        let text = String::from_utf8(std::fs::read(&form_path).unwrap()).unwrap();
+        let text = match value {
+            None => text
+                .lines()
+                .filter(|line| !line.contains("<dcssch:useRestriction>"))
+                .collect::<Vec<_>>()
+                .join("\r\n"),
+            Some(false) => text,
+            Some(true) => text.replace(
+                "<dcssch:useRestriction>false</dcssch:useRestriction>",
+                "<dcssch:useRestriction>true</dcssch:useRestriction>",
+            ),
+        };
+        std::fs::write(form_path, text).unwrap();
+        let xml = read_xml_source(dir.path(), ReaderLimits::default()).unwrap();
+        let generated = xml_to_edt(&xml, &options).unwrap().tree;
+        let returned = edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &options)
+            .unwrap()
+            .tree;
+        assert_eq!(
+            returned, xml,
+            "native restriction {value:?} must return every original byte"
+        );
+        if value == Some(false) {
+            let path = "src/CommonForms/OpaqueOrdinary/Form.form";
+            let original = generated
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == path)
+                .unwrap();
+            let edited = String::from_utf8(original.bytes().to_vec())
+                .unwrap()
+                .replace(
+                    "</parameters>",
+                    "<useRestriction>true</useRestriction></parameters>",
+                )
+                .into_bytes();
+            assert_ne!(edited.as_slice(), original.bytes());
+            let hash = format!("{:x}", Sha256::digest(&edited));
+            let tree = mutate(&generated, path, edited);
+            let manifest = tree
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == ".ibcmd-provenance/manifest.json")
+                .unwrap();
+            let mut manifest: serde_json::Value = serde_json::from_slice(manifest.bytes()).unwrap();
+            manifest["generated"][path] = serde_json::Value::String(hash);
+            let tree = mutate(
+                &tree,
+                ".ibcmd-provenance/manifest.json",
+                serde_json::to_vec(&manifest).unwrap(),
+            );
+            let error = edt_to_xml(&Project::from_tree(tree).unwrap(), &options).unwrap_err();
+            assert!(
+                error.to_string().contains("changed"),
+                "edited true restriction must fail stale provenance: {error}"
+            );
+        }
+    }
+}

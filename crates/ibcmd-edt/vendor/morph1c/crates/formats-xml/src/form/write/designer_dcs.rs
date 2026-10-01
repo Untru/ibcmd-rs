@@ -97,17 +97,17 @@ pub(crate) fn designer_dcs_field(f: &DcsField) -> Result<OutElement, FormError> 
     let mut el = OutElement::branch("", "Field").attr("xsi:type", xt);
     el.push(OutElement::leaf("dcssch", "dataPath", f.data_path.clone()));
     el.push(OutElement::leaf("dcssch", "field", f.field.clone()));
-    // presentationExpression — за `field`, до title (см. edt_dcs_field; ⟷ EDT). В cf-кэше
-    // `ServerState` тот же writer переиспользуется ⇒ выражение попадает и в кэш схемы.
+    // Independent native witness places co-present title before presentationExpression.
+    // The cf ServerState schema cache uses this same writer.
+    if let Some(t) = designer_dcs_title(&f.title) {
+        el.push(t);
+    }
     if let Some(pe) = &f.presentation_expression {
         el.push(OutElement::leaf(
             "dcssch",
             "presentationExpression",
             pe.clone(),
         ));
-    }
-    if let Some(t) = designer_dcs_title(&f.title) {
-        el.push(t);
     }
     for oe in &f.order_expressions { el.push(designer_dcs_order_expression(oe)); }
     // valueType — после title (ERP-witness ВыручкаИСебестоимостьПродаж: dataPath→field→
@@ -297,7 +297,10 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
         el.push(designer_dcs_param_value("value", v));
     }
     // useRestriction — presence-точная реконструкция три-состояния (true/false/absent).
-    if let Some(b) = p.use_restriction {
+    if let Some(b) = p
+        .use_restriction
+        .or_else(|| (!p.designer_omitted_use_restriction).then_some(false))
+    {
         el.push(OutElement::leaf(
             "dcssch",
             "useRestriction",

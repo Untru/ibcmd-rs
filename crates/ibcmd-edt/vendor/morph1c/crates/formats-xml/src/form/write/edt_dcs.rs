@@ -14,12 +14,13 @@ pub(crate) fn edt_dcs_field(f: &DcsField) -> Result<OutElement, FormError> {
     let mut el = OutElement::branch("", "fields").attr("xsi:type", xt);
     el.push(OutElement::leaf("", "dataPath", f.data_path.clone()));
     el.push(OutElement::leaf("", "field", f.field.clone()));
-    // presentationExpression — за `field`, до title (единственный witnessed-порядок; ДокументыПоДоговору).
-    if let Some(pe) = &f.presentation_expression {
-        el.push(OutElement::leaf("", "presentationExpression", pe.clone()));
-    }
+    // Co-present title precedes presentationExpression (genuine UH monitor witness).
+
     if let Some(t) = edt_dcs_title(&f.title) {
         el.push(t);
+    }
+    if let Some(pe) = &f.presentation_expression {
+        el.push(OutElement::leaf("", "presentationExpression", pe.clone()));
     }
     for oe in &f.order_expressions { el.push({ let mut value = edt_dcs_order_expression(oe); value.local = "orderExpressions".to_string(); value }); }
     // valueType — после title (ERP-witness; ⟷ Designer dcssch:valueType; ошибка — громкая).

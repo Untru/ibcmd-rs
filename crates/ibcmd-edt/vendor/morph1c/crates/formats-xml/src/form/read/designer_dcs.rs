@@ -359,6 +359,7 @@ pub(crate) fn read_designer_dcs_parameter(p: &Element) -> Result<DcsParameter, F
         value,
         additional_values,
         use_restriction,
+        designer_omitted_use_restriction: use_restriction.is_none(),
         value_list_allowed,
         available_as_field,
     })

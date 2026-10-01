@@ -44,7 +44,7 @@ fn ordered_schema_values_and_parameter_expression_survive_both_dialects() {
         let decoded = read_form(dialect, &bytes).unwrap();
         assert_eq!(dl(&decoded).fields, list.fields);
         assert_eq!(dl(&decoded).calculated_fields, list.calculated_fields);
-        assert_eq!(dl(&decoded).parameters, list.parameters);
+        assert_parameter_semantics(&dl(&decoded).parameters, &list.parameters);
         let text = String::from_utf8(bytes).unwrap();
         if dialect == FormDialect::Edt {
             let cf = text
@@ -76,7 +76,7 @@ fn design_time_symbolic_reference_and_rgb_color_have_typed_cross_encoding() {
     for dialect in [FormDialect::Edt, FormDialect::Designer] {
         let encoded = write_form(dialect, &body).unwrap();
         let decoded = read_form(dialect, &encoded).unwrap();
-        assert_eq!(dl(&decoded).parameters, dl(&body).parameters);
+        assert_parameter_semantics(&dl(&decoded).parameters, &dl(&body).parameters);
         assert_eq!(dl(&decoded).fields, dl(&body).fields);
     }
     assert!(read_form(FormDialect::Edt, &form(content, "")).is_err());
@@ -245,11 +245,9 @@ fn authentic_uha_dcs_witnesses_decode_and_reencode() {
                                         "{} {name}",
                                         path.display()
                                     );
-                                    assert_eq!(
-                                        before.parameters,
-                                        after.parameters,
-                                        "{} {name}",
-                                        path.display()
+                                    assert_parameter_semantics(
+                                        &before.parameters,
+                                        &after.parameters,
                                     );
                                 }
                             }
@@ -288,7 +286,7 @@ fn repeated_parameter_values_remain_ordered_and_unknown_values_fail() {
     for dialect in [FormDialect::Edt, FormDialect::Designer] {
         let bytes = write_form(dialect, &body).unwrap();
         let decoded = read_form(dialect, &bytes).unwrap();
-        assert_eq!(dl(&decoded).parameters, dl(&body).parameters);
+        assert_parameter_semantics(&dl(&decoded).parameters, &dl(&body).parameters);
     }
     assert!(
         read_form(
@@ -452,4 +450,206 @@ fn genuine_dcs_writers_preserve_schema_and_parameter_element_order() {
         }
     }
     assert_eq!(count, 6);
+}
+
+fn assert_parameter_semantics(
+    actual: &[morph1c_core::ir::DcsParameter],
+    expected: &[morph1c_core::ir::DcsParameter],
+) {
+    // The sole witnessed semantic default is useRestriction=false. Raw native
+    // absence/false/true output is asserted independently below; all other
+    // ordered values and optional presences remain in semantic serialization.
+    assert_eq!(
+        serde_json::to_value(actual).unwrap(),
+        serde_json::to_value(expected).unwrap()
+    );
+}
+#[test]
+fn schema_parameter_default_false_materializes_only_for_edt_origin() {
+    let body = read_form(
+        FormDialect::Edt,
+        &form("<parameters><name>Restriction</name></parameters>", ""),
+    )
+    .unwrap();
+    let encoded = write_form(FormDialect::Designer, &body).unwrap();
+    let text = String::from_utf8(encoded).unwrap();
+    assert!(text.contains("<dcssch:useRestriction>false</dcssch:useRestriction>"));
+    for value in [None, Some(false), Some(true)] {
+        let text = match value {
+            None => text
+                .lines()
+                .filter(|line| !line.contains("<dcssch:useRestriction>"))
+                .collect::<Vec<_>>()
+                .join("\r\n"),
+            Some(true) => text.replace(
+                "<dcssch:useRestriction>false</dcssch:useRestriction>",
+                "<dcssch:useRestriction>true</dcssch:useRestriction>",
+            ),
+            Some(false) => text.clone(),
+        };
+        let native = read_form(FormDialect::Designer, text.as_bytes()).unwrap();
+        assert_eq!(dl(&native).parameters[0].use_restriction, value);
+        let regenerated =
+            String::from_utf8(write_form(FormDialect::Designer, &native).unwrap()).unwrap();
+        match value {
+            None => assert!(!regenerated.contains("<dcssch:useRestriction>")),
+            Some(b) => assert!(regenerated.contains(&format!(
+                "<dcssch:useRestriction>{b}</dcssch:useRestriction>"
+            ))),
+        }
+    }
+    assert!(
+        read_form(
+            FormDialect::Designer,
+            text.replace(
+                "<dcssch:useRestriction>false</dcssch:useRestriction>",
+                "<dcssch:useRestriction>unknown</dcssch:useRestriction>"
+            )
+            .as_bytes()
+        )
+        .is_err()
+    );
+    let none = dl(&body).parameters[0].clone();
+    let mut explicit_false = none.clone();
+    explicit_false.use_restriction = Some(false);
+    let mut explicit_true = none.clone();
+    explicit_true.use_restriction = Some(true);
+    assert_eq!(
+        serde_json::to_value(&none).unwrap(),
+        serde_json::to_value(&explicit_false).unwrap()
+    );
+    assert_ne!(
+        serde_json::to_value(&none).unwrap(),
+        serde_json::to_value(&explicit_true).unwrap()
+    );
+}
+#[test]
+fn co_present_schema_field_title_precedes_presentation_expression() {
+    let content = r#"<fields xsi:type="schema:DataCompositionSchemaDataSetField"><dataPath>Name</dataPath><field>Name</field><title><value>Title</value></title><presentationExpression>STRING(Name)</presentationExpression></fields>"#;
+    let body = read_form(FormDialect::Edt, &form(content, "")).unwrap();
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let bytes = write_form(dialect, &body).unwrap();
+        let text = String::from_utf8(bytes.clone()).unwrap();
+        assert!(
+            text.find("<title")
+                .or_else(|| text.find("<dcssch:title"))
+                .unwrap()
+                < text.find("presentationExpression>").unwrap()
+        );
+        assert_eq!(
+            dl(&read_form(dialect, &bytes).unwrap()).fields,
+            dl(&body).fields
+        );
+    }
+    assert!(
+        read_form(
+            FormDialect::Edt,
+            &form(
+                &content.replace(
+                    "</presentationExpression>",
+                    "</presentationExpression><unmodeled/>"
+                ),
+                ""
+            )
+        )
+        .is_err()
+    );
+}
+#[test]
+#[ignore = "requires genuine F BSP SDK and UH co-present field witnesses"]
+fn genuine_sdk_parameter_defaults_and_field_order_are_independently_witnessed() {
+    let lab = std::path::PathBuf::from(std::env::var("IBCMD_DCS_ORDER_LAB").unwrap());
+    let report: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(lab.join("bsp83-direct-dynamiclist-differences-r1.json")).unwrap(),
+    )
+    .unwrap();
+    let mut explicit_false = 0;
+    let mut params = 0;
+    for row in report["rows"].as_array().unwrap() {
+        let rel = row["path"].as_str().unwrap();
+        let edt = std::fs::read(
+            lab.join("oracle-bsp83-r1/authentic-workspace/OracleConfiguration/src")
+                .join(rel.replace("/Ext/Form.xml", "/Form.form")),
+        )
+        .unwrap();
+        let sdk =
+            std::fs::read(lab.join("native-reference-bsp83-r2/native-xml").join(rel)).unwrap();
+        let source = read_form(FormDialect::Edt, &edt).unwrap();
+        let expected = read_form(FormDialect::Designer, &sdk).unwrap();
+        let generated = read_form(
+            FormDialect::Designer,
+            &write_form(FormDialect::Designer, &source).unwrap(),
+        )
+        .unwrap();
+        for attr in &expected.data_attributes {
+            if let Some(list) = &attr.dynamic_list {
+                let result = generated
+                    .data_attributes
+                    .iter()
+                    .find(|a| a.name == attr.name)
+                    .unwrap()
+                    .dynamic_list
+                    .as_ref()
+                    .unwrap();
+                assert_parameter_semantics(&result.parameters, &list.parameters);
+                assert_eq!(
+                    result
+                        .parameters
+                        .iter()
+                        .map(|p| p.use_restriction)
+                        .collect::<Vec<_>>(),
+                    list.parameters
+                        .iter()
+                        .map(|p| p.use_restriction)
+                        .collect::<Vec<_>>()
+                );
+                params += list.parameters.len();
+                explicit_false += list
+                    .parameters
+                    .iter()
+                    .filter(|p| p.use_restriction == Some(false))
+                    .count();
+            }
+        }
+    }
+    assert_eq!(params, 28);
+    assert_eq!(explicit_false, 24);
+    let rel = "DataProcessors/МониторСверкиВзаиморасчетов/Forms/ДокументыНеПолученныеПоЭДО/Form.form";
+    let original = std::fs::read(
+        lab.join("oracle-uha83-r1/authentic-workspace/OracleConfiguration/src")
+            .join(rel),
+    )
+    .unwrap();
+    let source = read_form(FormDialect::Edt, &original).unwrap();
+    let generated = write_form(FormDialect::Edt, &source).unwrap();
+    fn field_orders(bytes: &[u8]) -> Vec<Vec<String>> {
+        fn visit(el: &formats_xml::Element, out: &mut Vec<Vec<String>>) {
+            if matches!(el.local.as_str(), "fields" | "Field")
+                && el.children.iter().any(|c| c.local == "title")
+                && el
+                    .children
+                    .iter()
+                    .any(|c| c.local == "presentationExpression")
+            {
+                out.push(el.children.iter().map(|c| c.local.clone()).collect());
+            }
+            for c in &el.children {
+                visit(c, out);
+            }
+        }
+        let mut result = vec![];
+        visit(&formats_xml::read::parse(bytes).unwrap().root, &mut result);
+        result
+    }
+    assert!(!field_orders(&original).is_empty());
+    assert_eq!(field_orders(&generated), field_orders(&original));
+    let native_rel = rel.replace("/Form.form", "/Ext/Form.xml");
+    let native = std::fs::read(
+        lab.join("native-reference-uha83-r1/native-xml")
+            .join(native_rel),
+    )
+    .unwrap();
+    let generated_native = write_form(FormDialect::Designer, &source).unwrap();
+    assert!(!field_orders(&native).is_empty());
+    assert_eq!(field_orders(&generated_native), field_orders(&native));
 }

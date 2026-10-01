@@ -172,14 +172,16 @@ pub struct DcsParameter {
     /// Additional parameter values in original order, after the first value.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub additional_values: Vec<DcsParamValue>,
-    /// Использовать ограничение (`useRestriction` ⟺ `dcssch:useRestriction`) — ТРИ-состояние
-    /// {`Some(true)`, `Some(false)`, `None`=absent}: Designer НЕРЕГУЛЯРНО эмитит явный `false`
-    /// (SSL: absent×1492 / true×72 / false×19 — МашиночитаемыеДоверенности.ФормаСписка несёт
-    /// false×18 И absent×9 в ОДНОЙ форме, правила нет), EDT эмитит ТОЛЬКО `true` (sparse).
-    /// Presence-точное хранение ⇒ byte-exact roundtrip обоих диалектов; EDT-write трактует
-    /// `Some(false)` как омиссию (X расходится лишь на false-витнессах — класс DesKeep).
-    #[serde(default)]
+    /// Schema useRestriction has semantic default false. Preserve None/false/true
+    /// source presence for native same-source output; installed SDK independently
+    /// materializes false from EDT absence (BSP post-EDT native witnesses).
+    #[serde(default, serialize_with = "serialize_parameter_restriction")]
     pub use_restriction: Option<bool>,
+    /// Native source-only omission witness. The semantic schema default is false;
+    /// native same-source regeneration must still preserve the absent node.
+    /// Not canonical data: the host retains lexical source bytes separately.
+    #[serde(skip)]
+    pub designer_omitted_use_restriction: bool,
     /// Разрешён список значений (`valueListAllowed` ⟺ `dcssch:valueListAllowed`) — presence-bool.
     #[serde(default)]
     pub value_list_allowed: bool,
@@ -582,4 +584,13 @@ pub enum DcsRightValue {
 pub enum DcsParameterUse {
     /// Always apply the parameter; unspecified usage is stored as None.
     Always,
+}
+
+/// Only the witnessed DCS schema-parameter default: absence has false semantics.
+/// Presence remains in the private fields for exact native same-source output.
+fn serialize_parameter_restriction<S: serde::Serializer>(
+    value: &Option<bool>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    serializer.serialize_bool(value.unwrap_or(false))
 }
