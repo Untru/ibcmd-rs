@@ -73,6 +73,8 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
             &body.mobile_device_command_bar,
         )?);
     }
+    // Native BSP 8.3 witness: after mobile command bar, before AutoCommandBar.
+    push_des_attr(&mut root, body, fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT);
     // Форм-уровневый CommandSet (между CommandBarLocation/WindowViewMode и ShowCommandBar).
     if !body.excluded_commands.is_empty() {
         let mut cs = OutElement::branch("", "CommandSet");

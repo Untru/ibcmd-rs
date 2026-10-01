@@ -358,14 +358,6 @@ pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
         Policy::Symmetric,
     ),
     fp(
-        fg::F_EXT_BACK_COLOR,
-        "backColor",
-        "BackColor",
-        Region::Ext,
-        Codec::Color,
-        Policy::Symmetric,
-    ),
-    fp(
         fg::F_EXT_SHOW_TITLE,
         "showTitle",
         "ShowTitle",
@@ -377,6 +369,14 @@ pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
             fg::DESIGNER_AUTO_LOWER,
             DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
         ),
+    ),
+    fp(
+        fg::F_EXT_BACK_COLOR,
+        "backColor",
+        "BackColor",
+        Region::Ext,
+        Codec::Color,
+        Policy::Symmetric,
     ),
     fp(
         fg::F_EXT_TITLE_DATA_PATH,

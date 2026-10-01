@@ -82,6 +82,7 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
         fr::F_VERTICAL_SCROLL,
         fr::F_SHOW_TITLE,
         fr::F_SHOW_CLOSE_BUTTON,
+        fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT,
         fr::F_CONVERSATIONS_REPRESENTATION,
     ] {
         push_edt_attr(&mut root, body, id);

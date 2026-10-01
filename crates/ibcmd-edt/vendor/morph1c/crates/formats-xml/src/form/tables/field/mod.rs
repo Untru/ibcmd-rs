@@ -372,4 +372,4 @@ pub(crate) static FORM_FIELD_COMMON: &[FieldProj] = &[
 /// Число головных полей общего тела FormField, эмитимых EDT ДО `<handlers>`/`extendedTooltip`/
 /// `contextMenu`/`<type>` (по F_TOOL_TIP_REPRESENTATION включительно; +1 = `shortcut`);
 /// остальные — после.
-pub(crate) const FORM_FIELD_EDT_HEAD: usize = 14;
+pub(crate) const FORM_FIELD_EDT_HEAD: usize = 15;

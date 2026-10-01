@@ -806,6 +806,19 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
                 && attrs.is_empty()
                 && !mixed
                 && !preserve_space;
+            let sparse_column_card_true = path.first().copied()
+                == Some("{http://g5.1c.ru/v8/dt/form}Form")
+                && path.len() >= 3
+                && path[path.len() - 2] == "{}items"
+                && name == "{}extInfo"
+                && namespaces.get("form").map(String::as_str) == Some("http://g5.1c.ru/v8/dt/form")
+                && attrs.len() == 1
+                && attrs
+                    .get("{http://www.w3.org/2001/XMLSchema-instance}type")
+                    .map(String::as_str)
+                    == Some("form:ColumnGroupExtInfo")
+                && !mixed
+                && !preserve_space;
             let mut children = Vec::new();
             for node in e.children() {
                 match node {
@@ -815,6 +828,13 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
                         // false. Only this exact typed scalar spelling may omit.
                         if sparse_cmi_false
                             && value == serde_json::json!(["{}value", {}, [["text", "false"]]])
+                        {
+                            continue;
+                        }
+                        // Authentic 8.3 ColumnGroup omission denotes the same
+                        // known typed true default emitted by the EDT codec.
+                        if sparse_column_card_true
+                            && value == serde_json::json!(["{}showInCard", {}, [["text", "true"]]])
                         {
                             continue;
                         }
@@ -888,6 +908,155 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "requires genuine F laboratory form corpus"]
+    fn strict_form_regeneration_census() {
+        use formats_xml::form::{FormDialect, read_form, write_form};
+        let root = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_CENSUS_ROOT").unwrap());
+        let lab = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").unwrap());
+        let dialect = if std::env::var("IBCMD_EDT_CENSUS_DIALECT").unwrap_or_default() == "xml" {
+            FormDialect::Designer
+        } else {
+            FormDialect::Edt
+        };
+        let label = if dialect == FormDialect::Edt {
+            "edt"
+        } else {
+            "xml"
+        };
+        let start = std::time::Instant::now();
+        fn files(root: &Path, out: &mut Vec<std::path::PathBuf>) {
+            for entry in std::fs::read_dir(root).unwrap() {
+                let entry = entry.unwrap();
+                let kind = entry.file_type().unwrap();
+                assert!(!kind.is_symlink());
+                if kind.is_dir() {
+                    files(&entry.path(), out);
+                } else if entry.path().extension().is_some_and(|e| e == "form")
+                    || entry.file_name() == "Form.xml"
+                {
+                    out.push(entry.path());
+                }
+            }
+        }
+        let mut paths = Vec::new();
+        files(&root, &mut paths);
+        paths.sort();
+        assert!(!paths.is_empty());
+        let witnesses = lab.join(format!("form-regeneration-{label}-witnesses"));
+        std::fs::create_dir_all(&witnesses).unwrap();
+        let mut failures = BTreeMap::<String, Vec<String>>::new();
+        let mut passed = 0;
+        let mut changed = Vec::new();
+        for (index, path) in paths.iter().enumerate() {
+            let rel = path
+                .strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
+            let result = (|| -> Result<bool, EdtError> {
+                let snapshot = tempfile::tempdir_in(&lab).map_err(EdtError::source)?;
+                let name = if dialect == FormDialect::Edt {
+                    "Form.form"
+                } else {
+                    "Form.xml"
+                };
+                std::fs::copy(path, snapshot.path().join(name)).map_err(EdtError::source)?;
+                let limits = ReaderLimits {
+                    files: 1,
+                    directories: 1,
+                    depth: 2,
+                    asset_bytes: 256 * 1024 * 1024,
+                    total_bytes: 256 * 1024 * 1024,
+                };
+                let tree = bounded::read_tree(snapshot.path(), limits)?;
+                let source = &tree.entries()[0];
+                let body = if dialect == FormDialect::Designer {
+                    formats_xml::read::with_verbatim_in_text_eol(|| {
+                        read_form(dialect, source.bytes())
+                    })
+                } else {
+                    morph1c_core::version::with_source_version(
+                        Some(FormatVersion::new(2, 20)),
+                        || read_form(dialect, source.bytes()),
+                    )
+                }
+                .map_err(EdtError::source)?;
+                let version = if dialect == FormDialect::Designer {
+                    let descriptor =
+                        formats_xml::parse(source.bytes()).map_err(EdtError::source)?;
+                    match descriptor.root.attr("version").map(|a| a.value.as_str()) {
+                        Some("2.20") => FormatVersion::new(2, 20),
+                        Some("2.21") => FormatVersion::new(2, 21),
+                        _ => {
+                            return Err(EdtError::new(
+                                "laboratory form requires explicit witnessed XML version",
+                            ));
+                        }
+                    }
+                } else {
+                    FormatVersion::new(2, 20)
+                };
+                let output = morph1c_core::version::with_roundtrip_target(version, || {
+                    write_form(dialect, &body)
+                })
+                .map_err(EdtError::source)?;
+                bounded::validate_xml(name, &output)?;
+                let generated = SourceEntry::from_bytes(SourcePath::new(name).unwrap(), output)
+                    .map_err(EdtError::source)?;
+                if same_body(source, &generated)? {
+                    return Ok(true);
+                }
+                let witness = changed.len() + 1;
+                if witness <= 1024 {
+                    std::fs::write(
+                        witnesses.join(format!("{witness}.source.{label}")),
+                        source.bytes(),
+                    )
+                    .map_err(EdtError::source)?;
+                    std::fs::write(
+                        witnesses.join(format!("{witness}.generated.{label}")),
+                        generated.bytes(),
+                    )
+                    .map_err(EdtError::source)?;
+                }
+                changed.push(serde_json::json!({"path":rel,"witness":witness}));
+                Ok(false)
+            })();
+            match result {
+                Ok(true) => passed += 1,
+                Ok(false) => {}
+                Err(e) => failures.entry(e.to_string()).or_default().push(rel),
+            }
+            if index % 250 == 0 || index + 1 == paths.len() {
+                let progress = serde_json::json!({"root":root,"files":paths.len(),"processed":index+1,"passed":passed,"regeneration_differences":changed.len(),"failure_kinds":failures.len(),"elapsed_seconds":start.elapsed().as_secs_f64()});
+                std::fs::write(
+                    lab.join(format!("form-regeneration-{label}-progress.json")),
+                    serde_json::to_vec_pretty(&progress).unwrap(),
+                )
+                .unwrap();
+                eprintln!(
+                    "regenerated={}/{} passed={} differences={} failures={} elapsed={:.1}s",
+                    index + 1,
+                    paths.len(),
+                    passed,
+                    changed.len(),
+                    failures.len(),
+                    start.elapsed().as_secs_f64()
+                );
+            }
+        }
+        let report = serde_json::json!({"root":root,"dialect":format!("{dialect:?}"),"files":paths.len(),"passed":passed,"regeneration_differences":changed,"failures":failures,"elapsed_seconds":start.elapsed().as_secs_f64()});
+        std::fs::write(
+            lab.join(format!("form-regeneration-{label}.json")),
+            serde_json::to_vec_pretty(&report).unwrap(),
+        )
+        .unwrap();
+        assert!(
+            changed.is_empty() && failures.is_empty(),
+            "see F laboratory regeneration census"
+        );
+    }
     fn body(path: &str, xml: &str) -> SourceEntry {
         SourceEntry::from_bytes(SourcePath::new(path).unwrap(), xml.as_bytes().to_vec()).unwrap()
     }
@@ -1003,5 +1172,44 @@ mod tests {
             )
             .unwrap()
         );
+    }
+    #[test]
+    fn typed_column_group_rejects_duplicate_default_property() {
+        use formats_xml::form::{FormDialect, read_form, write_form};
+        use morph1c_core::ir::{FieldId, FormBody, FormControlKind, FormItem, PropertyValue};
+        let mut form = FormBody::new();
+        let mut group = FormItem::new(FormControlKind::new("ColumnGroup"), "Column", 1);
+        group.ext_info.push((FieldId(181), PropertyValue::Bool(true)));
+        form.items.push(group);
+        let encoded = write_form(FormDialect::Edt, &form).unwrap();
+        let text = std::str::from_utf8(&encoded).unwrap();
+        let valid = "<showInCard>true</showInCard>";
+        assert!(text.contains(valid));
+        assert!(read_form(FormDialect::Edt, &encoded).is_ok());
+        let duplicate = text.replace(valid, &format!("{valid}{valid}"));
+        assert!(read_form(FormDialect::Edt, duplicate.as_bytes()).is_err());
+    }
+    #[test]
+    fn only_typed_column_group_show_in_card_has_true_default_equivalence() {
+        let source = r#"<form:Form xmlns:form="http://g5.1c.ru/v8/dt/form" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><items xsi:type="form:FormGroup"><extInfo xsi:type="form:ColumnGroupExtInfo"><showTitle>true</showTitle></extInfo></items></form:Form>"#;
+        let explicit = source.replace("</extInfo>", "<showInCard>true</showInCard></extInfo>");
+        assert!(same_body(&body("Form.form", source), &body("Form.form", &explicit)).unwrap());
+        for bad in [
+            explicit.replace("<showInCard>true", "<showInCard>false"),
+            explicit.replace("<showInCard>", "<showInCard extra='keep'>"),
+            explicit.replace("<extInfo ", "<extInfo xml:space='preserve' "),
+            explicit.replace("<showTitle>", "keep<showTitle>"),
+            explicit.replace("<extInfo ", "<extInfo extra='keep' "),
+            explicit
+                .replace(
+                    "<showInCard>",
+                    "<other:showInCard xmlns:other='urn:unknown'>",
+                )
+                .replace("</showInCard>", "</other:showInCard>"),
+            explicit.replace("http://g5.1c.ru/v8/dt/form", "urn:wrong:form"),
+            explicit.replace("form:ColumnGroupExtInfo", "form:UsualGroupExtInfo"),
+        ] {
+            assert!(!same_body(&body("Form.form", source), &body("Form.form", &bad)).unwrap());
+        }
     }
 }
