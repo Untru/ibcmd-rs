@@ -120,7 +120,6 @@ struct FacetSet {
     budget: Rc<RefCell<FacetBudget>>,
     policy: MetadataShapePolicy,
     content: SourceFacetContent,
-    typed_depth: usize,
 }
 type SourceFacetContent = Rc<RefCell<BTreeMap<Sha256Digest, Arc<Vec<u8>>>>>;
 type VerifiedFacetContent = Arc<BTreeMap<Sha256Digest, Arc<Vec<u8>>>>;
@@ -131,7 +130,6 @@ impl FacetSet {
             budget: Rc::new(RefCell::new(FacetBudget::default())),
             policy,
             content: Rc::default(),
-            typed_depth: 0,
         }
     }
     fn child_with(parent: &Self, values: Vec<OpaqueFacet>) -> Self {
@@ -140,7 +138,6 @@ impl FacetSet {
             budget: Rc::clone(&parent.budget),
             policy: parent.policy,
             content: Rc::clone(&parent.content),
-            typed_depth: parent.typed_depth + 1,
         }
     }
     fn reserve(&self, bytes: usize) -> Result<(), MetadataDecodeError> {
@@ -774,6 +771,255 @@ pub fn decode_metadata_envelope_with_dialect(
     decode_metadata_envelope(document, source_profile, object_path)
 }
 
+struct ObjectDecoder<'a> {
+    element: &'a XmlElement,
+    uuid: ObjectUuid,
+    profile: ProfileId,
+    path: ObjectPath,
+    facets: FacetSet,
+    parts: CanonicalObjectParts,
+    names: BTreeSet<String>,
+    containers: BTreeSet<&'static str>,
+    generated_source: Option<&'static str>,
+}
+impl<'a> ObjectDecoder<'a> {
+    fn new(
+        element: &'a XmlElement,
+        profile: ProfileId,
+        path: ObjectPath,
+        owner: Option<ObjectUuid>,
+        parent_facets: &FacetSet,
+        initial_facets: Vec<OpaqueFacet>,
+    ) -> Result<Self, MetadataDecodeError> {
+        let e = element;
+        let mut local_facets = FacetSet::child_with(parent_facets, initial_facets);
+        let uuid = uuid_attr(e)?;
+        retain_unknown_start_tag(
+            e,
+            &["uuid"],
+            &profile,
+            &path,
+            "object.attributes",
+            "xml:object-start-tag-projection",
+            &mut local_facets,
+        )?;
+        let mut parts = CanonicalObjectParts::new(
+            LogicalIdentity::new(uuid, path.clone()),
+            MetadataKind::new(e.name().local())
+                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+            provenance(&profile, &path, "object")?,
+        );
+        parts.owner = owner;
+        Ok(Self {
+            element,
+            uuid,
+            profile,
+            path,
+            facets: local_facets,
+            parts,
+            names: BTreeSet::new(),
+            containers: BTreeSet::new(),
+            generated_source: None,
+        })
+    }
+    fn finish(mut self) -> Result<CanonicalObject, MetadataDecodeError> {
+        if !self.names.contains("Name") {
+            return Err(MetadataDecodeError::Missing("Name"));
+        }
+        push_family_guard(&self.profile, &self.path, &mut self.facets)?;
+        self.parts.opaque_facets =
+            OpaqueFacets::new_with_policy(self.facets.values, self.facets.policy.core)
+                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
+        CanonicalObject::new_with_policy(self.parts, self.facets.policy.core)
+            .map_err(|x| MetadataDecodeError::Core(x.to_string()))
+    }
+}
+
+fn decode_object_node<'a>(
+    state: &mut ObjectDecoder<'a>,
+    ordinal: usize,
+    node: &'a XmlNode,
+    uris: &ResolvedNamespaces,
+    expected: Option<&str>,
+) -> Result<Option<&'a XmlElement>, MetadataDecodeError> {
+    let profile = &state.profile;
+    let path = &state.path;
+    let local_facets = &mut state.facets;
+    let parts = &mut state.parts;
+    let names = &mut state.names;
+    let containers = &mut state.containers;
+    let generated_source = &mut state.generated_source;
+    let XmlNode::Element(child) = node else {
+        retain(node, ordinal, profile, path, local_facets)?;
+        return Ok(None);
+    };
+    match child.name().local() {
+        "Properties" if typed(child, "Properties", expected, uris) => {
+            if !containers.insert("Properties") {
+                return Err(MetadataDecodeError::Duplicate("Properties"));
+            }
+            retain_unknown_start_tag(
+                child,
+                &[],
+                profile,
+                path,
+                "properties.attributes",
+                "xml:properties-start-tag-projection",
+                local_facets,
+            )?;
+            let has_generated = decode_properties(
+                child,
+                &mut parts.properties,
+                &mut parts.generated_types,
+                names,
+                profile,
+                path,
+                local_facets,
+                uris,
+                expected,
+            )?;
+            if has_generated
+                && generated_source
+                    .replace("Properties/GeneratedTypes")
+                    .is_some()
+            {
+                return Err(MetadataDecodeError::Duplicate("generated types source"));
+            }
+        }
+        "GeneratedTypes" if typed(child, "GeneratedTypes", expected, uris) => {
+            if !containers.insert("GeneratedTypes") {
+                return Err(MetadataDecodeError::Duplicate("GeneratedTypes"));
+            }
+            let has_generated = decode_generated_types(
+                child,
+                &mut parts.generated_types,
+                profile,
+                path,
+                local_facets,
+                uris,
+                expected,
+                DIRECT_GENERATED_LAYOUT,
+            )?;
+            if has_generated && generated_source.replace("GeneratedTypes").is_some() {
+                return Err(MetadataDecodeError::Duplicate("generated types source"));
+            }
+        }
+        "InternalInfo" if typed(child, "InternalInfo", expected, uris) => {
+            if !containers.insert("InternalInfo") {
+                return Err(MetadataDecodeError::Duplicate("InternalInfo"));
+            }
+            let has_generated = decode_generated_types(
+                child,
+                &mut parts.generated_types,
+                profile,
+                path,
+                local_facets,
+                uris,
+                if expected.is_none() {
+                    None
+                } else {
+                    Some(XR_NAMESPACE)
+                },
+                INTERNAL_INFO_GENERATED_LAYOUT,
+            )?;
+            if has_generated && generated_source.replace("InternalInfo").is_some() {
+                return Err(MetadataDecodeError::Duplicate("generated types source"));
+            }
+        }
+        "ChildObjects" if typed(child, "ChildObjects", expected, uris) => {
+            if !containers.insert("ChildObjects") {
+                return Err(MetadataDecodeError::Duplicate("ChildObjects"));
+            }
+            retain_unknown_start_tag(
+                child,
+                &[],
+                profile,
+                path,
+                "child_objects.attributes",
+                "xml:child-objects-start-tag-projection",
+                local_facets,
+            )?;
+            return Ok(Some(child));
+        }
+        _ => retain(node, ordinal, profile, path, local_facets)?,
+    }
+    Ok(None)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn next_typed_child<'a>(
+    node: &'a XmlNode,
+    ordinal: usize,
+    typed_index: &mut u32,
+    profile: &ProfileId,
+    parent_path: &ObjectPath,
+    facets: &mut FacetSet,
+    uris: &ResolvedNamespaces,
+    expected: Option<&str>,
+    child_reference_kinds: &[&str],
+) -> Result<Option<(&'a XmlElement, ObjectPath)>, MetadataDecodeError> {
+    let XmlNode::Element(child) = node else {
+        retain_as(
+            node,
+            ordinal,
+            profile,
+            parent_path,
+            "child_objects",
+            "xml:child-objects-child",
+            facets,
+        )?;
+        return Ok(None);
+    };
+    if uri_of(child, uris) != expected {
+        retain_as(
+            node,
+            ordinal,
+            profile,
+            parent_path,
+            "child_objects",
+            "xml:child-objects-child",
+            facets,
+        )?;
+        return Ok(None);
+    }
+    let has_uuid = child.attributes().iter().any(|attribute| {
+        matches!(
+            attribute.kind(),
+            AttributeKind::Ordinary(name) if name.prefix().is_none() && name.local() == "uuid"
+        )
+    });
+    if !has_uuid
+        && child_reference_kinds
+            .iter()
+            .any(|candidate| *candidate == child.name().local())
+    {
+        retain_as(
+            node,
+            ordinal,
+            profile,
+            parent_path,
+            "child_objects",
+            "xml:child-object-reference",
+            facets,
+        )?;
+        return Ok(None);
+    }
+    uuid_attr(child)?;
+    let mut path = parent_path.clone();
+    path.push_with_policy(
+        PathSegment::name_with_policy("children", facets.policy.core)
+            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+        facets.policy.core,
+    )
+    .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
+    path.push_with_policy(PathSegment::index(*typed_index), facets.policy.core)
+        .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
+    *typed_index = typed_index
+        .checked_add(1)
+        .ok_or(MetadataDecodeError::ResourceLimit("child ordinal"))?;
+    Ok(Some((child, path)))
+}
+
 #[allow(clippy::too_many_arguments)]
 fn decode_object(
     e: &XmlElement,
@@ -787,240 +1033,166 @@ fn decode_object(
     expected: Option<&str>,
     child_reference_kinds: &[&str],
 ) -> Result<CanonicalObject, MetadataDecodeError> {
-    // Unknown XML content is traversed iteratively. Typed ownership remains
-    // recursive and keeps its separate lifecycle guard until that decoder is
-    // iterative as well.
-    if parent_facets.typed_depth > MAX_METADATA_DEPTH {
-        return Err(MetadataDecodeError::ResourceLimit("typed object depth"));
+    let mut state = ObjectDecoder::new(e, profile, path, owner, parent_facets, initial_facets)?;
+    if state.facets.policy.core == SourceOperationPolicy::Source {
+        return decode_source_objects_iteratively(
+            state,
+            descendants,
+            uris,
+            expected,
+            child_reference_kinds,
+        );
     }
-    let mut local_facets = FacetSet::child_with(parent_facets, initial_facets);
-    let uuid = uuid_attr(e)?;
-    retain_unknown_start_tag(
-        e,
-        &["uuid"],
-        &profile,
-        &path,
-        "object.attributes",
-        "xml:object-start-tag-projection",
-        &mut local_facets,
-    )?;
-    let mut parts = CanonicalObjectParts::new(
-        LogicalIdentity::new(uuid, path.clone()),
-        MetadataKind::new(e.name().local())
-            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-        provenance(&profile, &path, "object")?,
-    );
-    parts.owner = owner;
-    let mut names = BTreeSet::new();
-    let mut containers = BTreeSet::new();
-    let mut generated_source = None;
+    // The legacy document preflight retains its small depth limit. Share the
+    // node grammar and child inspection with the iterative source decoder.
     for (ordinal, node) in e.children().iter().enumerate() {
-        let XmlNode::Element(child) = node else {
-            retain(node, ordinal, &profile, &path, &mut local_facets)?;
-            continue;
-        };
-        match child.name().local() {
-            "Properties" if typed(child, "Properties", expected, uris) => {
-                if !containers.insert("Properties") {
-                    return Err(MetadataDecodeError::Duplicate("Properties"));
-                }
-                retain_unknown_start_tag(
-                    child,
-                    &[],
-                    &profile,
-                    &path,
-                    "properties.attributes",
-                    "xml:properties-start-tag-projection",
-                    &mut local_facets,
-                )?;
-                let has_generated = decode_properties(
-                    child,
-                    &mut parts.properties,
-                    &mut parts.generated_types,
-                    &mut names,
-                    &profile,
-                    &path,
-                    &mut local_facets,
-                    uris,
-                    expected,
-                )?;
-                if has_generated
-                    && generated_source
-                        .replace("Properties/GeneratedTypes")
-                        .is_some()
-                {
-                    return Err(MetadataDecodeError::Duplicate("generated types source"));
-                }
-            }
-            "GeneratedTypes" if typed(child, "GeneratedTypes", expected, uris) => {
-                if !containers.insert("GeneratedTypes") {
-                    return Err(MetadataDecodeError::Duplicate("GeneratedTypes"));
-                }
-                let has_generated = decode_generated_types(
-                    child,
-                    &mut parts.generated_types,
-                    &profile,
-                    &path,
-                    &mut local_facets,
-                    uris,
-                    expected,
-                    DIRECT_GENERATED_LAYOUT,
-                )?;
-                if has_generated && generated_source.replace("GeneratedTypes").is_some() {
-                    return Err(MetadataDecodeError::Duplicate("generated types source"));
-                }
-            }
-            "InternalInfo" if typed(child, "InternalInfo", expected, uris) => {
-                if !containers.insert("InternalInfo") {
-                    return Err(MetadataDecodeError::Duplicate("InternalInfo"));
-                }
-                let has_generated = decode_generated_types(
-                    child,
-                    &mut parts.generated_types,
-                    &profile,
-                    &path,
-                    &mut local_facets,
-                    uris,
-                    if expected.is_none() {
-                        None
-                    } else {
-                        Some(XR_NAMESPACE)
-                    },
-                    INTERNAL_INFO_GENERATED_LAYOUT,
-                )?;
-                if has_generated && generated_source.replace("InternalInfo").is_some() {
-                    return Err(MetadataDecodeError::Duplicate("generated types source"));
-                }
-            }
-            "ChildObjects" if typed(child, "ChildObjects", expected, uris) => {
-                if !containers.insert("ChildObjects") {
-                    return Err(MetadataDecodeError::Duplicate("ChildObjects"));
-                }
-                retain_unknown_start_tag(
-                    child,
-                    &[],
-                    &profile,
-                    &path,
-                    "child_objects.attributes",
-                    "xml:child-objects-start-tag-projection",
-                    &mut local_facets,
-                )?;
-                decode_children(
-                    child,
-                    &profile,
-                    &path,
-                    uuid,
-                    descendants,
-                    &mut local_facets,
+        if let Some(container) = decode_object_node(&mut state, ordinal, node, uris, expected)? {
+            let mut typed_index = 0;
+            for (ordinal, node) in container.children().iter().enumerate() {
+                if let Some((child, path)) = next_typed_child(
+                    node,
+                    ordinal,
+                    &mut typed_index,
+                    &state.profile,
+                    &state.path,
+                    &mut state.facets,
                     uris,
                     expected,
                     child_reference_kinds,
-                )?
+                )? {
+                    let mut nested = Vec::new();
+                    let object = decode_object(
+                        child,
+                        state.profile.clone(),
+                        path,
+                        Some(state.uuid),
+                        &mut nested,
+                        &mut state.facets,
+                        Vec::new(),
+                        uris,
+                        expected,
+                        &[],
+                    )?;
+                    descendants.push(object);
+                    descendants.extend(nested);
+                }
             }
-            _ => retain(node, ordinal, &profile, &path, &mut local_facets)?,
         }
     }
-    if !names.contains("Name") {
-        return Err(MetadataDecodeError::Missing("Name"));
-    }
-    push_family_guard(&profile, &path, &mut local_facets)?;
-    parts.opaque_facets =
-        OpaqueFacets::new_with_policy(local_facets.values, local_facets.policy.core)
-            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
-    CanonicalObject::new_with_policy(parts, local_facets.policy.core)
-        .map_err(|x| MetadataDecodeError::Core(x.to_string()))
+    state.finish()
 }
 
-#[allow(clippy::too_many_arguments)]
-fn decode_children(
-    container: &XmlElement,
-    profile: &ProfileId,
-    parent_path: &ObjectPath,
-    owner: ObjectUuid,
+struct ChildCursor<'a> {
+    container: &'a XmlElement,
+    next: usize,
+    typed_index: u32,
+}
+struct ObjectContinuation<'a> {
+    state: ObjectDecoder<'a>,
+    next: usize,
+    children: Option<ChildCursor<'a>>,
+    slot: usize,
+}
+fn decode_source_objects_iteratively<'a>(
+    root: ObjectDecoder<'a>,
     descendants: &mut Vec<CanonicalObject>,
-    facets: &mut FacetSet,
     uris: &ResolvedNamespaces,
     expected: Option<&str>,
     child_reference_kinds: &[&str],
-) -> Result<(), MetadataDecodeError> {
-    let mut typed_index = 0u32;
-    for (ordinal, node) in container.children().iter().enumerate() {
-        let XmlNode::Element(child) = node else {
-            retain_as(
-                node,
-                ordinal,
-                profile,
-                parent_path,
-                "child_objects",
-                "xml:child-objects-child",
-                facets,
-            )?;
-            continue;
-        };
-        if uri_of(child, uris) != expected {
-            retain_as(
-                node,
-                ordinal,
-                profile,
-                parent_path,
-                "child_objects",
-                "xml:child-objects-child",
-                facets,
-            )?;
-            continue;
-        }
-        let has_uuid = child.attributes().iter().any(|attribute| {
-            matches!(
-                attribute.kind(),
-                AttributeKind::Ordinary(name) if name.prefix().is_none() && name.local() == "uuid"
-            )
-        });
-        if !has_uuid
-            && child_reference_kinds
-                .iter()
-                .any(|candidate| *candidate == child.name().local())
-        {
-            retain_as(
-                node,
-                ordinal,
-                profile,
-                parent_path,
-                "child_objects",
-                "xml:child-object-reference",
-                facets,
-            )?;
-            continue;
-        }
-        uuid_attr(child)?;
-        let mut path = parent_path.clone();
-        path.push_with_policy(
-            PathSegment::name_with_policy("children", facets.policy.core)
-                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-            facets.policy.core,
-        )
-        .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
-        path.push_with_policy(PathSegment::index(typed_index), facets.policy.core)
-            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
-        typed_index = typed_index
-            .checked_add(1)
-            .ok_or(MetadataDecodeError::ResourceLimit("child ordinal"))?;
-        let mut nested = Vec::new();
-        let child_object = decode_object(
-            child,
-            profile.clone(),
-            path,
-            Some(owner),
-            &mut nested,
-            facets,
-            Vec::new(),
-            uris,
-            expected,
-            &[],
-        )?;
-        descendants.push(child_object);
-        descendants.extend(nested);
+) -> Result<CanonicalObject, MetadataDecodeError> {
+    enum Action<'a> {
+        Continue,
+        Descend(Box<ObjectDecoder<'a>>),
+        Complete,
     }
-    Ok(())
+    let mut pending = vec![ObjectContinuation {
+        state: root,
+        next: 0,
+        children: None,
+        slot: 0,
+    }];
+    // Slots are reserved on entry (DFS preorder), but populated on exit. The
+    // parent remains suspended while each child is fully validated, preserving
+    // the original decoder's first-error priority and owner/facet sequence.
+    let mut completed = vec![None];
+    while !pending.is_empty() {
+        let action = {
+            let frame = pending.last_mut().expect("nonempty continuation stack");
+            if let Some(cursor) = frame.children.as_mut() {
+                if let Some(node) = cursor.container.children().get(cursor.next) {
+                    let ordinal = cursor.next;
+                    cursor.next += 1;
+                    let references = if frame.slot == 0 {
+                        child_reference_kinds
+                    } else {
+                        &[]
+                    };
+                    match next_typed_child(
+                        node,
+                        ordinal,
+                        &mut cursor.typed_index,
+                        &frame.state.profile,
+                        &frame.state.path,
+                        &mut frame.state.facets,
+                        uris,
+                        expected,
+                        references,
+                    )? {
+                        Some((child, path)) => Action::Descend(Box::new(ObjectDecoder::new(
+                            child,
+                            frame.state.profile.clone(),
+                            path,
+                            Some(frame.state.uuid),
+                            &frame.state.facets,
+                            Vec::new(),
+                        )?)),
+                        None => Action::Continue,
+                    }
+                } else {
+                    frame.children = None;
+                    Action::Continue
+                }
+            } else if let Some(node) = frame.state.element.children().get(frame.next) {
+                let ordinal = frame.next;
+                frame.next += 1;
+                if let Some(container) =
+                    decode_object_node(&mut frame.state, ordinal, node, uris, expected)?
+                {
+                    frame.children = Some(ChildCursor {
+                        container,
+                        next: 0,
+                        typed_index: 0,
+                    });
+                }
+                Action::Continue
+            } else {
+                Action::Complete
+            }
+        };
+        match action {
+            Action::Continue => {}
+            Action::Descend(state) => {
+                let slot = completed.len();
+                completed.push(None);
+                pending.push(ObjectContinuation {
+                    state: *state,
+                    next: 0,
+                    children: None,
+                    slot,
+                });
+            }
+            Action::Complete => {
+                let frame = pending.pop().expect("completion has a frame");
+                completed[frame.slot] = Some(frame.state.finish()?);
+            }
+        }
+    }
+    let mut objects = completed
+        .into_iter()
+        .map(|object| object.expect("each frame completed"));
+    let root = objects.next().expect("root frame completed");
+    descendants.extend(objects);
+    Ok(root)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2013,6 +2185,98 @@ mod tests {
     }
     fn profile() -> ProfileId {
         ProfileId::parse("xml:2.20").unwrap()
+    }
+
+    #[test]
+    fn source_operation_typed_object_continuations_preserve_preorder_and_first_errors() {
+        let xml = b"<MetaDataObject><Catalog uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Root</Name></Properties><ChildObjects> <TabularSection uuid='22222222-2222-4222-8222-222222222222'><Properties><Name>Table</Name></Properties><ChildObjects><Attribute uuid='33333333-3333-4333-8333-333333333333'><Properties><Name>Nested</Name></Properties></Attribute></ChildObjects></TabularSection> <Attribute uuid='44444444-4444-4444-8444-444444444444'><Properties><Name>Sibling</Name></Properties></Attribute> </ChildObjects><Future>unchanged</Future></Catalog></MetaDataObject>";
+        let document = XmlReader::from_slice(xml).unwrap();
+        let bounded = decode_source_metadata_envelope(&document, profile(), path()).unwrap();
+        let source = decode_source_metadata_envelope_with_policy(
+            &document,
+            profile(),
+            path(),
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert_eq!(source.root(), bounded.root());
+        assert_eq!(source.descendants(), bounded.descendants());
+        assert_eq!(source.descendants().len(), 3);
+        assert_eq!(
+            source.descendants()[0].owner(),
+            Some(source.root().identity().uuid())
+        );
+        assert_eq!(
+            source.descendants()[1].owner(),
+            Some(source.descendants()[0].identity().uuid())
+        );
+        assert_eq!(
+            source.descendants()[2].owner(),
+            Some(source.root().identity().uuid())
+        );
+        assert_eq!(source.emit(&profile()).unwrap(), xml);
+        for invalid in [
+            // Child UUID must be checked before the suspended parent's missing Name.
+            "<MetaDataObject><Catalog uuid='11111111-1111-4111-8111-111111111111'><ChildObjects><Attribute uuid='invalid'><Properties><Name>Child</Name></Properties></Attribute></ChildObjects></Catalog></MetaDataObject>",
+            // The deep child's duplicate Name precedes the later duplicate parent container.
+            "<MetaDataObject><Catalog uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Root</Name></Properties><ChildObjects><Attribute uuid='22222222-2222-4222-8222-222222222222'><Properties><Name>A</Name><Name>B</Name></Properties></Attribute></ChildObjects><Properties/></Catalog></MetaDataObject>",
+        ] {
+            let document = XmlReader::from_slice(invalid.as_bytes()).unwrap();
+            assert_eq!(
+                decode_source_metadata_envelope(&document, profile(), path()).unwrap_err(),
+                decode_source_metadata_envelope_with_policy(
+                    &document,
+                    profile(),
+                    path(),
+                    SourceOperationPolicy::Source
+                )
+                .unwrap_err()
+            );
+        }
+    }
+
+    #[test]
+    fn source_operation_typed_objects_deep_512_are_iterative_and_reject_late_corruption() {
+        std::thread::Builder::new().stack_size(128 * 1024).spawn(|| {
+            const OBJECTS: usize = 512;
+            let uuids: Vec<_> = (0..OBJECTS).map(|index| format!("{index:08x}-1111-4111-8111-111111111111")).collect();
+            let mut xml = String::from("<MetaDataObject>");
+            for (index, uuid) in uuids.iter().enumerate() {
+                let kind = if index == 0 { "Catalog" } else { "Attribute" };
+                xml.push_str(&format!("<{kind} uuid='{uuid}' future='retained'><Properties><Name>N{index}</Name><Future>opaque{index}</Future></Properties>"));
+                if index + 1 != OBJECTS { xml.push_str("<ChildObjects>"); }
+            }
+            xml.push_str("</Attribute>");
+            for index in (0..OBJECTS-1).rev() {
+                xml.push_str(if index == 0 { "</ChildObjects></Catalog>" } else { "</ChildObjects></Attribute>" });
+            }
+            xml.push_str("</MetaDataObject>");
+            let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+            assert!(matches!(decode_source_metadata_envelope(&document, profile(), path()), Err(MetadataDecodeError::ResourceLimit("depth"))));
+            let envelope = decode_source_metadata_envelope_with_policy(&document, profile(), path(), SourceOperationPolicy::Source).unwrap();
+            assert_eq!(envelope.configuration().unwrap().len(), OBJECTS);
+            assert_eq!(envelope.descendants().len(), OBJECTS-1);
+            for (index, object) in envelope.descendants().iter().enumerate() {
+                assert_eq!(object.identity().uuid().to_string(), uuids[index+1]);
+                assert_eq!(object.owner().unwrap().to_string(), uuids[index]);
+                assert_eq!(object.identity().path().segments().len(), 1+2*(index+1));
+                assert_eq!(object.identity().path().segments().last().unwrap().as_index(), Some(0));
+                assert_eq!(object.opaque_facets().as_slice().len(), 3);
+            }
+            assert_eq!(envelope.emit(&profile()).unwrap(), xml.as_bytes());
+            let copy = envelope.clone();
+            assert_eq!(copy.source_document(), envelope.source_document());
+            assert_eq!(copy.root(), envelope.root());
+            assert_eq!(copy.descendants(), envelope.descendants());
+            let edited = copy.with_model(envelope.root().clone(), envelope.descendants().to_vec()).unwrap();
+            assert!(matches!(edited.emit(&profile()), Err(MetadataEncodeError::ModelChanged { .. })));
+            let duplicate = xml.replace(&format!("uuid='{}'", uuids[OBJECTS-1]), &format!("uuid='{}'", uuids[0]));
+            let duplicate = XmlReader::from_slice(duplicate.as_bytes()).unwrap();
+            assert!(decode_source_metadata_envelope_with_policy(&duplicate, profile(), path(), SourceOperationPolicy::Source).is_err());
+            let malformed = xml.replace(&format!("uuid='{}'", uuids[OBJECTS-1]), "uuid='invalid'");
+            let malformed = XmlReader::from_slice(malformed.as_bytes()).unwrap();
+            assert!(matches!(decode_source_metadata_envelope_with_policy(&malformed, profile(), path(), SourceOperationPolicy::Source), Err(MetadataDecodeError::InvalidUuid(_))));
+        }).unwrap().join().unwrap();
     }
 
     #[test]
