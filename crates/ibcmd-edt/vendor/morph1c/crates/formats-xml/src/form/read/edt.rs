@@ -62,6 +62,15 @@ pub(crate) fn read_edt(root: Element) -> Result<FormBody, FormError> {
         a.claimed.set(true);
     }
 
+    fn uses_dcs_value(el: &Element) -> bool {
+        el.attrs.iter().any(|a| a.name == "xsi:type" && a.value == "core_1:DesignTimeValueValue") || el.children.iter().any(uses_dcs_value)
+    }
+    match (root.attr("xmlns:core_1"), uses_dcs_value(&root)) {
+        (Some(a), true) if a.value == "http://g5.1c.ru/v8/dt/data-composition-system/core" => a.claimed.set(true),
+        (None, false) => {},
+        _ => return Err(FormError::Envelope("DCS core namespace must bind interpreted DesignTimeValueValue".into())),
+    }
+
     let mut body = FormBody::new();
 
     // Форм-заголовок `<title>` (опц., прямой ребёнок корня — ДО контрол-дерева).

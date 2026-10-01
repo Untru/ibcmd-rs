@@ -110,6 +110,7 @@ pub(crate) fn designer_dcs_field(f: &DcsField) -> Result<OutElement, FormError> 
     if let Some(t) = designer_dcs_title(&f.title) {
         el.push(t);
     }
+    for oe in &f.order_expressions { el.push(designer_dcs_order_expression(oe)); }
     // valueType — после title (ERP-witness ВыручкаИСебестоимостьПродаж: dataPath→field→
     // title→valueType; тот же scoped-энкод, что у DCS-параметра; ошибка кодека — громкая).
     if let Some(ts) = &f.value_type {
@@ -178,6 +179,7 @@ pub(crate) fn designer_dcs_calculated_field(
     if let Some(app) = designer_dcs_appearance(&cf.appearance) {
         el.push(app);
     }
+    for av in &cf.available_values { el.push(designer_dcs_available_value(av)); }
     if let Some(ts) = &cf.value_type {
         el.push(
             crate::type_codec::encode_scoped(
@@ -303,6 +305,8 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
     if p.value_list_allowed {
         el.push(OutElement::leaf("dcssch", "valueListAllowed", "true"));
     }
+    if let Some(expression) = &p.expression { el.push(OutElement::leaf("dcssch", "expression", expression.clone())); }
+    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("dcssch", "use", "Always")); }
     if let Some(b) = p.available_as_field {
         el.push(OutElement::leaf(
             "dcssch",
@@ -334,6 +338,7 @@ const DCS_COMMON_NS_URI: &str = "http://v8.1c.ru/8.1/data-composition-system/com
 /// для availableValue не витнесснут).
 pub(crate) fn designer_dcs_param_value(local: &str, v: &DcsParamValue) -> OutElement {
     match v {
+        DcsParamValue::DesignTimeValue(text) => designer_dcs_text_value(local, text, "dcscor:DesignTimeValue"),
         DcsParamValue::Undefined => {
             OutElement::self_closing("dcssch", local).attr("xsi:nil", "true")
         }
@@ -451,6 +456,9 @@ pub(crate) fn designer_dcs_settings_parameter_value(it: &DcsSettingsParameterVal
     // (§1.0-witness ×7 designer-блоков) ⇒ ничего не эмитим.
     if let Some(v) = &it.value {
         match v {
+        DcsCorValue::DesignTimeValue(text) => {
+            el.push(designer_dcs_text_value_ns("dcscor", "value", text, "dcscor:DesignTimeValue"));
+        }
         DcsCorValue::Nil => {
             el.push(OutElement::self_closing("dcscor", "value").attr("xsi:nil", "true"));
         }
@@ -600,6 +608,7 @@ pub(crate) fn designer_dcs_item(it: &DcsItem) -> OutElement {
             items,
             presentation,
             view_mode,
+            user_setting_id,
         } => {
             let mut el =
                 OutElement::branch("dcsset", "item").attr("xsi:type", "dcsset:FilterItemGroup");
@@ -620,6 +629,7 @@ pub(crate) fn designer_dcs_item(it: &DcsItem) -> OutElement {
             if let Some(v) = view_mode {
                 el.push(OutElement::leaf("dcsset", "viewMode", v.clone()));
             }
+            if let Some(id) = user_setting_id { el.push(OutElement::leaf("dcsset", "userSettingID", id.clone())); }
             el
         }
         DcsItem::OrderAuto => {

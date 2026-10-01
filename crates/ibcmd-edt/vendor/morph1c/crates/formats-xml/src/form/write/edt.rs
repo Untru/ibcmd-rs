@@ -144,6 +144,9 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
     // (`core:ColorRef`/`core:PictureRef`/`core:NumberValue`/`core:StringValue`); позиция
     // фиксирована МЕЖДУ `xmlns:xsi` и `xmlns:form` (сверено 104/104). Выводим из
     // построенного дерева, чтобы не тащить presence-флаг через каждый кодек.
+    if out_uses_prefix(&root, "core_1:") {
+        root.attrs.insert(0, ("xmlns:core_1".to_string(), "http://g5.1c.ru/v8/dt/data-composition-system/core".to_string()));
+    }
     if out_uses_core(&root) {
         root.attrs
             .insert(0, ("xmlns:core".to_string(), CORE_NS_URI.to_string()));

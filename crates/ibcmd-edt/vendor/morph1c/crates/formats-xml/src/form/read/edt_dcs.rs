@@ -54,6 +54,7 @@ pub(crate) fn read_edt_dcs_field(f: &Element) -> Result<DcsField, FormError> {
     {
         available_values.push(read_edt_dcs_available_value(av)?);
     }
+    let order_expressions = f.children.iter().filter(|c| c.local == "orderExpressions" && c.prefix == "").map(read_edt_dcs_order_expression).collect::<Result<Vec<_>, _>>()?;
     expect_only_children(
         f,
         &[
@@ -61,6 +62,7 @@ pub(crate) fn read_edt_dcs_field(f: &Element) -> Result<DcsField, FormError> {
             "field",
             "presentationExpression",
             "title",
+            "orderExpressions",
             "valueType",
             "useRestriction",
             "attributeUseRestriction",
@@ -69,6 +71,7 @@ pub(crate) fn read_edt_dcs_field(f: &Element) -> Result<DcsField, FormError> {
         ],
     )?;
     Ok(DcsField {
+        order_expressions,
         nested,
         data_path,
         field,
@@ -140,6 +143,7 @@ pub(crate) fn read_edt_dcs_calculated_field(cf: &Element) -> Result<DcsCalculate
         Some(_) => read_value_type(cf, "valueType", crate::TypeDialect::Edt)?,
         None => None,
     };
+    let available_values = cf.children.iter().filter(|c| c.local == "availableValues" && c.prefix == "").map(read_edt_dcs_available_value).collect::<Result<Vec<_>, _>>()?;
     expect_only_children(
         cf,
         &[
@@ -151,9 +155,11 @@ pub(crate) fn read_edt_dcs_calculated_field(cf: &Element) -> Result<DcsCalculate
             "orderExpression",
             "appearance",
             "valueType",
+            "availableValues",
         ],
     )?;
     Ok(DcsCalculatedField {
+        available_values,
         data_path,
         expression,
         title,
@@ -209,21 +215,25 @@ pub(crate) fn read_edt_dcs_appearance(host: &Element) -> Result<Vec<DcsSettingsP
             let vxt = values.attr("xsi:type").ok_or_else(|| {
                 FormError::Frame("DCS appearance <values>: no xsi:type (§1.0)".into())
             })?;
-            if vxt.value != "core:StringValue" {
-                return Err(FormError::Frame(format!(
-                    "DCS appearance <values> xsi:type={:?}: unmodeled (§1.0)",
-                    vxt.value
-                )));
-            }
             vxt.claimed.set(true);
             values.claim();
-            let v = leaf_text(values, "value")?;
+            let value = match vxt.value.as_str() {
+                "core:StringValue" => DcsCorValue::Str(leaf_text(values, "value")?),
+                "core:ColorValue" => {
+                    let inner = values.child("value").filter(|c| c.prefix.is_empty()).ok_or_else(|| FormError::Frame("DCS ColorValue: no value".into()))?;
+                    match super::super::decode_edt_color(inner, "value")? {
+                        PropertyValue::Ref(c) => DcsCorValue::Color(super::super::color_to_designer(&c, "value")?),
+                        other => return Err(FormError::Frame(format!("DCS ColorValue: unexpected {other:?}"))),
+                    }
+                }
+                other => return Err(FormError::Frame(format!("DCS appearance values xsi:type={other:?}: unmodeled"))),
+            };
             expect_only_children(values, &["value"])?;
             expect_only_children(ai, &["parameter", "values"])?;
             appearance.push(DcsSettingsParameterValue {
                 used: None,
                 parameter,
-                value: Some(DcsCorValue::Str(v)),
+                value: Some(value),
                 user_setting_id: None,
             });
         }
@@ -247,11 +257,18 @@ pub(crate) fn read_edt_dcs_order_expression(oe: &Element) -> Result<DcsOrderExpr
     let auto_order = match oe.child("autoOrder").filter(|c| c.prefix.is_empty()) {
         Some(v) => {
             v.claim_with_text();
-            matches!(v.text.as_str(), "true")
+            match v.text.as_str() {
+                "true" => true,
+                "false" => false,
+                other => return Err(FormError::Frame(format!("DCS autoOrder={other:?}: want boolean"))),
+            }
         }
         None => false,
     };
     expect_only_children(oe, &["expression", "orderType", "autoOrder"])?;
+    if !matches!(order_type.as_str(), "Asc" | "Desc") {
+        return Err(FormError::Frame(format!("DCS orderType={order_type:?}: unmodeled direction")));
+    }
     Ok(DcsOrderExpression {
         expression,
         order_type,
@@ -315,6 +332,17 @@ pub(crate) fn read_edt_dcs_parameter(p: &Element) -> Result<DcsParameter, FormEr
     };
     let value_list_allowed = read_presence_true(p, "valueListAllowed")?;
     let available_as_field = read_edt_opt_bool(p, "availableAsField")?;
+    let expression = p.child("expression").filter(|c| c.prefix == "").map(|c| { c.claim_with_text(); c.text.clone() });
+    let usage = match p.child("use").filter(|c| c.prefix == "") {
+        None => None,
+        Some(c) => {
+            c.claim_with_text(); expect_no_children(c)?;
+            match c.text.as_str() {
+                "Always" => Some(morph1c_core::ir::form::DcsParameterUse::Always),
+                other => return Err(FormError::Frame(format!("DCS parameter use={other:?}: unmodeled usage"))),
+            }
+        }
+    };
     expect_only_children(
         p,
         &[
@@ -325,9 +353,13 @@ pub(crate) fn read_edt_dcs_parameter(p: &Element) -> Result<DcsParameter, FormEr
             "useRestriction",
             "valueListAllowed",
             "availableAsField",
+            "expression",
+            "use",
         ],
     )?;
     Ok(DcsParameter {
+        expression,
+        usage,
         name,
         title,
         value_type,
@@ -375,8 +407,9 @@ pub(crate) fn read_edt_dcs_param_value(values: &Element) -> Result<DcsParamValue
             DcsParamValue::Undefined
         }
         "core:BooleanValue" => {
-            empty(values)?;
-            DcsParamValue::Boolean("false".to_string())
+            let text = if values.children.is_empty() { empty(values)?; "false".to_string() } else { child_value(values)? };
+            if !matches!(text.as_str(), "true" | "false") { return Err(FormError::Frame("DCS BooleanValue: invalid boolean".into())); }
+            DcsParamValue::Boolean(text)
         }
         "core:StringValue" => DcsParamValue::Str(child_value(values)?),
         "core:DateValue" => DcsParamValue::Date(child_value(values)?),
@@ -394,6 +427,11 @@ pub(crate) fn read_edt_dcs_param_value(values: &Element) -> Result<DcsParamValue
         // types-ns ⟷ Designer `xsi:type="v8:Type">dNpM:Undefined` (witness
         // КлючиРеестраДокументов.ФормаВыбора). Храним беспрефиксное имя (X-канон).
         "core:TypeValue" => DcsParamValue::TypeValue(child_value(values)?),
+        "core_1:DesignTimeValueValue" => {
+            let outer = values.child("value").filter(|c| c.prefix.is_empty()).ok_or_else(|| FormError::Frame("DesignTimeValueValue: no outer value".into()))?;
+            outer.claim(); expect_only_children(values, &["value"])?;
+            DcsParamValue::DesignTimeValue(child_value(outer)?)
+        }
         other => {
             return Err(FormError::Frame(format!(
                 "<values> xsi:type={other:?}: unmodeled DCS value (§1.0)"

@@ -21,6 +21,7 @@ pub(crate) fn edt_dcs_field(f: &DcsField) -> Result<OutElement, FormError> {
     if let Some(t) = edt_dcs_title(&f.title) {
         el.push(t);
     }
+    for oe in &f.order_expressions { el.push({ let mut value = edt_dcs_order_expression(oe); value.local = "orderExpressions".to_string(); value }); }
     // valueType — после title (ERP-witness; ⟷ Designer dcssch:valueType; ошибка — громкая).
     if let Some(ts) = &f.value_type {
         el.push(
@@ -68,6 +69,7 @@ pub(crate) fn edt_dcs_calculated_field(cf: &DcsCalculatedField) -> Result<OutEle
     if let Some(app) = edt_dcs_appearance(&cf.appearance)? {
         el.push(app);
     }
+    for av in &cf.available_values { el.push(edt_dcs_available_value(av)); }
     if let Some(ts) = &cf.value_type {
         el.push(
             crate::type_codec::encode(crate::TypeDialect::Edt, "", "valueType", ts)
@@ -105,6 +107,12 @@ pub(crate) fn edt_dcs_appearance(
                 let mut values =
                     OutElement::branch("", "values").attr("xsi:type", "core:StringValue");
                 values.push(OutElement::leaf("", "value", s.clone()));
+                item.push(values);
+            }
+            Some(DcsCorValue::Color(c)) => {
+                let mut values = OutElement::branch("", "values").attr("xsi:type", "core:ColorValue");
+                let canon = super::super::color_from_designer(c, "value")?;
+                values.push(super::super::render_edt_color("value", &canon)?);
                 item.push(values);
             }
             other => {
@@ -207,6 +215,8 @@ pub(crate) fn edt_dcs_parameter(p: &DcsParameter) -> Result<OutElement, FormErro
     if p.value_list_allowed {
         el.push(OutElement::leaf("", "valueListAllowed", "true"));
     }
+    if let Some(expression) = &p.expression { el.push(OutElement::leaf("", "expression", expression.clone())); }
+    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("", "use", "Always")); }
     if let Some(b) = p.available_as_field {
         el.push(OutElement::leaf(
             "",
@@ -238,11 +248,16 @@ pub(crate) fn edt_dcs_local_title(pairs: &[(Lang, String)]) -> OutElement {
 /// TypeValue — `<value>текст</value>`; Uuid — `value=`-АТРИБУТ.
 pub(crate) fn edt_dcs_param_value(local: &str, v: &DcsParamValue) -> OutElement {
     match v {
+        DcsParamValue::DesignTimeValue(text) => {
+            let mut values = OutElement::branch("", local).attr("xsi:type", "core_1:DesignTimeValueValue");
+            let mut outer = OutElement::branch("", "value"); outer.push(OutElement::leaf("", "value", text.clone())); values.push(outer); values
+        }
         DcsParamValue::Undefined => {
             OutElement::self_closing("", local).attr("xsi:type", "core:UndefinedValue")
         }
-        DcsParamValue::Boolean(_) => {
-            OutElement::self_closing("", local).attr("xsi:type", "core:BooleanValue")
+        DcsParamValue::Boolean(text) => {
+            if text == "false" { OutElement::self_closing("", local).attr("xsi:type", "core:BooleanValue") }
+            else { let mut value = OutElement::branch("", local).attr("xsi:type", "core:BooleanValue"); value.push(OutElement::leaf("", "value", text.clone())); value }
         }
         DcsParamValue::Str(s) => {
             let mut values = OutElement::branch("", local).attr("xsi:type", "core:StringValue");

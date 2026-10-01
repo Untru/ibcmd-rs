@@ -4,6 +4,9 @@ use super::*;
 /// заголовок + опц. ограничения использования. ОБА формата несут ⇒ X-сравнимо.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DcsField {
+    /// Ordered UH data-set field expressions; EDT orderExpressions, native orderExpression.
+    #[serde(default)]
+    pub order_expressions: Vec<DcsOrderExpression>,
     /// Вложенный набор данных: `true` ⇒ EDT `xsi:type="schema:DataCompositionSchemaNestedDataSet"`
     /// ⟺ Designer `xsi:type="dcssch:DataSetFieldNestedDataSet"` (witness СценарииОбменовДанными);
     /// `false` ⇒ обычное поле (`…DataSetField` ⟺ `dcssch:DataSetFieldField`).
@@ -87,6 +90,9 @@ pub struct DcsUseRestriction {
 /// опц. локализованный title + опц. useRestriction. ОБА формата несут ⇒ X-сравнимо.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DcsCalculatedField {
+    /// Ordered available values, before valueType in both SDK dialects.
+    #[serde(default)]
+    pub available_values: Vec<DcsAvailableValue>,
     /// Путь данных (`dataPath` ⟺ `dcssch:dataPath`).
     pub data_path: String,
     /// Выражение (`expression` ⟺ `dcssch:expression`), напр. `4`.
@@ -140,6 +146,12 @@ pub struct DcsOrderExpression {
 /// заголовок + тип + значение + флаги. ОБА формата несут ⇒ X-сравнимо.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DcsParameter {
+    /// Parameter expression, preserved as text, before use/availableAsField.
+    #[serde(default)]
+    pub expression: Option<String>,
+    /// Explicit witnessed Always; absence remains absence.
+    #[serde(default)]
+    pub usage: Option<DcsParameterUse>,
     /// Имя параметра (`name` ⟺ `dcssch:name`).
     pub name: String,
     /// Локализованный заголовок (EDT `<title><localValue><content>` ⟺ Designer `<dcssch:title>`),
@@ -177,6 +189,8 @@ pub struct DcsParameter {
 /// Значение параметра DCS (EDT `<values xsi:type="core:*Value"/>` ⟺ Designer `<dcssch:value>`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DcsParamValue {
+    /// Design-time symbolic value: native dcscor:DesignTimeValue, EDT nested value/value.
+    DesignTimeValue(String),
     /// `core:UndefinedValue` ⟺ Designer `xsi:nil="true"` (пустое значение).
     Undefined,
     /// `core:BooleanValue` (EDT) ⟺ Designer `xsi:type="xs:boolean"` с текстом (`false`/`true`).
@@ -342,6 +356,8 @@ pub struct DcsSettingsParameterValue {
 /// Значение `dcscor:value` параметра DCS-настроек, по `xsi:type`/`xsi:nil`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DcsCorValue {
+    /// Symbolic design-time parameter value, also present in EDT .dcss sidecars.
+    DesignTimeValue(String),
     /// `xsi:nil="true"` (пустое значение; witness dataParameters УзелИнформационнойБазы).
     Nil,
     /// `xsi:type="v8ui:Color"` — текст (напр. `style:ТекстЗапрещеннойЯчейкиЦвет`).
@@ -496,6 +512,9 @@ pub enum DcsItem {
         presentation: Option<DcsPresentation>,
         /// Режим показа (`dcsset:viewMode`). `None` ⇒ отсутствует. Позиция: ПОСЛЕ presentation.
         view_mode: Option<String>,
+        /// Ordered group identity, present in UH native and EDT sidecar.
+        #[serde(default)]
+        user_setting_id: Option<String>,
     },
     /// `dcsset:OrderItemAuto`: авто-упорядочивание — ПУСТОЙ самозакрытый
     /// `<dcsset:item xsi:type="dcsset:OrderItemAuto"/>` (witness ERP — 23/23 без детей).
@@ -553,4 +572,11 @@ pub enum DcsRightValue {
         /// Значение `<v8:lastId xsi:type="xs:decimal">` (напр. `-1`).
         last_id: String,
     },
+}
+
+/// Explicit schema parameter usage witnessed in independent UH native/EDT pairs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DcsParameterUse {
+    /// Always apply the parameter; unspecified usage is stored as None.
+    Always,
 }

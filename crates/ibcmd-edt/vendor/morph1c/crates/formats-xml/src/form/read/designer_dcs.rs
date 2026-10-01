@@ -36,6 +36,7 @@ pub(crate) fn read_designer_dcs_calculated_field(cf: &Element) -> Result<DcsCalc
     let appearance = read_designer_dcs_appearance(cf)?;
     // valueType — тип поля (тот же локус, что у DCS-параметра/DCS-поля; witness — `v8:TypeId`).
     let value_type = read_dcssch_value_type(cf)?;
+    let available_values = cf.children.iter().filter(|c| c.local == "availableValue" && c.prefix == "dcssch").map(read_designer_dcs_available_value).collect::<Result<Vec<_>, _>>()?;
     expect_only_dcssch_children(
         cf,
         &[
@@ -47,9 +48,11 @@ pub(crate) fn read_designer_dcs_calculated_field(cf: &Element) -> Result<DcsCalc
             "orderExpression",
             "appearance",
             "valueType",
+            "availableValue",
         ],
     )?;
     Ok(DcsCalculatedField {
+        available_values,
         data_path,
         expression,
         title,
@@ -128,7 +131,11 @@ pub(crate) fn read_designer_dcs_order_expression(oe: &Element) -> Result<DcsOrde
         Some(v) => {
             claim_common_ns(v);
             v.claim_with_text();
-            matches!(v.text.as_str(), "true")
+            match v.text.as_str() {
+                "true" => true,
+                "false" => false,
+                other => return Err(FormError::Frame(format!("DCS autoOrder={other:?}: want boolean"))),
+            }
         }
         None => false,
     };
@@ -142,6 +149,9 @@ pub(crate) fn read_designer_dcs_order_expression(oe: &Element) -> Result<DcsOrde
                 c.prefix, c.local
             )));
         }
+    }
+    if !matches!(order_type.as_str(), "Asc" | "Desc") {
+        return Err(FormError::Frame(format!("DCS orderType={order_type:?}: unmodeled direction")));
     }
     Ok(DcsOrderExpression {
         expression,
@@ -200,6 +210,7 @@ pub(crate) fn read_designer_dcs_field(f: &Element) -> Result<DcsField, FormError
     {
         available_values.push(read_designer_dcs_available_value(av)?);
     }
+    let order_expressions = f.children.iter().filter(|c| c.local == "orderExpression" && c.prefix == "dcssch").map(read_designer_dcs_order_expression).collect::<Result<Vec<_>, _>>()?;
     expect_only_dcssch_children(
         f,
         &[
@@ -207,6 +218,7 @@ pub(crate) fn read_designer_dcs_field(f: &Element) -> Result<DcsField, FormError
             "field",
             "presentationExpression",
             "title",
+            "orderExpression",
             "valueType",
             "useRestriction",
             "attributeUseRestriction",
@@ -215,6 +227,7 @@ pub(crate) fn read_designer_dcs_field(f: &Element) -> Result<DcsField, FormError
         ],
     )?;
     Ok(DcsField {
+        order_expressions,
         nested,
         data_path,
         field,
@@ -311,6 +324,17 @@ pub(crate) fn read_designer_dcs_parameter(p: &Element) -> Result<DcsParameter, F
     };
     let value_list_allowed = read_dcssch_presence_true(p, "valueListAllowed")?;
     let available_as_field = read_designer_opt_bool(p, "availableAsField")?;
+    let expression = p.child("expression").filter(|c| c.prefix == "dcssch").map(|c| { c.claim_with_text(); c.text.clone() });
+    let usage = match p.child("use").filter(|c| c.prefix == "dcssch") {
+        None => None,
+        Some(c) => {
+            c.claim_with_text(); expect_no_children(c)?;
+            match c.text.as_str() {
+                "Always" => Some(morph1c_core::ir::form::DcsParameterUse::Always),
+                other => return Err(FormError::Frame(format!("DCS parameter use={other:?}: unmodeled usage"))),
+            }
+        }
+    };
     expect_only_dcssch_children(
         p,
         &[
@@ -321,9 +345,13 @@ pub(crate) fn read_designer_dcs_parameter(p: &Element) -> Result<DcsParameter, F
             "useRestriction",
             "valueListAllowed",
             "availableAsField",
+            "expression",
+            "use",
         ],
     )?;
     Ok(DcsParameter {
+        expression,
+        usage,
         name,
         title,
         value_type,
@@ -356,6 +384,7 @@ pub(crate) fn read_designer_dcs_param_value(v: &Element) -> Result<DcsParamValue
         expect_no_children(v)?;
         v.text_claimed.set(true);
         let out = match xt.value.as_str() {
+            "dcscor:DesignTimeValue" => DcsParamValue::DesignTimeValue(v.text.clone()),
             "xs:boolean" => DcsParamValue::Boolean(v.text.clone()),
             "xs:string" => DcsParamValue::Str(v.text.clone()),
             "xs:dateTime" => DcsParamValue::Date(v.text.clone()),

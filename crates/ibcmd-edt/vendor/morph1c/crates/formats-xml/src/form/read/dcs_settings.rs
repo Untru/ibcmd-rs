@@ -132,6 +132,10 @@ pub(crate) fn read_dcs_settings_parameter_value(it: &Element) -> Result<DcsSetti
             .attr("xsi:type")
             .ok_or_else(|| FormError::Frame("dcscor:value: no xsi:type (§1.0)".into()))?;
         match xt.value.as_str() {
+            "dcscor:DesignTimeValue" => {
+                xt.claimed.set(true); v.claim_with_text(); expect_no_children(v)?;
+                DcsCorValue::DesignTimeValue(v.text.clone())
+            }
             "v8ui:Color" => {
                 xt.claimed.set(true);
                 v.text_claimed.set(true);
@@ -344,11 +348,13 @@ pub(crate) fn read_dcs_item(it: &Element) -> Result<DcsItem, FormError> {
             }
             let presentation = read_dcs_presentation_opt(it, "presentation")?;
             let view_mode = dcsset_leaf_text_opt(it, "viewMode");
+            let user_setting_id = dcsset_leaf_text_opt(it, "userSettingID");
             expect_only_dcsset_children(
                 it,
-                &["use", "groupType", "item", "presentation", "viewMode"],
+                &["use", "groupType", "item", "presentation", "viewMode", "userSettingID"],
             )?;
             Ok(DcsItem::FilterGroup {
+                user_setting_id,
                 used,
                 group_type,
                 items,
