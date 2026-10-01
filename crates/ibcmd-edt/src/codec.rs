@@ -510,11 +510,8 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
             .iter()
             .filter_map(|e| e.path().as_str().strip_prefix("src/").map(|p| (p, e)))
             .map(|(p, e)| {
-                SourceEntry::from_bytes(
-                    SourcePath::new(p).map_err(EdtError::source)?,
-                    e.bytes().to_vec(),
-                )
-                .map_err(EdtError::source)
+                e.with_path(SourcePath::new(p).map_err(EdtError::source)?)
+                    .map_err(EdtError::source)
             })
             .collect::<Result<Vec<_>, _>>()?,
     )

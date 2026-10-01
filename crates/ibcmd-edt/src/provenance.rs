@@ -73,9 +73,8 @@ pub(crate) fn retain(
     );
     for e in original.entries() {
         entries.push(
-            SourceEntry::from_bytes(
+            e.with_path(
                 SourcePath::new(format!("{PREFIX}xml/{}", e.path())).map_err(EdtError::source)?,
-                e.bytes().to_vec(),
             )
             .map_err(EdtError::source)?,
         );
@@ -148,11 +147,8 @@ pub(crate) fn restore(
     let entries = originals
         .into_iter()
         .map(|(p, e)| {
-            SourceEntry::from_bytes(
-                SourcePath::new(p).map_err(EdtError::source)?,
-                e.bytes().to_vec(),
-            )
-            .map_err(EdtError::source)
+            e.with_path(SourcePath::new(p).map_err(EdtError::source)?)
+                .map_err(EdtError::source)
         })
         .collect::<Result<Vec<_>, _>>()?;
     Ok(Some(SourceTree::new(entries).map_err(EdtError::source)?))

@@ -118,10 +118,29 @@ pub struct SourceEntry {
 }
 impl SourceEntry {
     pub fn from_bytes(path: SourcePath, bytes: Vec<u8>) -> Result<Self, SourceTreeError> {
+        let (kind, uuid) = Self::classify_bytes(&path, &bytes)?;
+        Self::new(path, kind, bytes, uuid)
+    }
+    /// Rebinds immutable content to a validated path without copying its bytes.
+    /// Path-dependent XML validation, classification and identity are repeated.
+    pub fn with_path(&self, path: SourcePath) -> Result<Self, SourceTreeError> {
+        let (kind, uuid) = Self::classify_bytes(&path, self.bytes())?;
+        Ok(Self {
+            path,
+            kind,
+            bytes: Arc::clone(&self.bytes),
+            uuid,
+            digest: self.digest,
+        })
+    }
+    fn classify_bytes(
+        path: &SourcePath,
+        bytes: &[u8],
+    ) -> Result<(SourceKind, Option<ObjectUuid>), SourceTreeError> {
         let mut kind = reader::classify(path.as_str());
         let root = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
             Some(
-                crate::XmlReader::inspect_slice(&bytes).map_err(|e| SourceTreeError::Xml {
+                crate::XmlReader::inspect_slice(bytes).map_err(|e| SourceTreeError::Xml {
                     path: path.clone(),
                     message: e.to_string(),
                 })?,
@@ -143,11 +162,11 @@ impl SourceEntry {
             kind,
             SourceKind::ConfigurationRoot | SourceKind::MetadataXml
         ) {
-            reader::derive_uuid_from_bytes(&path, &bytes)?
+            reader::derive_uuid_from_bytes(path, bytes)?
         } else {
             None
         };
-        Self::new(path, kind, bytes, uuid)
+        Ok((kind, uuid))
     }
     pub(crate) fn new(
         path: SourcePath,
@@ -660,6 +679,46 @@ mod tests {
                     .unwrap();
             assert_eq!(entry.kind(), SourceKind::MetadataXml, "{path}");
         }
+    }
+    #[test]
+    fn rebinding_shares_bytes_but_revalidates_path_dependent_xml_identity() {
+        let entry = SourceEntry::from_bytes(
+            SourcePath::new("payload.bin").unwrap(),
+            b"<Configuration uuid='12345678-90ab-cdef-0123-456789abcdef'/>".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(entry.uuid(), None);
+        let moved = entry
+            .with_path(SourcePath::new("Configuration.xml").unwrap())
+            .unwrap();
+        assert_eq!(moved.kind(), SourceKind::ConfigurationRoot);
+        assert_eq!(
+            moved.uuid().unwrap().to_string(),
+            "12345678-90ab-cdef-0123-456789abcdef"
+        );
+        assert_eq!(moved.digest(), entry.digest());
+        assert!(Arc::ptr_eq(&entry.bytes, &moved.bytes));
+        let expected = SourceEntry::from_bytes(moved.path.clone(), entry.bytes().to_vec()).unwrap();
+        assert_eq!(moved, expected);
+        drop(entry);
+        assert_eq!(moved.bytes(), expected.bytes());
+
+        let bad = SourceEntry::from_bytes(
+            SourcePath::new("bad.bin").unwrap(),
+            b"<Configuration uuid='bad'/>".to_vec(),
+        )
+        .unwrap();
+        assert!(matches!(
+            bad.with_path(SourcePath::new("Configuration.xml").unwrap()),
+            Err(SourceTreeError::InvalidUuid { .. })
+        ));
+        let malformed =
+            SourceEntry::from_bytes(SourcePath::new("bad.bin").unwrap(), b"<root>".to_vec())
+                .unwrap();
+        assert!(matches!(
+            malformed.with_path(SourcePath::new("body.xml").unwrap()),
+            Err(SourceTreeError::Xml { .. })
+        ));
     }
     #[test]
     fn uuid_errors_and_root_wins() {
