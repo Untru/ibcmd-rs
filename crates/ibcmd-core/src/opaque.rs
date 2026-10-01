@@ -1,5 +1,6 @@
 //! Anchored opaque facets and fail-closed emission permits.
 
+use crate::source_policy::SourceOperationPolicy;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
@@ -410,7 +411,20 @@ pub struct OpaqueFacets {
 impl OpaqueFacets {
     /// Validates an ordered collection without sorting or deduplicating it.
     pub fn new(facets: Vec<OpaqueFacet>) -> Result<Self, OpaqueBuildError> {
-        validate_facets(&facets, MAX_OPAQUE_FACETS, MAX_OPAQUE_RETAINED_BYTES)?;
+        Self::new_with_policy(facets, SourceOperationPolicy::Bounded)
+    }
+
+    /// Retains ordered facets under an explicit source resource policy.
+    /// Individual assets, source provenance and emission permissions remain validated.
+    pub fn new_with_policy(
+        facets: Vec<OpaqueFacet>,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, OpaqueBuildError> {
+        validate_facets(
+            &facets,
+            policy.maximum(MAX_OPAQUE_FACETS),
+            policy.maximum(MAX_OPAQUE_RETAINED_BYTES),
+        )?;
         Ok(Self { facets })
     }
 
@@ -634,5 +648,45 @@ mod tests {
         assert_eq!(future.ordinal(), 42);
         assert!(OpaquePlacement::new("bad placement", 0).is_err());
         assert!(OpaquePlacement::new(&"x".repeat(MAX_OPAQUE_PLACEMENT_KIND_BYTES + 1), 0).is_err());
+    }
+
+    #[test]
+    fn source_facets_cross_default_count_without_changing_permissions_or_order() {
+        let first = facet("profile:source", 0, b"first");
+        let last = facet("profile:source", 1, b"last");
+        let mut facets = vec![first.clone(); MAX_OPAQUE_FACETS + 1];
+        *facets.last_mut().unwrap() = last.clone();
+        assert!(OpaqueFacets::new(facets.clone()).is_err());
+        let from_source =
+            OpaqueFacets::new_with_policy(facets, SourceOperationPolicy::Source).unwrap();
+        assert_eq!(from_source.as_slice().first(), Some(&first));
+        assert_eq!(from_source.as_slice().last(), Some(&last));
+        let target = ProfileId::parse("profile:source").unwrap();
+        assert_eq!(
+            from_source
+                .as_slice()
+                .last()
+                .unwrap()
+                .emit_permit(&target)
+                .unwrap()
+                .bytes(),
+            b"last"
+        );
+        assert!(
+            last.emit_permit(&ProfileId::parse("profile:other").unwrap())
+                .is_err()
+        );
+        assert!(
+            serde_json::from_str::<OpaqueFacets>(&serde_json::to_string(&from_source).unwrap())
+                .is_err()
+        );
+        assert_eq!(
+            checked_retained_bytes(MAX_OPAQUE_RETAINED_BYTES, 1, usize::MAX).unwrap(),
+            MAX_OPAQUE_RETAINED_BYTES + 1
+        );
+        assert!(matches!(
+            checked_retained_bytes(usize::MAX, 1, usize::MAX),
+            Err(OpaqueBuildError::RetainedByteCountOverflow)
+        ));
     }
 }

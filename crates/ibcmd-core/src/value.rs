@@ -16,6 +16,7 @@ use serde::ser::SerializeMap;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::asset::{Asset, AssetReference};
+use crate::source_policy::SourceOperationPolicy;
 
 /// Maximum encoded length of arbitrary canonical text.
 pub const MAX_CANONICAL_TEXT_BYTES: usize = 1_048_576;
@@ -200,10 +201,19 @@ macro_rules! bounded_string_type {
         impl $name {
             /// Validates borrowed text before retaining it.
             pub fn new(value: &str) -> Result<Self, ValueBuildError> {
+                Self::new_with_policy(value, SourceOperationPolicy::Bounded)
+            }
+
+            /// Validates exact text under an explicit source resource policy.
+            /// Syntax, required content and control-character rules are unchanged.
+            pub fn new_with_policy(
+                value: &str,
+                policy: SourceOperationPolicy,
+            ) -> Result<Self, ValueBuildError> {
                 validate_bounded_text(
                     $field,
                     value,
-                    $maximum,
+                    policy.maximum($maximum),
                     $allow_empty,
                     $control_free,
                 )?;
@@ -277,10 +287,18 @@ pub struct CanonicalInteger(Box<str>);
 impl CanonicalInteger {
     /// Validates canonical integer notation before retaining it.
     pub fn new(value: &str) -> Result<Self, ValueBuildError> {
+        Self::new_with_policy(value, SourceOperationPolicy::Bounded)
+    }
+
+    /// Validates canonical notation with an explicit source resource policy.
+    pub fn new_with_policy(
+        value: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
         validate_bounded_text(
             "canonical integer",
             value,
-            MAX_CANONICAL_NUMBER_BYTES,
+            policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
             false,
             true,
         )?;
@@ -350,10 +368,18 @@ pub struct CanonicalDecimal(Box<str>);
 impl CanonicalDecimal {
     /// Validates canonical decimal notation before retaining it.
     pub fn new(value: &str) -> Result<Self, ValueBuildError> {
+        Self::new_with_policy(value, SourceOperationPolicy::Bounded)
+    }
+
+    /// Validates canonical notation with an explicit source resource policy.
+    pub fn new_with_policy(
+        value: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
         validate_bounded_text(
             "canonical decimal",
             value,
-            MAX_CANONICAL_NUMBER_BYTES,
+            policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
             false,
             true,
         )?;
@@ -429,9 +455,18 @@ pub struct UnresolvedReference {
 impl UnresolvedReference {
     /// Creates a generic unresolved reference from open, bounded strings.
     pub fn new(kind: &str, target: &str) -> Result<Self, ValueBuildError> {
+        Self::new_with_policy(kind, target, SourceOperationPolicy::Bounded)
+    }
+
+    /// Creates an unresolved reference under an explicit source resource policy.
+    pub fn new_with_policy(
+        kind: &str,
+        target: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
         Ok(Self {
-            kind: EnumToken::new(kind)?,
-            target: ReferenceTarget::new(target)?,
+            kind: EnumToken::new_with_policy(kind, policy)?,
+            target: ReferenceTarget::new_with_policy(target, policy)?,
         })
     }
 
@@ -460,8 +495,12 @@ impl UnresolvedReference {
         self.target.as_str()
     }
 
-    fn retained_byte_len(&self) -> usize {
-        self.kind.as_str().len() + self.target.as_str().len()
+    fn retained_byte_len(&self) -> Result<usize, ValueBuildError> {
+        self.kind
+            .as_str()
+            .len()
+            .checked_add(self.target.as_str().len())
+            .ok_or(ValueBuildError::RetainedByteCountOverflow)
     }
 }
 
@@ -480,7 +519,16 @@ impl CanonicalField {
 
     /// Validates a borrowed field name and retains the supplied value.
     pub fn named(name: &str, value: CanonicalValue) -> Result<Self, ValueBuildError> {
-        Ok(Self::new(FieldName::new(name)?, value))
+        Self::named_with_policy(name, value, SourceOperationPolicy::Bounded)
+    }
+
+    /// Validates a source field name without changing value or field order.
+    pub fn named_with_policy(
+        name: &str,
+        value: CanonicalValue,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
+        Ok(Self::new(FieldName::new_with_policy(name, policy)?, value))
     }
 
     /// Returns the exact case-sensitive field name.
@@ -574,7 +622,7 @@ impl CanonicalValue {
         }
     }
 
-    /// Retains already bounded exact text.
+    /// Retains already validated exact text.
     pub const fn text(value: CanonicalText) -> Self {
         Self {
             inner: CanonicalValueInner::Text(value),
@@ -600,19 +648,37 @@ impl CanonicalValue {
     /// Names are case-sensitive and the input is never sorted. Consequently,
     /// records with identical fields in different orders remain unequal.
     pub fn record(fields: Vec<CanonicalField>) -> Result<Self, ValueBuildError> {
+        Self::record_with_policy(fields, SourceOperationPolicy::Bounded)
+    }
+
+    /// Creates an ordered record under an explicit source resource policy.
+    /// Duplicate names and the recursive representation's depth safety remain checked.
+    pub fn record_with_policy(
+        fields: Vec<CanonicalField>,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
         let value = Self {
             inner: CanonicalValueInner::Record(fields),
         };
-        validate_root(&value)?;
+        validate_root_with_policy(&value, policy)?;
         Ok(value)
     }
 
     /// Creates an ordered sequence without sorting or deduplicating it.
     pub fn sequence(values: Vec<Self>) -> Result<Self, ValueBuildError> {
+        Self::sequence_with_policy(values, SourceOperationPolicy::Bounded)
+    }
+
+    /// Creates an ordered sequence under an explicit source resource policy.
+    /// The recursive representation's depth safety remains checked.
+    pub fn sequence_with_policy(
+        values: Vec<Self>,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ValueBuildError> {
         let value = Self {
             inner: CanonicalValueInner::Sequence(values),
         };
-        validate_root(&value)?;
+        validate_root_with_policy(&value, policy)?;
         Ok(value)
     }
 
@@ -621,7 +687,7 @@ impl CanonicalValue {
         let value = Self {
             inner: CanonicalValueInner::Binary(asset),
         };
-        validate_root(&value)?;
+        validate_root_with_policy(&value, SourceOperationPolicy::Bounded)?;
         Ok(value)
     }
 
@@ -669,7 +735,7 @@ impl CanonicalValue {
 
     /// Returns aggregate variable-sized retained bytes.
     pub fn retained_byte_len(&self) -> usize {
-        let mut budget = ValueBudget::default();
+        let mut budget = ValueBudget::with_policy(SourceOperationPolicy::Source);
         validate_value(self, 0, &mut budget)
             .expect("private canonical value invariants remain valid");
         budget.retained_bytes
@@ -705,43 +771,52 @@ impl Serialize for CanonicalValue {
 struct ValueBudget {
     nodes: usize,
     retained_bytes: usize,
+    policy: SourceOperationPolicy,
 }
 
 impl ValueBudget {
+    fn with_policy(policy: SourceOperationPolicy) -> Self {
+        Self {
+            policy,
+            ..Self::default()
+        }
+    }
+
     fn add_node(&mut self) -> Result<(), ValueBuildError> {
-        self.nodes = self
+        let maximum = self.policy.maximum(MAX_CANONICAL_NODES);
+        let actual = self
             .nodes
             .checked_add(1)
             .ok_or(ValueBuildError::TooManyNodes {
-                maximum: MAX_CANONICAL_NODES,
+                maximum,
                 actual: usize::MAX,
             })?;
-        if self.nodes > MAX_CANONICAL_NODES {
-            return Err(ValueBuildError::TooManyNodes {
-                maximum: MAX_CANONICAL_NODES,
-                actual: self.nodes,
-            });
+        if actual > maximum {
+            return Err(ValueBuildError::TooManyNodes { maximum, actual });
         }
+        self.nodes = actual;
         Ok(())
     }
 
     fn retain(&mut self, bytes: usize) -> Result<(), ValueBuildError> {
-        self.retained_bytes = self
+        let maximum = self.policy.maximum(MAX_CANONICAL_RETAINED_BYTES);
+        let actual = self
             .retained_bytes
             .checked_add(bytes)
             .ok_or(ValueBuildError::RetainedByteCountOverflow)?;
-        if self.retained_bytes > MAX_CANONICAL_RETAINED_BYTES {
-            return Err(ValueBuildError::RetainedBytesExceeded {
-                maximum: MAX_CANONICAL_RETAINED_BYTES,
-                actual: self.retained_bytes,
-            });
+        if actual > maximum {
+            return Err(ValueBuildError::RetainedBytesExceeded { maximum, actual });
         }
+        self.retained_bytes = actual;
         Ok(())
     }
 }
 
-fn validate_root(value: &CanonicalValue) -> Result<(), ValueBuildError> {
-    validate_value(value, 0, &mut ValueBudget::default())
+fn validate_root_with_policy(
+    value: &CanonicalValue,
+    policy: SourceOperationPolicy,
+) -> Result<(), ValueBuildError> {
+    validate_value(value, 0, &mut ValueBudget::with_policy(policy))
 }
 
 fn validate_value(
@@ -758,16 +833,75 @@ fn validate_value(
     budget.add_node()?;
     match &value.inner {
         CanonicalValueInner::Null | CanonicalValueInner::Bool(_) => {}
-        CanonicalValueInner::Integer(value) => budget.retain(value.as_str().len())?,
-        CanonicalValueInner::Decimal(value) => budget.retain(value.as_str().len())?,
-        CanonicalValueInner::Text(value) => budget.retain(value.as_str().len())?,
-        CanonicalValueInner::EnumToken(value) => budget.retain(value.as_str().len())?,
-        CanonicalValueInner::Reference(value) => budget.retain(value.retained_byte_len())?,
+        CanonicalValueInner::Integer(value) => {
+            validate_bounded_text(
+                "canonical integer",
+                value.as_str(),
+                budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                false,
+                true,
+            )?;
+            budget.retain(value.as_str().len())?;
+        }
+        CanonicalValueInner::Decimal(value) => {
+            validate_bounded_text(
+                "canonical decimal",
+                value.as_str(),
+                budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                false,
+                true,
+            )?;
+            budget.retain(value.as_str().len())?;
+        }
+        CanonicalValueInner::Text(value) => {
+            validate_bounded_text(
+                "canonical text",
+                value.as_str(),
+                budget.policy.maximum(MAX_CANONICAL_TEXT_BYTES),
+                true,
+                false,
+            )?;
+            budget.retain(value.as_str().len())?;
+        }
+        CanonicalValueInner::EnumToken(value) => {
+            validate_bounded_text(
+                "enum token",
+                value.as_str(),
+                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                false,
+                true,
+            )?;
+            budget.retain(value.as_str().len())?;
+        }
+        CanonicalValueInner::Reference(value) => {
+            validate_bounded_text(
+                "enum token",
+                value.kind(),
+                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                false,
+                true,
+            )?;
+            validate_bounded_text(
+                "reference target",
+                value.target(),
+                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                false,
+                true,
+            )?;
+            budget.retain(value.retained_byte_len()?)?;
+        }
         CanonicalValueInner::Record(fields) => {
-            validate_collection_len(fields.len())?;
+            validate_collection_len(fields.len(), budget.policy)?;
             let mut names = BTreeSet::new();
             for field in fields {
-                if !names.insert(field.name.clone()) {
+                validate_bounded_text(
+                    "field name",
+                    field.name.as_str(),
+                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    false,
+                    true,
+                )?;
+                if !names.insert(field.name.as_str()) {
                     return Err(ValueBuildError::DuplicateField {
                         name: field.name.as_str().to_owned(),
                     });
@@ -777,7 +911,7 @@ fn validate_value(
             }
         }
         CanonicalValueInner::Sequence(values) => {
-            validate_collection_len(values.len())?;
+            validate_collection_len(values.len(), budget.policy)?;
             for child in values {
                 validate_value(child, depth + 1, budget)?;
             }
@@ -790,12 +924,13 @@ fn validate_value(
     Ok(())
 }
 
-fn validate_collection_len(actual: usize) -> Result<(), ValueBuildError> {
-    if actual > MAX_CANONICAL_COLLECTION_ITEMS {
-        return Err(ValueBuildError::TooManyCollectionItems {
-            maximum: MAX_CANONICAL_COLLECTION_ITEMS,
-            actual,
-        });
+fn validate_collection_len(
+    actual: usize,
+    policy: SourceOperationPolicy,
+) -> Result<(), ValueBuildError> {
+    let maximum = policy.maximum(MAX_CANONICAL_COLLECTION_ITEMS);
+    if actual > maximum {
+        return Err(ValueBuildError::TooManyCollectionItems { maximum, actual });
     }
     Ok(())
 }
@@ -898,7 +1033,7 @@ impl<'de> Visitor<'de> for CanonicalValueVisitor<'_> {
             ValueVariant::Reference => {
                 let value = map.next_value::<UnresolvedReference>()?;
                 self.budget
-                    .retain(value.retained_byte_len())
+                    .retain(value.retained_byte_len().map_err(de::Error::custom)?)
                     .map_err(de::Error::custom)?;
                 CanonicalValueInner::Reference(value)
             }
@@ -1342,5 +1477,98 @@ mod tests {
             budget.retain(MAX_CANONICAL_RETAINED_BYTES + 1),
             Err(ValueBuildError::RetainedBytesExceeded { .. })
         ));
+    }
+
+    #[test]
+    fn source_scalar_policy_preserves_syntax_and_bounded_deserialization() {
+        let source = SourceOperationPolicy::Source;
+        let text = "x".repeat(MAX_CANONICAL_TEXT_BYTES + 1);
+        let value = CanonicalValue::text(CanonicalText::new_with_policy(&text, source).unwrap());
+        assert_eq!(value.retained_byte_len(), text.len());
+        assert!(CanonicalText::new(&text).is_err());
+        assert!(
+            serde_json::from_str::<CanonicalValue>(&serde_json::to_string(&value).unwrap())
+                .is_err()
+        );
+        assert!(CanonicalValue::sequence(vec![value.clone()]).is_err());
+        assert_eq!(
+            CanonicalValue::sequence_with_policy(vec![value], source)
+                .unwrap()
+                .retained_byte_len(),
+            text.len()
+        );
+
+        let number = "1".repeat(MAX_CANONICAL_NUMBER_BYTES + 1);
+        assert!(CanonicalInteger::new_with_policy(&number, source).is_ok());
+        assert!(CanonicalDecimal::new_with_policy(&number, source).is_ok());
+        assert!(CanonicalInteger::new(&number).is_err());
+        assert!(CanonicalDecimal::new(&number).is_err());
+        for invalid in ["01", "-0", "+1", "1e2"] {
+            assert!(CanonicalInteger::new_with_policy(invalid, source).is_err());
+            assert!(CanonicalDecimal::new_with_policy(invalid, source).is_err());
+        }
+        let token = "t".repeat(MAX_CANONICAL_TOKEN_BYTES + 1);
+        assert!(EnumToken::new_with_policy(&token, source).is_ok());
+        assert!(FieldName::new_with_policy(&token, source).is_ok());
+        assert!(ReferenceTarget::new_with_policy(&token, source).is_ok());
+        assert!(UnresolvedReference::new_with_policy("kind", &token, source).is_ok());
+        assert!(UnresolvedReference::new("kind", &token).is_err());
+        assert!(EnumToken::new_with_policy("", source).is_err());
+        assert!(FieldName::new_with_policy("bad\nname", source).is_err());
+    }
+
+    #[test]
+    fn source_collections_keep_order_duplicates_and_bounded_wire_contract() {
+        let source = SourceOperationPolicy::Source;
+        let small = vec![CanonicalValue::boolean(true), CanonicalValue::null()];
+        let ordinary = CanonicalValue::sequence(small.clone()).unwrap();
+        let from_source = CanonicalValue::sequence_with_policy(small, source).unwrap();
+        assert_eq!(ordinary, from_source);
+        assert_eq!(
+            serde_json::to_vec(&ordinary).unwrap(),
+            serde_json::to_vec(&from_source).unwrap()
+        );
+        let mut items = vec![CanonicalValue::null(); MAX_CANONICAL_COLLECTION_ITEMS + 1];
+        items[0] = CanonicalValue::boolean(true);
+        assert!(CanonicalValue::sequence(items.clone()).is_err());
+        let large = CanonicalValue::sequence_with_policy(items, source).unwrap();
+        assert!(matches!(
+            large.as_sequence().unwrap()[0].kind(),
+            CanonicalValueKind::Bool(true)
+        ));
+        assert!(
+            serde_json::from_str::<CanonicalValue>(&serde_json::to_string(&large).unwrap())
+                .is_err()
+        );
+        assert!(matches!(
+            CanonicalValue::record_with_policy(
+                vec![
+                    CanonicalField::named("x", CanonicalValue::null()).unwrap(),
+                    CanonicalField::named("x", CanonicalValue::boolean(true)).unwrap(),
+                ],
+                source
+            ),
+            Err(ValueBuildError::DuplicateField { .. })
+        ));
+    }
+
+    #[test]
+    fn source_value_accounting_crosses_default_budgets_and_overflow_is_atomic() {
+        let mut budget = ValueBudget::with_policy(SourceOperationPolicy::Source);
+        budget.nodes = MAX_CANONICAL_NODES;
+        budget.add_node().unwrap();
+        assert_eq!(budget.nodes, MAX_CANONICAL_NODES + 1);
+        budget.retained_bytes = MAX_CANONICAL_RETAINED_BYTES;
+        budget.retain(1).unwrap();
+        assert_eq!(budget.retained_bytes, MAX_CANONICAL_RETAINED_BYTES + 1);
+        budget.nodes = usize::MAX;
+        assert!(budget.add_node().is_err());
+        assert_eq!(budget.nodes, usize::MAX);
+        budget.retained_bytes = usize::MAX;
+        assert!(matches!(
+            budget.retain(1),
+            Err(ValueBuildError::RetainedByteCountOverflow)
+        ));
+        assert_eq!(budget.retained_bytes, usize::MAX);
     }
 }
