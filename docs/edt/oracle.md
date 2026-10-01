@@ -17,10 +17,13 @@ by the harness; failure evidence remains available.
 
 Every installed EDT command takes the existing shared FIFO `heavy` laboratory
 lock and releases it in `finally`. Use a unique track name per active run. The
-launcher gets a disposable workspace, explicit language and 8 GiB heap. No
+launcher gets a disposable workspace, explicit language and a recorded heap
+(`--heap-gib`, default 8; UH preparation uses 32). No
 original EDT workspace, database, global EDT preferences or XML corpus is edited.
-Native inputs are hashed before and after; manifests include every path, size
-and SHA-256. ConfigDumpInfo.xml is required for native XML; genuine EDT export
+Native inputs are hashed before and after with four bounded SHA readers and
+cached directory enumeration metadata; manifests include every path, size
+and SHA-256. Runs retain the exact harness source and SHA-256.
+ConfigDumpInfo.xml is required for native XML; genuine EDT export
 omits it, which remains explicit in every raw report. Imported projects must
 have `.project`, `DT-INF/PROJECT.PMF`, a
 configuration MDO and the explicitly requested `Runtime-Version`.

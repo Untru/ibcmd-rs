@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import hashlib
 import json
@@ -53,25 +54,52 @@ def snapshot(root: Path, max_files=500000, max_total=32 * 1024**3,
     no_links(root)
     if not root.is_dir():
         raise OracleError(f"Missing input tree: {root}")
-    files, keys, total = [], set(), 0
-    for directory, dirs, names in os.walk(root, followlinks=False):
-        for name in dirs:
-            no_link_entry(Path(directory) / name)
-        for name in sorted(names):
-            path = Path(directory) / name
-            no_link_entry(path)
-            if not path.is_file():
-                raise OracleError(f"Non-file input: {path}")
-            relative = path.relative_to(root).as_posix()
-            key = relative.casefold()
-            if key in keys:
-                raise OracleError(f"Case-colliding input: {relative}")
-            keys.add(key)
-            size = path.stat().st_size
-            total += size
-            if size > max_file or total > max_total or len(files) >= max_files:
-                raise OracleError(f"Corpus resource limit exceeded: {path}")
-            files.append({"path": relative, "bytes": size, "sha256": digest(path)})
+    entries, keys, total = [], set(), 0
+    directories = [root]
+    while directories:
+        directory = directories.pop()
+        # DirEntry caches native enumeration metadata on Windows. Repeated
+        # Path.stat/is_file/is_symlink calls cost minutes on 140,000-file corpora.
+        with os.scandir(directory) as iterator:
+            for entry in iterator:
+                st = entry.stat(follow_symlinks=False)
+                path = Path(entry.path)
+                if entry.is_symlink() or getattr(st, "st_file_attributes", 0) & 0x400:
+                    raise OracleError(f"Symlink/reparse point refused: {path}")
+                if entry.is_dir(follow_symlinks=False):
+                    directories.append(path)
+                    continue
+                if not entry.is_file(follow_symlinks=False):
+                    raise OracleError(f"Non-file input: {path}")
+                relative = path.relative_to(root).as_posix()
+                key = relative.casefold()
+                if key in keys:
+                    raise OracleError(f"Case-colliding input: {relative}")
+                keys.add(key)
+                size = st.st_size
+                total += size
+                if size > max_file or total > max_total or len(entries) >= max_files:
+                    raise OracleError(f"Corpus resource limit exceeded: {path}")
+                entries.append((path, relative, size))
+
+    def hash_entry(entry):
+        path, relative, size = entry
+        no_link_entry(path)
+        result, read_size = hashlib.sha256(), 0
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                result.update(chunk)
+                read_size += len(chunk)
+                if read_size > max_file:
+                    raise OracleError(f"Corpus resource limit exceeded while reading: {path}")
+        if read_size != size:
+            raise OracleError(f"Input size changed while hashing: {path}")
+        return {"path": relative, "bytes": size, "sha256": result.hexdigest()}
+
+    # Four independent reads hide Windows per-file latency without oversubscribing
+    # CPU or launching extra EDT JVMs. Equality is still the complete SHA inventory.
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        files = list(pool.map(hash_entry, entries))
     if not files:
         raise OracleError(f"Empty tree refused: {root}")
     files.sort(key=lambda row: row["path"])
@@ -403,13 +431,18 @@ def main() -> int:
             raise OracleError("Explicit XML profile and runtime disagree")
         args.run.mkdir(parents=True, exist_ok=False)
         created = True
+        harness_source = Path(__file__).read_bytes()
+        (args.run / "harness-source.py").write_bytes(harness_source)
         write_json(args.run / "invocation.json", {
-            key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()})
+            **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
+            "harness_sha256": hashlib.sha256(harness_source).hexdigest()})
         if args.mode == "prepare":
             prepare(args, args.run)
         else:
             accept(args, args.run)
-        print(f"{'PREPARED' if args.mode == 'prepare' else 'PASS'}: {args.run}", flush=True)
+        status = json.loads((args.run / "prepared.json").read_text(encoding="utf-8"))["status"] \
+            if args.mode == "prepare" else "PASS"
+        print(f"{status}: {args.run}", flush=True)
         return 0
     except (OracleError, OSError, ValueError, subprocess.SubprocessError) as error:
         if created and args.run.is_dir() and not (args.run / "failure.json").exists():
