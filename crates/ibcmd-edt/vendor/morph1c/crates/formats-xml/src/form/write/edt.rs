@@ -185,6 +185,11 @@ pub(crate) fn edt_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
         if it.ty != "Auto" {
             rec.push(OutElement::leaf("", "type", it.ty.clone()));
         }
+        if let Some(path) = &it.command_parameter {
+            let mut parameter = OutElement::branch("", "commandParameter").attr("xsi:type", "form:DataPath");
+            parameter.push(OutElement::leaf("", "segments", path.clone()));
+            rec.push(parameter);
+        }
         // group и index НЕЗАВИСИМЫ (census ERP): EDT эмитит `<index>` ВСЕГДА при group (включая 0)
         // И как index-БЕЗ-группы (размещение по индексу на корне панели, значения ≥1). Инверсия —
         // `read_edt_cmi_panel` (group-БЕЗ-index не витнесснут, ридер его отвергает).
@@ -206,7 +211,7 @@ pub(crate) fn edt_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
                 }
                 for (role, val) in &it.user_visible_roles {
                     let mut f = OutElement::branch("", "for");
-                    f.push(OutElement::leaf("", "value", if *val { "true" } else { "false" }));
+                    if *val { f.push(OutElement::leaf("", "value", "true")); }
                     f.push(OutElement::leaf("", "role", role.clone()));
                     uv.push(f);
                 }

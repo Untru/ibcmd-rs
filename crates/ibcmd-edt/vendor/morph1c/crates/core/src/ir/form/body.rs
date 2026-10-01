@@ -35,6 +35,9 @@ pub struct FormCiItem {
     pub command: String,
     /// Тип пункта (`Auto`/`Added`): EDT `<type>` опускает `Auto`; Designer `<Type>` эмитит всегда.
     pub ty: String,
+    /// Typed command DataPath parameter (EDT commandParameter / XML Attribute).
+    #[serde(default)]
+    pub command_parameter: Option<String>,
     /// Группа команд (`FormCommandBarImportant`/`CommandGroup.<Имя>`): EDT `<group>` ⟺
     /// Designer `<CommandGroup>`.
     pub group: Option<String>,

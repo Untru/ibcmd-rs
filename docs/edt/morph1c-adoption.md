@@ -88,6 +88,12 @@ out-of-range RGB components and unknown references fail explicitly.
 Client application interface regions are optional typed groups: an absent top
 region stays absent, while panel membership and unset/definition tables remain
 validated. No group UUID is synthesized for an absent region.
+Form command-interface parameters reuse the existing DataPath grammar and map
+EDT `commandParameter` to XML `Attribute`; both optional presence and content are
+part of typed form semantics. Native role visibility witnesses prove that an
+absent EDT CMI `for/value` means false, while XML retains an explicit false.
+Inventory equivalence permits only that exact EDT form/CMI scalar spelling;
+true, unknown attributes/namespaces, mixed content and `xml:space` stay distinct.
 The canonical bridge checks core object/member/retained-byte budgets before
 cloning metadata or retaining asset references, checks each owner's asset count,
 and checks the final graph including separately declared ownership.

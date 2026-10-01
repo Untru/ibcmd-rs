@@ -1,4 +1,51 @@
 use formats_xml::{parse, source_extensions as codec};
+#[test]
+fn form_command_data_path_parameter_is_typed_and_preserved() {
+    use formats_xml::form::{FormDialect, read_form, write_form};
+    let mut body = morph1c_core::ir::FormBody::new();
+    body.command_interface = true;
+    body.form_ci_navigation_panel
+        .push(morph1c_core::ir::FormCiItem {
+            command: "CommonCommand.Notes".into(),
+            ty: "Added".into(),
+            command_parameter: Some("Объект.Ref".into()),
+            group: Some("FormNavigationPanelGoTo".into()),
+            index: Some(0),
+            user_visible: Some(false),
+            user_visible_roles: vec![("Role.Editor".into(), false), ("Role.Admin".into(), true)],
+        });
+    let edt = write_form(FormDialect::Edt, &body).unwrap();
+    let read = read_form(FormDialect::Edt, &edt).unwrap();
+    assert_eq!(read.form_ci_navigation_panel, body.form_ci_navigation_panel);
+    let xml = write_form(FormDialect::Designer, &read).unwrap();
+    assert!(
+        std::str::from_utf8(&xml)
+            .unwrap()
+            .contains("<Attribute>Объект.Ref</Attribute>")
+    );
+    assert_eq!(
+        read_form(FormDialect::Designer, &xml)
+            .unwrap()
+            .form_ci_navigation_panel,
+        body.form_ci_navigation_panel
+    );
+    let text = std::str::from_utf8(&edt).unwrap();
+    for bad in [
+        text.replace("form:DataPath", "core:StringValue"),
+        text.replace(
+            "</commandParameter>",
+            "<segments>Other.Ref</segments></commandParameter>",
+        ),
+        text.replace(
+            "</commandParameter>",
+            "<unknown>keep</unknown></commandParameter>",
+        ),
+        text.replace("<segments>", "<segments extra=\"keep\">"),
+        text.replace("http://g5.1c.ru/v8/dt/form", "urn:wrong:form"),
+    ] {
+        assert!(read_form(FormDialect::Edt, bad.as_bytes()).is_err());
+    }
+}
 
 /// This witness deliberately has no native-process invocation. The supplied
 /// native export and authentic installed-EDT project remain read-only.
@@ -92,6 +139,30 @@ fn authentic_bsp_common_source_features_agree() {
         // Above raw descriptor inputs were independently bounded by the helper.
         assert_eq!(e.root.local, kind);
         assert_eq!(x.root.local, "MetaDataObject");
+    }
+    for path in [
+        "Catalogs/_ДемоКонтрагенты/Forms/ФормаГруппы",
+        "Documents/_ДемоПоступлениеТоваров/Forms/ФормаДокумента",
+    ] {
+        use formats_xml::form::{FormDialect, read_form};
+        let e = read_form(
+            FormDialect::Edt,
+            &read_bytes(&edt.join(format!("src/{path}/Form.form"))),
+        )
+        .unwrap();
+        let x = read_form(
+            FormDialect::Designer,
+            &read_bytes(&xml.join(format!("{path}/Ext/Form.xml"))),
+        )
+        .unwrap();
+        assert_eq!(
+            e.form_ci_navigation_panel, x.form_ci_navigation_panel,
+            "{path} CMI navigation semantics"
+        );
+        assert_eq!(
+            e.form_ci_command_bar, x.form_ci_command_bar,
+            "{path} CMI command semantics"
+        );
     }
 }
 

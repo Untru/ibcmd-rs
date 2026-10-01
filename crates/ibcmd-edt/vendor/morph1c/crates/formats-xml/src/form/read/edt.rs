@@ -339,6 +339,10 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
         }
         rec.claim();
         let command = leaf_text(rec, "command")?;
+        let command_parameter = rec.child("commandParameter").filter(|c| c.prefix.is_empty()).map(|parameter| {
+            super::super::fields::claim_xsi(parameter, "commandParameter", "form:DataPath")?;
+            super::super::fields::require_single_leaf(parameter, "commandParameter", "segments")
+        }).transpose()?;
         let ty = match rec.child("type").filter(|c| c.prefix.is_empty()) {
             Some(t) => {
                 t.claim_with_text();
@@ -369,10 +373,11 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
             )));
         }
         let (user_visible, user_visible_roles) = read_edt_user_visible(rec)?;
-        expect_only_children(rec, &["command", "type", "group", "index", "userVisible"])?;
+        expect_only_children(rec, &["command", "type", "commandParameter", "group", "index", "userVisible"])?;
         out.push(FormCiItem {
             command,
             ty,
+            command_parameter,
             group,
             index,
             user_visible,
@@ -421,15 +426,10 @@ pub(crate) fn read_edt_user_visible(rec: &Element) -> Result<(Option<bool>, Vec<
             .filter(|c| c.local == "for" && c.prefix.is_empty())
         {
             f.claim();
-            let val = matches!(
-                read_bool_text(
-                    f.child("value").filter(|c| c.prefix.is_empty()).ok_or_else(|| {
-                        FormError::Frame("userVisible <for>: no <value> (§1.0)".into())
-                    })?,
-                    "value"
-                )?,
-                PropertyValue::Bool(true)
-            );
+            let val = match f.child("value").filter(|c| c.prefix.is_empty()) {
+                Some(value) => matches!(read_bool_text(value, "value")?, PropertyValue::Bool(true)),
+                None => false, // Native BSP83 witnessed sparse role boolean.
+            };
             let role = leaf_text(f, "role")?;
             expect_only_children(f, &["value", "role"])?;
             roles.push((role, val));

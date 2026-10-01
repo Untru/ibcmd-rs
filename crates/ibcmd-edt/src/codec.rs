@@ -746,6 +746,7 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
             e: &ibcmd_xml::XmlElement,
             inherited: &BTreeMap<String, String>,
             preserve_space: bool,
+            ancestors: &[&str],
         ) -> Result<serde_json::Value, EdtError> {
             use ibcmd_xml::{AttributeKind, XmlNode};
             let mut namespaces = inherited.clone();
@@ -793,11 +794,31 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
                 .children()
                 .iter()
                 .any(|n| matches!(n,XmlNode::Text(t) if !t.value().trim().is_empty()));
+            let name = expanded(e.name(), false)?;
+            let mut path = ancestors.to_vec();
+            path.push(name.as_str());
+            let sparse_cmi_false = path.first().copied()
+                == Some("{http://g5.1c.ru/v8/dt/form}Form")
+                && path.len() == 6
+                && path[1] == "{}commandInterface"
+                && matches!(path[2], "{}navigationPanel" | "{}commandBar")
+                && path.ends_with(&["{}cmiFragmentRecord", "{}userVisible", "{}for"])
+                && attrs.is_empty()
+                && !mixed
+                && !preserve_space;
             let mut children = Vec::new();
             for node in e.children() {
                 match node {
                     XmlNode::Element(child) => {
-                        children.push(normalized(child, &namespaces, preserve_space)?)
+                        let value = normalized(child, &namespaces, preserve_space, &path)?;
+                        // Witnessed EDT CMI role boolean: absent <value> means
+                        // false. Only this exact typed scalar spelling may omit.
+                        if sparse_cmi_false
+                            && value == serde_json::json!(["{}value", {}, [["text", "false"]]])
+                        {
+                            continue;
+                        }
+                        children.push(value)
                     }
                     XmlNode::Text(t)
                         if branches && !preserve_space && !mixed && t.value().trim().is_empty() => {
@@ -811,11 +832,7 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
                     }
                 }
             }
-            Ok(serde_json::json!([
-                expanded(e.name(), false)?,
-                attrs,
-                children
-            ]))
+            Ok(serde_json::json!([name, attrs, children]))
         }
         let da = ibcmd_xml::XmlReader::from_slice(a.bytes()).map_err(EdtError::source)?;
         let db = ibcmd_xml::XmlReader::from_slice(b.bytes()).map_err(EdtError::source)?;
@@ -854,8 +871,8 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
             "xml".to_string(),
             "http://www.w3.org/XML/1998/namespace".to_string(),
         )]);
-        return Ok(normalized(da.root(), &namespaces, false)?
-            == normalized(db.root(), &namespaces, false)?);
+        return Ok(normalized(da.root(), &namespaces, false, &[])?
+            == normalized(db.root(), &namespaces, false, &[])?);
     }
     if a.path().as_str().ends_with(".bsl") || a.path().as_str().ends_with(".html") {
         let normalize = |bytes: &[u8]| {
@@ -957,5 +974,34 @@ mod tests {
         let a = body("Ext/Unknown.xml", "<Unknown><x/></Unknown>");
         let b = body("Ext/Unknown.xml", "<Unknown>\n<x/>\n</Unknown>");
         assert!(!same_body(&a, &b).unwrap());
+    }
+    #[test]
+    fn only_edt_cmi_role_false_has_witnessed_sparse_equivalence() {
+        let source = r#"<form:Form xmlns:form="http://g5.1c.ru/v8/dt/form"><commandInterface><navigationPanel><cmiFragmentRecord><userVisible><for><role>Role.Editor</role></for></userVisible></cmiFragmentRecord></navigationPanel></commandInterface></form:Form>"#;
+        let sparse = body("Form.form", source);
+        let explicit = source.replace("<for>", "<for><value>false</value>");
+        assert!(same_body(&sparse, &body("Form.form", &explicit)).unwrap());
+        for bad in [
+            explicit.replace("false", "true"),
+            explicit.replace("<value>", "<value retained=\"yes\">"),
+            explicit.replace("<for>", "<for>keep"),
+            explicit
+                .replace("<value>", "<other:value xmlns:other=\"urn:unknown\">")
+                .replace("</value>", "</other:value>"),
+            explicit.replace("<for>", "<for xml:space=\"preserve\">"),
+        ] {
+            assert!(!same_body(&sparse, &body("Form.form", &bad)).unwrap());
+        }
+        let other = source.replace("cmiFragmentRecord", "otherRecord");
+        assert!(
+            !same_body(
+                &body("Form.form", &other),
+                &body(
+                    "Form.form",
+                    &other.replace("<for>", "<for><value>false</value>")
+                )
+            )
+            .unwrap()
+        );
     }
 }

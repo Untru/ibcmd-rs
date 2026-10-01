@@ -266,6 +266,9 @@ pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElemen
         let mut item = OutElement::branch("", "Item");
         item.push(OutElement::leaf("", "Command", it.command.clone()));
         item.push(OutElement::leaf("", "Type", it.ty.clone()));
+        if let Some(path) = &it.command_parameter {
+            item.push(OutElement::leaf("", "Attribute", path.clone()));
+        }
         if let Some(g) = &it.group {
             item.push(OutElement::leaf("", "CommandGroup", g.clone()));
         }

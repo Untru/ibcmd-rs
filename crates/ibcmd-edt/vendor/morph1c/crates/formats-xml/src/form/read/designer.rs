@@ -47,6 +47,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
         }
         item.claim();
         let command = leaf_text(item, "Command")?;
+        let command_parameter = item.child("Attribute").filter(|c| c.prefix.is_empty()).map(|_| leaf_text(item, "Attribute")).transpose()?;
         // Type — Designer эмитит всегда (101/101: Auto/Added).
         let ty_el = item
             .child("Type")
@@ -154,6 +155,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
             &[
                 "Command",
                 "Type",
+                "Attribute",
                 "CommandGroup",
                 "Index",
                 "DefaultVisible",
@@ -163,6 +165,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
         out.push(FormCiItem {
             command,
             ty,
+            command_parameter,
             group,
             index,
             user_visible,
