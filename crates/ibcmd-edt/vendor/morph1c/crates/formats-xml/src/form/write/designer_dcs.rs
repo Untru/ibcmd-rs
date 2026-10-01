@@ -793,6 +793,7 @@ pub(crate) fn designer_dcs_right(right: &DcsRightValue) -> OutElement {
     // `<dcsset:right xsi:type="xs:string"/>` — ПубличныеИдентификаторы).
     let text_leaf = |v: &str, xt: &str| designer_dcs_text_value_ns("dcsset", "right", v, xt);
     match right {
+        DcsRightValue::Undefined => OutElement::self_closing("dcsset", "right").attr("xsi:nil", "true"),
         DcsRightValue::Boolean(v) => text_leaf(v, "xs:boolean"),
         DcsRightValue::Decimal(v) => text_leaf(v, "xs:decimal"),
         DcsRightValue::Str(v) => text_leaf(v, "xs:string"),

@@ -545,6 +545,8 @@ pub enum DcsItem {
 /// Правое значение сравнения фильтра (`dcsset:right`), диспетчеризованное по `xsi:type`.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum DcsRightValue {
+    /// Explicit undefined operand: Designer/EDT `right xsi:nil="true"`.
+    Undefined,
     /// `xs:boolean`: текст `true`/`false`.
     Boolean(String),
     /// `xs:decimal`: текст (напр. `0`; witness Взаимодействия).

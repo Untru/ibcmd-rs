@@ -630,6 +630,15 @@ pub(crate) fn claim_inline_type_qname_local(el: &Element) -> Result<String, Form
 /// `dcscor:DesignTimeValue` — тексты; `v8:Type` — QName с ИНЛАЙН types-ns (ЛЮБОЙ авто-префикс).
 pub(crate) fn read_dcs_right_value(right: &Element) -> Result<DcsRightValue, FormError> {
     right.claim();
+    if let Some(nil) = right.attr("xsi:nil") {
+        if nil.value != "true" || right.attr("xsi:type").is_some()
+            || !right.children.is_empty() || !right.text.is_empty() {
+            return Err(FormError::Frame("dcsset:right: invalid undefined operand".into()));
+        }
+        nil.claimed.set(true);
+        right.text_claimed.set(true);
+        return Ok(DcsRightValue::Undefined);
+    }
     let xt = right
         .attr("xsi:type")
         .ok_or_else(|| FormError::Frame("dcsset:right: no xsi:type (§1.0)".into()))?;
