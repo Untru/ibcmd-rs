@@ -1,5 +1,5 @@
 - [x] 1. Pin and assess morph1c, identify reusable source-only XML codec closure and record provenance/licensing.
-- [ ] 2. Implement bounded EDT project reader and canonical metadata/source-tree bridge (#355).
+- [ ] 2. Implement complete scalable EDT project reader and canonical metadata/source-tree bridge (#355).
 - [ ] 3. Implement offline EDT to XML with complete descriptor/body coverage and fail-closed accounting (#356).
 - [x] 4. Extend convert, profiles, diagnostics, preflight, dry-run and atomic directory publication.
 - [ ] 5. Implement importable XML to EDT, exact unchanged return conversion and stale-provenance protection (#357).

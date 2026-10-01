@@ -7,7 +7,15 @@ source-tree contracts without invoking EDT, Java or the 1C platform.
 #### Scenario: Read complete project
 - **WHEN** a supported EDT project with DT-INF and src is supplied
 - **THEN** objects, UUIDs, properties, modules, forms and assets are inventoried
-  and represented without silent losses, under bounded resource limits.
+  and represented without silent losses, with checked resource accounting and
+  scalable source storage rather than arbitrary configuration-size quotas.
+
+#### Scenario: Large valid source
+- **WHEN** a valid project exceeds the legacy in-memory API limits for XML
+  events, depth, graph size, scalar bytes, opaque XML or external assets
+- **THEN** both directory conversion directions retain its complete contents
+  using the explicit source policy, and size refusal or file exclusion does not
+  count as acceptance; ordinary bounded in-memory APIs retain their own contract.
 
 ### Requirement: Explicit lossless conversion and publication
 The system SHALL support explicit edt/xml conversion endpoints and profiles,
