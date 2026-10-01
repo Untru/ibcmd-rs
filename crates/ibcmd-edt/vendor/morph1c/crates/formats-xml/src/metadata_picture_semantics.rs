@@ -105,7 +105,10 @@ fn tuple(obj: &MetadataObject, id: FieldId) -> Result<(String, bool, Option<(i64
         Ok((reference.into(), flag, pixel))
     }
 }
-fn resource(obj: &MetadataObject) -> Result<Option<Resource>, String> {
+fn resource(
+    obj: &MetadataObject,
+    defaults: &BTreeMap<String, bool>,
+) -> Result<Option<Resource>, String> {
     let declared = targets(obj);
     let mut ids = BTreeSet::new();
     for command in &declared {
@@ -130,7 +133,7 @@ fn resource(obj: &MetadataObject) -> Result<Option<Resource>, String> {
             tuple(command, field(command).expect("registered picture"))?;
         if selected.contains(&command.uuid)
             || pixel.is_some()
-            || load_transparent != picture::default_load_transparent(&reference)
+            || load_transparent != resolved_default(&reference, defaults)
         {
             pictures.push(Row {
                 command_uuid: command.uuid,
@@ -203,40 +206,137 @@ pub fn apply(obj: &mut MetadataObject, bytes: &[u8]) -> Result<(), String> {
     obj.metadata_picture_resource_commands = r.pictures.iter().map(|r| r.command_uuid).collect();
     Ok(())
 }
-/// Project only descriptor PictureRef values to the ordinary SDK shape. The
-/// returned resource is rebuilt from the same CURRENT typed values each time.
-pub fn project(obj: &MetadataObject) -> Result<(Cow<'_, MetadataObject>, Option<Vec<u8>>), String> {
-    let Some(r) = resource(obj)? else {
-        return Ok((Cow::Borrowed(obj), None));
-    };
-    let bytes = serde_json::to_vec_pretty(&r).map_err(|e| e.to_string())?;
-    let mut projected = obj.clone();
-    for row in r.pictures {
-        let command = if projected.uuid == row.command_uuid && field(&projected).is_some() {
-            &mut projected
-        } else {
-            projected
-                .children
-                .iter_mut()
-                .find(|c| c.uuid == row.command_uuid)
-                .expect("validated command")
-        };
-        let id = field(command).expect("registered field");
-        let value = picture::pack(
-            row.reference.clone(),
-            picture::default_load_transparent(&row.reference),
-            None,
-        );
+/// CURRENT CommonPicture metadata determines the SDK reference-only BOOL.
+/// Per-use pixels are never reconstructed from these descriptors.
+pub fn common_picture_defaults(
+    objects: &[MetadataObject],
+) -> Result<BTreeMap<String, bool>, String> {
+    fn collect(objects: &[MetadataObject], out: &mut BTreeMap<String, bool>) -> Result<(), String> {
+        for object in objects {
+            if object.kind.as_str() == "CommonPicture" {
+                let pixel = object
+                    .get(morph1c_core::spec::metadata::common_picture::F_TRANSPARENT_PIXEL)
+                    .map(crate::transparent_pixel::pixel_of)
+                    .transpose()?;
+                if out
+                    .insert(format!("CommonPicture.{}", object.name), pixel.is_some())
+                    .is_some()
+                {
+                    return Err("duplicate CommonPicture reference identity".into());
+                }
+            }
+            collect(&object.children, out)?;
+        }
+        Ok(())
+    }
+    let mut defaults = BTreeMap::new();
+    collect(objects, &mut defaults)?;
+    Ok(defaults)
+}
+fn resolved_default(reference: &str, defaults: &BTreeMap<String, bool>) -> bool {
+    defaults
+        .get(reference)
+        .copied()
+        .unwrap_or_else(|| picture::default_load_transparent(reference))
+}
+/// Apply the official reference-only projection only to EDT-origin commands.
+/// Validated resource-owned tuples remain authoritative, including explicit false.
+pub fn resolve(obj: &mut MetadataObject, defaults: &BTreeMap<String, bool>) -> Result<(), String> {
+    // Validate identities/selections before modifying any tuple.
+    resource(obj, defaults)?;
+    let updates: Vec<_> = targets(obj)
+        .into_iter()
+        .filter(|command| {
+            !obj.metadata_picture_resource_commands
+                .contains(&command.uuid)
+        })
+        .map(|command| {
+            let id = field(command).expect("registered picture");
+            let (reference, flag, pixel) = tuple(command, id)?;
+            let resolved = resolved_default(&reference, defaults);
+            Ok((
+                command.uuid,
+                id,
+                picture::pack(reference, resolved, pixel),
+                flag != resolved,
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    for (uuid, id, value, changed) in updates {
+        if !changed {
+            continue;
+        }
+        let command = target_mut(obj, uuid);
         if let Some(entry) = command.properties.iter_mut().find(|(f, _)| *f == id) {
             entry.1 = value;
         } else {
             command.properties.push((id, value));
         }
     }
-    Ok((Cow::Owned(projected), Some(bytes)))
+    Ok(())
+}
+fn target_mut(obj: &mut MetadataObject, uuid: Uuid) -> &mut MetadataObject {
+    if obj.uuid == uuid && field(obj).is_some() {
+        obj
+    } else {
+        obj.children
+            .iter_mut()
+            .find(|c| c.uuid == uuid)
+            .expect("validated command")
+    }
+}
+/// Standalone descriptors have no CommonPicture context; whole projects use
+/// project_with_defaults with the CURRENT complete configuration metadata.
+pub fn project(obj: &MetadataObject) -> Result<(Cow<'_, MetadataObject>, Option<Vec<u8>>), String> {
+    project_with_defaults(obj, &BTreeMap::new())
+}
+pub fn project_with_defaults<'a>(
+    obj: &'a MetadataObject,
+    defaults: &BTreeMap<String, bool>,
+) -> Result<(Cow<'a, MetadataObject>, Option<Vec<u8>>), String> {
+    let bytes = resource(obj, defaults)?
+        .map(|r| serde_json::to_vec_pretty(&r))
+        .transpose()
+        .map_err(|e| e.to_string())?;
+    let updates: Vec<_> = targets(obj)
+        .into_iter()
+        .map(|command| {
+            let id = field(command).expect("registered picture");
+            let (reference, flag, pixel) = tuple(command, id)?;
+            let wire_flag = picture::default_load_transparent(&reference);
+            Ok((
+                command.uuid,
+                id,
+                picture::pack(reference, wire_flag, None),
+                pixel.is_some() || flag != wire_flag,
+            ))
+        })
+        .collect::<Result<_, String>>()?;
+    if !updates.iter().any(|(_, _, _, changed)| *changed) {
+        return Ok((Cow::Borrowed(obj), bytes));
+    }
+    let mut projected = obj.clone();
+    for (uuid, id, value, changed) in updates {
+        if !changed {
+            continue;
+        }
+        let command = target_mut(&mut projected, uuid);
+        if let Some(entry) = command.properties.iter_mut().find(|(f, _)| *f == id) {
+            entry.1 = value;
+        } else {
+            command.properties.push((id, value));
+        }
+    }
+    Ok((Cow::Owned(projected), bytes))
 }
 pub fn resource_count(obj: &MetadataObject) -> Result<Option<usize>, String> {
-    Ok(resource(obj)?.map(|r| r.pictures.len()))
+    resource_count_with_defaults(obj, &BTreeMap::new())
+}
+pub fn resource_count_with_defaults(
+    obj: &MetadataObject,
+    defaults: &BTreeMap<String, bool>,
+) -> Result<Option<usize>, String> {
+    Ok(resource(obj, defaults)?.map(|r| r.pictures.len()))
 }
 /// Closed carrier records are a mapping by declared command identity. This does
 /// not normalize source metadata, picture values, or any semantic ordered array.

@@ -62,7 +62,7 @@ pub fn attach_picture_body(
     if !PICTURE_KINDS.contains(&kind) {
         return Ok(());
     }
-    let (file_name, image_path, pixel) = match picture_source(format, descriptor_path, &obj.name)? {
+    let (file_name, image_path, pixel, sentinel_explicit) = match picture_source(format, descriptor_path, &obj.name)? {
         Some(x) => x,
         None => return Ok(()), // cf: container, or an image-less stub — no-op.
     };
@@ -99,6 +99,7 @@ pub fn attach_picture_body(
             PropertyValue::List(vec![PropertyValue::Int(x), PropertyValue::Int(y)]),
         ));
     }
+    obj.picture_wrapper_sentinel_explicit = sentinel_explicit;
     obj.picture = Some(PictureBody { file_name, bytes });
     Ok(())
 }
@@ -167,7 +168,7 @@ pub fn write_picture_body(
             )?;
             crate::form_write::write_file(
                 &ext.join("Picture.xml"),
-                &serialize_wrapper(&pic.file_name, pixel),
+                &serialize_wrapper_with_presence(&pic.file_name, pixel, obj.picture_wrapper_sentinel_explicit),
             )
         }
         Format::Cf => Ok(()), // container — no file-per-object sidecar.
@@ -191,7 +192,7 @@ fn picture_source(
     format: Format,
     descriptor_path: &Path,
     obj_name: &str,
-) -> Result<Option<(String, PathBuf, Option<(i64, i64)>)>, ConvertError> {
+) -> Result<Option<(String, PathBuf, Option<(i64, i64)>, bool)>, ConvertError> {
     match format {
         // EDT: the image is the sibling file whose stem is `Picture` (extension = image format).
         Format::Edt => {
@@ -227,7 +228,7 @@ fn picture_source(
                     found = Some(path);
                 }
             }
-            Ok(found.map(|p| (file_name_of(&p), p, None)))
+            Ok(found.map(|p| (file_name_of(&p), p, None, false)))
         }
         // Designer: read the wrapper `<Name>/Ext/Picture.xml` for the referenced file name (and
         // the transparent pixel, if any), then the raw image `<Name>/Ext/Picture/<file>`.
@@ -245,11 +246,12 @@ fn picture_source(
             if !wrapper.is_file() {
                 return Ok(None); // image-less stub.
             }
-            let (file_name, pixel) = parse_wrapper(&wrapper, obj_name)?;
+            let (file_name, pixel, sentinel_explicit) = parse_wrapper_with_presence(&wrapper, obj_name)?;
             Ok(Some((
                 file_name.clone(),
                 ext.join(PICTURE_STEM).join(file_name),
                 pixel,
+                sentinel_explicit,
             )))
         }
         Format::Cf => Ok(None),
@@ -259,15 +261,20 @@ fn picture_source(
 /// Parse the Designer `Ext/Picture.xml` wrapper → `(referenced image file name, transparent
 /// pixel)`. §1.0: the shape must be exactly `<ExtPicture><Picture><xr:Abs>NAME</xr:Abs>
 /// <xr:LoadTransparent>false|true</xr:LoadTransparent>[<xr:TransparentPixel x="N" y="M"/>]
-/// </Picture></ExtPicture>` with `LoadTransparent=true` ⟺ `TransparentPixel` present
-/// (witnessed ERP 30/30 pixel-carriers + 2428/2428 plain — the flag is a denormalization of
-/// pixel presence, not an independent bit). Shared with the config-level Ext pictures
+/// </Picture></ExtPicture>`. True with no explicit pixel maps to the installed
+/// SDK's Point(-1,-1); false maps to null. Explicit coordinates are preserved. Shared with the config-level Ext pictures
 /// (`crate::ext_read`: `Ext/<Slot>.xml` wrappers of `Splash`/`MainSectionPicture` carry the
 /// IDENTICAL shape — verified byte-equal on s15; those refuse a pixel, unwitnessed there).
 pub(crate) fn parse_wrapper(
     path: &Path,
     obj_name: &str,
 ) -> Result<(String, Option<(i64, i64)>), ConvertError> {
+    parse_wrapper_with_presence(path, obj_name).map(|(name, point, _)| (name, point))
+}
+fn parse_wrapper_with_presence(
+    path: &Path,
+    obj_name: &str,
+) -> Result<(String, Option<(i64, i64)>, bool), ConvertError> {
     let bytes = std::fs::read(path).map_err(|e| ConvertError::Io {
         path: path.display().to_string(),
         reason: e.to_string(),
@@ -304,18 +311,14 @@ pub(crate) fn parse_wrapper(
         }
     };
     let pixel_el = child(picture, "TransparentPixel");
-    // §1.0: the flag is a denormalization of pixel presence — a contradicting pair is
-    // unwitnessed (ERP 2458/2458) and refused, never guessed.
+    // Nullable Point controls the flag; an absent coordinate with true is the
+    // official default sentinel Point(-1,-1), distinct from null/false.
     let pixel = match (transparent, pixel_el) {
         (false, None) => None,
         (true, Some(px)) => Some(parse_pixel(px, &read_err)?),
-        (true, None) => {
-            return Err(read_err(
-                "<xr:LoadTransparent>true</…> without <xr:TransparentPixel> — unwitnessed \
-                 (the flag denormalizes pixel presence, §1.0)"
-                    .into(),
-            ));
-        }
+        // Installed MdPictureXmlFileReader creates its default Point(-1,-1)
+        // when LoadTransparent is true and no explicit coordinate is present.
+        (true, None) => Some((-1, -1)),
         (false, Some(_)) => {
             return Err(read_err(
                 "<xr:TransparentPixel> with <xr:LoadTransparent>false</…> — unwitnessed \
@@ -324,7 +327,7 @@ pub(crate) fn parse_wrapper(
             ));
         }
     };
-    Ok((abs.text.clone(), pixel))
+    Ok((abs.text.clone(), pixel, pixel == Some((-1, -1)) && pixel_el.is_some()))
 }
 
 /// `<xr:TransparentPixel x="N" y="M"/>` → `(x, y)`. §1.0: both attributes required (DENSE —
@@ -377,6 +380,9 @@ fn file_name_of(path: &Path) -> String {
 /// (`crate::ext_read` — `Ext/<Slot>.xml` wrappers are byte-identical in shape, RE s15;
 /// those always pass `pixel=None`).
 pub(crate) fn serialize_wrapper(file_name: &str, pixel: Option<(i64, i64)>) -> Vec<u8> {
+    serialize_wrapper_with_presence(file_name, pixel, false)
+}
+fn serialize_wrapper_with_presence(file_name: &str, pixel: Option<(i64, i64)>, sentinel_explicit: bool) -> Vec<u8> {
     let version = formats_designer::common::profile_for(crate::sidecar_version::write_target())
         .map(|p| p.version_value)
         // Реестр всегда несёт таргет (`write_target` возвращает только witnessed-версии);
@@ -398,7 +404,7 @@ pub(crate) fn serialize_wrapper(file_name: &str, pixel: Option<(i64, i64)>) -> V
     s.push_str("</xr:Abs>\r\n\t\t<xr:LoadTransparent>");
     s.push_str(if pixel.is_some() { "true" } else { "false" });
     s.push_str("</xr:LoadTransparent>");
-    if let Some((x, y)) = pixel {
+    if let Some((x, y)) = pixel.filter(|p| *p != (-1, -1) || sentinel_explicit) {
         s.push_str(&format!(
             "\r\n\t\t<xr:TransparentPixel x=\"{x}\" y=\"{y}\"/>"
         ));
@@ -475,21 +481,17 @@ mod tests {
         let _ = std::fs::remove_dir_all(&base);
     }
 
-    /// §1.0: `true` WITHOUT a pixel (and a pixel with `false`) are unwitnessed — the flag
-    /// denormalizes pixel presence (ERP 2458/2458) — refused, not guessed.
+    /// Installed SDK sentinel true/noPixel is valid; false with an explicit
+    /// coordinate still cannot be discarded.
     #[test]
     fn wrapper_rejects_contradicting_transparency() {
         let base = std::env::temp_dir().join(format!("morph1c-pic-lt-{}", std::process::id()));
         std::fs::create_dir_all(&base).unwrap();
         let xml = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ExtPicture xmlns:xr=\"x\"><Picture><xr:Abs>P.png</xr:Abs><xr:LoadTransparent>true</xr:LoadTransparent></Picture></ExtPicture>";
         crate::fsio::write(base.join("Picture.xml"), xml).unwrap();
-        let err = parse_wrapper(&base.join("Picture.xml"), "Кар").unwrap_err();
-        match err {
-            ConvertError::Read { reason, .. } => {
-                assert!(reason.contains("LoadTransparent"), "got {reason}")
-            }
-            other => panic!("expected Read, got {other:?}"),
-        }
+        let (name, point) = parse_wrapper(&base.join("Picture.xml"), "Кар").unwrap();
+        assert_eq!(name, "P.png");
+        assert_eq!(point, Some((-1, -1)));
         let xml2 = b"\xEF\xBB\xBF<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ExtPicture xmlns:xr=\"x\"><Picture><xr:Abs>P.png</xr:Abs><xr:LoadTransparent>false</xr:LoadTransparent><xr:TransparentPixel x=\"1\" y=\"2\"/></Picture></ExtPicture>";
         crate::fsio::write(base.join("Picture.xml"), xml2).unwrap();
         let err = parse_wrapper(&base.join("Picture.xml"), "Кар").unwrap_err();
@@ -511,40 +513,18 @@ pub(crate) fn resolve_form_picture_transparency(
     cfg: &mut morph1c_core::ir::Configuration,
 ) -> Result<(), ConvertError> {
     use std::collections::BTreeMap;
-    fn collect(
-        objects: &[MetadataObject],
-        out: &mut BTreeMap<String, bool>,
-    ) -> Result<(), ConvertError> {
-        for object in objects {
-            if object.kind.as_str() == "CommonPicture" {
-                let pixel = object
-                    .get(F_TRANSPARENT_PIXEL)
-                    .map(pixel_of)
-                    .transpose()
-                    .map_err(|reason| ConvertError::Read {
-                        kind: "CommonPicture".into(),
-                        object: object.name.clone(),
-                        reason,
-                    })?;
-                let reference = format!("CommonPicture.{}", object.name);
-                if out.insert(reference, pixel.is_some()).is_some() {
-                    return Err(ConvertError::Read {
-                        kind: "CommonPicture".into(),
-                        object: object.name.clone(),
-                        reason: "duplicate CommonPicture reference identity".into(),
-                    });
-                }
-            }
-            collect(&object.children, out)?;
-        }
-        Ok(())
-    }
     fn bind(
         objects: &mut [MetadataObject],
         defaults: &BTreeMap<String, bool>,
         edt: bool,
     ) -> Result<(), ConvertError> {
         for object in objects {
+            if edt {
+                formats_xml::metadata_picture_semantics::resolve(object, defaults)
+                    .map_err(|reason| ConvertError::Read {
+                        kind: object.kind.as_str().into(), object: object.name.clone(), reason,
+                    })?;
+            }
             let declared: Vec<_> = object
                 .form_bodies
                 .iter()
@@ -575,7 +555,9 @@ pub(crate) fn resolve_form_picture_transparency(
         }
         Ok(())
     }
-    let mut defaults = BTreeMap::new();
-    collect(&cfg.objects, &mut defaults)?;
+    let defaults = formats_xml::metadata_picture_semantics::common_picture_defaults(&cfg.objects)
+        .map_err(|reason| ConvertError::Read {
+            kind: "CommonPicture".into(), object: "configuration context".into(), reason,
+        })?;
     bind(&mut cfg.objects, &defaults, format == Format::Edt)
 }

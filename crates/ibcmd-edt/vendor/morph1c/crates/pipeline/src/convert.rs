@@ -370,10 +370,11 @@ fn write_object(
     fk: &FormatKind,
     out: &Path,
     obj: &MetadataObject,
+    picture_defaults: &std::collections::BTreeMap<String, bool>,
 ) -> Result<(), ConvertError> {
     let help_view = crate::help_read::descriptor_with_help(obj)?;
     let projection = if format == Format::Edt {
-        Some(formats_xml::metadata_picture_semantics::project(help_view.as_ref()).map_err(|reason| ConvertError::Write {
+        Some(formats_xml::metadata_picture_semantics::project_with_defaults(help_view.as_ref(), picture_defaults).map_err(|reason| ConvertError::Write {
             kind: fk.kind.into(), object: obj.name.clone(), reason,
         })?)
     } else { None };
@@ -523,6 +524,10 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
     let timing = std::env::var_os("MORPH1C_TIMING").is_some();
     let t1 = std::time::Instant::now();
     let reg = FormatRegistry::for_format(format)?;
+    let picture_defaults = formats_xml::metadata_picture_semantics::common_picture_defaults(&cfg.objects)
+        .map_err(|reason| ConvertError::Write {
+            kind: "CommonPicture".into(), object: "configuration context".into(), reason,
+        })?;
 
     // PHASE 1 — plan every object's output path (nothing written yet, so a path error aborts
     // BEFORE any partial output). Nested (Subsystem) kinds reconstruct the HIERARCHICAL path
@@ -602,7 +607,7 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
             // Clock reads only when profiling — see `fsio::accounting`.
             let t = timing.then(std::time::Instant::now);
             let r = morph1c_core::version::with_captured_roundtrip_target(ambient_target, || {
-                write_object(format, fk, out, obj)
+                write_object(format, fk, out, obj, &picture_defaults)
             });
             if let Some(t) = t {
                 use std::sync::atomic::Ordering::Relaxed;

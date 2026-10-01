@@ -145,6 +145,14 @@ native descriptor regeneration and pixel/flag edits; forged provenance hashes
 cannot hide a changed tuple. This resource preserves adapter semantics and does
 not claim that the installed EDT model or its native exporter stores per-use
 transparency. Installed-tool compatibility is a separate laboratory gate.
+For reference-only EDT metadata commands, the whole-project reader derives
+LoadTransparent from CURRENT CommonPicture nullable transparentPixel presence,
+as the installed SDK does. It never reconstructs a per-use pixel. Validated
+resource-owned tuples override this derived default, including explicit false.
+The writer and extension ledger use the same current configuration context, so
+a reference matching this default needs no extra resource. Editing shared
+picture metadata therefore updates an unowned command default while preserving
+independently carried per-use values; semantic fingerprints detect both edits.
 
 ## Tests and acceptance scope
 

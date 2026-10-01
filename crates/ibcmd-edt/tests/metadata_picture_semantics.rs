@@ -504,3 +504,299 @@ fn genuine_catalog_command_resource_keeps_all_current_values() {
         ibcmd_xml::source_tree::publish_new(&strip(&output.tree), destination).unwrap();
     }
 }
+
+fn common_picture(name: &str, pixel: Option<(i64, i64)>) -> MetadataObject {
+    let mut object = MetadataObject::new(ObjectKind::new("CommonPicture"), name, Uuid([0x1a; 16]));
+    if let Some((x, y)) = pixel {
+        object.properties.push((
+            morph1c_core::spec::metadata::common_picture::F_TRANSPARENT_PIXEL,
+            PropertyValue::List(vec![PropertyValue::Int(x), PropertyValue::Int(y)]),
+        ));
+    }
+    object
+}
+fn set_command_picture(object: &mut MetadataObject, flag: bool, pixel: Option<(i64, i64)>) {
+    object.children[0]
+        .properties
+        .iter_mut()
+        .find(|(id, _)| *id == cmd::F_PICTURE)
+        .unwrap()
+        .1 = picture::pack("CommonPicture.Print".into(), flag, pixel);
+}
+#[test]
+fn current_metadata_context_and_carrier_precedence_drive_projection_and_counts() {
+    let mut authentic = owner();
+    set_command_picture(&mut authentic, false, None);
+    for pixel in [Some((13, 3)), None, Some((-2, 0))] {
+        let defaults = carrier::common_picture_defaults(&[common_picture("Print", pixel)]).unwrap();
+        carrier::resolve(&mut authentic, &defaults).unwrap();
+        assert_eq!(
+            picture::unpack(authentic.children[0].get(cmd::F_PICTURE).unwrap()).unwrap(),
+            ("CommonPicture.Print", pixel.is_some(), None)
+        );
+        assert_eq!(
+            carrier::resource_count_with_defaults(&authentic, &defaults).unwrap(),
+            None
+        );
+        let (descriptor, resource) = carrier::project_with_defaults(&authentic, &defaults).unwrap();
+        assert!(resource.is_none());
+        let mut readback = read(Format::Edt, &write(Format::Edt, &descriptor));
+        carrier::resolve(&mut readback, &defaults).unwrap();
+        assert_eq!(
+            readback.children[0].get(cmd::F_PICTURE),
+            authentic.children[0].get(cmd::F_PICTURE)
+        );
+    }
+    let defaults =
+        carrier::common_picture_defaults(&[common_picture("Print", Some((13, 3)))]).unwrap();
+    let mut explicit = owner();
+    set_command_picture(&mut explicit, false, None);
+    let (descriptor, resource) = carrier::project_with_defaults(&explicit, &defaults).unwrap();
+    let mut readback = read(Format::Edt, &write(Format::Edt, &descriptor));
+    carrier::apply(&mut readback, &resource.unwrap()).unwrap();
+    carrier::resolve(&mut readback, &defaults).unwrap();
+    assert_eq!(
+        picture::unpack(readback.children[0].get(cmd::F_PICTURE).unwrap()).unwrap(),
+        ("CommonPicture.Print", false, None)
+    );
+    assert_eq!(
+        carrier::resource_count_with_defaults(&readback, &defaults).unwrap(),
+        Some(1)
+    );
+    assert!(
+        carrier::common_picture_defaults(&[
+            common_picture("Print", None),
+            common_picture("Print", Some((1, 1)))
+        ])
+        .is_err()
+    );
+    let mut missing = owner();
+    set_command_picture(&mut missing, false, None);
+    carrier::resolve(&mut missing, &Default::default()).unwrap();
+    assert!(
+        !picture::unpack(missing.children[0].get(cmd::F_PICTURE).unwrap())
+            .unwrap()
+            .1
+    );
+}
+#[test]
+fn public_current_shared_picture_edits_resolve_without_resource_and_cannot_restore_stale_xml() {
+    let opts = ConversionOptions {
+        edt_version: "2025.2.3".into(),
+        xml_dialect: "2.21".into(),
+        runtime_version: Some("8.5.1".into()),
+    };
+    let base = read_xml_source(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        ),
+        ReaderLimits::default(),
+    )
+    .unwrap();
+    let mut model = owner();
+    set_command_picture(&mut model, false, None);
+    let source = mutate(
+        &base,
+        "Catalogs/PictureOwner.xml",
+        write(Format::Designer, &model),
+    );
+    let generated = xml_to_edt(&source, &opts).unwrap().tree;
+    let path = "src/CommonPictures/Print/Print.mdo";
+    let serialize = |pixel| {
+        with_roundtrip_target(FormatVersion::new(2, 21), || {
+            (FormatRegistry::for_format(Format::Edt)
+                .unwrap()
+                .get("CommonPicture")
+                .unwrap()
+                .write)(&common_picture("Print", pixel))
+        })
+        .unwrap()
+    };
+    let mut complete_native = None;
+    for pixel in [Some((13, 3)), None, Some((-2, 0))] {
+        let bytes = serialize(pixel);
+        let changed = mutate(
+            &mutate(&strip(&generated), path, bytes.clone()),
+            "src/CommonPictures/Print/Picture.png",
+            tiny_png(),
+        );
+        let output = edt_to_xml(&Project::from_tree(changed).unwrap(), &opts).unwrap();
+        let descriptor = output
+            .tree
+            .entries()
+            .iter()
+            .find(|e| e.path().as_str() == "Catalogs/PictureOwner.xml")
+            .unwrap();
+        let result = read(Format::Designer, descriptor.bytes());
+        assert_eq!(
+            picture::unpack(result.children[0].get(cmd::F_PICTURE).unwrap()).unwrap(),
+            ("CommonPicture.Print", pixel.is_some(), None)
+        );
+        assert!(
+            output
+                .extensions
+                .iter()
+                .all(|e| e.id != "ibcmd-metadata-picture-semantics/1")
+        );
+        if pixel == Some((13, 3)) {
+            complete_native = Some(output.tree.clone());
+        }
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            generated
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == ".ibcmd-provenance/manifest.json")
+                .unwrap()
+                .bytes(),
+        )
+        .unwrap();
+        manifest["generated"][path] = serde_json::json!(format!("{:x}", Sha256::digest(&bytes)));
+        let image_path = "src/CommonPictures/Print/Picture.png";
+        manifest["generated"][image_path] =
+            serde_json::json!(format!("{:x}", Sha256::digest(tiny_png())));
+        let forged = mutate(
+            &mutate(&mutate(&generated, path, bytes), image_path, tiny_png()),
+            ".ibcmd-provenance/manifest.json",
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        assert!(edt_to_xml(&Project::from_tree(forged).unwrap(), &opts).is_err());
+    }
+    // An explicit current false flag is independently carried when the shared
+    // metadata default is true, and remains false after shared pixel edits.
+    let source = mutate(
+        &complete_native.unwrap(),
+        "Catalogs/PictureOwner.xml",
+        write(Format::Designer, &model),
+    );
+    let generated = xml_to_edt(&source, &opts).unwrap();
+    assert_eq!(
+        generated
+            .extensions
+            .iter()
+            .find(|e| e.id == "ibcmd-metadata-picture-semantics/1")
+            .map(|e| (e.resources, e.references)),
+        Some((1, 1))
+    );
+    assert_eq!(
+        edt_to_xml(&Project::from_tree(generated.tree.clone()).unwrap(), &opts)
+            .unwrap()
+            .tree,
+        source
+    );
+    for pixel in [Some((-2, 0)), None] {
+        let bytes = serialize(pixel);
+        let changed = mutate(&strip(&generated.tree), path, bytes.clone());
+        let returned = edt_to_xml(&Project::from_tree(changed).unwrap(), &opts).unwrap();
+        let descriptor = returned
+            .tree
+            .entries()
+            .iter()
+            .find(|e| e.path().as_str() == "Catalogs/PictureOwner.xml")
+            .unwrap();
+        let current = read(Format::Designer, descriptor.bytes());
+        assert_eq!(
+            picture::unpack(current.children[0].get(cmd::F_PICTURE).unwrap()).unwrap(),
+            ("CommonPicture.Print", false, None)
+        );
+        let mut manifest: serde_json::Value = serde_json::from_slice(
+            generated
+                .tree
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == ".ibcmd-provenance/manifest.json")
+                .unwrap()
+                .bytes(),
+        )
+        .unwrap();
+        manifest["generated"][path] = serde_json::json!(format!("{:x}", Sha256::digest(&bytes)));
+        let forged = mutate(
+            &mutate(&generated.tree, path, bytes),
+            ".ibcmd-provenance/manifest.json",
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        assert!(edt_to_xml(&Project::from_tree(forged).unwrap(), &opts).is_err());
+    }
+}
+#[test]
+#[ignore = "requires immutable genuine UH83 authentic and independent SDK native descriptors"]
+fn genuine_four_commands_match_sdk_context_without_inventing_per_use_pixels() {
+    let edt = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_UHA_EDT").unwrap());
+    let sdk = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_UHA_SDK").unwrap());
+    let mut authentic = read(
+        Format::Edt,
+        &std::fs::read(edt.join("src/Catalogs/ВидыОтчетов/ВидыОтчетов.mdo")).unwrap(),
+    );
+    let native = read(
+        Format::Designer,
+        &std::fs::read(sdk.join("Catalogs/ВидыОтчетов.xml")).unwrap(),
+    );
+    let picture_reader = FormatRegistry::for_format(Format::Edt)
+        .unwrap()
+        .get("CommonPicture")
+        .unwrap()
+        .read;
+    let mut pictures = Vec::new();
+    let mut refs = std::collections::BTreeSet::new();
+    for command in &authentic.children {
+        if command.kind.as_str() != "Catalog.Command" {
+            continue;
+        }
+        let reference = picture::unpack(command.get(cmd::F_PICTURE).unwrap())
+            .unwrap()
+            .0;
+        let name = reference.strip_prefix("CommonPicture.").unwrap();
+        if refs.insert(name.to_owned()) {
+            pictures.push(
+                picture_reader(
+                    &std::fs::read(
+                        edt.join("src/CommonPictures")
+                            .join(name)
+                            .join(format!("{name}.mdo")),
+                    )
+                    .unwrap(),
+                )
+                .unwrap(),
+            );
+        }
+    }
+    let defaults = carrier::common_picture_defaults(&pictures).unwrap();
+    carrier::resolve(&mut authentic, &defaults).unwrap();
+    let mut counts = (0, 0);
+    for command in &authentic.children {
+        if command.kind.as_str() != "Catalog.Command" {
+            continue;
+        }
+        let corresponding = native
+            .children
+            .iter()
+            .find(|c| c.uuid == command.uuid)
+            .unwrap();
+        let ours = picture::unpack(command.get(cmd::F_PICTURE).unwrap()).unwrap();
+        assert_eq!(
+            ours,
+            picture::unpack(corresponding.get(cmd::F_PICTURE).unwrap()).unwrap()
+        );
+        assert!(ours.2.is_none());
+        counts.0 += 1;
+        counts.1 += usize::from(ours.1);
+    }
+    assert_eq!(counts, (4, 2));
+    let (projected, resource) = carrier::project_with_defaults(&authentic, &defaults).unwrap();
+    assert!(resource.is_none());
+    let mut regenerated = read(Format::Edt, &write(Format::Edt, &projected));
+    carrier::resolve(&mut regenerated, &defaults).unwrap();
+    assert_eq!(
+        serde_json::to_vec(&regenerated).unwrap(),
+        serde_json::to_vec(&authentic).unwrap()
+    );
+}
+
+fn tiny_png() -> Vec<u8> {
+    // Genuine PNG framing of a one-pixel test image; no source corpus mutation.
+    vec![
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4,
+        0, 0, 0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 100, 248, 15, 0, 1, 5,
+        1, 1, 39, 24, 227, 102, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+    ]
+}
