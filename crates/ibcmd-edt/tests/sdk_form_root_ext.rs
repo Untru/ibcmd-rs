@@ -1,7 +1,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use formats_xml::form::{FormDialect, read_form, resolve_common_picture_transparency, write_form};
+use formats_xml::form::{
+    FormDialect, bind_picture_semantics, read_form, resolve_common_picture_transparency, write_form,
+};
 use morph1c_core::ir::{FormBody, FormRootExtInfo};
 use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
 use sha2::{Digest, Sha256};
@@ -74,7 +76,7 @@ fn differences(
         _ => {
             let abbreviated = |value: &serde_json::Value| {
                 let text = value.to_string();
-                serde_json::json!({"serialized_sha256":sha(text.as_bytes()),"characters":text.chars().count(),"prefix":text.chars().take(160).collect::<String>()})
+                serde_json::json!({"serialized_sha256":sha(text.as_bytes()),"characters":text.chars().count()})
             };
             out.push(
                 serde_json::json!({"path":path,"before":abbreviated(a),"after":abbreviated(b)}),
@@ -316,6 +318,8 @@ fn genuine_bsp83_all_forms_semantic_digest_census() {
             }
             resolve_common_picture_transparency(&mut source.form_bodies[0].body, &pictures, false)
                 .map_err(|e| format!("native picture context: {e}"))?;
+            bind_picture_semantics(&mut source.form_bodies[0].body, source.uuid, false)
+                .map_err(|e| format!("native picture resource binding: {e}"))?;
             let scratch = tempfile::tempdir_in(&lab).unwrap();
             let target_anchor = scratch.path().join(&name).join(format!("{name}.mdo"));
             with_roundtrip_target(version(), || {
@@ -333,6 +337,8 @@ fn genuine_bsp83_all_forms_semantic_digest_census() {
             }
             resolve_common_picture_transparency(&mut returned.form_bodies[0].body, &pictures, true)
                 .map_err(|e| format!("EDT picture context: {e}"))?;
+            bind_picture_semantics(&mut returned.form_bodies[0].body, returned.uuid, true)
+                .map_err(|e| format!("EDT picture resource binding: {e}"))?;
             let before = semantic_sha(&source.form_bodies);
             let after = semantic_sha(&returned.form_bodies);
             let body_before = semantic_sha(&source.form_bodies[0].body);

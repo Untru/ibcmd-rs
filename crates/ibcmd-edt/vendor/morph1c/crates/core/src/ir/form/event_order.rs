@@ -136,6 +136,25 @@ pub const FORM_EVENT_GUIDS: &[(&str, &str)] = &[
         "URLListGetProcessing",
         "44498116-1641-4bfa-ae33-86e53c205797",
     ), // n=1
+    // Exact installed EDT runtime .type identities, independently bound to the
+    // 8.3.27/8.5.1 platform jars by sdk_event_owners::installed_sdk_tables_agree.
+    // Root ActivationProcessing takes precedence over the Task extension's
+    // same-named event, as in EventHandlerXmlPartReader's owner exclusion.
+    ("ActivationProcessing", "21da18af-c6f6-4433-9fbc-86b3b22dd7b3"),
+    ("AddInDetachmentOnError", "ecc0d8bf-c3da-4af5-a7ec-836635143bf9"),
+    ("BeforeReopenFromOtherServer", "07884f97-281c-45ed-bb58-b1df2529c968"),
+    ("CollaborationSystemUsersAutoComplete", "54bc68a5-4ffc-430c-8dd7-2d07cbb48ae5"),
+    ("CollaborationSystemUsersChoiceFormGetProcessing", "a00bb88f-4de1-4a8f-a720-1bc9b74689db"),
+    ("OnPasteFromClipboard", "2c5f182c-1a2b-4fe1-a340-71979d5c39a8"),
+    ("OnReopenFromOtherServer", "14e2ecfe-38f1-402c-8107-44c13851e739"),
+    ("OnClientApplicationSuspend", "1a97ed33-7804-41cc-abfe-9d45f937cb3c"),
+    ("OnClientApplicationResume", "8edde14c-57d9-480d-8119-8eb26ed7dde2"),
+    ("ValueChoice", "0bf5cb1e-85d7-4344-8e8e-e8e131006339"),
+    ("BeforeStart", "36205ca4-af87-4708-b594-00ffb647b887"),
+    ("BeforeExecute", "ea0a9886-1607-44fe-a446-2cc57548f57d"),
+    ("AfterComposeResult", "b634e40b-c7cd-471b-9d2d-03406a7ee2b2"),
+    ("OnComposeResult", "acb39a89-2fa6-4a11-a764-5597b67f5fff"),
+    ("OnSettingsChange", "58a9c022-69bc-495e-aab1-32be2210fb79"),
 ];
 
 /// Переопределения для двух имён событий, чей guid зависит от вида корневого extInfo

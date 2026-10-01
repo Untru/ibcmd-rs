@@ -172,33 +172,20 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
         };
         root.push(designer_auto_command_bar(&form_acb)?);
     }
-    // Единый корневой `<Events>` = ОБЪЕДИНЕНИЕ двух локусов IR: обычные форм-события
-    // (`body.events`) И СОБСТВЕННЫЕ обработчики корневого extInfo (`root_ext_info.events` —
-    // EDT-локус `<extInfo><handlers>`: `OnReadAtServer`/`AfterWrite`/`BeforeWrite`/…).
-    // Designer их СЛИВАЕТ (статья B `docs/X_LEDGER_FORMS.md`), designer-ридер поэтому
-    // оставляет всё в `body.events` и держит `root_ext_info.events` ПУСТЫМ (см.
-    // `read::designer`) ⇒ designer→designer тут no-op, byte-exact сохранён. На EDT-производном
-    // IR второй слот НЕПУСТ, и до r34 писатель его не читал — 323 обработчика (13 имён)
-    // молча исчезали на SSL, 98 тел форм расходились в edt→xml→cf.
-    //
-    // ПОРЯДОК — платформенный (guid типа события), см. `morph1c_core::ir::merge_form_events`:
-    // намайнено по 11 485 формам с событиями (SSL 813 + ERP 10 672), 11 485/11 485,
-    // контрпримеров 0. Это НЕ «сначала обычные, потом extInfo»: extInfo-события ложатся
-    // ВНУТРЬ обычных (витнесс `Catalog/…/ФормаЭлемента`), а у формы ДОКУМЕНТА порядок ещё и
-    // сдвигается документным переопределением guid (`BeforeWrite`/`BeforeWriteAtServer`).
+    // Native combines the two semantic owners in one Events container. A native
+    // source facet retains only the original merged name order and is reusable
+    // while both owners' name/order lists match. Current handler values always
+    // win. Cross-origin output uses the existing physical platform GUID merge;
+    // neither owner's semantic array is sorted or moved between containers.
     {
         let ext_events: &[morph1c_core::ir::FormEvent] = body
             .root_ext_info
             .as_ref()
             .map(|r| r.events.as_slice())
             .unwrap_or(&[]);
-        let document_ext = body
-            .root_ext_info
-            .as_ref()
-            .is_some_and(|r| r.kind == "form:DocumentFormExtInfo");
         if !body.events.is_empty() || !ext_events.is_empty() {
             let mut events = OutElement::branch("", "Events");
-            for ev in morph1c_core::ir::merge_form_events(&body.events, ext_events, document_ext) {
+            for ev in super::super::event_owners::native_order(body)? {
                 events.push(designer_event(ev));
             }
             root.push(events);
@@ -840,17 +827,16 @@ mod events_locus_tests {
         );
     }
 
-    /// ПУСТОЙ ext-локус (весь Designer→Designer путь) НЕ переупорядочивает `body.events` —
-    /// иначе byte-exact designer round-trip держался бы «на счастливой сортируемости».
+    /// With no extension events the root's semantic order is unchanged.
     #[test]
     fn empty_ext_locus_keeps_source_order() {
         let mut body = FormBody::new();
-        body.events = vec![ev("OnOpen", "О1"), ev("AfterWrite", "О2")];
+        body.events = vec![ev("OnOpen", "О1"), ev("OnClose", "О2")];
         assert_eq!(
             root_events_block(&body),
             vec![
                 "<Event name=\"OnOpen\">О1</Event>",
-                "<Event name=\"AfterWrite\">О2</Event>",
+                "<Event name=\"OnClose\">О2</Event>",
             ]
         );
     }

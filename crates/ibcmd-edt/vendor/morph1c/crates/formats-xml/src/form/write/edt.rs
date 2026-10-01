@@ -13,6 +13,7 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
 }
 
 pub(crate) fn edt_root(body: &FormBody) -> Result<OutElement, FormError> {
+    super::super::event_owners::validate_owned(body)?;
     let mut root = OutElement::branch("form", "Form").attr("xmlns:form", FORM_NS_URI);
 
     // 0) форм-заголовок `<title>` (если задан) — ПЕРВЫЙ ребёнок корня. Мультиязычный —

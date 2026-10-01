@@ -238,6 +238,7 @@ pub(crate) fn read_edt(root: &Element) -> Result<FormBody, FormError> {
         }
     }
 
+    super::super::event_owners::validate_owned(&body)?;
     // §1.0 тотальность по ВСЕМУ дереву формы.
     let leftover = root.unclaimed_count();
     if leftover != 0 {

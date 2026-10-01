@@ -454,11 +454,9 @@ fn read_designer_body(root: &Element) -> Result<FormBody, FormError> {
     // (`form_body::build_ext_pairs` диспатчится РОВНО по этому виду) не эмитит НИ ОДНОЙ ext-пары
     // ⇒ designer→cf молча терял 2·N ячеек корневой группы на КАЖДОЙ форме с extInfo.
     //
-    // СОБСТВЕННЫЕ обработчики extInfo (`AfterWrite`/`OnWriteAtServer`/…) Designer сливает в единый
-    // корневой `<Events>` — они остаются в [`FormBody::events`] (X сравнивает форм-события как
-    // МНОЖЕСТВО, объединяя оба слота; cf-реестр событий — тоже объединение, отсортированное по
-    // guid). Поэтому `events` здесь ПУСТ: раскладывать их обратно по слотам не нужно и опасно
-    // (designer-писатель регенерирует ОДИН `<Events>`).
+    // Native combines root and extension handlers. The installed SDK declares
+    // distinct owners; partition below after deriving the extension kind, while
+    // retaining the original merged spelling as a names-only lexical facet.
     // `<CustomSettingsFolder>` — корневая группа польз. настроек формы КОМПОНОВЩИКА НАСТРОЕК
     // (⟺ EDT `form:SettingsComposerFormExtInfo`>`userSettingsGroup`). У ФОРМЫ ОТЧЁТА этот тег
     // читается внутри `read_designer_report_form` (⇒ уже claimed) ⇒ здесь берём его ЛИШЬ для
@@ -476,6 +474,7 @@ fn read_designer_body(root: &Element) -> Result<FormBody, FormError> {
             user_settings_group,
         });
 
+    super::super::event_owners::partition_native(&mut body)?;
     let leftover = root.unclaimed_count();
     if leftover != 0 {
         return Err(FormError::Frame(format!(
@@ -526,13 +525,10 @@ pub(crate) fn derive_root_ext_info_kind(attrs: &[FormDataAttribute]) -> Option<S
         "ConstantsSet" => "form:ConstantsFormExtInfo",
         "InformationRegisterRecordManager" => "form:InformationRegisterManagerFormExtInfo",
         "InformationRegisterRecordSet" => "form:RecordSetFormExtInfo",
-        // AccountingRegister record-set форма (основной реквизит `AccountingRegisterRecordSet.*`,
-        // witness ОтражениеДокументовВРеглУчете.ПроводкиРегламентированногоУчета) — корневой extInfo
-        // ПУСТ (класс RecordSet), НЕ объект-триплет. Байт-точно намайнено на erp.cf носителе
-        // `6d466252-2132-4992-a614-5a7f2e9f29b2.0`: форма НЕСЁТ модуль, но ext-count=0 (позиция
-        // [18] группы-50, ровно после 17 head-ячеек, перед events_registry) — что и отделяет
-        // empty-always класс (RecordSet/Object) от object-triple-when-module (Task/CoA-Object).
-        "AccountingRegisterRecordSet" => "form:AccountingRegisterRecordSetFormExtInfo",
+        // Genuine UH ОтражениеДокументовВРеглУчете.ПроводкиРегламентированногоУчета
+        // and installed Form.xcore use RecordSetFormExtInfo, including its six
+        // ordered write-event handlers. The accounting storage label is not an EDT class.
+        "AccountingRegisterRecordSet" => "form:RecordSetFormExtInfo",
         // Форма КОМПОНОВЩИКА НАСТРОЕК (основной реквизит `DataCompositionSettingsComposer`;
         // witness .НастройкаОтборовСписка) — EDT-маркер `form:SettingsComposerFormExtInfo`.
         "DataCompositionSettingsComposer" => "form:SettingsComposerFormExtInfo",

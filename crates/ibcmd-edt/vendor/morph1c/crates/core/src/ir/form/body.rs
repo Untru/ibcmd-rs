@@ -60,6 +60,10 @@ pub struct FormCiItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormBody {
+    /// Native merged event spelling only. Owner lists remain ordered semantic
+    /// data; replay requires both current owner/name orders to remain identical.
+    #[serde(skip)]
+    pub native_event_order: Option<NativeFormEventOrder>,
     /// Typed semantic carrier for per-use reference flags/pixels; included in fingerprints.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub picture_semantics: Option<FormPictureSemantics>,
@@ -419,6 +423,7 @@ impl FormBody {
     /// Создать пустое тело формы.
     pub fn new() -> Self {
         FormBody {
+            native_event_order: None,
             picture_semantics: None,
             picture_resource_selection: None,
             source_wire_order: None,
@@ -455,6 +460,14 @@ impl FormBody {
             .find(|(k, _)| *k == id)
             .map(|(_, v)| v)
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeFormEventOrder {
+    pub extension_kind: Option<String>,
+    pub merged: Vec<String>,
+    pub root: Vec<String>,
+    pub extension: Vec<String>,
 }
 
 impl Default for FormBody {

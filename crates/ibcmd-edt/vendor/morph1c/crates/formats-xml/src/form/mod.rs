@@ -19,6 +19,7 @@ use std::sync::OnceLock;
 use crate::emit::Envelope;
 
 mod availability;
+mod event_owners;
 mod chart;
 mod dcss;
 mod fields;
