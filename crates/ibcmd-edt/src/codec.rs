@@ -795,6 +795,23 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
     if a.bytes() == b.bytes() {
         return Ok(true);
     }
+    let mobile_format = match a.path().as_str() {
+        "Ext/MobileClientSignature.bin" => Some(Format::Designer),
+        "src/Configuration/MobileClientSign.bin" | "Configuration/MobileClientSign.bin" => {
+            Some(Format::Edt)
+        }
+        _ => None,
+    };
+    if let Some(format) = mobile_format {
+        if a.path() != b.path() {
+            return Ok(false);
+        }
+        let a = morph1c_pipeline::canonical_empty_mobile_signature(a.bytes(), format)
+            .map_err(EdtError::new)?;
+        let b = morph1c_pipeline::canonical_empty_mobile_signature(b.bytes(), format)
+            .map_err(EdtError::new)?;
+        return Ok(a.is_some() && a == b);
+    }
     // Native XML formatting is not semantic data. Require every expanded QName,
     // attribute, non-formatting text and ordered child to survive regeneration.
     // This catches body fields that a borrowed reader accepted but did not emit.
@@ -1011,6 +1028,31 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn mobile_empty_signature_equivalence_is_scoped_to_the_root_blob() {
+        let native = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
+        let lexical = [
+            b"\xef\xbb\xbf".as_slice(),
+            String::from_utf8_lossy(native)
+                .replace('\n', "\r\n")
+                .as_bytes(),
+        ]
+        .concat();
+        let body = |path: &str, bytes: &[u8]| {
+            SourceEntry::from_bytes(SourcePath::new(path).unwrap(), bytes.to_vec()).unwrap()
+        };
+        let root = "Ext/MobileClientSignature.bin";
+        assert!(same_body(&body(root, native), &body(root, &lexical)).unwrap());
+        let unrelated = "DataProcessors/X/Ext/MobileClientSignature.bin";
+        assert!(!same_body(&body(unrelated, native), &body(unrelated, &lexical)).unwrap());
+        assert!(!same_body(&body(root, native), &body("Other.bin", &lexical)).unwrap());
+        let changed = String::from_utf8_lossy(native).replace("},0}", "},1}");
+        assert!(!same_body(&body(root, native), &body(root, changed.as_bytes())).unwrap());
+        let carrier = String::from_utf8_lossy(native).replace("{0}", "{-1}");
+        assert!(same_body(&body(root, native), &body(root, carrier.as_bytes())).is_err());
+        let edt = "src/Configuration/MobileClientSign.bin";
+        assert!(same_body(&body(edt, native), &body(edt, carrier.as_bytes())).unwrap());
+    }
     #[test]
     fn large_mxl_inventory_and_body_guard_avoid_per_node_dom() {
         let path = SourcePath::new("CommonTemplates/Large/Ext/Template.xml").unwrap();

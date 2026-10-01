@@ -82,6 +82,8 @@ pub use form_read::attach_form_body;
 pub use form_write::write_form_bodies;
 #[doc(hidden)]
 pub use sdk_body_projection::mxl_newlines as project_mxl_content_newlines;
+#[doc(hidden)]
+pub use ext_read::canonical_empty_mobile_signature;
 pub use preflight::{check, preflight, KindStatus, KindSupport, PreflightEntry, PreflightReport};
 
 /// Honest note surfaced by `convert`/`check`: what a whole-config conversion actually carries,
