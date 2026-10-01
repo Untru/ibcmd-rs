@@ -15,7 +15,10 @@
     "Independent native picture transparency is preserved or rejected when EDT cannot represent it; no default-based loss or acceptance waiver",
     "Bounded Unicode source-path integration and per-file indexed host diagnostic paths retain metadata-name, inventory and allocation limits",
     "Witnessed SDK schema parameter false defaults preserve native absent/false/true source bytes and reject stale provenance; co-present DCS titles retain exact element order",
-    "Narrow native SDK sidecar projections preserve markup and QName scopes: localized MXL text EOL and existing current-config TypeSet aliases; physical child ordering validates complete unique collections"
+    "Narrow native SDK sidecar projections preserve markup and QName scopes: localized MXL text EOL and existing current-config TypeSet aliases; physical child ordering validates complete unique collections",
+    "Witnessed typed field availability maps native unavailable-path sigils with original native spelling retained and forged-hash edits rejected",
+    "Actual EDT ObjectFormExtInfo mappings replace upstream storage-group placeholders for ExchangePlan and account/calculation chart objects",
+    "Designer form modules strip exactly one UTF-8 encoding signature in private semantic IR while raw source bytes remain retained; only exact all-field default DCS list settings equal absent EDT sidecars"
   ],
   "files": [
     {
@@ -36,11 +39,11 @@
     },
     {
       "path": "crates/core/src/ir/form/body.rs",
-      "sha256": "a7c02594b093005f3475bd63daed8afa6a8bd6f79944461e3c4b6dd422029f04"
+      "sha256": "03e2f0d5980068c741b3cc8d10f93483ce92aee63261c68c70d581725096396f"
     },
     {
       "path": "crates/core/src/ir/form/data_attributes.rs",
-      "sha256": "fa058fd70ab364131c4f1eef46e90218a351911b6572a1bf5aac824dccb201b0"
+      "sha256": "80334621b7c2f6d5886767bfbb13f7a8a3622da8dd3f9834649c0764500e672c"
     },
     {
       "path": "crates/core/src/ir/form/dcs.rs",
@@ -56,7 +59,7 @@
     },
     {
       "path": "crates/core/src/ir/form/items.rs",
-      "sha256": "00e4885e1cc5431286862d21ec23bfdb2b0f73f6171a9132e7f00654c9609dca"
+      "sha256": "cf80771104c3fdde718e5aa7404611232afe9ec69980d3b560d18d0e7a205906"
     },
     {
       "path": "crates/core/src/ir/form/mod.rs",
@@ -1499,6 +1502,10 @@
       "sha256": "5e5015a37062b0fc82251e9bd8b1a8981f76a845a4fb7a1e2a4aaeeedc633136"
     },
     {
+      "path": "crates/formats-xml/src/form/availability.rs",
+      "sha256": "97fcdc5b3a3efebc6f91ea537b4712387b87d3c397a73874930a76cf56f61a0a"
+    },
+    {
       "path": "crates/formats-xml/src/form/chart/common.rs",
       "sha256": "31f9019866e2f76edfdc052079e002b42ae0898efea83e862eda78dcc6122c12"
     },
@@ -1588,7 +1595,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/mod.rs",
-      "sha256": "7f788c72fb4e2b5a430a597b45efc6c1cad8e3ca7651afc7e0f522068d45b4c4"
+      "sha256": "14cdd2b0ef04c06a48a05e871692148ff6e64a5c93344a17fdb4439ca9588354"
     },
     {
       "path": "crates/formats-xml/src/form/mxlx.rs",
@@ -1616,7 +1623,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/designer.rs",
-      "sha256": "ab8911f2431f65aa09eeeb8b79468ec311b2857e562444233c156ecda8798efc"
+      "sha256": "6c7d63ba1152b54b6756d8802922ecdb71e1bd8faec9004da881636756d02f1e"
     },
     {
       "path": "crates/formats-xml/src/form/read/designer_controls.rs",
@@ -1644,7 +1651,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/mod.rs",
-      "sha256": "73521c38d77bc31a15ae45f10943a4c88800096a72a7e12c2b95aadbf5a76bae"
+      "sha256": "b49d44480b7e699a34cb1a2550fbcabc2f4a8bb3393f3b403bbc283c16d3ad39"
     },
     {
       "path": "crates/formats-xml/src/form/read/mxl.rs",
@@ -1700,7 +1707,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_controls.rs",
-      "sha256": "76b9558ba87b8496cf309258eb927b6c3f21a06a52a31818a9b64d736b2649e1"
+      "sha256": "b71a566710409cbf7a44b30baf3bf9f869bb9ca3760a6cd2fc8269563a88e49e"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_dcs.rs",
@@ -1728,7 +1735,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/mod.rs",
-      "sha256": "d20da918dbcee686e70b9fd9316647068a9ff6dcfbd41b4b0ae4ba48120621ed"
+      "sha256": "cdad98b26fe1b90bb92c086bcee2e498f88fd2262a4a73128bd8d5666bd5206b"
     },
     {
       "path": "crates/formats-xml/src/form/write/mxl.rs",
@@ -2424,7 +2431,7 @@
     },
     {
       "path": "crates/pipeline/src/form_read.rs",
-      "sha256": "71811150acdc29a9fd099ec675850080ef4ffa077a8df7f989ec59eb7c936fe3"
+      "sha256": "560cfbc527d6e1889be103f843ed1f89522ce5e10a9d65ad158802f92138f65a"
     },
     {
       "path": "crates/pipeline/src/form_ref_read.rs",
@@ -2464,7 +2471,7 @@
     },
     {
       "path": "crates/pipeline/src/lib.rs",
-      "sha256": "4b7c17358f6c8e6bc1a082d8c7106bbcdbae7c65b3d8fbc16da4e4d0e3cb52d1"
+      "sha256": "19fc879da3d5b1c6c316a5595090919c145a32c0e69af3f8767e3d9ce2d3861e"
     },
     {
       "path": "crates/pipeline/src/module_read.rs",
