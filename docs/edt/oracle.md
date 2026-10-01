@@ -15,7 +15,8 @@ separately: a multi-command EDT script can report only its last command's exit
 code and cannot serve as acceptance. Timeouts kill only the process tree started
 by the harness; failure evidence remains available.
 
-Every installed EDT command takes the existing shared FIFO `heavy` laboratory
+Every installed EDT command and every product `convert` command, including the
+unchanged return conversion, takes the existing shared FIFO `heavy` laboratory
 lock and releases it in `finally`. Use a unique track name per active run. The
 launcher gets a disposable workspace, explicit language and a recorded heap
 (`--heap-gib`, default 8; UH preparation uses 32). No

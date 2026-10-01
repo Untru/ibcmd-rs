@@ -16,6 +16,27 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_conversion_fifo_is_released_on_success_and_failure(self):
+        args = SimpleNamespace(lock_script=Path("fixture-lock.ps1"), lock_track="edt-oracle", timeout=120)
+        run = Path("fixture-run")
+        for fails in (False, True):
+            with self.subTest(fails=fails):
+                calls = []
+                def command(root, label, argv, timeout):
+                    calls.append((label, argv))
+                    if fails and label == "conversion":
+                        raise oracle.OracleError("fixture conversion failure")
+                    return b"captured"
+                with patch.object(oracle, "run_command", side_effect=command):
+                    if fails:
+                        with self.assertRaises(oracle.OracleError):
+                            oracle.run_conversion(args, run, "conversion", ["fixture.exe", "convert"])
+                    else:
+                        self.assertEqual(oracle.run_conversion(args, run, "conversion", ["fixture.exe", "convert"]), b"captured")
+                self.assertEqual([row[0] for row in calls], ["conversion-lock-acquire", "conversion", "conversion-lock-release"])
+                self.assertEqual(calls[0][1][-4:-2], ["acquire", "edt-oracle"])
+                self.assertEqual(calls[-1][1][-2:], ["release", "edt-oracle"])
+
     def test_malformed_workspace_errors_are_preserved_and_never_ambient(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "workspace.log"

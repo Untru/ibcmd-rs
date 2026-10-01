@@ -147,7 +147,7 @@ def run_command(run: Path, label: str, argv: list[str], timeout: int,
 @contextlib.contextmanager
 def heavy_lock(args, run: Path, label: str):
     if not args.lock_script:
-        raise OracleError("Installed EDT lab commands require the shared FIFO lock script")
+        raise OracleError("Heavy lab commands require the shared FIFO lock script")
     argv = ["pwsh", "-NoProfile", "-File", str(args.lock_script)]
     run_command(run, f"{label}-lock-acquire", argv + ["acquire", args.lock_track,
                 "-TimeoutMin", str(max(1, args.timeout // 60))], args.timeout + 60)
@@ -155,6 +155,14 @@ def heavy_lock(args, run: Path, label: str):
         yield
     finally:
         run_command(run, f"{label}-lock-release", argv + ["release", args.lock_track], 60)
+
+
+def run_conversion(args, run: Path, label: str, argv: list[str]) -> bytes:
+    # Full configuration models can consume as much memory as the EDT JVM.
+    # Share the same FIFO with each EDT/native command, including a return
+    # conversion that may read provenance and rebuild the complete model.
+    with heavy_lock(args, run, label):
+        return run_command(run, label, argv, args.timeout)
 
 
 def edt(args, run: Path, label: str, workspace: Path, command: list[str]) -> bytes:
@@ -779,10 +787,10 @@ def accept(args, run: Path) -> None:
         ("convert-authentic-edt", project, converted_xml, "edt", "xml", profile_edt, profile_xml),
         ("convert-native-xml", args.native, generated, "xml", "edt", profile_xml, profile_edt),
     ):
-        run_command(run, label, [str(args.ours_exe), "convert", str(source), str(target),
+        run_conversion(args, run, label, [str(args.ours_exe), "convert", str(source), str(target),
             "--source-format", source_format, "--target-format", target_format,
             "--source-profile", source_profile, "--target-profile", target_profile,
-            "--report", str(run / f"{label}.report.json")], args.timeout)
+            "--report", str(run / f"{label}.report.json")])
     # Authentic EDT carries no native storage-generation dump manifest. Direct
     # conversion is complete configuration data without inventing such a file.
     require_xml(converted_xml, require_dump_info=False)
@@ -791,9 +799,9 @@ def accept(args, run: Path) -> None:
     write_json(run / "ours-authentic-edt-xml.json", converted_before)
     write_json(run / "ours-generated-edt.json", snapshot(generated))
     returned_xml = run / "ours-unchanged-return-xml"
-    run_command(run, "convert-generated-edt-unchanged", [str(args.ours_exe), "convert", str(generated), str(returned_xml),
+    run_conversion(args, run, "convert-generated-edt-unchanged", [str(args.ours_exe), "convert", str(generated), str(returned_xml),
         "--source-format", "edt", "--target-format", "xml", "--source-profile", profile_edt,
-        "--target-profile", profile_xml, "--report", str(run / "convert-generated-edt-unchanged.report.json")], args.timeout)
+        "--target-profile", profile_xml, "--report", str(run / "convert-generated-edt-unchanged.report.json")])
     require_xml(returned_xml)
     returned_before = snapshot(returned_xml)
     write_json(run / "ours-unchanged-return-xml.json", returned_before)
