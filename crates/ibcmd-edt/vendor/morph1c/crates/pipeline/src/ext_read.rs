@@ -42,7 +42,7 @@
 //!   `{2,"MIIBtjCC…"}`), designer == edt (сверено sha256) == erp.cf `<host>.10`.
 //!   У SSL файла нет ни в одном диалекте (и в ssl.cf нет `.10`) — отсутствие честно.
 //!
-//! The exact Converted v2 signature with empty key/digest/four groups/false flag
+//! The exact Converted v2 signature with empty key/digest/four groups and a boolean flag
 //! has a witnessed typed exception: native canonical framing is 35 bytes; EDT
 //! uses four -1 empty counts to avoid the installed zero-count double-End bug.
 //! The full model is equal, original44 bytes remain host lexical provenance,
@@ -112,37 +112,37 @@ struct EmptyConvertedMobileSignature {
 impl EmptyConvertedMobileSignature {
     fn decode(bytes: &[u8], format: Format) -> Result<Option<Self>, String> {
         let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
-        let native = matches_empty_signature_frame(bytes, b"0");
-        let carrier = matches_empty_signature_frame(bytes, b"-1");
-        if !native && !(carrier && format == Format::Edt) {
+        let native = empty_signature_flag(bytes, b"0");
+        let carrier = empty_signature_flag(bytes, b"-1");
+        let converted = native.or(if format == Format::Edt { carrier } else { None });
+        let Some(converted) = converted else {
             if has_negative_digest_count(bytes) {
                 return Err("unsupported mobile-signature negative-count carrier; only the exact empty Converted v2 EDT shape is interpreted".into());
             }
             return Ok(None);
-        }
+        };
         Ok(Some(Self {
             public_key: String::new(),
             digest: String::new(),
             group_lengths: [0; 4],
-            converted: false,
+            converted,
         }))
     }
     fn encode(&self, format: Format) -> Result<Vec<u8>, String> {
-        if !self.public_key.is_empty()
-            || !self.digest.is_empty()
-            || self.group_lengths != [0; 4]
-            || self.converted
-        {
+        if !self.public_key.is_empty() || !self.digest.is_empty() || self.group_lengths != [0; 4] {
             return Err(
                 "mobile signature exceeds the witnessed complete empty Converted v2 model".into(),
             );
         }
-        Ok(if format == Format::Edt {
+        let mut bytes = if format == Format::Edt {
             EMPTY_SIGNATURE_EDT
         } else {
             EMPTY_SIGNATURE_NATIVE
         }
-        .to_vec())
+        .to_vec();
+        let flag = bytes.len() - 2;
+        bytes[flag] = if self.converted { b'1' } else { b'0' };
+        Ok(bytes)
     }
 }
 
@@ -161,7 +161,7 @@ pub fn canonical_empty_mobile_signature(
 
 // Recognize complete tokens, not whitespace-stripped byte concatenations:
 // e.g. `- 1` cannot become the witnessed `-1` carrier. No document-sized buffer.
-fn matches_empty_signature_frame(bytes: &[u8], count: &[u8]) -> bool {
+fn empty_signature_flag(bytes: &[u8], count: &[u8]) -> Option<bool> {
     let mut rest = bytes;
     let mut eat = |token: &[u8]| {
         rest = rest.trim_ascii_start();
@@ -183,23 +183,33 @@ fn matches_empty_signature_frame(bytes: &[u8], count: &[u8]) -> bool {
         b"{",
     ] {
         if !eat(token) {
-            return false;
+            return None;
         }
     }
     for group in 0..4 {
         if group > 0 && !eat(b",") {
-            return false;
+            return None;
         }
         if !eat(b"{") || !eat(count) || !eat(b"}") {
-            return false;
+            return None;
         }
     }
-    for token in [b"}".as_slice(), b",", b"0", b"}"] {
+    for token in [b"}".as_slice(), b","] {
         if !eat(token) {
-            return false;
+            return None;
         }
     }
-    rest.trim_ascii().is_empty()
+    let converted = if eat(b"0") {
+        false
+    } else if eat(b"1") {
+        true
+    } else {
+        return None;
+    };
+    if !eat(b"}") || !rest.trim_ascii().is_empty() {
+        return None;
+    }
+    Some(converted)
 }
 fn has_negative_digest_count(bytes: &[u8]) -> bool {
     let mut quoted = false;
@@ -318,10 +328,12 @@ pub fn attach_config_ext(
                         .map_err(|reason| read_err(entry.0, reason))?;
                     // Carrier39 cannot be a native lexical facet. Source44/35
                     // already has native-compatible zero counts and is kept.
-                    if matches_empty_signature_frame(
+                    if empty_signature_flag(
                         bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes),
                         b"0",
-                    ) {
+                    )
+                    .is_some()
+                    {
                         lexical = Some(morph1c_core::ir::MobileSignatureLexical {
                             canonical_bytes: canonical.clone(),
                             source_bytes: bytes,

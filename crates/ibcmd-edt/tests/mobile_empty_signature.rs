@@ -204,6 +204,21 @@ fn genuine_empty_native_and_installed_model_save_match_exact_framers() {
         std::fs::read(lab.join("mobile-carrier-research-r1/negative-count-SDK-save.bin")).unwrap(),
         NATIVE
     );
+    let shapes = lab.join("mobile-model-shape-probe-r1/partial-r4");
+    assert!(
+        std::fs::read_to_string(shapes.join("actual.stdout"))
+            .unwrap()
+            .contains("empty-true-carrier load=true full_model_equal=true")
+    );
+    assert_eq!(
+        morph1c_pipeline::canonical_empty_mobile_signature(
+            &std::fs::read(shapes.join("empty-true-carrier.bin")).unwrap(),
+            Format::Edt
+        )
+        .unwrap()
+        .unwrap(),
+        std::fs::read(shapes.join("empty-true-carrier.sdk-save.bin")).unwrap()
+    );
 }
 
 #[test]
@@ -375,4 +390,83 @@ fn genuine_dual_names_pass_unmodified_official_export_and_fresh_native_gate() {
     )
     .unwrap();
     assert_eq!(native_result["status"], "CAPTURED");
+}
+
+#[test]
+fn empty_converted_boolean_is_preserved_and_cannot_hide_a_forged_edit() {
+    use morph1c_pipeline::canonical_empty_mobile_signature;
+    let flag_bytes = |data: &[u8], flag: bool| {
+        let mut data = data.to_vec();
+        let at = data.len() - 2;
+        data[at] = if flag { b'1' } else { b'0' };
+        data
+    };
+    assert_ne!(
+        canonical_empty_mobile_signature(NATIVE, Format::Designer).unwrap(),
+        canonical_empty_mobile_signature(&flag_bytes(NATIVE, true), Format::Designer).unwrap()
+    );
+    for flag in [false, true] {
+        let original_bytes = flag_bytes(&original44(), flag);
+        let dir = fixture();
+        std::fs::create_dir_all(dir.path().join("Ext")).unwrap();
+        std::fs::write(
+            dir.path().join("Ext/MobileClientSignature.bin"),
+            &original_bytes,
+        )
+        .unwrap();
+        let original = read_xml_source(dir.path(), ReaderLimits::default()).unwrap();
+        let opts = options();
+        let generated = xml_to_edt(&original, &opts).unwrap().tree;
+        let reader = "src/Configuration/MobileClientSign.bin";
+        let preferred = "src/Configuration/MobileClientSignature.bin";
+        assert_eq!(bytes(&generated, reader), flag_bytes(CARRIER, flag));
+        assert_eq!(bytes(&generated, preferred), original_bytes);
+        assert_eq!(
+            edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &opts)
+                .unwrap()
+                .tree,
+            original
+        );
+        let clean = SourceTree::new(
+            generated
+                .entries()
+                .iter()
+                .filter(|e| !e.path().as_str().starts_with(".ibcmd-provenance/"))
+                .cloned()
+                .collect(),
+        )
+        .unwrap();
+        assert_eq!(
+            bytes(
+                &edt_to_xml(&Project::from_tree(clean).unwrap(), &opts)
+                    .unwrap()
+                    .tree,
+                "Ext/MobileClientSignature.bin"
+            ),
+            original_bytes
+        );
+        let mut changed = generated.clone();
+        let manifest_path = ".ibcmd-provenance/manifest.json";
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(bytes(&changed, manifest_path)).unwrap();
+        for (path, data) in [
+            (reader, flag_bytes(CARRIER, !flag)),
+            (preferred, flag_bytes(&original44(), !flag)),
+        ] {
+            manifest["generated"][path] = serde_json::json!(format!("{:x}", Sha256::digest(&data)));
+            changed = replace(&changed, path, data);
+        }
+        changed = replace(
+            &changed,
+            manifest_path,
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        assert!(edt_to_xml(&Project::from_tree(changed).unwrap(), &opts).is_err());
+    }
+    for flag in ["01", "10", "2", "-1", "true", "false"] {
+        let bad = String::from_utf8(CARRIER.to_vec())
+            .unwrap()
+            .replace("},0}", &format!("}},{flag}}}"));
+        assert!(canonical_empty_mobile_signature(bad.as_bytes(), Format::Edt).is_err());
+    }
 }
