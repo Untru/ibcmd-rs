@@ -195,7 +195,7 @@ impl LocusMap for EdtFormRef {
             }
             fref::F_HELP => FieldProjection::new(flat(&["help"]), Codec::HelpConst),
             fref::F_USE_PURPOSES => {
-                FieldProjection::new(flat(&["usePurposes"]), Codec::UsePurposesConst)
+                FieldProjection::new(flat(&["usePurposes"]), Codec::RefList(formats_xml::ref_list::RefListDialect::Edt))
             }
             _ => return None,
         })

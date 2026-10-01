@@ -465,7 +465,7 @@ impl LocusMap for EdtFormRef {
             fref::F_COMMENT => fp(&["comment"], Codec::PlainText),
             fref::F_INCLUDE_HELP_IN_CONTENTS => fp(&["includeHelpInContents"], Codec::BoolPresence),
             fref::F_HELP => fp(&["help"], Codec::HelpConst),
-            fref::F_USE_PURPOSES => fp(&["usePurposes"], Codec::UsePurposesConst),
+            fref::F_USE_PURPOSES => fp(&["usePurposes"], Codec::RefList(formats_xml::ref_list::RefListDialect::Edt)),
             _ => return None,
         })
     }

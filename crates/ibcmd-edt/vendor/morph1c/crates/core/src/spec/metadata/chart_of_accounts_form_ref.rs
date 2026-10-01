@@ -13,7 +13,7 @@ pub const F_COMMENT: FieldId = FieldId(2);
 pub const F_INCLUDE_HELP_IN_CONTENTS: FieldId = FieldId(3);
 /// `help` — EDT const-блок (presence). Default false.
 pub const F_HELP: FieldId = FieldId(4);
-/// `usePurposes` — константа `[PersonalComputer, MobileDevice]`. Required (всегда present).
+/// Ordered application purposes; valid subsets retain their current values.
 pub const F_USE_PURPOSES: FieldId = FieldId(5);
 
 /// `formType` — тип формы. Designer вложенный дескриптор `Forms/<Имя>.xml` несёт ВСЕГДА
@@ -30,7 +30,7 @@ fn build_fields() -> Vec<FieldSpec> {
         FieldSpec::with_default(F_COMMENT, "comment", ValueKind::Str, PropertyValue::Str(String::new())),
         FieldSpec::with_default(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents", ValueKind::Bool, PropertyValue::Bool(false)),
         FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)),
-        FieldSpec::required(F_USE_PURPOSES, "usePurposes", ValueKind::Bool),
+        FieldSpec::required(F_USE_PURPOSES, "usePurposes", ValueKind::List),
         FieldSpec::with_default(F_FORM_TYPE, "formType", ValueKind::Enum, PropertyValue::Enum(Token::new("Managed"))),
         FieldSpec::with_default(F_USE_IN_INTERFACE_COMPATIBILITY_MODE, "useInInterfaceCompatibilityMode", ValueKind::Enum, PropertyValue::Enum(Token::new("Any"))),
     ]
