@@ -64,7 +64,50 @@ fn read_with_limits(
     root: impl AsRef<Path>,
     limits: ReaderLimits,
 ) -> Result<SourceTree, SourceTreeError> {
-    let root = root.as_ref();
+    let mut entries = Vec::new();
+    walk_with_limits(root.as_ref(), limits, &mut |entry| {
+        entries.push(entry);
+        Ok(())
+    })?;
+    SourceTree::new(entries)
+}
+
+// Validate a staged tree one file at a time. Re-reading the complete inventory
+// would retain a second copy of every payload just before publication.
+pub(super) fn verify_with_limits(
+    root: &Path,
+    expected: &SourceTree,
+    limits: ReaderLimits,
+) -> Result<(), SourceTreeError> {
+    let mut remaining = expected
+        .entries()
+        .iter()
+        .map(|entry| (entry.path().as_str(), entry))
+        .collect::<BTreeMap<_, _>>();
+    let mismatch = || SourceTreeError::PathConflict {
+        first: SourcePath::new("staging").expect("fixed safe path"),
+        second: SourcePath::new("tree").expect("fixed safe path"),
+    };
+    walk_with_limits(root, limits, &mut |entry| {
+        let original = remaining
+            .remove(entry.path().as_str())
+            .ok_or_else(mismatch)?;
+        if &entry != original {
+            return Err(mismatch());
+        }
+        Ok(())
+    })?;
+    if !remaining.is_empty() {
+        return Err(mismatch());
+    }
+    Ok(())
+}
+
+fn walk_with_limits(
+    root: &Path,
+    limits: ReaderLimits,
+    accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
+) -> Result<(), SourceTreeError> {
     let m = fs::symlink_metadata(root)?;
     if !m.file_type().is_dir() || m.file_type().is_symlink() {
         return Err(SourceTreeError::UnsafePath(root.display().to_string()));
@@ -74,19 +117,22 @@ fn read_with_limits(
         total: 0,
         dirs: 1,
         files: 0,
-        out: vec![],
     };
-    visit(root, root, 0, &mut state)?;
-    SourceTree::new(state.out)
+    visit(root, root, 0, &mut state, accept)
 }
 struct State {
     limits: ReaderLimits,
     total: usize,
     dirs: usize,
     files: usize,
-    out: Vec<SourceEntry>,
 }
-fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), SourceTreeError> {
+fn visit(
+    root: &Path,
+    dir: &Path,
+    depth: usize,
+    s: &mut State,
+    accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
+) -> Result<(), SourceTreeError> {
     if depth > s.limits.depth {
         return Err(SourceTreeError::DepthExceeded);
     }
@@ -123,7 +169,7 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Sou
     es.sort_by_key(|(entry, _)| entry.file_name());
     for (e, ty) in es {
         if ty.is_dir() {
-            visit(root, &e.path(), depth + 1, s)?
+            visit(root, &e.path(), depth + 1, s, accept)?
         } else {
             let entry_path = e.path();
             let relative = entry_path
@@ -180,7 +226,7 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Sou
             }
             // Use the same streaming body validation and descriptor identity
             // rules for both disk inventories and entries built by adapters.
-            s.out.push(SourceEntry::from_bytes(path, bytes)?);
+            accept(SourceEntry::from_bytes(path, bytes)?)?;
         }
     }
     Ok(())

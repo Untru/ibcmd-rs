@@ -68,13 +68,7 @@ pub fn publish_new_with_limits(
         f.write_all(e.bytes())?;
         f.sync_all()?;
     }
-    let reread = SourceTreeReader::new(limits)?.read(&temp)?;
-    if &reread != tree {
-        return Err(SourceTreeError::PathConflict {
-            first: SourcePath::new("staging")?,
-            second: SourcePath::new("tree")?,
-        });
-    }
+    reader::verify_with_limits(&temp, tree, limits)?;
     destination_absent(dest)?;
     rename_directory_new(&temp, dest)?;
     let mut guard = guard;

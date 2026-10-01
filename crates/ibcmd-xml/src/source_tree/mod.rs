@@ -882,6 +882,29 @@ mod tests {
         }));
     }
     #[test]
+    fn streamed_staging_verification_rejects_changed_missing_extra_and_malformed_files() {
+        let temp = Temp::new();
+        temp.file(
+            "Configuration.xml",
+            b"<Configuration uuid='12345678-90ab-cdef-0123-456789abcdef'/>",
+        );
+        temp.file("Module.bsl", b"text");
+        let tree = read_source_tree(&temp.0).unwrap();
+        let verify = || reader::verify_with_limits(&temp.0, &tree, ReaderLimits::default());
+        verify().unwrap();
+        temp.file("Module.bsl", b"edit");
+        assert!(verify().is_err());
+        temp.file("Module.bsl", b"text");
+        fs::remove_file(temp.0.join("Module.bsl")).unwrap();
+        assert!(verify().is_err());
+        temp.file("Module.bsl", b"text");
+        temp.file("extra.bin", b"unexpected");
+        assert!(verify().is_err());
+        fs::remove_file(temp.0.join("extra.bin")).unwrap();
+        temp.file("Configuration.xml", b"<Configuration>");
+        assert!(matches!(verify(), Err(SourceTreeError::Xml { .. })));
+    }
+    #[test]
     fn writer_io_error_does_not_leave_a_staging_directory() {
         let t = Temp::new();
         let tree = SourceTree::new(vec![
