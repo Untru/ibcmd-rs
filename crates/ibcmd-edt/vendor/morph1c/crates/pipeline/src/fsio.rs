@@ -158,15 +158,12 @@ fn write_inner(path: &Path, bytes: &[u8]) -> io::Result<()> {
 fn check_portable_path(path: &Path) -> io::Result<()> {
     for component in path.components() {
         if let std::path::Component::Normal(value) = component {
-            let value = value.to_str().ok_or_else(|| {
+            value.to_str().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "non-UTF8 source path")
             })?;
-            if value.len() > 255 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "source filename exceeds portable component limit",
-                ));
-            }
+            // UTF-8 byte length is not the host filesystem's component limit.
+            // In particular a valid Windows Unicode name may exceed 255 UTF-8
+            // bytes. Preserve it and let the actual filesystem operation decide.
         }
     }
     Ok(())
