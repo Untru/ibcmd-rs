@@ -8,10 +8,16 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 
 pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree};
-pub use writer::{SourceTreeWriter, publish_new};
+pub use writer::{SourceTreeWriter, publish_new, publish_new_with_limits};
 
-pub const MAX_SOURCE_FILES: usize = 65_536;
-pub const MAX_SOURCE_DIRECTORIES: usize = 65_536;
+/// Absolute inventory bounds, including a complete ERP UH source tree and
+/// reversible EDT preservation records. Readers retain smaller defaults.
+pub const MAX_SOURCE_FILES: usize = 524_288;
+pub const MAX_SOURCE_DIRECTORIES: usize = 524_288;
+/// Source files are not canonical assets: native MXL/XML files exceed 100 MiB.
+pub const MAX_SOURCE_FILE_BYTES: usize = 256 * 1024 * 1024;
+/// Complete source inventory, separate from the bounded semantic object model.
+pub const MAX_SOURCE_RETAINED_BYTES: usize = 32 * 1024 * 1024 * 1024;
 pub const MAX_SOURCE_DEPTH: usize = 64;
 pub const MAX_SOURCE_COMPONENT_BYTES: usize = 255;
 pub const MAX_SOURCE_PATH_BYTES: usize = 4_096;
@@ -146,7 +152,7 @@ impl SourceEntry {
         bytes: Vec<u8>,
         uuid: Option<ObjectUuid>,
     ) -> Result<Self, SourceTreeError> {
-        if bytes.len() > ibcmd_core::asset::MAX_ASSET_BYTES {
+        if bytes.len() > MAX_SOURCE_FILE_BYTES {
             return Err(SourceTreeError::AssetTooLarge {
                 path,
                 actual: bytes.len(),
@@ -202,7 +208,7 @@ impl SourceTree {
             total = total
                 .checked_add(e.bytes.len())
                 .ok_or(SourceTreeError::TotalTooLarge)?;
-            if total > ibcmd_core::model::MAX_CONFIGURATION_RETAINED_BYTES {
+            if total > MAX_SOURCE_RETAINED_BYTES {
                 return Err(SourceTreeError::TotalTooLarge);
             }
             let fold = e
@@ -404,6 +410,38 @@ mod tests {
         ] {
             assert!(SourcePath::new(path).is_err(), "{path}");
         }
+    }
+
+    #[test]
+    fn explicit_source_limits_publish_large_file_without_changing_defaults() {
+        let temp = Temp::new();
+        let bytes = vec![42; ibcmd_core::asset::MAX_ASSET_BYTES + 1];
+        let entry = SourceEntry::from_bytes(SourcePath::new("large.bin").unwrap(), bytes).unwrap();
+        let expected = entry.digest();
+        let tree = SourceTree::new(vec![entry]).unwrap();
+        let refused = temp.0.join("default");
+        assert!(matches!(
+            publish_new(&tree, &refused),
+            Err(SourceTreeError::AssetTooLarge { .. })
+        ));
+        assert!(!refused.exists());
+        let limits = ReaderLimits {
+            asset_bytes: MAX_SOURCE_FILE_BYTES,
+            total_bytes: MAX_SOURCE_RETAINED_BYTES,
+            ..ReaderLimits::default()
+        };
+        let output = temp.0.join("explicit");
+        publish_new_with_limits(&tree, &output, limits).unwrap();
+        assert!(matches!(
+            read_source_tree(&output),
+            Err(SourceTreeError::AssetTooLarge { .. })
+        ));
+        let reread = SourceTreeReader::new(limits)
+            .unwrap()
+            .read(&output)
+            .unwrap();
+        assert_eq!(reread.entries()[0].digest(), expected);
+        assert_eq!(reread, tree);
     }
     #[test]
     fn entries_have_digest_and_tree_rejects_case_parent_and_uuid_conflicts() {

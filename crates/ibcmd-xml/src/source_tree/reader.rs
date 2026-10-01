@@ -14,8 +14,8 @@ pub struct ReaderLimits {
 impl Default for ReaderLimits {
     fn default() -> Self {
         Self {
-            files: MAX_SOURCE_FILES,
-            directories: MAX_SOURCE_DIRECTORIES,
+            files: 65_536,
+            directories: 65_536,
             depth: MAX_SOURCE_DEPTH,
             asset_bytes: ibcmd_core::asset::MAX_ASSET_BYTES,
             total_bytes: ibcmd_core::model::MAX_CONFIGURATION_RETAINED_BYTES,
@@ -35,8 +35,8 @@ impl ReaderLimits {
         if self.files > MAX_SOURCE_FILES
             || self.directories > MAX_SOURCE_DIRECTORIES
             || self.depth > MAX_SOURCE_DEPTH
-            || self.asset_bytes > ibcmd_core::asset::MAX_ASSET_BYTES
-            || self.total_bytes > ibcmd_core::model::MAX_CONFIGURATION_RETAINED_BYTES
+            || self.asset_bytes > MAX_SOURCE_FILE_BYTES
+            || self.total_bytes > MAX_SOURCE_RETAINED_BYTES
         {
             return Err(SourceTreeError::InvalidLimits);
         }

@@ -32,6 +32,27 @@ FORBIDDEN_BINARY_MARKERS = (
     b".jar",
 )
 FORBIDDEN_ARCHIVE_SUFFIXES = (".jar", ".class", ".war", ".ear", ".so", ".dylib", ".dll")
+# Declarative IDs written to .project / UTF-8 prefs by the offline EDT adapter.
+# These are source-format data, not runtime packages. All other Eclipse names,
+# Java class paths, launchers, JNI, JARs and archive payloads remain forbidden.
+EDT_SOURCE_IDS = (
+    b"org.eclipse.xtext.ui.shared.xtextbuilder",
+    b"org.eclipse.xtext.ui.shared.xtextnature",
+    b".settings/org.eclipse.core.resources.prefs",
+)
+
+
+def forbidden_binary_markers(data: bytes) -> list[bytes]:
+    lowered = data.lower()
+    declarative = bytearray(lowered)
+    for identifier in EDT_SOURCE_IDS:
+        position = 0
+        while (position := lowered.find(identifier, position)) != -1:
+            end = position + len(identifier)
+            if identifier.startswith(b".settings/") or lowered[end:end + 1] not in (b".", b"/", b"$"):
+                declarative[position:end] = b"\0" * len(identifier)
+            position = end
+    return [marker for marker in FORBIDDEN_BINARY_MARKERS if marker in declarative]
 
 
 def arguments() -> argparse.Namespace:
@@ -44,12 +65,10 @@ def arguments() -> argparse.Namespace:
 
 
 def audit_binary(binary: pathlib.Path) -> None:
-    data = binary.read_bytes().lower()
-    for marker in FORBIDDEN_BINARY_MARKERS:
-        if marker in data:
-            raise SystemExit(
-                f"release binary contains forbidden platform/EDT marker: {marker.decode('ascii')}"
-            )
+    for marker in forbidden_binary_markers(binary.read_bytes()):
+        raise SystemExit(
+            f"release binary contains forbidden platform/EDT marker: {marker.decode('ascii')}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="ibcmd-rs-empty-path-") as empty_path:
         environment = os.environ.copy()

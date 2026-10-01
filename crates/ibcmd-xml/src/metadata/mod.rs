@@ -27,7 +27,7 @@ pub use characteristics::{
 pub use children::{CctTemplateChildrenError, append_cct_template_children};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_configuration_envelope, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect,
+    decode_metadata_envelope_with_dialect, decode_source_metadata_envelope,
 };
 pub use common_objects::{
     register_command_group_codec, register_common_command_codec, register_common_module_codec,

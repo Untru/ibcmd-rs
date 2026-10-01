@@ -39,6 +39,7 @@ jobs:
           npx --yes @fission-ai/openspec@1.6.0 validate build-offline-converter --strict --no-interactive
           npx --yes @fission-ai/openspec@1.6.0 validate add-fast-parity-evidence --strict --no-interactive
           npx --yes @fission-ai/openspec@1.6.0 validate add-selected-cf-extract --strict --no-interactive
+          npx --yes @fission-ai/openspec@1.6.0 validate implement-edt-project-conversion --strict --no-interactive
 
   quality:
     name: Quality
@@ -140,6 +141,11 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+
+      - name: Test installed-EDT oracle guards without the platform
+        run: |
+          python tests/scripts/edt_oracle_test.py
+          python tests/scripts/edt_release_audit_test.py
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2

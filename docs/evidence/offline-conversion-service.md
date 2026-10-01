@@ -24,7 +24,10 @@ JSON report as stdout.
 Format and profile are independent mandatory inputs. An XML endpoint requires
 an exact profile with an `xml_dialect` coordinate. A CF endpoint requires an
 exact platform profile with explicit `platform_build` and `storage_profile`
-coordinates. Mismatched coordinates fail before decoding the artifact.
+coordinates. An EDT endpoint carries the `edt.project-format=mdo` marker,
+explicit EDT tool/runtime constants and its associated XML dialect. It does not
+register a second XML dialect adapter. Mismatched coordinates fail before
+decoding the artifact.
 
 ## Supported route contracts
 
@@ -34,6 +37,8 @@ coordinates. Mismatched coordinates fail before decoding the artifact.
 | XML -> CF | The complete source tree is decoded and validated first. A direct adapter plan then invokes the base-free compiler, patch preflight, in-memory CF write, and reopen validation before create-new atomic publication. |
 | CF -> XML | The CF is decoded into a neutral `StorageImage`, exported into private staging, reparsed as a bounded source tree, and atomically published. Failed records and unknown opaque records block the operation. The exact structural records `root`, `version`, and `versions` are classified separately because the XML -> CF adapter regenerates them deterministically. |
 | CF -> CF | Only an exact same-profile lossless repack is supported. Packed bytes, logical headers, layout metadata, and entry order are preflighted and reopen-validated before atomic publication. Cross-profile CF migration has no verified edge and fails closed. |
+| XML -> EDT | Complete bounded input, typed codecs and canonical validation; explicit runtime and matching XML dialect; generated project controls and source bodies; original XML provenance for exact unchanged return. |
+| EDT -> XML | Complete bounded project inventory, parsed controls and typed canonical metadata/assets; stale provenance fails; unknown files fail. A native project without provenance is encoded from current typed metadata. Native configVersion storage values are not invented. |
 
 During cross-profile XML conversion, only BSL modules and recognized binary
 assets may pass through byte-exactly. Forms, templates, other XML, and unknown

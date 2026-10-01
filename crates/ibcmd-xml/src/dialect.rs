@@ -549,6 +549,11 @@ impl DialectRegistry {
     pub fn from_profiles(registry: &ProfileRegistry) -> Result<Self, DialectError> {
         let mut out = BTreeMap::new();
         for p in registry.profiles().values() {
+            // EDT profiles declare their associated XML dialect, but are not
+            // additional XML dialect codecs. Their format adapter owns them.
+            if p.constants.contains_key("edt.project-format") {
+                continue;
+            }
             let Some(axis) = &p.xml_dialect else { continue };
             if p.platform_build.is_some() {
                 return Err(DialectError::MixedAxes {
@@ -1321,6 +1326,20 @@ mod tests {
             })
             .collect::<Vec<_>>();
         DialectRegistry::from_profiles(&resolve_profiles(docs).unwrap())
+    }
+    #[test]
+    fn edt_associated_xml_coordinate_does_not_register_a_duplicate_adapter() {
+        let xml = r#"{"schema_version":1,"id":"xml","status":"experimental","xml_dialect":"2.21","fingerprints":{"xcf.version":"2.21"}}"#;
+        let edt = r#"{"schema_version":1,"id":"edt","status":"experimental","xml_dialect":"2.21","constants":{"edt.project-format":"mdo","edt.tool-version":"2025.2.3"}}"#;
+        let registry = external(&[("xml", xml), ("edt", edt)]).unwrap();
+        assert_eq!(registry.descriptors().len(), 1);
+        let document = XmlReader::from_slice(
+            b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.21'/>",
+        )
+        .unwrap();
+        assert!(
+            matches!(registry.detect(&document).unwrap(), DialectDetection::Exact { candidate, .. } if candidate.profile_id().as_str() == "xml")
+        );
     }
     #[test]
     fn descriptors_have_open_features_unknown_and_provenance() {

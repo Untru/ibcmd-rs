@@ -849,26 +849,46 @@ impl CanonicalConfiguration {
     }
 }
 
-fn validate_configuration_budgets(objects: &[CanonicalObject]) -> Result<(), ModelBuildError> {
-    let mut members = 0_usize;
-    let mut retained = 0_usize;
-    for object in objects {
-        members = members
-            .checked_add(object.member_count()?)
-            .ok_or(ModelBuildError::CountOverflow)?;
-        if members > MAX_CONFIGURATION_MEMBERS {
-            return Err(ModelBuildError::TooManyMembers {
-                scope: "canonical configuration",
-                maximum: MAX_CONFIGURATION_MEMBERS,
-                actual: members,
-            });
-        }
-        retained = checked_add_retained(retained, object.retained_byte_len())?;
+/// Incremental canonical graph accounting for adapters before retaining objects.
+/// Asset references are included in their owning object's accounting.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CanonicalConfigurationBudget {
+    objects: usize,
+    members: usize,
+    retained: usize,
+}
+
+impl CanonicalConfigurationBudget {
+    /// Checks the next object against the same hard bounds as configuration
+    /// construction. Failure leaves the accumulator unchanged.
+    pub fn add_object(&mut self, object: &CanonicalObject) -> Result<(), ModelBuildError> {
+        let objects = checked_add_members(self.objects, 1)?;
+        validate_item_count("configuration objects", objects, MAX_CONFIGURATION_OBJECTS)?;
+        let members = checked_add_members(self.members, object.member_count()?)?;
+        enforce_member_budget(
+            "canonical configuration",
+            members,
+            MAX_CONFIGURATION_MEMBERS,
+        )?;
+        let retained = checked_add_retained(self.retained, object.retained_byte_len())?;
         enforce_retained_budget(
             "canonical configuration",
             retained,
             MAX_CONFIGURATION_RETAINED_BYTES,
         )?;
+        *self = Self {
+            objects,
+            members,
+            retained,
+        };
+        Ok(())
+    }
+}
+
+fn validate_configuration_budgets(objects: &[CanonicalObject]) -> Result<(), ModelBuildError> {
+    let mut budget = CanonicalConfigurationBudget::default();
+    for object in objects {
+        budget.add_object(object)?;
     }
     Ok(())
 }
@@ -897,30 +917,12 @@ impl<'de> Visitor<'de> for BoundedObjectsVisitor {
                 .unwrap_or_default()
                 .min(MAX_CONFIGURATION_OBJECTS),
         );
-        let mut members = 0_usize;
-        let mut retained = 0_usize;
+        let mut budget = CanonicalConfigurationBudget::default();
         while objects.len() < MAX_CONFIGURATION_OBJECTS {
             let Some(object) = sequence.next_element::<CanonicalObject>()? else {
                 return Ok(BoundedObjects(objects));
             };
-            members = members
-                .checked_add(object.member_count().map_err(de::Error::custom)?)
-                .ok_or_else(|| de::Error::custom(ModelBuildError::CountOverflow))?;
-            if members > MAX_CONFIGURATION_MEMBERS {
-                return Err(de::Error::custom(ModelBuildError::TooManyMembers {
-                    scope: "canonical configuration",
-                    maximum: MAX_CONFIGURATION_MEMBERS,
-                    actual: members,
-                }));
-            }
-            retained = checked_add_retained(retained, object.retained_byte_len())
-                .map_err(de::Error::custom)?;
-            enforce_retained_budget(
-                "canonical configuration",
-                retained,
-                MAX_CONFIGURATION_RETAINED_BYTES,
-            )
-            .map_err(de::Error::custom)?;
+            budget.add_object(&object).map_err(de::Error::custom)?;
             objects.push(object);
         }
         if sequence.next_element::<IgnoredAny>()?.is_some() {
@@ -994,6 +996,37 @@ mod tests {
             MetadataKind::new("Catalog").unwrap(),
             provenance(id, "one"),
         )
+    }
+
+    #[test]
+    fn incremental_budget_rejects_before_retaining_and_preserves_state() {
+        let object = CanonicalObject::new(parts()).unwrap();
+        for seeded in [
+            CanonicalConfigurationBudget {
+                objects: MAX_CONFIGURATION_OBJECTS,
+                members: 0,
+                retained: 0,
+            },
+            CanonicalConfigurationBudget {
+                objects: 0,
+                members: MAX_CONFIGURATION_MEMBERS,
+                retained: 0,
+            },
+            CanonicalConfigurationBudget {
+                objects: 0,
+                members: 0,
+                retained: MAX_CONFIGURATION_RETAINED_BYTES,
+            },
+        ] {
+            let mut budget = seeded.clone();
+            assert!(budget.add_object(&object).is_err());
+            assert_eq!(budget, seeded);
+        }
+        let mut budget = CanonicalConfigurationBudget::default();
+        budget.add_object(&object).unwrap();
+        assert_eq!(budget.objects, 1);
+        assert_eq!(budget.members, object.member_count().unwrap());
+        assert_eq!(budget.retained, object.retained_byte_len());
     }
 
     #[test]

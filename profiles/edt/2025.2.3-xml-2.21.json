@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "id": "edt-2025.2.3-xml-2.21",
+  "status": "experimental",
+  "xml_dialect": "2.21",
+  "constants": {
+    "edt.project-format": "mdo",
+    "edt.tool-version": "2025.2.3",
+    "edt.runtime-version": "8.5.1"
+  },
+  "evidence": [
+    "docs/edt/oracle.md",
+    "docs/edt/morph1c-adoption.md",
+    "openspec/changes/implement-edt-project-conversion/design.md"
+  ]
+}

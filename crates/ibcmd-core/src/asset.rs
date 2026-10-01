@@ -10,6 +10,9 @@ use crate::storage::Sha256Digest;
 
 /// Maximum number of bytes retained by one canonical asset.
 pub const MAX_ASSET_BYTES: usize = 33_554_432;
+/// Maximum length of an externally retained source asset. A reference keeps
+/// only its digest and length, not the potentially large XML/MXL payload.
+pub const MAX_ASSET_REFERENCE_BYTES: usize = 256 * 1024 * 1024;
 /// Maximum encoded length of an open media-kind token.
 pub const MAX_MEDIA_KIND_BYTES: usize = 256;
 
@@ -252,9 +255,9 @@ impl AssetReference {
         byte_len: u64,
         media_kind: MediaKind,
     ) -> Result<Self, AssetBuildError> {
-        if byte_len > MAX_ASSET_BYTES as u64 {
+        if byte_len > MAX_ASSET_REFERENCE_BYTES as u64 {
             return Err(AssetBuildError::AssetTooLarge {
-                maximum: MAX_ASSET_BYTES,
+                maximum: MAX_ASSET_REFERENCE_BYTES,
                 actual: byte_len,
             });
         }
@@ -459,7 +462,7 @@ mod tests {
         assert!(
             AssetReference::new(
                 Sha256Digest::for_bytes(&[]),
-                MAX_ASSET_BYTES as u64 + 1,
+                MAX_ASSET_REFERENCE_BYTES as u64 + 1,
                 MediaKind::octet_stream(),
             )
             .is_err()
@@ -468,5 +471,26 @@ mod tests {
         assert!(serde_json::from_str::<BoundedBytes<3>>("[1,2,3,4]").is_err());
         assert!(MediaKind::new("application/x-vendor.future+bin").is_ok());
         assert!(MediaKind::new("application / bad").is_err());
+    }
+
+    #[test]
+    fn large_source_reference_does_not_relax_inline_asset_budget() {
+        let reference = AssetReference::new(
+            Sha256Digest::for_bytes(&[]),
+            127_569_637,
+            MediaKind::octet_stream(),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&reference).unwrap();
+        assert_eq!(
+            serde_json::from_str::<AssetReference>(&json).unwrap(),
+            reference
+        );
+        let oversized_inline = format!(
+            "{{\"byte_len\":{},\"sha256\":\"{}\",\"media_kind\":\"application/octet-stream\",\"bytes\":[]}}",
+            MAX_ASSET_BYTES + 1,
+            Sha256Digest::for_bytes(&[]),
+        );
+        assert!(serde_json::from_str::<Asset>(&oversized_inline).is_err());
     }
 }

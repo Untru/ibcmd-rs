@@ -523,7 +523,29 @@ ibcmd-rs cf load C:\src\MyConf C:\cf\MyConf-new.cf --base C:\cf\MyConf.cf
 | `cf overlay` | Наложить выбранные файлы XML на базовый CF и собрать новый CF. |
 | `cf load` | Собрать новый файл с правками дерева XML — см. [раздел 3](#cf-export-и-cf-load--файлы-cf-cfe-epf-erf--xml-без-базы). |
 | `cf bootstrap` | Собрать новый CF из полного дерева XML без базы и платформы. |
-| `convert` | Конвертация целиком: XML ↔ CF между указанными профилями версий (`--source-format`, `--target-format`, `--source-profile`, `--target-profile`). |
+| `convert` | Конвертация целиком: XML ↔ CF и XML ↔ EDT между указанными профилями версий (`--source-format`, `--target-format`, `--source-profile`, `--target-profile`). |
+
+Для EDT 2025.2.3 укажите профиль `edt-2025.2.3-xml-2.21` (Runtime-Version
+8.5.1) либо `edt-2025.2.3-xml-2.20` (8.3.27), а для XML — соответствующий
+`xml-2.21` либо `xml-2.20`. Установленный EDT для конвертации не требуется.
+
+```powershell
+ibcmd-rs convert native-xml edt-project --source-format xml --target-format edt --source-profile xml-2.21 --target-profile edt-2025.2.3-xml-2.21
+ibcmd-rs convert edt-project returned-xml --source-format edt --target-format xml --source-profile edt-2025.2.3-xml-2.21 --target-profile xml-2.21
+```
+
+Назначение должно быть новым каталогом. `--dry-run` выполняет чтение, проверку
+и подготовку результата без публикации; `--report <файл>` сохраняет JSON-отчёт
+с этапами и учётом исходных файлов. Разные версии XML требуют отдельной
+подтверждённой миграции и здесь отклоняются.
+
+При XML → EDT каталог `.ibcmd-provenance` сохраняет исходную запись XML для
+точного обратного прохода, включая `ConfigDumpInfo.xml`. Если проект изменён,
+обратная конвертация сообщает об устаревшем происхождении. Для преобразования
+изменённого проекта удалите этот каталог: результат будет собран из текущих
+метаданных и ресурсов EDT. Неизвестные файлы или настройки отклоняются с
+указанием пути. Подробнее: [границы адаптера](edt/morph1c-adoption.md) и
+[лабораторная сверка](edt/oracle.md).
 
 ### Расширения конфигурации
 

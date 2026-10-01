@@ -41,6 +41,17 @@ lists nor accepts `config roundtrip|sweep` and refuses `config apply` by name
 for known 1C, EDT/JAR, JNI, and OSGi payload/path markers (`ibcmd.exe` among
 them). `scripts/audit_release.py` makes the same checks on the release binary.
 
+The offline EDT adapter necessarily writes two declarative source IDs:
+`org.eclipse.xtext.ui.shared.xtextBuilder`,
+`org.eclipse.xtext.ui.shared.xtextNature`, and
+and the preferences file path `.settings/org.eclipse.core.resources.prefs`.
+These source-format strings are excluded from the generic Eclipse binary-marker
+heuristic. Builder/nature names with package/class suffixes remain forbidden;
+the preferences exception requires the full `.settings/` file path. Other Eclipse package/class paths,
+JNI/JVM/OSGi markers, JAR payloads, runtime SBOM dependencies and nonallowlisted
+archive entries still fail. Negative controls combine valid project IDs with
+forbidden runtime markers so legitimate scaffolding cannot mask a runtime.
+
 The portable Windows/Linux CI lane now compiles all root targets with
 `--no-default-features` and runs that boundary test. The Windows legacy lane
 does the inverse check with `--features platform-oracle`, proving that research
