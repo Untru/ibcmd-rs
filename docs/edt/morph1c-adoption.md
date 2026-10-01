@@ -98,10 +98,14 @@ boundary independently.
 
 | Area | Useful concrete source | Reuse decision and limit |
 | --- | --- | --- |
-| Whole CF/CFE compilation | [`formats/cf`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/formats/cf), especially assembly/body modules | Strong research/oracle reference for independent format gaps; excluded from this adapter to preserve the existing ibcmd-cf/storage architecture |
-| Version migrations | [`core/version`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/core/src/version), inventory/model witnesses | Useful default/availability witnesses and negative cases; not a substitute for host explicit-profile migration graph and platform proof |
-| Forms/DCS and XDTO coverage | [`formats-xml/src`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/formats-xml/src) | Typed source transcoders reused here; physical storage compilation still belongs to existing host codecs and native evidence |
+| 0.6 — whole CF/CFE compilation | [`formats/cf`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/formats/cf), especially assembly/body modules | Strong research/oracle reference for independent format gaps; excluded from this adapter to preserve the existing ibcmd-cf/storage architecture |
+| 0.8 — version migrations and corpus coverage | [`core/version`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/core/src/version), inventory/model witnesses | Useful default/availability witnesses and negative cases; not a substitute for host explicit-profile migration graph and platform proof |
+| 0.6/0.8 — forms/DCS and XDTO coverage | [`formats-xml/src`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/formats-xml/src) | Typed source transcoders reused here; physical storage compilation still belongs to existing host codecs and native evidence |
 | Semantic comparison/testing | [`testkit`](https://github.com/Segate-ekb/morph1c/tree/962eedddd14493a914bae11f11667951de0f23a7/crates/testkit) | Useful test design and adverse cases; not a production dependency and not authority to ignore host inventory or unknown fragments |
-| High-load generation/import | [`pipeline/cf_stream.rs`](https://github.com/Segate-ekb/morph1c/blob/962eedddd14493a914bae11f11667951de0f23a7/crates/pipeline/src/cf_stream.rs) | Descriptor-first/body-streaming design may reduce memory; no SQL generation switching or database transaction guarantees supplied, so no automatic completion of other milestones |
+| 0.5 — high-load generation/import | [`pipeline/cf_stream.rs`](https://github.com/Segate-ekb/morph1c/blob/962eedddd14493a914bae11f11667951de0f23a7/crates/pipeline/src/cf_stream.rs) | Descriptor-first/body-streaming design may reduce memory; no SQL generation switching or database transaction guarantees supplied, so no automatic completion of other milestones |
 
-No other milestone is implemented or closed merely by including these sources.
+Milestone labels follow the repository's maintained [roadmap](../../README.md).
+No reusable SQL Server generation-switching, PostgreSQL backend (0.9), or file
+database storage/transactions (0.10) is supplied by this source-codec closure.
+Those tasks need their own implementation and evidence. No other milestone is
+implemented or closed merely by including these sources.
