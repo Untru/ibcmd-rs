@@ -33,8 +33,8 @@ const MAX_METADATA_BYTES: usize = 33_554_432;
 const MAX_METADATA_ATTRIBUTES: usize = 65_536;
 const MAX_METADATA_NAMESPACES: usize = 4_096;
 const MAX_METADATA_NAMESPACE_BYTES: usize = 1_048_576;
-// Whole source-file envelopes have many sibling references; family codecs keep
-// their original small shape. Byte/depth/attribute/namespace limits stay common.
+// Bounded source-file envelopes allow more sibling references than family codecs.
+// Explicit source operations use checked accounting and iterative traversal.
 #[derive(Clone, Copy, Debug)]
 struct MetadataShapePolicy {
     nodes: usize,
@@ -473,8 +473,9 @@ pub fn decode_source_metadata_envelope(
     )
 }
 /// Decode an explicitly owned source operation. Bounded defaults retain their
-/// existing limits. Source accounting removes fixed count/byte ceilings but
-/// retains recursive lifecycle depth protection and individual inline assets.
+/// existing limits. Source accounting removes fixed shape/byte ceilings and uses
+/// iterative typed-object traversal. Large opaque facets use verified references;
+/// the core inline-asset contract remains unchanged.
 /// Identity, namespace, ownership, ordering and provenance validation are common.
 pub fn decode_source_metadata_envelope_with_policy(
     document: &XmlDocument,
