@@ -199,6 +199,19 @@ Choosing the 8.3.27 profile alone therefore does not make this corpus clean.
 These records remain outside the ambient control classes and block strict
 acceptance; the full UH83 structured validation is captured separately.
 
+A separate read-only investigation under
+`F:\ibcmd\lab\07\mobile-signature-reader-probe` reproduces the mobile-signature
+tail guard with the installed `TextListInStream` class in a 64 MiB Java process.
+The actual 44-byte source is a version-2 text list with four empty digest groups.
+The installed `readDigestData` zero-count branch consumes two list terminators;
+on the fourth group it also consumes the enclosing list's terminator. The later
+version-2 guard then sees the comma before the converted flag and reports the
+unsupported-version error. Source before/after hashes, plugin hashes, bytecode,
+probe source and exact command/trace are preserved. An old basic version-0
+literal is only a grammar control: rewriting the genuine version-2 artifact to
+that schema would discard typed/converted fields. This investigation neither
+changes the source nor relaxes the acceptance gate.
+
 Acceptance binds the empty control's current TSV to its captured summary and
 SHA-256, its template before/after/current inventories, its source before/current
 inventory and its installed-export inventory. New captures additionally record
