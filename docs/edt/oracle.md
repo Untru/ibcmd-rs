@@ -198,6 +198,13 @@ unsupported mobile-signature diagnostic and a BSL index transaction error.
 Choosing the 8.3.27 profile alone therefore does not make this corpus clean.
 These records remain outside the ambient control classes and block strict
 acceptance; the full UH83 structured validation is captured separately.
+That genuine validation completed with exit 0 and an existing empty TSV; the
+mobile workspace error remains, so zero TSV rows do not mean clean acceptance.
+All nine ordinary-form payloads are byte equal across original native
+`Form.bin`, authentic EDT `Form.oform` and the fresh post-EDT native SDK export.
+This preserves the entire opaque body, including any embedded module, without
+assuming the module is empty. The separate `module` property export diagnostics
+remain captured; the binary identity proof does not silently waive them.
 
 A separate read-only investigation under
 `F:\ibcmd\lab\07\mobile-signature-reader-probe` reproduces the mobile-signature
