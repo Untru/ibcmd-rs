@@ -45,9 +45,9 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
     let mut form_body = false;
     let mut dump_info = false;
     let mut streamed_mxl = false;
-    // These asset carriers are consumed as complete opaque bytes or text;
-    // their XML nesting/attribute counts never drive a recursive typed model.
-    let opaque_asset = policy == PreflightPolicy::DiskSource && !declared_xml(path);
+    // Directory source inspection is iterative. Complete lexical validation
+    // and typed filename checks are independent of the legacy memory parser's
+    // recursive-shape quotas. Typed decoders apply their own explicit policy.
     // Opaque XML-backed templates, Rights and DCS contain arbitrary human labels.
     // Only these known document roles derive physical paths from name facets.
     let mut metadata_names = path.ends_with(".mdo");
@@ -143,7 +143,11 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                         "ConfigDumpInfo.xml" | ".ibcmd-provenance/xml/ConfigDumpInfo.xml"
                     )
                 {
-                    for a in e.attributes().take(MAX_XML_ATTRIBUTES) {
+                    for a in e.attributes().take(if policy == PreflightPolicy::Legacy {
+                        MAX_XML_ATTRIBUTES
+                    } else {
+                        usize::MAX
+                    }) {
                         let a = a.map_err(EdtError::source)?;
                         if a.key.as_ref() == b"xmlns" {
                             dump_info = a
@@ -164,7 +168,8 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                     *has_picture = true;
                 }
                 for (n, a) in e.attributes().enumerate() {
-                    if !streamed_mxl && !opaque_asset && n >= MAX_XML_ATTRIBUTES {
+                    if policy == PreflightPolicy::Legacy && !streamed_mxl && n >= MAX_XML_ATTRIBUTES
+                    {
                         return Err(EdtError::new(format!(
                             "{path}: XML attribute budget exceeded"
                         )));
@@ -200,8 +205,10 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                     }
                 }
                 if matches!(event, Event::Start(_)) {
-                    depth += 1;
-                    if !streamed_mxl && !opaque_asset && depth > MAX_XML_DEPTH {
+                    depth = depth
+                        .checked_add(1)
+                        .ok_or_else(|| EdtError::new(format!("{path}: XML depth overflow")))?;
+                    if policy == PreflightPolicy::Legacy && !streamed_mxl && depth > MAX_XML_DEPTH {
                         return Err(EdtError::new(format!("{path}: XML depth budget exceeded")));
                     }
                     names.push(local);
@@ -500,6 +507,49 @@ fn reparse(_: &fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn source_operation_declared_xml_has_no_generic_shape_ceiling_and_keeps_all_guards() {
+        let mut xml = String::from(
+            "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses'><Catalog><Properties><Name>Owner</Name><Future",
+        );
+        for index in 0..300 {
+            xml.push_str(&format!(" a{index}='value'"));
+        }
+        xml.push('>');
+        for _ in 0..4096 {
+            xml.push_str("<nested>");
+        }
+        for _ in 0..4096 {
+            xml.push_str("</nested>");
+        }
+        xml.push_str("</Future></Properties></Catalog></MetaDataObject>");
+        assert!(validate_xml("Catalogs/Owner.xml", xml.as_bytes()).is_err());
+        validate_xml_source_reader("Catalogs/Owner.xml", std::io::Cursor::new(xml.as_bytes()))
+            .unwrap();
+        for invalid in [
+            xml.replace("<Name>Owner</Name>", "<Name>../escape</Name>"),
+            xml.replace("</Future>", "</different>"),
+            xml.replace("<Name>Owner</Name>", "<Name>&unknown;</Name>"),
+        ] {
+            assert!(
+                validate_xml_source_reader(
+                    "Catalogs/Owner.xml",
+                    std::io::Cursor::new(invalid.as_bytes())
+                )
+                .is_err()
+            );
+        }
+        // Source semantic checks must inspect attributes beyond the old ceiling,
+        // rather than silently treating a truncated prefix as the whole input.
+        let mut form = String::from("<Form><item");
+        for index in 0..300 {
+            form.push_str(&format!(" a{index}='value'"));
+        }
+        form.push_str(" name='../escape'/></Form>");
+        assert!(
+            validate_xml_source_reader("Form.form", std::io::Cursor::new(form.as_bytes())).is_err()
+        );
+    }
     #[test]
     fn source_operation_opaque_assets_keep_complete_xml_without_shape_quotas() {
         let mut xml = String::from("<payload");

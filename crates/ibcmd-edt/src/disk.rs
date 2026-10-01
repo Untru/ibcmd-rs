@@ -682,7 +682,7 @@ mod tests {
         let mut report = serde_json::json!({ "source": root, "files": inventory.entries.len(), "source_bytes": inventory.bytes, "source_tree_sha256": source_tree_sha256, "inventory_seconds": inventory_seconds, "elapsed_seconds": started.elapsed().as_secs_f64(), "source_unchanged": unchanged.is_ok() });
         match &result {
             Ok(model) => {
-                report["status"] = "PASS".into();
+                report["status"] = if unchanged.is_ok() { "PASS" } else { "FAIL" }.into();
                 report["objects"] = model.len().into();
                 report["assets"] = model
                     .objects()
@@ -695,6 +695,9 @@ mod tests {
                 report["status"] = "FAIL".into();
                 report["error"] = error.to_string().into();
             }
+        }
+        if let Err(error) = &unchanged {
+            report["source_verification_error"] = error.to_string().into();
         }
         let mut file = fs::OpenOptions::new()
             .create_new(true)
