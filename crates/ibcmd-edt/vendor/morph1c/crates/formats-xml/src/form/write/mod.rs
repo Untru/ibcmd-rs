@@ -2,27 +2,26 @@
 //! РАЗНЫЙ физический порядок регионов (сверено по корпусу); каждый dialect собирает своё.
 
 use super::fields::{
-    designer_attr_value, emit_designer_auto_edit_mode, emit_field_designer, emit_field_edt,
-    FieldProj,
+    FieldProj, designer_attr_value, emit_designer_auto_edit_mode, emit_field_designer,
+    emit_field_edt,
 };
 use super::projection::{designer_attr_node, edt_attr_node};
 use super::tables::{self, DesSlot};
 use super::{
-    designer_envelope, edt_envelope, form_profile_for, witnessed_form_versions, FormDialect,
-    FormError, CORE_NS_URI, DESIGNER_FORM_NS, FORM_COMMAND_BAR_NAME, FORM_NS_URI, MXL_NS_URI,
-    SCHEMA_NS_URI, SETTINGS_NS_URI, XSI_NS_URI,
+    CORE_NS_URI, DESIGNER_FORM_NS, FORM_COMMAND_BAR_NAME, FORM_NS_URI, FormDialect, FormError,
+    MXL_NS_URI, SCHEMA_NS_URI, SETTINGS_NS_URI, XSI_NS_URI, designer_envelope, edt_envelope,
+    form_profile_for, witnessed_form_versions,
 };
-use crate::emit::{render, OutElement};
+use crate::emit::{OutElement, render};
 use crate::value_codec::{self, ValueDialect};
 use morph1c_core::ir::value::PropertyValue;
 use morph1c_core::ir::{
     DcsAvailableValue, DcsCalculatedField, DcsCorValue, DcsField, DcsItem, DcsListSettings,
-    DcsOrderExpression, DcsParamValue,
-    DcsParameter, DcsPresentation, DcsRightValue, DcsSettingsGroup, DcsSettingsParameterValue,
-    DcsUseRestriction,
-    DecoratorBody, DecoratorRef, DynamicListAttrExt, DynamicListExt, FieldId, FontRef, FormBody,
-    FormCiItem, FormCommand, FormDataAttribute, FormItem, FormParameter, Lang, ReportFormInfo,
-    TooltipBody, REPORT_FORM_AUTO,
+    DcsOrderExpression, DcsParamValue, DcsParameter, DcsPresentation, DcsRightValue,
+    DcsSettingsGroup, DcsSettingsParameterValue, DcsUseRestriction, DecoratorBody, DecoratorRef,
+    DynamicListAttrExt, DynamicListExt, FieldId, FontRef, FormBody, FormCiItem, FormCommand,
+    FormDataAttribute, FormItem, FormParameter, Lang, REPORT_FORM_AUTO, ReportFormInfo,
+    TooltipBody,
 };
 // `MxlSpreadsheetSettings`/`MxlNode` — по полному пути модуля (не через re-export `ir::mod`, вне границ лейна).
 use morph1c_core::ir::form::{MxlNode, MxlSpreadsheetSettings};
@@ -35,32 +34,35 @@ use morph1c_core::spec::forms::controls::radio_button as rb;
 use morph1c_core::spec::forms::controls::table as tb;
 use morph1c_core::spec::forms::form_root as fr;
 
-mod edt;
-mod edt_data;
-mod edt_dcs;
-mod edt_controls;
-mod font;
-mod tooltip;
 mod designer;
 mod designer_controls;
-mod mxl;
 mod designer_dcs;
+mod edt;
+mod edt_controls;
+mod edt_data;
+mod edt_dcs;
+mod font;
+mod mxl;
+mod tooltip;
 
-pub(crate) use edt::*;
-pub(crate) use edt_data::*;
-pub(crate) use edt_dcs::*;
-pub(crate) use edt_controls::*;
-pub(crate) use font::*;
-pub(crate) use tooltip::*;
 pub(crate) use designer::*;
 pub(crate) use designer_controls::*;
-pub(crate) use mxl::*;
 pub(crate) use designer_dcs::*;
+pub(crate) use edt::*;
+pub(crate) use edt_controls::*;
+pub(crate) use edt_data::*;
+pub(crate) use edt_dcs::*;
+pub(crate) use font::*;
+pub(crate) use mxl::*;
+pub(crate) use tooltip::*;
 
 /// Записать тело формы в байты заданного формата (byte-exact).
 pub fn write_form(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, FormError> {
     match dialect {
-        FormDialect::Edt => write_edt(body),
+        FormDialect::Edt => super::picture_defaults::with_common_picture_defaults(
+            &body.common_picture_transparency,
+            || write_edt(body),
+        ),
         FormDialect::Designer => write_designer(body),
     }
 }

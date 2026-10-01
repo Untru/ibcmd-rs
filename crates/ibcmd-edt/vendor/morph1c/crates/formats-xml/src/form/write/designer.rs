@@ -257,6 +257,9 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
         root.push(ci);
     }
 
+    if target == morph1c_core::version::FormatVersion::new(2, 20) {
+        project_xml220_checkbox_type(&mut root, &body.designer_checkbox_auto_presence);
+    }
     Ok(render(&designer_envelope(), &root))
 }
 
@@ -306,6 +309,35 @@ pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElemen
         panel.push(item);
     }
     panel
+}
+
+/// XML 2.20 omits Auto when ThreeState is true (22/1142 genuine BSP SDK
+/// fields); two-state Auto is explicit (1112). Native spelling facets preserve
+/// independently read Auto presence. Edited nondefault variants stay explicit.
+fn project_xml220_checkbox_type(
+    node: &mut OutElement,
+    source_presence: &std::collections::BTreeMap<i64, bool>,
+) {
+    let source_spelling = node
+        .attrs
+        .iter()
+        .find(|(name, _)| name == "id")
+        .and_then(|(_, value)| value.parse::<i64>().ok())
+        .and_then(|id| source_presence.get(&id))
+        .copied();
+    let three_state = node
+        .children
+        .iter()
+        .any(|child| child.local == "ThreeState" && child.text.as_deref() == Some("true"));
+    let omit_auto = source_spelling.map_or(three_state, |present| !present);
+    if omit_auto && node.local == "CheckBoxField" {
+        node.children.retain(|child| {
+            !(child.local == "CheckBoxType" && child.text.as_deref() == Some("Auto"))
+        });
+    }
+    for child in &mut node.children {
+        project_xml220_checkbox_type(child, source_presence);
+    }
 }
 
 pub(crate) fn push_des_attr(root: &mut OutElement, body: &FormBody, id: morph1c_core::ir::FieldId) {
@@ -600,7 +632,14 @@ pub(crate) fn designer_command(cmd: &FormCommand) -> Result<OutElement, FormErro
         ));
     }
     if let Some(PropertyValue::Enum(t)) = get(fc::F_SELECTED_ROWS_USE) {
-        if t.as_str() != fc::ROW_USE_DESIGNER_DEFAULT {
+        let default = if morph1c_core::version::current_roundtrip_target()
+            == Some(morph1c_core::version::FormatVersion::new(2, 20))
+        {
+            "Use"
+        } else {
+            fc::ROW_USE_DESIGNER_DEFAULT
+        };
+        if t.as_str() != default {
             el.push(OutElement::leaf(
                 "",
                 "SelectedRowsUse",

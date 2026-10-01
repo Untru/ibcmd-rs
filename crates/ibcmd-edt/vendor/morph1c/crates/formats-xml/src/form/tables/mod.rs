@@ -39,6 +39,12 @@ const fn keep(
     })
 }
 
+/// Profile-bound platform defaults, witnessed against the genuine 8.3.27 post-EDT SDK export.
+const fn xml220(mut field: FieldProj, policy: Policy) -> FieldProj {
+    field.xml220_policy = Some(policy);
+    field
+}
+
 /// [`Policy::PlatformDefault`] — как [`keep`], но канон НЕ хранит `des_fill` (дефолт
 /// ПЛАТФОРМЫ), поэтому оба ридера дают ОДИН И ТОТ ЖЕ IR у незаданного свойства (X-канон).
 /// Применимо ТОЛЬКО там, где `edt_fill != des_fill` и кросс-витнесс доказал, что
@@ -73,6 +79,7 @@ const fn fpa(
         codec,
         policy,
         des_attr: true,
+        xml220_policy: None,
     }
 }
 

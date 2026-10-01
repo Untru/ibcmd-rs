@@ -37,7 +37,9 @@ pub(crate) fn emit_field_edt(
     // дефолт, а EDT-омиссия значит ДРУГОЕ (ecore-дефолт EDT) ⇒ EDT ОБЯЗАН выписать литерал
     // платформы ЯВНО (ровно так пишет и реальная EDT-выгрузка: `<editMode>Enter` 86 533,
     // `<headerHorizontalAlign>Left` 122 142 при отсутствующем Designer-теге).
-    let platform_fill: Option<PropertyValue> = match entry.policy {
+    let platform_fill: Option<PropertyValue> = match entry
+        .policy_for(morph1c_core::version::current_roundtrip_target())
+    {
         Policy::PlatformDefault(k) if value.is_none() => Some(parse_lit(entry.codec, k.des_fill)),
         Policy::EditMode if value.is_none() => {
             Some(parse_lit(entry.codec, ff::EDIT_MODE_DESIGNER_DEFAULT))
@@ -45,7 +47,7 @@ pub(crate) fn emit_field_edt(
         _ => None,
     };
     let value = platform_fill.as_ref().or(value);
-    let emit = match entry.policy {
+    let emit = match entry.policy_for(morph1c_core::version::current_roundtrip_target()) {
         Policy::Symmetric => value,
         Policy::OppositeBool => match value {
             Some(PropertyValue::Bool(true)) => value,
@@ -286,7 +288,12 @@ pub(crate) fn emit_choice_list_edt(
         }
         if let Some(p) = pic {
             // Канон `List([Ref, Bool(lt)])`; EDT LoadTransparent не несёт (lt игнор).
-            let (r, _lt) = picture_ref_lt(p)?;
+            let (r, lt) = picture_ref_lt(p)?;
+            if picture_pixel(p).is_some() || lt != picture_lt_default(r) {
+                return Err(FormError::Frame(format!(
+                    "choiceList picture: EDT cannot represent per-use transparency/pixel for {r:?}"
+                )));
+            }
             let mut pe = OutElement::branch("", "picture").attr("xsi:type", "core:PictureRef");
             pe.push(OutElement::leaf("", "picture", r.to_string()));
             cl.push(pe);

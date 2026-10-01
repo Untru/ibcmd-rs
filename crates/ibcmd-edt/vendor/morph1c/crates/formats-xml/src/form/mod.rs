@@ -21,22 +21,26 @@ use crate::emit::Envelope;
 mod chart;
 mod dcss;
 mod fields;
-pub(crate) use fields::{color_from_designer, color_to_designer, render_edt_color, decode_edt_color};
+pub(crate) use fields::{
+    color_from_designer, color_to_designer, decode_edt_color, render_edt_color,
+};
 mod mxlx;
+mod picture_defaults;
 mod pictures;
+pub use picture_defaults::resolve_common_picture_transparency;
 mod projection;
 mod read;
 mod tables;
 mod write;
 
-pub use dcss::{
-    read_conditional_appearance_dcssca, read_list_settings_dcss,
-    write_conditional_appearance_dcssca, write_form_settings_blob, write_list_settings_dcss,
-    write_list_settings_section, write_server_state, DcsSettingsSection,
-};
 pub use chart::{designer_dense_chart_settings, read_chart_sidecar, write_chart_sidecar};
+pub use dcss::{
+    DcsSettingsSection, read_conditional_appearance_dcssca, read_list_settings_dcss,
+    write_conditional_appearance_dcssca, write_form_settings_blob, write_list_settings_dcss,
+    write_list_settings_section, write_server_state,
+};
 pub use mxlx::{read_spreadsheet_mxlx, write_spreadsheet_mxlx};
-pub use pictures::{picture_slots, set_sidecar_ext, sidecar_slots, PictureSlot};
+pub use pictures::{PictureSlot, picture_slots, set_sidecar_ext, sidecar_slots};
 pub use read::read_form;
 pub use write::write_form;
 

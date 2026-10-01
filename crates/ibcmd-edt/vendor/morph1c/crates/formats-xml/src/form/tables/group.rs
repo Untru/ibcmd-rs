@@ -3,7 +3,7 @@
 use crate::form::fields::{Codec, DesOmit, FieldProj, Keep, Policy, Region, fp};
 use crate::form::tables::{
     F_GRP_ASSOCIATED_TABLE, F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR,
-    F_GRP_TITLE_BACK_COLOR, KEEP_BOOL_TRUE, fpa, keep,
+    F_GRP_TITLE_BACK_COLOR, KEEP_BOOL_TRUE, fpa, keep, xml220,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 use morph1c_core::spec::forms::controls::form_group as fg;
@@ -190,17 +190,25 @@ pub(crate) static FORM_GROUP_BODY: &[FieldProj] = &[
 
 /// extInfo UsualGroup (KEEP-политики — cross-omission witnesses, см. спек).
 pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
-    fp(
-        fg::F_EXT_GROUP,
-        "group",
-        "Group",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_GROUP,
+            "group",
+            "Group",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::GROUP_EDT_DEFAULT,
+                Some(fg::GROUP_EDT_DEFAULT),
+                fg::DESIGNER_AUTO,
+                DesOmit::Eq(fg::DESIGNER_AUTO),
+            ),
+        ),
         keep(
             fg::GROUP_EDT_DEFAULT,
             Some(fg::GROUP_EDT_DEFAULT),
-            fg::DESIGNER_AUTO,
-            DesOmit::Eq(fg::DESIGNER_AUTO),
+            "HorizontalIfPossible",
+            DesOmit::Eq("HorizontalIfPossible"),
         ),
     ),
     fp(
@@ -292,17 +300,25 @@ pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
         Codec::Bool,
         Policy::Symmetric,
     ),
-    fp(
-        fg::F_EXT_REPRESENTATION,
-        "representation",
-        "Representation",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_REPRESENTATION,
+            "representation",
+            "Representation",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::REPRESENTATION_EDT_DEFAULT,
+                Some(fg::REPRESENTATION_EDT_DEFAULT),
+                fg::DESIGNER_AUTO,
+                DesOmit::Eq(fg::DESIGNER_AUTO),
+            ),
+        ),
         keep(
             fg::REPRESENTATION_EDT_DEFAULT,
             Some(fg::REPRESENTATION_EDT_DEFAULT),
-            fg::DESIGNER_AUTO,
-            DesOmit::Eq(fg::DESIGNER_AUTO),
+            "WeakSeparation",
+            DesOmit::Eq("WeakSeparation"),
         ),
     ),
     fp(
@@ -358,17 +374,25 @@ pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
         Codec::Localized,
         Policy::Symmetric,
     ),
-    fp(
-        fg::F_EXT_SHOW_TITLE,
-        "showTitle",
-        "ShowTitle",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_SHOW_TITLE,
+            "showTitle",
+            "ShowTitle",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::SHOW_TITLE_EDT_DEFAULT,
+                Some(fg::SHOW_TITLE_EDT_DEFAULT),
+                fg::DESIGNER_AUTO_LOWER,
+                DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            ),
+        ),
         keep(
             fg::SHOW_TITLE_EDT_DEFAULT,
             Some(fg::SHOW_TITLE_EDT_DEFAULT),
-            fg::DESIGNER_AUTO_LOWER,
-            DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            "true",
+            DesOmit::Eq("true"),
         ),
     ),
     fp(
@@ -505,17 +529,25 @@ pub(crate) static PAGE_EXT: &[FieldProj] = &[
     // ⚠ ОСТАТОК (версионный вход, класс `buttonImportance`): литерал, который ОПУСКАЕТ Designer,
     // ВЕРСИОНЕН — `Auto` в дампах 8.5.1 (SSL/coverage), `Vertical` в дампе 8.3.27 (ERP);
     // `des_fill` — константа, поэтому на ERP клетка 10 371 остаётся X-неравной.
-    fp(
-        fg::F_EXT_GROUP,
-        "group",
-        "Group",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_GROUP,
+            "group",
+            "Group",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::GROUP_EDT_DEFAULT,
+                Some(fg::GROUP_EDT_DEFAULT),
+                fg::DESIGNER_AUTO,
+                DesOmit::Eq(fg::DESIGNER_AUTO),
+            ),
+        ),
         keep(
             fg::GROUP_EDT_DEFAULT,
             Some(fg::GROUP_EDT_DEFAULT),
-            fg::DESIGNER_AUTO,
-            DesOmit::Eq(fg::DESIGNER_AUTO),
+            "Vertical",
+            DesOmit::Eq("Vertical"),
         ),
     ),
     fp(
@@ -570,17 +602,25 @@ pub(crate) static PAGE_EXT: &[FieldProj] = &[
         Codec::EnumTok,
         Policy::Symmetric,
     ),
-    fp(
-        fg::F_EXT_SHOW_TITLE,
-        "showTitle",
-        "ShowTitle",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_SHOW_TITLE,
+            "showTitle",
+            "ShowTitle",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::SHOW_TITLE_EDT_DEFAULT,
+                Some(fg::SHOW_TITLE_EDT_DEFAULT),
+                fg::DESIGNER_AUTO_LOWER,
+                DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            ),
+        ),
         keep(
             fg::SHOW_TITLE_EDT_DEFAULT,
             Some(fg::SHOW_TITLE_EDT_DEFAULT),
-            fg::DESIGNER_AUTO_LOWER,
-            DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            "true",
+            DesOmit::Eq("true"),
         ),
     ),
     fp(
@@ -696,17 +736,25 @@ pub(crate) static COLUMN_GROUP_EXT: &[FieldProj] = &[
             DesOmit::Eq(fg::COLUMN_GROUP_GROUP_DESIGNER_DEFAULT),
         ),
     ),
-    fp(
-        fg::F_EXT_SHOW_TITLE,
-        "showTitle",
-        "ShowTitle",
-        Region::Ext,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fg::F_EXT_SHOW_TITLE,
+            "showTitle",
+            "ShowTitle",
+            Region::Ext,
+            Codec::EnumTok,
+            keep(
+                fg::SHOW_TITLE_EDT_DEFAULT,
+                Some(fg::SHOW_TITLE_EDT_DEFAULT),
+                fg::DESIGNER_AUTO_LOWER,
+                DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            ),
+        ),
         keep(
             fg::SHOW_TITLE_EDT_DEFAULT,
             Some(fg::SHOW_TITLE_EDT_DEFAULT),
-            fg::DESIGNER_AUTO_LOWER,
-            DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
+            "true",
+            DesOmit::Eq("true"),
         ),
     ),
     fp(
@@ -830,18 +878,26 @@ pub(crate) static POPUP_EXT: &[FieldProj] = &[
     // контингентная таблица по всем 173 Popup'ам SSL ЧИСТАЯ, без внедиагональных клеток
     // (`<ABSENT>`⟺`Main` ×1, `Normal`⟺`Normal` ×169, `Supplementary`⟺`Supplementary` ×3 —
     // `probe_defaults`). ⇒ Policy::Keep: bag'и диалектов совпадают, оба R byte-exact.
-    fp(
-        fg::F_EXT_IMPORTANCE,
-        "importance",
-        "Importance",
-        Region::Ext,
-        Codec::EnumTok,
-        Policy::Keep(Keep {
-            edt_fill: fg::POPUP_IMPORTANCE_EDT_FILL,
-            edt_omit: Some(fg::POPUP_IMPORTANCE_EDT_FILL),
-            des_fill: fg::POPUP_IMPORTANCE_FILL,
-            des_omit: DesOmit::Eq(fg::POPUP_IMPORTANCE_FILL),
-        }),
+    xml220(
+        fp(
+            fg::F_EXT_IMPORTANCE,
+            "importance",
+            "Importance",
+            Region::Ext,
+            Codec::EnumTok,
+            Policy::Keep(Keep {
+                edt_fill: fg::POPUP_IMPORTANCE_EDT_FILL,
+                edt_omit: Some(fg::POPUP_IMPORTANCE_EDT_FILL),
+                des_fill: fg::POPUP_IMPORTANCE_FILL,
+                des_omit: DesOmit::Eq(fg::POPUP_IMPORTANCE_FILL),
+            }),
+        ),
+        keep(
+            fg::POPUP_IMPORTANCE_EDT_FILL,
+            Some(fg::POPUP_IMPORTANCE_EDT_FILL),
+            "Main",
+            DesOmit::Eq("Main"),
+        ),
     ),
     // backColor/borderColor — Color Symmetric (метамодель PopupGroupExtInfo#8/#9;
     // ERP 5⟷5 и 2⟷2). cf: popup-композит cells[7]/[8] (абляция s10).

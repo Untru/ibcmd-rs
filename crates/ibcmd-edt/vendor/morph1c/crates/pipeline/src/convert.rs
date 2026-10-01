@@ -253,6 +253,7 @@ fn read_config_inner(
         .map(|e| (e.kind.clone(), e.object_count))
         .collect();
 
+    crate::picture_read::resolve_form_picture_transparency(format, &mut cfg)?;
     Ok((cfg, skipped))
 }
 

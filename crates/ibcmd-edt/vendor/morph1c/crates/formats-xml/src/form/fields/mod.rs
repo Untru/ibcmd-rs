@@ -40,11 +40,11 @@
 //!   `PlatformDefault` (`Enter`): EDT опускает `Directly`; Designer кодирует `Auto` ПАРОЙ
 //!   `<EditMode>EnterOnInput` + `<AutoEditMode>true`, опускает `Enter` (сверено 280+6+1+1).
 
-use super::{FormDialect, FormError, DESIGNER_FORM_NS};
+use super::{DESIGNER_FORM_NS, FormDialect, FormError};
 use crate::descriptor::Element;
 use crate::emit::OutElement;
 use crate::value_codec::{self, ValueDialect};
-use crate::{type_codec, TypeDialect};
+use crate::{TypeDialect, type_codec};
 use morph1c_core::ir::value::{PropertyValue, Token};
 use morph1c_core::ir::{FieldId, Lang};
 use morph1c_core::spec::forms::controls::button as bt;
@@ -273,8 +273,23 @@ pub(super) struct FieldProj {
     pub region: Region,
     pub codec: Codec,
     pub policy: Policy,
+    /// Exact XML 2.20 platform projection; later profiles retain the original policy.
+    pub xml220_policy: Option<Policy>,
     /// Designer кодирует поле АТРИБУТОМ элемента контрола (`DisplayImportance`), не тегом.
     pub des_attr: bool,
+}
+
+impl FieldProj {
+    pub(super) fn policy_for(
+        &self,
+        version: Option<morph1c_core::version::FormatVersion>,
+    ) -> Policy {
+        if version == Some(morph1c_core::version::FormatVersion::new(2, 20)) {
+            self.xml220_policy.unwrap_or(self.policy)
+        } else {
+            self.policy
+        }
+    }
 }
 
 /// Конструктор строки таблицы (компактность объявлений).
@@ -294,6 +309,7 @@ pub(super) const fn fp(
         codec,
         policy,
         des_attr: false,
+        xml220_policy: None,
     }
 }
 
@@ -316,17 +332,17 @@ fn bag_get(bag: &[(FieldId, PropertyValue)], id: FieldId) -> Option<&PropertyVal
 }
 
 mod common;
-mod edt_read;
 mod designer_read;
-mod policy;
-mod edt_write;
 mod designer_write;
+mod edt_read;
+mod edt_write;
+mod policy;
 #[cfg(any())]
 mod tests;
 
 pub(crate) use common::*;
-pub(crate) use edt_read::*;
 pub(crate) use designer_read::*;
-pub(crate) use policy::*;
-pub(crate) use edt_write::*;
 pub(crate) use designer_write::*;
+pub(crate) use edt_read::*;
+pub(crate) use edt_write::*;
+pub(crate) use policy::*;

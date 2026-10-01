@@ -56,12 +56,12 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
         // width→height→windowOpeningMode).
         fr::F_HEIGHT,
         fr::F_WINDOW_OPENING_MODE,
-        fr::F_AUTO_SAVE_DATA_IN_SETTINGS,
         fr::F_ENTER_KEY_BEHAVIOR,
+        fr::F_AUTO_SAVE_DATA_IN_SETTINGS,
         fr::F_SAVE_DATA_IN_SETTINGS,
-        fr::F_SETTINGS_STORAGE,
         fr::F_WINDOW_VIEW_MODE,
         fr::F_SAVE_WINDOW_SETTINGS,
+        fr::F_SETTINGS_STORAGE,
         fr::F_AUTO_TITLE,
         fr::F_AUTO_URL,
         fr::F_GROUP,
@@ -85,8 +85,8 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
         fr::F_SCALING_MODE,
         fr::F_SHOW_TITLE,
         fr::F_SHOW_CLOSE_BUTTON,
-        fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT,
         fr::F_CONVERSATIONS_REPRESENTATION,
+        fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT,
     ] {
         push_edt_attr(&mut root, body, id);
     }

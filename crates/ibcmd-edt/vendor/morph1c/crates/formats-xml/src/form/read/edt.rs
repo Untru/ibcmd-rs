@@ -575,7 +575,13 @@ pub(crate) fn read_edt_root_ext_info(ex: &Element) -> Result<RootExtInfoRead, Fo
     // ФОРМ-уровневое `useForFoldersAndItems` (иерархические Catalog/ChartOfCharacteristicTypes):
     // EDT держит его ВНУТРИ этого extInfo, эмитит лишь non-default `Folders` (дефолт `Items`
     // опущен). Designer несёт прямым ребёнком корня (см. read_designer). См. FormBody.
-    let use_for_folders_and_items = leaf_text_opt(ex, "useForFoldersAndItems");
+    let use_for_folders_and_items = leaf_text_opt(ex, "useForFoldersAndItems").or_else(|| {
+        matches!(
+            kind.as_str(),
+            "form:CatalogFormExtInfo" | "form:ChartOfCharacteristicTypesFormExtInfo"
+        )
+        .then(|| "Items".to_owned())
+    });
     // ФОРМ-уровневый `groupList` (форма динамического списка `form:DynamicListFormExtInfo`):
     // представление группировки списка (`Дерево`/…). EDT держит его ВНУТРИ этого extInfo,
     // Designer — прямым ребёнком корня `<GroupList>` (форм-атрибут F_GROUP_LIST). ERP-witness

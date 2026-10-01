@@ -60,6 +60,15 @@ pub struct FormCiItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormBody {
+    /// Native XML 2.20 lexical presence of Auto CheckBoxType. This source-only
+    /// spelling facet does not change the independently typed CheckBoxType value.
+    /// It is excluded from semantic serialization; edited nondefault values win.
+    #[serde(skip)]
+    pub designer_checkbox_auto_presence: std::collections::BTreeMap<i64, bool>,
+    /// Typed referenced CommonPicture defaults, populated by whole-config binding.
+    /// Projection context only; independent per-use BOOL/pixel remain semantic IR.
+    #[serde(skip)]
+    pub common_picture_transparency: std::collections::BTreeMap<String, bool>,
     /// Локализованный заголовок формы (`<title>`/`<Title>`), если задан. Оба формата
     /// эмитят его явно (X-сравнимо). `None` ⇒ форма без заголовка (как пилот).
     pub title: Option<PropertyValue>,
@@ -377,6 +386,8 @@ impl FormBody {
     /// Создать пустое тело формы.
     pub fn new() -> Self {
         FormBody {
+            designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
+            common_picture_transparency: std::collections::BTreeMap::new(),
             ca_envelope_without_lf_pal: false,
             title: None,
             attributes: Vec::new(),

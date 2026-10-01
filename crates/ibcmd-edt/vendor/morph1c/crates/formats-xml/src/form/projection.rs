@@ -8,8 +8,8 @@
 
 use super::FormDialect;
 use crate::emit::OutElement;
-use morph1c_core::ir::value::{PropertyValue, Token};
 use morph1c_core::ir::FieldId;
+use morph1c_core::ir::value::{PropertyValue, Token};
 use morph1c_core::spec::forms::form_root as fr;
 
 /// Вид значения форм-атрибута в проекции.
@@ -562,6 +562,23 @@ pub(crate) fn designer_attr_node(id: FieldId, value: Option<&PropertyValue>) -> 
 }
 
 /// Общий: эмитировать узел атрибута, если его эффективное значение != дефолту ЭТОГО формата.
+fn profile_default(
+    proj: &AttrProj,
+    dialect: FormDialect,
+    version: Option<morph1c_core::version::FormatVersion>,
+) -> Option<DefaultVal> {
+    if dialect == FormDialect::Designer
+        && version == Some(morph1c_core::version::FormatVersion::new(2, 20))
+    {
+        match proj.id {
+            fr::F_GROUP => return Some(DefaultVal::Enum("Vertical")),
+            fr::F_SHOW_TITLE => return Some(DefaultVal::Enum("true")),
+            _ => {}
+        }
+    }
+    proj.default
+}
+
 fn attr_node(
     dialect: FormDialect,
     id: FieldId,
@@ -579,10 +596,13 @@ fn attr_node(
         },
     };
     // Дефолт ЭТОГО формата: пер-форматный override, иначе канонический spec.default.
-    let fmt_default: Option<PropertyValue> = proj
-        .default
-        .map(|d| d.to_value())
-        .or_else(|| fs.default.clone());
+    let fmt_default: Option<PropertyValue> = profile_default(
+        proj,
+        dialect,
+        morph1c_core::version::current_roundtrip_target(),
+    )
+    .map(|d| d.to_value())
+    .or_else(|| fs.default.clone());
     if let Some(fd) = &fmt_default {
         if eff == fd {
             return None; // == дефолту формата ⇒ опускаем (sparse).
@@ -649,10 +669,10 @@ pub(crate) fn read_form_attrs(
                             return Err(format!(
                                 "form attr <{}> xsi:type={:?}, want {x:?}",
                                 proj.tag, a.value
-                            ))
+                            ));
                         }
                         None => {
-                            return Err(format!("form attr <{}> missing xsi:type {x:?}", proj.tag))
+                            return Err(format!("form attr <{}> missing xsi:type {x:?}", proj.tag));
                         }
                     }
                 }
@@ -664,10 +684,13 @@ pub(crate) fn read_form_attrs(
                 }
                 decode_attr(proj, &el.text)?
             }
-            None => match proj
-                .default
-                .map(|d| d.to_value())
-                .or_else(|| fs.default.clone())
+            None => match profile_default(
+                proj,
+                dialect,
+                morph1c_core::version::current_source_version(),
+            )
+            .map(|d| d.to_value())
+            .or_else(|| fs.default.clone())
             {
                 Some(v) => v,
                 // Нет ни пер-форматного, ни канонического дефолта ⇒ атрибут ОПЦИОНАЛЕН (absent

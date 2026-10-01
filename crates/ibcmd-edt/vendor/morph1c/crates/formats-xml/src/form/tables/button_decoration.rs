@@ -1,7 +1,9 @@
 //! Тела и extInfo Button / Decoration (Label+Picture) / Tooltip / FormCommand.
 
-use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
-use crate::form::tables::{fpa, keep, F_DEC_SHORTCUT, F_LD_BORDER_COLOR, F_BT_SERVER_UNAVAILABLE, KEEP_BOOL_TRUE};
+use crate::form::fields::{Codec, DesOmit, FieldProj, Policy, Region, fp};
+use crate::form::tables::{
+    F_BT_SERVER_UNAVAILABLE, F_DEC_SHORTCUT, F_LD_BORDER_COLOR, KEEP_BOOL_TRUE, fpa, keep, xml220,
+};
 use morph1c_core::spec::forms::command as fc;
 use morph1c_core::spec::forms::controls::button as bt;
 use morph1c_core::spec::forms::controls::form_field as ff;
@@ -936,18 +938,25 @@ pub(crate) static COMMAND_BODY: &[FieldProj] = &[
             DesOmit::Eq(fc::ROW_USE_DESIGNER_DEFAULT),
         ),
     ),
-    fp(
-        fc::F_SELECTED_ROWS_USE,
-        "selectedRowsUse",
-        "SelectedRowsUse",
-        Region::Body,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            fc::F_SELECTED_ROWS_USE,
+            "selectedRowsUse",
+            "SelectedRowsUse",
+            Region::Body,
+            Codec::EnumTok,
+            keep(
+                fc::ROW_USE_EDT_DEFAULT,
+                Some(fc::ROW_USE_EDT_DEFAULT),
+                fc::ROW_USE_DESIGNER_DEFAULT,
+                DesOmit::Eq(fc::ROW_USE_DESIGNER_DEFAULT),
+            ),
+        ),
         keep(
             fc::ROW_USE_EDT_DEFAULT,
             Some(fc::ROW_USE_EDT_DEFAULT),
-            fc::ROW_USE_DESIGNER_DEFAULT,
-            DesOmit::Eq(fc::ROW_USE_DESIGNER_DEFAULT),
+            "Use",
+            DesOmit::Eq("Use"),
         ),
     ),
 ];
-

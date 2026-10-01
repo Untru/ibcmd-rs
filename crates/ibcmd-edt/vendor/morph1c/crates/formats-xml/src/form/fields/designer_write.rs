@@ -38,7 +38,9 @@ pub(crate) fn emit_field_designer(
         return Ok(());
     }
     let value = bag_get(bag, entry.id);
-    let emit: Option<PropertyValue> = match entry.policy {
+    let emit: Option<PropertyValue> = match entry
+        .policy_for(morph1c_core::version::current_roundtrip_target())
+    {
         Policy::Symmetric => value.cloned(),
         Policy::OppositeBool => match value {
             Some(PropertyValue::Bool(true)) => None, // Designer-дефолт true ⇒ опускаем.

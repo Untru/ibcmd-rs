@@ -247,7 +247,9 @@ fn parse_hex_rgb(canon: &str) -> Option<(u8, u8, u8)> {
 /// функцией; Designer читает независимый флаг как есть. Также — fallback [`picture_ref_lt`]
 /// для голого `Ref` (не-конвертированный источник).
 pub(crate) fn picture_lt_default(picture_ref: &str) -> bool {
-    picture_ref.starts_with(morph1c_core::spec::forms::command::PICTURE_STD_PREFIX)
+    super::super::picture_defaults::common_picture_default(picture_ref).unwrap_or_else(|| {
+        picture_ref.starts_with(morph1c_core::spec::forms::command::PICTURE_STD_PREFIX)
+    })
 }
 
 /// Разобрать текст `<xr:LoadTransparent>` в bool; иное — типизированный отказ (§1.0).

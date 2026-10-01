@@ -1,9 +1,9 @@
 //! Table: полное тело + HEAD-маркеры, DynamicListTableExtInfo, Designer-порядки Таблицы.
 
-use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
+use crate::form::fields::{Codec, DesOmit, FieldProj, Policy, Region, fp};
 use crate::form::tables::{
-    fpa, keep, DesSlot, F_TB_BEHAVIOR_ON_HORIZONTAL_COMPRESSION, F_TB_REFRESH_REQUEST,
-    F_TB_SHORTCUT, F_TB_TITLE_HEIGHT, F_TB_USE_ALTERNATION_ROW_COLOR, KEEP_BOOL_TRUE,
+    DesSlot, F_TB_BEHAVIOR_ON_HORIZONTAL_COMPRESSION, F_TB_REFRESH_REQUEST, F_TB_SHORTCUT,
+    F_TB_TITLE_HEIGHT, F_TB_USE_ALTERNATION_ROW_COLOR, KEEP_BOOL_TRUE, fpa, keep, xml220,
 };
 use morph1c_core::ir::FieldId;
 use morph1c_core::spec::forms::controls::table as tb;
@@ -324,17 +324,25 @@ pub(crate) static TABLE_BODY: &[FieldProj] = &[
             DesOmit::Eq(tb::SELECTION_MODE_DESIGNER_DEFAULT),
         ),
     ),
-    fp(
-        tb::F_ROW_SELECTION_MODE,
-        "rowSelectionMode",
-        "RowSelectionMode",
-        Region::Body,
-        Codec::EnumTok,
+    xml220(
+        fp(
+            tb::F_ROW_SELECTION_MODE,
+            "rowSelectionMode",
+            "RowSelectionMode",
+            Region::Body,
+            Codec::EnumTok,
+            keep(
+                tb::ROW_SELECTION_MODE_EDT_DEFAULT,
+                Some(tb::ROW_SELECTION_MODE_EDT_DEFAULT),
+                tb::ROW_SELECTION_MODE_DESIGNER_DEFAULT,
+                DesOmit::Eq(tb::ROW_SELECTION_MODE_DESIGNER_DEFAULT),
+            ),
+        ),
         keep(
             tb::ROW_SELECTION_MODE_EDT_DEFAULT,
             Some(tb::ROW_SELECTION_MODE_EDT_DEFAULT),
-            tb::ROW_SELECTION_MODE_DESIGNER_DEFAULT,
-            DesOmit::Eq(tb::ROW_SELECTION_MODE_DESIGNER_DEFAULT),
+            "Cell",
+            DesOmit::Eq("Cell"),
         ),
     ),
     fp(
@@ -424,21 +432,27 @@ pub(crate) static TABLE_BODY: &[FieldProj] = &[
     // composer `*AvailableFields` tables carry (`<HorizontalLines>false</HorizontalLines>` → cf 0, not
     // 2). Witnessed on the DeepHarness composer synthetic (b2). SSL edt→cf stays byte-exact because
     // its Table lines ride the separate `…BWA` twins (37/38), so field 35/36 is absent there.
-    fp(
-        tb::F_HORIZONTAL_LINES,
-        "horizontalLines",
-        "HorizontalLines",
-        Region::Body,
-        Codec::Bool,
-        Policy::Symmetric,
+    xml220(
+        fp(
+            tb::F_HORIZONTAL_LINES,
+            "horizontalLines",
+            "HorizontalLines",
+            Region::Body,
+            Codec::Bool,
+            Policy::Symmetric,
+        ),
+        keep("false", Some("false"), "true", DesOmit::Eq("true")),
     ),
-    fp(
-        tb::F_VERTICAL_LINES,
-        "verticalLines",
-        "VerticalLines",
-        Region::Body,
-        Codec::Bool,
-        Policy::Symmetric,
+    xml220(
+        fp(
+            tb::F_VERTICAL_LINES,
+            "verticalLines",
+            "VerticalLines",
+            Region::Body,
+            Codec::Bool,
+            Policy::Symmetric,
+        ),
+        keep("false", Some("false"), "true", DesOmit::Eq("true")),
     ),
     // useAlternationRowColor — ПЛОСКИЙ Symmetric Bool (метамодель Table#73, verticalLines→
     // useAlternationRowColor→…BWA-твины; ERP 3864⟷3864×true; ОТДЕЛЬНОЕ поле от нуляемого
@@ -712,13 +726,16 @@ pub(crate) static TABLE_BODY: &[FieldProj] = &[
         Codec::EnumTok,
         Policy::Symmetric,
     ),
-    fp(
-        tb::F_AUTO_MAX_CARD_HEIGHT,
-        "autoMaxCardHeight",
-        "AutoMaxCardHeight",
-        Region::Body,
-        Codec::Bool,
-        Policy::OppositeBool,
+    xml220(
+        fp(
+            tb::F_AUTO_MAX_CARD_HEIGHT,
+            "autoMaxCardHeight",
+            "AutoMaxCardHeight",
+            Region::Body,
+            Codec::Bool,
+            Policy::OppositeBool,
+        ),
+        keep("false", Some("false"), "false", DesOmit::Eq("false")),
     ),
     fp(
         tb::F_ROW_FILTER,
@@ -1082,4 +1099,3 @@ pub(crate) static DES_DYNAMIC_LIST_ORDER: &[FieldId] = &[
     tb::F_DL_USER_SETTINGS_GROUP,
     tb::F_DL_ALLOW_GETTING_CURRENT_ROW_URL,
 ];
-

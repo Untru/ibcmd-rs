@@ -37,7 +37,7 @@ pub(crate) fn apply_read_policy(
     dialect: FormDialect,
     bag: &mut Vec<(FieldId, PropertyValue)>,
 ) -> Result<(), FormError> {
-    match entry.policy {
+    match entry.policy_for(morph1c_core::version::current_source_version()) {
         Policy::Symmetric => {
             if let Some(v) = present {
                 bag.push((entry.id, v));
@@ -67,15 +67,9 @@ pub(crate) fn apply_read_policy(
         }
         // ПЛАТФОРМЕННЫЙ ДЕФОЛТ: `des_fill` НЕ хранится в каноне (⇒ оба ридера дают ОДНО и то
         // же при незаданном свойстве), EDT-омиссия по-прежнему значит `edt_fill`.
-        Policy::PlatformDefault(k) => push_platform_default(
-            owner,
-            entry,
-            present,
-            dialect,
-            k.edt_fill,
-            k.des_fill,
-            bag,
-        ),
+        Policy::PlatformDefault(k) => {
+            push_platform_default(owner, entry, present, dialect, k.edt_fill, k.des_fill, bag)
+        }
         Policy::EditMode => push_platform_default(
             owner,
             entry,

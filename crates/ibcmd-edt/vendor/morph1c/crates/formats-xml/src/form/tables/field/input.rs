@@ -5,7 +5,7 @@ use crate::form::tables::{
     F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT, F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES,
     F_EXT_MULTIPLE_PRESENT_PATH, F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST,
     F_EXT_SPECIAL_TEXT_INPUT_MODE, geo_auto_max_height, geo_auto_max_width, geo_h_stretch,
-    geo_height, geo_max_height, geo_max_width, geo_v_stretch, geo_width, keep,
+    geo_height, geo_max_height, geo_max_width, geo_v_stretch, geo_width, keep, xml220,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 use morph1c_core::spec::forms::controls::radio_button as rb;
@@ -406,18 +406,26 @@ pub(crate) static INPUT_FIELD_EXT: &[FieldProj] = &[
     // (82), `Normal`⟺`Normal` (2738). См. `probe_defaults` + `ff::TEXT_SIZE_EDT_FILL`.
     // ⇒ Policy::Keep: каждый диалект заполняет СВОЙ дефолт на чтении и опускает его на записи;
     // bag'и совпадают (X-равны), оба R остаются byte-exact.
-    fp(
-        ff::F_EXT_TEXT_SIZE,
-        "textSize",
-        "TextSize",
-        Region::Ext,
-        Codec::EnumTok,
-        Policy::Keep(Keep {
-            edt_fill: ff::TEXT_SIZE_EDT_FILL,
-            edt_omit: Some(ff::TEXT_SIZE_EDT_FILL),
-            des_fill: ff::TEXT_SIZE_FILL,
-            des_omit: DesOmit::Eq(ff::TEXT_SIZE_FILL),
-        }),
+    xml220(
+        fp(
+            ff::F_EXT_TEXT_SIZE,
+            "textSize",
+            "TextSize",
+            Region::Ext,
+            Codec::EnumTok,
+            Policy::Keep(Keep {
+                edt_fill: ff::TEXT_SIZE_EDT_FILL,
+                edt_omit: Some(ff::TEXT_SIZE_EDT_FILL),
+                des_fill: ff::TEXT_SIZE_FILL,
+                des_omit: DesOmit::Eq(ff::TEXT_SIZE_FILL),
+            }),
+        ),
+        keep(
+            ff::TEXT_SIZE_EDT_FILL,
+            Some(ff::TEXT_SIZE_EDT_FILL),
+            "Enlarged",
+            DesOmit::Eq("Enlarged"),
+        ),
     ),
     // typeLink: связь по типу (structured; метамодель #63 — ПОСЛЕ textSize (55), ДО
     // heightControlVariant (64); witness EDT textSize→typeLink→КОНЕЦ extInfo ×7).
@@ -537,13 +545,16 @@ pub(crate) static INPUT_FIELD_EXT: &[FieldProj] = &[
 
 /// extInfo CheckBoxField.
 pub(crate) static CHECK_BOX_FIELD_EXT: &[FieldProj] = &[
-    fp(
-        ff::F_EXT_CHECK_BOX_TYPE,
-        "checkBoxType",
-        "CheckBoxType",
-        Region::Ext,
-        Codec::EnumTok,
-        Policy::Symmetric,
+    xml220(
+        fp(
+            ff::F_EXT_CHECK_BOX_TYPE,
+            "checkBoxType",
+            "CheckBoxType",
+            Region::Ext,
+            Codec::EnumTok,
+            Policy::Symmetric,
+        ),
+        keep("Auto", Some("Auto"), "Auto", DesOmit::Never),
     ),
     fp(
         ff::F_EXT_THREE_STATE,

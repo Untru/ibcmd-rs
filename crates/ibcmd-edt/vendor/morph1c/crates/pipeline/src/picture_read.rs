@@ -34,9 +34,9 @@
 
 use std::path::{Path, PathBuf};
 
+use formats_xml::Element;
 use formats_xml::registry::Format;
 use formats_xml::transparent_pixel::pixel_of;
-use formats_xml::Element;
 use morph1c_core::ir::value::PropertyValue;
 use morph1c_core::ir::{MetadataObject, PictureBody};
 use morph1c_core::spec::metadata::common_picture::F_TRANSPARENT_PIXEL;
@@ -300,7 +300,7 @@ pub(crate) fn parse_wrapper(
         other => {
             return Err(read_err(format!(
                 "<xr:LoadTransparent> is {other:?}, expected true|false (§1.0)"
-            )))
+            )));
         }
     };
     let pixel_el = child(picture, "TransparentPixel");
@@ -314,14 +314,14 @@ pub(crate) fn parse_wrapper(
                 "<xr:LoadTransparent>true</…> without <xr:TransparentPixel> — unwitnessed \
                  (the flag denormalizes pixel presence, §1.0)"
                     .into(),
-            ))
+            ));
         }
         (false, Some(_)) => {
             return Err(read_err(
                 "<xr:TransparentPixel> with <xr:LoadTransparent>false</…> — unwitnessed \
                  (the flag denormalizes pixel presence, §1.0)"
                     .into(),
-            ))
+            ));
         }
     };
     Ok((abs.text.clone(), pixel))
@@ -438,8 +438,11 @@ mod tests {
         ));
         let ext = base.join("CommonPictures").join("Кар").join("Ext");
         std::fs::create_dir_all(&ext).unwrap();
-        crate::fsio::write(ext.join("Picture.xml"), serialize_wrapper("Picture.png", None))
-            .unwrap();
+        crate::fsio::write(
+            ext.join("Picture.xml"),
+            serialize_wrapper("Picture.png", None),
+        )
+        .unwrap();
         let (name, pixel) = parse_wrapper(&ext.join("Picture.xml"), "Кар").unwrap();
         assert_eq!(name, "Picture.png");
         assert_eq!(pixel, None);
@@ -498,4 +501,69 @@ mod tests {
         }
         let _ = std::fs::remove_dir_all(&base);
     }
+}
+
+/// Resolve form reference transparency only after every CommonPicture descriptor
+/// and image wrapper has been typed. Designer-origin per-use flags/pixels are
+/// preserved; the carrier is consulted only by EDT projection validation.
+pub(crate) fn resolve_form_picture_transparency(
+    format: Format,
+    cfg: &mut morph1c_core::ir::Configuration,
+) -> Result<(), ConvertError> {
+    use std::collections::BTreeMap;
+    fn collect(
+        objects: &[MetadataObject],
+        out: &mut BTreeMap<String, bool>,
+    ) -> Result<(), ConvertError> {
+        for object in objects {
+            if object.kind.as_str() == "CommonPicture" {
+                let pixel = object
+                    .get(F_TRANSPARENT_PIXEL)
+                    .map(pixel_of)
+                    .transpose()
+                    .map_err(|reason| ConvertError::Read {
+                        kind: "CommonPicture".into(),
+                        object: object.name.clone(),
+                        reason,
+                    })?;
+                let reference = format!("CommonPicture.{}", object.name);
+                if out.insert(reference, pixel.is_some()).is_some() {
+                    return Err(ConvertError::Read {
+                        kind: "CommonPicture".into(),
+                        object: object.name.clone(),
+                        reason: "duplicate CommonPicture reference identity".into(),
+                    });
+                }
+            }
+            collect(&object.children, out)?;
+        }
+        Ok(())
+    }
+    fn bind(
+        objects: &mut [MetadataObject],
+        defaults: &BTreeMap<String, bool>,
+        edt: bool,
+    ) -> Result<(), ConvertError> {
+        for object in objects {
+            for form in &mut object.form_bodies {
+                if form.ordinary_body.is_none() {
+                    formats_xml::form::resolve_common_picture_transparency(
+                        &mut form.body,
+                        defaults,
+                        edt,
+                    )
+                    .map_err(|error| ConvertError::Read {
+                        kind: object.kind.as_str().into(),
+                        object: format!("{}.{}", object.name, form.name),
+                        reason: error.to_string(),
+                    })?;
+                }
+            }
+            bind(&mut object.children, defaults, edt)?;
+        }
+        Ok(())
+    }
+    let mut defaults = BTreeMap::new();
+    collect(&cfg.objects, &mut defaults)?;
+    bind(&mut cfg.objects, &defaults, format == Format::Edt)
 }

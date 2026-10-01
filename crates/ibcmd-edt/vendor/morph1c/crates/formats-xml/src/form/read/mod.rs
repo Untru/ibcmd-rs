@@ -84,8 +84,48 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
     validate_qname_bindings(&root, &std::collections::BTreeMap::new())?;
     match dialect {
         FormDialect::Edt => read_edt(root),
-        FormDialect::Designer => read_designer(root),
+        FormDialect::Designer => {
+            let mut presence = std::collections::BTreeMap::new();
+            if root
+                .attr("version")
+                .is_some_and(|attribute| attribute.value == "2.20")
+            {
+                collect_xml220_checkbox_presence(&root, &mut presence)?;
+            }
+            let mut body = read_designer(root)?;
+            body.designer_checkbox_auto_presence = presence;
+            Ok(body)
+        }
     }
+}
+
+fn collect_xml220_checkbox_presence(
+    element: &Element,
+    out: &mut std::collections::BTreeMap<i64, bool>,
+) -> Result<(), FormError> {
+    if element.prefix.is_empty() && element.local == "CheckBoxField" {
+        let ty = element
+            .children
+            .iter()
+            .find(|child| child.prefix.is_empty() && child.local == "CheckBoxType");
+        if ty.is_none_or(|ty| ty.text == "Auto") {
+            let id = element
+                .attr("id")
+                .ok_or_else(|| FormError::Frame("checkbox has no id".into()))?
+                .value
+                .parse::<i64>()
+                .map_err(|_| FormError::Frame("checkbox id is not an integer".into()))?;
+            if out.insert(id, ty.is_some()).is_some() {
+                return Err(FormError::Frame(
+                    "duplicate checkbox id in spelling facet".into(),
+                ));
+            }
+        }
+    }
+    for child in &element.children {
+        collect_xml220_checkbox_presence(child, out)?;
+    }
+    Ok(())
 }
 
 fn validate_qname_bindings(
