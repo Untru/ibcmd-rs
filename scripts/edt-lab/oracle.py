@@ -336,7 +336,9 @@ def accept(args, run: Path) -> None:
             "--source-format", source_format, "--target-format", target_format,
             "--source-profile", source_profile, "--target-profile", target_profile,
             "--report", str(run / f"{label}.report.json")], args.timeout)
-    require_xml(converted_xml)
+    # Authentic EDT carries no native storage-generation dump manifest. Direct
+    # conversion is complete configuration data without inventing such a file.
+    require_xml(converted_xml, require_dump_info=False)
     require_project(generated, args.runtime)
     write_json(run / "ours-authentic-edt-xml.json", snapshot(converted_xml))
     write_json(run / "ours-generated-edt.json", snapshot(generated))
