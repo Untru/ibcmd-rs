@@ -128,12 +128,36 @@ pub(super) fn convert(
         })?;
         // The EDT adapter owns complete semantic decoding. The physical CF
         // compiler's narrower family readers are not EDT capability gates.
-        for entry in tree.entries().iter().filter(|entry| {
-            matches!(
-                entry.kind(),
-                SourceKind::ConfigurationRoot | SourceKind::MetadataXml
-            )
-        }) {
+        for entry in tree
+            .entries()
+            .iter()
+            .filter(|entry| entry.path().as_str().to_ascii_lowercase().ends_with(".xml"))
+        {
+            // Inspect only the envelope before building a tree: template and
+            // interface bodies can be large and have their own bounded codecs.
+            let mut reader = quick_xml::Reader::from_reader(entry.bytes());
+            let descriptor = loop {
+                match reader.read_event() {
+                    Ok(quick_xml::events::Event::Start(element))
+                    | Ok(quick_xml::events::Event::Empty(element)) => {
+                        break element.local_name().as_ref() == b"MetaDataObject";
+                    }
+                    Ok(quick_xml::events::Event::Eof) => break false,
+                    Ok(_) => continue,
+                    Err(error) => {
+                        return Err(failure(
+                            &mut report,
+                            PHASE_DECODE,
+                            "conversion.xml-source-profile-mismatch",
+                            error.to_string(),
+                            Some(entry.path().to_string()),
+                        ));
+                    }
+                }
+            };
+            if !descriptor {
+                continue;
+            }
             let document = XmlReader::from_slice(entry.bytes()).map_err(|error| {
                 failure(
                     &mut report,
@@ -143,6 +167,11 @@ pub(super) fn convert(
                     Some(entry.path().to_string()),
                 )
             })?;
+            // SourceKind also classifies XML bodies under Ext/ as metadata,
+            // and form/template descriptors by their physical folder. Check
+            // every actual descriptor envelope, including subordinate ones.
+            // Interface, help, picture and other body dialects are checked by
+            // their own complete codecs rather than an MDClasses profile.
             validate_dialect(&document, &dialects, &source.id).map_err(|message| {
                 failure(
                     &mut report,

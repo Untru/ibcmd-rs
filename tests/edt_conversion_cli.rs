@@ -174,3 +174,63 @@ fn edt_profile_is_not_an_xml_profile_and_unknown_migration_fails_closed() {
     );
     assert!(!output.exists());
 }
+
+#[test]
+fn edt_xml_profile_checks_descriptors_and_accepts_unversioned_interface_bodies() {
+    let temp = Temp::new("descriptor-profile");
+    let source = temp.0.join("source");
+    let fixture = read_xml_source(fixture(), ReaderLimits::default()).unwrap();
+    for entry in fixture.entries() {
+        let path = source.join(entry.path().as_str());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, entry.bytes()).unwrap();
+    }
+    let mut interface = String::from("\u{feff}");
+    interface.push_str(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n",
+    );
+    // Platform-defined panel identities are fixture data; the CLI does not
+    // expose or depend directly on the adapter's private intermediate model.
+    for id in [
+        "b553047f-c9aa-4157-978d-448ecad24248",
+        "13322b22-3960-4d68-93a6-fe2dd7f28ca3",
+        "c933ac92-92cd-459d-81cc-e0c8a83ced99",
+        "cbab57f2-a0f3-4f0a-89ea-4cb19570ab75",
+        "b2735bd3-d822-4430-ba59-c9e869693b24",
+        "8e10648b-f52d-4ec2-b4dd-87de33778d95",
+    ] {
+        interface.push_str(&format!("\t<panelDef id=\"{id}\"/>\r\n"));
+    }
+    interface.push_str("</ClientApplicationInterface>");
+    let body = source.join("Ext/ClientApplicationInterface.xml");
+    fs::create_dir_all(body.parent().unwrap()).unwrap();
+    fs::write(&body, &interface).unwrap();
+    let output = temp.0.join("project");
+    let report = success(run(&source, &output, "xml", "edt", &["--dry-run"]));
+    assert_eq!(report["output_published"], false);
+    assert!(!output.exists());
+
+    // A real subordinate descriptor still has to match the selected profile.
+    // Its physical folder can classify it as a form or template instead of
+    // MetadataXml, which must not bypass the descriptor gate.
+    let descriptor_path = source.join("Catalogs/Parent/Forms/ProfileMismatch.xml");
+    fs::create_dir_all(descriptor_path.parent().unwrap()).unwrap();
+    fs::write(
+        &descriptor_path,
+        "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" version=\"2.20\"><Form uuid=\"11111111-1111-4111-8111-111111111111\"><Properties><Name>ProfileMismatch</Name></Properties></Form></MetaDataObject>",
+    )
+    .unwrap();
+    let failed = run(&source, &output, "xml", "edt", &["--dry-run"]);
+    assert!(!failed.status.success());
+    let report: Value = serde_json::from_slice(&failed.stderr).unwrap();
+    assert_eq!(
+        report["errors"][0]["code"],
+        "conversion.xml-source-profile-mismatch"
+    );
+    assert_eq!(
+        report["errors"][0]["path"],
+        "Catalogs/Parent/Forms/ProfileMismatch.xml"
+    );
+    assert!(!output.exists());
+    assert_eq!(fs::read_to_string(body).unwrap(), interface);
+}
