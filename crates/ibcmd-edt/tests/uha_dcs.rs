@@ -209,9 +209,27 @@ fn authentic_uha_dcs_witnesses_decode_and_reencode() {
                 Ok(body) => {
                     match write_form(dialect, &body).and_then(|bytes| read_form(dialect, &bytes)) {
                         Ok(decoded) => {
+                            assert_eq!(
+                                body.data_attributes.len(),
+                                decoded.data_attributes.len(),
+                                "{} {name}: attribute count",
+                                path.display()
+                            );
                             for (before, after) in
                                 body.data_attributes.iter().zip(&decoded.data_attributes)
                             {
+                                assert_eq!(
+                                    before.name,
+                                    after.name,
+                                    "{} {name}: attribute identity/order",
+                                    path.display()
+                                );
+                                assert_eq!(
+                                    before.dynamic_list.is_some(),
+                                    after.dynamic_list.is_some(),
+                                    "{} {name}: dynamic-list presence",
+                                    path.display()
+                                );
                                 if let (Some(before), Some(after)) =
                                     (&before.dynamic_list, &after.dynamic_list)
                                 {
