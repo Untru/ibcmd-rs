@@ -247,7 +247,11 @@ fn xml_to_edt(
             "generated EDT differs from source typed semantics",
         ));
     }
-    let canonical = codec::canonical_inventory(&source.inventory, options)?;
+    let canonical = codec::canonical_inventory_with_policy(
+        &source.inventory,
+        options,
+        ibcmd_core::source_policy::SourceOperationPolicy::source_operation(),
+    )?;
     source.inventory.verify()?;
     output.verify()?;
     Ok(DirectoryConversion {
@@ -343,7 +347,11 @@ fn edt_to_xml(
         }
         None => rendered,
     };
-    let canonical = codec::canonical_inventory(&output, options)?;
+    let canonical = codec::canonical_inventory_with_policy(
+        &output,
+        options,
+        ibcmd_core::source_policy::SourceOperationPolicy::source_operation(),
+    )?;
     source.inventory.verify()?;
     output.verify()?;
     Ok(DirectoryConversion {

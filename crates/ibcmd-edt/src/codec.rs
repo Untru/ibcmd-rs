@@ -668,9 +668,20 @@ pub(crate) fn canonical_inventory(
     inventory: &impl CanonicalInventory,
     o: &ConversionOptions,
 ) -> Result<CanonicalConfiguration, EdtError> {
+    canonical_inventory_with_policy(
+        inventory,
+        o,
+        ibcmd_core::source_policy::SourceOperationPolicy::Bounded,
+    )
+}
+pub(crate) fn canonical_inventory_with_policy(
+    inventory: &impl CanonicalInventory,
+    o: &ConversionOptions,
+    operation: ibcmd_core::source_policy::SourceOperationPolicy,
+) -> Result<CanonicalConfiguration, EdtError> {
     let profile = ProfileId::parse(&format!("xml-{}", o.xml_dialect)).map_err(EdtError::source)?;
     let mut objects = Vec::new();
-    let mut model_budget = ibcmd_core::model::CanonicalConfigurationBudget::default();
+    let mut model_budget = ibcmd_core::model::CanonicalConfigurationBudget::with_policy(operation);
     let mut owners = BTreeMap::new();
     let mut uuids = BTreeSet::new();
     let mut metadata_paths = BTreeSet::new();
@@ -692,10 +703,15 @@ pub(crate) fn canonical_inventory(
             PathSegment::index(u32::try_from(file_index).map_err(EdtError::source)?),
         ])
         .map_err(EdtError::source)?;
-        let envelope = ibcmd_xml::decode_source_metadata_envelope(&doc, profile.clone(), path)
-            .map_err(|error| {
-                EdtError::new(format!("{}: canonical metadata bridge: {error}", e.path))
-            })?;
+        let envelope = ibcmd_xml::decode_source_metadata_envelope_with_policy(
+            &doc,
+            profile.clone(),
+            path,
+            operation,
+        )
+        .map_err(|error| {
+            EdtError::new(format!("{}: canonical metadata bridge: {error}", e.path))
+        })?;
         let root = envelope.root().identity().uuid();
         let stem = e.path.strip_suffix(".xml").unwrap_or(e.path);
         owners.insert(stem.to_string(), root);
@@ -790,7 +806,9 @@ pub(crate) fn canonical_inventory(
                 .add_asset_reference(&asset)
                 .map_err(EdtError::source)?;
             let assets = asset_map.entry(*uuid).or_insert_with(Vec::new);
-            if assets.len() >= ibcmd_core::model::MAX_OBJECT_ASSETS {
+            if operation == ibcmd_core::source_policy::SourceOperationPolicy::Bounded
+                && assets.len() >= ibcmd_core::model::MAX_OBJECT_ASSETS
+            {
                 return Err(EdtError::new(
                     "canonical object asset reference budget exceeded",
                 ));
@@ -807,7 +825,7 @@ pub(crate) fn canonical_inventory(
             return Err(EdtError::new("conflicting declared metadata ownership"));
         }
     }
-    let mut final_budget = ibcmd_core::model::CanonicalConfigurationBudget::default();
+    let mut final_budget = ibcmd_core::model::CanonicalConfigurationBudget::with_policy(operation);
     let objects = objects
         .into_iter()
         .map(|obj| {
@@ -830,12 +848,13 @@ pub(crate) fn canonical_inventory(
             parts.generated_types = obj.generated_types().to_vec();
             parts.opaque_facets = obj.opaque_facets().clone();
             parts.assets = asset_map.remove(&obj.identity().uuid()).unwrap_or_default();
-            let object = CanonicalObject::new(parts).map_err(EdtError::source)?;
+            let object =
+                CanonicalObject::new_with_policy(parts, operation).map_err(EdtError::source)?;
             final_budget.add_object(&object).map_err(EdtError::source)?;
             Ok(object)
         })
         .collect::<Result<Vec<_>, _>>()?;
-    CanonicalConfiguration::new(objects).map_err(EdtError::source)
+    CanonicalConfiguration::new_with_policy(objects, operation).map_err(EdtError::source)
 }
 
 pub(crate) fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
@@ -1127,6 +1146,41 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_source_inventory_policy_retains_all_asset_references_without_changing_defaults() {
+        use ibcmd_core::source_policy::SourceOperationPolicy;
+        let mut entries = vec![SourceEntry::from_bytes(SourcePath::new("Configuration.xml").unwrap(), b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses'><Configuration uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties></Configuration></MetaDataObject>".to_vec()).unwrap()];
+        for index in 0..=ibcmd_core::model::MAX_OBJECT_ASSETS {
+            entries.push(
+                SourceEntry::from_bytes(
+                    SourcePath::new(format!("Ext/asset-{index:05}.bin")).unwrap(),
+                    vec![index as u8],
+                )
+                .unwrap(),
+            );
+        }
+        let tree = SourceTree::new(entries).unwrap();
+        let options = ConversionOptions {
+            edt_version: "2025.2.3".into(),
+            xml_dialect: "2.21".into(),
+            runtime_version: Some("8.5.1".into()),
+        };
+        assert!(canonical_inventory(&tree, &options).is_err());
+        let model = canonical_inventory_with_policy(&tree, &options, SourceOperationPolicy::Source)
+            .unwrap();
+        assert_eq!(model.len(), 1);
+        let assets = model.objects()[0].assets();
+        assert_eq!(assets.len(), ibcmd_core::model::MAX_OBJECT_ASSETS + 1);
+        for (asset, entry) in assets.iter().zip(
+            tree.entries()
+                .iter()
+                .filter(|entry| entry.path().as_str() != "Configuration.xml"),
+        ) {
+            assert_eq!(asset.sha256(), entry.digest());
+            assert_eq!(asset.byte_len(), entry.bytes().len() as u64);
+        }
+    }
     #[test]
     #[ignore = "read-only whole native corpus host model acceptance; requires shared heavy FIFO and F lab"]
     fn whole_native_host_model_acceptance() {

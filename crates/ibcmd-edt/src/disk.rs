@@ -671,7 +671,11 @@ mod tests {
             runtime_version: None,
         };
         phase("canonical_model", Some(inventory.entries.len()));
-        let result = codec::canonical_inventory(&inventory, &options);
+        let result = codec::canonical_inventory_with_policy(
+            &inventory,
+            &options,
+            ibcmd_core::source_policy::SourceOperationPolicy::source_operation(),
+        );
         // Re-scan the complete source after the authoritative model operation.
         phase("source_verification", Some(inventory.entries.len()));
         let unchanged = inventory.verify();

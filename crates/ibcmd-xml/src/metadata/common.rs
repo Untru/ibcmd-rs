@@ -15,6 +15,7 @@ use ibcmd_core::model::{
 };
 use ibcmd_core::opaque::{OpaqueFacet, OpaqueFacets, OpaquePlacement};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
+use ibcmd_core::source_policy::SourceOperationPolicy;
 use ibcmd_core::value::{CanonicalField, CanonicalText, CanonicalValue};
 
 use super::fallback::Fallback;
@@ -36,14 +37,35 @@ const MAX_METADATA_NAMESPACE_BYTES: usize = 1_048_576;
 struct MetadataShapePolicy {
     nodes: usize,
     facets: usize,
+    core: SourceOperationPolicy,
+}
+impl MetadataShapePolicy {
+    const fn limit(self, bounded: usize) -> usize {
+        match self.core {
+            SourceOperationPolicy::Bounded => bounded,
+            SourceOperationPolicy::Source => usize::MAX,
+        }
+    }
+    const fn source_with(core: SourceOperationPolicy) -> Self {
+        match core {
+            SourceOperationPolicy::Bounded => SOURCE_METADATA_POLICY,
+            SourceOperationPolicy::Source => Self {
+                nodes: usize::MAX,
+                facets: usize::MAX,
+                core,
+            },
+        }
+    }
 }
 const DEFAULT_METADATA_POLICY: MetadataShapePolicy = MetadataShapePolicy {
     nodes: MAX_METADATA_NODES,
     facets: MAX_METADATA_FACETS,
+    core: SourceOperationPolicy::Bounded,
 };
 const SOURCE_METADATA_POLICY: MetadataShapePolicy = MetadataShapePolicy {
     nodes: 1_048_576,
     facets: 65_536,
+    core: SourceOperationPolicy::Bounded,
 };
 pub(super) const MD_NAMESPACE: &str = "http://v8.1c.ru/8.3/MDClasses";
 pub(super) const V8_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
@@ -124,7 +146,7 @@ impl FacetSet {
         if budget.count > self.policy.facets {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
-        if budget.bytes > MAX_METADATA_BYTES {
+        if budget.bytes > self.policy.limit(MAX_METADATA_BYTES) {
             return Err(MetadataDecodeError::ResourceLimit("opaque bytes"));
         }
         Ok(())
@@ -228,7 +250,7 @@ impl MetadataEnvelope {
         if facet_count > shape_policy.facets {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
-        if facet_bytes > MAX_METADATA_BYTES {
+        if facet_bytes > shape_policy.limit(MAX_METADATA_BYTES) {
             return Err(MetadataDecodeError::ResourceLimit("opaque bytes"));
         }
         let envelope = Self {
@@ -276,7 +298,7 @@ impl MetadataEnvelope {
         let mut objects = Vec::with_capacity(self.descendants.len() + 1);
         objects.push(self.root.clone());
         objects.extend(self.descendants.clone());
-        CanonicalConfiguration::new(objects)
+        CanonicalConfiguration::new_with_policy(objects, self.shape_policy.core)
     }
     pub(crate) fn emit(
         &self,
@@ -410,13 +432,31 @@ pub fn decode_source_metadata_envelope(
     source_profile: ProfileId,
     object_path: ObjectPath,
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
-    let family = inspect_metadata_family_with_policy(document, SOURCE_METADATA_POLICY)?;
+    decode_source_metadata_envelope_with_policy(
+        document,
+        source_profile,
+        object_path,
+        SourceOperationPolicy::Bounded,
+    )
+}
+/// Decode an explicitly owned source operation. Bounded defaults retain their
+/// existing limits. Source accounting removes fixed count/byte ceilings but
+/// retains recursive lifecycle depth protection and individual inline assets.
+/// Identity, namespace, ownership, ordering and provenance validation are common.
+pub fn decode_source_metadata_envelope_with_policy(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    operation: SourceOperationPolicy,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    let shape_policy = MetadataShapePolicy::source_with(operation);
+    let family = inspect_metadata_family_with_policy(document, shape_policy)?;
     if family.as_str() == "Configuration" {
         return decode_configuration_envelope_with_policy(
             document,
             source_profile,
             object_path,
-            SOURCE_METADATA_POLICY,
+            shape_policy,
         );
     }
     let references: &[&str] = match family.as_str() {
@@ -446,7 +486,7 @@ pub fn decode_source_metadata_envelope(
         source_profile,
         object_path,
         references,
-        SOURCE_METADATA_POLICY,
+        shape_policy,
     )
 }
 
@@ -835,9 +875,11 @@ fn decode_object(
         return Err(MetadataDecodeError::Missing("Name"));
     }
     push_family_guard(&profile, &path, &mut local_facets)?;
-    parts.opaque_facets = OpaqueFacets::new(local_facets.values)
-        .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
-    CanonicalObject::new(parts).map_err(|x| MetadataDecodeError::Core(x.to_string()))
+    parts.opaque_facets =
+        OpaqueFacets::new_with_policy(local_facets.values, local_facets.policy.core)
+            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
+    CanonicalObject::new_with_policy(parts, local_facets.policy.core)
+        .map_err(|x| MetadataDecodeError::Core(x.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1006,7 +1048,7 @@ fn decode_properties(
             )?;
         }
         let value = if local == "Synonym" {
-            let value = synonym_value(child, uris)?;
+            let value = synonym_value(child, uris, facets.policy.core)?;
             retain_as(
                 node,
                 ordinal,
@@ -1019,15 +1061,16 @@ fn decode_properties(
             value
         } else {
             CanonicalValue::text(
-                CanonicalText::new(
-                    &element_text(child)?
+                CanonicalText::new_with_policy(
+                    &element_text_with_policy(child, facets.policy.core)?
                         .ok_or(MetadataDecodeError::Missing("common property text"))?,
+                    facets.policy.core,
                 )
                 .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
             )
         };
         out.push(
-            CanonicalField::named(local, value)
+            CanonicalField::named_with_policy(local, value, facets.policy.core)
                 .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
         );
     }
@@ -1040,6 +1083,7 @@ fn decode_properties(
 fn synonym_value(
     e: &XmlElement,
     uris: &ResolvedNamespaces,
+    policy: SourceOperationPolicy,
 ) -> Result<CanonicalValue, MetadataDecodeError> {
     let mut values = Vec::new();
     let mut languages = BTreeSet::new();
@@ -1085,14 +1129,14 @@ fn synonym_value(
                         return Err(MetadataDecodeError::Duplicate("Synonym lang"));
                     }
                     seen_lang = true;
-                    lang = element_text(field)?
+                    lang = element_text_with_policy(field, policy)?
                 }
                 "content" => {
                     if seen_content {
                         return Err(MetadataDecodeError::Duplicate("Synonym content"));
                     }
                     seen_content = true;
-                    content = element_text(field)?
+                    content = element_text_with_policy(field, policy)?
                 }
                 _ => {}
             }
@@ -1103,28 +1147,34 @@ fn synonym_value(
         }
         let content = content.ok_or(MetadataDecodeError::Missing("Synonym item content"))?;
         values.push(
-            CanonicalValue::record(vec![
-                CanonicalField::named(
-                    "lang",
-                    CanonicalValue::text(
-                        CanonicalText::new(&lang)
-                            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-                    ),
-                )
-                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-                CanonicalField::named(
-                    "content",
-                    CanonicalValue::text(
-                        CanonicalText::new(&content)
-                            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-                    ),
-                )
-                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
-            ])
+            CanonicalValue::record_with_policy(
+                vec![
+                    CanonicalField::named_with_policy(
+                        "lang",
+                        CanonicalValue::text(
+                            CanonicalText::new_with_policy(&lang, policy)
+                                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+                        ),
+                        policy,
+                    )
+                    .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+                    CanonicalField::named_with_policy(
+                        "content",
+                        CanonicalValue::text(
+                            CanonicalText::new_with_policy(&content, policy)
+                                .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+                        ),
+                        policy,
+                    )
+                    .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
+                ],
+                policy,
+            )
             .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
         );
     }
-    CanonicalValue::sequence(values).map_err(|x| MetadataDecodeError::Core(x.to_string()))
+    CanonicalValue::sequence_with_policy(values, policy)
+        .map_err(|x| MetadataDecodeError::Core(x.to_string()))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1283,6 +1333,12 @@ fn uuid_attr(e: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
     ObjectUuid::parse(value).map_err(|_| MetadataDecodeError::InvalidUuid(value.to_owned()))
 }
 pub(super) fn element_text(e: &XmlElement) -> Result<Option<String>, MetadataDecodeError> {
+    element_text_with_policy(e, SourceOperationPolicy::Bounded)
+}
+fn element_text_with_policy(
+    e: &XmlElement,
+    policy: SourceOperationPolicy,
+) -> Result<Option<String>, MetadataDecodeError> {
     let mut value = String::new();
     let mut length = 0usize;
     for node in e.children() {
@@ -1291,7 +1347,10 @@ pub(super) fn element_text(e: &XmlElement) -> Result<Option<String>, MetadataDec
                 length = length
                     .checked_add(x.value().len())
                     .ok_or(MetadataDecodeError::ResourceLimit("canonical text"))?;
-                if length > ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES {
+                if length
+                    > MetadataShapePolicy::source_with(policy)
+                        .limit(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                {
                     return Err(MetadataDecodeError::ResourceLimit("canonical text"));
                 }
                 value.push_str(x.value());
@@ -1300,7 +1359,10 @@ pub(super) fn element_text(e: &XmlElement) -> Result<Option<String>, MetadataDec
                 length = length
                     .checked_add(x.value().len())
                     .ok_or(MetadataDecodeError::ResourceLimit("canonical text"))?;
-                if length > ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES {
+                if length
+                    > MetadataShapePolicy::source_with(policy)
+                        .limit(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                {
                     return Err(MetadataDecodeError::ResourceLimit("canonical text"));
                 }
                 value.push_str(x.value());
@@ -1368,7 +1430,7 @@ fn retain_unknown_start_tag(
         .map_err(|error| MetadataDecodeError::Xml(error.to_string()))?;
     let normalized_bytes = crate::writer::element_start_len(element, LexicalPolicy::Normalized)
         .map_err(|error| MetadataDecodeError::Xml(error.to_string()))?;
-    if normalized_bytes > MAX_METADATA_BYTES {
+    if normalized_bytes > facets.policy.limit(MAX_METADATA_BYTES) {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     facets.reserve(preserve_bytes)?;
@@ -1388,7 +1450,7 @@ fn retain_as(
     facets: &mut FacetSet,
 ) -> Result<(), MetadataDecodeError> {
     let preserve_bytes = node_lexical_len(node)?;
-    if node_normalized_len(node)? > MAX_METADATA_BYTES {
+    if node_normalized_len(node)? > facets.policy.limit(MAX_METADATA_BYTES) {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     facets.reserve(preserve_bytes)?;
@@ -1775,22 +1837,32 @@ fn check_document_with_policy(
 ) -> Result<(), MetadataDecodeError> {
     let mut budget = Budget::default();
     if document.has_utf8_bom() {
-        checked_add(&mut budget.bytes, 3, MAX_METADATA_BYTES, "bytes")?;
+        checked_add(
+            &mut budget.bytes,
+            3,
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        )?;
     }
     if let Some(value) = document
         .declaration_raw()
         .or_else(|| document.declaration())
     {
-        checked_add(&mut budget.bytes, value.len(), MAX_METADATA_BYTES, "bytes")?;
+        checked_add(
+            &mut budget.bytes,
+            value.len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        )?;
     }
     for node in document.before_root().iter().chain(document.after_root()) {
         check_node(node, 0, &mut budget, shape_policy)?;
     }
     check_tree(document.root(), 0, &mut budget, shape_policy)?;
-    if document_lexical_len(document)? > MAX_METADATA_BYTES {
+    if document_lexical_len(document)? > shape_policy.limit(MAX_METADATA_BYTES) {
         return Err(MetadataDecodeError::ResourceLimit("bytes"));
     }
-    if document_normalized_len(document)? > MAX_METADATA_BYTES {
+    if document_normalized_len(document)? > shape_policy.limit(MAX_METADATA_BYTES) {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     crate::writer::validate_document(document)
@@ -1808,20 +1880,39 @@ fn check_node(
     }
     checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
     if let Some(raw) = node.raw() {
-        return checked_add(&mut b.bytes, raw.len(), MAX_METADATA_BYTES, "bytes");
+        return checked_add(
+            &mut b.bytes,
+            raw.len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        );
     }
     match node {
         XmlNode::Element(_) => unreachable!("handled above"),
-        XmlNode::Text(x) => checked_add(&mut b.bytes, x.value().len(), MAX_METADATA_BYTES, "bytes"),
-        XmlNode::CData(x) => {
-            checked_add(&mut b.bytes, x.value().len(), MAX_METADATA_BYTES, "bytes")
-        }
-        XmlNode::Comment(x) => {
-            checked_add(&mut b.bytes, x.value().len(), MAX_METADATA_BYTES, "bytes")
-        }
-        XmlNode::ProcessingInstruction(x) | XmlNode::DocType(x) => {
-            checked_add(&mut b.bytes, x.value().len(), MAX_METADATA_BYTES, "bytes")
-        }
+        XmlNode::Text(x) => checked_add(
+            &mut b.bytes,
+            x.value().len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        ),
+        XmlNode::CData(x) => checked_add(
+            &mut b.bytes,
+            x.value().len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        ),
+        XmlNode::Comment(x) => checked_add(
+            &mut b.bytes,
+            x.value().len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        ),
+        XmlNode::ProcessingInstruction(x) | XmlNode::DocType(x) => checked_add(
+            &mut b.bytes,
+            x.value().len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        ),
     }
 }
 fn check_tree(
@@ -1835,19 +1926,34 @@ fn check_tree(
     }
     checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
     if let Some(raw) = e.raw_start() {
-        checked_add(&mut b.bytes, raw.len(), MAX_METADATA_BYTES, "bytes")?;
+        checked_add(
+            &mut b.bytes,
+            raw.len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        )?;
     }
     if let Some(raw) = e.raw_end() {
-        checked_add(&mut b.bytes, raw.len(), MAX_METADATA_BYTES, "bytes")?;
+        checked_add(
+            &mut b.bytes,
+            raw.len(),
+            shape_policy.limit(MAX_METADATA_BYTES),
+            "bytes",
+        )?;
     }
     checked_add(
         &mut b.bytes,
         e.name().raw().len(),
-        MAX_METADATA_BYTES,
+        shape_policy.limit(MAX_METADATA_BYTES),
         "bytes",
     )?;
     for attribute in e.attributes() {
-        checked_add(&mut b.attributes, 1, MAX_METADATA_ATTRIBUTES, "attributes")?;
+        checked_add(
+            &mut b.attributes,
+            1,
+            shape_policy.limit(MAX_METADATA_ATTRIBUTES),
+            "attributes",
+        )?;
         if let AttributeKind::Ordinary(name) = attribute.kind()
             && (name.raw() == "xmlns" || name.prefix() == Some("xmlns"))
         {
@@ -1863,7 +1969,12 @@ fn check_tree(
             ));
         }
         if matches!(attribute.kind(), AttributeKind::Namespace(_)) {
-            checked_add(&mut b.namespaces, 1, MAX_METADATA_NAMESPACES, "namespaces")?;
+            checked_add(
+                &mut b.namespaces,
+                1,
+                shape_policy.limit(MAX_METADATA_NAMESPACES),
+                "namespaces",
+            )?;
             let prefix_len = match attribute.kind() {
                 AttributeKind::Namespace(prefix) => prefix.as_deref().map_or(0, str::len),
                 _ => 0,
@@ -1871,7 +1982,7 @@ fn check_tree(
             checked_add(
                 &mut b.namespace_bytes,
                 prefix_len + attribute.value().len(),
-                MAX_METADATA_NAMESPACE_BYTES,
+                shape_policy.limit(MAX_METADATA_NAMESPACE_BYTES),
                 "namespace bytes",
             )?;
         }
@@ -1880,11 +1991,16 @@ fn check_tree(
                 AttributeKind::Ordinary(name) => name.raw().len(),
                 AttributeKind::Namespace(prefix) => 5 + prefix.as_deref().map_or(0, str::len),
             };
-            checked_add(&mut b.bytes, name_len, MAX_METADATA_BYTES, "bytes")?;
+            checked_add(
+                &mut b.bytes,
+                name_len,
+                shape_policy.limit(MAX_METADATA_BYTES),
+                "bytes",
+            )?;
             checked_add(
                 &mut b.bytes,
                 attribute.value().len(),
-                MAX_METADATA_BYTES,
+                shape_policy.limit(MAX_METADATA_BYTES),
                 "bytes",
             )?;
         }
@@ -1909,6 +2025,144 @@ mod tests {
     }
     fn profile() -> ProfileId {
         ProfileId::parse("xml:2.20").unwrap()
+    }
+
+    #[test]
+    fn source_operation_policy_preserves_large_typed_text_and_revalidation() {
+        let text = "x".repeat(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES + 1);
+        let xml = format!(
+            "<MetaDataObject xmlns='{MD_NAMESPACE}'><Catalog uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name><Synonym><item xmlns='{V8_NAMESPACE}'><lang>ru</lang><content>{text}</content></item></Synonym></Properties></Catalog></MetaDataObject>"
+        );
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        assert!(matches!(
+            decode_source_metadata_envelope(&document, profile(), path()),
+            Err(MetadataDecodeError::ResourceLimit("canonical text"))
+        ));
+        let envelope = decode_source_metadata_envelope_with_policy(
+            &document,
+            profile(),
+            path(),
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert_eq!(
+            MetadataRegistry::default()
+                .encode(&envelope, &profile())
+                .unwrap(),
+            xml.as_bytes()
+        );
+        let configuration = envelope.configuration().unwrap();
+        assert_eq!(configuration.len(), 1);
+        use ibcmd_core::value::CanonicalValueKind;
+        let CanonicalValueKind::Sequence(items) = envelope.root().properties()[1].value().kind()
+        else {
+            panic!("Synonym sequence was dropped")
+        };
+        assert_eq!(items.len(), 1);
+        let CanonicalValueKind::Record(fields) = items[0].kind() else {
+            panic!("Synonym item was dropped")
+        };
+        assert_eq!(fields.len(), 2);
+        assert_eq!(fields[1].name().as_str(), "content");
+        let CanonicalValueKind::Text(actual) = fields[1].value().kind() else {
+            panic!("Synonym text was dropped")
+        };
+        assert_eq!(actual.as_str(), text);
+        let edited = envelope
+            .clone()
+            .with_model(envelope.root().clone(), envelope.descendants().to_vec())
+            .unwrap();
+        assert_eq!(edited.root(), envelope.root());
+        assert!(matches!(
+            MetadataRegistry::default().encode(&edited, &profile()),
+            Err(MetadataEncodeError::ModelChanged { .. })
+        ));
+        // Explicit operation policy is retained inside the envelope, never
+        // inferred from retained data or allowed to enable source-byte replay.
+        let reconstructed =
+            MetadataEnvelope::from_parts(envelope.root().clone(), Vec::new(), document).unwrap();
+        assert!(!reconstructed.source_model_unchanged());
+        assert!(matches!(
+            MetadataRegistry::default().encode(&reconstructed, &profile()),
+            Err(MetadataEncodeError::ModelChanged { .. })
+        ));
+    }
+
+    #[test]
+    fn source_operation_counters_are_explicit_checked_and_keep_depth_safety() {
+        let source = MetadataShapePolicy::source_with(SourceOperationPolicy::Source);
+        let facets = FacetSet::root(source);
+        facets.budget.borrow_mut().count = SOURCE_METADATA_POLICY.facets;
+        facets.reserve(MAX_METADATA_BYTES + 1).unwrap();
+        assert_eq!(
+            facets.budget.borrow().count,
+            SOURCE_METADATA_POLICY.facets + 1
+        );
+        let child = FacetSet::child_with(&facets, Vec::new());
+        assert_eq!(child.policy.core, SourceOperationPolicy::Source);
+        child.budget.borrow_mut().count = usize::MAX;
+        assert!(matches!(
+            child.reserve(0),
+            Err(MetadataDecodeError::ResourceLimit("opaque facets"))
+        ));
+        let node = XmlElement::new(QName::new("X").unwrap());
+        let mut budget = Budget {
+            nodes: SOURCE_METADATA_POLICY.nodes,
+            ..Budget::default()
+        };
+        check_tree(&node, 0, &mut budget, source).unwrap();
+        budget.nodes = usize::MAX;
+        assert!(matches!(
+            check_tree(&node, 0, &mut budget, source),
+            Err(MetadataDecodeError::ResourceLimit("nodes"))
+        ));
+        assert!(matches!(
+            check_tree(
+                &node,
+                MAX_METADATA_DEPTH + 1,
+                &mut Budget::default(),
+                source
+            ),
+            Err(MetadataDecodeError::ResourceLimit("depth"))
+        ));
+    }
+
+    #[test]
+    fn source_operation_policy_keeps_same_semantics_and_rejects_bad_source() {
+        let xml = b"<MetaDataObject><Catalog uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties></Catalog></MetaDataObject>";
+        let document = XmlReader::from_slice(xml).unwrap();
+        let bounded = decode_source_metadata_envelope(&document, profile(), path()).unwrap();
+        let source = decode_source_metadata_envelope_with_policy(
+            &document,
+            profile(),
+            path(),
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert_eq!(source.root(), bounded.root());
+        assert_eq!(source.descendants(), bounded.descendants());
+        for input in [
+            String::from_utf8(xml.to_vec())
+                .unwrap()
+                .replace("</Name>", "</Name><Name>Duplicate</Name>"),
+            String::from_utf8(xml.to_vec())
+                .unwrap()
+                .replace("11111111-1111-4111-8111-111111111111", "not-a-uuid"),
+            String::from_utf8(xml.to_vec())
+                .unwrap()
+                .replace("<Properties>", "<Properties xmlns='urn:unknown'>"),
+        ] {
+            let document = XmlReader::from_slice(input.as_bytes()).unwrap();
+            assert!(
+                decode_source_metadata_envelope_with_policy(
+                    &document,
+                    profile(),
+                    path(),
+                    SourceOperationPolicy::Source
+                )
+                .is_err()
+            );
+        }
     }
 
     #[test]
