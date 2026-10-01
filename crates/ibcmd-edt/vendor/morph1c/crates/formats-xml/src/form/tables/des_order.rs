@@ -5,7 +5,8 @@ use crate::form::tables::{
     F_EXT_SPECIAL_TEXT_INPUT_MODE, F_EXT_VIEW_SCALING_MODE, F_FF_FOOTER_DATA_PATH,
     F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR, F_FF_TITLE_BACK_COLOR,
     F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR, F_LD_BORDER_COLOR,
-    F_PIC_BORDER_COLOR,
+    F_PIC_BORDER_COLOR, F_FF_WIDTH_IN_CARD, F_BT_SERVER_UNAVAILABLE,
+    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
 };
 use morph1c_core::ir::FieldId;
 use morph1c_core::spec::forms::controls::button as bt;
@@ -125,6 +126,7 @@ pub(crate) static DES_BUTTON_ORDER: &[DesSlot] = &[
     DesSlot::F(bt::F_REPRESENTATION_IN_CONTEXT_MENU),
     DesSlot::F(bt::F_SHAPE_REPRESENTATION),
     DesSlot::F(bt::F_LOCATION_IN_COMMAND_BAR),
+    DesSlot::F(F_BT_SERVER_UNAVAILABLE),
     DesSlot::F(bt::F_BUTTON_IMPORTANCE),
     DesSlot::ContextMenu,
     DesSlot::ExtendedTooltip,
@@ -335,6 +337,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // (SSL: AutoEditMode<AWIT×196, ShowTitleInCard<AWIT×2, AWIT<CellHyperlinkRepresentation×1
     // ПользовательскиеМакетыПечати; 0 контрпримеров — прежний хвост AWIT-после-CH* ломал её).
     DesSlot::F(ff::F_SHOW_TITLE_IN_CARD),
+    DesSlot::F(F_FF_WIDTH_IN_CARD),
     DesSlot::F(ff::F_AUTO_WIDTH_IN_TABLE),
     DesSlot::F(ff::F_CELL_HYPERLINK_REPRESENTATION),
     DesSlot::F(ff::F_CELL_HYPERLINK_DISPLAY_VARIANT),
@@ -490,6 +493,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // перенесён из ранней позиции choiceButton-семейства (witness: EditTextUpdate<CBP,
     // CBP<TextColor/InputHint).
     DesSlot::F(ff::F_EXT_CHOICE_BUTTON_PICTURE),
+    DesSlot::F(F_EXT_CHOICE_BUTTON_TITLE),
     DesSlot::F(ff::F_EXT_TEXT_COLOR),
     // BorderColor — после цветов/ChoiceList/EditTextUpdate/ListChoiceMode, до
     // HeightControlVariant/ContextMenu (SSL-витнессы 42 InputField'ов; напр.
@@ -521,6 +525,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // (witness SSL: InputHint→TextSize→ContextMenu; 82 экземпляра, все `Enlarged`). Опускается при
     // дефолте `Normal` (KEEP Eq). В EDT — extInfo-поле (Region::Ext), в Designer — тело контрола.
     DesSlot::F(ff::F_EXT_TEXT_SIZE),
+    DesSlot::F(F_EXT_DROP_LIST_HINT),
     // RadioButtonField extInfo (ids 201+ — не пересекаются с InputField 101+; для прочих
     // типов lookup не находит их и пропускает). Порядок = Designer topo: RadioButtonType,
     // Orientation, ColumnsCount, ChoiceList; ChoiceList — последний ext ДО декораторов.
@@ -726,6 +731,7 @@ pub(crate) static DES_SPREADSHEET_ORDER: &[DesSlot] = &[
     // РОНЯЛ его (roundtrip-баг, вскрытый по мере чтения формы).
     DesSlot::F(ff::F_FOOTER_HORIZONTAL_ALIGN),
     DesSlot::AutoEditMode,
+    DesSlot::F(F_FF_WIDTH_IN_CARD),
     DesSlot::F(ff::F_EXT_WIDTH),
     DesSlot::F(ff::F_EXT_AUTO_MAX_WIDTH),
     // maxWidth — общий geo-слот (ERP-witness; Spreadsheet designer-порядок loose).
@@ -824,6 +830,7 @@ pub(crate) static DES_CALENDAR_ORDER: &[DesSlot] = &[
     // (SSL: AutoEditMode<AWIT×196, ShowTitleInCard<AWIT×2, AWIT<CellHyperlinkRepresentation×1
     // ПользовательскиеМакетыПечати; 0 контрпримеров — прежний хвост AWIT-после-CH* ломал её).
     DesSlot::F(ff::F_SHOW_TITLE_IN_CARD),
+    DesSlot::F(F_FF_WIDTH_IN_CARD),
     DesSlot::F(ff::F_AUTO_WIDTH_IN_TABLE),
     DesSlot::F(ff::F_CELL_HYPERLINK_REPRESENTATION),
     DesSlot::F(ff::F_CELL_HYPERLINK_DISPLAY_VARIANT),

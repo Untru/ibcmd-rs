@@ -5,6 +5,7 @@ use crate::form::tables::{
     geo_auto_max_height, geo_auto_max_width, geo_h_stretch, geo_height, geo_max_height,
     geo_max_width, geo_v_stretch, geo_width, keep, F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES,
     F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST, F_EXT_SPECIAL_TEXT_INPUT_MODE,
+    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 use morph1c_core::spec::forms::controls::radio_button as rb;
@@ -129,6 +130,14 @@ pub(crate) static INPUT_FIELD_EXT: &[FieldProj] = &[
         "ChoiceButtonRepresentation",
         Region::Ext,
         Codec::EnumTok,
+        Policy::Symmetric,
+    ),
+    fp(
+        F_EXT_CHOICE_BUTTON_TITLE,
+        "choiceButtonTitle",
+        "ChoiceButtonTitle",
+        Region::Ext,
+        Codec::Localized,
         Policy::Symmetric,
     ),
     fp(
@@ -412,6 +421,14 @@ pub(crate) static INPUT_FIELD_EXT: &[FieldProj] = &[
     ),
     // typeLink: связь по типу (structured; метамодель #63 — ПОСЛЕ textSize (55), ДО
     // heightControlVariant (64); witness EDT textSize→typeLink→КОНЕЦ extInfo ×7).
+    fp(
+        F_EXT_DROP_LIST_HINT,
+        "dropListHint",
+        "DropListHint",
+        Region::Ext,
+        Codec::Localized,
+        Policy::Symmetric,
+    ),
     fp(
         ff::F_EXT_TYPE_LINK,
         "typeLink",

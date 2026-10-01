@@ -3,7 +3,7 @@
 use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
 use crate::form::tables::{
     fpa, platform_default, F_FF_FOOTER_DATA_PATH, F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR,
-    F_FF_TITLE_BACK_COLOR, KEEP_BOOL_TRUE,
+    F_FF_TITLE_BACK_COLOR, F_FF_WIDTH_IN_CARD, KEEP_BOOL_TRUE,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 
@@ -264,6 +264,14 @@ pub(crate) static FORM_FIELD_COMMON: &[FieldProj] = &[
             ff::HEADER_HORIZONTAL_ALIGN_DEFAULT,
             DesOmit::Eq(ff::HEADER_HORIZONTAL_ALIGN_DEFAULT),
         ),
+    ),
+    fp(
+        F_FF_WIDTH_IN_CARD,
+        "widthInCard",
+        "WidthInCard",
+        Region::Body,
+        Codec::EnumMap(&[("Half", "Half")]),
+        Policy::Symmetric,
     ),
     fp(
         ff::F_SHOW_IN_FOOTER,

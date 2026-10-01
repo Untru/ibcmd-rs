@@ -145,6 +145,10 @@ pub(super) const F_FF_FOOTER_TEXT_COLOR: FieldId = FieldId(943);
 /// FormField common: `footerPicture` ⟺ Designer `FooterPicture` (PictureRef; ERP 2×;
 /// cf-ячейка НЕ витнесснута — типизированный отказ cf-write).
 pub(super) const F_FF_FOOTER_PICTURE: FieldId = FieldId(944);
+/// BSP 8.5 source witness: Field widthInCard=Half, preserved without inferred defaults.
+pub(super) const F_FF_WIDTH_IN_CARD: FieldId = FieldId(945);
+/// BSP 8.5 source witness: Button onMainServerUnavalableBehavior=DontChangeBehavior.
+pub(super) const F_BT_SERVER_UNAVAILABLE: FieldId = FieldId(946);
 
 /// extInfo Input/LabelField: `markNegatives` ⟺ Designer `MarkNegatives` (метамодель
 /// InputFieldExtInfo#18 / LabelFieldExtInfo#10; ERP 380⟷380, true×379+false×1; cf: Input
@@ -174,6 +178,10 @@ pub(super) const F_EXT_PIC_ENABLE_DRAG: FieldId = FieldId(958);
 /// `F_LD_BORDER_COLOR`/`F_GRP_POPUP_BORDER_COLOR` — локальный id ERP-волны, зеркалится в cf.
 /// cf-ячейка НЕ витнесснута (SSL PictureField без borderColor) — эмит по witness-ключу.
 pub(super) const F_PIC_BORDER_COLOR: FieldId = FieldId(959);
+/// BSP 8.5 InputField choice button caption (localized pairs).
+pub(super) const F_EXT_CHOICE_BUTTON_TITLE: FieldId = FieldId(960);
+/// BSP 8.5 InputField drop-list hint (localized pairs).
+pub(super) const F_EXT_DROP_LIST_HINT: FieldId = FieldId(961);
 
 /// extInfo UsualGroup: `hiddenStateTitleBackColor` (метамодель UsualGroupExtInfo#28; ERP 1×;
 /// cf {38}-композит cell[23] — абляция s10 style:BorderColor).

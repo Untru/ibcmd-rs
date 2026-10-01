@@ -1,7 +1,7 @@
 //! Тела и extInfo Button / Decoration (Label+Picture) / Tooltip / FormCommand.
 
 use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
-use crate::form::tables::{fpa, keep, F_DEC_SHORTCUT, F_LD_BORDER_COLOR, KEEP_BOOL_TRUE};
+use crate::form::tables::{fpa, keep, F_DEC_SHORTCUT, F_LD_BORDER_COLOR, F_BT_SERVER_UNAVAILABLE, KEEP_BOOL_TRUE};
 use morph1c_core::spec::forms::command as fc;
 use morph1c_core::spec::forms::controls::button as bt;
 use morph1c_core::spec::forms::controls::form_field as ff;
@@ -357,6 +357,14 @@ pub(crate) static BUTTON_BODY: &[FieldProj] = &[
         "LocationInCommandBar",
         Region::Body,
         Codec::EnumTok,
+        Policy::Symmetric,
+    ),
+    fp(
+        F_BT_SERVER_UNAVAILABLE,
+        "onMainServerUnavalableBehavior",
+        "OnMainServerUnavalableBehavior",
+        Region::Body,
+        Codec::EnumMap(&[("DontChangeBehavior", "DontChangeBehavior")]),
         Policy::Symmetric,
     ),
 ];

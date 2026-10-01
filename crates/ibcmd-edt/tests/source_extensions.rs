@@ -1,5 +1,132 @@
 use formats_xml::{parse, source_extensions as codec};
 #[test]
+#[ignore = "requires genuine BSP85 Designer and installed EDT corpus witnesses"]
+fn authentic_bsp85_new_form_fields_agree() {
+    use formats_xml::form::{FormDialect, read_form, write_form};
+    use morph1c_core::ir::{FormItem, PropertyValue};
+    let edt = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_BSP_EDT").unwrap());
+    let xml = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_BSP_XML").unwrap());
+    let lab = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").unwrap());
+    fn values(items: &[FormItem], out: &mut Vec<(String, i64, u32, PropertyValue)>) {
+        for item in items {
+            for (id, value) in item.properties.iter().chain(&item.ext_info) {
+                if [945, 946, 960, 961].contains(&id.0) {
+                    out.push((item.name.clone(), item.id, id.0, value.clone()));
+                }
+            }
+            values(&item.children, out);
+            values(&item.additions, out);
+            if let Some(bar) = &item.auto_command_bar {
+                values(&bar.items, out);
+            }
+            if let Some(table) = &item.auto_table {
+                values(std::slice::from_ref(table.as_ref()), out);
+            }
+        }
+    }
+    let read_bytes = |path: &std::path::Path| {
+        let snapshot = tempfile::tempdir_in(&lab).unwrap();
+        std::fs::copy(path, snapshot.path().join(path.file_name().unwrap())).unwrap();
+        ibcmd_edt::read_xml_source(snapshot.path(), ibcmd_edt::ReaderLimits::default())
+            .unwrap()
+            .entries()[0]
+            .bytes()
+            .to_vec()
+    };
+    for path in [
+        "DataProcessors/МастерПереходаВОблако/Forms/МастерПереходаВОблако",
+        "Documents/_ДемоСписаниеБезналичныхДенежныхСредств/Forms/ФормаДокумента",
+        "BusinessProcesses/_ДемоЗаданиеСРолевойАдресацией/Forms/ФормаБизнесПроцесса",
+        "CommonForms/НастройкиПолученияВременныхПаролей",
+        "Catalogs/_ДемоНоменклатура/Forms/ФормаСписка",
+    ] {
+        let e = read_form(
+            FormDialect::Edt,
+            &read_bytes(&edt.join(format!("src/{path}/Form.form"))),
+        )
+        .unwrap();
+        let x = read_form(
+            FormDialect::Designer,
+            &read_bytes(&xml.join(format!("{path}/Ext/Form.xml"))),
+        )
+        .unwrap();
+        let mut ev = Vec::new();
+        let mut xv = Vec::new();
+        values(&e.items, &mut ev);
+        values(&x.items, &mut xv);
+        assert!(!ev.is_empty(), "{path} has no witnessed new field");
+        assert_eq!(ev, xv, "{path} native paired typed values");
+        for (dialect, body) in [(FormDialect::Designer, &e), (FormDialect::Edt, &x)] {
+            let output = write_form(dialect, body).unwrap();
+            let decoded = read_form(dialect, &output).unwrap();
+            let mut generated = Vec::new();
+            values(&decoded.items, &mut generated);
+            assert_eq!(ev, generated, "{path} cross-format typed values");
+        }
+    }
+}
+#[test]
+fn bsp85_form_fields_preserve_typed_values_and_reject_unknown_shape() {
+    use formats_xml::form::{FormDialect, read_form, write_form};
+    use morph1c_core::ir::{
+        FieldId, FormBody, FormControlKind, FormItem, Lang, PropertyValue, Token,
+    };
+    let mut body = FormBody::new();
+    let mut input = FormItem::new(FormControlKind::new("InputField"), "Input", 1);
+    input.ext_info.push((
+        FieldId(960),
+        PropertyValue::Localized(vec![(Lang::new("ru"), "Добавить".into())]),
+    ));
+    input.ext_info.push((
+        FieldId(961),
+        PropertyValue::Localized(vec![(Lang::new("ru"), "Подсказка".into())]),
+    ));
+    let mut picture = FormItem::new(FormControlKind::new("PictureField"), "Picture", 2);
+    picture
+        .properties
+        .push((FieldId(945), PropertyValue::Enum(Token::new("Half"))));
+    let mut button = FormItem::new(FormControlKind::new("Button"), "Button", 3);
+    button.properties.push((
+        FieldId(946),
+        PropertyValue::Enum(Token::new("DontChangeBehavior")),
+    ));
+    body.items = vec![input, picture, button];
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let bytes = write_form(dialect, &body).unwrap();
+        let decoded = read_form(dialect, &bytes).unwrap();
+        for (index, ids) in [(0, vec![960, 961]), (1, vec![945]), (2, vec![946])] {
+            for id in ids {
+                let field = FieldId(id);
+                let find = |item: &FormItem| {
+                    item.properties
+                        .iter()
+                        .chain(&item.ext_info)
+                        .find(|(f, _)| *f == field)
+                        .unwrap()
+                        .1
+                        .clone()
+                };
+                assert_eq!(find(&decoded.items[index]), find(&body.items[index]));
+            }
+        }
+        let text = std::str::from_utf8(&bytes).unwrap();
+        let title = if dialect == FormDialect::Edt {
+            "choiceButtonTitle"
+        } else {
+            "ChoiceButtonTitle"
+        };
+        let title_end = format!("</{title}>");
+        for bad in [
+            text.replace("Half", "InventedWidth"),
+            text.replace("DontChangeBehavior", "InventedBehavior"),
+            text.replace(&format!("<{title}>"), &format!("<{title} extra=\"keep\">")),
+            text.replace(&title_end, &format!("<unknown>keep</unknown>{title_end}")),
+        ] {
+            assert!(read_form(dialect, bad.as_bytes()).is_err());
+        }
+    }
+}
+#[test]
 fn form_command_data_path_parameter_is_typed_and_preserved() {
     use formats_xml::form::{FormDialect, read_form, write_form};
     let mut body = morph1c_core::ir::FormBody::new();

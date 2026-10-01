@@ -94,6 +94,14 @@ part of typed form semantics. Native role visibility witnesses prove that an
 absent EDT CMI `for/value` means false, while XML retains an explicit false.
 Inventory equivalence permits only that exact EDT form/CMI scalar spelling;
 true, unknown attributes/namespaces, mixed content and `xml:space` stay distinct.
+Paired BSP 8.5 form witnesses additionally map localized `choiceButtonTitle` and
+`dropListHint`, `widthInCard=Half`, and the platform-spelled
+`onMainServerUnavalableBehavior=DontChangeBehavior`. Enum grammars are restricted
+to these observed values; no absent-field default is invented. Existing picture
+codecs already preserve `choiceButtonPicture`. Strict parser censuses cover every
+form in the genuine BSP 8.3 and 8.5 Designer/installed-EDT corpora; the laboratory
+JSON reports record exact inputs and outcomes. Parser coverage and paired field
+roundtrips are separate evidence from the installed-tool acceptance gate.
 The canonical bridge checks core object/member/retained-byte budgets before
 cloning metadata or retaining asset references, checks each owner's asset count,
 and checks the final graph including separately declared ownership.

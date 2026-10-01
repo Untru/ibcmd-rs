@@ -2086,7 +2086,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/tables/button_decoration.rs",
-      "sha256": "16bb5e5625ec866d1e1bf1d0b69e49d95cb3127bb4824aaf53ca4099126e99d1"
+      "sha256": "5a739d61220ebbeba1cbc5b7330eeed43a6a5d57478ce6323e8a9b599530b5ab"
     },
     {
       "path": "crates/formats-xml/src/form/tables/catalog.rs",
@@ -2094,7 +2094,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/tables/des_order.rs",
-      "sha256": "4484c87e886418d01c5dffeddc1a74718626e35c39d1e1d8df810a6cf5af0950"
+      "sha256": "e07ad844dd06a9c6ee75f40538d138d7680fccba8dbc34a007b24e2db28ee6f8"
     },
     {
       "path": "crates/formats-xml/src/form/tables/field/document_picture.rs",
@@ -2102,11 +2102,11 @@
     },
     {
       "path": "crates/formats-xml/src/form/tables/field/input.rs",
-      "sha256": "1a88f1e8a5e022f6eb2c44c7f28f5d9f6db0342c3bb0d30d80b33b19dfe87ebb"
+      "sha256": "5f0108cf24d283198ff73dfcd88445303b2a6d05649cdc141bf8995238582790"
     },
     {
       "path": "crates/formats-xml/src/form/tables/field/mod.rs",
-      "sha256": "3ba61b59acfee10faf17b5cdb59962b7c7849b1a14140b1914e1a91bbf3d9f7f"
+      "sha256": "bf6cbaade2947e3ba1a516f751d0a120b75df9711487816875d7933eebbf5ce7"
     },
     {
       "path": "crates/formats-xml/src/form/tables/group.rs",
@@ -2114,7 +2114,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/tables/mod.rs",
-      "sha256": "4ac2e2b6a8c3d438d232b91b6b896cc052ed4805c083963e3195309e0058ea2a"
+      "sha256": "f2fd883ef1ac33599c2e5ded6c7e91d8d53615ba58500c4d2f7c87ebf5880d85"
     },
     {
       "path": "crates/formats-xml/src/form/tables/table.rs",
