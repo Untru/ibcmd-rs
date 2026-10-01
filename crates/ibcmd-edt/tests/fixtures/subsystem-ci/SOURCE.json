@@ -1,0 +1,43 @@
+{
+  "repository": "https://github.com/Segate-ekb/morph1c",
+  "commit": "962eedddd14493a914bae11f11667951de0f23a7",
+  "adaptation": "Synthetic fixture: Configuration and Language envelopes normalized to XML 2.21 with pal namespace, XML line endings normalized CRLF. Not installed-platform evidence.",
+  "files": [
+    {
+      "path": "src/Catalogs/\u0421\u0442\u0440\u043e\u043a\u043e\u0432\u044b\u0435\u041a\u043e\u043d\u0442\u0430\u043a\u0442\u044b\u0412\u0437\u0430\u0438\u043c\u043e\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/Catalogs/\u0421\u0442\u0440\u043e\u043a\u043e\u0432\u044b\u0435\u041a\u043e\u043d\u0442\u0430\u043a\u0442\u044b\u0412\u0437\u0430\u0438\u043c\u043e\u0434\u0435\u0439\u0441\u0442\u0432\u0438\u0439.xml",
+      "upstream_sha256": "e89d3c0582f57809c24ec0172d1dcb039d23842448ccf0e31130d00b28cc375e",
+      "local_sha256": "e89d3c0582f57809c24ec0172d1dcb039d23842448ccf0e31130d00b28cc375e"
+    },
+    {
+      "path": "src/ConfigDumpInfo.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/ConfigDumpInfo.xml",
+      "upstream_sha256": "f7e1370208852dfbe482367471054cc4ba677324e37d38fdcb7d7912227c63ba",
+      "local_sha256": "f7e1370208852dfbe482367471054cc4ba677324e37d38fdcb7d7912227c63ba"
+    },
+    {
+      "path": "src/Configuration.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/Configuration.xml",
+      "upstream_sha256": "bfd7ca5d042b640e777645fb2aaf0670b4cd3cadb526b23343c0cdf912593854",
+      "local_sha256": "5511342a42f2c17cd45aea34a3e03845348bba25f2c4a312c6061816132147c8"
+    },
+    {
+      "path": "src/Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
+      "upstream_sha256": "311b2241ba92f5b1d898946cae0e00d4580d3a8a8222316cf3ece0c7d8fe0262",
+      "local_sha256": "6d17715b06419a42337d8758c61d4e5beca4e539e665643db8ffdfab1c843217"
+    },
+    {
+      "path": "src/Subsystems/\u041f\u043e\u0434\u0441\u0438\u0441\u0442\u0435\u043c\u0430\u041a\u0418/Ext/CommandInterface.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/Subsystems/\u041f\u043e\u0434\u0441\u0438\u0441\u0442\u0435\u043c\u0430\u041a\u0418/Ext/CommandInterface.xml",
+      "upstream_sha256": "c57c3fc705b94e363222eaa62dd77e9ce6f2b9a010484032c65edc72d950f3e3",
+      "local_sha256": "698b09869f74ab637134cf8131951d138f40e647dda52fa15353d43d3aa892a5"
+    },
+    {
+      "path": "src/Subsystems/\u041f\u043e\u0434\u0441\u0438\u0441\u0442\u0435\u043c\u0430\u041a\u0418.xml",
+      "upstream_path": ".fixtures/probes/subsystem_ci/src/Subsystems/\u041f\u043e\u0434\u0441\u0438\u0441\u0442\u0435\u043c\u0430\u041a\u0418.xml",
+      "upstream_sha256": "2923d1747e7f15d6fa8c31e6ed868d674d034ab13cb13c65633717fa7ad7669b",
+      "local_sha256": "a9cf148d6ff7ab4ffc9f62c179571a72595054a7ca0c99a68eea3cac91bd2f91"
+    }
+  ]
+}

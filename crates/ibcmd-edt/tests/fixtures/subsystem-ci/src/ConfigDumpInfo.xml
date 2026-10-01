@@ -1,0 +1,10 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<ConfigDumpInfo xmlns="http://v8.1c.ru/8.3/xcf/dumpinfo" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" format="Hierarchical" version="2.21">
+	<ConfigVersions>
+		<Metadata name="Catalog.СтроковыеКонтактыВзаимодействий" id="7779cd6d-8fa1-49cb-9bbc-9dfd0979f3f4" configVersion="43c7f92d2f9f1b47a8ab29734dd6241600000000"/>
+		<Metadata name="Configuration.Конфигурация" id="93087212-a91b-4519-8fe2-2169107d7936" configVersion="72e9e97b41404c48868b05f9ca60eccd00000000"/>
+		<Metadata name="Language.Русский" id="08a2251e-884a-4dcc-858b-eadcc6203e5e" configVersion="d1219c606fddd54f96d5c58356353d5200000000"/>
+		<Metadata name="Subsystem.ПодсистемаКИ" id="b1c2d3e4-0000-4000-8000-000000000001" configVersion="eab3e397fce3cd41be5a191dc374aef500000000"/>
+		<Metadata name="Subsystem.ПодсистемаКИ.CommandInterface" id="b1c2d3e4-0000-4000-8000-000000000001.1" configVersion="00add7b3d88d664db66775fae2f0747e00000000"/>
+	</ConfigVersions>
+</ConfigDumpInfo>

@@ -1,0 +1,26 @@
+[package]
+workspace = "../.."
+name = "formats-xml"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+description = "Shared XML projection substrate for 1C XML-family formats (EDT .mdo, Designer .xml). Locus/Codec model + totality-checked reader + byte-exact structured emitter. XML is the format layer, NOT core (ARCHITECTURE.md §1.4/§5)."
+
+[lib]
+name = "formats_xml"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+# Canonical IR + spec-driven engine + Projection trait. The XML substrate drives
+# `core::engine` and projects FieldId↔XML; it never re-implements decode/order/default.
+morph1c-core = { path = "../core" }
+# Streaming XML tokenizer. We use quick-xml ONLY to TOKENIZE the descriptor on READ
+# (so totality §1.0 is enforced over real events, not a hand-rolled scanner). The
+# byte-exact WRITE path does NOT use a generic XML writer (those do not round-trip
+# indent/EOL/attr-order/escaping); it is a small structured emitter in `emit.rs`.
+quick-xml = "0.36"
+
