@@ -200,6 +200,23 @@ pub(crate) fn read_edt(root: Element) -> Result<FormBody, FormError> {
             read_edt_root_ext_info(ex)?;
         body.root_ext_info = Some(rx);
         body.report_form = report;
+        if let Some(report) = &mut body.report_form {
+            for (reference, spelling) in [
+                (&mut report.report_result, &mut report.edt_report_result_id),
+                (&mut report.details_data, &mut report.edt_details_data_id),
+            ] {
+                if let Some(identifier) = reference
+                    .as_ref()
+                    .filter(|s| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit()))
+                    .cloned()
+                {
+                    let name =
+                        super::super::report_refs::canonical(&identifier, &body.data_attributes)?;
+                    *reference = Some(name.clone());
+                    *spelling = Some((name, identifier));
+                }
+            }
+        }
         body.use_for_folders_and_items = folders_and_items;
         body.document_form = document_form;
         // `groupList` — форм-атрибут F_GROUP_LIST: EDT несёт его в extInfo, Designer — прямым
@@ -678,6 +695,10 @@ pub(crate) fn read_edt_report_form(ex: &Element) -> Result<ReportFormInfo, FormE
         user_settings_group,
         report_result,
         details_data,
+        designer_report_result_id: None,
+        designer_details_data_id: None,
+        edt_report_result_id: None,
+        edt_details_data_id: None,
         variant_appearance,
         report_result_view_mode,
         view_mode_application,

@@ -411,7 +411,7 @@ fn read_designer_body(root: &Element) -> Result<FormBody, FormError> {
         .filter(|c| c.prefix.is_empty())
         .is_some()
     {
-        body.report_form = Some(read_designer_report_form(&root)?);
+        body.report_form = Some(read_designer_report_form(&root, &body.data_attributes)?);
     }
     // ФОРМ-уровневое `UseForFoldersAndItems` (иерархические формы). Designer несёт ПРЯМЫМ ребёнком
     // корня ВСЕГДА (`Items`/`Folders`); EDT — внутри корневого extInfo, опуская дефолт `Items`.
@@ -548,7 +548,10 @@ pub(crate) fn derive_root_ext_info_kind(attrs: &[FormDataAttribute]) -> Option<S
 /// `ReportFormType`/`AutoShowState`/`ReportResultViewMode`/`ViewModeApplicationOnSetReportResult`
 /// ВСЕГДА (в т.ч. `Auto`), `CustomSettingsFolder` — при наличии. Канон X-равен EDT-стороне
 /// (которая опускает `Auto`-дефолты KEEP-полей).
-pub(crate) fn read_designer_report_form(root: &Element) -> Result<ReportFormInfo, FormError> {
+pub(crate) fn read_designer_report_form(
+    root: &Element,
+    attributes: &[FormDataAttribute],
+) -> Result<ReportFormInfo, FormError> {
     let req = |tag: &str| -> Result<String, FormError> { leaf_text(root, tag) };
     let opt = |tag: &str| -> Option<String> {
         root.child(tag).filter(|c| c.prefix.is_empty()).map(|c| {
@@ -559,8 +562,43 @@ pub(crate) fn read_designer_report_form(root: &Element) -> Result<ReportFormInfo
     let settings_form = req("ReportFormType")?;
     let show_state = req("AutoShowState")?;
     let user_settings_group = opt("CustomSettingsFolder");
-    let report_result = opt("ReportResult");
-    let details_data = opt("DetailsData");
+    let reference = |tag: &str| -> Result<_, FormError> {
+        let nodes: Vec<_> = root
+            .children
+            .iter()
+            .filter(|c| c.local == tag && c.prefix.is_empty())
+            .collect();
+        let node = match nodes.as_slice() {
+            [] => return Ok((None, None)),
+            [node] => node,
+            _ => {
+                return Err(FormError::Frame(format!(
+                    "duplicate report reference {tag}"
+                )));
+            }
+        };
+        expect_no_children(node)?;
+        node.claim_with_text();
+        if let Some(kind) = node.attr("xsi:type") {
+            if kind.value != "xs:decimal" || node.attrs.len() != 1 {
+                return Err(FormError::Frame(format!(
+                    "unknown typed report reference {tag}"
+                )));
+            }
+            kind.claimed.set(true);
+            let name = super::super::report_refs::canonical(&node.text, attributes)?;
+            Ok((Some(name.clone()), Some((name, node.text.clone()))))
+        } else {
+            if !node.attrs.is_empty() {
+                return Err(FormError::Frame(format!(
+                    "unknown report reference attributes {tag}"
+                )));
+            }
+            Ok((Some(node.text.clone()), None))
+        }
+    };
+    let (report_result, designer_report_result_id) = reference("ReportResult")?;
+    let (details_data, designer_details_data_id) = reference("DetailsData")?;
     let variant_appearance = opt("VariantAppearance");
     let report_result_view_mode = req("ReportResultViewMode")?;
     let view_mode_application = req("ViewModeApplicationOnSetReportResult")?;
@@ -570,6 +608,10 @@ pub(crate) fn read_designer_report_form(root: &Element) -> Result<ReportFormInfo
         user_settings_group,
         report_result,
         details_data,
+        designer_report_result_id,
+        designer_details_data_id,
+        edt_report_result_id: None,
+        edt_details_data_id: None,
         variant_appearance,
         report_result_view_mode,
         view_mode_application,

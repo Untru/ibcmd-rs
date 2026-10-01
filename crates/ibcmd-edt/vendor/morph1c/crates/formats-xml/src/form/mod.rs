@@ -22,6 +22,7 @@ mod availability;
 mod chart;
 mod dcss;
 mod fields;
+mod report_refs;
 pub(crate) use fields::{
     color_from_designer, color_to_designer, decode_edt_color, render_edt_color,
 };

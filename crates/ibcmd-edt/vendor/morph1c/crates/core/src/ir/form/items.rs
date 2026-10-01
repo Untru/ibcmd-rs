@@ -188,6 +188,10 @@ pub struct FormItem {
     /// угадываем — несём наблюдённый бит.
     #[serde(skip)]
     pub row_picture_path_unavailable: bool,
+    /// Exact native Button.BackColor `auto` spelling of the nullable Color
+    /// default. Installed EDT reads it as null; explicit edited colors win.
+    #[serde(skip)]
+    pub designer_button_back_color_auto: bool,
 }
 
 /// extInfo Таблицы-динамического-списка (`form:DynamicListTableExtInfo`).
@@ -259,6 +263,7 @@ impl FormItem {
             auto_table: None,
             pictures: Vec::new(),
             row_picture_path_unavailable: false,
+            designer_button_back_color_auto: false,
         }
     }
 

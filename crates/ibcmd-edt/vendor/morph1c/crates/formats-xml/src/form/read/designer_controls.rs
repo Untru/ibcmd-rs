@@ -27,7 +27,7 @@ pub(crate) fn read_designer_decoration(
             other => {
                 return Err(FormError::Frame(format!(
                     "decoration Title formatted={other:?}"
-                )))
+                )));
             }
         };
         // Пустой `<Title formatted="true"/>` (без содержимого): EDT-аналог несёт лишь
@@ -301,10 +301,32 @@ pub(crate) fn read_designer_button(el: &Element) -> Result<FormItem, FormError> 
     let id = parse_int(&attr_value(el, "id")?)?;
     let mut item = FormItem::new(FormControlKind::new("Button"), name, id);
 
+    let color_nodes: Vec<_> = el
+        .children
+        .iter()
+        .filter(|c| c.local == "BackColor" && c.prefix.is_empty())
+        .collect();
+    if color_nodes.len() > 1 {
+        return Err(FormError::Frame("duplicate Button.BackColor".into()));
+    }
+    if let Some(color) = color_nodes.first().filter(|c| c.text == "auto") {
+        if !color.attrs.is_empty() || !color.children.is_empty() {
+            return Err(FormError::Frame(
+                "Button.BackColor auto must be an attribute-free scalar".into(),
+            ));
+        }
+        color.claim_with_text();
+        item.designer_button_back_color_auto = true;
+    }
+    let button_body: Vec<_> = tables::BUTTON_BODY
+        .iter()
+        .copied()
+        .filter(|entry| !item.designer_button_back_color_auto || entry.des != "BackColor")
+        .collect();
     read_fields_designer(
         "Button",
         el,
-        tables::BUTTON_BODY,
+        &button_body,
         Region::Body,
         &mut item.properties,
     )?;
@@ -392,7 +414,7 @@ pub(crate) fn read_designer_table(el: &Element) -> Result<FormItem, FormError> {
             other => {
                 return Err(FormError::Frame(format!(
                     "Table <ShowCommandBar>={other:?}, want true/false/auto (§1.0)"
-                )))
+                )));
             }
         }
     }
@@ -405,7 +427,13 @@ pub(crate) fn read_designer_table(el: &Element) -> Result<FormItem, FormError> {
         .is_some()
     {
         let mut fields = Vec::new();
-        read_fields_designer("Table", el, tables::DYNAMIC_LIST_EXT, Region::Ext, &mut fields)?;
+        read_fields_designer(
+            "Table",
+            el,
+            tables::DYNAMIC_LIST_EXT,
+            Region::Ext,
+            &mut fields,
+        )?;
         item.dynamic_list_ext = Some(DynamicListExt {
             fields,
             events: Vec::new(),
@@ -750,7 +778,7 @@ pub(crate) fn read_designer_tooltip_body(el: &Element) -> Result<TooltipBody, Fo
             other => {
                 return Err(FormError::Frame(format!(
                     "tooltip Title formatted={other:?}"
-                )))
+                )));
             }
         };
         fa.claimed.set(true);
@@ -840,7 +868,10 @@ pub(crate) fn read_designer_tooltip_body(el: &Element) -> Result<TooltipBody, Fo
         bc.claim_with_text();
         body.ext_info.push((
             ld::F_EXT_BACK_COLOR,
-            PropertyValue::Ref(crate::form::fields::color_from_designer(&bc.text, "BackColor")?),
+            PropertyValue::Ref(crate::form::fields::color_from_designer(
+                &bc.text,
+                "BackColor",
+            )?),
         ));
     }
     if let Some(bc) = el.child("BorderColor").filter(|c| c.prefix.is_empty()) {
@@ -892,7 +923,10 @@ pub(crate) const TOOLTIP_EXT_HORIZONTAL_ALIGN: &str = "Left";
 /// дефолт: Designer ОПУСКАЕТ его у авто-меню (дефолт `true`), эмитит `<Autofill>false` у
 /// не-авто. Заполняем дефолт `true` при отсутствии ⇒ X-равно EDT (которая эмитит `<autoFill>
 /// true` ВСЕГДА). Вложенное дерево пунктов — `<ChildItems>` (рекурсивные контролы).
-pub(crate) fn read_designer_context_menu_body(el: &Element, tag: &str) -> Result<ContextMenuBody, FormError> {
+pub(crate) fn read_designer_context_menu_body(
+    el: &Element,
+    tag: &str,
+) -> Result<ContextMenuBody, FormError> {
     let auto_fill = match el.child("Autofill").filter(|c| c.prefix.is_empty()) {
         Some(v) => Some(matches!(
             read_bool_text(v, "Autofill")?,
@@ -918,7 +952,10 @@ pub(crate) const CONTEXT_MENU_AUTO_FILL_DEFAULT: bool = true;
 
 /// Прочитать Designer `<Title>`/`<v8:item>` локализацию. `require_formatted`: контрол-
 /// заголовки несут `formatted="false"` (сверяется-claim'ится); форм-заголовок — нет.
-pub(crate) fn read_designer_title(t: &Element, require_formatted: bool) -> Result<PropertyValue, FormError> {
+pub(crate) fn read_designer_title(
+    t: &Element,
+    require_formatted: bool,
+) -> Result<PropertyValue, FormError> {
     if require_formatted {
         // `<Title formatted="false">` — атрибут formatted=false (контрол-заголовок).
         let fa = t
@@ -1007,7 +1044,7 @@ pub(crate) fn read_designer_common_flag(
             other => {
                 return Err(FormError::Frame(format!(
                     "<{tag}><xr:Value name={role:?}>={other:?}, want bool (§1.0)"
-                )))
+                )));
             }
         };
         roles.push((role, val));
@@ -1030,4 +1067,3 @@ pub(crate) fn read_designer_common_flag(
         ))),
     }
 }
-

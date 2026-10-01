@@ -140,7 +140,8 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
             body.use_for_folders_and_items.as_deref(),
             body.document_form.as_ref(),
             group_list,
-        ));
+            &body.data_attributes,
+        )?);
     }
 
     // `xmlns:core` — объявляется РОВНО когда тело несёт хоть один `core:`-тип
@@ -330,7 +331,8 @@ pub(crate) fn edt_root_ext_info(
     use_for_folders_and_items: Option<&str>,
     document_form: Option<&morph1c_core::ir::DocumentFormInfo>,
     group_list: Option<&str>,
-) -> OutElement {
+    attributes: &[morph1c_core::ir::FormDataAttribute],
+) -> Result<OutElement, FormError> {
     let mut ex = OutElement::branch("", "extInfo").attr("xsi:type", rx.kind.clone());
     for ev in &rx.events {
         ex.push(edt_handlers(ev));
@@ -377,10 +379,22 @@ pub(crate) fn edt_root_ext_info(
             ex.push(OutElement::leaf("", "showState", r.show_state.clone()));
         }
         if let Some(v) = &r.report_result {
-            ex.push(OutElement::leaf("", "reportResult", v.clone()));
+            let spelling = r
+                .edt_report_result_id
+                .as_ref()
+                .or(r.designer_report_result_id.as_ref());
+            let value = super::super::report_refs::source_identifier(v, spelling, attributes)?
+                .unwrap_or_else(|| v.clone());
+            ex.push(OutElement::leaf("", "reportResult", value));
         }
         if let Some(v) = &r.details_data {
-            ex.push(OutElement::leaf("", "detailsInformation", v.clone()));
+            let spelling = r
+                .edt_details_data_id
+                .as_ref()
+                .or(r.designer_details_data_id.as_ref());
+            let value = super::super::report_refs::source_identifier(v, spelling, attributes)?
+                .unwrap_or_else(|| v.clone());
+            ex.push(OutElement::leaf("", "detailsInformation", value));
         }
         if let Some(v) = &r.variant_appearance {
             ex.push(OutElement::leaf(
@@ -418,9 +432,9 @@ pub(crate) fn edt_root_ext_info(
         }
     }
     if ex.children.is_empty() {
-        return OutElement::self_closing("", "extInfo").attr("xsi:type", rx.kind.clone());
+        return Ok(OutElement::self_closing("", "extInfo").attr("xsi:type", rx.kind.clone()));
     }
-    ex
+    Ok(ex)
 }
 
 pub(crate) fn edt_parameter(p: &FormParameter) -> Result<OutElement, FormError> {

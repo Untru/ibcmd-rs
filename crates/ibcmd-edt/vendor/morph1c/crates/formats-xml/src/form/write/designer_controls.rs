@@ -24,6 +24,14 @@ pub(crate) fn designer_table_control(
     }
     for slot in order {
         match slot {
+            DesSlot::F(id)
+                if tag == "Button"
+                    && *id == bt::F_BACK_COLOR
+                    && item.designer_button_back_color_auto
+                    && item.get(*id).is_none() =>
+            {
+                el.push(OutElement::leaf("", "BackColor", "auto"));
+            }
             // Сигила `~` на `RowPictureDataPath` — DESIGNER-ONLY денормализация, снятая на чтении
             // в канон (EDT-написание) и удержанная presence-точным флагом. Возвращаем её ЗДЕСЬ,
             // ровно тем контролам, что её несли (5/312 SSL). См. `FormItem::row_picture_path_unavailable`.

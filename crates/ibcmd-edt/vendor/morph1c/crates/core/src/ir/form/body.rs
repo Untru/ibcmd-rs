@@ -306,10 +306,20 @@ pub struct ReportFormInfo {
     /// форма отчёта `Main`. `None` у `Variant`/`Settings`. X-сравнимо напрямую.
     #[serde(default)]
     pub report_result: Option<String>,
+    /// Native legacy xs:decimal identifier, paired with its resolved name.
+    #[serde(skip)]
+    pub designer_report_result_id: Option<(String, String)>,
+    /// EDT source identifier spelling, paired with its resolved name.
+    #[serde(skip)]
+    pub edt_report_result_id: Option<(String, String)>,
     /// Поле данных расшифровки (`detailsInformation` EDT ⟺ `DetailsData` Designer) — `Main`.
     /// `None` у `Variant`/`Settings`. X-сравнимо напрямую.
     #[serde(default)]
     pub details_data: Option<String>,
+    #[serde(skip)]
+    pub designer_details_data_id: Option<(String, String)>,
+    #[serde(skip)]
+    pub edt_details_data_id: Option<(String, String)>,
     /// Поле наименования текущего варианта (`currentVariantPresentationField` EDT ⟺
     /// `VariantAppearance` Designer) — `Main`. `None` у `Variant`/`Settings`. X-сравнимо напрямую.
     #[serde(default)]

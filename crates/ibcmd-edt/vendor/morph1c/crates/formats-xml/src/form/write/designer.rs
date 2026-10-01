@@ -131,7 +131,7 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     // ReportFormType/AutoShowState/[CustomSettingsFolder]/ReportResultViewMode/
     // ViewModeApplicationOnSetReportResult СРАЗУ после ShowCommandBar (corpus fact).
     if let Some(r) = &body.report_form {
-        designer_report_form(&mut root, r);
+        designer_report_form(&mut root, r, &body.data_attributes)?;
     }
     // `<CustomSettingsFolder>` формы КОМПОНОВЩИКА НАСТРОЕК (не-отчётной; ⟺ EDT
     // `form:SettingsComposerFormExtInfo`>`userSettingsGroup`) — та же позиция, что у отчётного
@@ -353,12 +353,28 @@ pub(crate) const REPORT_FORM_MAIN: &str = "Main";
 /// (форма `Main`, если заданы), `ReportFormType` (всегда), `VariantAppearance` (`Main`, если
 /// задан), `AutoShowState` (всегда), `CustomSettingsFolder` (если задан), `ReportResultViewMode`
 /// (всегда, в т.ч. `Auto`), `ViewModeApplicationOnSetReportResult` (всегда).
-pub(crate) fn designer_report_form(root: &mut OutElement, r: &ReportFormInfo) {
-    if let Some(v) = &r.report_result {
-        root.push(OutElement::leaf("", "ReportResult", v.clone()));
-    }
-    if let Some(v) = &r.details_data {
-        root.push(OutElement::leaf("", "DetailsData", v.clone()));
+pub(crate) fn designer_report_form(
+    root: &mut OutElement,
+    r: &ReportFormInfo,
+    attributes: &[morph1c_core::ir::FormDataAttribute],
+) -> Result<(), FormError> {
+    for (tag, value, spelling) in [
+        (
+            "ReportResult",
+            &r.report_result,
+            &r.designer_report_result_id,
+        ),
+        ("DetailsData", &r.details_data, &r.designer_details_data_id),
+    ] {
+        if let Some(value) = value {
+            if let Some(identifier) =
+                super::super::report_refs::source_identifier(value, spelling.as_ref(), attributes)?
+            {
+                root.push(OutElement::leaf("", tag, identifier).attr("xsi:type", "xs:decimal"));
+            } else {
+                root.push(OutElement::leaf("", tag, value.clone()));
+            }
+        }
     }
     root.push(OutElement::leaf(
         "",
@@ -382,6 +398,7 @@ pub(crate) fn designer_report_form(root: &mut OutElement, r: &ReportFormInfo) {
         "ViewModeApplicationOnSetReportResult",
         r.view_mode_application.clone(),
     ));
+    Ok(())
 }
 
 /// Designer `<AutoCommandBar>`: порядок детей (сверен по 104 ACB корпуса) —
