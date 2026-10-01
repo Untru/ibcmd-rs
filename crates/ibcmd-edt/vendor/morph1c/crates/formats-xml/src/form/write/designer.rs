@@ -43,10 +43,12 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     push_des_attr(&mut root, body, fr::F_AUTO_SAVE_DATA_IN_SETTINGS);
     push_des_attr(&mut root, body, fr::F_ENTER_KEY_BEHAVIOR);
     push_des_attr(&mut root, body, fr::F_SAVE_DATA_IN_SETTINGS);
+    push_des_attr(&mut root, body, fr::F_SETTINGS_STORAGE);
     push_des_attr(&mut root, body, fr::F_SAVE_WINDOW_SETTINGS);
     push_des_attr(&mut root, body, fr::F_AUTO_TITLE);
     push_des_attr(&mut root, body, fr::F_AUTO_URL);
     push_des_attr(&mut root, body, fr::F_GROUP);
+    push_des_attr(&mut root, body, fr::F_CHILDREN_ALIGN);
     // VerticalSpacing — СРАЗУ после Group (witness УничтожениеПерсональныхДанных.
     // ФормаСозданияАктов: Group→VerticalSpacing→CommandBarLocation).
     push_des_attr(&mut root, body, fr::F_VERTICAL_SPACING);
@@ -65,6 +67,7 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     push_des_attr(&mut root, body, fr::F_ENABLED);
     push_des_attr(&mut root, body, fr::F_COMMAND_BAR_LOCATION);
     push_des_attr(&mut root, body, fr::F_VERTICAL_SCROLL);
+    push_des_attr(&mut root, body, fr::F_SCALING_MODE);
     push_des_attr(&mut root, body, fr::F_CONVERSATIONS_REPRESENTATION);
     push_des_attr(&mut root, body, fr::F_WINDOW_VIEW_MODE);
     // Командная панель мобильного устройства (корневой список; ПОСЛЕ ConversationsRepresentation/

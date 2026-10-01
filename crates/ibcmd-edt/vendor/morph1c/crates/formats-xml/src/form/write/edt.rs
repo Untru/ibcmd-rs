@@ -59,11 +59,13 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
         fr::F_AUTO_SAVE_DATA_IN_SETTINGS,
         fr::F_ENTER_KEY_BEHAVIOR,
         fr::F_SAVE_DATA_IN_SETTINGS,
+        fr::F_SETTINGS_STORAGE,
         fr::F_WINDOW_VIEW_MODE,
         fr::F_SAVE_WINDOW_SETTINGS,
         fr::F_AUTO_TITLE,
         fr::F_AUTO_URL,
         fr::F_GROUP,
+        fr::F_CHILDREN_ALIGN,
         fr::F_HORIZONTAL_ALIGN,
         // verticalAlign/horizontalSpacing/verticalSpacing/childItemsWidth — контейнер-геометрия
         // формы, ПОСЛЕ horizontalAlign, ДО autoFillCheck (witness Report group→verticalAlign→
@@ -80,6 +82,7 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
         // ВыборТипаТранспорта: enabled→scale=101.0→showTitle).
         fr::F_SCALE,
         fr::F_VERTICAL_SCROLL,
+        fr::F_SCALING_MODE,
         fr::F_SHOW_TITLE,
         fr::F_SHOW_CLOSE_BUTTON,
         fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT,

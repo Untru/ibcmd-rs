@@ -52,6 +52,11 @@ pub(crate) fn edt_table_body_into(el: &mut OutElement, item: &FormItem) -> Resul
     push_edt_id(el, item.id);
     for entry in &tables::TABLE_BODY[..tables::TABLE_HEAD_A] {
         emit_field_edt(el, entry, &item.properties)?;
+        if entry.id == tb::F_TITLE_TEXT_COLOR {
+            if let Some(font) = &item.title_font {
+                el.push(edt_font_named("titleFont", font));
+            }
+        }
     }
     for x in &item.excluded_commands {
         el.push(OutElement::leaf("", "excludedCommands", x.clone()));
@@ -96,6 +101,11 @@ pub(crate) fn edt_table_body_into(el: &mut OutElement, item: &FormItem) -> Resul
     }
     for entry in &tables::TABLE_BODY[tables::TABLE_HEAD_B..] {
         emit_field_edt(el, entry, &item.properties)?;
+        if entry.id == tb::F_BORDER_COLOR {
+            if let Some(font) = &item.font {
+                el.push(edt_font(font));
+            }
+        }
     }
     // extInfo динамического списка — ПОСЛЕ TAIL-полей, ДО showCommandBarNeedDereferenced
     // (последний ребёнок `<items>`; corpus fact).

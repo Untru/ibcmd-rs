@@ -452,7 +452,7 @@ pub(crate) static SPREADSHEET_FIELD_EXT: &[FieldProj] = &[
         "ShowGroups",
         Region::Ext,
         Codec::Bool,
-        keep("true", None, "true", DesOmit::Always),
+        Policy::OppositeBool,
     ),
     fp(
         ff::F_EXT_ENABLE_START_DRAG,

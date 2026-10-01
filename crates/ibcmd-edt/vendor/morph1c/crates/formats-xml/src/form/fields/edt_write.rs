@@ -183,11 +183,9 @@ pub(crate) fn render_edt(
                         (pair.first(), pair.get(1))
                     {
                         let mut f = OutElement::branch("", "for");
-                        f.push(OutElement::leaf(
-                            "",
-                            "value",
-                            if *v { "true" } else { "false" },
-                        ));
+                        if *v {
+                            f.push(OutElement::leaf("", "value", "true"));
+                        }
                         f.push(OutElement::leaf("", "role", role.clone()));
                         el.push(f);
                     }

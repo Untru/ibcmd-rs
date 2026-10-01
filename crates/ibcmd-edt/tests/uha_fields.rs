@@ -284,6 +284,11 @@ fn sparse_role_false_and_empty_command_use_remain_typed_false() {
     ));
     form.commands.push(command);
     let edt = write_form(FormDialect::Edt, &form).unwrap();
+    assert!(
+        !std::str::from_utf8(&edt)
+            .unwrap()
+            .contains("<value>false</value>")
+    );
     let source = std::str::from_utf8(&edt)
         .unwrap()
         .replace("<value>false</value>", "");
@@ -343,6 +348,93 @@ fn chart_style_font_preserves_all_four_boolean_overrides() {
     ] {
         assert!(read_chart_sidecar(bad.as_bytes()).is_err());
     }
+}
+
+#[test]
+fn optional_form_root_properties_and_table_fonts_are_written() {
+    use morph1c_core::{ir::FontRef, spec::forms::form_root as fr};
+    let mut form = FormBody::new();
+    form.attributes = vec![
+        (
+            fr::F_SCALING_MODE,
+            PropertyValue::Enum(Token::new("Normal")),
+        ),
+        (
+            fr::F_CHILDREN_ALIGN,
+            PropertyValue::Enum(Token::new("None")),
+        ),
+        (
+            fr::F_SETTINGS_STORAGE,
+            PropertyValue::Str("SettingsStorage.UserSettings".into()),
+        ),
+    ];
+    let font = FontRef {
+        auto: false,
+        font_ref: Some("System.DefaultGUIFont".into()),
+        face_name: None,
+        height: Some("10.0".into()),
+        bold: Some(false),
+        italic: Some(false),
+        underline: Some(false),
+        strikeout: Some(false),
+        scale: None,
+    };
+    let mut table = item("Table", 1, vec![]);
+    table.font = Some(font.clone());
+    table.title_font = Some(font.clone());
+    form.items.push(table);
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let encoded = write_form(dialect, &form).unwrap();
+        let decoded = read_form(dialect, &encoded).unwrap();
+        assert_eq!(decoded.items[0].font.as_ref(), Some(&font));
+        assert_eq!(decoded.items[0].title_font.as_ref(), Some(&font));
+        for (id, value) in &form.attributes {
+            assert_eq!(
+                decoded
+                    .attributes
+                    .iter()
+                    .find(|(other, _)| id == other)
+                    .unwrap()
+                    .1,
+                *value
+            );
+        }
+    }
+}
+
+#[test]
+fn spreadsheet_show_groups_false_uses_exact_paired_default_spelling() {
+    use morph1c_core::spec::forms::controls::form_field as ff;
+    let mut form = FormBody::new();
+    form.items.push(item(
+        "SpreadsheetDocumentField",
+        1,
+        vec![(ff::F_EXT_SHOW_GROUPS, PropertyValue::Bool(false))],
+    ));
+    let native = write_form(FormDialect::Designer, &form).unwrap();
+    assert!(
+        std::str::from_utf8(&native)
+            .unwrap()
+            .contains("<ShowGroups>false</ShowGroups>")
+    );
+    let parsed = read_form(FormDialect::Designer, &native).unwrap();
+    let edt = write_form(FormDialect::Edt, &parsed).unwrap();
+    assert!(!std::str::from_utf8(&edt).unwrap().contains("<showGroups>"));
+    let parsed_edt = read_form(FormDialect::Edt, &edt).unwrap();
+    assert_eq!(parsed.items[0].ext_info, parsed_edt.items[0].ext_info);
+    let native_again = write_form(FormDialect::Designer, &parsed_edt).unwrap();
+    assert!(
+        std::str::from_utf8(&native_again)
+            .unwrap()
+            .contains("<ShowGroups>false</ShowGroups>")
+    );
+    form.items[0].ext_info = vec![(ff::F_EXT_SHOW_GROUPS, PropertyValue::Bool(true))];
+    let edt = write_form(FormDialect::Edt, &form).unwrap();
+    assert!(
+        std::str::from_utf8(&edt)
+            .unwrap()
+            .contains("<showGroups>true</showGroups>")
+    );
 }
 
 #[test]
