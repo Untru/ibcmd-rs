@@ -83,6 +83,12 @@ Its `CAPTURED` status is an evidence capture, never a validation or acceptance P
 The TSV summary preserves its raw hash and every configuration-error row.
 Unknown categories and malformed rows remain unresolved source diagnostics;
 they cannot silently become a clean result.
+The `control` mode uses the same CLI options and prepared template to create a
+synthetic empty EDT project, retaining only root platform properties, contained
+object identifiers and the inline language. It validates and exports that project
+with the installed tool. This diagnostic control can establish precise recurring
+environment log classes; it never substitutes for BSP/UH data or automatically
+waives an error. Every original template byte remains unchanged.
 
 ```powershell
 $edt = 'C:\Program Files\1C\1CE\components\1c-edt-2025.2.3+30-x86_64\1cedtcli.exe'

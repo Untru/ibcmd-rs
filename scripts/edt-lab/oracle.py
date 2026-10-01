@@ -14,6 +14,7 @@ import shutil
 import subprocess
 import sys
 import time
+import xml.etree.ElementTree as ET
 
 
 class OracleError(RuntimeError):
@@ -331,6 +332,71 @@ def validate_project(args, run: Path) -> None:
         "note": "Raw installed-EDT TSV and workspace diagnostics require inspection; this capture is not acceptance PASS"})
 
 
+def empty_project_control(args, run: Path) -> None:
+    if not args.prepared:
+        raise OracleError("control requires an authentic --prepared template")
+    prepared_root = args.prepared.absolute()
+    no_links(prepared_root)
+    prepared = json.loads((prepared_root / "prepared.json").read_text(encoding="utf-8"))
+    project = Path(prepared["project"])
+    if not project.is_relative_to(prepared_root) or prepared["runtime"] != args.runtime:
+        raise OracleError("Control template profile/path mismatch")
+    before = snapshot(project)
+    require_project(project, args.runtime)
+    if before != json.loads((prepared_root / "authentic-project-after.json").read_text(encoding="utf-8")):
+        raise OracleError("Authentic template changed before control")
+    write_json(run / "template-project-before.json", before)
+    version = check_edt_version(args, run)
+    control = run / "EmptyEdtDiagnosticControl"
+    (control / "DT-INF").mkdir(parents=True)
+    (control / "src/Configuration").mkdir(parents=True)
+    shutil.copyfile(project / "DT-INF/PROJECT.PMF", control / "DT-INF/PROJECT.PMF")
+    descriptor = ET.parse(project / ".project")
+    project_name = descriptor.getroot().find("name")
+    if project_name is None:
+        raise OracleError("Authentic project descriptor has no name")
+    project_name.text = control.name
+    descriptor.write(control / ".project", encoding="utf-8", xml_declaration=True)
+    metadata = ET.parse(project / "src/Configuration/Configuration.mdo")
+    kept = {"name", "containedObjects", "configurationExtensionCompatibilityMode", "defaultRunMode",
+            "usePurposes", "scriptVariant", "defaultLanguage", "dataLockControlMode",
+            "objectAutonumerationMode", "modalityUseMode", "interfaceCompatibilityMode",
+            "compatibilityMode", "languages"}
+    for child in list(metadata.getroot()):
+        if child.tag not in kept:
+            metadata.getroot().remove(child)
+    configuration_name = metadata.getroot().find("name")
+    if configuration_name is None:
+        raise OracleError("Authentic configuration has no name")
+    configuration_name.text = control.name
+    metadata.write(control / "src/Configuration/Configuration.mdo", encoding="utf-8", xml_declaration=True)
+    write_json(run / "control-project-before.json", snapshot(control))
+    workspace = run / "control-workspace"
+    tsv = run / "control-validation.tsv"
+    edt(args, run, "edt-control-validate", workspace, ["validate", "--file", str(tsv),
+        "--project-list", str(control)])
+    if not tsv.is_file():
+        raise OracleError("Control validation produced no TSV")
+    summary = summarize_validation_tsv(tsv)
+    write_json(run / "control-validation-summary.json", summary)
+    exported = run / "control-installed-export"
+    edt(args, run, "edt-control-export", workspace, ["export", "--project-name", control.name,
+        "--configuration-files", str(exported)])
+    require_xml(exported, require_dump_info=False)
+    write_json(run / "control-installed-export.json", snapshot(exported))
+    diagnostics = command_diagnostics(run, ["edt-control-validate", "edt-control-export"])
+    write_json(run / "edt-diagnostics.json", diagnostics)
+    after = snapshot(project)
+    if before != after:
+        raise OracleError("Control modified the original authentic template")
+    write_json(run / "template-project-after.json", after)
+    write_json(run / "control.json", {"status": "CAPTURED", "edt_version": version,
+        "unresolved_source_diagnostics": summary["unresolved_source_diagnostics"],
+        "unresolved_edt_error_diagnostics": has_error_diagnostics(diagnostics.values()),
+        "template_project_unchanged": True,
+        "note": "Synthetic empty-project diagnostic control only. It neither represents BSP/UH acceptance nor automatically waives any log error."})
+
+
 def validate_raw_report(path: Path) -> dict:
     report = json.loads(path.read_text(encoding="utf-8"))
     rows = report["rows"]
@@ -532,7 +598,11 @@ def accept(args, run: Path) -> None:
         raise OracleError("An immutable input changed during acceptance")
     if digest(args.ours_exe) != ours_hash:
         raise OracleError("Candidate executable changed during acceptance")
-    original_diagnostics = json.loads((prepared_root / "edt-diagnostics.json").read_text(encoding="utf-8"))
+    # Older preparation captures predate workspace severity collection. Read
+    # their preserved raw stage logs rather than trusting an obsolete summary.
+    original_diagnostics = command_diagnostics(prepared_root,
+                                               ["edt-import-native", "edt-export-native"])
+    write_json(run / "prepared-diagnostics-recomputed.json", original_diagnostics)
     generated_diagnostics = command_diagnostics(run, ["edt-export-generated"])
     write_json(run / "edt-diagnostics.json", generated_diagnostics)
     diagnostic_failure = has_error_diagnostics([
@@ -553,7 +623,7 @@ def accept(args, run: Path) -> None:
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("mode", choices=("prepare", "validate", "accept"))
+    result.add_argument("mode", choices=("prepare", "validate", "control", "accept"))
     result.add_argument("--native", type=Path, required=True)
     result.add_argument("--source-version", choices=("2.20", "2.21"), required=True)
     result.add_argument("--runtime", choices=("8.3.27", "8.5.1"), required=True)
@@ -599,10 +669,12 @@ def main() -> int:
             prepare(args, args.run)
         elif args.mode == "validate":
             validate_project(args, args.run)
+        elif args.mode == "control":
+            empty_project_control(args, args.run)
         else:
             accept(args, args.run)
         status = json.loads((args.run / "prepared.json").read_text(encoding="utf-8"))["status"] \
-            if args.mode == "prepare" else "CAPTURED" if args.mode == "validate" else "PASS"
+            if args.mode == "prepare" else "CAPTURED" if args.mode in ("validate", "control") else "PASS"
         print(f"{status}: {args.run}", flush=True)
         return 0
     except (OracleError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
