@@ -39,7 +39,7 @@ fn build_fields() -> Vec<FieldSpec> {
             .normalized(Normalize::LocalizedSortByLang),
         FieldSpec::with_default(F_COMMENT, "comment", ValueKind::Str, PropertyValue::Str(String::new())),
         FieldSpec::with_default(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents", ValueKind::Bool, PropertyValue::Bool(false)),
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())),
         FieldSpec::required(F_USE_PURPOSES, "usePurposes", ValueKind::List),
         FieldSpec::with_default(F_EXTENDED_PRESENTATION, "extendedPresentation", ValueKind::Localized, PropertyValue::Localized(Vec::new()))
             .normalized(Normalize::LocalizedSortByLang),

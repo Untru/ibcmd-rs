@@ -878,6 +878,9 @@ pub struct MetadataObject {
     pub templates: Vec<Template>,
     #[serde(default)]
     pub source_extensions: source_extensions::SourceExtensions,
+    /// Physical resource selection only. Ref/LT/Point remain current properties.
+    #[serde(skip)]
+    pub metadata_picture_resource_commands: Vec<Uuid>,
 }
 
 impl MetadataObject {
@@ -913,6 +916,7 @@ impl MetadataObject {
             form_bodies: Vec::new(),
             templates: Vec::new(),
             source_extensions: source_extensions::SourceExtensions::default(),
+            metadata_picture_resource_commands: Vec::new(),
         }
     }
 

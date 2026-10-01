@@ -128,9 +128,10 @@ fn common_command_help_pages_resources_and_share_edits_survive_without_provenanc
         cc::F_GROUP,
         PropertyValue::Enum(Token::new("NavigationPanelOrdinary")),
     ));
-    command
-        .properties
-        .push((cc::F_HELP, PropertyValue::Bool(true)));
+    command.properties.push((
+        cc::F_HELP,
+        PropertyValue::List(vec![PropertyValue::Str("ru".into())]),
+    ));
     command.help.push(HelpPage {
         lang: "ru".into(),
         body: "<html>complete help\nsecond line</html>".into(),
@@ -206,7 +207,7 @@ fn common_command_help_pages_resources_and_share_edits_survive_without_provenanc
                 .find(|(id, _)| *id == cc::F_HELP)
                 .unwrap()
                 .1,
-            PropertyValue::Bool(true)
+            PropertyValue::List(vec![PropertyValue::Str("ru".into())])
         );
     }
     let root = config
@@ -299,7 +300,7 @@ fn genuine_configuration_and_common_command_census_both_versions() {
                 .find(|(id, _)| *id == cc::F_HELP)
                 .unwrap()
                 .1,
-            PropertyValue::Bool(true)
+            PropertyValue::List(vec![PropertyValue::Str("ru".into())])
         );
         assert_eq!(write(Format::Edt, &c, version), cb);
         let bad = text(&cb).replace("<lang>ru</lang>", "<lang>ru</lang><unknown/>");

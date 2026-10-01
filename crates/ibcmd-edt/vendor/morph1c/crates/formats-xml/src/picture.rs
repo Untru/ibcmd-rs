@@ -15,7 +15,11 @@
 //! следуют 27/28 ссылок, одна НЕТ. Платформа даёт флаг ЗАДАТЬ ⇒ он обязан жить в IR, иначе
 //! designer→designer МОЛЧА переписал бы его в `false` (§1.0-потеря).
 //!
-//! Канонический IR: `List([Str(ref), Bool(loadTransparent)])` (`Str("")` = пусто, дефолт —
+//! Current IR: `List([Str(ref), Bool(loadTransparent), optional List([Int(x), Int(y)])])`.
+//! Native emits every supplied value. The whole-project adapter uses a typed resource
+//! for EDT transparency; standalone EDT emission refuses a nonrepresentable tuple.
+//! Empty reference with default true/no pixel collapses to an empty container.
+//! (`Str("")` = empty reference, default —
 //! [`picture_ref_default`]). У EDT флага НЕТ (доказано платформой: designer→edt→cf→designer
 //! теряет его и восстанавливает правилом) ⇒ EDT-ридер ВЫВОДИТ флаг тем же правилом
 //! ([`default_load_transparent`] — ДЕФОЛТ РЕКОНСТРУКЦИИ), пишет только ссылку, а поле
@@ -50,25 +54,36 @@ pub fn default_load_transparent(reference: &str) -> bool {
     !reference.starts_with("CommonPicture.")
 }
 
-/// Собрать канонический IR `List([Str(ref), Bool(lt)])`.
-fn pack(reference: String, load_transparent: bool) -> PropertyValue {
-    PropertyValue::List(vec![
+/// Current semantic tuple. Pixel coordinates reuse the typed Point representation.
+pub fn pack(reference: String, load_transparent: bool, pixel: Option<(i64, i64)>) -> PropertyValue {
+    let mut values = vec![
         PropertyValue::Str(reference),
         PropertyValue::Bool(load_transparent),
-    ])
+    ];
+    if let Some((x, y)) = pixel {
+        values.push(PropertyValue::List(vec![
+            PropertyValue::Int(x),
+            PropertyValue::Int(y),
+        ]));
+    }
+    PropertyValue::List(values)
 }
-
-/// Разобрать канонический IR (строго, §1.0).
-fn unpack(value: &PropertyValue) -> Result<(&str, bool), String> {
+/// Decode the complete current tuple; legacy two-slot references have no pixel.
+pub fn unpack(value: &PropertyValue) -> Result<(&str, bool, Option<(i64, i64)>), String> {
     match value {
-        PropertyValue::List(v) if v.len() == 2 => match (&v[0], &v[1]) {
-            (PropertyValue::Str(s), PropertyValue::Bool(b)) => Ok((s.as_str(), *b)),
-            _ => Err("picture must be List([Str(ref), Bool(loadTransparent)]) (§1.0)".into()),
-        },
-        other => Err(format!(
-            "picture expects List([Str, Bool]), got {:?}",
-            other.kind()
-        )),
+        PropertyValue::List(values) if values.len() == 2 || values.len() == 3 => {
+            match (&values[0], &values[1]) {
+                (PropertyValue::Str(reference), PropertyValue::Bool(flag)) => {
+                    let pixel = values
+                        .get(2)
+                        .map(crate::transparent_pixel::pixel_of)
+                        .transpose()?;
+                    Ok((reference, *flag, pixel))
+                }
+                _ => Err("picture requires Ref string and LoadTransparent boolean".into()),
+            }
+        }
+        _ => Err("picture requires List([Ref, LoadTransparent, optional Point])".into()),
     }
 }
 
@@ -121,7 +136,7 @@ fn decode_edt(host: &Element) -> Result<PropertyValue, String> {
         }
     };
     let lt = default_load_transparent(&reference);
-    Ok(pack(reference, lt))
+    Ok(pack(reference, lt, None))
 }
 
 /// Designer НЕСЁТ флаг явно ⇒ читаем ОБА значения (без сверки с правилом: флаг — данные).
@@ -131,12 +146,12 @@ fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
     }
     if host.children.is_empty() {
         // <Picture/> — картинки нет; флаг берём канонический для пустой ссылки.
-        return Ok(pack(String::new(), default_load_transparent("")));
+        return Ok(pack(String::new(), default_load_transparent(""), None));
     }
     // <xr:Ref>ref</xr:Ref> + <xr:LoadTransparent>true|false</xr:LoadTransparent>.
-    if host.children.len() != 2 {
+    if host.children.len() != 2 && host.children.len() != 3 {
         return Err(format!(
-            "Picture: expected <xr:Ref>+<xr:LoadTransparent>, got {} children",
+            "Picture: expected Ref, LoadTransparent, optional TransparentPixel, got {} children",
             host.children.len()
         ));
     }
@@ -163,7 +178,35 @@ fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
         }
     };
     lt.claim_with_text();
-    Ok(pack(r.text.clone(), flag))
+    let pixel = if let Some(p) = host.children.get(2) {
+        if p.local != "TransparentPixel"
+            || p.prefix != "xr"
+            || !p.children.is_empty()
+            || !p.text.is_empty()
+            || p.attrs.len() != 2
+        {
+            return Err(
+                "Picture: expected empty xr:TransparentPixel with exact x/y attributes".into(),
+            );
+        }
+        let coordinate = |name: &str| -> Result<i64, String> {
+            let a = p
+                .attr(name)
+                .ok_or_else(|| format!("TransparentPixel missing {name}"))?;
+            let n = a
+                .value
+                .parse::<i64>()
+                .map_err(|e| format!("TransparentPixel {name} is not an integer: {e}"))?;
+            a.claimed.set(true);
+            Ok(n)
+        };
+        let point = (coordinate("x")?, coordinate("y")?);
+        p.claim();
+        Some(point)
+    } else {
+        None
+    };
+    Ok(pack(r.text.clone(), flag, pixel))
 }
 
 /// Claim (host claimed выше) — то же, что decode.
@@ -178,9 +221,12 @@ pub fn encode(
     tag: &str,
     value: &PropertyValue,
 ) -> Result<OutElement, String> {
-    let (reference, load_transparent) = unpack(value)?;
+    let (reference, load_transparent, pixel) = unpack(value)?;
     Ok(match dialect {
         PictureDialect::Edt => {
+            if pixel.is_some() || load_transparent != default_load_transparent(reference) {
+                return Err("PictureRef transparency requires the typed metadata semantic resource in whole-project EDT emission".into());
+            }
             if reference.is_empty() {
                 // EDT пустой picture — тег отсутствует; но re-sparsify дефолта уже
                 // опустил его. Сюда дойдёт лишь непустой; на всякий — self-closing.
@@ -193,7 +239,10 @@ pub fn encode(
             }
         }
         PictureDialect::Designer => {
-            if reference.is_empty() {
+            if reference.is_empty()
+                && load_transparent == default_load_transparent("")
+                && pixel.is_none()
+            {
                 OutElement::self_closing(ns, tag)
             } else {
                 let mut host = OutElement::branch(ns, tag);
@@ -203,6 +252,13 @@ pub fn encode(
                     "LoadTransparent",
                     if load_transparent { "true" } else { "false" }.to_string(),
                 ));
+                if let Some((x, y)) = pixel {
+                    host.push(
+                        OutElement::self_closing("xr", "TransparentPixel")
+                            .attr("x", x.to_string())
+                            .attr("y", y.to_string()),
+                    );
+                }
                 host
             }
         }

@@ -52,48 +52,14 @@ pub fn attach_help_pages(
     descriptor_path: &Path,
     obj: &mut MetadataObject,
 ) -> Result<(), ConvertError> {
-    let (pages, resources) = read_help_sidecar(format, kind, descriptor_path, &obj.name)?;
-    if format == Format::Edt && kind == "CommonCommand" {
-        let field = morph1c_core::spec::metadata::common_command::F_HELP;
-        let declared = obj.properties.iter().any(|(id, value)| {
-            *id == field && matches!(value, morph1c_core::ir::value::PropertyValue::Bool(true))
-        });
-        if declared == pages.is_empty() {
-            return Err(ConvertError::Read {
-                kind: kind.to_string(),
-                object: obj.name.clone(),
-                reason: "CommonCommand help marker and owned help pages disagree".into(),
-            });
-        }
-    }
-    if pages.is_empty() {
-        return Ok(());
-    }
-    // §1.0: дескриптор-read НЕ заполняет справку — только этот проход.
+    let (mut pages, resources) = read_help_sidecar(format, kind, descriptor_path, &obj.name)?;
+    sync_help_descriptor_property(format, kind, &obj.name, &mut obj.properties, &mut pages)?;
     if !obj.help.is_empty() || !obj.help_resources.is_empty() {
-        return Err(ConvertError::Read {
-            kind: kind.to_string(),
-            object: obj.name.clone(),
-            reason: "object already carries help pages before the sidecar attach (unexpected — \
-                     the descriptor projection must not populate them)"
-                .into(),
-        });
+        return Err(ConvertError::Read { kind: kind.into(), object: obj.name.clone(),
+            reason: "object already carries help pages before sidecar attach".into() });
     }
     obj.help = pages;
     obj.help_resources = resources;
-    // Designer: дескриптор-СВОЙСТВО `help` (EDT-канон — const-блок `<help><pages><lang>ru…`,
-    // presence-Bool в спеке вида). У Designer признак справки — ТОЛЬКО файловый сайдкар
-    // `Ext/Help.xml`, дескриптор аналога не несёт → IR designer-read без синтеза свойства
-    // НЕ равен edt-read, и designer→edt теряет `<help>`-блок владельца (witnessed: 15/15
-    // s15 owner `.mdo` диффов). EDT-read свойство уже несёт (из самого `.mdo`) — no-op.
-    if format == Format::Designer {
-        sync_help_descriptor_property(
-            spec_for_help_field(kind),
-            kind,
-            &obj.name,
-            &mut obj.properties,
-        )?;
-    }
     Ok(())
 }
 
@@ -141,53 +107,93 @@ fn spec_for_help_field(kind: &str) -> Option<&'static morph1c_core::spec::common
     morph1c_core::spec::registry::spec_for(kind)
 }
 
-/// Выставить presence-Bool `help` (по ИМЕНИ поля в `spec`) НОСИТЕЛЮ, у которого attach нашёл
-/// help-страницы, если он его ещё не несёт. §1.0: спек без `help`-поля — громкий отказ (значит,
-/// EDT-дескриптор это свойство не смоделировал и блок был бы молча потерян).
-///
-/// Носителей ДВА, и оба нуждаются в синтезе на Designer-read (EDT несёт свойство в самом
-/// дескрипторе — no-op):
-/// * ОБЪЕКТ — `spec_for(<kind>)`, свойства `obj.properties` (`Ext/Help.xml` рядом с дескриптором);
-/// * `.FormRef`-РЕБЁНОК — `spec_for("<Owner>.FormRef")`, свойства ребёнка (EDT-стаб внутри `.mdo`
-///   несёт `<help><pages><lang>ru</lang></pages></help>`, Designer `Forms/<F>.xml` — НИЧЕГО, только
-///   файловый сайдкар). Без синтеза designer-IR ≠ edt-IR и designer→edt терял бы `<help>`-блок
-///   у 291 формы.
+/// Bind the descriptor's ordered IDs to the complete owned page set. Native IDs come
+/// from Help.xml; EDT directory enumeration is reordered by its metadata declaration.
 fn sync_help_descriptor_property(
-    spec: Option<&'static morph1c_core::spec::common::EntitySpec>,
-    kind: &str,
-    owner_name: &str,
-    properties: &mut Vec<(
-        morph1c_core::ir::FieldId,
-        morph1c_core::ir::value::PropertyValue,
-    )>,
+    format: Format, kind: &str, owner_name: &str,
+    properties: &mut Vec<(morph1c_core::ir::FieldId, morph1c_core::ir::PropertyValue)>,
+    pages: &mut Vec<HelpPage>,
 ) -> Result<(), ConvertError> {
-    let field = spec
-        .and_then(|spec| spec.fields().iter().find(|f| f.name == "help"))
-        .ok_or_else(|| ConvertError::Read {
-            kind: kind.to_string(),
-            object: owner_name.to_string(),
-            reason: "help sidecar present but the kind's spec has no `help` field (§1.0 — \
-                     the EDT descriptor <help> block cannot be synthesized)"
-                .into(),
-        })?;
-    if !properties.iter().any(|(id, _)| *id == field.id) {
-        properties.push((field.id, morph1c_core::ir::value::PropertyValue::Bool(true)));
+    use morph1c_core::ir::PropertyValue;
+    let fail = |reason: String| ConvertError::Read { kind: kind.into(), object: owner_name.into(), reason };
+    let field = spec_for_help_field(kind).and_then(|s| s.fields().iter().find(|f| f.name == "help"));
+    let Some(field) = field else {
+        return if pages.is_empty() { Ok(()) } else { Err(fail("help pages present but kind has no help field".into())) };
+    };
+    let positions: Vec<_> = properties.iter().enumerate().filter(|(_, (id,_))| *id == field.id).map(|(i,_)| i).collect();
+    if positions.len() > 1 { return Err(fail("duplicate help marker".into())); }
+    if format == Format::Edt {
+        let empty = PropertyValue::List(Vec::new());
+        let value = positions.first().map_or(&empty, |i| &properties[*i].1);
+        let ids = formats_xml::help::languages(value).map_err(fail)?;
+        if ids.len() != pages.len() || ids.iter().any(|id| !pages.iter().any(|p| p.lang == *id)) {
+            return Err(fail("help marker and owned help pages disagree".into()));
+        }
+        let mut owned: std::collections::BTreeMap<_,_> = std::mem::take(pages).into_iter().map(|p| (p.lang.clone(), p)).collect();
+        for id in ids { pages.push(owned.remove(id).ok_or_else(|| fail("duplicate owned help language".into()))?); }
+        if !owned.is_empty() { return Err(fail("unclaimed owned help page".into())); }
+    } else {
+        let value = PropertyValue::List(pages.iter().map(|p| PropertyValue::Str(p.lang.clone())).collect());
+        formats_xml::help::languages(&value).map_err(fail)?;
+        properties.retain(|(id,_)| *id != field.id);
+        if !pages.is_empty() { properties.push((field.id, value)); }
     }
     Ok(())
 }
 
-/// [`sync_help_descriptor_property`] для `.FormRef`-РЕБЁНКА (см. его док): Designer-read формы,
-/// у которой нашёлся сайдкар справки, обязан синтезировать presence-`help`, которого её тонкий
-/// дескриптор `Forms/<F>.xml` не несёт. Зовётся из `crate::form_read`.
-pub(crate) fn sync_form_ref_help_property(child: &mut MetadataObject) -> Result<(), ConvertError> {
-    let kind = child.kind.as_str().to_string();
-    let name = child.name.clone();
-    sync_help_descriptor_property(
-        spec_for_help_field(&kind),
-        &kind,
-        &name,
-        &mut child.properties,
-    )
+pub(crate) fn sync_form_ref_help_property(format: Format, child: &mut MetadataObject, pages: &mut Vec<HelpPage>) -> Result<(), ConvertError> {
+    sync_help_descriptor_property(format, child.kind.as_str(), &child.name, &mut child.properties, pages)
+}
+
+/// Descriptor-only view derives marker IDs from CURRENT page bodies. Binary assets,
+/// modules and form bodies stay borrowed by the write pipeline and are not copied.
+pub(crate) fn descriptor_with_help(obj: &MetadataObject) -> Result<std::borrow::Cow<'_, MetadataObject>, ConvertError> {
+    use morph1c_core::ir::PropertyValue;
+    fn field(kind: &str) -> Option<morph1c_core::ir::FieldId> {
+        spec_for_help_field(kind).and_then(|s| s.fields().iter().find(|f| f.name == "help").map(|f| f.id))
+    }
+    fn marker(obj: &MetadataObject, pages: &[HelpPage]) -> Result<bool, ConvertError> {
+        let value = PropertyValue::List(pages.iter().map(|p| PropertyValue::Str(p.lang.clone())).collect());
+        let fail = |reason| ConvertError::Write { kind: obj.kind.as_str().into(), object: obj.name.clone(), reason };
+        formats_xml::help::languages(&value).map_err(fail)?;
+        let Some(id) = field(obj.kind.as_str()) else { return if pages.is_empty() { Ok(false) } else { Err(fail("help pages present but kind has no help field".into())) }; };
+        let current: Vec<_> = obj.properties.iter().filter(|(f,_)| *f == id).collect();
+        if current.len() > 1 { return Err(fail("duplicate help marker".into())); }
+        if let Some((_, value)) = current.first() { formats_xml::help::languages(value).map_err(fail)?; }
+        Ok(if pages.is_empty() { !current.is_empty() } else { current.first().is_none_or(|(_,v)| *v != value) })
+    }
+    let mut needs = marker(obj, &obj.help)?;
+    for child in &obj.children {
+        if child.kind.as_str().ends_with(".FormRef") {
+            let body = obj.form_bodies.iter().find(|b| b.name == child.name);
+            needs |= marker(child, body.map_or(&[], |b| b.help.as_slice()))?;
+        }
+    }
+    if !needs { return Ok(std::borrow::Cow::Borrowed(obj)); }
+    fn shallow(obj: &MetadataObject) -> MetadataObject {
+        let mut view = MetadataObject::new(obj.kind.clone(), obj.name.clone(), obj.uuid);
+        view.properties = obj.properties.clone();
+        view.internal_info = obj.internal_info.clone();
+        view.this_node = obj.this_node;
+        view.source_extensions = obj.source_extensions.clone();
+        view.metadata_picture_resource_commands = obj.metadata_picture_resource_commands.clone();
+        view.children = obj.children.iter().map(shallow).collect();
+        view
+    }
+    fn set(obj: &mut MetadataObject, pages: &[HelpPage]) {
+        if let Some(id) = field(obj.kind.as_str()) {
+            obj.properties.retain(|(f,_)| *f != id);
+            if !pages.is_empty() { obj.properties.push((id, PropertyValue::List(pages.iter().map(|p| PropertyValue::Str(p.lang.clone())).collect()))); }
+        }
+    }
+    let mut view = shallow(obj);
+    set(&mut view, &obj.help);
+    for child in &mut view.children {
+        if child.kind.as_str().ends_with(".FormRef") {
+            set(child, obj.form_bodies.iter().find(|b| b.name == child.name).map_or(&[], |b| b.help.as_slice()));
+        }
+    }
+    Ok(std::borrow::Cow::Owned(view))
 }
 
 /// Write-side mirror of [`attach_help_pages`]: emit every help page `obj` carries beside its
@@ -566,11 +572,7 @@ fn read_help_file(path: &Path) -> std::io::Result<Vec<u8>> {
     crate::form_read::read_regular_source(path)
 }
 fn valid_language(lang: &str) -> bool {
-    !lang.is_empty()
-        && lang.len() <= 64
-        && lang
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+    formats_xml::help::valid_language(lang)
 }
 
 /// Прочитать ОДНУ страницу `<lang>.html` → канонический текст (BOM-снят, EOL=`\n`).
@@ -709,7 +711,7 @@ pub(crate) fn serialize_page_descriptor(langs: &[&str]) -> Vec<u8> {
     ));
     for lang in langs {
         s.push_str("\t<Page>");
-        s.push_str(lang);
+        s.push_str(&lang.replace('&', "&amp;"));
         s.push_str("</Page>\r\n");
     }
     s.push_str("</Help>");

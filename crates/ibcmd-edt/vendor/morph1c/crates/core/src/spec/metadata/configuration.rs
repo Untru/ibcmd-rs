@@ -373,7 +373,7 @@ fn build_fields() -> Vec<FieldSpec> {
         dref(F_DEFAULT_INTERFACE, "defaultInterface"),
         loc(F_CAPTION, "caption"),
         loc(F_SHORT_CAPTION, "shortCaption"),
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)).x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         dref(F_DEFAULT_STYLE, "defaultStyle"),
         str_f(F_DEFAULT_LANGUAGE, "defaultLanguage"),
         loc(F_BRIEF_INFORMATION, "briefInformation"),

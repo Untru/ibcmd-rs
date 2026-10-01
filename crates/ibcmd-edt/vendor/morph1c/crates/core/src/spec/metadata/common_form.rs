@@ -100,7 +100,7 @@ fn build_fields() -> Vec<FieldSpec> {
         ),
         // help — EDT-only presence-блок (тот же `HelpConst`, что у Subsystem/Catalog/
         // InformationRegister). Default false; X-исключён (Designer — справка в спутнике).
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false))
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new()))
             .x_ignored(),
         // usePurposes — СПИСОК enum-значений; default пустой; X-исключён (литералы формато-
         // расходятся, как у Configuration.usePurposes). R обоих byte-exact на своих литералах.

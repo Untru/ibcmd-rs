@@ -154,11 +154,8 @@ pub enum Codec {
     /// (дети Resource/Dimension/Attribute). Хост-имя/ns — из локуса; структуру разбирает
     /// [`crate::choice_param_links`]. IR — `List` из `List([name,field])`; пустой → `[]`.
     ChoiceParameterLinks(crate::choice_param_links::LinksDialect),
-    /// EDT-only КОНСТАНТНЫЙ блок `<help><pages><lang>ru</lang></pages></help>` корня
-    /// InformationRegister (20 объектов). Присутствие ⇒ `Bool(true)`; на записи (EDT)
-    /// эмитит фикс-блок. Designer его НЕ проецирует (нет аналога) → поле помечено
-    /// `x_ignore` в спеке (исключено из X-сравнения, см. `morph1c_testkit`). Локус даёт
-    /// имя тега (`help`); структура фиксирована (byte-exact).
+    /// EDT ordered Help.pages language IDs, bound to owned pages by the pipeline.
+    /// The historical variant name is retained; the value is List(Str), not Bool.
     HelpConst,
     /// Complete ordered Configuration share-request records in either source dialect.
     AllowedIncomingShareTypes(crate::configuration::ConfigDialect),

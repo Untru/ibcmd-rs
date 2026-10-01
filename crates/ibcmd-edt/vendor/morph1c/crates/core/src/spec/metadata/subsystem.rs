@@ -87,7 +87,7 @@ fn build_fields() -> Vec<FieldSpec> {
         ),
         // help — EDT-only presence-блок (после includeHelpInContents, метамодель-порядок).
         // Default false; X-исключён (Designer несёт справку в спутнике, не в дескрипторе).
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false))
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new()))
             .x_ignored(),
         FieldSpec::with_default(
             F_INCLUDE_IN_COMMAND_INTERFACE,

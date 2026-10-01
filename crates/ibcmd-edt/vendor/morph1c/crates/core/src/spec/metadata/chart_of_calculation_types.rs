@@ -189,7 +189,7 @@ fn build_fields() -> Vec<FieldSpec> {
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
         // help: EDT-only presence-блок (физически МЕЖДУ includeHelpInContents и
         // dataLockControlMode, сверено s15). Default false; X-исключён (Designer n/a).
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         list(F_DATA_LOCK_FIELDS, "dataLockFields"),
         e(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", "Automatic"),
         e(F_FULL_TEXT_SEARCH, "fullTextSearch", "DontUse"),

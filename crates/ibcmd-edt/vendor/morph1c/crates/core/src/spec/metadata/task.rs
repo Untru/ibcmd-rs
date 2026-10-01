@@ -185,7 +185,7 @@ fn build_fields() -> Vec<FieldSpec> {
         s(F_AUX_CHOICE_FORM, "auxiliaryChoiceForm"),
         e(F_CHOICE_HISTORY_ON_INPUT, "choiceHistoryOnInput", "Auto"),
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         list(F_DATA_LOCK_FIELDS, "dataLockFields"),
         e(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", "Automatic"),
         e(F_FULL_TEXT_SEARCH, "fullTextSearch", "DontUse"),

@@ -109,7 +109,7 @@ fn build_fields() -> Vec<FieldSpec> {
         // includeHelpInContents: EDT-bool, Default false (омитится). Физически ПЕРЕД help.
         FieldSpec::with_default(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents", ValueKind::Bool, bool_f()),
         // help: EDT-only presence-блок. Default false; X-исключён (Designer/cf n/a).
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, bool_f()).x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         // standardAttributes: вариадный const-блок, IR-List, БЕЗ дефолта (всегда present).
         // В корпусе покрытия — 0-вариант (пустой List): Designer/EDT опускают, cf → body[21]={0}.
         FieldSpec::required(F_STANDARD_ATTRIBUTES, "standardAttributes", ValueKind::List),

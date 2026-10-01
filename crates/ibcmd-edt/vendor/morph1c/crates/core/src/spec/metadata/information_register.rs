@@ -129,7 +129,7 @@ fn build_fields() -> Vec<FieldSpec> {
         FieldSpec::with_default(F_MAIN_FILTER_ON_PERIOD, "mainFilterOnPeriod", ValueKind::Bool, bool_f()).x_ignored(),
         FieldSpec::with_default(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents", ValueKind::Bool, bool_f()),
         // help: EDT-only presence-блок. Default false; X-исключён (Designer не несёт).
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, bool_f()).x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         FieldSpec::with_default(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", ValueKind::Enum, enum_tok("Automatic")),
         FieldSpec::with_default(F_FULL_TEXT_SEARCH, "fullTextSearch", ValueKind::Enum, enum_tok("DontUse")),
         FieldSpec::with_default(F_ENABLE_TOTALS_SLICE_FIRST, "enableTotalsSliceFirst", ValueKind::Bool, bool_f()),

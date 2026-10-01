@@ -262,10 +262,10 @@ fn claim_element_for_codec(el: &Element, codec: &Codec, version: FormatVersion) 
                 choice_parameters::claim_designer(el);
             }
         }
-        // HelpConst: host (`<help>`) claimed; claim фикс-подструктуру pages/lang.
+        // Ordered Help.pages/lang: every page is fully claimed.
         Codec::HelpConst => {
             el.claim();
-            let _ = verify_help_const(el);
+            let _ = crate::help::decode(el);
         }
         // Designer UsePurposes: host claimed; claim как читает decode.
         Codec::UsePurposesV8 => {
@@ -541,10 +541,8 @@ pub(crate) fn decode_with_codec(
             Located::Absent => Decoded::Absent,
         },
         Codec::HelpConst => match located {
-            // EDT `<help>` присутствует ⇒ сверяем фикс-блок и даём Bool(true). Отсутствие
-            // ⇒ Absent (дефолт Bool(false)). Любая иная структура → ошибка (§1.0).
-            Located::Element(host) => match verify_help_const(host) {
-                Ok(()) => Decoded::Present(PropertyValue::Bool(true)),
+            Located::Element(host) => match crate::help::decode(host) {
+                Ok(value) => Decoded::Present(value),
                 Err(e) => Decoded::Error(e),
             },
             Located::Attr(_) => Decoded::Error("HelpConst on attribute unsupported".into()),
@@ -767,33 +765,6 @@ fn decode_empty_value_list(host: &Element) -> Decoded {
 
 /// Сверить фикс-структуру EDT-`<help>` (`<pages><lang>ru</lang></pages>`) и claim'ить её
 /// целиком. Любое отклонение → ошибка (§1.0). Хост уже claimed `locate`'ом.
-fn verify_help_const(host: &Element) -> Result<(), String> {
-    if !host.attrs.is_empty() || !host.text.is_empty() {
-        return Err("help: must be <help><pages><lang>ru</lang></pages></help>".into());
-    }
-    if host.children.len() != 1 {
-        return Err("help: expected single <pages> child".into());
-    }
-    let pages = &host.children[0];
-    if pages.local != "pages" || !pages.prefix.is_empty() || !pages.attrs.is_empty() {
-        return Err("help: expected <pages> child".into());
-    }
-    pages.claim();
-    if pages.children.len() != 1 {
-        return Err("help: <pages> must have single <lang>".into());
-    }
-    let lang = &pages.children[0];
-    if lang.local != "lang"
-        || !lang.prefix.is_empty()
-        || !lang.attrs.is_empty()
-        || lang.text != "ru"
-    {
-        return Err("help: expected <lang>ru</lang>".into());
-    }
-    lang.claim_with_text();
-    Ok(())
-}
-
 /// EDT-локализация (`synonym`/`toolTip`/…): MULTI-SIBLING разбор от КОРНЯ (§1.0).
 ///
 /// EDT эмитит по ОДНОМУ `<tag>` на язык (двуязычный ERP: `<synonym><key>ru</key>
@@ -1378,16 +1349,12 @@ pub(crate) fn encode_with_codec(
                 }
             }
         }
-        Codec::HelpConst => match value {
-            // EDT-only: presence-маркер Bool(true) → фикс-блок `<help><pages><lang>ru</lang>
-            // </pages></help>`. Bool(false) сюда не доходит (re-sparsify дефолта).
-            PropertyValue::Bool(true) => {
-                sink.children.push(help_const_block(ns, tag));
-                Ok(())
+        Codec::HelpConst => {
+            if let Some(help) = crate::help::emit(ns, tag, value)? {
+                sink.children.push(help);
             }
-            PropertyValue::Bool(false) => Ok(()),
-            other => Err(format!("HelpConst expects Bool, got {:?}", other.kind())),
-        },
+            Ok(())
+        }
         Codec::UsePurposesV8 => {
             sink.children
                 .push(configuration::emit_use_purposes_designer(ns, tag, value)?);
@@ -1478,14 +1445,6 @@ pub(crate) fn encode_with_codec(
 
 /// Фикс-блок EDT-only `<help><pages><lang>ru</lang></pages></help>` (byte-exact;
 /// сверено: 46/46 вхождений побайтово идентичны во всём IR-корпусе).
-fn help_const_block(ns: &str, tag: &str) -> OutElement {
-    let mut help = OutElement::branch(ns, tag);
-    let mut pages = OutElement::branch("", "pages");
-    pages.push(OutElement::leaf("", "lang", "ru"));
-    help.push(pages);
-    help
-}
-
 /// Константа usePurposes: РОВНО два значения в фикс-порядке.
 const USE_PURPOSES: &[&str] = &["PersonalComputer", "MobileDevice"];
 

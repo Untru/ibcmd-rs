@@ -278,6 +278,7 @@ pub(crate) fn read_object_at(
     // Without this a Designer-sourced IR looks all-top-level → own-name collisions on write and a
     // silently FLAT subsystem hierarchy in cf (§1.0/§1.6).
     crate::subsystem_read::reconcile_nested_identity(format, fk, name, &mut obj)?;
+    crate::metadata_picture_semantics::attach(format, path, &mut obj)?;
     // Every BODY pass is gated on the depth; the descriptor-level ones are not. The passes below
     // keep the ORIGINAL order in both depths (a `Full` read runs exactly the sequence it always
     // did), because that order is load-bearing — see this function's docs and the note at
@@ -370,7 +371,14 @@ fn write_object(
     out: &Path,
     obj: &MetadataObject,
 ) -> Result<(), ConvertError> {
-    let bytes = (fk.write)(obj).map_err(|reason| ConvertError::Write {
+    let help_view = crate::help_read::descriptor_with_help(obj)?;
+    let projection = if format == Format::Edt {
+        Some(formats_xml::metadata_picture_semantics::project(help_view.as_ref()).map_err(|reason| ConvertError::Write {
+            kind: fk.kind.into(), object: obj.name.clone(), reason,
+        })?)
+    } else { None };
+    let descriptor = projection.as_ref().map_or(help_view.as_ref(), |(model,_)| model.as_ref());
+    let bytes = (fk.write)(descriptor).map_err(|reason| ConvertError::Write {
         kind: fk.kind.to_string(),
         object: obj.name.clone(),
         reason,
@@ -394,6 +402,7 @@ fn write_object(
     // content loss the platform then compiles differently (§1.0/§1.6). No-op for objects /
     // kinds that carry no such body. cf never reaches here (handled by the caller).
     crate::source_extensions::emit(format, out, obj)?;
+    crate::metadata_picture_semantics::emit(out, projection.as_ref().and_then(|(_,bytes)| bytes.as_deref()))?;
     let kind = obj.kind.as_str();
     crate::form_write::write_form_bodies(format, out, obj)?;
     if kind == "Configuration" {

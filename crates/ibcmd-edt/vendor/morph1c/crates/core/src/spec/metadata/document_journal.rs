@@ -92,7 +92,7 @@ fn build_fields() -> Vec<FieldSpec> {
         loc_field(F_EXTENDED_LIST_PRESENTATION, "extendedListPresentation"),
         loc_field(F_EXPLANATION, "explanation"),
         // help — EDT-only const-блок (Designer не несёт): X-исключён, R EDT-only.
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         // structural-tail: objectBelonging (enum) + extendedConfigurationObject (Uuid-Str).
         // Дефолт = отсутствие в SSL-корпусе → дефолт-омиссия; проекции их НЕ размещают.
         FieldSpec::with_default(F_OBJECT_BELONGING, "objectBelonging", ValueKind::Enum, PropertyValue::Enum(crate::ir::value::Token::new("Native"))),

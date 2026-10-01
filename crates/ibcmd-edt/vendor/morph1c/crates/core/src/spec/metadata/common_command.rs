@@ -92,7 +92,7 @@ fn build_fields() -> Vec<FieldSpec> {
             ValueKind::Bool,
             PropertyValue::Bool(false),
         ),
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)).x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         // CommandParameterType — описание типов; default = ПУСТОЕ (`parts:[]`).
         FieldSpec::with_default(
             F_COMMAND_PARAMETER_TYPE,

@@ -935,6 +935,11 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
                 == morph1c_pipeline::dcs_qname_semantic_bytes(b).map_err(EdtError::new)?,
         );
     }
+    if parts.len() == 3
+        && parts.last().copied() == Some(formats_xml::metadata_picture_semantics::RESOURCE)
+    {
+        return Ok(formats_xml::metadata_picture_semantics::same_resource(a, b));
+    }
     if parts.last().copied() == Some(formats_xml::form::PICTURE_SEMANTICS_RESOURCE)
         && (parts.len() == 3 && parts[0] == "CommonForms"
             || parts.len() == 5 && parts[2] == "Forms")

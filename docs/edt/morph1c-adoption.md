@@ -129,6 +129,23 @@ tests prove both routes with stripped provenance and exact unchanged native
 return with independently validated provenance; edited types and forged hashes
 cannot restore an old source. DTD remains forbidden.
 
+Metadata-command pictures use an additional versioned resource,
+`ibcmd-metadata-picture-semantics.v1.json`, next to the owning metadata descriptor.
+The closed resource binds the owner UUID/kind and registered command UUID/kind,
+Picture slot and current reference. Reference, LoadTransparent and optional
+pixel coordinates remain current typed properties in semantic fingerprints;
+only selected resource identities are lexical transport metadata. Native XML
+emits all current values, including an explicit empty-reference container when
+it carries nondefault transparency. EDT descriptors carry the ordinary SDK
+PictureRef; the adapter consumes and re-emits the separate resource exactly once.
+The conversion report identifies `ibcmd-metadata-picture-semantics/1` with actual
+resource and carried-reference counts. Unknown, duplicate, deleted or stale
+bindings fail before output publication. Stripped-provenance tests prove exact
+native descriptor regeneration and pixel/flag edits; forged provenance hashes
+cannot hide a changed tuple. This resource preserves adapter semantics and does
+not claim that the installed EDT model or its native exporter stores per-use
+transparency. Installed-tool compatibility is a separate laboratory gate.
+
 ## Tests and acceptance scope
 
 The small offline fixture is derived from upstream

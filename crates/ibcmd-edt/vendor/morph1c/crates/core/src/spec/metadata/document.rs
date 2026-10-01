@@ -189,7 +189,7 @@ fn build_fields() -> Vec<FieldSpec> {
         b(F_POST_IN_PRIVILEGED_MODE, "postInPrivilegedMode"),
         b(F_UNPOST_IN_PRIVILEGED_MODE, "unpostInPrivilegedMode"),
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         list(F_DATA_LOCK_FIELDS, "dataLockFields"),
         e(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", "Automatic"),
         e(F_FULL_TEXT_SEARCH, "fullTextSearch", "DontUse"),

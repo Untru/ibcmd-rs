@@ -175,7 +175,7 @@ fn build_fields() -> Vec<FieldSpec> {
         list(F_DATA_LOCK_FIELDS, "dataLockFields"),
         e(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", "Automatic"),
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         e(F_FULL_TEXT_SEARCH, "fullTextSearch", "DontUse"),
         loc_field(F_OBJECT_PRESENTATION, "objectPresentation"),
         loc_field(F_EXTENDED_OBJECT_PRESENTATION, "extendedObjectPresentation"),

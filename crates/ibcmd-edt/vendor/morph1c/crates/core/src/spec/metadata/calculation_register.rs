@@ -116,7 +116,7 @@ fn build_fields() -> Vec<FieldSpec> {
         s(F_CHART_OF_CALCULATION_TYPES, "chartOfCalculationTypes"),
         FieldSpec::with_default(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents", ValueKind::Bool, bool_f()),
         // help: EDT-only presence-блок. Default false; X-исключён (Designer/cf n/a).
-        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, bool_f()).x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         // standardAttributes: вариадный платформенный блок (11/0), IR-List, дефолт [] —
         // cf-проекция вида держит слот frame-const {0} и поле не проецирует.
         FieldSpec::with_default(F_STANDARD_ATTRIBUTES, "standardAttributes", ValueKind::List, PropertyValue::List(Vec::new())),

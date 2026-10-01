@@ -27,6 +27,7 @@ pub mod exchange_plan_content;
 pub mod form;
 pub mod form_tree;
 pub mod geoschema;
+pub mod help;
 pub mod link_by_type;
 pub mod locus;
 pub mod picture;
@@ -71,3 +72,5 @@ pub use value_codec::ValueDialect;
 pub use xdto_packages::XdtoPackagesDialect;
 pub use xdto_type_ref::XdtoTypeRefDialect;
 pub use projection::{claim_props, LocusMap, XmlProjection, XmlSink, XmlSource};
+
+pub mod metadata_picture_semantics;

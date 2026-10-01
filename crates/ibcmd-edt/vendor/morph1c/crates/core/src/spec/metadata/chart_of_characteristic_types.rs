@@ -217,7 +217,7 @@ fn build_fields() -> Vec<FieldSpec> {
         e(F_DATA_HISTORY, "dataHistory", "DontUse"),
         b(F_UPDATE_DATA_HISTORY, "updateDataHistoryImmediatelyAfterWrite"),
         b(F_EXECUTE_AFTER_WRITE_DH, "executeAfterWriteDataHistoryVersionProcessing"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         // predefined — EDT-only; List; отсутствие = дефолт-омиссия; X-исключён.
         list(F_PREDEFINED, "predefined").x_ignored(),
         // structural-tail: objectBelonging (enum) + extendedConfigurationObject (Uuid-Str).

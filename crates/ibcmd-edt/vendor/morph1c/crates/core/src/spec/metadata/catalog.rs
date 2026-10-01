@@ -204,7 +204,7 @@ fn build_fields() -> Vec<FieldSpec> {
         s(F_AUX_CHOICE_FORM, "auxiliaryChoiceForm"),
         s(F_AUX_FOLDER_CHOICE_FORM, "auxiliaryFolderChoiceForm"),
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         list(F_BASED_ON, "basedOn"),
         list(F_DATA_LOCK_FIELDS, "dataLockFields"),
         e(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", "Automatic"),

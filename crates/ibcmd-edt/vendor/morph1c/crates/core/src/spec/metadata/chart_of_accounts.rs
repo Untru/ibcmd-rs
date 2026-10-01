@@ -205,7 +205,7 @@ fn build_fields() -> Vec<FieldSpec> {
         loc_field(F_LIST_PRESENTATION, "listPresentation"),
         loc_field(F_EXTENDED_LIST_PRESENTATION, "extendedListPresentation"),
         loc_field(F_EXPLANATION, "explanation"),
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         list(F_PREDEFINED, "predefined").x_ignored(),
     ]
 }

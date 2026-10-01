@@ -89,7 +89,7 @@ fn build_fields() -> Vec<FieldSpec> {
         b(F_USE_STANDARD_COMMANDS, "useStandardCommands"),
         b(F_INCLUDE_HELP_IN_CONTENTS, "includeHelpInContents"),
         // help: EDT-only presence-блок; X-исключён (Designer/cf n/a).
-        b(F_HELP, "help").x_ignored(),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::List, PropertyValue::List(Vec::new())).x_ignored(),
         s(F_CHART_OF_ACCOUNTS, "chartOfAccounts"),
         b(F_CORRESPONDENCE, "correspondence"),
         FieldSpec::with_default(F_PERIOD_ADJUSTMENT_LENGTH, "periodAdjustmentLength", ValueKind::Int, PropertyValue::Int(0)),

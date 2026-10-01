@@ -249,8 +249,7 @@ fn genuine_uha_auxiliary_refs_match_and_regenerate() {
         let xbytes = bounded_read(&native.join(format!("{family}/{name}.xml")));
         let e = read(Format::Edt, kind, &ebytes).unwrap();
         // Verify the exact genuine native root slots independently. The original
-        // Catalog also contains a command-picture TransparentPixel, whose separate
-        // codec is not covered by this auxiliary-reference checkpoint.
+        // Catalog also exercises the separately typed command-picture pixel codec.
         let native_doc = formats_xml::parse(&xbytes).unwrap();
         let properties = native_doc
             .root
@@ -262,16 +261,7 @@ fn genuine_uha_auxiliary_refs_match_and_regenerate() {
             .iter()
             .find(|c| c.local == "Properties")
             .unwrap();
-        let x = if kind == "Catalog" {
-            assert!(
-                read(Format::Designer, kind, &xbytes)
-                    .unwrap_err()
-                    .contains("Picture/TransparentPixel")
-            );
-            None
-        } else {
-            Some(read(Format::Designer, kind, &xbytes).unwrap())
-        };
+        let x = Some(read(Format::Designer, kind, &xbytes).unwrap());
         for field in fields {
             let ev = e.properties.iter().find(|(id, _)| *id == field).unwrap();
             let tag = cases()

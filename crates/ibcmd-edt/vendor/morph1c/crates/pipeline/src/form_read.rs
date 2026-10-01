@@ -185,18 +185,18 @@ pub fn attach_form_body(
                 return Err(ConvertError::Read { kind: kind.to_string(), object: name.clone(), reason: "ordinary body conflicts with declared form type, managed body, or external Module.bsl".into() });
             }
             let bytes = read_ordinary_body(&ordinary_path)?;
-            let (help, help_resources) = if kind == OWN_FORM_KIND {
+            let (mut help, help_resources) = if kind == OWN_FORM_KIND {
                 (Vec::new(), Vec::new())
             } else {
                 crate::help_read::read_help_sidecar(format, kind, &anchor, &name)?
             };
-            if format == Format::Designer && !help.is_empty() {
+            if kind != OWN_FORM_KIND {
                 if let Some(child) = obj
                     .children
                     .iter_mut()
                     .find(|c| is_form_ref_child(c) && c.name == name)
                 {
-                    crate::help_read::sync_form_ref_help_property(child)?;
+                    crate::help_read::sync_form_ref_help_property(format, child, &mut help)?;
                 }
             }
             obj.form_bodies.push(NamedFormBody {
@@ -329,7 +329,7 @@ pub fn attach_form_body(
         // A CommonForm is EXEMPT: the object IS the form, its help sidecar sits at the OBJECT
         // anchor and `help_read::attach_help_pages` has already read it into `obj.help` — reading
         // it here too would DOUBLE it (and `attach_help_pages` runs first, see `convert.rs`).
-        let (help, help_resources) = if kind == OWN_FORM_KIND {
+        let (mut help, help_resources) = if kind == OWN_FORM_KIND {
             (Vec::new(), Vec::new())
         } else {
             crate::help_read::read_help_sidecar(format, kind, &anchor, &name)?
@@ -338,13 +338,13 @@ pub fn attach_form_body(
         // inline stub does (`<help><pages><lang>ru</lang></pages></help>`) — synthesize the
         // presence-Bool on the `.FormRef` child so BOTH dialects yield the SAME IR (§1.6) and
         // designer→edt does not drop the block (mirror of the object-level sync).
-        if format == Format::Designer && !help.is_empty() {
+        if kind != OWN_FORM_KIND {
             if let Some(child) = obj
                 .children
                 .iter_mut()
                 .find(|c| is_form_ref_child(c) && c.name == name)
             {
-                crate::help_read::sync_form_ref_help_property(child)?;
+                crate::help_read::sync_form_ref_help_property(format, child, &mut help)?;
             }
         }
 
