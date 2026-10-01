@@ -84,9 +84,8 @@ pub fn write_form_bodies(
                 || form.body != FormBody::new()
                 || form.module.is_some()
                 || bytes.is_empty()
-                || bytes.len() as u64 > crate::form_read::MAX_ORDINARY_FORM_BYTES
             {
-                return Err(ConvertError::Write { kind: kind.to_string(), object: form.name.clone(), reason: "ordinary form body conflicts with managed data/module/type or exceeds bounds".into() });
+                return Err(ConvertError::Write { kind: kind.to_string(), object: form.name.clone(), reason: "ordinary form body conflicts with managed data/module/type".into() });
             }
             let path =
                 crate::form_read::ordinary_form_body_path(format, &anchor).ok_or_else(|| {

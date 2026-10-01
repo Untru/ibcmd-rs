@@ -234,7 +234,6 @@ pub(crate) fn write_help_sidecar(
     for page in pages {
         if !valid_language(&page.lang)
             || !languages.insert(&page.lang)
-            || page.body.len() as u64 > MAX_HELP_FILE_BYTES
         {
             return Err(ConvertError::Write {
                 kind: kind.to_string(),
@@ -298,12 +297,11 @@ fn write_help_resources(pages_dir: &Path, resources: &[HelpResource]) -> Result<
                 .split('/')
                 .any(|part| part.is_empty() || part == "." || part == "..")
             || !seen.insert(&res.rel_path)
-            || res.bytes.len() as u64 > MAX_HELP_FILE_BYTES
         {
             return Err(ConvertError::Write {
                 kind: "HelpResource".into(),
                 object: res.rel_path.clone(),
-                reason: "unsafe, duplicate, or oversized help resource".into(),
+                reason: "unsafe or duplicate help resource".into(),
             });
         }
         // `rel_path` — `/`-разделённый канон; `join` на Windows принимает `/` как разделитель.
@@ -551,30 +549,8 @@ fn collect_help_resources(
     Ok(())
 }
 
-/// Bound each help page/manifest/resource before allocation; the adapter also bounds the total source tree.
-const MAX_HELP_FILE_BYTES: u64 = 32 * 1024 * 1024;
 fn read_help_file(path: &Path) -> std::io::Result<Vec<u8>> {
-    use std::io::Read;
-    let metadata = std::fs::symlink_metadata(path)?;
-    if !metadata.is_file()
-        || metadata.file_type().is_symlink()
-        || metadata.len() > MAX_HELP_FILE_BYTES
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "help sidecar is not a bounded regular file",
-        ));
-    }
-    let file = std::fs::File::open(path)?;
-    let mut bytes = Vec::with_capacity(metadata.len() as usize);
-    file.take(MAX_HELP_FILE_BYTES + 1).read_to_end(&mut bytes)?;
-    if bytes.len() as u64 > MAX_HELP_FILE_BYTES {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::InvalidData,
-            "help sidecar grew beyond limit",
-        ));
-    }
-    Ok(bytes)
+    crate::form_read::read_regular_source(path)
 }
 fn valid_language(lang: &str) -> bool {
     !lang.is_empty()

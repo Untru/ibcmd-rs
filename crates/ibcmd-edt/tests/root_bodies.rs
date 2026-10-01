@@ -89,7 +89,7 @@ fn ordinary_entire_body_survives_both_dialects_without_external_module() {
     }
 }
 #[test]
-fn ordinary_reader_rejects_ambiguous_and_oversized_bodies() {
+fn ordinary_reader_rejects_conflicts_and_preserves_large_bodies() {
     for extra in ["Form.form", "Module.bsl"] {
         let dir = tempfile::tempdir().unwrap();
         write_config(Format::Edt, &ordinary(), dir.path()).unwrap();
@@ -105,16 +105,52 @@ fn ordinary_reader_rejects_ambiguous_and_oversized_bodies() {
     let body = dir.path().join("CommonForms/OpaqueOrdinary/Form.oform");
     std::fs::OpenOptions::new()
         .write(true)
-        .open(body)
+        .open(&body)
         .unwrap()
         .set_len(32 * 1024 * 1024 + 1)
         .unwrap();
-    assert!(read_config(Format::Edt, dir.path(), &opts()).is_err());
+    let expected = std::fs::read(body).unwrap();
+    let returned = read_config(Format::Edt, dir.path(), &opts()).unwrap().0;
+    let retained = returned
+        .objects
+        .iter()
+        .find(|object| object.name == "OpaqueOrdinary")
+        .unwrap()
+        .form_bodies[0]
+        .ordinary_body
+        .as_ref()
+        .unwrap();
+    assert!(retained == &expected);
     let mut cfg = ordinary();
     cfg.objects.last_mut().unwrap().form_bodies[0].body.title =
         Some(PropertyValue::Str("managed".into()));
     let dir = tempfile::tempdir().unwrap();
     assert!(write_config(Format::Edt, &cfg, dir.path()).is_err());
+
+    let mut cfg = ordinary();
+    cfg.objects.last_mut().unwrap().properties[0].1 =
+        PropertyValue::Enum(Token::new("UnknownFormType"));
+    let dir = tempfile::tempdir().unwrap();
+    assert!(write_config(Format::Edt, &cfg, dir.path()).is_err());
+
+    for format in [Format::Designer, Format::Edt] {
+        for empty in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            write_config(format, &ordinary(), dir.path()).unwrap();
+            let body = dir.path().join(if format == Format::Designer {
+                "CommonForms/OpaqueOrdinary/Ext/Form.bin"
+            } else {
+                "CommonForms/OpaqueOrdinary/Form.oform"
+            });
+            std::fs::remove_file(&body).unwrap();
+            if empty {
+                std::fs::write(&body, []).unwrap();
+            } else {
+                std::fs::create_dir(&body).unwrap();
+            }
+            assert!(read_config(format, dir.path(), &opts()).is_err());
+        }
+    }
 }
 #[test]
 fn configuration_help_uses_root_ext_and_preserves_pages_resources() {

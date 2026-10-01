@@ -53,6 +53,9 @@ use morph1c_core::ir::form::{DecoratorBody, FormItem, FormPicture};
 use morph1c_core::ir::{FormBody, MetadataObject, NamedFormBody};
 
 use crate::ConvertError;
+#[path = "source_read.rs"]
+mod source_read;
+pub(crate) use source_read::read_regular_source;
 
 /// The kind whose object carries its OWN whole form body (the form IS the object).
 const OWN_FORM_KIND: &str = "CommonForm";
@@ -964,8 +967,6 @@ pub(crate) fn form_body_path(
     }
 }
 
-/// Maximum retained opaque ordinary body; checked before allocation and after a bounded read.
-pub(crate) const MAX_ORDINARY_FORM_BYTES: u64 = 32 * 1024 * 1024;
 pub(crate) fn ordinary_form_body_path(format: Format, anchor: &Path) -> Option<PathBuf> {
     match format {
         Format::Edt => Some(anchor.parent()?.join("Form.oform")),
@@ -1031,35 +1032,13 @@ pub(crate) fn declared_form_is_ordinary(
     }
 }
 fn read_ordinary_body(path: &Path) -> Result<Vec<u8>, ConvertError> {
-    use std::io::Read;
-    let read = || -> std::io::Result<Vec<u8>> {
-        let metadata = std::fs::symlink_metadata(path)?;
-        if !metadata.is_file()
-            || metadata.file_type().is_symlink()
-            || metadata.len() == 0
-            || metadata.len() > MAX_ORDINARY_FORM_BYTES
-        {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "ordinary body is not a nonempty bounded regular file",
-            ));
-        }
-        let file = std::fs::File::open(path)?;
-        let mut bytes = Vec::with_capacity(metadata.len() as usize);
-        file.take(MAX_ORDINARY_FORM_BYTES + 1)
-            .read_to_end(&mut bytes)?;
-        if bytes.is_empty() || bytes.len() as u64 > MAX_ORDINARY_FORM_BYTES {
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                "ordinary body changed beyond bounds",
-            ));
-        }
-        Ok(bytes)
-    };
-    read().map_err(|e| ConvertError::Io {
-        path: path.display().to_string(),
-        reason: e.to_string(),
-    })
+    let bytes = read_regular_source(path).map_err(|error| ConvertError::Io {
+        path: path.display().to_string(), reason: error.to_string(),
+    })?;
+    if bytes.is_empty() {
+        return Err(ConvertError::Io { path: path.display().to_string(), reason: "ordinary body is empty".into() });
+    }
+    Ok(bytes)
 }
 
 /// Form MODULE (`Module.bsl`) path beside the descriptor ANCHOR, per format layout (see module
