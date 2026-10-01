@@ -9,8 +9,9 @@
 //!   Оба листа present ВСЕГДА (это значение, а не дефолт-омиссия). Порядок: name, nsUri.
 //! * **Designer**: QName-лист — `<Host>prefix:local</Host>`, где `prefix` разрешается в
 //!   nsUri через таблицу префиксов КОРНЯ (`xs`→XMLSchema, `v8`→…/8.1/data/core). Для
-//!   nsUri ВНЕ корневой таблицы платформа объявляет ЛОКАЛЬНЫЙ `xmlns:d6p1="<uri>"`
-//!   ПРЯМО на host-элементе и пишет `d6p1:local` (сверено: prefix ВСЕГДА `d6p1`).
+//!   nsUri outside the root table is declared on the host with a serializer
+//!   depth prefix: `d6p1` for operation return types, `d8p1` for parameter types.
+//!   The URI and local name remain the same canonical pair.
 //!
 //! Канонический IR (X by construction): `PropertyValue::List([Str(name), Str(nsUri)])` —
 //! пара в фиксированном порядке. Оба формата дают ТУ ЖЕ пару (§1.6). §1.0: неизвестный
@@ -28,11 +29,13 @@ pub enum XdtoTypeRefDialect {
     Edt,
     /// Designer: QName-лист `prefix:local` (+опц. локальный `xmlns:d6p1`).
     Designer,
+    /// Same Designer QName syntax at a known physical host depth.
+    /// WebService.Parameter.XDTOValueType has depth 8, returning types depth 6.
+    DesignerAtDepth(usize),
 }
 
-/// Локальный auto-префикс, которым платформа объявляет ns ВНЕ корневой таблицы. Сверено
-/// по SSL WebServices-корпусу: ВСЕГДА `d6p1` (первый локальный ns на элементе).
-const LOCAL_PREFIX: &str = "d6p1";
+/// Default physical depth of WebService.Operation.XDTOReturningValueType.
+const DEFAULT_DESIGNER_DEPTH: usize = 6;
 
 const XS_PREFIX: &str = "xs";
 const XS_URI: &str = "http://www.w3.org/2001/XMLSchema";
@@ -109,7 +112,7 @@ fn unpack(value: &PropertyValue) -> Result<(&str, &str), String> {
 pub fn decode(dialect: XdtoTypeRefDialect, host: &Element) -> Result<PropertyValue, String> {
     match dialect {
         XdtoTypeRefDialect::Edt => decode_edt(host),
-        XdtoTypeRefDialect::Designer => decode_designer(host),
+        XdtoTypeRefDialect::Designer | XdtoTypeRefDialect::DesignerAtDepth(_) => decode_designer(host),
     }
 }
 
@@ -213,7 +216,7 @@ pub fn claim(dialect: XdtoTypeRefDialect, host: &Element) {
                 leaf.claim_with_text();
             }
         }
-        XdtoTypeRefDialect::Designer => {
+        XdtoTypeRefDialect::Designer | XdtoTypeRefDialect::DesignerAtDepth(_) => {
             host.claim_text();
             // Локальный `xmlns:<prefix>` (если QName-текст его использует).
             if let Some((prefix, _)) = host.text.split_once(':') {
@@ -242,7 +245,12 @@ pub fn encode(
             h.push(OutElement::leaf("", "nsUri", ns_uri.to_string()));
             Ok(h)
         }
-        XdtoTypeRefDialect::Designer => {
+        XdtoTypeRefDialect::Designer | XdtoTypeRefDialect::DesignerAtDepth(_) => {
+            let depth = match dialect {
+                XdtoTypeRefDialect::DesignerAtDepth(depth) if depth > 0 => depth,
+                XdtoTypeRefDialect::DesignerAtDepth(_) => return Err("xdto-type-ref physical depth must be positive".into()),
+                _ => DEFAULT_DESIGNER_DEPTH,
+            };
             if let Some(prefix) = uri_to_root_prefix(ns_uri) {
                 // Корневой префикс: `<Host>prefix:local</Host>`, без локального xmlns.
                 Ok(OutElement::leaf(
@@ -251,10 +259,10 @@ pub fn encode(
                     format!("{prefix}:{name}"),
                 ))
             } else {
-                // Кастомный ns: локальный `xmlns:d6p1="<uri>"` + `d6p1:local`.
+                let local_prefix = format!("d{depth}p1");
                 Ok(
-                    OutElement::leaf(host_prefix, host_local, format!("{LOCAL_PREFIX}:{name}"))
-                        .attr(format!("xmlns:{LOCAL_PREFIX}"), ns_uri.to_string()),
+                    OutElement::leaf(host_prefix, host_local, format!("{local_prefix}:{name}"))
+                        .attr(format!("xmlns:{local_prefix}"), ns_uri.to_string()),
                 )
             }
         }

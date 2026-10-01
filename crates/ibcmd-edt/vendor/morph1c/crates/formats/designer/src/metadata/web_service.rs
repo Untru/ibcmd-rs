@@ -67,7 +67,7 @@ impl LocusMap for DesignerParameter {
         } else if field == PR_COMMENT {
             Some(FieldProjection::new(elem(PR_P_COMMENT), Codec::PlainText))
         } else if field == PR_TYPE {
-            Some(FieldProjection::new(elem(PR_P_TYPE), Codec::XdtoTypeRef(XdtoTypeRefDialect::Designer)))
+            Some(FieldProjection::new(elem(PR_P_TYPE), Codec::XdtoTypeRef(XdtoTypeRefDialect::DesignerAtDepth(8))))
         } else if field == PR_NILLABLE {
             Some(FieldProjection::new(elem(PR_P_NILLABLE), Codec::BoolText))
         } else if field == PR_DIR {

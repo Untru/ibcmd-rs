@@ -48,6 +48,13 @@ impl LocusMap for EdtFilterCriterion {
         })
     }
 
+    fn root_extra_namespaces(&self) -> &'static [(&'static str, &'static str)] {
+        &[
+            ("xmlns:xsi", "http://www.w3.org/2001/XMLSchema-instance"),
+            ("xmlns:core", "http://g5.1c.ru/v8/dt/mcore"),
+        ]
+    }
+
     fn child_collection(&self, collection: &str) -> Option<ChildLocus> {
         let (tag, name_tag) = match collection {
             "Form" => ("forms", "name"),

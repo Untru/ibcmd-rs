@@ -15,7 +15,7 @@
 //! — DENSE. `xdtoReturningValueType` — xdto-type-ref (пара `name`+`nsUri`), present ВСЕГДА
 //! (143/143). Собственные дети `Parameter` — НЕ свойства, а [`ChildSlot`] (рекурсия).
 
-use crate::ir::value::{PropertyValue, ValueKind};
+use crate::ir::value::{PropertyValue, Token, ValueKind};
 use crate::ir::FieldId;
 use crate::spec::common::{ChildSlot, EntitySpec, FieldSpec, Normalize};
 
@@ -32,8 +32,9 @@ pub const F_NILLABLE: FieldId = FieldId(4);
 pub const F_TRANSACTIONED: FieldId = FieldId(5);
 /// `procedureName` — имя обработчика-процедуры. Required (143/143).
 pub const F_PROCEDURE_NAME: FieldId = FieldId(6);
-/// `dataLockControlMode` — режим управления блокировкой данных. Required (143/143;
-/// корпус: только `Managed`).
+/// `dataLockControlMode` — режим управления блокировкой данных. Default =
+/// `Automatic` (EDT omits it; Designer emits it). Confirmed against genuine UH
+/// operation pairs and EDT MdProperty 09c14dad-bd23-4d30-9c09-20ca3e5cd9f0.
 pub const F_DATA_LOCK_CONTROL_MODE: FieldId = FieldId(7);
 
 fn build_fields() -> Vec<FieldSpec> {
@@ -50,7 +51,12 @@ fn build_fields() -> Vec<FieldSpec> {
         FieldSpec::with_default(F_NILLABLE, "nillable", ValueKind::Bool, PropertyValue::Bool(false)),
         FieldSpec::with_default(F_TRANSACTIONED, "transactioned", ValueKind::Bool, PropertyValue::Bool(false)),
         FieldSpec::required(F_PROCEDURE_NAME, "procedureName", ValueKind::Str),
-        FieldSpec::required(F_DATA_LOCK_CONTROL_MODE, "dataLockControlMode", ValueKind::Enum),
+        FieldSpec::with_default(
+            F_DATA_LOCK_CONTROL_MODE,
+            "dataLockControlMode",
+            ValueKind::Enum,
+            PropertyValue::Enum(Token::new("Automatic")),
+        ),
     ]
 }
 
