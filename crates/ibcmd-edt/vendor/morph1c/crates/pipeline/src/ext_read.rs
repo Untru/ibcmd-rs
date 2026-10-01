@@ -46,7 +46,8 @@
 //! has a witnessed typed exception: native canonical framing is 35 bytes; EDT
 //! uses four -1 empty counts to avoid the installed zero-count double-End bug.
 //! The full model is equal, original44 bytes remain host lexical provenance,
-//! and raw installed XML export39 is still rejected by native SDK export.
+//! and an independently model-bound native-name sibling makes official XML export
+//! prefer native-compatible bytes. The old single-file raw39 failure remains evidence.
 //! Nonempty/unknown signatures retain the verbatim contract and require their
 //! independent SDK gates; this exception does not claim universal support.
 //!
@@ -95,8 +96,8 @@ const CONFIG_BLOB_SLOTS: &[(&str, &str, &str)] = &[
 // Exact converted-v2 empty signature witnessed through the installed SDK EObject,
 // resource serializer, headless import/validation and a fresh native database.
 // Other signatures keep their complete verbatim body; this narrow adaptation
-// does not certify their SDK acceptance. The native XML exporter copies the
-// EDT carrier verbatim, so its raw39 native-import/export gate still fails.
+// does not certify their SDK acceptance. Official XML export prefers a separately
+// model-bound native-name file; its reader-name carrier remains EDT-loadable.
 const EMPTY_SIGNATURE_NATIVE: &[u8] = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
 const EMPTY_SIGNATURE_EDT: &[u8] = b"{2,\"\",\"\",\n{\n{-1},\n{-1},\n{-1},\n{-1}\n},0}";
 
@@ -269,10 +270,7 @@ pub fn attach_config_ext(
         }
         // Config-level application modules are text sidecars (no protected app module is
         // witnessed in the corpus; a non-UTF-8 one would surface as a typed read error).
-        let source = std::fs::read_to_string(&path).map_err(|e| ConvertError::Io {
-            path: path.display().to_string(),
-            reason: e.to_string(),
-        })?;
+        let source = crate::module_read::read_module_text(&path)?;
         obj.modules.push(Module::text(slot, source));
     }
 
@@ -297,6 +295,15 @@ pub fn attach_config_ext(
     for entry in CONFIG_BLOB_SLOTS {
         let path = dir.join(blob_file_name(format, entry));
         if !path.is_file() {
+            if format == Format::Edt
+                && entry.0 == "MobileClientSignature"
+                && dir.join("MobileClientSignature.bin").is_file()
+            {
+                return Err(read_err(
+                    entry.0,
+                    "Preferred native signature has no EDT reader carrier".into(),
+                ));
+            }
             continue; // no file → no blob in the IR (honest; SSL carries no signature).
         }
         let bytes = read_bytes(&path)?;
@@ -327,6 +334,35 @@ pub fn attach_config_ext(
         } else {
             bytes
         };
+        if format == Format::Edt && entry.0 == "MobileClientSignature" {
+            let preferred_path = dir.join("MobileClientSignature.bin");
+            if preferred_path.is_file() {
+                let preferred = read_bytes(&preferred_path)?;
+                let canonical = canonical_empty_mobile_signature(&preferred, Format::Designer)
+                    .map_err(|reason| read_err(entry.0, reason))?
+                    .ok_or_else(|| {
+                        read_err(
+                            entry.0,
+                            "Preferred signature is not the complete witnessed empty model".into(),
+                        )
+                    })?;
+                if canonical != bytes
+                    || canonical_empty_mobile_signature(&bytes, Format::Designer)
+                        .map_err(|reason| read_err(entry.0, reason))?
+                        .as_ref()
+                        != Some(&canonical)
+                {
+                    return Err(read_err(
+                        entry.0,
+                        "EDT reader and preferred native signature models differ".into(),
+                    ));
+                }
+                lexical = Some(morph1c_core::ir::MobileSignatureLexical {
+                    canonical_bytes: canonical,
+                    source_bytes: preferred,
+                });
+            }
+        }
         obj.config_blobs.push(ConfigBlob {
             slot: entry.0.to_string(),
             bytes,
@@ -619,6 +655,30 @@ pub fn write_config_ext(
             std::borrow::Cow::Borrowed(blob.bytes.as_slice())
         };
         crate::form_write::write_file(&dir.join(blob_file_name(format, entry)), &bytes)?;
+        if format == Format::Edt && blob.slot == "MobileClientSignature" {
+            if let Some(canonical) = canonical_empty_mobile_signature(&blob.bytes, Format::Designer)
+                .map_err(|reason| write_err(obj, reason))?
+            {
+                // The installed XML exporter prefers this native-name sibling over
+                // its reader-name carrier. Both files are independently model-bound.
+                let preferred = blob
+                    .mobile_signature_lexical
+                    .as_ref()
+                    .filter(|facet| {
+                        facet.canonical_bytes == canonical
+                            && canonical_empty_mobile_signature(
+                                &facet.source_bytes,
+                                Format::Designer,
+                            )
+                            .ok()
+                            .flatten()
+                            .as_ref()
+                                == Some(&canonical)
+                    })
+                    .map_or(canonical.as_slice(), |facet| facet.source_bytes.as_slice());
+                crate::form_write::write_file(&dir.join("MobileClientSignature.bin"), preferred)?;
+            }
+        }
     }
 
     // (4) Состав автономной конфигурации — пер-диалектная СТРУКТУРНАЯ запись

@@ -77,6 +77,10 @@ fn public_empty_v2_keeps_all_original44_bytes_and_emits_model_equal_carrier() {
         CARRIER
     );
     assert_eq!(
+        bytes(&generated, "src/Configuration/MobileClientSignature.bin"),
+        original44()
+    );
+    assert_eq!(
         edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &opts)
             .unwrap()
             .tree,
@@ -98,7 +102,7 @@ fn public_empty_v2_keeps_all_original44_bytes_and_emits_model_equal_carrier() {
                 .tree,
             "Ext/MobileClientSignature.bin"
         ),
-        NATIVE
+        original44()
     );
     for edited in [
         String::from_utf8(CARRIER.to_vec())
@@ -260,4 +264,115 @@ fn authentic_edt_native_spelling_is_retained_only_for_unchanged_full_model() {
             "edited model must never use stale44 facet"
         );
     }
+}
+
+#[test]
+fn dual_names_require_the_same_complete_model_and_a_native_preferred_frame() {
+    let cfg = read_config(
+        Format::Designer,
+        fixture().path(),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let edt = tempfile::tempdir().unwrap();
+    write_config(Format::Edt, &cfg, edt.path()).unwrap();
+    let reader = edt.path().join("Configuration/MobileClientSign.bin");
+    let preferred = edt.path().join("Configuration/MobileClientSignature.bin");
+    std::fs::write(&reader, CARRIER).unwrap();
+    for native in [NATIVE.to_vec(), original44()] {
+        std::fs::write(&preferred, &native).unwrap();
+        let model = read_config(Format::Edt, edt.path(), &ConvertOptions::default())
+            .unwrap()
+            .0;
+        let out = tempfile::tempdir().unwrap();
+        write_config(Format::Designer, &model, out.path()).unwrap();
+        assert_eq!(
+            std::fs::read(out.path().join("Ext/MobileClientSignature.bin")).unwrap(),
+            native
+        );
+        let regenerated = tempfile::tempdir().unwrap();
+        write_config(Format::Edt, &model, regenerated.path()).unwrap();
+        assert_eq!(
+            std::fs::read(
+                regenerated
+                    .path()
+                    .join("Configuration/MobileClientSign.bin")
+            )
+            .unwrap(),
+            CARRIER
+        );
+        assert_eq!(
+            std::fs::read(
+                regenerated
+                    .path()
+                    .join("Configuration/MobileClientSignature.bin")
+            )
+            .unwrap(),
+            native
+        );
+    }
+    for invalid in [
+        CARRIER.to_vec(),
+        b"{0,\"\",\"\"}".to_vec(),
+        String::from_utf8(NATIVE.to_vec())
+            .unwrap()
+            .replace("},0}", "},1}")
+            .into_bytes(),
+        b"{2,\"not empty\",\"digest\",{{0},{0},{0},{0}},0}".to_vec(),
+    ] {
+        std::fs::write(&preferred, invalid).unwrap();
+        assert!(read_config(Format::Edt, edt.path(), &ConvertOptions::default()).is_err());
+    }
+    std::fs::write(&preferred, NATIVE).unwrap();
+    std::fs::remove_file(&reader).unwrap();
+    assert!(read_config(Format::Edt, edt.path(), &ConvertOptions::default()).is_err());
+    std::fs::write(&reader, b"{0,\"\",\"\"}").unwrap();
+    assert!(read_config(Format::Edt, edt.path(), &ConvertOptions::default()).is_err());
+}
+
+#[test]
+#[ignore = "requires bound genuine EDT raw export and fresh native SDK dual-name captures"]
+fn genuine_dual_names_pass_unmodified_official_export_and_fresh_native_gate() {
+    let lab = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").unwrap());
+    let capture = lab.join("mobile-dual-name-headless-r1");
+    let project = capture.join("EmptyEdtDiagnosticControl/src/Configuration");
+    assert_eq!(
+        std::fs::read(project.join("MobileClientSign.bin")).unwrap(),
+        CARRIER
+    );
+    assert_eq!(
+        std::fs::read(project.join("MobileClientSignature.bin")).unwrap(),
+        NATIVE
+    );
+    let binding: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(capture.join("bound-native-chain.json")).unwrap())
+            .unwrap();
+    assert_eq!(
+        binding["status"],
+        "DUAL_NAME_OFFICIAL_EMPTY_MODEL_CHAIN_CAPTURED"
+    );
+    assert_eq!(
+        binding["native_reference_binding"]["native_build"],
+        "8.3.27.2214"
+    );
+    assert_eq!(
+        binding["raw_installed_export35_sha256"],
+        format!("{:x}", Sha256::digest(NATIVE))
+    );
+    assert_eq!(
+        binding["raw_native_export35_sha256"],
+        format!("{:x}", Sha256::digest(NATIVE))
+    );
+    for path in [
+        capture.join("installed-export/Ext/MobileClientSignature.bin"),
+        lab.join("mobile-dual-name-native-r1/native-xml/Ext/MobileClientSignature.bin"),
+    ] {
+        assert_eq!(std::fs::read(path).unwrap(), NATIVE);
+    }
+    let native_result: serde_json::Value = serde_json::from_slice(
+        &std::fs::read(lab.join("mobile-dual-name-native-r1/result.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(native_result["status"], "CAPTURED");
 }
