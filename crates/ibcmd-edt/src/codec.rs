@@ -698,10 +698,14 @@ pub(crate) fn canonical_inventory_with_policy(
         // Use the stable source-tree index; retain the exact physical path in
         // errors below rather than truncating Cyrillic names or relaxing the
         // common model's bounded diagnostic strings.
-        let path = ObjectPath::new(vec![
-            PathSegment::name("source_files").map_err(EdtError::source)?,
-            PathSegment::index(u32::try_from(file_index).map_err(EdtError::source)?),
-        ])
+        let path = ObjectPath::new_with_policy(
+            vec![
+                PathSegment::name_with_policy("source_files", operation)
+                    .map_err(EdtError::source)?,
+                PathSegment::index(u32::try_from(file_index).map_err(EdtError::source)?),
+            ],
+            operation,
+        )
         .map_err(EdtError::source)?;
         let envelope = ibcmd_xml::decode_source_metadata_envelope_with_policy(
             &doc,
