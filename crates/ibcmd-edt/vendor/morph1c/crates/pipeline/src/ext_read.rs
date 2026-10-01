@@ -31,7 +31,7 @@
 //! Designer reads — a cross-write to EDT then regenerates the node exactly when the source
 //! actually carries the picture.
 //!
-//! # VERBATIM binary sidecars (ParentConfigurations / MobileClientSignature)
+//! # Binary sidecars (ParentConfigurations / MobileClientSignature)
 //! Два бинарных конфиг-сайдкара носятся ДОСЛОВНО (это не модули: BOM/CRLF не трогаются,
 //! никакой перекодировки — [`morph1c_core::ir::ConfigBlob`]):
 //! * **`ParentConfigurations`** — designer `Ext/ParentConfigurations.bin`, edt
@@ -41,6 +41,14 @@
 //!   ⚠️ ДРУГОЕ имя `MobileClientSign.bin`. Витнесс: ERP 560 886 Б (brace
 //!   `{2,"MIIBtjCC…"}`), designer == edt (сверено sha256) == erp.cf `<host>.10`.
 //!   У SSL файла нет ни в одном диалекте (и в ssl.cf нет `.10`) — отсутствие честно.
+//!
+//! The exact Converted v2 signature with empty key/digest/four groups/false flag
+//! has a witnessed typed exception: native canonical framing is 35 bytes; EDT
+//! uses four -1 empty counts to avoid the installed zero-count double-End bug.
+//! The full model is equal, original44 bytes remain host lexical provenance,
+//! and raw installed XML export39 is still rejected by native SDK export.
+//! Nonempty/unknown signatures retain the verbatim contract and require their
+//! independent SDK gates; this exception does not claim universal support.
 //!
 //! cf-СТОРОНА: запись — `formats_cf::assemble` (`CONFIG_BLOB_SLOTS`, verbatim-лист
 //! `<host>.N`); ЧТЕНИЕ cf → IR корневые Ext-тела НЕ подхватывает (cf-декомпиляция
@@ -83,6 +91,127 @@ const CONFIG_BLOB_SLOTS: &[(&str, &str, &str)] = &[
         "MobileClientSign.bin",
     ),
 ];
+
+// Exact converted-v2 empty signature witnessed through the installed SDK EObject,
+// resource serializer, headless import/validation and a fresh native database.
+// Other signatures keep their complete verbatim body; this narrow adaptation
+// does not certify their SDK acceptance. The native XML exporter copies the
+// EDT carrier verbatim, so its raw39 native-import/export gate still fails.
+const EMPTY_SIGNATURE_NATIVE: &[u8] = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
+const EMPTY_SIGNATURE_EDT: &[u8] = b"{2,\"\",\"\",\n{\n{-1},\n{-1},\n{-1},\n{-1}\n},0}";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct EmptyConvertedMobileSignature {
+    public_key: String,
+    digest: String,
+    // Installed MobileClientDigestTypes order: enums/infoRegKeys/refs/regKeys.
+    group_lengths: [usize; 4],
+    converted: bool,
+}
+impl EmptyConvertedMobileSignature {
+    fn decode(bytes: &[u8], format: Format) -> Result<Option<Self>, String> {
+        let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
+        let native = matches_empty_signature_frame(bytes, b"0");
+        let carrier = matches_empty_signature_frame(bytes, b"-1");
+        if !native && !(carrier && format == Format::Edt) {
+            if has_negative_digest_count(bytes) {
+                return Err("unsupported mobile-signature negative-count carrier; only the exact empty Converted v2 EDT shape is interpreted".into());
+            }
+            return Ok(None);
+        }
+        Ok(Some(Self {
+            public_key: String::new(),
+            digest: String::new(),
+            group_lengths: [0; 4],
+            converted: false,
+        }))
+    }
+    fn encode(&self, format: Format) -> Result<Vec<u8>, String> {
+        if !self.public_key.is_empty()
+            || !self.digest.is_empty()
+            || self.group_lengths != [0; 4]
+            || self.converted
+        {
+            return Err(
+                "mobile signature exceeds the witnessed complete empty Converted v2 model".into(),
+            );
+        }
+        Ok(if format == Format::Edt {
+            EMPTY_SIGNATURE_EDT
+        } else {
+            EMPTY_SIGNATURE_NATIVE
+        }
+        .to_vec())
+    }
+}
+
+/// Private host bridge: only the complete witnessed Converted empty-v2 model
+/// receives canonical bytes. Unknown/nonempty bodies return None, requiring the
+/// host's existing raw-byte fidelity check. This does not waive any SDK gate.
+#[doc(hidden)]
+pub fn canonical_empty_mobile_signature(
+    bytes: &[u8],
+    format: Format,
+) -> Result<Option<Vec<u8>>, String> {
+    EmptyConvertedMobileSignature::decode(bytes, format)?
+        .map(|model| model.encode(Format::Designer))
+        .transpose()
+}
+
+// Recognize complete tokens, not whitespace-stripped byte concatenations:
+// e.g. `- 1` cannot become the witnessed `-1` carrier. No document-sized buffer.
+fn matches_empty_signature_frame(bytes: &[u8], count: &[u8]) -> bool {
+    let mut rest = bytes;
+    let mut eat = |token: &[u8]| {
+        rest = rest.trim_ascii_start();
+        if let Some(tail) = rest.strip_prefix(token) {
+            rest = tail;
+            true
+        } else {
+            false
+        }
+    };
+    for token in [
+        b"{".as_slice(),
+        b"2",
+        b",",
+        b"\"\"",
+        b",",
+        b"\"\"",
+        b",",
+        b"{",
+    ] {
+        if !eat(token) {
+            return false;
+        }
+    }
+    for group in 0..4 {
+        if group > 0 && !eat(b",") {
+            return false;
+        }
+        if !eat(b"{") || !eat(count) || !eat(b"}") {
+            return false;
+        }
+    }
+    for token in [b"}".as_slice(), b",", b"0", b"}"] {
+        if !eat(token) {
+            return false;
+        }
+    }
+    rest.trim_ascii().is_empty()
+}
+fn has_negative_digest_count(bytes: &[u8]) -> bool {
+    let mut quoted = false;
+    for (i, byte) in bytes.iter().enumerate() {
+        if *byte == b'"' {
+            quoted = !quoted;
+        }
+        if !quoted && *byte == b'{' && bytes[i + 1..].trim_ascii_start().starts_with(b"-") {
+            return true;
+        }
+    }
+    false
+}
 
 /// Пер-форматное имя файла VERBATIM-сайдкара по записи [`CONFIG_BLOB_SLOTS`]. cf сюда не
 /// доходит ([`ext_dir`] возвращает `None`).
@@ -170,9 +299,38 @@ pub fn attach_config_ext(
         if !path.is_file() {
             continue; // no file → no blob in the IR (honest; SSL carries no signature).
         }
+        let bytes = read_bytes(&path)?;
+        let mut lexical = None;
+        let bytes = if entry.0 == "MobileClientSignature" {
+            match EmptyConvertedMobileSignature::decode(&bytes, format)
+                .map_err(|reason| read_err(entry.0, reason))?
+            {
+                Some(model) => {
+                    let canonical = model
+                        .encode(Format::Designer)
+                        .map_err(|reason| read_err(entry.0, reason))?;
+                    // Carrier39 cannot be a native lexical facet. Source44/35
+                    // already has native-compatible zero counts and is kept.
+                    if matches_empty_signature_frame(
+                        bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes),
+                        b"0",
+                    ) {
+                        lexical = Some(morph1c_core::ir::MobileSignatureLexical {
+                            canonical_bytes: canonical.clone(),
+                            source_bytes: bytes,
+                        });
+                    }
+                    canonical
+                }
+                None => bytes,
+            }
+        } else {
+            bytes
+        };
         obj.config_blobs.push(ConfigBlob {
             slot: entry.0.to_string(),
-            bytes: read_bytes(&path)?,
+            bytes,
+            mobile_signature_lexical: lexical,
         });
     }
 
@@ -419,7 +577,48 @@ pub fn write_config_ext(
                     ),
                 )
             })?;
-        crate::form_write::write_file(&dir.join(blob_file_name(format, entry)), &blob.bytes)?;
+        let bytes = if blob.slot == "MobileClientSignature" {
+            match EmptyConvertedMobileSignature::decode(&blob.bytes, Format::Designer)
+                .map_err(|reason| write_err(obj, reason))?
+            {
+                Some(model) => {
+                    let canonical = model
+                        .encode(Format::Designer)
+                        .map_err(|reason| write_err(obj, reason))?;
+                    if format == Format::Designer {
+                        if let Some(facet) = &blob.mobile_signature_lexical {
+                            if facet.canonical_bytes == canonical
+                                && facet.canonical_bytes == blob.bytes
+                                && canonical_empty_mobile_signature(
+                                    &facet.source_bytes,
+                                    Format::Designer,
+                                )
+                                .ok()
+                                .flatten()
+                                .as_ref()
+                                    == Some(&canonical)
+                            {
+                                std::borrow::Cow::Borrowed(facet.source_bytes.as_slice())
+                            } else {
+                                std::borrow::Cow::Owned(canonical)
+                            }
+                        } else {
+                            std::borrow::Cow::Owned(canonical)
+                        }
+                    } else {
+                        std::borrow::Cow::Owned(
+                            model
+                                .encode(format)
+                                .map_err(|reason| write_err(obj, reason))?,
+                        )
+                    }
+                }
+                None => std::borrow::Cow::Borrowed(blob.bytes.as_slice()),
+            }
+        } else {
+            std::borrow::Cow::Borrowed(blob.bytes.as_slice())
+        };
+        crate::form_write::write_file(&dir.join(blob_file_name(format, entry)), &bytes)?;
     }
 
     // (4) Состав автономной конфигурации — пер-диалектная СТРУКТУРНАЯ запись
@@ -1031,6 +1230,7 @@ mod tests {
         obj.config_blobs.push(ConfigBlob {
             slot: "StandaloneConfigurationContent".into(),
             bytes: vec![1, 2, 3],
+            mobile_signature_lexical: None,
         });
         let err = write_config_ext(Format::Designer, Path::new("/nope/Configuration.xml"), &obj)
             .unwrap_err();

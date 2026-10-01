@@ -254,6 +254,17 @@ pub struct ConfigBlob {
     pub slot: String,
     /// Сырые байты файла — ВЕРБАТИМ (идентичны между форматами, вкл. BOM).
     pub bytes: Vec<u8>,
+    /// Private source spelling of a completely interpreted empty Converted v2
+    /// mobile signature; excluded from semantic fingerprints. Emission may use
+    /// it only while the canonical bytes match the recorded complete model.
+    #[serde(skip)]
+    pub mobile_signature_lexical: Option<MobileSignatureLexical>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MobileSignatureLexical {
+    pub canonical_bytes: Vec<u8>,
+    pub source_bytes: Vec<u8>,
 }
 
 /// ОДНА запись приоритета обмена автономной конфигурации ([`StandaloneContent`]):

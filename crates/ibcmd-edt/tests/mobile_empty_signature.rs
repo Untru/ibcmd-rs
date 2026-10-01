@@ -1,0 +1,263 @@
+use ibcmd_edt::{
+    ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
+};
+use ibcmd_xml::source_tree::{SourceEntry, SourcePath, SourceTree};
+use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
+use sha2::{Digest, Sha256};
+const NATIVE: &[u8] = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
+const CARRIER: &[u8] = b"{2,\"\",\"\",\n{\n{-1},\n{-1},\n{-1},\n{-1}\n},0}";
+fn fixture() -> tempfile::TempDir {
+    let cfg = read_config(
+        Format::Designer,
+        std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        )),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let dir = tempfile::tempdir().unwrap();
+    write_config(Format::Designer, &cfg, dir.path()).unwrap();
+    dir
+}
+fn original44() -> Vec<u8> {
+    [
+        b"\xef\xbb\xbf".as_slice(),
+        String::from_utf8(NATIVE.to_vec())
+            .unwrap()
+            .replace('\n', "\r\n")
+            .as_bytes(),
+    ]
+    .concat()
+}
+fn options() -> ConversionOptions {
+    ConversionOptions {
+        edt_version: "2025.2.3".into(),
+        xml_dialect: "2.21".into(),
+        runtime_version: Some("8.5.1".into()),
+    }
+}
+fn bytes<'a>(tree: &'a SourceTree, path: &str) -> &'a [u8] {
+    tree.entries()
+        .iter()
+        .find(|e| e.path().as_str() == path)
+        .unwrap()
+        .bytes()
+}
+fn replace(tree: &SourceTree, path: &str, data: Vec<u8>) -> SourceTree {
+    SourceTree::new(
+        tree.entries()
+            .iter()
+            .map(|e| {
+                if e.path().as_str() == path {
+                    SourceEntry::from_bytes(SourcePath::new(path).unwrap(), data.clone()).unwrap()
+                } else {
+                    e.clone()
+                }
+            })
+            .collect(),
+    )
+    .unwrap()
+}
+#[test]
+fn public_empty_v2_keeps_all_original44_bytes_and_emits_model_equal_carrier() {
+    let dir = fixture();
+    std::fs::create_dir_all(dir.path().join("Ext")).unwrap();
+    std::fs::write(
+        dir.path().join("Ext/MobileClientSignature.bin"),
+        original44(),
+    )
+    .unwrap();
+    let original = read_xml_source(dir.path(), ReaderLimits::default()).unwrap();
+    let opts = options();
+    let generated = xml_to_edt(&original, &opts).unwrap().tree;
+    assert_eq!(
+        bytes(&generated, "src/Configuration/MobileClientSign.bin"),
+        CARRIER
+    );
+    assert_eq!(
+        edt_to_xml(&Project::from_tree(generated.clone()).unwrap(), &opts)
+            .unwrap()
+            .tree,
+        original
+    );
+    let clean = SourceTree::new(
+        generated
+            .entries()
+            .iter()
+            .filter(|e| !e.path().as_str().starts_with(".ibcmd-provenance/"))
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    assert_eq!(
+        bytes(
+            &edt_to_xml(&Project::from_tree(clean).unwrap(), &opts)
+                .unwrap()
+                .tree,
+            "Ext/MobileClientSignature.bin"
+        ),
+        NATIVE
+    );
+    for edited in [
+        String::from_utf8(CARRIER.to_vec())
+            .unwrap()
+            .replace("},0}", "},1}")
+            .into_bytes(),
+        b"{0,\"\",\"\"}".to_vec(),
+        String::from_utf8(CARRIER.to_vec())
+            .unwrap()
+            .replace("{-1}", "{-2}")
+            .into_bytes(),
+    ] {
+        let path = "src/Configuration/MobileClientSign.bin";
+        let mut changed = replace(&generated, path, edited.clone());
+        let manifest_path = ".ibcmd-provenance/manifest.json";
+        let mut manifest: serde_json::Value =
+            serde_json::from_slice(bytes(&changed, manifest_path)).unwrap();
+        manifest["generated"][path] = serde_json::json!(format!("{:x}", Sha256::digest(edited)));
+        changed = replace(
+            &changed,
+            manifest_path,
+            serde_json::to_vec(&manifest).unwrap(),
+        );
+        assert!(edt_to_xml(&Project::from_tree(changed).unwrap(), &opts).is_err());
+    }
+}
+#[test]
+fn exact_carrier_only_and_nonempty_signature_body_remains_verbatim() {
+    let cfg = read_config(
+        Format::Designer,
+        fixture().path(),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let dir = tempfile::tempdir().unwrap();
+    write_config(Format::Edt, &cfg, dir.path()).unwrap();
+    let path = dir.path().join("Configuration/MobileClientSign.bin");
+    for malformed in [
+        String::from_utf8(CARRIER.to_vec())
+            .unwrap()
+            .replace("{-1}", "{- 1}"),
+        String::from_utf8(CARRIER.to_vec()).unwrap() + "trailing",
+        String::from_utf8(CARRIER.to_vec())
+            .unwrap()
+            .replace("\"\",\"\"", "\"nonempty\",\"\""),
+    ] {
+        std::fs::write(&path, malformed).unwrap();
+        assert!(read_config(Format::Edt, dir.path(), &ConvertOptions::default()).is_err());
+    }
+    let full=b"{2,\"nonempty key {-1} retained verbatim\",\"digest\",{{1,{00000000-0000-0000-0000-000000000001,\"Enum.Value\"}},{0},{0},{0}},1}";
+    std::fs::write(&path, full).unwrap();
+    let loaded = read_config(Format::Edt, dir.path(), &ConvertOptions::default())
+        .unwrap()
+        .0;
+    let blob = loaded
+        .objects
+        .iter()
+        .flat_map(|o| &o.config_blobs)
+        .find(|b| b.slot == "MobileClientSignature")
+        .unwrap();
+    assert_eq!(blob.bytes, full);
+    let out = tempfile::tempdir().unwrap();
+    write_config(Format::Designer, &loaded, out.path()).unwrap();
+    assert_eq!(
+        std::fs::read(out.path().join("Ext/MobileClientSignature.bin")).unwrap(),
+        full
+    );
+    // Native negative counts are not accepted as the special EDT carrier.
+    let native = fixture();
+    std::fs::create_dir_all(native.path().join("Ext")).unwrap();
+    std::fs::write(native.path().join("Ext/MobileClientSignature.bin"), CARRIER).unwrap();
+    assert!(read_config(Format::Designer, native.path(), &ConvertOptions::default()).is_err());
+}
+#[test]
+#[ignore = "requires immutable installed SDK mobile-signature experiment artifacts in F lab"]
+fn genuine_empty_native_and_installed_model_save_match_exact_framers() {
+    let lab = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").unwrap());
+    let actual = std::fs::read(
+        lab.join("../04/release-20261001/rc/out/uha8327_db_r1/tree/Ext/MobileClientSignature.bin"),
+    )
+    .unwrap();
+    assert_eq!(actual, original44());
+    assert_eq!(
+        std::fs::read(
+            lab.join("mobile-carrier-headless-r1/installed-export/Ext/MobileClientSignature.bin")
+        )
+        .unwrap(),
+        CARRIER
+    );
+    assert_eq!(
+        std::fs::read(
+            lab.join("mobile-carrier-canonical-native-r1/native-xml/Ext/MobileClientSignature.bin")
+        )
+        .unwrap(),
+        NATIVE
+    );
+    assert_eq!(
+        std::fs::read(lab.join("mobile-carrier-research-r1/negative-count-SDK-save.bin")).unwrap(),
+        NATIVE
+    );
+}
+
+#[test]
+fn authentic_edt_native_spelling_is_retained_only_for_unchanged_full_model() {
+    let cfg = read_config(
+        Format::Designer,
+        fixture().path(),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    for source in [NATIVE.to_vec(), original44()] {
+        let edt = tempfile::tempdir().unwrap();
+        write_config(Format::Edt, &cfg, edt.path()).unwrap();
+        std::fs::write(
+            edt.path().join("Configuration/MobileClientSign.bin"),
+            &source,
+        )
+        .unwrap();
+        let mut loaded = read_config(Format::Edt, edt.path(), &ConvertOptions::default())
+            .unwrap()
+            .0;
+        let native = tempfile::tempdir().unwrap();
+        write_config(Format::Designer, &loaded, native.path()).unwrap();
+        assert_eq!(
+            std::fs::read(native.path().join("Ext/MobileClientSignature.bin")).unwrap(),
+            source
+        );
+        let root = loaded
+            .objects
+            .iter_mut()
+            .find(|o| o.kind.as_str() == "Configuration")
+            .unwrap();
+        let blob = root
+            .config_blobs
+            .iter_mut()
+            .find(|b| b.slot == "MobileClientSignature")
+            .unwrap();
+        let before = serde_json::to_vec(blob).unwrap();
+        let facet = blob.mobile_signature_lexical.take().unwrap();
+        assert_eq!(
+            serde_json::to_vec(blob).unwrap(),
+            before,
+            "lexical facet never enters semantic hash"
+        );
+        blob.mobile_signature_lexical = Some(facet);
+        blob.bytes = String::from_utf8(NATIVE.to_vec())
+            .unwrap()
+            .replace("},0}", "},1}")
+            .into_bytes();
+        let edited = blob.bytes.clone();
+        let native = tempfile::tempdir().unwrap();
+        write_config(Format::Designer, &loaded, native.path()).unwrap();
+        let returned = std::fs::read(native.path().join("Ext/MobileClientSignature.bin")).unwrap();
+        assert_eq!(returned, edited);
+        assert_ne!(
+            returned, source,
+            "edited model must never use stale44 facet"
+        );
+    }
+}
