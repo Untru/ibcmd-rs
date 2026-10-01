@@ -26,7 +26,8 @@ pub const MAX_CANONICAL_TOKEN_BYTES: usize = 1_024;
 pub const MAX_CANONICAL_NUMBER_BYTES: usize = 4_096;
 /// Maximum number of direct items in one record or sequence.
 pub const MAX_CANONICAL_COLLECTION_ITEMS: usize = 16_384;
-/// Maximum nested record/sequence depth, with the root at depth zero.
+/// Maximum nested record/sequence depth in the bounded wire format.
+/// Explicit source construction and in-memory traversal have no depth quota.
 pub const MAX_CANONICAL_DEPTH: usize = 64;
 /// Maximum total value nodes retained by one canonical value.
 pub const MAX_CANONICAL_NODES: usize = 131_072;
@@ -542,7 +543,7 @@ impl CanonicalField {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 enum CanonicalValueInner {
     Null,
     Bool(bool),
@@ -561,9 +562,170 @@ enum CanonicalValueInner {
 ///
 /// Inner variants and collection vectors are private so every construction
 /// path applies the same depth, count, duplicate, and aggregate-byte policy.
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CanonicalValue {
     inner: CanonicalValueInner,
+}
+
+// Source values can be deeper than the bounded wire format. All in-memory
+// lifecycle operations therefore walk heap-backed work lists, including drop.
+impl Clone for CanonicalValue {
+    fn clone(&self) -> Self {
+        enum Work<'a> {
+            Value(&'a CanonicalValue),
+            Record(&'a [CanonicalField]),
+            Sequence(usize),
+        }
+        let mut work = vec![Work::Value(self)];
+        let mut output: Vec<Self> = Vec::new();
+        while let Some(item) = work.pop() {
+            let inner = match item {
+                Work::Value(value) => match &value.inner {
+                    CanonicalValueInner::Record(fields) => {
+                        work.push(Work::Record(fields));
+                        work.extend(fields.iter().rev().map(|f| Work::Value(&f.value)));
+                        continue;
+                    }
+                    CanonicalValueInner::Sequence(values) => {
+                        work.push(Work::Sequence(values.len()));
+                        work.extend(values.iter().rev().map(Work::Value));
+                        continue;
+                    }
+                    CanonicalValueInner::Null => CanonicalValueInner::Null,
+                    CanonicalValueInner::Bool(v) => CanonicalValueInner::Bool(*v),
+                    CanonicalValueInner::Integer(v) => CanonicalValueInner::Integer(v.clone()),
+                    CanonicalValueInner::Decimal(v) => CanonicalValueInner::Decimal(v.clone()),
+                    CanonicalValueInner::Text(v) => CanonicalValueInner::Text(v.clone()),
+                    CanonicalValueInner::EnumToken(v) => CanonicalValueInner::EnumToken(v.clone()),
+                    CanonicalValueInner::Reference(v) => CanonicalValueInner::Reference(v.clone()),
+                    CanonicalValueInner::Binary(v) => CanonicalValueInner::Binary(v.clone()),
+                    CanonicalValueInner::AssetReference(v) => {
+                        CanonicalValueInner::AssetReference(v.clone())
+                    }
+                },
+                Work::Record(fields) => {
+                    let values = output.split_off(output.len() - fields.len());
+                    CanonicalValueInner::Record(
+                        fields
+                            .iter()
+                            .zip(values)
+                            .map(|(field, value)| CanonicalField::new(field.name.clone(), value))
+                            .collect(),
+                    )
+                }
+                Work::Sequence(count) => {
+                    CanonicalValueInner::Sequence(output.split_off(output.len() - count))
+                }
+            };
+            output.push(Self { inner });
+        }
+        output.pop().expect("one source root")
+    }
+}
+
+impl PartialEq for CanonicalValue {
+    fn eq(&self, other: &Self) -> bool {
+        let mut work = vec![(self, other)];
+        while let Some((left, right)) = work.pop() {
+            match (&left.inner, &right.inner) {
+                (CanonicalValueInner::Null, CanonicalValueInner::Null) => {}
+                (CanonicalValueInner::Bool(a), CanonicalValueInner::Bool(b)) if a == b => {}
+                (CanonicalValueInner::Integer(a), CanonicalValueInner::Integer(b)) if a == b => {}
+                (CanonicalValueInner::Decimal(a), CanonicalValueInner::Decimal(b)) if a == b => {}
+                (CanonicalValueInner::Text(a), CanonicalValueInner::Text(b)) if a == b => {}
+                (CanonicalValueInner::EnumToken(a), CanonicalValueInner::EnumToken(b))
+                    if a == b => {}
+                (CanonicalValueInner::Reference(a), CanonicalValueInner::Reference(b))
+                    if a == b => {}
+                (CanonicalValueInner::Binary(a), CanonicalValueInner::Binary(b)) if a == b => {}
+                (
+                    CanonicalValueInner::AssetReference(a),
+                    CanonicalValueInner::AssetReference(b),
+                ) if a == b => {}
+                (CanonicalValueInner::Record(a), CanonicalValueInner::Record(b))
+                    if a.len() == b.len() =>
+                {
+                    for (a, b) in a.iter().zip(b).rev() {
+                        if a.name != b.name {
+                            return false;
+                        }
+                        work.push((&a.value, &b.value));
+                    }
+                }
+                (CanonicalValueInner::Sequence(a), CanonicalValueInner::Sequence(b))
+                    if a.len() == b.len() =>
+                {
+                    work.extend(a.iter().zip(b).rev());
+                }
+                _ => return false,
+            }
+        }
+        true
+    }
+}
+
+impl Eq for CanonicalValue {}
+
+impl fmt::Debug for CanonicalValue {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        enum Work<'a> {
+            Value(&'a CanonicalValue),
+            Field(&'a CanonicalField),
+            Text(&'static str),
+        }
+        let mut work = vec![Work::Value(self)];
+        while let Some(item) = work.pop() {
+            match item {
+                Work::Text(text) => formatter.write_str(text)?,
+                Work::Field(field) => {
+                    write!(formatter, "{:?}: ", field.name)?;
+                    work.push(Work::Value(&field.value));
+                }
+                Work::Value(value) => match &value.inner {
+                    CanonicalValueInner::Record(fields) => {
+                        formatter.write_str("Record([")?;
+                        work.push(Work::Text("])"));
+                        for (index, field) in fields.iter().enumerate().rev() {
+                            work.push(Work::Field(field));
+                            if index > 0 {
+                                work.push(Work::Text(", "));
+                            }
+                        }
+                    }
+                    CanonicalValueInner::Sequence(values) => {
+                        formatter.write_str("Sequence([")?;
+                        work.push(Work::Text("])"));
+                        for (index, value) in values.iter().enumerate().rev() {
+                            work.push(Work::Value(value));
+                            if index > 0 {
+                                work.push(Work::Text(", "));
+                            }
+                        }
+                    }
+                    scalar => write!(formatter, "{scalar:?}")?,
+                },
+            }
+        }
+        Ok(())
+    }
+}
+
+impl Drop for CanonicalValue {
+    fn drop(&mut self) {
+        fn detach(value: &mut CanonicalValue, work: &mut Vec<CanonicalValue>) {
+            match std::mem::replace(&mut value.inner, CanonicalValueInner::Null) {
+                CanonicalValueInner::Record(fields) => {
+                    work.extend(fields.into_iter().map(|field| field.value))
+                }
+                CanonicalValueInner::Sequence(values) => work.extend(values),
+                _ => {}
+            }
+        }
+        let mut work = Vec::new();
+        detach(self, &mut work);
+        while let Some(mut value) = work.pop() {
+            detach(&mut value, &mut work);
+        }
+    }
 }
 
 /// Borrowed view of a [`CanonicalValue`] variant.
@@ -652,7 +814,7 @@ impl CanonicalValue {
     }
 
     /// Creates an ordered record under an explicit source resource policy.
-    /// Duplicate names and the recursive representation's depth safety remain checked.
+    /// Duplicate names remain checked; source traversal uses an explicit stack.
     pub fn record_with_policy(
         fields: Vec<CanonicalField>,
         policy: SourceOperationPolicy,
@@ -670,7 +832,7 @@ impl CanonicalValue {
     }
 
     /// Creates an ordered sequence under an explicit source resource policy.
-    /// The recursive representation's depth safety remains checked.
+    /// Source traversal uses an explicit stack rather than a depth quota.
     pub fn sequence_with_policy(
         values: Vec<Self>,
         policy: SourceOperationPolicy,
@@ -747,6 +909,27 @@ impl Serialize for CanonicalValue {
     where
         S: Serializer,
     {
+        // Generic serde serializers recurse through nested callbacks. The
+        // bounded wire contract stays bounded even for a deeper source value;
+        // source XML emission uses its independent iterative writer.
+        let mut work = vec![(self, 0usize)];
+        while let Some((value, depth)) = work.pop() {
+            if depth > MAX_CANONICAL_DEPTH {
+                return Err(serde::ser::Error::custom(ValueBuildError::DepthExceeded {
+                    maximum: MAX_CANONICAL_DEPTH,
+                    actual: depth,
+                }));
+            }
+            match &value.inner {
+                CanonicalValueInner::Record(fields) => {
+                    work.extend(fields.iter().rev().map(|field| (&field.value, depth + 1)))
+                }
+                CanonicalValueInner::Sequence(values) => {
+                    work.extend(values.iter().rev().map(|value| (value, depth + 1)))
+                }
+                _ => {}
+            }
+        }
         let mut map = serializer.serialize_map(Some(1))?;
         match &self.inner {
             CanonicalValueInner::Null => map.serialize_entry("null", &())?,
@@ -824,76 +1007,18 @@ fn validate_value(
     depth: usize,
     budget: &mut ValueBudget,
 ) -> Result<(), ValueBuildError> {
-    if depth > MAX_CANONICAL_DEPTH {
-        return Err(ValueBuildError::DepthExceeded {
-            maximum: MAX_CANONICAL_DEPTH,
-            actual: depth,
-        });
+    enum Work<'a> {
+        Value(&'a CanonicalValue, usize),
+        Record(&'a [CanonicalField], usize, usize, BTreeSet<&'a str>),
     }
-    budget.add_node()?;
-    match &value.inner {
-        CanonicalValueInner::Null | CanonicalValueInner::Bool(_) => {}
-        CanonicalValueInner::Integer(value) => {
-            validate_bounded_text(
-                "canonical integer",
-                value.as_str(),
-                budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
-                false,
-                true,
-            )?;
-            budget.retain(value.as_str().len())?;
-        }
-        CanonicalValueInner::Decimal(value) => {
-            validate_bounded_text(
-                "canonical decimal",
-                value.as_str(),
-                budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
-                false,
-                true,
-            )?;
-            budget.retain(value.as_str().len())?;
-        }
-        CanonicalValueInner::Text(value) => {
-            validate_bounded_text(
-                "canonical text",
-                value.as_str(),
-                budget.policy.maximum(MAX_CANONICAL_TEXT_BYTES),
-                true,
-                false,
-            )?;
-            budget.retain(value.as_str().len())?;
-        }
-        CanonicalValueInner::EnumToken(value) => {
-            validate_bounded_text(
-                "enum token",
-                value.as_str(),
-                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
-                false,
-                true,
-            )?;
-            budget.retain(value.as_str().len())?;
-        }
-        CanonicalValueInner::Reference(value) => {
-            validate_bounded_text(
-                "enum token",
-                value.kind(),
-                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
-                false,
-                true,
-            )?;
-            validate_bounded_text(
-                "reference target",
-                value.target(),
-                budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
-                false,
-                true,
-            )?;
-            budget.retain(value.retained_byte_len()?)?;
-        }
-        CanonicalValueInner::Record(fields) => {
-            validate_collection_len(fields.len(), budget.policy)?;
-            let mut names = BTreeSet::new();
-            for field in fields {
+    let mut work = vec![Work::Value(value, depth)];
+    while let Some(item) = work.pop() {
+        let (value, depth) = match item {
+            Work::Value(value, depth) => (value, depth),
+            Work::Record(fields, index, depth, mut names) => {
+                let Some(field) = fields.get(index) else {
+                    continue;
+                };
                 validate_bounded_text(
                     "field name",
                     field.name.as_str(),
@@ -907,18 +1032,95 @@ fn validate_value(
                     });
                 }
                 budget.retain(field.name.as_str().len())?;
-                validate_value(&field.value, depth + 1, budget)?;
+                work.push(Work::Record(fields, index + 1, depth, names));
+                work.push(Work::Value(&field.value, depth + 1));
+                continue;
             }
+        };
+        let maximum = budget.policy.maximum(MAX_CANONICAL_DEPTH);
+        if depth > maximum {
+            return Err(ValueBuildError::DepthExceeded {
+                maximum,
+                actual: depth,
+            });
         }
-        CanonicalValueInner::Sequence(values) => {
-            validate_collection_len(values.len(), budget.policy)?;
-            for child in values {
-                validate_value(child, depth + 1, budget)?;
+        budget.add_node()?;
+        match &value.inner {
+            CanonicalValueInner::Null | CanonicalValueInner::Bool(_) => {}
+            CanonicalValueInner::Integer(value) => {
+                validate_bounded_text(
+                    "canonical integer",
+                    value.as_str(),
+                    budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                    false,
+                    true,
+                )?;
+                budget.retain(value.as_str().len())?;
             }
-        }
-        CanonicalValueInner::Binary(asset) => budget.retain(asset.retained_byte_len())?,
-        CanonicalValueInner::AssetReference(reference) => {
-            budget.retain(reference.retained_byte_len())?
+            CanonicalValueInner::Decimal(value) => {
+                validate_bounded_text(
+                    "canonical decimal",
+                    value.as_str(),
+                    budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                    false,
+                    true,
+                )?;
+                budget.retain(value.as_str().len())?;
+            }
+            CanonicalValueInner::Text(value) => {
+                validate_bounded_text(
+                    "canonical text",
+                    value.as_str(),
+                    budget.policy.maximum(MAX_CANONICAL_TEXT_BYTES),
+                    true,
+                    false,
+                )?;
+                budget.retain(value.as_str().len())?;
+            }
+            CanonicalValueInner::EnumToken(value) => {
+                validate_bounded_text(
+                    "enum token",
+                    value.as_str(),
+                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    false,
+                    true,
+                )?;
+                budget.retain(value.as_str().len())?;
+            }
+            CanonicalValueInner::Reference(value) => {
+                validate_bounded_text(
+                    "enum token",
+                    value.kind(),
+                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    false,
+                    true,
+                )?;
+                validate_bounded_text(
+                    "reference target",
+                    value.target(),
+                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    false,
+                    true,
+                )?;
+                budget.retain(value.retained_byte_len()?)?;
+            }
+            CanonicalValueInner::Record(fields) => {
+                validate_collection_len(fields.len(), budget.policy)?;
+                work.push(Work::Record(fields, 0, depth, BTreeSet::new()));
+            }
+            CanonicalValueInner::Sequence(values) => {
+                validate_collection_len(values.len(), budget.policy)?;
+                work.extend(
+                    values
+                        .iter()
+                        .rev()
+                        .map(|child| Work::Value(child, depth + 1)),
+                );
+            }
+            CanonicalValueInner::Binary(asset) => budget.retain(asset.retained_byte_len())?,
+            CanonicalValueInner::AssetReference(reference) => {
+                budget.retain(reference.retained_byte_len())?
+            }
         }
     }
     Ok(())
@@ -1307,6 +1509,38 @@ impl<'de> Deserialize<'de> for CanonicalField {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn deep_source_values_have_iterative_lifecycle_and_keep_bounded_wire() {
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(|| {
+                let source = SourceOperationPolicy::Source;
+                let mut value = CanonicalValue::text(CanonicalText::new("leaf").unwrap());
+                for depth in 0..2048 {
+                    value = if depth % 2 == 0 {
+                        CanonicalValue::sequence_with_policy(vec![value], source).unwrap()
+                    } else {
+                        CanonicalValue::record_with_policy(
+                            vec![CanonicalField::named("field", value).unwrap()],
+                            source,
+                        )
+                        .unwrap()
+                    };
+                }
+                assert_eq!(value.retained_byte_len(), 4 + 1024 * 5);
+                let copy = value.clone();
+                assert_eq!(value, copy);
+                assert!(!format!("{value:?}").is_empty());
+                // Public serde is the existing bounded wire API, independent
+                // of the source XML writer. It must fail before recursive calls.
+                assert!(serde_json::to_vec(&value).is_err());
+                assert!(CanonicalValue::sequence(vec![copy]).is_err());
+                drop(value);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
     use super::*;
 
     fn integer(value: &str) -> CanonicalValue {
