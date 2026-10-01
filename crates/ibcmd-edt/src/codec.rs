@@ -1179,7 +1179,9 @@ mod tests {
         use morph1c_core::ir::{FieldId, FormBody, FormControlKind, FormItem, PropertyValue};
         let mut form = FormBody::new();
         let mut group = FormItem::new(FormControlKind::new("ColumnGroup"), "Column", 1);
-        group.ext_info.push((FieldId(181), PropertyValue::Bool(true)));
+        group
+            .ext_info
+            .push((FieldId(181), PropertyValue::Bool(true)));
         form.items.push(group);
         let encoded = write_form(FormDialect::Edt, &form).unwrap();
         let text = std::str::from_utf8(&encoded).unwrap();
