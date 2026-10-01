@@ -108,6 +108,92 @@ class EvidenceControls(unittest.TestCase):
             self.assertEqual(report["stage"]["error_count"], 0)
             self.assertTrue(oracle.has_error_diagnostics(report.values()))
 
+    def native_capture_fixture(self, root):
+        baseline = {"root": str(root / "authentic-edt-xml"), "tree_sha256": "source-hash",
+                    "file_count": 1, "files": [{"path": "Configuration.xml", "sha256": "source-file"}]}
+        reference = root / "native-xml"
+        current = {"root": str(reference), "tree_sha256": "reference-hash", "file_count": 2,
+                   "files": [{"path": "Configuration.xml", "sha256": "native-file"},
+                             {"path": "ConfigDumpInfo.xml", "sha256": "cdi"}]}
+        native = root / "ibcmd.exe"
+        native.write_bytes(b"dummy fixture executable; never launched")
+        source = root / "harness-source.py"
+        source.write_bytes(b"dummy fixture harness; never launched")
+        database, build = "ibcmd_rs_04_edt07_test", "8.5.1.1150"
+        invocation = {"database": database, "native_build": build, "input": baseline["root"],
+                      "ibcmd": str(native), "harness_sha256": oracle.digest(source),
+                      "restore_script": str(root / "restore-clone.ps1")}
+        result = {"status": "CAPTURED", "input_unchanged": True, "database": database,
+                  "native_build": build, "reference": str(reference),
+                  "reference_sha256": current["tree_sha256"], "executable_sha256": oracle.digest(native)}
+        for name, data in (("result.json", result), ("invocation.json", invocation),
+                           ("input-before.json", baseline), ("input-after.json", baseline),
+                           ("native-reference.json", current)):
+            oracle.write_json(root / name, data)
+        (root / "native-version.stdout").write_bytes(build.encode())
+        operations = {"native-version": ["--version"], "native-create": ["infobase", "create"],
+                      "native-import": ["infobase", "config", "import"],
+                      "native-apply": ["infobase", "config", "apply"],
+                      "native-export": ["infobase", "config", "export"]}
+        for label, operation in operations.items():
+            argv = [str(native), *operation]
+            if label != "native-version":
+                argv.extend([f"--db-name={database}", "--dbms=MSSQLServer", "--db-server=localhost",
+                             f"--data={root / 'ibdata'}"])
+            if label == "native-import":
+                argv.append(baseline["root"])
+            if label == "native-export":
+                argv.append(str(reference))
+            oracle.write_json(root / f"{label}.command.json", {"exit_code": 0, "argv": argv})
+        oracle.write_json(root / "fresh-database.command.json", {"exit_code": 0,
+            "argv": ["pwsh", "-File", invocation["restore_script"], "-Corpus", "empty",
+                     "-Name", database, "-Track", "edt-native"]})
+        return reference, baseline, build, current
+
+    def test_arbitrary_reference_directory_without_native_capture_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with self.assertRaises(FileNotFoundError):
+                oracle.validate_native_reference(root / "native-xml", {}, "8.5.1.1150", {})
+
+    def test_complete_synthetic_binding_fixture_is_valid_structure_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            values = self.native_capture_fixture(Path(folder))
+            result = oracle.validate_native_reference(*values)
+            self.assertEqual(result["source_edt_xml_tree_sha256"], "source-hash")
+            self.assertEqual(len(result["command_evidence_sha256"]), 6)
+
+    def test_native_reference_wrong_input_failed_command_version_and_manifest_rejected(self):
+        for corruption in ("input", "command", "version", "manifest", "database", "executable"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                values = self.native_capture_fixture(root)
+                # This synthetic proof only exercises binding validation; it is
+                # never passed to the actual accept entry point or native tools.
+                if corruption == "input":
+                    path = root / "input-before.json"
+                    data = json.loads(path.read_text()); data["tree_sha256"] = "another-source"
+                elif corruption == "command":
+                    path = root / "native-apply.command.json"
+                    data = json.loads(path.read_text()); data["exit_code"] = 7
+                elif corruption == "version":
+                    (root / "native-version.stdout").write_bytes(b"8.5.1.11500")
+                    path = None
+                elif corruption == "manifest":
+                    path = root / "native-reference.json"
+                    data = json.loads(path.read_text()); data["files"] = []
+                elif corruption == "database":
+                    path = root / "native-import.command.json"
+                    data = json.loads(path.read_text())
+                    data["argv"] = [part.replace("ibcmd_rs_04_edt07_test", "some_user_db") for part in data["argv"]]
+                else:
+                    (root / "ibcmd.exe").write_bytes(b"changed")
+                    path = None
+                if path:
+                    path.write_text(json.dumps(data))
+                with self.assertRaises(oracle.OracleError):
+                    oracle.validate_native_reference(*values)
+
 
 if __name__ == "__main__":
     unittest.main()

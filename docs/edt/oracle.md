@@ -37,15 +37,19 @@ Acceptance additionally requires `--reference`: a fresh native export after
 loading this authentic EDT project's exported XML into a disposable native
 infobase. Its creation is a separate laboratory operation with native import,
 apply, export, database ownership and cleanup evidence. This harness does not
-create or modify a database. Comparing only the pre-EDT original XML would mix
+create or modify a database. `accept` binds the adjacent `native_reference.py`
+capture's successful result, every required command, exact build/version output,
+executable and harness hashes, input-before/after manifests and current exported
+tree. A copied XML directory without this native command chain is rejected.
+Comparing only the pre-EDT original XML would mix
 EDT's own materialization of defaults/order with converter errors.
 
 `accept` checks those captured inputs again and uses the exact candidate binary
 for two independent directions:
 
-1. Authentic EDT, with no ibcmd-rs provenance, в†’ our XML.
-2. Native XML в†’ our EDT в†’ a disposable complete project copy with the entire
-   `.ibcmd-provenance` directory removed в†’ installed EDT XML export. The harness
+1. Authentic EDT, with no ibcmd-rs provenance, -> our XML.
+2. Native XML -> our EDT -> a disposable complete project copy with the entire
+   `.ibcmd-provenance` directory removed -> installed EDT XML export. The harness
    does not add missing project scaffolding or restore cached native XML.
 
 Both results enter existing `source-three-way-oracle`, together with native XML
@@ -82,11 +86,19 @@ python scripts/edt-lab/oracle.py prepare `
   --native-tool-version 8.5.1.1150 --edt-exe $edt --edt-version 2025.2.3 --edt-build 2025.2.3.30 `
   --run F:\ibcmd\lab\07\oracle-bsp85-example --lock-script $lock
 
+python scripts/edt-lab/native_reference.py `
+  --input F:\ibcmd\lab\07\oracle-bsp85-example\edt-native-xml `
+  --run F:\ibcmd\lab\07\native-reference-bsp85-example `
+  --database ibcmd_rs_04_edt07_bsp85_example `
+  --ibcmd 'C:\Program Files\1cv8\8.5.1.1150\bin\ibcmd.exe' `
+  --native-build 8.5.1.1150 `
+  --restore-script F:\ibcmd\lab\04\tools\restore-clone.ps1 --lock-script $lock
+
 python scripts/edt-lab/oracle.py accept `
   --native $native --source-version 2.21 --runtime 8.5.1 `
   --native-tool-version 8.5.1.1150 --edt-exe $edt --edt-version 2025.2.3 --edt-build 2025.2.3.30 `
   --prepared F:\ibcmd\lab\07\oracle-bsp85-example `
-  --reference F:\ibcmd\lab\07\native-after-edt-bsp85\native `
+  --reference F:\ibcmd\lab\07\native-reference-bsp85-example\native-xml `
   --ours-exe F:\ibcmd\lab\07\target-root\debug\ibcmd-rs.exe `
   --run F:\ibcmd\lab\07\accept-bsp85-example --lock-script $lock
 ```

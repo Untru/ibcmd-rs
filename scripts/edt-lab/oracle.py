@@ -285,6 +285,84 @@ def validate_raw_report(path: Path) -> dict:
                 "different_rows": sum(row["agreement"] != "all_equal" for row in configuration)}}
 
 
+def validate_native_reference(reference: Path, baseline: dict, native_build: str,
+                              current_reference: dict) -> dict:
+    """Bind the native branch to the completed fresh-DB capture, not a copied tree."""
+    capture = reference.parent
+    no_links(capture)
+    def evidence(name):
+        path = capture / name
+        no_links(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(data, dict):
+            raise OracleError(f"Native reference evidence must be an object: {name}")
+        return data
+    result = evidence("result.json")
+    invocation = evidence("invocation.json")
+    if result.get("status") != "CAPTURED" or result.get("input_unchanged") is not True:
+        raise OracleError("Native reference capture did not complete")
+    database = result.get("database", "")
+    if not re.fullmatch(r"ibcmd_rs_04_edt07_[a-z0-9_]+", database) \
+            or invocation.get("database") != database:
+        raise OracleError("Native reference is not a fresh database owned by the EDT lab")
+    if result.get("native_build") != native_build or invocation.get("native_build") != native_build:
+        raise OracleError("Native reference exact build mismatch")
+    if Path(result["reference"]).absolute() != reference or result["reference_sha256"] != current_reference["tree_sha256"]:
+        raise OracleError("Native reference result belongs to another output")
+    if evidence("input-before.json") != baseline or evidence("input-after.json") != baseline \
+            or Path(invocation["input"]).absolute() != Path(baseline["root"]):
+        raise OracleError("Native reference was not loaded from this exact installed-EDT XML export")
+    if evidence("native-reference.json") != current_reference:
+        raise OracleError("Native export manifest does not match the current reference")
+    source = capture / "harness-source.py"
+    if invocation["harness_sha256"] != digest(source):
+        raise OracleError("Native reference harness evidence changed")
+    native = Path(invocation["ibcmd"])
+    no_links(native)
+    if native.name.casefold() != "ibcmd.exe" or digest(native) != result["executable_sha256"]:
+        raise OracleError("Native reference executable identity changed")
+    if (capture / "native-version.stdout").read_bytes().decode("utf-8").strip() != native_build:
+        raise OracleError("Native reference actual version output mismatches its declared build")
+    operations = {
+        "native-version": ["--version"],
+        "native-create": ["infobase", "create"],
+        "native-import": ["infobase", "config", "import"],
+        "native-apply": ["infobase", "config", "apply"],
+        "native-export": ["infobase", "config", "export"],
+    }
+    commands = {}
+    for label in ["fresh-database", *operations]:
+        record = evidence(f"{label}.command.json")
+        if record.get("exit_code") != 0 or record.get("timeout") or record.get("timeout_or_log_limit"):
+            raise OracleError(f"Native reference required command failed: {label}")
+        argv = record["argv"]
+        if label == "fresh-database":
+            helper = Path(invocation["restore_script"])
+            if "-File" not in argv or argv.index("-File") + 1 >= len(argv) \
+                    or Path(argv[argv.index("-File") + 1]) != helper:
+                raise OracleError("Native reference used a different fresh-database helper")
+            for flag, expected in (("-Corpus", "empty"), ("-Name", database), ("-Track", "edt-native")):
+                if flag not in argv or argv.index(flag) + 1 >= len(argv) or argv[argv.index(flag) + 1] != expected:
+                    raise OracleError("Native reference fresh-database ownership command mismatch")
+        else:
+            if Path(argv[0]) != native or argv[1:1 + len(operations[label])] != operations[label]:
+                raise OracleError(f"Native reference command identity mismatch: {label}")
+            if label != "native-version" and f"--db-name={database}" not in argv:
+                raise OracleError(f"Native reference command targets another database: {label}")
+            if label != "native-version" and any(flag not in argv for flag in (
+                    "--dbms=MSSQLServer", "--db-server=localhost", f"--data={capture / 'ibdata'}")):
+                raise OracleError(f"Native reference command targets another server/cache: {label}")
+            if label == "native-import" and str(Path(baseline["root"])) not in argv:
+                raise OracleError("Native import command did not use this exact EDT export")
+            if label == "native-export" and str(reference) not in argv:
+                raise OracleError("Native export command did not create this reference")
+        commands[label] = digest(capture / f"{label}.command.json")
+    return {"capture": str(capture), "database": database, "native_build": native_build,
+            "result_sha256": digest(capture / "result.json"), "command_evidence_sha256": commands,
+            "source_edt_xml_tree_sha256": baseline["tree_sha256"],
+            "native_reference_tree_sha256": current_reference["tree_sha256"]}
+
+
 def accept(args, run: Path) -> None:
     if not args.prepared or not args.ours_exe or not args.reference:
         raise OracleError("accept requires --prepared, --ours-exe, and --reference captured after native loading of this EDT export")
@@ -318,6 +396,9 @@ def accept(args, run: Path) -> None:
         raise OracleError("Native reference must be an independent post-EDT native load/export capture")
     require_xml(reference)
     reference_before = snapshot(reference)
+    reference_binding = validate_native_reference(reference, baseline_before,
+                                                 args.native_tool_version, reference_before)
+    write_json(run / "native-reference-binding.json", reference_binding)
     write_json(run / "native-post-edt-reference.json", reference_before)
     write_json(run / "native-before.json", native_before)
     write_json(run / "authentic-project-before.json", project_before)
@@ -450,7 +531,7 @@ def main() -> int:
             if args.mode == "prepare" else "PASS"
         print(f"{status}: {args.run}", flush=True)
         return 0
-    except (OracleError, OSError, ValueError, subprocess.SubprocessError) as error:
+    except (OracleError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:
         if created and args.run.is_dir() and not (args.run / "failure.json").exists():
             write_json(args.run / "failure.json", {"status": "FAIL", "error": str(error)})
         print(f"FAIL: {error}", file=sys.stderr, flush=True)
