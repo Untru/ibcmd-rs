@@ -112,11 +112,18 @@ pub(super) fn convert(
         })?;
         // The complete immutable snapshot was already validated. Load only
         // metadata envelopes for the explicit CLI profile, one file at a time.
+        let mut descriptor_failure_path = None;
         tree.visit_xml_descriptors(|path, bytes| -> Result<(), String> {
-            let document =
-                XmlReader::from_slice(bytes).map_err(|error| format!("{path}: {error}"))?;
-            validate_dialect(&document, &dialects, &source.id)
-                .map_err(|message| format!("{path}: {message}"))
+            let validation = XmlReader::from_slice(bytes)
+                .map_err(|error| format!("{path}: {error}"))
+                .and_then(|document| {
+                    validate_dialect(&document, &dialects, &source.id)
+                        .map_err(|message| format!("{path}: {message}"))
+                });
+            if validation.is_err() {
+                descriptor_failure_path = Some(path.to_owned());
+            }
+            validation
         })
         .map_err(|error| {
             failure(
@@ -124,7 +131,9 @@ pub(super) fn convert(
                 PHASE_DECODE,
                 "conversion.xml-source-profile-mismatch",
                 error.to_string(),
-                Some(display_path(&args.input)),
+                descriptor_failure_path
+                    .take()
+                    .or_else(|| Some(display_path(&args.input))),
             )
         })?;
         report.mark(PHASE_DECODE, ConversionPhaseStatus::Completed);
