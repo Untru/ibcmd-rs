@@ -614,7 +614,8 @@ fn genuine_sdk_parameter_defaults_and_field_order_are_independently_witnessed() 
     }
     assert_eq!(params, 28);
     assert_eq!(explicit_false, 24);
-    let rel = "DataProcessors/МониторСверкиВзаиморасчетов/Forms/ДокументыНеПолученныеПоЭДО/Form.form";
+    let rel =
+        "DataProcessors/МониторСверкиВзаиморасчетов/Forms/ДокументыНеПолученныеПоЭДО/Form.form";
     let original = std::fs::read(
         lab.join("oracle-uha83-r1/authentic-workspace/OracleConfiguration/src")
             .join(rel),
