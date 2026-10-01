@@ -56,13 +56,23 @@ claiming an error-free configuration. Ambient workspace diagnostics require
 precise empty-project control evidence and a matching differential; unknown
 or new errors remain failures.
 
-The measured UH native source has 140,709 files, 130,638 directories, 9.59 GB
-of bytes and a 127.57 MB maximum file. Source inventories have independent hard
-bounds of 524,288 files/directories, 256 MiB per file and 32 GiB aggregate
-(including reversible source preservation). Ordinary reader defaults stay at
-65,536 files/directories, 32 MiB per file and 256 MiB total. EDT routes opt into
-the larger explicit bounds. Inline canonical assets remain capped at 32 MiB;
-external digest/length references may identify source files up to 256 MiB.
+Valid configurations must convert in both directions without arbitrary
+configuration-size or XML-event-count exclusions. Streaming XML validation
+shares the strict lexical/document parser but retains only ancestor state;
+source-asset inventory and root dispatch must not build a body DOM. MXL SDK
+projection processes qualified localized-content leaves in a single pass and
+preserves other bytes, including binary payloads and structural whitespace.
+Its iterative codec must not inherit recursive metadata depth/node ceilings.
+
+Resource policy is distinct from format support. Complete source trees and
+large assets need scalable storage and external digest/length references;
+fixed in-memory source-file, inventory-count and aggregate-byte ceilings are
+implementation gaps to remove, not acceptance exceptions. Ordinary bounded
+reader policies and adversarial path/XML protections remain explicit. Raising
+a magic constant does not complete the scalable-storage requirement. Preserve
+atomic publication and stale-provenance protection when adding disk-backed
+storage, and report actual resource exhaustion without classifying a valid
+configuration as unsupported because of its size.
 
 Assess useful morph1c knowledge for other milestones in a separate documented
 matrix, without silently expanding this implementation's scope.

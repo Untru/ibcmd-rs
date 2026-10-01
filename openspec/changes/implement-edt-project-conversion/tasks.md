@@ -7,3 +7,4 @@
 - [x] 7. Record morph1c applicability to other milestones with concrete source links and limitations.
 - [ ] 8. Independently review implementation and acceptance, repair findings, run appropriate offline/security/architecture gates.
 - [ ] 9. Publish reviewable PR with version scope, evidence and honest issue statuses; complete all four issues only after acceptance.
+- [ ] 10. Remove arbitrary valid-configuration size exclusions with streaming asset codecs and scalable source storage; verify both directions on real large UH assets and complete corpora without accepting a size refusal as completion.
