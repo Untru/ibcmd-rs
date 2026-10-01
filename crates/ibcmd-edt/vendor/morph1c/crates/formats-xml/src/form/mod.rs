@@ -29,8 +29,13 @@ pub(crate) use fields::{
 };
 mod mxlx;
 mod picture_defaults;
+mod picture_semantics;
 mod pictures;
 pub use picture_defaults::resolve_common_picture_transparency;
+pub use picture_semantics::{
+    PICTURE_SEMANTICS_RESOURCE, bind_picture_semantics, picture_semantics_resource_count,
+    project_picture_semantics, read_picture_semantics_resource, same_picture_semantics_resource,
+};
 mod projection;
 mod read;
 mod tables;

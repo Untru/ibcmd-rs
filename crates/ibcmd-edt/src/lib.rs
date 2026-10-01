@@ -9,7 +9,15 @@ use std::path::Path;
 
 mod bounded;
 mod codec;
+mod directory;
+mod disk;
+mod extensions;
 mod provenance;
+
+pub use directory::{
+    DirectoryConversion, DirectoryFileAccounting, DirectorySource, read_directory_project,
+    read_directory_source,
+};
 
 #[derive(Clone, Debug)]
 pub struct ConversionOptions {
@@ -69,11 +77,21 @@ pub struct FileAccounting {
     pub path: SourcePath,
     pub disposition: Disposition,
 }
+/// Explicit semantic resources used by this conversion. These capabilities
+/// describe adapter transport; they do not claim the installed EDT model stores
+/// the additional per-use values.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SourceExtensionUse {
+    pub id: &'static str,
+    pub resources: usize,
+    pub references: usize,
+}
 #[derive(Debug)]
 pub struct Conversion {
     pub tree: SourceTree,
     pub canonical: CanonicalConfiguration,
     pub accounting: Vec<FileAccounting>,
+    pub extensions: Vec<SourceExtensionUse>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

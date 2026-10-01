@@ -23,4 +23,6 @@ morph1c-core = { path = "../core" }
 # byte-exact WRITE path does NOT use a generic XML writer (those do not round-trip
 # indent/EOL/attr-order/escaping); it is a small structured emitter in `emit.rs`.
 quick-xml = "0.36"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 

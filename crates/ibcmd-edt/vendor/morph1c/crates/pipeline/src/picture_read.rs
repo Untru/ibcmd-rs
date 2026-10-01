@@ -545,7 +545,12 @@ pub(crate) fn resolve_form_picture_transparency(
         edt: bool,
     ) -> Result<(), ConvertError> {
         for object in objects {
-            for form in &mut object.form_bodies {
+            let declared: Vec<_> = object
+                .form_bodies
+                .iter()
+                .map(|form| crate::form_read::declared_form_uuid(object, &form.name))
+                .collect::<Result<_, _>>()?;
+            for (form, uuid) in object.form_bodies.iter_mut().zip(declared) {
                 if form.ordinary_body.is_none() {
                     formats_xml::form::resolve_common_picture_transparency(
                         &mut form.body,
@@ -557,6 +562,13 @@ pub(crate) fn resolve_form_picture_transparency(
                         object: format!("{}.{}", object.name, form.name),
                         reason: error.to_string(),
                     })?;
+                    formats_xml::form::bind_picture_semantics(&mut form.body, uuid, edt).map_err(
+                        |error| ConvertError::Read {
+                            kind: object.kind.as_str().into(),
+                            object: format!("{}.{}", object.name, form.name),
+                            reason: error.to_string(),
+                        },
+                    )?;
                 }
             }
             bind(&mut object.children, defaults, edt)?;

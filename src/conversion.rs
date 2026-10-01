@@ -136,6 +136,13 @@ pub struct EdtFileAccounting {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct EdtSourceExtensionReport {
+    pub id: &'static str,
+    pub resources: usize,
+    pub references: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct EdtConversionReport {
     pub edt_version: String,
     pub xml_dialect: String,
@@ -144,6 +151,8 @@ pub struct EdtConversionReport {
     pub canonical_retained_bytes: usize,
     pub asset_references: usize,
     pub referenced_asset_bytes: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<EdtSourceExtensionReport>,
     pub files: Vec<EdtFileAccounting>,
 }
 

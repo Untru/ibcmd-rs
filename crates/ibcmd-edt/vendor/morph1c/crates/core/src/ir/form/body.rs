@@ -60,6 +60,13 @@ pub struct FormCiItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormBody {
+    /// Typed semantic carrier for per-use reference flags/pixels; included in fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub picture_semantics: Option<FormPictureSemantics>,
+    /// Transport layout only: validated bindings selected by an input resource.
+    /// Current Ref/BOOL/pixel values always come from the typed body.
+    #[serde(skip)]
+    pub picture_resource_selection: Option<Vec<PictureSemanticBinding>>,
     /// Closed property-slot source ordering only, never source values or semantic arrays.
     /// The adapter populates this facet after the entire typed descriptor is claimed.
     #[serde(skip)]
@@ -412,6 +419,8 @@ impl FormBody {
     /// Создать пустое тело формы.
     pub fn new() -> Self {
         FormBody {
+            picture_semantics: None,
+            picture_resource_selection: None,
             source_wire_order: None,
             designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
             common_picture_transparency: std::collections::BTreeMap::new(),

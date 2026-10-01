@@ -25,7 +25,7 @@ pub(crate) fn large_limits() -> ReaderLimits {
     }
 }
 
-fn options(o: &ConversionOptions) -> Result<FormatVersion, EdtError> {
+pub(crate) fn options(o: &ConversionOptions) -> Result<FormatVersion, EdtError> {
     if o.edt_version != "2025.2.3" && o.edt_version != "2025.2.3+30" {
         return Err(EdtError::new(format!(
             "unsupported explicit EDT version {}",
@@ -41,7 +41,7 @@ fn options(o: &ConversionOptions) -> Result<FormatVersion, EdtError> {
         ))),
     }
 }
-fn runtime_format(value: &str) -> Result<FormatVersion, EdtError> {
+pub(crate) fn runtime_format(value: &str) -> Result<FormatVersion, EdtError> {
     let parts = value.split('.').collect::<Vec<_>>();
     if !(parts.len() == 3 || parts.len() == 4)
         || parts
@@ -64,7 +64,14 @@ fn project_version(
         .iter()
         .find(|e| e.path().as_str() == "DT-INF/PROJECT.PMF")
         .ok_or_else(|| EdtError::new("PROJECT.PMF missing"))?;
-    let text = std::str::from_utf8(entry.bytes()).map_err(EdtError::source)?;
+    project_version_bytes(entry.bytes(), o, v)
+}
+pub(crate) fn project_version_bytes(
+    bytes: &[u8],
+    o: &ConversionOptions,
+    v: FormatVersion,
+) -> Result<(), EdtError> {
+    let text = std::str::from_utf8(bytes).map_err(EdtError::source)?;
     let mut manifest_seen = false;
     for line in text.lines().filter(|l| !l.trim().is_empty()) {
         if line == "Manifest-Version: 1.0" && !manifest_seen {
@@ -105,187 +112,210 @@ fn project_version(
 
 fn validate_controls(tree: &SourceTree) -> Result<(), EdtError> {
     for e in tree.entries() {
-        match e.path().as_str() {
-            ".settings/org.eclipse.core.resources.prefs" => {
-                let text = std::str::from_utf8(e.bytes()).map_err(EdtError::source)?;
-                let lines = text.lines().filter(|l| !l.is_empty()).collect::<Vec<_>>();
-                if lines.len() != 2
-                    || !lines.contains(&"eclipse.preferences.version=1")
-                    || !lines.contains(&"encoding/<project>=UTF-8")
-                {
+        validate_control(e.path().as_str(), e.bytes())?;
+    }
+    Ok(())
+}
+pub(crate) fn validate_control(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
+    match path {
+        ".settings/org.eclipse.core.resources.prefs" => {
+            let text = std::str::from_utf8(bytes).map_err(EdtError::source)?;
+            let lines = text.lines().filter(|l| !l.is_empty()).collect::<Vec<_>>();
+            if lines.len() != 2
+                || !lines.contains(&"eclipse.preferences.version=1")
+                || !lines.contains(&"encoding/<project>=UTF-8")
+            {
+                return Err(EdtError::new(
+                    "unsupported Eclipse project encoding/settings",
+                ));
+            }
+        }
+        ".project" => {
+            let doc = ibcmd_xml::XmlReader::from_slice(bytes).map_err(EdtError::source)?;
+            // Eclipse controls use unqualified element names and no attributes,
+            // including namespace declarations. Do not consume a qualified
+            // lookalike by its local name and silently discard its namespace.
+            let mut pending = vec![doc.root()];
+            while let Some(element) = pending.pop() {
+                if element.name().prefix().is_some() || !element.attributes().is_empty() {
                     return Err(EdtError::new(
-                        "unsupported Eclipse project encoding/settings",
+                        "unexpected qualified Eclipse project control or attributes",
+                    ));
+                }
+                pending.extend(element.children().iter().filter_map(|node| match node {
+                    ibcmd_xml::XmlNode::Element(child) => Some(child),
+                    _ => None,
+                }));
+            }
+            for node in doc.before_root().iter().chain(doc.after_root()) {
+                if !matches!(node,ibcmd_xml::XmlNode::Text(t) if t.value().trim().is_empty()) {
+                    return Err(EdtError::new(
+                        "unmapped Eclipse project prolog/epilog content",
                     ));
                 }
             }
-            ".project" => {
-                let doc = ibcmd_xml::XmlReader::from_slice(e.bytes()).map_err(EdtError::source)?;
-                for node in doc.before_root().iter().chain(doc.after_root()) {
-                    if !matches!(node,ibcmd_xml::XmlNode::Text(t) if t.value().trim().is_empty()) {
-                        return Err(EdtError::new(
-                            "unmapped Eclipse project prolog/epilog content",
-                        ));
+            fn elements(
+                e: &ibcmd_xml::XmlElement,
+            ) -> Result<Vec<&ibcmd_xml::XmlElement>, EdtError> {
+                if !e.attributes().is_empty() {
+                    return Err(EdtError::new("unexpected Eclipse project attributes"));
+                }
+                let mut out = Vec::new();
+                for node in e.children() {
+                    match node {
+                        ibcmd_xml::XmlNode::Element(child) => out.push(child),
+                        ibcmd_xml::XmlNode::Text(t) if t.value().trim().is_empty() => {}
+                        _ => return Err(EdtError::new("unexpected Eclipse project content")),
                     }
                 }
-                fn elements(
-                    e: &ibcmd_xml::XmlElement,
-                ) -> Result<Vec<&ibcmd_xml::XmlElement>, EdtError> {
-                    if !e.attributes().is_empty() {
-                        return Err(EdtError::new("unexpected Eclipse project attributes"));
+                Ok(out)
+            }
+            fn text(e: &ibcmd_xml::XmlElement) -> Result<String, EdtError> {
+                if !e.attributes().is_empty() {
+                    return Err(EdtError::new("unexpected Eclipse project value attributes"));
+                }
+                let mut out = String::new();
+                for n in e.children() {
+                    if let ibcmd_xml::XmlNode::Text(t) = n {
+                        out.push_str(t.value());
+                    } else {
+                        return Err(EdtError::new("unexpected Eclipse project value"));
                     }
-                    let mut out = Vec::new();
-                    for node in e.children() {
-                        match node {
-                            ibcmd_xml::XmlNode::Element(child) => out.push(child),
-                            ibcmd_xml::XmlNode::Text(t) if t.value().trim().is_empty() => {}
-                            _ => return Err(EdtError::new("unexpected Eclipse project content")),
+                }
+                Ok(out)
+            }
+            if doc.root().name().local() != "projectDescription" {
+                return Err(EdtError::new("unexpected Eclipse project root"));
+            }
+            let mut fields = BTreeSet::new();
+            for field in elements(doc.root())? {
+                let name = field.name().local();
+                if !fields.insert(name) {
+                    return Err(EdtError::new("duplicate Eclipse project control field"));
+                }
+                match name {
+                    "name" => {
+                        let value = text(field)?;
+                        if value.is_empty() {
+                            return Err(EdtError::new("empty Eclipse project name"));
+                        }
+                        bounded::component(&value)?;
+                    }
+                    "comment" => {
+                        if !text(field)?.trim().is_empty() {
+                            return Err(EdtError::new(
+                                "project comment cannot be represented in configuration XML",
+                            ));
                         }
                     }
-                    Ok(out)
-                }
-                fn text(e: &ibcmd_xml::XmlElement) -> Result<String, EdtError> {
-                    if !e.attributes().is_empty() {
-                        return Err(EdtError::new("unexpected Eclipse project value attributes"));
-                    }
-                    let mut out = String::new();
-                    for n in e.children() {
-                        if let ibcmd_xml::XmlNode::Text(t) = n {
-                            out.push_str(t.value());
-                        } else {
-                            return Err(EdtError::new("unexpected Eclipse project value"));
+                    "projects" => {
+                        if !elements(field)?.is_empty() {
+                            return Err(EdtError::new(
+                                "referenced Eclipse projects require explicit support",
+                            ));
                         }
                     }
-                    Ok(out)
-                }
-                if doc.root().name().local() != "projectDescription" {
-                    return Err(EdtError::new("unexpected Eclipse project root"));
-                }
-                let mut fields = BTreeSet::new();
-                for field in elements(doc.root())? {
-                    let name = field.name().local();
-                    if !fields.insert(name) {
-                        return Err(EdtError::new("duplicate Eclipse project control field"));
-                    }
-                    match name {
-                        "name" => {
-                            let value = text(field)?;
-                            if value.is_empty() {
-                                return Err(EdtError::new("empty Eclipse project name"));
+                    "buildSpec" => {
+                        let mut commands = BTreeSet::new();
+                        for command in elements(field)? {
+                            if command.name().local() != "buildCommand" {
+                                return Err(EdtError::new("unexpected Eclipse builder"));
                             }
-                            bounded::component(&value)?;
-                        }
-                        "comment" => {
-                            if !text(field)?.trim().is_empty() {
-                                return Err(EdtError::new(
-                                    "project comment cannot be represented in configuration XML",
-                                ));
-                            }
-                        }
-                        "projects" => {
-                            if !elements(field)?.is_empty() {
-                                return Err(EdtError::new(
-                                    "referenced Eclipse projects require explicit support",
-                                ));
-                            }
-                        }
-                        "buildSpec" => {
-                            let mut commands = BTreeSet::new();
-                            for command in elements(field)? {
-                                if command.name().local() != "buildCommand" {
-                                    return Err(EdtError::new("unexpected Eclipse builder"));
-                                }
-                                let mut command_name = None;
-                                let mut arguments = false;
-                                for value in elements(command)? {
-                                    match value.name().local() {
-                                        "name" if command_name.is_none() => {
-                                            command_name = Some(text(value)?)
-                                        }
-                                        "arguments" if !arguments => {
-                                            arguments = true;
-                                            if !elements(value)?.is_empty() {
-                                                return Err(EdtError::new(
-                                                    "custom Eclipse builder arguments are unsupported",
-                                                ));
-                                            }
-                                        }
-                                        _ => {
+                            let mut command_name = None;
+                            let mut arguments = false;
+                            for value in elements(command)? {
+                                match value.name().local() {
+                                    "name" if command_name.is_none() => {
+                                        command_name = Some(text(value)?)
+                                    }
+                                    "arguments" if !arguments => {
+                                        arguments = true;
+                                        if !elements(value)?.is_empty() {
                                             return Err(EdtError::new(
-                                                "unexpected Eclipse builder field",
+                                                "custom Eclipse builder arguments are unsupported",
                                             ));
                                         }
                                     }
-                                }
-                                if !commands.insert(
-                                    command_name
-                                        .ok_or_else(|| EdtError::new("missing builder name"))?,
-                                ) {
-                                    return Err(EdtError::new("duplicate Eclipse builder"));
+                                    _ => {
+                                        return Err(EdtError::new(
+                                            "unexpected Eclipse builder field",
+                                        ));
+                                    }
                                 }
                             }
-                            if commands
-                                != ["org.eclipse.xtext.ui.shared.xtextBuilder".to_string()]
-                                    .into_iter()
-                                    .collect()
-                                && commands
-                                    != [
-                                        "org.eclipse.xtext.ui.shared.xtextBuilder".to_string(),
-                                        "com.e1c.langtool.builder.translationBuilder".to_string(),
-                                    ]
-                                    .into_iter()
-                                    .collect()
-                            {
-                                return Err(EdtError::new("unsupported Eclipse builder set"));
+                            if !commands.insert(
+                                command_name
+                                    .ok_or_else(|| EdtError::new("missing builder name"))?,
+                            ) {
+                                return Err(EdtError::new("duplicate Eclipse builder"));
                             }
                         }
-                        "natures" => {
-                            let mut natures = BTreeSet::new();
-                            for nature in elements(field)? {
-                                if nature.name().local() != "nature" {
-                                    return Err(EdtError::new("unexpected Eclipse nature field"));
-                                }
-                                if !natures.insert(text(nature)?) {
-                                    return Err(EdtError::new("duplicate Eclipse nature"));
-                                }
-                            }
-                            if natures
+                        if commands
+                            != ["org.eclipse.xtext.ui.shared.xtextBuilder".to_string()]
+                                .into_iter()
+                                .collect()
+                            && commands
                                 != [
-                                    "org.eclipse.xtext.ui.shared.xtextNature".to_string(),
-                                    "com._1c.g5.v8.dt.core.V8ConfigurationNature".to_string(),
+                                    "org.eclipse.xtext.ui.shared.xtextBuilder".to_string(),
+                                    "com.e1c.langtool.builder.translationBuilder".to_string(),
                                 ]
                                 .into_iter()
                                 .collect()
-                                && natures
-                                    != [
-                                        "org.eclipse.xtext.ui.shared.xtextNature".to_string(),
-                                        "com._1c.g5.v8.dt.core.V8ConfigurationNature".to_string(),
-                                        "com.e1c.langtool.TranslatingNature".to_string(),
-                                    ]
-                                    .into_iter()
-                                    .collect()
-                            {
-                                return Err(EdtError::new("unsupported Eclipse project natures"));
+                        {
+                            return Err(EdtError::new("unsupported Eclipse builder set"));
+                        }
+                    }
+                    "natures" => {
+                        let mut natures = BTreeSet::new();
+                        for nature in elements(field)? {
+                            if nature.name().local() != "nature" {
+                                return Err(EdtError::new("unexpected Eclipse nature field"));
+                            }
+                            if !natures.insert(text(nature)?) {
+                                return Err(EdtError::new("duplicate Eclipse nature"));
                             }
                         }
-                        _ => return Err(EdtError::new("unknown Eclipse project control field")),
+                        if natures
+                            != [
+                                "org.eclipse.xtext.ui.shared.xtextNature".to_string(),
+                                "com._1c.g5.v8.dt.core.V8ConfigurationNature".to_string(),
+                            ]
+                            .into_iter()
+                            .collect()
+                            && natures
+                                != [
+                                    "org.eclipse.xtext.ui.shared.xtextNature".to_string(),
+                                    "com._1c.g5.v8.dt.core.V8ConfigurationNature".to_string(),
+                                    "com.e1c.langtool.TranslatingNature".to_string(),
+                                ]
+                                .into_iter()
+                                .collect()
+                        {
+                            return Err(EdtError::new("unsupported Eclipse project natures"));
+                        }
                     }
-                }
-                if !["name", "buildSpec", "natures"]
-                    .iter()
-                    .all(|name| fields.contains(name))
-                {
-                    return Err(EdtError::new("incomplete Eclipse project description"));
+                    _ => return Err(EdtError::new("unknown Eclipse project control field")),
                 }
             }
-            _ => {}
+            if !["name", "buildSpec", "natures"]
+                .iter()
+                .all(|name| fields.contains(name))
+            {
+                return Err(EdtError::new("incomplete Eclipse project description"));
+            }
         }
+        _ => {}
     }
     Ok(())
 }
 
 /// Stage only a validated, immutable snapshot. Borrowed readers never see the
 /// caller's directory or concurrent mutations. The private codec cannot publish.
-fn read_codec(format: Format, root: &Path, v: FormatVersion) -> Result<Configuration, EdtError> {
+pub(crate) fn read_codec(
+    format: Format,
+    root: &Path,
+    v: FormatVersion,
+) -> Result<Configuration, EdtError> {
     let run = || {
         let (mut config, skipped) =
             morph1c_pipeline::read_config(format, root, &ConvertOptions::default())
@@ -390,6 +420,63 @@ fn inventory_accounting(
     Ok(accounting)
 }
 
+fn project_controls(config: &Configuration, runtime: &str) -> Result<Vec<SourceEntry>, EdtError> {
+    let mut entries = Vec::new();
+    entries.push(
+        SourceEntry::from_bytes(
+            SourcePath::new("DT-INF/PROJECT.PMF").map_err(EdtError::source)?,
+            format!("Manifest-Version: 1.0\r\nRuntime-Version: {runtime}\r\n").into_bytes(),
+        )
+        .map_err(EdtError::source)?,
+    );
+    let root = config
+        .objects
+        .iter()
+        .find(|object| object.kind.as_str() == "Configuration")
+        .ok_or_else(|| EdtError::new("no Configuration root"))?;
+    let project_name = format!(
+        "ibcmd_{}",
+        root.uuid
+            .0
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>()
+    );
+    let eclipse = format!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<projectDescription>\r\n  <name>{project_name}</name>\r\n  <comment></comment>\r\n  <projects></projects>\r\n  <buildSpec>\r\n    <buildCommand><name>org.eclipse.xtext.ui.shared.xtextBuilder</name><arguments></arguments></buildCommand>\r\n    <buildCommand><name>com.e1c.langtool.builder.translationBuilder</name><arguments></arguments></buildCommand>\r\n  </buildSpec>\r\n  <natures>\r\n    <nature>org.eclipse.xtext.ui.shared.xtextNature</nature>\r\n    <nature>com._1c.g5.v8.dt.core.V8ConfigurationNature</nature>\r\n    <nature>com.e1c.langtool.TranslatingNature</nature>\r\n  </natures>\r\n</projectDescription>\r\n"
+    );
+    entries.push(
+        SourceEntry::from_bytes(
+            SourcePath::new(".project").map_err(EdtError::source)?,
+            eclipse.into_bytes(),
+        )
+        .map_err(EdtError::source)?,
+    );
+    entries.push(
+        SourceEntry::from_bytes(
+            SourcePath::new(".settings/org.eclipse.core.resources.prefs")
+                .map_err(EdtError::source)?,
+            b"eclipse.preferences.version=1\r\nencoding/<project>=UTF-8\r\n".to_vec(),
+        )
+        .map_err(EdtError::source)?,
+    );
+    Ok(entries)
+}
+pub(crate) fn write_project_controls(
+    config: &Configuration,
+    project: &Path,
+    runtime: &str,
+) -> Result<(), EdtError> {
+    for entry in project_controls(config, runtime)? {
+        let target = project.join(entry.path().as_str());
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(EdtError::source)?;
+        }
+        std::fs::write(target, entry.bytes()).map_err(EdtError::source)?;
+    }
+    Ok(())
+}
+
 pub(crate) fn xml_to_edt(
     source: &SourceTree,
     o: &ConversionOptions,
@@ -431,44 +518,7 @@ pub(crate) fn xml_to_edt(
         );
     }
     drop(converted);
-    entries.push(
-        SourceEntry::from_bytes(
-            SourcePath::new("DT-INF/PROJECT.PMF").map_err(EdtError::source)?,
-            format!("Manifest-Version: 1.0\r\nRuntime-Version: {runtime}\r\n").into_bytes(),
-        )
-        .map_err(EdtError::source)?,
-    );
-    let root = config
-        .objects
-        .iter()
-        .find(|object| object.kind.as_str() == "Configuration")
-        .ok_or_else(|| EdtError::new("no Configuration root"))?;
-    let project_name = format!(
-        "ibcmd_{}",
-        root.uuid
-            .0
-            .iter()
-            .map(|b| format!("{b:02x}"))
-            .collect::<String>()
-    );
-    let eclipse = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<projectDescription>\r\n  <name>{project_name}</name>\r\n  <comment></comment>\r\n  <projects></projects>\r\n  <buildSpec>\r\n    <buildCommand><name>org.eclipse.xtext.ui.shared.xtextBuilder</name><arguments></arguments></buildCommand>\r\n    <buildCommand><name>com.e1c.langtool.builder.translationBuilder</name><arguments></arguments></buildCommand>\r\n  </buildSpec>\r\n  <natures>\r\n    <nature>org.eclipse.xtext.ui.shared.xtextNature</nature>\r\n    <nature>com._1c.g5.v8.dt.core.V8ConfigurationNature</nature>\r\n    <nature>com.e1c.langtool.TranslatingNature</nature>\r\n  </natures>\r\n</projectDescription>\r\n"
-    );
-    entries.push(
-        SourceEntry::from_bytes(
-            SourcePath::new(".project").map_err(EdtError::source)?,
-            eclipse.into_bytes(),
-        )
-        .map_err(EdtError::source)?,
-    );
-    entries.push(
-        SourceEntry::from_bytes(
-            SourcePath::new(".settings/org.eclipse.core.resources.prefs")
-                .map_err(EdtError::source)?,
-            b"eclipse.preferences.version=1\r\nencoding/<project>=UTF-8\r\n".to_vec(),
-        )
-        .map_err(EdtError::source)?,
-    );
+    entries.extend(project_controls(&config, runtime)?);
     let project = SourceTree::new(entries).map_err(EdtError::source)?;
     let canonical = canonical(source, o)?;
     let tree = provenance::retain(source, project, o, &config)?;
@@ -485,6 +535,7 @@ pub(crate) fn xml_to_edt(
         tree,
         canonical,
         accounting,
+        extensions: crate::extensions::source_extensions_from_model(&config)?,
     })
 }
 
@@ -572,12 +623,51 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
         tree,
         canonical,
         accounting,
+        extensions: crate::extensions::source_extensions_from_model(&config)?,
     })
 }
 
 /// Public bridge always goes through the established ibcmd XML metadata reader,
 /// retaining its ordered properties, ownership, references and opaque facets.
+pub(crate) struct CanonicalFile<'a> {
+    pub path: &'a str,
+    pub kind: SourceKind,
+    pub digest: ibcmd_core::storage::Sha256Digest,
+    pub byte_len: u64,
+}
+pub(crate) trait CanonicalInventory {
+    fn len(&self) -> usize;
+    fn file(&self, index: usize) -> CanonicalFile<'_>;
+    fn metadata_file(&self, index: usize) -> Result<bool, EdtError>;
+    fn read(&self, index: usize) -> Result<std::borrow::Cow<'_, [u8]>, EdtError>;
+}
+impl CanonicalInventory for SourceTree {
+    fn len(&self) -> usize {
+        self.entries().len()
+    }
+    fn file(&self, index: usize) -> CanonicalFile<'_> {
+        let entry = &self.entries()[index];
+        CanonicalFile {
+            path: entry.path().as_str(),
+            kind: entry.kind(),
+            digest: entry.digest(),
+            byte_len: entry.bytes().len() as u64,
+        }
+    }
+    fn metadata_file(&self, index: usize) -> Result<bool, EdtError> {
+        metadata_file(&self.entries()[index])
+    }
+    fn read(&self, index: usize) -> Result<std::borrow::Cow<'_, [u8]>, EdtError> {
+        Ok(std::borrow::Cow::Borrowed(self.entries()[index].bytes()))
+    }
+}
 fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfiguration, EdtError> {
+    canonical_inventory(tree, o)
+}
+pub(crate) fn canonical_inventory(
+    inventory: &impl CanonicalInventory,
+    o: &ConversionOptions,
+) -> Result<CanonicalConfiguration, EdtError> {
     let profile = ProfileId::parse(&format!("xml-{}", o.xml_dialect)).map_err(EdtError::source)?;
     let mut objects = Vec::new();
     let mut model_budget = ibcmd_core::model::CanonicalConfigurationBudget::default();
@@ -585,12 +675,14 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
     let mut uuids = BTreeSet::new();
     let mut metadata_paths = BTreeSet::new();
     let mut named_owners = Vec::new();
-    for (file_index, e) in tree.entries().iter().enumerate() {
-        if !metadata_file(e)? {
+    for file_index in 0..inventory.len() {
+        let e = inventory.file(file_index);
+        if !inventory.metadata_file(file_index)? {
             continue;
         }
-        metadata_paths.insert(e.path().as_str());
-        let doc = ibcmd_xml::XmlReader::from_slice(e.bytes()).map_err(EdtError::source)?;
+        metadata_paths.insert(e.path);
+        let bytes = inventory.read(file_index)?;
+        let doc = ibcmd_xml::XmlReader::from_slice(&bytes).map_err(EdtError::source)?;
         // Filesystem paths and diagnostic segments have different bounds.
         // Use the stable source-tree index; retain the exact physical path in
         // errors below rather than truncating Cyrillic names or relaxing the
@@ -602,14 +694,10 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
         .map_err(EdtError::source)?;
         let envelope = ibcmd_xml::decode_source_metadata_envelope(&doc, profile.clone(), path)
             .map_err(|error| {
-                EdtError::new(format!("{}: canonical metadata bridge: {error}", e.path()))
+                EdtError::new(format!("{}: canonical metadata bridge: {error}", e.path))
             })?;
         let root = envelope.root().identity().uuid();
-        let stem = e
-            .path()
-            .as_str()
-            .strip_suffix(".xml")
-            .unwrap_or(e.path().as_str());
+        let stem = e.path.strip_suffix(".xml").unwrap_or(e.path);
         owners.insert(stem.to_string(), root);
         // Link separately stored metadata only through validated, explicit
         // ChildObjects references. An incidental neighbouring path is no proof
@@ -666,18 +754,20 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             } else {
                 return Err(EdtError::new(format!(
                     "{}: duplicate canonical metadata UUID",
-                    e.path()
+                    e.path
                 )));
             }
         }
     }
     let mut asset_map = BTreeMap::new();
-    for e in tree.entries().iter().filter(|e| {
-        !metadata_paths.contains(e.path().as_str()) && e.path().as_str() != "ConfigDumpInfo.xml"
-    }) {
+    for index in 0..inventory.len() {
+        let e = inventory.file(index);
+        if metadata_paths.contains(e.path) || e.path == "ConfigDumpInfo.xml" {
+            continue;
+        }
         // Find the nearest metadata owner in O(path depth), rather than
         // scanning every metadata descriptor for every source asset.
-        let mut parent = e.path().as_str();
+        let mut parent = e.path;
         let mut owner = None;
         while let Some((prefix, _)) = parent.rsplit_once('/') {
             if let Some(uuid) = owners.get(prefix) {
@@ -687,15 +777,15 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             parent = prefix;
         }
         if let Some(uuid) = owner.or_else(|| owners.get("Configuration")) {
-            let media = MediaKind::new(match e.kind() {
+            let media = MediaKind::new(match e.kind {
                 SourceKind::Module => "text/x-1c-bsl",
                 SourceKind::Form => "application/x-1c-form",
                 SourceKind::Template => "application/x-1c-template",
                 _ => "application/octet-stream",
             })
             .map_err(EdtError::source)?;
-            let asset = AssetReference::new(e.digest(), e.bytes().len() as u64, media)
-                .map_err(EdtError::source)?;
+            let asset =
+                AssetReference::new(e.digest, e.byte_len, media).map_err(EdtError::source)?;
             model_budget
                 .add_asset_reference(&asset)
                 .map_err(EdtError::source)?;
@@ -748,7 +838,7 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
     CanonicalConfiguration::new(objects).map_err(EdtError::source)
 }
 
-fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
+pub(crate) fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
     if !entry.path().as_str().ends_with(".xml") {
         return Ok(false);
     }
@@ -757,7 +847,7 @@ fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
 
 // SourceEntry and bounded preflight already validate complete inputs. Peek
 // only the root for codec dispatch; do not rebuild a giant source asset DOM.
-fn body_root(bytes: &[u8]) -> Result<(String, String), EdtError> {
+pub(crate) fn body_root(bytes: &[u8]) -> Result<(String, String), EdtError> {
     let mut reader = quick_xml::Reader::from_reader(bytes);
     loop {
         match reader.read_event().map_err(EdtError::source)? {
@@ -786,10 +876,26 @@ fn body_root(bytes: &[u8]) -> Result<(String, String), EdtError> {
 }
 
 fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
-    if a.bytes() == b.bytes() {
+    if a.path() != b.path() {
+        return Ok(false);
+    }
+    same_body_bytes(a.path().as_str(), a.bytes(), b.bytes())
+}
+pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, EdtError> {
+    if a == b {
         return Ok(true);
     }
-    let mobile_format = match a.path().as_str() {
+    let relative = path.strip_prefix("src/").unwrap_or(path);
+    let parts = relative.split('/').collect::<Vec<_>>();
+    if parts.last().copied() == Some(formats_xml::form::PICTURE_SEMANTICS_RESOURCE)
+        && (parts.len() == 3 && parts[0] == "CommonForms"
+            || parts.len() == 5 && parts[2] == "Forms")
+    {
+        // Only the versioned form resource consumed by the typed pipeline has
+        // JSON lexical freedom; unrelated JSON remains byte-exact.
+        return Ok(formats_xml::form::same_picture_semantics_resource(a, b));
+    }
+    let mobile_format = match path {
         "Ext/MobileClientSignature.bin"
         | "src/Configuration/MobileClientSignature.bin"
         | "Configuration/MobileClientSignature.bin" => Some(Format::Designer),
@@ -799,28 +905,25 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
         _ => None,
     };
     if let Some(format) = mobile_format {
-        if a.path() != b.path() {
-            return Ok(false);
-        }
-        let a = morph1c_pipeline::canonical_empty_mobile_signature(a.bytes(), format)
-            .map_err(EdtError::new)?;
-        let b = morph1c_pipeline::canonical_empty_mobile_signature(b.bytes(), format)
-            .map_err(EdtError::new)?;
+        let a =
+            morph1c_pipeline::canonical_empty_mobile_signature(a, format).map_err(EdtError::new)?;
+        let b =
+            morph1c_pipeline::canonical_empty_mobile_signature(b, format).map_err(EdtError::new)?;
         return Ok(a.is_some() && a == b);
     }
     // Native XML formatting is not semantic data. Require every expanded QName,
     // attribute, non-formatting text and ordered child to survive regeneration.
     // This catches body fields that a borrowed reader accepted but did not emit.
-    let structured = |e: &SourceEntry| {
-        std::str::from_utf8(e.bytes()).is_ok_and(|s| {
+    let structured = |bytes: &[u8]| {
+        std::str::from_utf8(bytes).is_ok_and(|s| {
             s.trim_start_matches('\u{feff}')
                 .trim_start()
                 .starts_with('<')
         })
     };
-    if structured(a) && structured(b) && !a.path().as_str().ends_with(".html") {
-        let root_a = body_root(a.bytes())?;
-        let root_b = body_root(b.bytes())?;
+    if structured(a) && structured(b) && !path.ends_with(".html") {
+        let root_a = body_root(a)?;
+        let root_b = body_root(b)?;
         if root_a != root_b {
             return Ok(false);
         }
@@ -833,9 +936,9 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
             fn strip_bom(bytes: &[u8]) -> &[u8] {
                 bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)
             }
-            let a = morph1c_pipeline::project_mxl_content_newlines(strip_bom(a.bytes()), false)
+            let a = morph1c_pipeline::project_mxl_content_newlines(strip_bom(a), false)
                 .map_err(EdtError::source)?;
-            let b = morph1c_pipeline::project_mxl_content_newlines(strip_bom(b.bytes()), false)
+            let b = morph1c_pipeline::project_mxl_content_newlines(strip_bom(b), false)
                 .map_err(EdtError::source)?;
             return Ok(a == b);
         }
@@ -970,8 +1073,8 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
             }
             Ok(serde_json::json!([name, attrs, children]))
         }
-        let da = ibcmd_xml::XmlReader::from_slice(a.bytes()).map_err(EdtError::source)?;
-        let db = ibcmd_xml::XmlReader::from_slice(b.bytes()).map_err(EdtError::source)?;
+        let da = ibcmd_xml::XmlReader::from_slice(a).map_err(EdtError::source)?;
+        let db = ibcmd_xml::XmlReader::from_slice(b).map_err(EdtError::source)?;
         // These are the source-family codec bodies whose structured emitters
         // explicitly define indentation/BOM/EOL conventions. Unknown XML bodies
         // must remain byte-exact; this is not a general XML comparison mode.
@@ -1010,13 +1113,13 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
         return Ok(normalized(da.root(), &namespaces, false, &[])?
             == normalized(db.root(), &namespaces, false, &[])?);
     }
-    if a.path().as_str().ends_with(".bsl") || a.path().as_str().ends_with(".html") {
+    if path.ends_with(".bsl") || path.ends_with(".html") {
         let normalize = |bytes: &[u8]| {
             std::str::from_utf8(bytes)
                 .ok()
                 .map(|s| s.trim_start_matches('\u{feff}').replace("\r\n", "\n"))
         };
-        return Ok(normalize(a.bytes()).is_some() && normalize(a.bytes()) == normalize(b.bytes()));
+        return Ok(normalize(a).is_some() && normalize(a) == normalize(b));
     }
     Ok(false)
 }
@@ -1093,6 +1196,35 @@ mod tests {
         file.write_all(&serde_json::to_vec_pretty(&report).unwrap())
             .unwrap();
         result.unwrap();
+    }
+    #[test]
+    fn picture_resource_equivalence_is_typed_and_scoped_to_forms() {
+        let value = serde_json::json!({ "schema": "urn:ibcmd:source-extension:picture-semantics:1", "version": 1, "form": { "form_uuid": morph1c_core::ir::Uuid([42; 16]), "records": [] } });
+        let a = serde_json::to_vec(&value).unwrap();
+        let b = serde_json::to_vec_pretty(&value).unwrap();
+        for path in [
+            "CommonForms/F/ibcmd-picture-semantics.v1.json",
+            "src/Catalogs/C/Forms/F/ibcmd-picture-semantics.v1.json",
+        ] {
+            assert!(same_body_bytes(path, &a, &b).unwrap());
+            let mut unknown: serde_json::Value = serde_json::from_slice(&a).unwrap();
+            unknown["unknown"] = true.into();
+            assert!(!same_body_bytes(path, &a, &serde_json::to_vec(&unknown).unwrap()).unwrap());
+            unknown.as_object_mut().unwrap().remove("unknown");
+            unknown["version"] = 2.into();
+            assert!(!same_body_bytes(path, &a, &serde_json::to_vec(&unknown).unwrap()).unwrap());
+            unknown["version"] = 1.into();
+            unknown["form"]["form_uuid"] =
+                serde_json::to_value(morph1c_core::ir::Uuid([43; 16])).unwrap();
+            assert!(!same_body_bytes(path, &a, &serde_json::to_vec(&unknown).unwrap()).unwrap());
+        }
+        for path in [
+            "ibcmd-picture-semantics.v1.json",
+            "CommonModules/F/ibcmd-picture-semantics.v1.json",
+            "CommonForms/F/unrelated.json",
+        ] {
+            assert!(!same_body_bytes(path, &a, &b).unwrap());
+        }
     }
     #[test]
     fn mobile_empty_signature_equivalence_is_scoped_to_the_root_blob() {

@@ -6,17 +6,17 @@ use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
 
 pub(crate) const PREFIX: &str = ".ibcmd-provenance/";
-const MANIFEST: &str = ".ibcmd-provenance/manifest.json";
+pub(crate) const MANIFEST: &str = ".ibcmd-provenance/manifest.json";
 #[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Manifest {
-    version: u8,
-    edt_version: String,
-    xml_dialect: String,
-    runtime_version: Option<String>,
-    semantics: String,
-    generated: BTreeMap<String, String>,
-    original: BTreeMap<String, String>,
+pub(crate) struct Manifest {
+    pub(crate) version: u8,
+    pub(crate) edt_version: String,
+    pub(crate) xml_dialect: String,
+    pub(crate) runtime_version: Option<String>,
+    pub(crate) semantics: String,
+    pub(crate) generated: BTreeMap<String, String>,
+    pub(crate) original: BTreeMap<String, String>,
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))

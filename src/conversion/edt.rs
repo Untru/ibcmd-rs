@@ -1,22 +1,6 @@
 //! EDT is another format adapter. Profiles, reports and publication stay here.
 use super::*;
-use ibcmd_edt::{
-    ConversionOptions, Disposition, edt_to_xml, read_project, read_xml_source, xml_to_edt,
-};
-use ibcmd_xml::source_tree::{
-    MAX_SOURCE_DIRECTORIES, MAX_SOURCE_FILE_BYTES, MAX_SOURCE_FILES, MAX_SOURCE_RETAINED_BYTES,
-    ReaderLimits, publish_new_with_limits,
-};
-
-fn limits() -> ReaderLimits {
-    ReaderLimits {
-        files: MAX_SOURCE_FILES,
-        directories: MAX_SOURCE_DIRECTORIES,
-        depth: ibcmd_xml::source_tree::MAX_SOURCE_DEPTH,
-        asset_bytes: MAX_SOURCE_FILE_BYTES,
-        total_bytes: MAX_SOURCE_RETAINED_BYTES,
-    }
-}
+use ibcmd_edt::{ConversionOptions, Disposition, read_directory_project, read_directory_source};
 
 pub(super) fn convert(
     args: &ConvertArgs,
@@ -78,7 +62,7 @@ pub(super) fn convert(
         runtime_version: Some(runtime_version.clone()),
     };
     let (conversion, source_entries) = if args.source_format == ConversionFormat::Edt {
-        let project = read_project(&args.input, limits()).map_err(|error| {
+        let project = read_directory_project(&args.input).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_DECODE,
@@ -97,7 +81,7 @@ pub(super) fn convert(
                 None,
             ));
         }
-        let conversion = edt_to_xml(&project, &options).map_err(|error| {
+        let conversion = project.edt_to_xml(&options).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_PREFLIGHT,
@@ -106,9 +90,9 @@ pub(super) fn convert(
                 Some(display_path(&args.input)),
             )
         })?;
-        (conversion, project.entries().len())
+        (conversion, project.file_count())
     } else {
-        let tree = read_xml_source(&args.input, limits()).map_err(|error| {
+        let tree = read_directory_source(&args.input).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_DECODE,
@@ -126,64 +110,25 @@ pub(super) fn convert(
                 None,
             )
         })?;
-        // The EDT adapter owns complete semantic decoding. The physical CF
-        // compiler's narrower family readers are not EDT capability gates.
-        for entry in tree
-            .entries()
-            .iter()
-            .filter(|entry| entry.path().as_str().to_ascii_lowercase().ends_with(".xml"))
-        {
-            // Inspect only the envelope before building a tree: template and
-            // interface bodies can be large and have their own bounded codecs.
-            let mut reader = quick_xml::Reader::from_reader(entry.bytes());
-            let descriptor = loop {
-                match reader.read_event() {
-                    Ok(quick_xml::events::Event::Start(element))
-                    | Ok(quick_xml::events::Event::Empty(element)) => {
-                        break element.local_name().as_ref() == b"MetaDataObject";
-                    }
-                    Ok(quick_xml::events::Event::Eof) => break false,
-                    Ok(_) => continue,
-                    Err(error) => {
-                        return Err(failure(
-                            &mut report,
-                            PHASE_DECODE,
-                            "conversion.xml-source-profile-mismatch",
-                            error.to_string(),
-                            Some(entry.path().to_string()),
-                        ));
-                    }
-                }
-            };
-            if !descriptor {
-                continue;
-            }
-            let document = XmlReader::from_slice(entry.bytes()).map_err(|error| {
-                failure(
-                    &mut report,
-                    PHASE_DECODE,
-                    "conversion.xml-decode-failed",
-                    error.to_string(),
-                    Some(entry.path().to_string()),
-                )
-            })?;
-            // SourceKind also classifies XML bodies under Ext/ as metadata,
-            // and form/template descriptors by their physical folder. Check
-            // every actual descriptor envelope, including subordinate ones.
-            // Interface, help, picture and other body dialects are checked by
-            // their own complete codecs rather than an MDClasses profile.
-            validate_dialect(&document, &dialects, &source.id).map_err(|message| {
-                failure(
-                    &mut report,
-                    PHASE_DECODE,
-                    "conversion.xml-source-profile-mismatch",
-                    message,
-                    Some(entry.path().to_string()),
-                )
-            })?;
-        }
+        // The complete immutable snapshot was already validated. Load only
+        // metadata envelopes for the explicit CLI profile, one file at a time.
+        tree.visit_xml_descriptors(|path, bytes| -> Result<(), String> {
+            let document =
+                XmlReader::from_slice(bytes).map_err(|error| format!("{path}: {error}"))?;
+            validate_dialect(&document, &dialects, &source.id)
+                .map_err(|message| format!("{path}: {message}"))
+        })
+        .map_err(|error| {
+            failure(
+                &mut report,
+                PHASE_DECODE,
+                "conversion.xml-source-profile-mismatch",
+                error.to_string(),
+                Some(display_path(&args.input)),
+            )
+        })?;
         report.mark(PHASE_DECODE, ConversionPhaseStatus::Completed);
-        let conversion = xml_to_edt(&tree, &options).map_err(|error| {
+        let conversion = tree.xml_to_edt(&options).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_PREFLIGHT,
@@ -192,7 +137,7 @@ pub(super) fn convert(
                 Some(display_path(&args.input)),
             )
         })?;
-        (conversion, tree.entries().len())
+        (conversion, tree.file_count())
     };
     validate_configuration(&conversion.canonical).map_err(|diagnostics| {
         failure(
@@ -240,6 +185,15 @@ pub(super) fn convert(
             .flat_map(|object| object.assets())
             .map(|asset| asset.byte_len())
             .sum(),
+        extensions: conversion
+            .extensions
+            .iter()
+            .map(|extension| EdtSourceExtensionReport {
+                id: extension.id,
+                resources: extension.resources,
+                references: extension.references,
+            })
+            .collect(),
         files: conversion
             .accounting
             .iter()
@@ -252,7 +206,7 @@ pub(super) fn convert(
             })
             .collect(),
     });
-    conversion.tree.validate().map_err(|error| {
+    conversion.verify().map_err(|error| {
         failure(
             &mut report,
             PHASE_PREFLIGHT,
@@ -270,10 +224,10 @@ pub(super) fn convert(
             Some(display_path(&args.output)),
         )
     })?;
-    let bytes = source_tree_bytes(&conversion.tree);
+    let bytes = conversion.byte_len();
     report.preflight = Some(ConversionPreflightReport {
         source_entries,
-        target_entries: conversion.tree.entries().len(),
+        target_entries: conversion.file_count(),
         target_bytes: bytes,
         opaque_entries: retained,
         structural_entries: 0,
@@ -282,7 +236,7 @@ pub(super) fn convert(
     if args.dry_run {
         report.mark(PHASE_ENCODE, ConversionPhaseStatus::SkippedDryRun);
     } else {
-        publish_new_with_limits(&conversion.tree, &args.output, limits()).map_err(|error| {
+        conversion.publish_new(&args.output).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_ENCODE,
@@ -293,7 +247,7 @@ pub(super) fn convert(
         })?;
         report.publication = Some(ConversionPublicationReport {
             artifact: args.target_format.as_str(),
-            entries: conversion.tree.entries().len(),
+            entries: conversion.file_count(),
             bytes,
             cf_revision: None,
         });

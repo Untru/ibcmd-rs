@@ -87,6 +87,32 @@ fn is_form_ref_child(child: &MetadataObject) -> bool {
     child.kind.as_str().ends_with(".FormRef")
 }
 
+pub(crate) fn declared_form_uuid(
+    obj: &MetadataObject,
+    name: &str,
+) -> Result<morph1c_core::ir::Uuid, ConvertError> {
+    if obj.kind.as_str() == OWN_FORM_KIND && obj.name == name {
+        return Ok(obj.uuid);
+    }
+    let mut matches = obj
+        .children
+        .iter()
+        .filter(|child| is_form_ref_child(child) && child.name == name);
+    let child = matches.next().ok_or_else(|| ConvertError::Read {
+        kind: obj.kind.as_str().into(),
+        object: name.into(),
+        reason: "picture resource requires an exact declared form UUID".into(),
+    })?;
+    if matches.next().is_some() {
+        return Err(ConvertError::Read {
+            kind: obj.kind.as_str().into(),
+            object: name.into(),
+            reason: "duplicate declared form identity".into(),
+        });
+    }
+    Ok(child.uuid)
+}
+
 /// Load every form body (+ optional form module) `obj` declares from its sidecars into
 /// `obj.form_bodies`, in declaration order.
 ///
@@ -203,6 +229,40 @@ pub fn attach_form_body(
             object: format!("{}.{name}", obj.name),
             reason: e.to_string(),
         })?;
+        if format == Format::Edt {
+            let resource = body_path
+                .parent()
+                .expect("form body has a parent")
+                .join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE);
+            if resource.exists() {
+                let bytes = std::fs::read(&resource).map_err(|error| ConvertError::Io {
+                    path: resource.display().to_string(),
+                    reason: error.to_string(),
+                })?;
+                let model = formats_xml::form::read_picture_semantics_resource(&bytes).map_err(
+                    |error| ConvertError::Read {
+                        kind: kind.into(),
+                        object: name.clone(),
+                        reason: error.to_string(),
+                    },
+                )?;
+                if model.form_uuid != declared_form_uuid(obj, &name)? {
+                    return Err(ConvertError::Read {
+                        kind: kind.into(),
+                        object: name.clone(),
+                        reason: "picture resource form UUID differs from declared metadata".into(),
+                    });
+                }
+                body.picture_resource_selection = Some(
+                    model
+                        .records
+                        .iter()
+                        .map(|row| row.binding.clone())
+                        .collect(),
+                );
+                body.picture_semantics = Some(model);
+            }
+        }
 
         // EDT: the spreadsheet-document BODY of a form attribute is a SIDECAR
         // (`Attributes/<attr>/ExtInfo/SpreadsheetData.mxlx` beside `Form.form`), while `Form.form`

@@ -125,12 +125,37 @@ pub fn write_form_bodies(
             }
         })?;
 
-        let bytes = write_form(dialect, &form.body).map_err(|e| ConvertError::Write {
+        let projection = if format == Format::Edt {
+            Some(
+                formats_xml::form::project_picture_semantics(
+                    &form.body,
+                    crate::form_read::declared_form_uuid(obj, &form.name)?,
+                )
+                .map_err(|error| ConvertError::Write {
+                    kind: kind.into(),
+                    object: form.name.clone(),
+                    reason: error.to_string(),
+                })?,
+            )
+        } else {
+            None
+        };
+        let body = projection.as_ref().map_or(&form.body, |(body, _)| body);
+        let bytes = write_form(dialect, body).map_err(|e| ConvertError::Write {
             kind: kind.to_string(),
             object: format!("{}.{}", obj.name, form.name),
             reason: e.to_string(),
         })?;
         write_file(&body_path, &bytes)?;
+        if let Some((_, Some(bytes))) = projection {
+            write_file(
+                &body_path
+                    .parent()
+                    .expect("form body has a parent")
+                    .join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE),
+                &bytes,
+            )?;
+        }
 
         // EDT: the spreadsheet-document BODY of a form attribute lives in a SIDECAR
         // (`Attributes/<attr>/ExtInfo/SpreadsheetData.mxlx`; `Form.form` carries only the empty

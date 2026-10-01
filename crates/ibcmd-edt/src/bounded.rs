@@ -2,7 +2,7 @@ use crate::EdtError;
 use ibcmd_xml::source_tree::{ReaderLimits, SourceEntry, SourcePath, SourceTree};
 use quick_xml::{Reader, events::Event};
 use std::fs;
-use std::io::Read;
+use std::io::{BufRead, Read, Seek};
 use std::path::Path;
 
 const MAX_XML_DEPTH: usize = 128;
@@ -11,17 +11,41 @@ const MAX_XML_ATTRIBUTES: usize = 256;
 /// Run before either XML parser builds a recursive tree. All source-derived names
 /// that borrowed codecs can use as filenames must be portable components.
 pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
-    let mut reader = Reader::from_reader(bytes);
+    validate_xml_reader(path, std::io::Cursor::new(bytes))
+}
+pub(crate) fn validate_xml_reader<R: BufRead + Seek>(
+    path: &str,
+    mut input: R,
+) -> Result<(), EdtError> {
+    let origin = input.stream_position().map_err(EdtError::source)?;
+    ibcmd_xml::XmlReader::inspect_reader(&mut input).map_err(EdtError::source)?;
+    input
+        .seek(std::io::SeekFrom::Start(origin))
+        .map_err(EdtError::source)?;
+    let mut reader = Reader::from_reader(input);
+    let mut buffer = Vec::new();
     reader.config_mut().check_end_names = true;
     let mut depth = 0usize;
     let mut names = Vec::new();
     let mut form_body = false;
     let mut dump_info = false;
     let mut streamed_mxl = false;
+    // Opaque XML-backed templates, Rights and DCS contain arbitrary human labels.
+    // Only these known document roles derive physical paths from name facets.
+    let mut metadata_names = path.ends_with(".mdo");
+    let dump_path = matches!(
+        path,
+        "ConfigDumpInfo.xml" | ".ibcmd-provenance/xml/ConfigDumpInfo.xml"
+    );
+    let mut help_pages = false;
+    let mut picture_files = false;
+    let mut html_pages = false;
+    let mut graph_items = false;
+    let mut graph_item: Option<(usize, String, bool)> = None;
     loop {
         let before = reader.buffer_position();
         let event = reader
-            .read_event()
+            .read_event_into(&mut buffer)
             .map_err(|e| EdtError::new(format!("{path}: {e}")))?;
         // A streaming scan is bounded by its input, not by the number of cells
         // or XML events. Every non-EOF event must consume source bytes, so a
@@ -34,6 +58,37 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let local = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                if names.is_empty() && depth == 0 {
+                    let name = e.name();
+                    let raw = std::str::from_utf8(name.as_ref()).map_err(EdtError::source)?;
+                    let key = raw.split_once(':').map_or_else(
+                        || "xmlns".to_owned(),
+                        |(prefix, _)| format!("xmlns:{prefix}"),
+                    );
+                    let mut uri = String::new();
+                    for attribute in e.attributes() {
+                        let attribute = attribute.map_err(EdtError::source)?;
+                        if attribute.key.as_ref() == key.as_bytes() {
+                            uri = attribute
+                                .decode_and_unescape_value(reader.decoder())
+                                .map_err(EdtError::source)?
+                                .into_owned();
+                        }
+                    }
+                    metadata_names |= path.ends_with(".xml")
+                        && local == "MetaDataObject"
+                        && uri == "http://v8.1c.ru/8.3/MDClasses";
+                    help_pages = path.ends_with(".xml") && local == "Help";
+                    html_pages = path.ends_with(".htmldoc")
+                        && local == "HtmlDocument"
+                        && uri == "http://g5.1c.ru/v8/dt/html-document";
+                    graph_items =
+                        local == "GraphicalSchema" && uri == "http://v8.1c.ru/8.3/xcf/scheme";
+                    picture_files = path.ends_with(".xml") && local == "ExtPicture"
+                        || path.ends_with(".flowchart")
+                        || path.ends_with(".geos")
+                        || graph_items;
+                }
                 if names.is_empty() && depth == 0 && local == "document" {
                     let name = e.name();
                     let raw = std::str::from_utf8(name.as_ref()).map_err(EdtError::source)?;
@@ -53,7 +108,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                         // The MXL codec is iterative and never derives physical
                         // filenames from cell text/attributes. Use the shared
                         // complete XML checks without recursive-model ceilings.
-                        ibcmd_xml::XmlReader::inspect_slice(bytes).map_err(EdtError::source)?;
+                        // Complete lexical validation was streamed before this semantic preflight.
                     }
                 }
                 if names.is_empty() && depth == 0 && local == "Form" {
@@ -77,6 +132,16 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                         }
                     }
                 }
+                if graph_items && names.len() == 2 && names[1] == "Items" {
+                    graph_item = Some((3, String::new(), false));
+                }
+                if let Some((_, _, has_picture)) = graph_item.as_mut()
+                    && names.len() == 4
+                    && names[3] == "Properties"
+                    && local == "Picture"
+                {
+                    *has_picture = true;
+                }
                 for (n, a) in e.attributes().enumerate() {
                     if !streamed_mxl && n >= MAX_XML_ATTRIBUTES {
                         return Err(EdtError::new(format!(
@@ -84,7 +149,16 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                         )));
                     }
                     let a = a.map_err(EdtError::source)?;
-                    if !streamed_mxl && matches!(a.key.as_ref(), b"name" | b"Name" | b"lang") {
+                    if html_pages && local == "pages" && a.key.as_ref() == b"lang" {
+                        component(
+                            &a.decode_and_unescape_value(reader.decoder())
+                                .map_err(EdtError::source)?,
+                        )?;
+                    }
+                    if !streamed_mxl
+                        && (metadata_names || form_body || dump_path)
+                        && matches!(a.key.as_ref(), b"name" | b"Name" | b"lang")
+                    {
                         let value = a
                             .decode_and_unescape_value(reader.decoder())
                             .map_err(EdtError::source)?;
@@ -115,24 +189,26 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
             Event::Text(e) => {
                 let value = e.decode().map_err(EdtError::source)?;
                 let value = quick_xml::escape::unescape(&value).map_err(EdtError::source)?;
-                if !streamed_mxl
-                    && (matches!(
-                        names.last().map(String::as_str),
-                        Some(
-                            "Name"
-                                | "name"
-                                | "LanguageCode"
-                                | "languageCode"
-                                | "lang"
-                                | "Page"
-                                | "Abs"
-                        )
-                    ) || names
-                        .iter()
-                        .rev()
-                        .nth(1)
-                        .is_some_and(|p| p == "ChildObjects"))
+                let leaf = names.last().map(String::as_str);
+                if let Some((_, name, _)) = graph_item.as_mut()
+                    && names.len() == 5
+                    && names[3] == "Properties"
+                    && leaf == Some("Name")
                 {
+                    name.push_str(&value);
+                }
+                let derived_name = (metadata_names || form_body)
+                    && matches!(leaf, Some("Name" | "name"))
+                    || metadata_names
+                        && (matches!(leaf, Some("LanguageCode" | "languageCode" | "lang"))
+                            || names
+                                .iter()
+                                .rev()
+                                .nth(1)
+                                .is_some_and(|parent| parent == "ChildObjects"))
+                    || help_pages && leaf == Some("Page")
+                    || picture_files && leaf == Some("Abs");
+                if !streamed_mxl && derived_name {
                     let check = if form_body
                         && matches!(names.last().map(String::as_str), Some("Name" | "name"))
                     {
@@ -145,6 +221,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                     })?;
                 }
                 if !streamed_mxl
+                    && metadata_names
                     && matches!(
                         names.last().map(String::as_str),
                         Some("parentSubsystem" | "ParentSubsystem")
@@ -163,6 +240,15 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                 }
             }
             Event::End(_) => {
+                if graph_item
+                    .as_ref()
+                    .is_some_and(|(item_depth, _, _)| *item_depth == names.len())
+                {
+                    let (_, name, has_picture) = graph_item.take().expect("checked graph item");
+                    if has_picture {
+                        component(name.trim())?;
+                    }
+                }
                 depth = depth
                     .checked_sub(1)
                     .ok_or_else(|| EdtError::new(format!("{path}: unmatched XML end")))?;
@@ -182,6 +268,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
             }
             _ => {}
         }
+        buffer.clear();
     }
     Ok(())
 }
@@ -193,28 +280,15 @@ pub(crate) fn component(value: &str) -> Result<(), EdtError> {
     if value.contains(['/', '\\']) {
         return Err(EdtError::new("name is not a single path component"));
     }
-    SourcePath::new(value).map_err(EdtError::source)?;
+    ibcmd_xml::source_tree::validate_source_path_safety(value).map_err(EdtError::source)?;
     Ok(())
 }
 
-// Form identifiers and dump references can exceed portable filename limits
-// without naming a file.
-// Only bounded long identifiers receive this exception; physical paths keep
-// SourcePath limits and borrowed file writes independently check components.
+// These names are logical identities, not payload allocations or paths with
+// a platform-independent byte ceiling. Keep the same portable syntax checks;
+// actual filesystem operations determine the physical component limit.
 fn logical_form_name(value: &str) -> Result<(), EdtError> {
-    if value.len() <= ibcmd_xml::source_tree::MAX_SOURCE_COMPONENT_BYTES {
-        return component(value);
-    }
-    if value.len() > 4096
-        || value.ends_with('.')
-        || value.contains("..")
-        || value
-            .chars()
-            .any(|c| !c.is_alphanumeric() && !matches!(c, '_' | '-' | '.'))
-    {
-        return Err(EdtError::new("unsafe or unbounded logical form identifier"));
-    }
-    Ok(())
+    component(value)
 }
 
 fn structured(path: &str, bytes: &[u8]) -> bool {
@@ -363,6 +437,69 @@ fn reparse(_: &fs::Metadata) -> bool {
 mod tests {
     use super::*;
     #[test]
+    fn path_derived_names_use_lexical_safety_not_utf8_byte_quotas() {
+        let physical = "Имя".repeat(50); //150 UTF16 characters /300 UTF8 bytes.
+        assert!(SourcePath::new(&physical).is_err());
+        component(&physical).unwrap();
+        let form = format!("<Form><items name='{}'/></Form>", "Имя".repeat(1000));
+        validate_xml("Form.form", form.as_bytes()).unwrap();
+        for name in ["../escape", "a/b", "a\\b", "a:stream", "NUL", "trailing."] {
+            assert!(component(name).is_err(), "{name}");
+        }
+    }
+    #[test]
+    fn filename_checks_apply_to_path_deriving_roles_only() {
+        let opaque = b"<dicMessageTypeResponse xmlns='http://www.fss.ru/integration/types/sedo/arm/v01'><dicList><dic><name xmlns='http://www.fss.ru/integration/types/common/v01'>human / label: ../free</name></dic></dicList></dicMessageTypeResponse>";
+        validate_xml("DataProcessors/X/Templates/T/Ext/Template.bin", opaque).unwrap();
+        for body in [
+            b"<Rights><name>../human label</name></Rights>".as_slice(),
+            b"<DataCompositionSchema><name>../query label</name></DataCompositionSchema>",
+        ] {
+            validate_xml("Ext/Template.xml", body).unwrap();
+        }
+        for (path, body) in [
+            (
+                "Catalogs/C.xml",
+                "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses'><Catalog><Properties><Name>../escape</Name></Properties></Catalog></MetaDataObject>",
+            ),
+            (
+                "Catalogs/C/C.mdo",
+                "<mdclass:Catalog xmlns:mdclass='http://g5.1c.ru/v8/dt/metadata/mdclass'><name>../escape</name></mdclass:Catalog>",
+            ),
+            ("Form.form", "<Form><items name='../escape'/></Form>"),
+            (
+                "Ext/Form.xml",
+                "<Form><Attributes><Attribute name='../escape'/></Attributes></Form>",
+            ),
+            ("Ext/Help.xml", "<Help><Page>../escape</Page></Help>"),
+            (
+                "Ext/Picture.xml",
+                "<ExtPicture><Picture><Abs>../escape.png</Abs></Picture></ExtPicture>",
+            ),
+        ] {
+            assert!(validate_xml(path, body.as_bytes()).is_err(), "{path}");
+        }
+        assert!(validate_xml("Template.htmldoc", b"<h:HtmlDocument xmlns:h='http://g5.1c.ru/v8/dt/html-document'><pages lang='../escape'/></h:HtmlDocument>").is_err());
+        let graph = "<GraphicalSchema xmlns='http://v8.1c.ru/8.3/xcf/scheme'><Items><Decoration><Properties><Name>../label</Name>{picture}</Properties></Decoration></Items></GraphicalSchema>";
+        validate_xml(
+            "Ext/Template.xml",
+            graph.replace("{picture}", "").as_bytes(),
+        )
+        .unwrap();
+        assert!(
+            validate_xml(
+                "Ext/Template.xml",
+                graph
+                    .replace("{picture}", "<Picture><Abs>Picture.png</Abs></Picture>")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+        // The scoped name rule does not weaken complete syntax/entity checks.
+        assert!(validate_xml("Ext/Template.bin", b"<a><name>safe</name></different>").is_err());
+        assert!(validate_xml("Ext/Template.bin", b"<a>&unknown;</a>").is_err());
+    }
+    #[test]
     fn streamed_mxl_depth_and_cell_names_are_not_metadata_limits() {
         let mut xml = String::from("<document xmlns='http://v8.1c.ru/8.2/data/spreadsheet'");
         for i in 0..300 {
@@ -427,20 +564,10 @@ mod tests {
         ] {
             validate_xml(path, body.as_bytes()).unwrap();
         }
-        assert!(validate_xml("Descriptor.mdo", body.as_bytes()).is_err());
-        assert!(
-            validate_xml(
-                "ConfigDumpInfo.xml",
-                body.replace("http://v8.1c.ru/8.3/xcf/dumpinfo", "urn:unknown")
-                    .as_bytes(),
-            )
-            .is_err()
-        );
         for unsafe_name in [
             format!("{name}/escape"),
             format!("{name}\\escape"),
             format!("{name}:escape"),
-            "а".repeat(4097),
         ] {
             assert!(validate_xml("ConfigDumpInfo.xml", dump(&unsafe_name).as_bytes()).is_err());
         }
@@ -452,12 +579,10 @@ mod tests {
         assert!(name.len() > 255);
         let form = format!("<Form><items name='{name}'/></Form>");
         assert!(validate_xml("Form.form", form.as_bytes()).is_ok());
-        assert!(validate_xml("Descriptor.mdo", form.as_bytes()).is_err());
         for name in [
             format!("{name}/escape"),
             format!("{name}\\escape"),
             format!("{name}:escape"),
-            "а".repeat(4097),
         ] {
             let form = format!("<Form><name>{name}</name></Form>");
             assert!(validate_xml("Form.form", form.as_bytes()).is_err());

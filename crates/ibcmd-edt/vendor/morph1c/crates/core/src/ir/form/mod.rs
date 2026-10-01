@@ -34,6 +34,7 @@ mod dcs;
 mod decorations;
 mod event_order;
 mod items;
+mod picture_semantics;
 
 pub use body::*;
 pub use data_attributes::*;
@@ -41,3 +42,4 @@ pub use dcs::*;
 pub use decorations::*;
 pub use event_order::*;
 pub use items::*;
+pub use picture_semantics::*;
