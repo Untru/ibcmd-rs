@@ -180,7 +180,18 @@ The source TSV errors remain preserved baseline diagnostics; generated projects
 must not add to them. The unsupported MobileDigiSign runtime error is not an
 approved ambient class. The actual empty EDT control under
 `F:\ibcmd\lab\07\empty-edt-control83-r1` emitted zero TSV rows while reproducing
-the four exact environment record classes described above.
+the four exact environment record classes described above. Its source inventory
+then showed EDT had added `.settings/org.eclipse.core.resources.prefs`, so that
+capture fails the strict control immutability binding. The replacement
+`F:\ibcmd\lab\07\empty-edt-control83-r2` copies the authentic template's encoding
+settings before taking the source snapshot; the earlier evidence remains intact.
+
+Acceptance binds the empty control's current TSV to its captured summary and
+SHA-256, its template before/after/current inventories, its source before/current
+inventory and its installed-export inventory. New captures additionally record
+the source after inventory. Command evidence must name the exact disposable
+workspace, project and export destination. Malformed or unknown workspace error
+records remain unmatched errors instead of disappearing during parsing.
 
 The source issue remains subject to the completed BSP and ERP UH acceptance
 reports, review of diagnostics and complete differences. Neither an import

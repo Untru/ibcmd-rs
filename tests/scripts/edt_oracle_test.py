@@ -16,6 +16,91 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_malformed_workspace_errors_are_preserved_and_never_ambient(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "workspace.log"
+            for content in ("!ENTRY plugin 4 0\n!MESSAGE real error\n",
+                            "!ENTRY plugin 8 0", "!ENTRY plugin unknown 0\n!MESSAGE error\n",
+                            "!ENTRY plugin 12 0\n!MESSAGE unknown severity\n", "!ENTRY plugin\n"):
+                with self.subTest(content=content):
+                    path.write_bytes(content.encode("utf-8"))
+                    records = oracle.workspace_error_multiset(path)
+                    self.assertEqual(sum(records.values()), 1)
+                    self.assertFalse(any(oracle.is_ambient_record(row) for row in records))
+                    self.assertEqual(next(iter(records))[3], content)
+
+    def diagnostic_control_fixture(self, root):
+        capture, prepared = root / "control", root / "prepared"
+        project, template = capture / "EmptyEdtDiagnosticControl", prepared / "project"
+        for directory in (project, template):
+            for relative in (".project", "DT-INF/PROJECT.PMF", "src/Configuration/Configuration.mdo",
+                             ".settings/org.eclipse.core.resources.prefs"):
+                path = directory / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"fixture source; never launched")
+        source = capture / "harness-source.py"
+        source.write_bytes(b"fixture harness; never launched")
+        exe = root / "edt.exe"
+        exe.write_bytes(b"fixture executable; never launched")
+        args = SimpleNamespace(edt_build="2025.2.3.30", edt_exe=exe)
+        oracle.write_json(prepared / "prepared.json", {"project": str(template)})
+        oracle.write_json(prepared / "authentic-project-after.json", oracle.snapshot(template))
+        oracle.write_json(capture / "invocation.json", {"mode": "control", "harness_sha256": oracle.digest(source),
+            "prepared": str(prepared), "runtime": "8.3.27", "source_version": "2.20"})
+        oracle.write_json(capture / "edt-version.json", {"actual": args.edt_build, "executable_sha256": oracle.digest(exe)})
+        oracle.write_json(capture / "control.json", {"status": "CAPTURED", "template_project_unchanged": True,
+            "unresolved_source_diagnostics": False})
+        tsv = capture / "control-validation.tsv"
+        tsv.write_bytes(b"")
+        oracle.write_json(capture / "control-validation-summary.json", oracle.summarize_validation_tsv(tsv))
+        for name in ("template-project-before.json", "template-project-after.json"):
+            oracle.write_json(capture / name, oracle.snapshot(template))
+        oracle.write_json(capture / "control-project-before.json", oracle.snapshot(project))
+        oracle.write_json(capture / "control-project-after.json", oracle.snapshot(project))
+        exported = capture / "control-installed-export"
+        exported.mkdir()
+        (exported / "Configuration.xml").write_bytes(b"<Configuration/>")
+        oracle.write_json(capture / "control-installed-export.json", oracle.snapshot(exported))
+        for label, operation in (("edt-version", "version"), ("edt-control-validate", "validate"), ("edt-control-export", "export")):
+            argv = [str(exe), "-data", str(capture / ("version-workspace" if operation == "version" else "control-workspace")), "-command", operation]
+            if operation == "validate":
+                argv.extend(["--file", str(tsv), "--project-list", str(project)])
+            elif operation == "export":
+                argv.extend(["--project-name", project.name, "--configuration-files", str(exported)])
+            oracle.write_json(capture / f"{label}.command.json", {"argv": argv, "exit_code": 0, "cwd": str(capture)})
+            for suffix in ("stdout", "stderr", "workspace-log"):
+                (capture / f"{label}.{suffix}").write_bytes(args.edt_build.encode() if label == "edt-version" and suffix == "stdout" else b"")
+        return capture, args
+
+    def test_control_capture_binds_original_tsv_manifests_and_command_scope(self):
+        corruptions = (None, "truncated_tsv", "template", "project", "export", "workspace", "export_project", "export_target")
+        for corruption in corruptions:
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as folder:
+                capture, args = self.diagnostic_control_fixture(Path(folder))
+                if corruption == "truncated_tsv":
+                    # A previously nonempty captured TSV cannot become a clean
+                    # empty control just by truncating the current file.
+                    path = capture / "control-validation-summary.json"
+                    data = json.loads(path.read_text()); data["tsv_sha256"] = "previous-nonempty-hash"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                elif corruption in ("template", "project", "export"):
+                    path = {"template": capture.parent / "prepared/project/.project",
+                            "project": capture / "EmptyEdtDiagnosticControl/.project",
+                            "export": capture / "control-installed-export/Configuration.xml"}[corruption]
+                    path.write_bytes(b"modified after capture")
+                elif corruption:
+                    path = capture / "edt-control-export.command.json"
+                    data = json.loads(path.read_text())
+                    flag = {"workspace": "-data", "export_project": "--project-name", "export_target": "--configuration-files"}[corruption]
+                    data["argv"][data["argv"].index(flag) + 1] = "another-scope"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                if corruption:
+                    with self.assertRaises(oracle.OracleError):
+                        oracle.bind_diagnostic_capture(capture, args, control=True)
+                else:
+                    bound = oracle.bind_diagnostic_capture(capture, args, control=True)
+                    self.assertIn("control-validation-summary.json", bound["command_hashes"])
+
     def test_route_specific_tree_equality_keeps_serializer_differences_visible(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)

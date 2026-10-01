@@ -274,6 +274,13 @@ def workspace_error_multiset(log: Path) -> Counter:
             # and separator blank lines. Never collapse message/stack whitespace.
             key = (match[1], match[2], match[3], block[match.end():].rstrip("\r\n"))
             result[key] += 1
+        elif block.startswith("!ENTRY "):
+            header = block.splitlines()[0].split()
+            # A missing timestamp/newline cannot make an error disappear. Even
+            # an unreadable severity is a malformed diagnostic, not evidence
+            # that the entry was informational. Preserve its complete bytes.
+            if len(header) < 3 or header[2] not in ("0", "1", "2"):
+                result[("MALFORMED_ENTRY", "4", "unparsed", block)] += 1
     return result
 
 
@@ -317,27 +324,62 @@ def bind_diagnostic_capture(capture: Path, args, *, control=False, project_snaps
         if command["exit_code"] != 0 or command.get("timeout") or Path(argv[0]) != args.edt_exe \
                 or "-command" not in argv or argv[argv.index("-command") + 1] != operation:
             raise OracleError("Diagnostic capture command failed or uses another tool")
+        workspace = capture / ("version-workspace" if operation == "version" else
+                               "control-workspace" if control else "validation-workspace")
+        if command.get("cwd") != str(capture) or "-data" not in argv or \
+                argv[argv.index("-data") + 1] != str(workspace):
+            raise OracleError("Diagnostic command uses another capture/workspace")
         if operation == "validate" and ("--file" not in argv or argv[argv.index("--file") + 1] != str(tsv)):
             raise OracleError("Diagnostic command did not write this exact TSV")
         if operation == "validate":
             source_project = capture / ("EmptyEdtDiagnosticControl" if control else "project-copy")
             if "--project-list" not in argv or argv[argv.index("--project-list") + 1:] != [str(source_project)]:
                 raise OracleError("Diagnostic command checked another project")
+        if operation == "export" and ("--project-name" not in argv or
+                argv[argv.index("--project-name") + 1] != "EmptyEdtDiagnosticControl" or
+                "--configuration-files" not in argv or
+                argv[argv.index("--configuration-files") + 1] != str(capture / "control-installed-export")):
+            raise OracleError("Diagnostic control export belongs to another project/output")
         hashes[stage] = digest(command_path)
         for suffix in ("stdout", "stderr", "workspace-log"):
             raw = capture / f"{stage}.{suffix}"
             raw_hashes[raw.name] = digest(raw)
     if control:
-        if invocation["mode"] != "control" or validation_multiset(tsv):
+        summary_path = capture / "control-validation-summary.json"
+        summary = json.loads(summary_path.read_text(encoding="utf-8"))
+        if invocation["mode"] != "control" or validation_multiset(tsv) or \
+                summary != summarize_validation_tsv(tsv) or summary["unresolved_source_diagnostics"] or \
+                result.get("unresolved_source_diagnostics") is not False:
             raise OracleError("Ambient control is not a genuinely validated empty diagnostic project")
         for stage in ("edt-control-validate", "edt-control-export"):
             if command_diagnostics(capture, [stage])[stage]["error_count"] or any(
                     not is_ambient_record(record) for record in workspace_error_multiset(capture / f"{stage}.workspace-log")):
                 raise OracleError("Empty diagnostic control contains an unapproved runtime error")
         before = json.loads((capture / "control-project-before.json").read_text(encoding="utf-8"))
-        if {row["path"] for row in before["files"]} != {".project", "DT-INF/PROJECT.PMF", "src/Configuration/Configuration.mdo"}:
+        if {row["path"] for row in before["files"]} != {".project", "DT-INF/PROJECT.PMF", "src/Configuration/Configuration.mdo",
+                                                       ".settings/org.eclipse.core.resources.prefs"}:
             raise OracleError("Ambient control contains more than an empty configuration scaffold")
+        if before != snapshot(capture / "EmptyEdtDiagnosticControl"):
+            raise OracleError("Ambient control project changed after its captured validation")
+        after_path = capture / "control-project-after.json"
+        if after_path.exists() and json.loads(after_path.read_text(encoding="utf-8")) != before:
+            raise OracleError("Ambient control project changed during validation/export")
+        template_before = json.loads((capture / "template-project-before.json").read_text(encoding="utf-8"))
+        template_after = json.loads((capture / "template-project-after.json").read_text(encoding="utf-8"))
+        prepared_root = Path(invocation["prepared"])
+        prepared = json.loads((prepared_root / "prepared.json").read_text(encoding="utf-8"))
+        if template_before != template_after or template_before != snapshot(Path(prepared["project"])) or \
+                template_before != json.loads((prepared_root / "authentic-project-after.json").read_text(encoding="utf-8")):
+            raise OracleError("Ambient control template identity or immutability mismatch")
         require_xml(capture / "control-installed-export", require_dump_info=False)
+        export_snapshot = json.loads((capture / "control-installed-export.json").read_text(encoding="utf-8"))
+        if export_snapshot != snapshot(capture / "control-installed-export"):
+            raise OracleError("Ambient control installed export changed after capture")
+        for name in ("control-validation-summary.json", "control-project-before.json", "template-project-before.json",
+                     "template-project-after.json", "control-installed-export.json"):
+            hashes[name] = digest(capture / name)
+        if after_path.exists():
+            hashes[after_path.name] = digest(after_path)
     else:
         if invocation["mode"] != "validate" or digest(tsv) != result["tsv_sha256"]:
             raise OracleError("Validation TSV identity mismatch")
@@ -508,6 +550,11 @@ def empty_project_control(args, run: Path) -> None:
     (control / "DT-INF").mkdir(parents=True)
     (control / "src/Configuration").mkdir(parents=True)
     shutil.copyfile(project / "DT-INF/PROJECT.PMF", control / "DT-INF/PROJECT.PMF")
+    # Installed EDT otherwise adds this standard encoding setting during
+    # import. Copy the genuine template setting before taking the source hash.
+    (control / ".settings").mkdir()
+    shutil.copyfile(project / ".settings/org.eclipse.core.resources.prefs",
+                    control / ".settings/org.eclipse.core.resources.prefs")
     descriptor = ET.parse(project / ".project")
     project_name = descriptor.getroot().find("name")
     if project_name is None:
@@ -541,6 +588,10 @@ def empty_project_control(args, run: Path) -> None:
         "--configuration-files", str(exported)])
     require_xml(exported, require_dump_info=False)
     write_json(run / "control-installed-export.json", snapshot(exported))
+    control_after = snapshot(control)
+    if control_after != json.loads((run / "control-project-before.json").read_text(encoding="utf-8")):
+        raise OracleError("EDT modified the empty diagnostic control source project")
+    write_json(run / "control-project-after.json", control_after)
     diagnostics = command_diagnostics(run, ["edt-control-validate", "edt-control-export"])
     write_json(run / "edt-diagnostics.json", diagnostics)
     after = snapshot(project)
