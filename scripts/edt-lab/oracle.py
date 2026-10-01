@@ -292,6 +292,265 @@ def workspace_error_multiset(log: Path) -> Counter:
     return result
 
 
+def workspace_append_delta(previous: bytes, current: bytes) -> bytes:
+    """Extract a complete call boundary; never cancel or rewrite log records."""
+    if not current.startswith(previous):
+        raise OracleError("Workspace log was reset/truncated or its captured prefix changed")
+    for value in (previous, current):
+        value.decode("utf-8", errors="strict")
+        if value and not value.endswith(b"\n"):
+            raise OracleError("Partial workspace diagnostic record at call boundary")
+    delta = current[len(previous):]
+    if delta.strip() and not delta.lstrip(b"\r\n").startswith((b"!SESSION", b"!ENTRY")):
+        raise OracleError("Workspace phase begins inside a diagnostic record")
+    for value in (previous, delta):
+        validate_warm_workspace_records(value)
+    return delta
+
+
+def validate_warm_workspace_records(value: bytes) -> None:
+    """Malformed warm evidence is fatal even if both sides share the defect."""
+    for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION)(?:\s|$))", value.decode("utf-8", errors="strict")):
+        if block.startswith("!ENTRY"):
+            if not re.match(r"!ENTRY (\S+) ([01248]) (\S+) [^\r\n]+\r?\n", block) \
+                    or not re.search(r"(?m)^!MESSAGE [^\r\n]*\S[^\r\n]*\r?\n", block):
+                raise OracleError("Malformed/partial workspace ENTRY header or MESSAGE at warm boundary")
+
+
+WARM_REGISTRATION_IDENTITIES = {
+    ("com._1c.g5.v8.dt.bsl.ui", "IBslDocumentProviderExtension", "com.e1c.langtool.v8.dt.internal.bsl.ui.i18n.extension.BslContentWriterExtension"),
+    ("com._1c.g5.v8.dt.core", "IResourceContentExporterExtension", "com.e1c.langtool.v8.dt.internal.bp.scheme.i18n.extension.GraphicalSchemeV8ExporterExtension"),
+    ("com._1c.g5.v8.dt.core", "IResourceContentExporterExtension", "com.e1c.langtool.v8.dt.internal.core.ext.BmContentExporterExtension"),
+    ("com._1c.g5.v8.dt.core", "IResourceContentExporterExtension", "com.e1c.langtool.v8.dt.internal.moxel.i18n.extension.MoxelV8ExporterExtension"),
+    ("com._1c.g5.v8.dt.core", "IResourceContentImporterExtension", "com.e1c.langtool.v8.dt.internal.core.ext.BmContentImporterExtension"),
+    ("com._1c.g5.v8.dt.core", "IResourceContentImporterExtension", "com.e1c.langtool.v8.dt.internal.moxel.i18n.extension.MoxelV8ImporterExtension"),
+    ("com._1c.g5.v8.dt.ide", "IProjectFileSystemSupportProvider", "com.e1c.langtool.v8.dt.internal.htmldocument.HtmlProjectFileSystemSupportExtension$HtmlProjectFileSystemSupport"),
+    ("com._1c.g5.v8.dt.ide", "IProjectFileSystemSupportProvider", "com.e1c.langtool.v8.dt.internal.md.help.HelpPageProjectFileSystemSupportExtension$HelpPageProjectFileSystemSupport"),
+    ("com._1c.g5.v8.dt.md.export.xml", "IXmlExporterExtension", "com.e1c.langtool.v8.dt.internal.bp.scheme.i18n.xml.extension.GraphicalSchemeXmlExporterExtension"),
+    ("com._1c.g5.v8.dt.md.export.xml", "IXmlExporterExtension", "com.e1c.langtool.v8.dt.internal.dcs.i18n.xml.DcsXmlExporterExtension"),
+    ("com._1c.g5.v8.dt.md.export.xml", "IXmlExporterExtension", "com.e1c.langtool.v8.dt.internal.moxel.i18n.xml.extension.MoxelXmlExporterExtension"),
+}
+
+
+def warm_workspace_multiset(log: Path, command_path: Path) -> tuple[Counter, list[dict]]:
+    """ALL entries; only proven JVM identities and verified command context vary."""
+    raw = log.read_bytes()
+    validate_warm_workspace_records(raw)
+    command = json.loads(command_path.read_text(encoding="utf-8"))
+    argv = command["argv"]
+    result, lexical = Counter(), []
+    for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION)(?:\s|$))", raw.decode("utf-8")):
+        match = re.match(r"!ENTRY (\S+) ([01248]) (\S+) [^\r\n]+\r?\n", block)
+        if not match:
+            continue
+        body = block[match.end():].rstrip("\r\n")
+        current = body
+        if (match[2], match[3]) == ("2", "0"):
+            for plugin, interface, implementation in WARM_REGISTRATION_IDENTITIES:
+                fixed = f"!MESSAGE The external {interface} is registered: {implementation}@"
+                if match[1] == plugin and re.fullmatch(re.escape(fixed) + r"[0-9a-f]{1,8}", body):
+                    current = fixed + "<JVM-IDENTITY>"
+                    break
+        if (match[1], match[2], match[3]) == ("com.e1c.g5.v8.dt.cli.api", "1", "0") \
+                and len(argv) >= 6 and argv[-6:-3] == ["-command", "validate", "--file"] \
+                and argv[-2] == "--project-list":
+            fixed_command = f'validate --file "{argv[-3]}" --project-list "{argv[-1]}"'
+            if body in ("!MESSAGE Command to run:\n" + fixed_command, "!MESSAGE Command to run:\r\n" + fixed_command):
+                current = "!MESSAGE Command to run:\n<BOUND VALIDATE PASS COMMAND>"
+        result[(match[1], match[2], match[3], current)] += 1
+        if body != current:
+            lexical.append({"plugin": match[1], "severity": match[2], "code": match[3],
+                "raw_message_and_stack": body, "comparison_message_and_stack": current,
+                "kind": "verified_pass_command" if current.endswith("<BOUND VALIDATE PASS COMMAND>") else "known_registration_jvm_identity",
+                "command_sha256": digest(command_path),
+                "raw_body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()})
+    return result, lexical
+
+
+def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
+                             prefix: str, stem: str, passes: int, original: Path | None = None) -> dict:
+    """Recompute every capture fact; supplied summaries never authorize a pass."""
+    if passes < 2:
+        raise OracleError("Invalid warm validation evidence pass count")
+    before = snapshot(project)
+    original_before = snapshot(original) if original else None
+    if original_before and any(before[key] != original_before[key] for key in ("files", "file_count", "total_bytes", "tree_sha256")):
+        raise OracleError("Warm copy differs from immutable authentic source")
+    labels, records, workspace_counters, previous = [], [], [], b""
+    for index in range(1, passes + 1):
+        label = f"{prefix}-pass-{index:03d}"
+        labels.append(label)
+        tsv = run / f"{stem}-pass-{index:03d}.tsv"
+        command = json.loads((run / f"{label}.command.json").read_text(encoding="utf-8"))
+        expected = [str(args.edt_exe), "-data", str(workspace), "-timeout", str(args.timeout),
+                    "-nl", "en_US", "-vmargs", f"-Xmx{args.heap_gib}g", "-command", "validate",
+                    "--file", str(tsv), "--project-list", str(project)]
+        if command.get("argv") != expected or command.get("cwd") != str(run) \
+                or command.get("exit_code") != 0 or command.get("timeout") \
+                or command.get("timeout_or_log_limit"):
+            raise OracleError("Warm validation command/tool/workspace/project binding mismatch")
+        fifo_hashes = {}
+        for action in ("acquire", "release"):
+            lock_path = run / f"{label}-lock-{action}.command.json"
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+            expected_lock = ["pwsh", "-NoProfile", "-File", str(args.lock_script), action, args.lock_track]
+            if action == "acquire":
+                expected_lock.extend(["-TimeoutMin", str(max(1, args.timeout // 60))])
+            if lock.get("argv") != expected_lock or lock.get("cwd") != str(run) \
+                    or lock.get("exit_code") != 0 or lock.get("timeout") or lock.get("timeout_or_log_limit"):
+                raise OracleError("Warm FIFO command ownership/action binding mismatch")
+            fifo_hashes[action] = digest(lock_path)
+        for phase in ("before", "after"):
+            captured = json.loads((run / f"{label}.project-{phase}.json").read_text(encoding="utf-8"))
+            if captured != before:
+                raise OracleError("Warm validation modified or checked a different source project")
+            if original and json.loads((run / f"{label}.immutable-{phase}.json").read_text(encoding="utf-8")) != original_before:
+                raise OracleError("Immutable authentic source changed during a warm pass")
+        for suffix in ("stdout", "stderr"):
+            content = (run / f"{label}.{suffix}").read_bytes()
+            if content.decode("utf-8", errors="strict").strip():
+                raise OracleError("Unclassified warm validation stdout/stderr; raw output retained")
+        validation_multiset(tsv)  # malformed rows are always fatal
+        raw = (run / f"{label}.workspace-log").read_bytes()
+        delta = workspace_append_delta(previous, raw)
+        phase_path = run / f"{label}.workspace-phase-log"
+        if phase_path.read_bytes() != delta:
+            raise OracleError("Warm validation phase boundary bytes changed")
+        workspace_counter, lexical = warm_workspace_multiset(phase_path, run / f"{label}.command.json")
+        workspace_counters.append(workspace_counter)
+        record = {"label": label, "command_sha256": digest(run / f"{label}.command.json"),
+                  "fifo_command_sha256": fifo_hashes,
+                  "workspace_lexical_context": lexical,
+                  "tsv": tsv.name, "tsv_sha256": digest(tsv), "workspace_log_sha256": digest(run / f"{label}.workspace-log"),
+                  "workspace_prefix_bytes": len(previous), "workspace_phase_bytes": len(delta),
+                  "workspace_phase_sha256": digest(phase_path), "project_sha256": before["tree_sha256"],
+                  "before_sha256": digest(run / f"{label}.project-before.json"),
+                  "after_sha256": digest(run / f"{label}.project-after.json"),
+                  "stdout_sha256": digest(run / f"{label}.stdout"), "stderr_sha256": digest(run / f"{label}.stderr")}
+        record["auxiliary_workspace_logs_sha256"] = {suffix: digest(run / f"{label}.{suffix}")
+            for suffix in ("workspace-1cedtcli.log", "workspace-1cedtcli-shutdown-hook.log")
+            if (run / f"{label}.{suffix}").exists()}
+        if original:
+            record.update({"immutable_before_sha256": digest(run / f"{label}.immutable-before.json"),
+                           "immutable_after_sha256": digest(run / f"{label}.immutable-after.json")})
+        records.append(record)
+        previous = raw
+    first, final = run / records[-2]["tsv"], run / records[-1]["tsv"]
+    stable = validation_multiset(first) == validation_multiset(final)
+    return {"version": 1, "passes": passes, "project": str(project), "workspace": str(workspace),
+            "edt_executable_sha256": digest(args.edt_exe), "edt_build": args.edt_build,
+            "source_version": args.source_version, "runtime": args.runtime,
+            "immutable_original": str(original) if original else None,
+            "final_consecutive_all_diagnostics_stable": stable,
+            "final_consecutive_all_workspace_records_stable": workspace_counters[-2] == workspace_counters[-1],
+            "records": records,
+            "final_label": labels[-1], "final_tsv": final.name}
+
+
+def warm_validate(args, run: Path, project: Path, workspace: Path, prefix: str, stem: str,
+                  original: Path | None = None) -> dict:
+    passes = args.warm_validation_passes
+    if passes < 2 or workspace.exists():
+        raise OracleError("Warm validation requires >=2 passes and a fresh dedicated workspace")
+    artifacts = [run / f"{stem}.tsv", run / f"{stem}-warm.json"]
+    for index in range(1, passes + 1):
+        label = f"{prefix}-pass-{index:03d}"
+        artifacts.append(run / f"{stem}-pass-{index:03d}.tsv")
+        artifacts.extend(run / f"{label}.{suffix}" for suffix in ("command.json", "stdout", "stderr",
+            "workspace-log", "workspace-phase-log", "project-before.json", "project-after.json",
+            "immutable-before.json", "immutable-after.json", "workspace-1cedtcli.log", "workspace-1cedtcli-shutdown-hook.log"))
+        artifacts.extend(run / f"{label}-lock-{action}.{suffix}" for action in ("acquire", "release")
+                         for suffix in ("command.json", "stdout", "stderr"))
+    if any(path.exists() for path in artifacts):
+        raise OracleError("Warm validation refuses existing capture artifacts; use a fresh run")
+    before, previous = snapshot(project), b""
+    original_before = snapshot(original) if original else None
+    for index in range(1, passes + 1):
+        label = f"{prefix}-pass-{index:03d}"
+        tsv = run / f"{stem}-pass-{index:03d}.tsv"
+        write_json(run / f"{label}.project-before.json", snapshot(project))
+        if original:
+            write_json(run / f"{label}.immutable-before.json", snapshot(original))
+            if snapshot(original) != original_before:
+                raise OracleError("Immutable source changed between warm passes")
+        if snapshot(project) != before:
+            raise OracleError("Warm validation source changed between passes")
+        edt(args, run, label, workspace, ["validate", "--file", str(tsv), "--project-list", str(project)])
+        write_json(run / f"{label}.project-after.json", snapshot(project))
+        if original:
+            write_json(run / f"{label}.immutable-after.json", snapshot(original))
+            if snapshot(original) != original_before:
+                raise OracleError("Warm validation modified immutable authentic source")
+        if snapshot(project) != before:
+            raise OracleError("Warm validation modified its immutable source copy")
+        if not tsv.is_file():
+            raise OracleError("Warm validation did not produce requested TSV")
+        raw = (run / f"{label}.workspace-log").read_bytes()
+        delta = workspace_append_delta(previous, raw)
+        with (run / f"{label}.workspace-phase-log").open("xb") as stream:
+            stream.write(delta)
+        previous = raw
+    evidence = warm_validation_evidence(args, run, project, workspace, prefix, stem, passes, original)
+    write_json(run / f"{stem}-warm.json", evidence)
+    if not evidence["final_consecutive_all_diagnostics_stable"] \
+            or not evidence["final_consecutive_all_workspace_records_stable"]:
+        raise OracleError("Final consecutive ALL diagnostic Counters/workspace records are not stable; every pass retained")
+    with (run / f"{stem}.tsv").open("xb") as target:
+        with (run / evidence["final_tsv"]).open("rb") as source:
+            shutil.copyfileobj(source, target)
+    return evidence
+
+
+def bind_warm_validation(args, run: Path, project: Path, workspace: Path,
+                         prefix: str, stem: str, original: Path | None = None) -> dict:
+    evidence = warm_validation_evidence(args, run, project, workspace, prefix, stem,
+                                        args.warm_validation_passes, original)
+    recorded = json.loads((run / f"{stem}-warm.json").read_text(encoding="utf-8"))
+    if evidence != recorded or not evidence["final_consecutive_all_diagnostics_stable"] \
+            or not evidence["final_consecutive_all_workspace_records_stable"] \
+            or digest(run / f"{stem}.tsv") != evidence["records"][-1]["tsv_sha256"]:
+        raise OracleError("Warm capture summary/stability/final TSV disagrees with complete records")
+    return evidence
+
+
+def compare_warm_phase_errors(control: Path, baseline: Path, generated: Path,
+                              before: dict, after: dict) -> dict:
+    if before["passes"] != after["passes"] or len(before["records"]) != before["passes"] \
+            or len(after["records"]) != after["passes"]:
+        raise OracleError("Baseline/candidate warm pass strategy differs")
+    known = set()
+    for label in ("edt-control-validate", "edt-control-export"):
+        known.update(record for record in workspace_error_multiset(control / f"{label}.workspace-log")
+                     if is_ambient_record(record))
+    phases = []
+    def rows(counter):
+        return [{"plugin": key[0], "severity": key[1], "code": key[2], "message_and_stack": key[3], "count": count}
+                for key, count in sorted(counter.items())]
+    for original, candidate in zip(before["records"], after["records"]):
+        source_phase = baseline / f"{original['label']}.workspace-phase-log"
+        target_phase = generated / f"{candidate['label']}.workspace-phase-log"
+        validate_warm_workspace_records(source_phase.read_bytes())
+        validate_warm_workspace_records(target_phase.read_bytes())
+        a, source_lexical = warm_workspace_multiset(source_phase, baseline / f"{original['label']}.command.json")
+        b, target_lexical = warm_workspace_multiset(target_phase, generated / f"{candidate['label']}.command.json")
+        a = Counter({key: count for key, count in a.items() if key not in known})
+        b = Counter({key: count for key, count in b.items() if key not in known})
+        structured = compare_validation_tsv(baseline / original["tsv"], generated / candidate["tsv"])
+        phases.append({"baseline_label": original["label"], "candidate_label": candidate["label"],
+                       "all_tsv_diagnostics": structured,
+                       "baseline_lexical_context": source_lexical, "candidate_lexical_context": target_lexical,
+                       "baseline_tsv_unresolved": summarize_validation_tsv(baseline / original["tsv"])["unresolved_source_diagnostics"],
+                       "candidate_tsv_unresolved": summarize_validation_tsv(generated / candidate["tsv"])["unresolved_source_diagnostics"],
+                       "baseline_nonambient": rows(a), "candidate_nonambient": rows(b),
+                       "new_nonambient": rows(b - a), "removed_nonambient": rows(a - b)})
+    return {"no_new_nonambient_errors": not any(phase["new_nonambient"] for phase in phases),
+            "no_new_all_tsv_diagnostics": all(phase["all_tsv_diagnostics"]["no_new_diagnostics"] for phase in phases),
+            "clean_source": not any(any(row["severity"] in ("4", "8") for row in phase["baseline_nonambient"]) or phase["baseline_tsv_unresolved"] for phase in phases),
+            "clean_generated_validation": not any(any(row["severity"] in ("4", "8") for row in phase["candidate_nonambient"]) or phase["candidate_tsv_unresolved"] for phase in phases),
+            "phases": phases, "workspace_record_scope": "ALL ENTRY severities 0/1/2/4/8; closed registration JVM identity and bound validation command context only",
+            "note": "Each phase compares complete records/counts separately; no cross-phase cancellation or error waiver"}
+
+
 def is_ambient_record(record: tuple) -> bool:
     plugin, severity, code, body = record
     if code != "0":
@@ -317,12 +576,26 @@ def bind_diagnostic_capture(capture: Path, args, *, control=False, project_snaps
         raise OracleError("Diagnostic capture profile mismatch")
     if (capture / "edt-version.stdout").read_bytes().decode("utf-8").strip() != args.edt_build:
         raise OracleError("Diagnostic capture actual version output mismatch")
+    warm_passes = 0 if control else invocation.get("warm_validation_passes", 0)
+    if not control and warm_passes != getattr(args, "warm_validation_passes", 0):
+        raise OracleError("Baseline/candidate warm validation pass options disagree")
+    warm = None
+    if warm_passes:
+        if invocation["heap_gib"] != args.heap_gib or invocation["timeout"] != args.timeout:
+            raise OracleError("Baseline/candidate warm validation command resource options disagree")
+        capture_args = argparse.Namespace(**{**vars(args), "timeout": invocation["timeout"],
+                                             "heap_gib": invocation["heap_gib"],
+                                             "lock_script": Path(invocation["lock_script"]),
+                                             "lock_track": invocation["lock_track"]})
+        warm = bind_warm_validation(capture_args, capture, capture / "project-copy",
+                    capture / "validation-workspace", "edt-validate", "validation", Path(project_snapshot["root"]))
     label = "edt-control-validate" if control else "edt-validate"
     tsv = capture / ("control-validation.tsv" if control else "validation.tsv")
     result = json.loads((capture / ("control.json" if control else "validation.json")).read_text(encoding="utf-8"))
     if result["status"] != "CAPTURED" or result.get("template_project_unchanged" if control else "prepared_project_unchanged") is not True:
         raise OracleError("Diagnostic capture did not complete with unchanged original")
-    labels = ["edt-version", label, "edt-control-export"] if control else ["edt-version", label]
+    labels = ["edt-version", label, "edt-control-export"] if control else \
+        ["edt-version", *[record["label"] for record in warm["records"]]] if warm else ["edt-version", label]
     hashes, raw_hashes = {}, {}
     for stage in labels:
         command_path = capture / f"{stage}.command.json"
@@ -337,7 +610,9 @@ def bind_diagnostic_capture(capture: Path, args, *, control=False, project_snaps
         if command.get("cwd") != str(capture) or "-data" not in argv or \
                 argv[argv.index("-data") + 1] != str(workspace):
             raise OracleError("Diagnostic command uses another capture/workspace")
-        if operation == "validate" and ("--file" not in argv or argv[argv.index("--file") + 1] != str(tsv)):
+        stage_tsv = capture / next(record["tsv"] for record in warm["records"] if record["label"] == stage) \
+            if warm and operation == "validate" else tsv
+        if operation == "validate" and ("--file" not in argv or argv[argv.index("--file") + 1] != str(stage_tsv)):
             raise OracleError("Diagnostic command did not write this exact TSV")
         if operation == "validate":
             source_project = capture / ("EmptyEdtDiagnosticControl" if control else "project-copy")
@@ -398,10 +673,20 @@ def bind_diagnostic_capture(capture: Path, args, *, control=False, project_snaps
         if Path(copied["root"]) != capture / "project-copy" or any(
                 copied[key] != project_snapshot[key] for key in ("files", "file_count", "total_bytes", "tree_sha256")):
             raise OracleError("Validated disposable copy was not byte equal to the authentic project")
+        if warm and copied != snapshot(capture / "project-copy"):
+            raise OracleError("Warm validation source copy changed since the captured passes")
+        if warm:
+            for record in warm["records"]:
+                for name in (record["tsv"], f"{record['label']}.workspace-phase-log",
+                             f"{record['label']}.project-before.json", f"{record['label']}.project-after.json",
+                             f"{record['label']}.immutable-before.json", f"{record['label']}.immutable-after.json"):
+                    hashes[name] = digest(capture / name)
+            hashes["validation-warm.json"] = digest(capture / "validation-warm.json")
     return {"capture": str(capture), "tsv_sha256": digest(tsv), "harness_sha256": invocation["harness_sha256"],
             "capture_runtime": invocation["runtime"], "capture_source_version": invocation["source_version"],
             "command_hashes": hashes, "raw_diagnostic_hashes": raw_hashes,
-            "result_sha256": digest(capture / ("control.json" if control else "validation.json"))}
+            "result_sha256": digest(capture / ("control.json" if control else "validation.json")),
+            **({"warm_validation": warm} if warm else {})}
 
 
 def compare_ambient_diagnostics(control: Path, original: list[tuple[Path, str]],
@@ -517,12 +802,16 @@ def validate_project(args, run: Path) -> None:
     disposable = run / "project-copy"
     shutil.copytree(project, disposable, symlinks=False)
     output = run / "validation.tsv"
-    edt(args, run, "edt-validate", run / "validation-workspace", ["validate", "--file",
-        str(output), "--project-list", str(disposable)])
+    warm = None
+    if getattr(args, "warm_validation_passes", 0):
+        warm = warm_validate(args, run, disposable, run / "validation-workspace", "edt-validate", "validation", project)
+    else:
+        edt(args, run, "edt-validate", run / "validation-workspace", ["validate", "--file",
+            str(output), "--project-list", str(disposable)])
     if not output.is_file():
         raise OracleError("Installed EDT validate did not produce the requested TSV")
     no_links(output)
-    diagnostics = command_diagnostics(run, ["edt-validate"])
+    diagnostics = command_diagnostics(run, [record["label"] for record in warm["records"]] if warm else ["edt-validate"])
     write_json(run / "edt-diagnostics.json", diagnostics)
     source_diagnostics = summarize_validation_tsv(output)
     write_json(run / "validation-tsv-summary.json", source_diagnostics)
@@ -536,6 +825,8 @@ def validate_project(args, run: Path) -> None:
         "prepared_project_unchanged": True,
         "unresolved_source_diagnostics": source_diagnostics["unresolved_source_diagnostics"],
         "unresolved_edt_error_diagnostics": has_error_diagnostics(diagnostics.values()),
+        **({"warm_validation_passes": warm["passes"],
+            "warm_final_label": warm["final_label"], "warm_all_diagnostics_stable": True} if warm else {}),
         "note": "Raw installed-EDT TSV and workspace diagnostics require inspection; this capture is not acceptance PASS"})
 
 
@@ -855,8 +1146,13 @@ def accept(args, run: Path) -> None:
     generated_before = snapshot(generated_xml)
     write_json(run / "edt-generated-xml.json", generated_before)
     generated_tsv = run / "generated-validation.tsv"
-    edt(args, run, "edt-validate-generated", run / "generated-workspace", ["validate", "--file", str(generated_tsv),
-        "--project-list", str(stripped)])
+    warm_generated = None
+    if getattr(args, "warm_validation_passes", 0):
+        warm_generated = warm_validate(args, run, stripped, run / "generated-validation-workspace",
+                                       "edt-validate-generated", "generated-validation")
+    else:
+        edt(args, run, "edt-validate-generated", run / "generated-workspace", ["validate", "--file", str(generated_tsv),
+            "--project-list", str(stripped)])
     if not generated_tsv.is_file():
         raise OracleError("Generated project validate did not produce TSV")
     validation_comparison = compare_validation_tsv(validation_capture / "validation.tsv", generated_tsv)
@@ -879,15 +1175,32 @@ def accept(args, run: Path) -> None:
     original_diagnostics = command_diagnostics(prepared_root,
                                                ["edt-import-native", "edt-export-native"])
     write_json(run / "prepared-diagnostics-recomputed.json", original_diagnostics)
-    generated_diagnostics = command_diagnostics(run, ["edt-export-generated", "edt-validate-generated"])
+    generated_diagnostics = command_diagnostics(run, ["edt-export-generated",
+        *([record["label"] for record in warm_generated["records"]] if warm_generated else ["edt-validate-generated"])])
     write_json(run / "edt-diagnostics.json", generated_diagnostics)
-    ambient_comparison = compare_ambient_diagnostics(ambient_control,
-        [(prepared_root, "edt-import-native"), (prepared_root, "edt-export-native"), (validation_capture, "edt-validate")],
-        [(run, "edt-export-generated"), (run, "edt-validate-generated")])
+    if warm_generated:
+        if bind_warm_validation(args, run, stripped, run / "generated-validation-workspace",
+                                "edt-validate-generated", "generated-validation") != warm_generated:
+            raise OracleError("Generated warm validation evidence changed during acceptance")
+        # Import/export remains a separate strict gate. Warm repeats cannot
+        # hide any earlier candidate load failure or cancel errors across passes.
+        ambient_comparison = compare_ambient_diagnostics(ambient_control,
+            [(prepared_root, "edt-import-native"), (prepared_root, "edt-export-native")],
+            [(run, "edt-export-generated")])
+        warm_errors = compare_warm_phase_errors(ambient_control, validation_capture, run,
+                                               validation_binding["warm_validation"], warm_generated)
+        write_json(run / "warm-phase-error-differential.json", warm_errors)
+    else:
+        warm_errors = None
+        ambient_comparison = compare_ambient_diagnostics(ambient_control,
+            [(prepared_root, "edt-import-native"), (prepared_root, "edt-export-native"), (validation_capture, "edt-validate")],
+            [(run, "edt-export-generated"), (run, "edt-validate-generated")])
     write_json(run / "ambient-diagnostic-differential.json", ambient_comparison)
     generated_comparison = compare_tree_snapshots(baseline_before, generated_before)
     write_json(run / "generated-edt-same-serializer-comparison.json", generated_comparison)
-    diagnostic_failure = not ambient_comparison["no_unmatched_error_diagnostics"] or not validation_comparison["no_new_diagnostics"]
+    diagnostic_failure = not ambient_comparison["no_unmatched_error_diagnostics"] or not validation_comparison["no_new_diagnostics"] \
+        or bool(warm_errors and (not warm_errors["no_new_nonambient_errors"]
+                                 or not warm_errors["no_new_all_tsv_diagnostics"]))
     passed = not diagnostic_failure and direct_comparison["equal"] and generated_comparison["equal"] and unchanged_return["equal"]
     result = {"status": "PASS" if passed else "FAIL",
         "verdicts": verdicts, "ours_version": ours_version, "ours_executable_sha256": ours_hash,
@@ -900,6 +1213,13 @@ def accept(args, run: Path) -> None:
         "native_reference_scope": "Native export after loading the authentic installed-EDT XML export; native capture runs outside this offline comparator",
         "unresolved_edt_error_diagnostics": diagnostic_failure,
         "provenance_removed_for_installed_export": True,
+        **({"warm_validation_passes": warm_generated["passes"],
+            "warm_phase_no_new_nonambient_errors": warm_errors["no_new_nonambient_errors"],
+            "warm_phase_all_tsv_no_new_diagnostics": warm_errors["no_new_all_tsv_diagnostics"],
+            "clean_source": warm_errors["clean_source"] and not summarize_validation_tsv(validation_capture / "validation.tsv")["unresolved_source_diagnostics"],
+            "clean_import": warm_errors["clean_generated_validation"] and ambient_comparison["no_unmatched_error_diagnostics"],
+            "error_free_generated_configuration": not summarize_validation_tsv(generated_tsv)["unresolved_source_diagnostics"]
+                    and warm_errors["clean_generated_validation"] and ambient_comparison["no_unmatched_error_diagnostics"]} if warm_generated else {}),
         "note": "Raw divergences require investigation; EDT rc=0 is not equality acceptance"}
     write_json(run / "acceptance.json", result)
     if result["status"] != "PASS":
@@ -926,6 +1246,8 @@ def parser():
     result.add_argument("--validation-capture", type=Path, help="Completed structured validation of this authentic prepared EDT project")
     result.add_argument("--ambient-control", type=Path, help="Completed zero-source-error empty installed-EDT diagnostic control")
     result.add_argument("--heap-gib", type=int, default=8)
+    result.add_argument("--warm-validation-passes", type=int, default=0,
+                        help="Opt-in matched fresh-workspace validation repeats (>=2); ALL diagnostic gate remains exact")
     return result
 
 
@@ -942,6 +1264,9 @@ def main() -> int:
             raise OracleError("Run and immutable native input must not overlap")
         if args.timeout < 1 or not 1 <= args.heap_gib <= 64 or "_" in args.lock_track or not args.lock_track:
             raise OracleError("Invalid timeout/lock track")
+        if args.warm_validation_passes < 0 or args.warm_validation_passes == 1 \
+                or args.warm_validation_passes and args.mode not in ("validate", "accept"):
+            raise OracleError("Warm passes require validate/accept and either 0 or >=2")
         expected = {"2.20": "8.3.27", "2.21": "8.5.1"}[args.source_version]
         if expected != args.runtime:
             raise OracleError("Explicit XML profile and runtime disagree")

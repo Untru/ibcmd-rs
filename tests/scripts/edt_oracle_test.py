@@ -16,6 +16,322 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def warm_fixture(self, root, *, rows=None, logs=None, mutate=None):
+        """Synthetic captures exercise bindings only; no EDT executable is run."""
+        run, original = root / "run", root / "original"
+        run.mkdir(parents=True)
+        original.mkdir()
+        (original / "source.mdo").write_bytes(b"immutable source")
+        project = run / "project-copy"
+        project.mkdir()
+        (project / "source.mdo").write_bytes(b"immutable source")
+        exe = root / "edt.exe"
+        exe.write_bytes(b"synthetic tool; never executed")
+        args = SimpleNamespace(edt_exe=exe, edt_build="2025.2.3.30", timeout=120,
+            heap_gib=4, warm_validation_passes=3, source_version="2.20", runtime="8.3.27",
+            lock_script=root / "synthetic-lock.ps1", lock_track="edt-synthetic-warm")
+        rows = [b"", b"", b""] if rows is None else rows
+        logs = [b"", b"", b""] if logs is None else logs
+        calls, history = [], b""
+        def capture(_, __, label, workspace, operation):
+            nonlocal history
+            index = len(calls)
+            calls.append(label)
+            workspace.mkdir(exist_ok=True)
+            tsv = Path(operation[operation.index("--file") + 1])
+            tsv.write_bytes(rows[index])
+            argv = [str(exe), "-data", str(workspace), "-timeout", str(args.timeout),
+                "-nl", "en_US", "-vmargs", f"-Xmx{args.heap_gib}g", "-command", *operation]
+            oracle.write_json(run / f"{label}.command.json", {"argv": argv, "cwd": str(run), "exit_code": 0})
+            for action in ("acquire", "release"):
+                lock_argv = ["pwsh", "-NoProfile", "-File", str(args.lock_script), action, args.lock_track]
+                if action == "acquire":
+                    lock_argv.extend(["-TimeoutMin", str(max(1, args.timeout // 60))])
+                oracle.write_json(run / f"{label}-lock-{action}.command.json",
+                    {"argv": lock_argv, "cwd": str(run), "exit_code": 0})
+            for suffix in ("stdout", "stderr"):
+                (run / f"{label}.{suffix}").write_bytes(b"")
+            history += f"!SESSION synthetic-pass-{index + 1}\n".encode() + logs[index]
+            (run / f"{label}.workspace-log").write_bytes(history)
+            if mutate:
+                mutate(project, original, index)
+        with patch.object(oracle, "edt", side_effect=capture):
+            evidence = oracle.warm_validate(args, run, project, run / "validation-workspace",
+                                            "edt-validate", "validation", original)
+        return run, args, project, original, evidence, calls
+
+    def warm_binding_fixture(self, root):
+        run, args, project, original, evidence, calls = self.warm_fixture(root)
+        source = run / "harness-source.py"
+        source.write_bytes(b"synthetic harness; never executed")
+        oracle.write_json(run / "invocation.json", {**vars(args), "edt_exe": str(args.edt_exe), "lock_script": str(args.lock_script),
+            "mode": "validate", "harness_sha256": oracle.digest(source)})
+        oracle.write_json(run / "edt-version.json", {"actual": args.edt_build,
+            "executable_sha256": oracle.digest(args.edt_exe)})
+        oracle.write_json(run / "validation.json", {"status": "CAPTURED", "prepared_project_unchanged": True,
+            "tsv_sha256": oracle.digest(run / "validation.tsv")})
+        for name in ("authentic-project-before.json", "authentic-project-after.json"):
+            oracle.write_json(run / name, oracle.snapshot(original))
+        oracle.write_json(run / "validated-project-copy.json", oracle.snapshot(project))
+        oracle.write_json(run / "edt-version.command.json", {"argv": [str(args.edt_exe), "-data",
+            str(run / "version-workspace"), "-command", "version"], "cwd": str(run), "exit_code": 0})
+        for suffix in ("stdout", "stderr", "workspace-log"):
+            (run / f"edt-version.{suffix}").write_bytes(args.edt_build.encode() if suffix == "stdout" else b"")
+        return run, args, project, original, evidence, calls
+
+    def test_warm_capture_three_passes_retains_exact_logs_and_rebinds_all_records(self):
+        row = b"2026-10-01T11:18:24+0300\tMinor\tCodeStyle\tproject\tvalidator\tmodule\tline 1\tStyle\n"
+        with tempfile.TemporaryDirectory() as folder:
+            run, args, project, original, evidence, calls = self.warm_fixture(Path(folder), rows=[b"", row, row])
+            self.assertEqual(calls, [f"edt-validate-pass-{n:03d}" for n in range(1, 4)])
+            self.assertTrue(evidence["final_consecutive_all_diagnostics_stable"])
+            self.assertEqual((run / "validation.tsv").read_bytes(), row)
+            self.assertEqual(evidence, oracle.bind_warm_validation(args, run, project,
+                run / "validation-workspace", "edt-validate", "validation", original))
+            for record in evidence["records"]:
+                self.assertEqual(record["workspace_phase_bytes"], len((run / f"{record['label']}.workspace-phase-log").read_bytes()))
+            # Replay refuses an existing workspace and never overwrites history.
+            with self.assertRaisesRegex(oracle.OracleError, "fresh dedicated"):
+                oracle.warm_validate(args, run, project, run / "validation-workspace", "edt-validate", "validation")
+
+    def test_warm_capture_binding_rejects_command_tool_source_workspace_and_summary_tampering(self):
+        for corruption in (None, "tool", "project", "original", "workspace", "command", "tsv",
+                           "phase", "source_before", "summary", "passes", "heap", "timeout", "profile", "fifo"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as folder:
+                run, args, project, original, evidence, _ = self.warm_binding_fixture(Path(folder))
+                if corruption in ("tool", "project", "original"):
+                    {"tool": args.edt_exe, "project": project / "source.mdo", "original": original / "source.mdo"}[corruption].write_bytes(b"changed")
+                elif corruption in ("workspace", "command"):
+                    path = run / "edt-validate-pass-001.command.json"
+                    data = json.loads(path.read_text(encoding="utf-8"))
+                    data["argv"][data["argv"].index("-data" if corruption == "workspace" else "--project-list") + 1] = "wrong-scope"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                elif corruption == "tsv":
+                    (run / "validation-pass-001.tsv").write_bytes(b"truncated\trow\n")
+                elif corruption == "phase":
+                    (run / "edt-validate-pass-001.workspace-phase-log").write_bytes(b"!SESSION invented\n")
+                elif corruption == "source_before":
+                    path = run / "edt-validate-pass-001.project-before.json"
+                    data = json.loads(path.read_text(encoding="utf-8")); data["tree_sha256"] = "forged"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                elif corruption == "summary":
+                    path = run / "validation-warm.json"
+                    data = json.loads(path.read_text(encoding="utf-8")); data["records"] = []
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                elif corruption == "passes":
+                    args.warm_validation_passes = 0
+                elif corruption in ("heap", "timeout"):
+                    setattr(args, "heap_gib" if corruption == "heap" else "timeout", 99)
+                elif corruption == "profile":
+                    args.source_version = "2.21"
+                elif corruption == "fifo":
+                    path = run / "edt-validate-pass-002-lock-acquire.command.json"
+                    data = json.loads(path.read_text(encoding="utf-8")); data["argv"][5] = "other-owner"
+                    path.write_text(json.dumps(data), encoding="utf-8")
+                if corruption:
+                    with self.assertRaises(oracle.OracleError):
+                        oracle.bind_diagnostic_capture(run, args, project_snapshot=oracle.snapshot(original))
+                else:
+                    bound = oracle.bind_diagnostic_capture(run, args, project_snapshot=oracle.snapshot(original))
+                    self.assertEqual(bound["warm_validation"], evidence)
+                    self.assertIn("validation-pass-001.tsv", bound["command_hashes"])
+
+    def test_warm_capture_rejects_mutation_during_any_pass_and_retains_failed_after_snapshot(self):
+        for target in ("copy", "original"):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as folder:
+                def mutate(project, original, index):
+                    if index == 1:
+                        ((project if target == "copy" else original) / "source.mdo").write_bytes(b"mutated during validation")
+                with self.assertRaisesRegex(oracle.OracleError, "modified"):
+                    self.warm_fixture(Path(folder), mutate=mutate)
+                run = Path(folder) / "run"
+                self.assertTrue((run / "edt-validate-pass-002.project-after.json").is_file())
+                self.assertFalse((run / "validation.tsv").exists())
+
+    def test_warm_unstable_final_all_counters_fail_with_every_attempt_retained(self):
+        row = b"2026-10-01T11:18:24+0300\tMinor\tWarning\tproject\tvalidator\tmodule\tline 1\tWarning\n"
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(oracle.OracleError, "ALL diagnostic Counters"):
+                self.warm_fixture(Path(folder), rows=[b"", row, b""])
+            run = Path(folder) / "run"
+            self.assertFalse((run / "validation.tsv").exists())
+            self.assertFalse(json.loads((run / "validation-warm.json").read_text(encoding="utf-8"))["final_consecutive_all_diagnostics_stable"])
+            self.assertEqual(len(list(run.glob("validation-pass-*.tsv"))), 3)
+            self.assertEqual(len(list(run.glob("*.workspace-log"))), 3)
+
+    def test_warm_stable_tsv_cannot_hide_unstable_final_workspace_error_counters(self):
+        error = b"!ENTRY plugin 4 0 time\n!MESSAGE Error\n"
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(oracle.OracleError, "workspace records are not stable"):
+                self.warm_fixture(Path(folder), logs=[b"", error, b""])
+            run = Path(folder) / "run"
+            evidence = json.loads((run / "validation-warm.json").read_text(encoding="utf-8"))
+            self.assertTrue(evidence["final_consecutive_all_diagnostics_stable"])
+            self.assertFalse(evidence["final_consecutive_all_workspace_records_stable"])
+            self.assertFalse((run / "validation.tsv").exists())
+
+    def test_warm_boundaries_refuse_reset_truncation_partial_or_invalid_utf8_records(self):
+        full = b"!SESSION first\n!ENTRY plugin 4 0 time\n!MESSAGE Error\n"
+        self.assertEqual(oracle.workspace_append_delta(full, full + b"!SESSION next\n"), b"!SESSION next\n")
+        for previous, current in ((full, b"!SESSION reset\n"), (full, full[:-1]),
+            (b"!SESSION first\n!ENTRY plugin 4 0 time\n", full), (full, full + b"continuing stack\n"),
+            (b"", b"!SESSION first\n!ENTRY plugin 4 0 time\n"), (b"", b"!SESSION bad\xff\n")):
+            with self.subTest(previous=previous, current=current), self.assertRaises((oracle.OracleError, UnicodeError)):
+                oracle.workspace_append_delta(previous, current)
+
+    def test_warm_unclassified_stdout_and_missing_final_copy_cannot_be_laundered(self):
+        for corruption in ("stdout", "stderr", "final", "raw"):
+            with self.subTest(corruption=corruption), tempfile.TemporaryDirectory() as folder:
+                run, args, project, original, _, _ = self.warm_fixture(Path(folder))
+                path = run / ("validation.tsv" if corruption == "final" else
+                    f"edt-validate-pass-001.{corruption if corruption != 'raw' else 'workspace-log'}")
+                path.write_bytes(b"UNKNOWN diagnostic\n")
+                with self.assertRaises(oracle.OracleError):
+                    oracle.bind_warm_validation(args, run, project, run / "validation-workspace",
+                                                "edt-validate", "validation", original)
+
+    def test_warm_existing_artifacts_are_never_overwritten_even_with_fresh_workspace(self):
+        with tempfile.TemporaryDirectory() as folder:
+            run, args, project, _, _, _ = self.warm_fixture(Path(folder))
+            existing = run / "validation-pass-001.tsv"
+            existing.write_bytes(b"prior failed attempt must survive")
+            with patch.object(oracle, "edt") as execute, self.assertRaisesRegex(oracle.OracleError, "existing capture"):
+                oracle.warm_validate(args, run, project, run / "unused-new-workspace", "edt-validate", "validation")
+            execute.assert_not_called()
+            self.assertEqual(existing.read_bytes(), b"prior failed attempt must survive")
+
+    def test_warm_matched_early_tsv_error_remains_inherited_and_not_error_free(self):
+        row = b"2026-10-01T11:18:24+0300\tMajor\tConfiguration error\tproject\tvalidator\tmodule\tline 1\tInherited\n"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline = self.warm_fixture(root / "baseline", rows=[row, b"", b""])
+            candidate = self.warm_fixture(root / "candidate", rows=[row, b"", b""])
+            control = root / "control"; control.mkdir()
+            for label in ("edt-control-validate", "edt-control-export"):
+                (control / f"{label}.workspace-log").write_bytes(b"")
+            result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+            self.assertTrue(result["no_new_all_tsv_diagnostics"])
+            self.assertTrue(result["no_new_nonambient_errors"])
+            self.assertFalse(result["clean_source"])
+            self.assertFalse(result["clean_generated_validation"])
+
+    def test_warm_same_phase_keeps_inherited_errors_and_rejects_early_new_errors_or_tsv(self):
+        error = b"!ENTRY plugin 4 0 time\n!MESSAGE inherited\n!STACK 0\nExact stack\n"
+        row = b"2026-10-01T11:18:24+0300\tMajor\tConfiguration error\tproject\tvalidator\tmodule\tline 1\tError\n"
+        for mutation in (None, "new", "count", "severity", "plugin", "body", "stack", "tsv"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                baseline = self.warm_fixture(root / "baseline", logs=[error, b"", b""])
+                changed = error
+                if mutation == "new": changed += error.replace(b"inherited", b"new")
+                if mutation == "count": changed *= 2
+                if mutation == "severity": changed = error.replace(b" 4 0 ", b" 8 0 ")
+                if mutation == "plugin": changed = error.replace(b"plugin", b"other.plugin")
+                if mutation == "body": changed = error.replace(b"inherited", b"edited")
+                if mutation == "stack": changed = error.replace(b"Exact stack", b"Different stack")
+                candidate = self.warm_fixture(root / "candidate", logs=[changed, b"", b""],
+                    rows=[row, b"", b""] if mutation == "tsv" else None)
+                control = root / "control"; control.mkdir()
+                for label in ("edt-control-validate", "edt-control-export"):
+                    (control / f"{label}.workspace-log").write_bytes(b"")
+                result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+                self.assertFalse(result["clean_source"])
+                self.assertFalse(result["clean_generated_validation"])
+                self.assertTrue(candidate[4]["final_consecutive_all_diagnostics_stable"])
+                self.assertEqual(result["no_new_nonambient_errors"], mutation in (None, "tsv"))
+                self.assertEqual(result["no_new_all_tsv_diagnostics"], mutation != "tsv")
+                self.assertEqual(result["phases"][-1]["new_nonambient"], [])
+
+    def test_warm_exact_control_record_is_separate_from_similar_new_stack(self):
+        ambient = (b"!ENTRY com._1c.g5.v8.dt.core 4 0 time\n"
+            b"!MESSAGE Error while reading the library metainformation\n!STACK 0\n"
+            b"com._1c.g5.v8.dt.core.library.InvalidLibraryDescriptorException: The library compatibility mode is not specified in the library file\nExact stack\n")
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline = self.warm_fixture(root / "baseline")
+            candidate = self.warm_fixture(root / "candidate", logs=[ambient, ambient, ambient])
+            control = root / "control"; control.mkdir()
+            for label in ("edt-control-validate", "edt-control-export"):
+                (control / f"{label}.workspace-log").write_bytes(ambient)
+            result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+            self.assertTrue(result["no_new_nonambient_errors"])
+            self.assertTrue(result["clean_generated_validation"])
+            path = candidate[0] / "edt-validate-pass-001.workspace-phase-log"
+            path.write_bytes(path.read_bytes().replace(b"Exact stack", b"Different stack"))
+            self.assertFalse(oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])["no_new_nonambient_errors"])
+
+    def test_warm_identical_malformed_entries_never_cancel_between_baseline_and_candidate(self):
+        defects = (b"!ENTRY broken\n!MESSAGE error retained\n",
+            b"!ENTRY plugin unknown 0 time\n!MESSAGE error retained\n",
+            b"!ENTRY plugin 12 0 time\n!MESSAGE error retained\n",
+            b"!ENTRY plugin 4 0 time\n", b"!ENTRY plugin 4 0 time\n!MESSAGE\n",
+            b"!ENTRY plugin 4 0 time\n!MESSAGE   \n")
+        for defect in defects:
+            with self.subTest(defect=defect), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                baseline = self.warm_fixture(root / "baseline")
+                candidate = self.warm_fixture(root / "candidate")
+                for capture in (baseline, candidate):
+                    (capture[0] / "edt-validate-pass-001.workspace-phase-log").write_bytes(defect)
+                control = root / "control"; control.mkdir()
+                for label in ("edt-control-validate", "edt-control-export"):
+                    (control / f"{label}.workspace-log").write_bytes(b"")
+                with self.assertRaisesRegex(oracle.OracleError, "Malformed/partial"):
+                    oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+                with self.assertRaisesRegex(oracle.OracleError, "Malformed/partial"):
+                    oracle.workspace_append_delta(b"", defect)
+
+    def test_warm_all_entries_normalize_only_known_registration_identity_and_verified_command(self):
+        plugin, interface, implementation = sorted(oracle.WARM_REGISTRATION_IDENTITIES)[0]
+        registration = f"!MESSAGE The external {interface} is registered: {implementation}@"
+        for mutation in (None, "plugin", "class", "interface", "body", "stack", "neighbor_hex", "long_hex", "code", "severity", "command_body", "command_path"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                baseline = self.warm_fixture(root / "baseline")
+                candidate = self.warm_fixture(root / "candidate")
+                counters = []
+                for capture, identity in ((baseline, "1a"), (candidate, "2b")):
+                    run = capture[0]
+                    body, owner, severity, code = registration + identity, plugin, "2", "0"
+                    command = json.loads((run / "edt-validate-pass-001.command.json").read_text(encoding="utf-8"))
+                    argv = command["argv"]
+                    cli = f'!MESSAGE Command to run:\nvalidate --file "{argv[-3]}" --project-list "{argv[-1]}"'
+                    if capture is candidate:
+                        if mutation == "plugin": owner = "other.plugin"
+                        if mutation == "class": body = body.replace(implementation, "unknown.Exporter")
+                        if mutation == "interface": body = body.replace(interface, "IUnknownExtension")
+                        if mutation == "body": body = body.replace("registered", "rejected")
+                        if mutation == "stack": body += "\n!STACK 0\nNew failure"
+                        if mutation == "neighbor_hex": body += " neighboring@ff"
+                        if mutation == "long_hex": body = registration + "123456789"
+                        if mutation == "code": code = "1"
+                        if mutation == "severity": severity = "4"
+                        if mutation == "command_body": cli += " EXTRA"
+                        if mutation == "command_path": cli = cli.replace(argv[-3], "another-output.tsv")
+                    path = run / "edt-validate-pass-001.workspace-phase-log"
+                    path.write_text(f"!ENTRY {owner} {severity} {code} time\n{body}\n"
+                        f"!ENTRY com.e1c.g5.v8.dt.cli.api 1 0 time\n{cli}\n", encoding="utf-8")
+                    counter, ledger = oracle.warm_workspace_multiset(path, run / "edt-validate-pass-001.command.json")
+                    counters.append(counter)
+                    self.assertEqual(sum(counter.values()), 2)
+                    if mutation is None:
+                        self.assertEqual({row["kind"] for row in ledger}, {"known_registration_jvm_identity", "verified_pass_command"})
+                        self.assertTrue(all(row["raw_body_sha256"] and row["command_sha256"] for row in ledger))
+                self.assertEqual(counters[0] == counters[1], mutation is None)
+
+    def test_warm_workspace_only_warning_is_not_ignored_when_final_passes_are_clean(self):
+        warning = b"!ENTRY unrecognized.plugin 2 0 time\n!MESSAGE New semantic warning\n"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            baseline = self.warm_fixture(root / "baseline")
+            candidate = self.warm_fixture(root / "candidate", logs=[warning, b"", b""])
+            control = root / "control"; control.mkdir()
+            for label in ("edt-control-validate", "edt-control-export"):
+                (control / f"{label}.workspace-log").write_bytes(b"")
+            result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+            self.assertFalse(result["no_new_nonambient_errors"])
+            self.assertEqual(result["phases"][0]["new_nonambient"][0]["severity"], "2")
+
     def test_partial_route_keeps_raw_divergences_and_uses_heavy_fifo(self):
         with tempfile.TemporaryDirectory() as folder:
             run = Path(folder)
