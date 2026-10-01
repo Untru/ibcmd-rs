@@ -28,7 +28,12 @@
     "DCS typed right QName aliases retain same-dialect lexical spelling and bind opposite-dialect output to the actual physical XML depth, with URI/local-type semantics independently compared",
     "Strict complete v2 mobile signature framing validates all four UUID/name groups, quoted key/digest values and the converted flag; model-bound reader carrier changes only typed empty top-level group counts and official-export-preferred sibling retains exact native bytes",
     "Per-use picture semantics use a closed typed form resource keyed by declared form UUID, slot and current binding; pixel/ref/localized-text values enter semantic comparison and are rebuilt from current typed values",
-    "Installed SDK event-owner tables partition ordered handlers between Form and extInfo; native source ordering is replayed only when current ordered names and extension kind match, and edits emit current handlers using witnessed physical event GUIDs"
+    "Installed SDK event-owner tables partition ordered handlers between Form and extInfo; native source ordering is replayed only when current ordered names and extension kind match, and edits emit current handlers using witnessed physical event GUIDs",
+    "Dynamic-list Table handlers use installed SDK base/extInfo ownership and guarded ordered-name facets; native event order is preserved without replaying handler values",
+    "Source ordinary-form and help bodies use fallible actual 64 KiB reads without payload-size quotas or file-size-hint allocations, retaining type, language, regular-file and source-change validation",
+    "DCS QName projection traverses complete source XML iteratively without generic file, token, node or nesting quotas; only selected namespace-qualified TypeSet QName text is projected and all other bytes remain visible",
+    "An explicit borrowed configuration semantic view recomputes selected DCS QName equivalence from current bodies while ordinary private IR serialization and body bytes remain unchanged",
+    "Physical source filenames retain UTF-8 validation while actual filesystem operations determine their component limit; Windows-valid Unicode resource names are not rejected by an artificial UTF-8 byte ceiling"
   ],
   "files": [
     {
@@ -93,7 +98,11 @@
     },
     {
       "path": "crates/core/src/ir/mod.rs",
-      "sha256": "be36b712b51d887d04916447c8fdb25009092e76aaa3c59cbfd86ef6f09fb781"
+      "sha256": "e544f5f2a0418378dff7b8f13cc3ccaa88f33bb6426d3a94d4c8d9f846ec4dcb"
+    },
+    {
+      "path": "crates/core/src/ir/semantic_view.rs",
+      "sha256": "3690ffb8d9a3c7d813ee4a3f76c3056c9b66a83371a6a94a3f832b81536a0664"
     },
     {
       "path": "crates/core/src/ir/source_extensions.rs",
@@ -2433,7 +2442,7 @@
     },
     {
       "path": "crates/pipeline/Cargo.toml",
-      "sha256": "4776e5f0ab82c4ec54aaf694f31ad23aaa03369a2fa05106d439517f874afd6b"
+      "sha256": "6666dc54c089d34bfd09cd8ad5a8fe023ff8751e5bb97bd23430a240a313671e"
     },
     {
       "path": "crates/pipeline/src/blob_template_read.rs",
@@ -2477,7 +2486,7 @@
     },
     {
       "path": "crates/pipeline/src/form_read.rs",
-      "sha256": "0448a819c69c69834418cb7e3c03bfece03d09946e011c1727a58d548a023263"
+      "sha256": "b6d7e18323a90777c4a7979d355b7c4a4c644a7c6cb9500f95280bde566cd1ac"
     },
     {
       "path": "crates/pipeline/src/form_ref_read.rs",
@@ -2485,11 +2494,11 @@
     },
     {
       "path": "crates/pipeline/src/form_write.rs",
-      "sha256": "b7e07c84ecfcd5d990359e4e89f536a3cae5e214675c0534197e3f33fb12d2ef"
+      "sha256": "72eba06d986e50fece16e187db42a76edeba052dfd7e72eb5c82f203cc20882f"
     },
     {
       "path": "crates/pipeline/src/fsio.rs",
-      "sha256": "6f80539f3affc7fe3bfcd5fe57ee2275ac87845f01283e4f85ffa3a497c364c2"
+      "sha256": "07f9d388f8aa88ffe16a97d5bf135faa502918ecca490da47a57ff837d5761dc"
     },
     {
       "path": "crates/pipeline/src/geos_read.rs",
@@ -2501,7 +2510,7 @@
     },
     {
       "path": "crates/pipeline/src/help_read.rs",
-      "sha256": "ae3b9b7028e8a441430da33889873c1ec0e15393229318c53b804aa91781c6ff"
+      "sha256": "58eaffc97450a1abeab1c1e8d424e631e2a75d935221ab80ef7f2df3a3ad16ed"
     },
     {
       "path": "crates/pipeline/src/language_read.rs",
@@ -2517,7 +2526,7 @@
     },
     {
       "path": "crates/pipeline/src/lib.rs",
-      "sha256": "b67168e79f05e25b9dbba2aa556360370abbd2db4ab186694489a1e2eb1c8869"
+      "sha256": "9fb6d50205ccf6a37b573f4981c79f97867aeca4074f21ebb82ea4d051a77977"
     },
     {
       "path": "crates/pipeline/src/module_read.rs",
@@ -2553,7 +2562,7 @@
     },
     {
       "path": "crates/pipeline/src/sdk_body_projection.rs",
-      "sha256": "a0ace0ea5c6850b4dc435343d44e072b7e6019f8eec73f4c7cb2a34a2c0687b2"
+      "sha256": "37632c334cb040ec391f87665b14396622bf6642e417afe6bbfd518d79b0bce6"
     },
     {
       "path": "crates/pipeline/src/sidecar_version.rs",
@@ -2562,6 +2571,10 @@
     {
       "path": "crates/pipeline/src/source_extensions.rs",
       "sha256": "58f93fe97abafead813c16a74a272b0eda3b86c698dde41b9f30c17a3ac1eab8"
+    },
+    {
+      "path": "crates/pipeline/src/source_read.rs",
+      "sha256": "06b452ded6e695d82472ea89241908a8611c560b8730d2f9595e02f3bff4843b"
     },
     {
       "path": "crates/pipeline/src/standalone_content_read.rs",
@@ -2616,5 +2629,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "dc24109ee22512474b63fac8f27ce1d521b10054"
+  "local_source_snapshot": "a674e5663d1daad1655d29d35653fab2f8c6adda"
 }
