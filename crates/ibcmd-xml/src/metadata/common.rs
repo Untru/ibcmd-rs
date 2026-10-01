@@ -533,6 +533,7 @@ fn decode_configuration_envelope_with_policy(
             "BusinessProcess",
             "ExternalDataSource",
             "IntegrationService",
+            "PaletteColor",
         ],
         shape_policy,
     )
@@ -1908,6 +1909,20 @@ mod tests {
     }
     fn profile() -> ProfileId {
         ProfileId::parse("xml:2.20").unwrap()
+    }
+
+    #[test]
+    fn source_configuration_retains_palette_references_and_rejects_unknown_bare_kinds() {
+        let xml = b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.21'><Configuration uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties><ChildObjects><PaletteColor>Accent</PaletteColor></ChildObjects></Configuration></MetaDataObject>";
+        let document = XmlReader::from_slice(xml).unwrap();
+        let envelope = decode_source_metadata_envelope(&document, profile(), path()).unwrap();
+        assert!(envelope.descendants().is_empty());
+        assert_eq!(envelope.source_document(), &document);
+        let unknown = String::from_utf8(xml.to_vec())
+            .unwrap()
+            .replace("PaletteColor", "UnknownPalette");
+        let unknown = XmlReader::from_slice(unknown.as_bytes()).unwrap();
+        assert!(decode_source_metadata_envelope(&unknown, profile(), path()).is_err());
     }
 
     #[test]

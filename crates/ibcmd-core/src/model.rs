@@ -859,6 +859,27 @@ pub struct CanonicalConfigurationBudget {
 }
 
 impl CanonicalConfigurationBudget {
+    /// Accounts for an asset appended later to an already-accounted object.
+    /// Call once before retaining each additional reference; assets already
+    /// present in `add_object` must not be counted again.
+    pub fn add_asset_reference(&mut self, asset: &AssetReference) -> Result<(), ModelBuildError> {
+        let members = checked_add_members(self.members, 1)?;
+        enforce_member_budget(
+            "canonical configuration",
+            members,
+            MAX_CONFIGURATION_MEMBERS,
+        )?;
+        let retained = checked_add_retained(self.retained, 40 + asset.media_kind().as_str().len())?;
+        enforce_retained_budget(
+            "canonical configuration",
+            retained,
+            MAX_CONFIGURATION_RETAINED_BYTES,
+        )?;
+        self.members = members;
+        self.retained = retained;
+        Ok(())
+    }
+
     /// Checks the next object against the same hard bounds as configuration
     /// construction. Failure leaves the accumulator unchanged.
     pub fn add_object(&mut self, object: &CanonicalObject) -> Result<(), ModelBuildError> {
@@ -1027,6 +1048,43 @@ mod tests {
         assert_eq!(budget.objects, 1);
         assert_eq!(budget.members, object.member_count().unwrap());
         assert_eq!(budget.retained, object.retained_byte_len());
+    }
+
+    #[test]
+    fn incremental_asset_budget_matches_attached_object_accounting() {
+        let asset = AssetReference::new(
+            crate::storage::Sha256Digest::for_bytes(b"asset"),
+            5,
+            crate::asset::MediaKind::new("application/octet-stream").unwrap(),
+        )
+        .unwrap();
+        let object = CanonicalObject::new(parts()).unwrap();
+        let mut incremental = CanonicalConfigurationBudget::default();
+        incremental.add_object(&object).unwrap();
+        incremental.add_asset_reference(&asset).unwrap();
+        let mut attached = parts();
+        attached.assets.push(asset.clone());
+        let mut whole = CanonicalConfigurationBudget::default();
+        whole
+            .add_object(&CanonicalObject::new(attached).unwrap())
+            .unwrap();
+        assert_eq!(incremental, whole);
+        for seeded in [
+            CanonicalConfigurationBudget {
+                objects: 1,
+                members: MAX_CONFIGURATION_MEMBERS,
+                retained: 0,
+            },
+            CanonicalConfigurationBudget {
+                objects: 1,
+                members: 1,
+                retained: MAX_CONFIGURATION_RETAINED_BYTES,
+            },
+        ] {
+            let mut budget = seeded.clone();
+            assert!(budget.add_asset_reference(&asset).is_err());
+            assert_eq!(budget, seeded);
+        }
     }
 
     #[test]
