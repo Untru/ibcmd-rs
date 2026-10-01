@@ -910,6 +910,31 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
     }
     let relative = path.strip_prefix("src/").unwrap_or(path);
     let parts = relative.split('/').collect::<Vec<_>>();
+    let dcs_body_path = (parts.len() == 4
+        && parts[0] == "CommonTemplates"
+        && parts[2..] == ["Ext", "Template.xml"])
+        || (parts.len() == 6 && parts[2] == "Templates" && parts[4..] == ["Ext", "Template.xml"])
+        || (parts.len() == 3 && parts[0] == "CommonTemplates" && parts[2] == "Template.dcs")
+        || (parts.len() == 5 && parts[2] == "Templates" && parts[4] == "Template.dcs");
+    if dcs_body_path
+        && body_root(a).is_ok_and(|root| {
+            root == (
+                "DataCompositionSchema".into(),
+                "http://v8.1c.ru/8.1/data-composition-system/schema".into(),
+            )
+        })
+        && body_root(b).is_ok_and(|root| {
+            root == (
+                "DataCompositionSchema".into(),
+                "http://v8.1c.ru/8.1/data-composition-system/schema".into(),
+            )
+        })
+    {
+        return Ok(
+            morph1c_pipeline::dcs_qname_semantic_bytes(a).map_err(EdtError::new)?
+                == morph1c_pipeline::dcs_qname_semantic_bytes(b).map_err(EdtError::new)?,
+        );
+    }
     if parts.last().copied() == Some(formats_xml::form::PICTURE_SEMANTICS_RESOURCE)
         && (parts.len() == 3 && parts[0] == "CommonForms"
             || parts.len() == 5 && parts[2] == "Forms")

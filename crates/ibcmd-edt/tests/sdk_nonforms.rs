@@ -203,7 +203,6 @@ fn mxl_stream_keeps_namespace_scopes_and_has_no_fixed_depth_budget() {
         format!("unknown{source}"),
         format!("{source}unknown"),
         format!("{source}{source}"),
-        source.replace("<picture>", "<picture><![CDATA[unknown]]>"),
         source.replace(
             root,
             &format!("<!DOCTYPE document [<!ENTITY unknown 'data'>]>{root}"),
@@ -218,6 +217,20 @@ fn mxl_stream_keeps_namespace_scopes_and_has_no_fixed_depth_budget() {
             .is_err()
         );
     }
+    let cdata = source.replace("<picture>", "<picture><![CDATA[opaque < payload]]>");
+    let out = tempfile::tempdir().unwrap();
+    write_config(
+        Format::Edt,
+        &config("SpreadsheetDocument", cdata.as_bytes()),
+        out.path(),
+    )
+    .unwrap();
+    assert_eq!(
+        std::fs::read(out.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap(),
+        cdata
+            .replace("actual\ncontent", "actual\r\ncontent")
+            .as_bytes()
+    );
 }
 
 #[test]
@@ -332,13 +345,19 @@ fn dcs_projects_resolved_inline_typeset_alias_and_never_query_text() {
         ">p:AnyIBRef</v8:TypeSet>",
         "><!--keep-->p:AnyIBRef</v8:TypeSet>",
     );
-    assert!(
-        write_config(
-            Format::Edt,
-            &config("DataCompositionSchema", invalid.as_bytes()),
-            tempfile::tempdir().unwrap().path()
-        )
-        .is_err()
+    let output = tempfile::tempdir().unwrap();
+    write_config(
+        Format::Edt,
+        &config("DataCompositionSchema", invalid.as_bytes()),
+        output.path(),
+    )
+    .unwrap();
+    let expected = invalid
+        .replace("p:AnyIBRef</v8:TypeSet>", "p:AnyRef</v8:TypeSet>")
+        .replace("AnyIBRef\nSELECT", "AnyIBRef\r\nSELECT");
+    assert_eq!(
+        std::fs::read(output.path().join("CommonTemplates/Witness/Template.dcs")).unwrap(),
+        expected.as_bytes()
     );
 }
 

@@ -36,7 +36,11 @@ pub(crate) fn semantic_digest(config: &Configuration) -> Result<String, EdtError
         }
     }
     let mut writer = std::io::BufWriter::with_capacity(64 * 1024, HashWriter(Sha256::new()));
-    serde_json::to_writer(&mut writer, config).map_err(EdtError::source)?;
+    let view = morph1c_core::ir::semantic_view::ConfigurationSemanticView {
+        configuration: config,
+        template_body: morph1c_pipeline::dcs_template_semantic_body,
+    };
+    serde_json::to_writer(&mut writer, &view).map_err(EdtError::source)?;
     let writer = writer.into_inner().map_err(EdtError::source)?;
     Ok(format!("{:x}", writer.0.finalize()))
 }

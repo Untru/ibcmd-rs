@@ -795,6 +795,7 @@ dependencies = [
  "formats-edt",
  "formats-xml",
  "morph1c-core",
+ "quick-xml 0.36.2",
  "rayon",
 ]
 

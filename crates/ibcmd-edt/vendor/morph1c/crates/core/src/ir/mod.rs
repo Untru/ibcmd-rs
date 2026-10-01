@@ -24,6 +24,7 @@
 pub mod form;
 pub mod value;
 pub mod source_extensions;
+pub mod semantic_view;
 
 use serde::{Deserialize, Serialize};
 

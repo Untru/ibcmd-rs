@@ -118,6 +118,17 @@ body roots with codec-defined BOM/EOL/indent conventions, respecting mixed text
 and inherited `xml:space`. Unknown XML bodies require exact bytes. Prolog/epilog
 fragments, comments and changed fields cannot disappear through that comparison.
 
+DCS template QName projection uses an iterative namespace-aware cursor rather
+than fixed byte/node/depth ceilings. Arbitrary unselected CDATA, comments and PI
+remain byte-exact. Only the qualified current-configuration `AnyIBRef`/`AnyRef`
+`TypeSet` leaf has a format alias. Its semantic view is recomputed from the
+current typed template body and resolved binding; entity or split CDATA framing
+is lexical. Other bytes and ordered comments/PI remain significant. Ordinary IR
+serialization and native body emission retain actual source bytes. Directory
+tests prove both routes with stripped provenance and exact unchanged native
+return with independently validated provenance; edited types and forged hashes
+cannot restore an old source. DTD remains forbidden.
+
 ## Tests and acceptance scope
 
 The small offline fixture is derived from upstream

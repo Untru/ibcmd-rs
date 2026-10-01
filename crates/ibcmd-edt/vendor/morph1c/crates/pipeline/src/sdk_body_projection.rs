@@ -1,10 +1,7 @@
-//! Narrow SDK projections over typed XML sidecars. Markup is never reserialized.
+//! Narrow SDK projections over source XML. Unchanged markup is never reserialized.
 use crate::ConvertError;
-use std::collections::BTreeMap;
-// Typed source assets are external digest/length references in the public core,
-// not inline opaque values. Keep the independent physical source file ceiling.
-const MAX_SOURCE_ASSET_BYTES: usize = 256 * 1024 * 1024;
-
+use quick_xml::{events::Event, Reader};
+use std::collections::{BTreeMap, HashMap};
 fn error(reason: impl Into<String>) -> ConvertError {
     ConvertError::Read {
         kind: "TemplateBody".into(),
@@ -13,118 +10,110 @@ fn error(reason: impl Into<String>) -> ConvertError {
     }
 }
 
-// Quote-aware lexical markup boundaries. Comments/PI are opaque; CDATA and DTD
-// are outside the witnessed projection and must not be treated as plain text.
-fn markup(body: &[u8]) -> Result<Vec<(usize, usize)>, ConvertError> {
-    let mut result = Vec::new();
-    let mut i = 0;
-    let mut elements = 0usize;
-    let mut depth = 0usize;
-    while i < body.len() {
-        if body[i] != b'<' {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        if body[i..].starts_with(b"<!--") {
-            let end = body[i + 4..]
-                .windows(3)
-                .position(|w| w == b"-->")
-                .ok_or_else(|| error("unterminated comment"))?;
-            i += 4 + end + 3;
-        } else if body[i..].starts_with(b"<?") {
-            let end = body[i + 2..]
-                .windows(2)
-                .position(|w| w == b"?>")
-                .ok_or_else(|| error("unterminated processing instruction"))?;
-            i += 2 + end + 2;
-        } else {
-            if body[i..].starts_with(b"<!") {
-                return Err(error(
-                    "CDATA/DTD is outside the witnessed SDK sidecar projection",
-                ));
-            }
-            let mut quote = None;
-            i += 1;
-            while i < body.len() {
-                match (quote, body[i]) {
-                    (Some(q), b) if q == b => quote = None,
-                    (None, b'\'' | b'"') => quote = Some(body[i]),
-                    (None, b'>') => {
-                        i += 1;
-                        break;
-                    }
-                    _ => {}
-                }
-                i += 1;
-            }
-            if i > body.len() || body.get(i.wrapping_sub(1)) != Some(&b'>') {
-                return Err(error("unterminated markup"));
-            }
-        }
-        match body.get(start + 1) {
-            Some(b'/') => {
-                depth = depth
-                    .checked_sub(1)
-                    .ok_or_else(|| error("unbalanced XML end tag"))?
-            }
-            Some(b'?' | b'!') => {}
-            _ => {
-                elements += 1;
-                if elements > 1_048_576 {
-                    return Err(error("SDK sidecar element budget exceeded"));
-                }
-                if !body[start..i].ends_with(b"/>") {
-                    depth += 1;
-                    if depth > 64 {
-                        return Err(error("SDK sidecar XML depth exceeds 64"));
-                    }
-                }
-            }
-        }
-        if result.len() == 2_097_152 {
-            return Err(error("SDK sidecar markup budget exceeded"));
-        }
-        result.push((start, i));
-    }
-    Ok(result)
+fn output(size: usize) -> Result<Vec<u8>, ConvertError> {
+    let mut out = Vec::new();
+    out.try_reserve(size)
+        .map_err(|e| error(format!("output allocation failed: {e}")))?;
+    Ok(out)
 }
-
-fn parsed(body: &[u8], local: &str, uri: &str) -> Result<formats_xml::Descriptor, ConvertError> {
-    if body.len() > MAX_SOURCE_ASSET_BYTES {
-        return Err(error("SDK XML source asset exceeds 256 MiB"));
+fn append(out: &mut Vec<u8>, bytes: &[u8]) -> Result<(), ConvertError> {
+    out.try_reserve(bytes.len())
+        .map_err(|e| error(format!("output allocation failed: {e}")))?;
+    out.extend_from_slice(bytes);
+    Ok(())
+}
+fn push<T>(items: &mut Vec<T>, value: T) -> Result<(), ConvertError> {
+    items
+        .try_reserve(1)
+        .map_err(|e| error(format!("source traversal allocation failed: {e}")))?;
+    items.push(value);
+    Ok(())
+}
+fn string(value: &str) -> Result<String, ConvertError> {
+    let mut out = String::new();
+    out.try_reserve(value.len())
+        .map_err(|e| error(format!("text allocation failed: {e}")))?;
+    out.push_str(value);
+    Ok(out)
+}
+// Decode one XML character at a time, retaining its exact lexical source range.
+fn characters(
+    raw: &[u8],
+    cdata: bool,
+    mut visit: impl FnMut(char, usize, usize) -> Result<(), ConvertError>,
+) -> Result<(), ConvertError> {
+    let value = std::str::from_utf8(raw).map_err(|e| error(e.to_string()))?;
+    let mut pos = 0;
+    while pos < value.len() {
+        let (ch, end) = if !cdata && raw[pos] == b'&' {
+            let next = value[pos..]
+                .find(';')
+                .ok_or_else(|| error("unterminated XML entity"))?
+                + pos
+                + 1;
+            let decoded =
+                quick_xml::escape::unescape(&value[pos..next]).map_err(|e| error(e.to_string()))?;
+            let mut chars = decoded.chars();
+            let ch = chars.next().ok_or_else(|| error("empty XML entity"))?;
+            if chars.next().is_some() {
+                return Err(error("XML entity is not one character"));
+            }
+            (ch, next)
+        } else {
+            let ch = value[pos..].chars().next().expect("nonempty UTF-8 suffix");
+            (ch, pos + ch.len_utf8())
+        };
+        if !(matches!(ch, '\t' | '\n' | '\r') || ch >= ' ' && ch != '\u{fffe}' && ch != '\u{ffff}')
+        {
+            return Err(error("invalid XML character"));
+        }
+        visit(ch, pos, end)?;
+        pos = end;
     }
-    let _bounded = markup(body)?;
-    let doc = formats_xml::parse(body).map_err(|e| error(e.to_string()))?;
-    let root = &doc.root;
-    let ns = if root.prefix.is_empty() {
-        "xmlns".to_string()
-    } else {
-        format!("xmlns:{}", root.prefix)
-    };
-    if root.local != local || root.attr(&ns).map(|a| a.value.as_str()) != Some(uri) {
-        return Err(error("unexpected typed SDK sidecar root/namespace"));
+    Ok(())
+}
+fn decoded(raw: &[u8], cdata: bool) -> Result<String, ConvertError> {
+    let mut value = String::new();
+    value
+        .try_reserve(raw.len())
+        .map_err(|e| error(format!("text allocation failed: {e}")))?;
+    characters(raw, cdata, |ch, _, _| {
+        value
+            .try_reserve(ch.len_utf8())
+            .map_err(|e| error(e.to_string()))?;
+        value.push(ch);
+        Ok(())
+    })?;
+    Ok(value)
+}
+fn range(body: &[u8], part: &[u8]) -> Result<(usize, usize), ConvertError> {
+    let start = (part.as_ptr() as usize)
+        .checked_sub(body.as_ptr() as usize)
+        .ok_or_else(|| error("token outside source"))?;
+    let end = start
+        .checked_add(part.len())
+        .ok_or_else(|| error("source offset overflow"))?;
+    if end > body.len() {
+        return Err(error("token outside source"));
     }
-    Ok(doc)
+    Ok((start, end))
 }
 
 pub(crate) fn text_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError> {
-    if body.len() > MAX_SOURCE_ASSET_BYTES {
-        return Err(error("SDK XML source asset exceeds 256 MiB"));
-    }
-    let mut out = Vec::with_capacity(body.len());
+    let mut cursor = MarkupCursor { body, offset: 0 };
+    let mut out = output(body.len())?;
     let mut end = 0;
-    for (start, next) in markup(body)? {
+    while let Some((start, next)) = cursor.next()? {
         let text = &body[end..start];
         if text.iter().any(|b| !b.is_ascii_whitespace()) {
-            out.extend_from_slice(&crate::template_read::normalize_newlines(text, to_crlf));
+            append_newlines(&mut out, text, to_crlf)?;
         } else {
-            out.extend_from_slice(text);
+            append(&mut out, text)?;
         }
-        out.extend_from_slice(&body[start..next]);
+        append(&mut out, &body[start..next])?;
         end = next;
     }
-    out.extend_from_slice(&body[end..]);
+    append(&mut out, &body[end..])?;
     Ok(out)
 }
 
@@ -141,7 +130,15 @@ impl MarkupCursor<'_> {
         };
         let start = self.offset + relative;
         let tail = &self.body[start..];
-        let end = if tail.starts_with(b"<!--") {
+        let end = if tail.starts_with(b"<![CDATA[") {
+            start
+                + 9
+                + tail[9..]
+                    .windows(3)
+                    .position(|w| w == b"]]>")
+                    .ok_or_else(|| error("unterminated CDATA"))?
+                + 3
+        } else if tail.starts_with(b"<!--") {
             start
                 + 4
                 + tail[4..]
@@ -183,7 +180,23 @@ impl MarkupCursor<'_> {
     }
 }
 
-fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) {
+fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) -> Result<(), ConvertError> {
+    let extra = if to_crlf {
+        text.iter()
+            .enumerate()
+            .filter(|&(index, &b)| {
+                b == b'\n' && index.checked_sub(1).is_none_or(|p| text[p] != b'\r')
+            })
+            .count()
+    } else {
+        0
+    };
+    let reserve = text
+        .len()
+        .checked_add(extra)
+        .ok_or_else(|| error("output byte count overflow"))?;
+    out.try_reserve(reserve)
+        .map_err(|e| error(format!("output allocation failed: {e}")))?;
     let mut i = 0;
     while i < text.len() {
         match text[i] {
@@ -201,6 +214,7 @@ fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) {
             }
         }
     }
+    Ok(())
 }
 
 /// Project only plain qualified MXL localized-content line endings, preserving
@@ -224,13 +238,13 @@ pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError>
     let mut cursor = MarkupCursor { body, offset: 0 };
     let mut stack: Vec<Frame> = Vec::new();
     let mut ns = BTreeMap::new();
-    let mut out = Vec::with_capacity(body.len());
+    let mut out = output(body.len())?;
     let mut previous_end = 0;
     let mut root_seen = false;
     while let Some((start, end)) = cursor.next()? {
         let text = &body[previous_end..start];
         if stack.last().is_some_and(|frame| frame.projected) {
-            append_newlines(&mut out, text, to_crlf);
+            append_newlines(&mut out, text, to_crlf)?;
         } else {
             if stack.is_empty()
                 && text.iter().any(|b| !b.is_ascii_whitespace())
@@ -241,7 +255,7 @@ pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError>
             {
                 return Err(error("MXL has text outside its document root"));
             }
-            out.extend_from_slice(text);
+            append(&mut out, text)?;
         }
         let token = &body[start..end];
         match token.get(1) {
@@ -321,7 +335,7 @@ pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError>
                 }
             }
         }
-        out.extend_from_slice(token);
+        append(&mut out, token)?;
         previous_end = end;
     }
     if !root_seen || !stack.is_empty() {
@@ -333,123 +347,405 @@ pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError>
     {
         return Err(error("MXL has text after its document root"));
     }
-    out.extend_from_slice(&body[previous_end..]);
+    append(&mut out, &body[previous_end..])?;
     Ok(out)
 }
 
-enum Change {
-    Alias(String, String),
+const CORE_NS: &str = "http://v8.1c.ru/8.1/data/core";
+const DCS_NS: &str = "http://v8.1c.ru/8.1/data-composition-system/schema";
+const XML_NS: &str = "http://www.w3.org/XML/1998/namespace";
+fn ncname(name: &str) -> bool {
+    fn start(c: char) -> bool {
+        c == '_'
+            || c.is_ascii_alphabetic()
+            || matches!(c as u32, 0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0x2ff | 0x370..=0x37d | 0x37f..=0x1fff | 0x200c..=0x200d | 0x2070..=0x218f | 0x2c00..=0x2fef | 0x3001..=0xd7ff | 0xf900..=0xfdcf | 0xfdf0..=0xfffd | 0x10000..=0xeffff)
+    }
+    let mut chars = name.chars();
+    chars.next().is_some_and(start)
+        && chars.all(|c| {
+            start(c)
+                || c.is_ascii_digit()
+                || matches!(c, '-' | '.' | '\u{b7}')
+                || matches!(c as u32, 0x300..=0x36f | 0x203f..=0x2040)
+        })
 }
-
-/// EDT's current-config AnyRef spelling has the existing canonical/Designer
-/// alias AnyIBRef. Resolve both the element and text QNames; never touch a query,
-/// another namespace, another type host or any native-source body on read.
+fn qname(value: &str) -> Result<(&str, &str), ConvertError> {
+    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+    if !ncname(local) || !prefix.is_empty() && !ncname(prefix) || value.starts_with(':') {
+        return Err(error("invalid XML QName"));
+    }
+    Ok((prefix, local))
+}
+struct Fragment {
+    start: usize,
+    end: usize,
+    cdata: bool,
+}
+struct TypeLeaf {
+    content_start: usize,
+    text: String,
+    fragments: Vec<Fragment>,
+    inline_prefix: Option<String>,
+    children: bool,
+}
+struct DcsFrame {
+    name: String,
+    undo: Vec<(String, Option<String>)>,
+    leaf: Option<TypeLeaf>,
+}
+fn restore_namespaces(ns: &mut HashMap<String, String>, undo: Vec<(String, Option<String>)>) {
+    for (key, previous) in undo.into_iter().rev() {
+        if let Some(value) = previous {
+            ns.insert(key, value);
+        } else {
+            ns.remove(&key);
+        }
+    }
+}
+fn finish_leaf(
+    body: &[u8],
+    leaf: TypeLeaf,
+    ns: &HashMap<String, String>,
+    to_edt: bool,
+    semantic_view: bool,
+    content_end: usize,
+    out: &mut Vec<u8>,
+    emitted: &mut usize,
+) -> Result<(), ConvertError> {
+    let from = if to_edt { "AnyIBRef" } else { "AnyRef" };
+    let Ok((prefix, local)) = qname(&leaf.text) else {
+        return Ok(());
+    };
+    if (local != from && !(semantic_view && matches!(local, "AnyRef" | "AnyIBRef")))
+        || ns.get(prefix).map(String::as_str) != Some(formats_xml::type_codec::CURRENT_CONFIG_NS)
+    {
+        return Ok(());
+    }
+    if leaf.children || leaf.inline_prefix.as_deref() != Some(prefix) {
+        return Err(error(
+            "AnyRef TypeSet must be an exact inline-namespace leaf",
+        ));
+    }
+    if semantic_view {
+        append(out, &body[*emitted..leaf.content_start])?;
+        // Actual expanded QName identity; only this selected typed leaf's text
+        // carrier framing is lexical. Keep ordered comments and PI byte-exact.
+        if !prefix.is_empty() {
+            append(out, prefix.as_bytes())?;
+            append(out, b":")?;
+        }
+        append(out, b"AnyIBRef")?;
+        let inner = &body[leaf.content_start..content_end];
+        let mut cursor = MarkupCursor {
+            body: inner,
+            offset: 0,
+        };
+        while let Some((start, end)) = cursor.next()? {
+            let raw = &inner[start..end];
+            if raw.starts_with(b"<!--") || raw.starts_with(b"<?") {
+                append(out, raw)?;
+            }
+        }
+        *emitted = content_end;
+        return Ok(());
+    }
+    let target = prefix
+        .len()
+        .checked_add(usize::from(!prefix.is_empty()) + 3)
+        .ok_or_else(|| error("QName byte count overflow"))?;
+    let mut semantic = 0usize;
+    let mut edits = Vec::new();
+    for fragment in leaf.fragments {
+        characters(
+            &body[fragment.start..fragment.end],
+            fragment.cdata,
+            |ch, begin, end| {
+                if semantic == target {
+                    push(
+                        &mut edits,
+                        (
+                            fragment.start + begin,
+                            if to_edt {
+                                fragment.start + end
+                            } else {
+                                fragment.start + begin
+                            },
+                            if to_edt { "" } else { "IB" },
+                        ),
+                    )?;
+                } else if to_edt && semantic == target + 1 {
+                    push(
+                        &mut edits,
+                        (fragment.start + begin, fragment.start + end, ""),
+                    )?;
+                }
+                semantic = semantic
+                    .checked_add(ch.len_utf8())
+                    .ok_or_else(|| error("QName byte count overflow"))?;
+                Ok(())
+            },
+        )?;
+    }
+    if edits.len() != if to_edt { 2 } else { 1 } {
+        return Err(error("QName lexical projection mismatch"));
+    }
+    for (start, end, text) in edits {
+        if start < *emitted {
+            return Err(error("overlapping QName projections"));
+        }
+        append(out, &body[*emitted..start])?;
+        append(out, text.as_bytes())?;
+        *emitted = end;
+    }
+    Ok(())
+}
+/// Iterative namespace-qualified alias projection, preserving arbitrary XML
+/// comments, PI, CDATA and all bytes outside the chosen QName characters.
 pub(crate) fn dcs_alias(body: &[u8], to_edt: bool) -> Result<Vec<u8>, ConvertError> {
-    let doc = parsed(
-        body,
-        "DataCompositionSchema",
-        "http://v8.1c.ru/8.1/data-composition-system/schema",
-    )?;
+    dcs_scan(body, to_edt, false)
+}
+/// Semantic view of exact typed DCS template bodies. Always scans current bytes;
+/// no stored lexical values or cached fingerprint can override an edit.
+pub fn dcs_template_semantic_body(
+    owner: &morph1c_core::ir::MetadataObject,
+    template: &morph1c_core::ir::Template,
+) -> Result<Option<Vec<u8>>, String> {
+    use morph1c_core::{ir::PropertyValue, spec::metadata::report_template_ref::F_TEMPLATE_TYPE};
+    if !(owner.kind.as_str() == "CommonTemplate" || owner.kind.as_str().ends_with(".TemplateRef"))
+        || !matches!(owner.get(F_TEMPLATE_TYPE), Some(PropertyValue::Enum(t)) if t.as_str() == "DataCompositionSchema")
+    {
+        return Ok(None);
+    }
+    template
+        .body
+        .as_deref()
+        .map(dcs_qname_semantic_bytes)
+        .transpose()
+}
+/// Current body bytes with only qualified Any[IB]Ref TypeSet text framing
+/// represented by its expanded QName; all other bytes remain ordered/exact.
+pub fn dcs_qname_semantic_bytes(body: &[u8]) -> Result<Vec<u8>, String> {
+    dcs_scan(
+        body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body),
+        false,
+        true,
+    )
+    .map_err(|e| e.to_string())
+}
+fn dcs_scan(body: &[u8], to_edt: bool, semantic_view: bool) -> Result<Vec<u8>, ConvertError> {
+    characters(body, true, |_, _, _| Ok(()))?;
     if formats_xml::type_codec::canon_for_config_local("AnyIBRef") != Some("AnyRef") {
         return Err(error(
             "DCS projection alias is absent from the type codec registry",
         ));
     }
-    let mut leaves = Vec::new();
-    fn walk(
-        el: &formats_xml::Element,
-        inherited: &BTreeMap<String, String>,
-        depth: usize,
-        to_edt: bool,
-        leaves: &mut Vec<Option<Change>>,
-    ) -> Result<(), ConvertError> {
-        if depth > 64 {
-            return Err(error("SDK sidecar XML depth exceeds 64"));
-        }
-        let mut ns = inherited.clone();
-        for a in &el.attrs {
-            if let Some(prefix) = a.name.strip_prefix("xmlns:") {
-                ns.insert(prefix.to_string(), a.value.clone());
-            }
-        }
-        let mut replacement = None;
-        let from = if to_edt { "AnyIBRef" } else { "AnyRef" };
-        let to = if to_edt { "AnyRef" } else { "AnyIBRef" };
-        if el.local == "TypeSet"
-            && ns.get(&el.prefix).map(String::as_str) == Some("http://v8.1c.ru/8.1/data/core")
-        {
-            if let Some((prefix, name)) = el.text.split_once(':') {
-                if name == from
-                    && ns.get(prefix).map(String::as_str)
-                        == Some(formats_xml::type_codec::CURRENT_CONFIG_NS)
-                {
-                    if !el.children.is_empty()
-                        || el.attrs.len() != 1
-                        || el.attrs[0].name != format!("xmlns:{prefix}")
+    let mut reader = Reader::from_reader(body);
+    reader.config_mut().check_comments = true;
+    let mut stack: Vec<DcsFrame> = Vec::new();
+    let mut ns = HashMap::new();
+    ns.insert("xml".into(), XML_NS.into());
+    let mut out = output(body.len())?;
+    let mut emitted = 0;
+    let mut root_seen = false;
+    let mut nodes = 0usize;
+    let mut declaration = false;
+    let mut prolog_markup = false;
+    loop {
+        let event_start =
+            usize::try_from(reader.buffer_position()).map_err(|e| error(e.to_string()))?;
+        let event = reader.read_event().map_err(|e| error(e.to_string()))?;
+        match event {
+            Event::Start(ref element) | Event::Empty(ref element) => {
+                let empty = matches!(event, Event::Empty(_));
+                nodes = nodes
+                    .checked_add(1)
+                    .ok_or_else(|| error("XML node count overflow"))?;
+                if let Some(parent) = stack.last_mut().and_then(|f| f.leaf.as_mut()) {
+                    parent.children = true;
+                }
+                let name = string(
+                    std::str::from_utf8(element.name().as_ref())
+                        .map_err(|e| error(e.to_string()))?,
+                )?;
+                let (prefix, local) = qname(&name)?;
+                let mut undo = Vec::new();
+                let mut attr_count = 0usize;
+                let mut inline_prefix = None;
+                let mut attr_names = Vec::new();
+                for attr in element.attributes() {
+                    let attr = attr.map_err(|e| error(e.to_string()))?;
+                    let key =
+                        std::str::from_utf8(attr.key.as_ref()).map_err(|e| error(e.to_string()))?;
+                    qname(key)?;
+                    if attr.value.as_ref().contains(&b'<') {
+                        return Err(error("unescaped markup in XML attribute"));
+                    }
+                    characters(attr.value.as_ref(), false, |_, _, _| Ok(()))?;
+                    attr_count = attr_count
+                        .checked_add(1)
+                        .ok_or_else(|| error("attribute count overflow"))?;
+                    if key == "xmlns" || key.starts_with("xmlns:") {
+                        let binding = key.strip_prefix("xmlns:").unwrap_or("");
+                        let uri = decoded(attr.value.as_ref(), false)?;
+                        if binding == "xmlns"
+                            || uri == "http://www.w3.org/2000/xmlns/"
+                            || binding == "xml" && uri != XML_NS
+                            || binding != "xml" && uri == XML_NS
+                        {
+                            return Err(error("invalid reserved namespace binding"));
+                        }
+                        if uri == formats_xml::type_codec::CURRENT_CONFIG_NS {
+                            inline_prefix = Some(string(binding)?);
+                        }
+                        ns.try_reserve(1).map_err(|e| error(e.to_string()))?;
+                        let old = ns.insert(string(binding)?, uri);
+                        push(&mut undo, (string(binding)?, old))?;
+                    } else {
+                        push(&mut attr_names, string(key)?)?;
+                    }
+                }
+                let mut expanded = std::collections::HashSet::new();
+                for attr in &attr_names {
+                    let (p, local) = qname(attr)?;
+                    if !p.is_empty() && ns.get(p).is_none_or(String::is_empty) {
+                        return Err(error("unbound attribute namespace"));
+                    }
+                    let uri = if p.is_empty() {
+                        ""
+                    } else {
+                        ns.get(p).expect("checked namespace").as_str()
+                    };
+                    expanded.try_reserve(1).map_err(|e| error(e.to_string()))?;
+                    if !expanded.insert((uri, local)) {
+                        return Err(error("duplicate expanded XML attribute"));
+                    }
+                }
+                if !prefix.is_empty() && ns.get(prefix).is_none_or(String::is_empty) {
+                    return Err(error("unbound element namespace"));
+                }
+                if stack.is_empty() {
+                    if root_seen
+                        || local != "DataCompositionSchema"
+                        || ns.get(prefix).map(String::as_str) != Some(DCS_NS)
                     {
-                        return Err(error(
-                            "AnyRef TypeSet must be an exact inline-namespace leaf",
-                        ));
+                        return Err(error("unexpected typed SDK sidecar root/namespace"));
                     }
-                    replacement = Some(Change::Alias(el.text.clone(), format!("{prefix}:{to}")));
+                    root_seen = true;
+                }
+                let leaf = (local == "TypeSet"
+                    && ns.get(prefix).map(String::as_str) == Some(CORE_NS))
+                .then(|| TypeLeaf {
+                    content_start: usize::try_from(reader.buffer_position())
+                        .expect("in-memory cursor fits usize"),
+                    text: String::new(),
+                    fragments: Vec::new(),
+                    inline_prefix: if attr_count == 1 { inline_prefix } else { None },
+                    children: false,
+                });
+                if empty {
+                    restore_namespaces(&mut ns, undo);
+                } else {
+                    push(&mut stack, DcsFrame { name, undo, leaf })?;
                 }
             }
-        }
-        leaves.push(replacement);
-        for child in &el.children {
-            walk(child, &ns, depth + 1, to_edt, leaves)?;
-        }
-        Ok(())
-    }
-    walk(&doc.root, &BTreeMap::new(), 0, to_edt, &mut leaves)?;
-    replace_leaves(body, leaves)
-}
-
-fn replace_leaves(body: &[u8], leaves: Vec<Option<Change>>) -> Result<Vec<u8>, ConvertError> {
-    let ranges = markup(body)?;
-    let mut index = 0;
-    let mut replacements = Vec::new();
-    for &(start, end) in &ranges {
-        if matches!(body.get(start + 1), Some(b'/' | b'?' | b'!')) {
-            continue;
-        }
-        let candidate = leaves
-            .get(index)
-            .ok_or_else(|| error("XML/lexical element inventory mismatch"))?;
-        index += 1;
-        if let Some(change) = candidate {
-            if body[start..end].ends_with(b"/>") {
-                continue;
-            }
-            let text_end = body[end..]
-                .iter()
-                .position(|b| *b == b'<')
-                .map(|n| end + n)
-                .ok_or_else(|| error("TypeSet closing tag missing"))?;
-            if !body[text_end..].starts_with(b"</") {
-                return Err(error("projected leaf has non-text lexical content"));
-            }
-            let new = match change {
-                Change::Alias(old, new) => {
-                    if &body[end..text_end] != old.as_bytes() {
-                        return Err(error("TypeSet QName has unwitnessed lexical content"));
-                    }
-                    new.as_bytes().to_vec()
+            Event::End(element) => {
+                let frame = stack
+                    .pop()
+                    .ok_or_else(|| error("XML closing tag has no owner"))?;
+                if frame.name.as_bytes() != element.name().as_ref() {
+                    return Err(error("XML closing tag mismatch"));
                 }
-            };
-            replacements.push((end, text_end, new));
+                if let Some(leaf) = frame.leaf {
+                    finish_leaf(
+                        body,
+                        leaf,
+                        &ns,
+                        to_edt,
+                        semantic_view,
+                        event_start,
+                        &mut out,
+                        &mut emitted,
+                    )?;
+                }
+                restore_namespaces(&mut ns, frame.undo);
+            }
+            Event::Text(text) => {
+                if text.as_ref().windows(3).any(|w| w == b"]]>") {
+                    return Err(error("unescaped CDATA terminator in XML text"));
+                }
+                characters(text.as_ref(), false, |_, _, _| Ok(()))?;
+                if stack.is_empty() && text.as_ref().iter().any(|b| !b.is_ascii_whitespace()) {
+                    return Err(error("text outside XML root"));
+                }
+                if !root_seen {
+                    prolog_markup = true;
+                }
+                if let Some(leaf) = stack.last_mut().and_then(|f| f.leaf.as_mut()) {
+                    let value = decoded(text.as_ref(), false)?;
+                    leaf.text
+                        .try_reserve(value.len())
+                        .map_err(|e| error(e.to_string()))?;
+                    leaf.text.push_str(&value);
+                    let (start, end) = range(body, text.as_ref())?;
+                    push(
+                        &mut leaf.fragments,
+                        Fragment {
+                            start,
+                            end,
+                            cdata: false,
+                        },
+                    )?;
+                }
+            }
+            Event::CData(text) => {
+                if stack.is_empty() {
+                    return Err(error("CDATA outside XML root"));
+                }
+                characters(text.as_ref(), true, |_, _, _| Ok(()))?;
+                if let Some(leaf) = stack.last_mut().and_then(|f| f.leaf.as_mut()) {
+                    let value = decoded(text.as_ref(), true)?;
+                    leaf.text
+                        .try_reserve(value.len())
+                        .map_err(|e| error(e.to_string()))?;
+                    leaf.text.push_str(&value);
+                    let (start, end) = range(body, text.as_ref())?;
+                    push(
+                        &mut leaf.fragments,
+                        Fragment {
+                            start,
+                            end,
+                            cdata: true,
+                        },
+                    )?;
+                }
+            }
+            Event::Decl(decl) => {
+                if root_seen || declaration || prolog_markup {
+                    return Err(error("misplaced XML declaration"));
+                }
+                declaration = true;
+                if let Some(encoding) = decl.encoding() {
+                    if !encoding
+                        .map_err(|e| error(e.to_string()))?
+                        .as_ref()
+                        .eq_ignore_ascii_case(b"UTF-8")
+                    {
+                        return Err(error("SDK source XML must be UTF-8"));
+                    }
+                }
+            }
+            Event::DocType(_) => return Err(error("DTD is forbidden in SDK source projection")),
+            Event::Comment(_) | Event::PI(_) => {
+                if !root_seen {
+                    prolog_markup = true;
+                }
+            }
+            Event::Eof => break,
         }
     }
-    if index != leaves.len() {
-        return Err(error("XML/lexical element inventory mismatch"));
+    if !root_seen || !stack.is_empty() {
+        return Err(error("incomplete XML document root"));
     }
-    let mut out = Vec::with_capacity(body.len());
-    let mut end = 0;
-    for (start, next, new) in replacements {
-        out.extend_from_slice(&body[end..start]);
-        out.extend_from_slice(&new);
-        end = next;
-    }
-    out.extend_from_slice(&body[end..]);
+    append(&mut out, &body[emitted..])?;
     Ok(out)
 }

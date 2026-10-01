@@ -254,9 +254,12 @@ fn reference_pixels_are_independent_and_edt_loss_is_rejected() {
     }
 }
 #[test]
-fn logical_name_exception_never_writes_an_oversized_filename() {
+#[cfg(windows)]
+fn logical_name_exception_never_writes_a_component_beyond_ntfs_limit() {
     let temporary = tempfile::tempdir().unwrap();
-    let path = temporary.path().join("а".repeat(150));
+    // NTFS checks UTF-16 code units, not UTF-8 bytes. A 150-character
+    // Cyrillic name is valid and is covered by source_windows_filenames.
+    let path = temporary.path().join("а".repeat(256));
     assert!(morph1c_pipeline::fsio::write(&path, b"keep").is_err());
     assert!(!path.exists());
     assert!(morph1c_pipeline::fsio::create_dir_all(&path).is_err());

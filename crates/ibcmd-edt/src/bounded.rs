@@ -45,6 +45,7 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
     let mut form_body = false;
     let mut dump_info = false;
     let mut streamed_mxl = false;
+    let mut dcs_template = false;
     // Directory source inspection is iterative. Complete lexical validation
     // and typed filename checks are independent of the legacy memory parser's
     // recursive-shape quotas. Typed decoders apply their own explicit policy.
@@ -96,6 +97,19 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                     metadata_names |= path.ends_with(".xml")
                         && local == "MetaDataObject"
                         && uri == "http://v8.1c.ru/8.3/MDClasses";
+                    let relative = path.strip_prefix(".ibcmd-provenance/xml/").unwrap_or(path);
+                    let relative = relative.strip_prefix("src/").unwrap_or(relative);
+                    let parts = relative.split('/').collect::<Vec<_>>();
+                    let dcs_path = matches!(
+                        parts.as_slice(),
+                        ["CommonTemplates", _, "Ext", "Template.xml"]
+                            | [_, _, "Templates", _, "Ext", "Template.xml"]
+                            | ["CommonTemplates", _, "Template.dcs"]
+                            | [_, _, "Templates", _, "Template.dcs"]
+                    );
+                    dcs_template = dcs_path
+                        && local == "DataCompositionSchema"
+                        && uri == "http://v8.1c.ru/8.1/data-composition-system/schema";
                     help_pages = path.ends_with(".xml") && local == "Help";
                     html_pages = path.ends_with(".htmldoc")
                         && local == "HtmlDocument"
@@ -282,8 +296,11 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                     .ok_or_else(|| EdtError::new(format!("{path}: unmatched XML end")))?;
                 names.pop();
             }
+            Event::CData(_) if dcs_template => {
+                // The complete XML reader already validated this lexical text.
+                // The typed DCS projector claims it without parsing markup in it.
+            }
             Event::DocType(_) | Event::CData(_) => {
-                // Typed morph codecs do not account for entity declarations or CDATA.
                 return Err(EdtError::new(format!(
                     "{path}: DTD/CDATA requires an explicit codec"
                 )));
@@ -646,6 +663,37 @@ mod tests {
         // The scoped name rule does not weaken complete syntax/entity checks.
         assert!(validate_xml("Ext/Template.bin", b"<a><name>safe</name></different>").is_err());
         assert!(validate_xml("Ext/Template.bin", b"<a>&unknown;</a>").is_err());
+    }
+    #[test]
+    fn cdata_is_claimed_only_by_exact_dcs_template_role_and_root() {
+        let valid = b"<s:DataCompositionSchema xmlns:s='http://v8.1c.ru/8.1/data-composition-system/schema'><query><![CDATA[a < b && c]]></query></s:DataCompositionSchema>";
+        for path in [
+            "CommonTemplates/T/Ext/Template.xml",
+            "Reports/R/Templates/T/Ext/Template.xml",
+            "src/CommonTemplates/T/Template.dcs",
+            "Reports/R/Templates/T/Template.dcs",
+        ] {
+            validate_xml(path, valid).unwrap();
+            assert!(validate_xml(path, &valid[..valid.len() - 1]).is_err());
+            assert!(
+                validate_xml(
+                    path,
+                    &String::from_utf8_lossy(valid)
+                        .replace("system/schema", "system/wrong")
+                        .into_bytes()
+                )
+                .is_err()
+            );
+            assert!(validate_xml(path, b"<!DOCTYPE x><DataCompositionSchema xmlns='http://v8.1c.ru/8.1/data-composition-system/schema'/>").is_err());
+        }
+        for path in [
+            "Ext/Template.xml",
+            "CommonModules/T/Ext/Module.xml",
+            "src/Configuration/Configuration.mdo",
+            "Form.form",
+        ] {
+            assert!(validate_xml(path, valid).is_err());
+        }
     }
     #[test]
     fn streamed_mxl_depth_and_cell_names_are_not_metadata_limits() {

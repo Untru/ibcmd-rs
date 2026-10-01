@@ -36,4 +36,5 @@ formats-designer = { path = "../formats/designer" }
 # are collected INDEXED and the first failure by object order is the one returned, so the reported
 # error is identical to the sequential walk regardless of thread scheduling.
 rayon = "1"
+quick-xml = "0.36"
 
