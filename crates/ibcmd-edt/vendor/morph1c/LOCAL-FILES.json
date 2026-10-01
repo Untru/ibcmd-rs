@@ -2094,7 +2094,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/tables/des_order.rs",
-      "sha256": "e07ad844dd06a9c6ee75f40538d138d7680fccba8dbc34a007b24e2db28ee6f8"
+      "sha256": "c1e0d228514c992aff87736ade5b6e2ac488aeb5cf50dbbcd376b8574ae3b158"
     },
     {
       "path": "crates/formats-xml/src/form/tables/field/document_picture.rs",
@@ -2126,7 +2126,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/designer.rs",
-      "sha256": "0538dba527d806b372c432873440b7265b31c93824877c7e885fd1fe39e831ac"
+      "sha256": "0929fac5bec2d5e1128a36f1370574eb8fd528b6fab4d2d1a5a8552dc2968a63"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_controls.rs",

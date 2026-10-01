@@ -6,7 +6,7 @@ use crate::form::tables::{
     F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR, F_FF_TITLE_BACK_COLOR,
     F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR, F_LD_BORDER_COLOR,
     F_PIC_BORDER_COLOR, F_FF_WIDTH_IN_CARD, F_BT_SERVER_UNAVAILABLE,
-    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
+    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT, F_EXT_ZOOMABLE,
 };
 use morph1c_core::ir::FieldId;
 use morph1c_core::spec::forms::controls::button as bt;
@@ -104,13 +104,13 @@ pub(crate) static DES_BUTTON_ORDER: &[DesSlot] = &[
     // DataPath — сразу после CommandName, до Title/LocationInCommandBar (SSL 52/52,
     // напр. `CommandName > DataPath > Title`; конфликтов 0).
     DesSlot::F(bt::F_DATA_PATH),
-    DesSlot::Font,
     // Цвета ДО Picture (SSL Designer: TextColor<BackColor×9, BackColor<BorderColor×9,
     // TextColor<BorderColor×49, BackColor<Picture×1, BorderColor<Picture×1, Font<Picture×6;
     // Picture<цвета НЕ витнессирован — прежняя позиция Picture-до-цветов была tie-break-слепой).
     DesSlot::F(bt::F_TEXT_COLOR),
     DesSlot::F(bt::F_BACK_COLOR),
     DesSlot::F(bt::F_BORDER_COLOR),
+    DesSlot::Font,
     DesSlot::F(bt::F_PICTURE),
     DesSlot::F(bt::F_TITLE),
     // `<Shape>`/`<PictureLocation>` — сразу после `<Title>` (witness Кнопка_Форма/РасположениеКартинки).
@@ -166,10 +166,7 @@ pub(crate) static DES_LABEL_DECORATION_ORDER: &[DesSlot] = &[
     // метамодель font→shortcut). LabelDecoration в SSL shortcut не несёт (слот безвреден).
     DesSlot::F(F_DEC_SHORTCUT),
     DesSlot::TitleFormatted,
-    DesSlot::F(ld::F_EXT_TITLE_HEIGHT),
-    DesSlot::F(ld::F_EXT_BACK_COLOR),
     // BorderColor — за BackColor (метамодель; ERP loose).
-    DesSlot::F(F_LD_BORDER_COLOR),
     DesSlot::F(ld::F_TOOL_TIP),
     DesSlot::F(ld::F_TOOL_TIP_REPRESENTATION),
     // GroupHorizontalAlign→GroupVerticalAlign — ПОСЛЕ ToolTip/ToolTipRepresentation, ДО
@@ -186,6 +183,9 @@ pub(crate) static DES_LABEL_DECORATION_ORDER: &[DesSlot] = &[
     // SkipOnInput→Border→ContextMenu ПанельОтчетов; VerticalAlign→Border→ContextMenu ×2
     // ПоискИУдалениеДублей; Title→Border→ContextMenu НастройкиРаботыСФайловымАрхивом).
     // Прежняя позиция после SkipOnInput (до TextColor/Title) ломала Title/VerticalAlign→Border.
+    DesSlot::F(ld::F_EXT_TITLE_HEIGHT),
+    DesSlot::F(ld::F_EXT_BACK_COLOR),
+    DesSlot::F(F_LD_BORDER_COLOR),
     DesSlot::F(ld::F_EXT_BORDER),
     DesSlot::ContextMenu,
     DesSlot::ExtendedTooltip,
@@ -289,6 +289,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // loose внутри интервала).
     DesSlot::F(F_FF_TITLE_BACK_COLOR),
     DesSlot::F(ff::F_TITLE_LOCATION),
+    DesSlot::TableCommandSet,
     DesSlot::F(ff::F_TITLE_HEIGHT),
     DesSlot::F(ff::F_TOOL_TIP),
     DesSlot::F(ff::F_TOOL_TIP_REPRESENTATION),
@@ -319,11 +320,11 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_CELL_HYPERLINK),
     DesSlot::F(ff::F_AUTO_CELL_HEIGHT),
     DesSlot::F(ff::F_FOOTER_HORIZONTAL_ALIGN),
+    DesSlot::F(ff::F_SHOW_IN_HEADER),
     DesSlot::F(ff::F_HEADER_PICTURE),
     DesSlot::F(ff::F_HEADER_HORIZONTAL_ALIGN),
     // showInHeader ПЕРЕД showInFooter (SSL: H<F ×16 по всем видам полей, 0 контрпримеров;
     // напр. ШаблоныСообщений.ФормаСписка СтандартнаяКартинка). Прежний порядок был обратным.
-    DesSlot::F(ff::F_SHOW_IN_HEADER),
     DesSlot::F(ff::F_SHOW_IN_FOOTER),
     // markRequiredComplete — ПЕРЕД AutoEditMode (корпус Designer: EditMode→MarkRequiredComplete×11,
     // MarkRequiredComplete→AutoEditMode×11; при отсутствии EditMode следует за WarningOnEdit).
@@ -354,8 +355,8 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_AUTO_MAX_HEIGHT),
     DesSlot::F(ff::F_EXT_MAX_HEIGHT),
     DesSlot::F(ff::F_EXT_HORIZONTAL_STRETCH),
-    DesSlot::F(ff::F_EXT_HYPERLINK),
     DesSlot::F(ff::F_EXT_VERTICAL_STRETCH),
+    DesSlot::F(ff::F_EXT_HYPERLINK),
     // PDFDocumentField scale/currentPageNumber — ПОСЛЕ геометрии (метамодель PDFDocumentFieldExtInfo:
     // …verticalStretch→scale→currentPageNumber). Designer их опускает (KEEP-дефолты 100/1 — 4/4
     // ERP-витнесса), поэтому позиция de-facto нейтральна; носитель — только PDFDocumentField
@@ -382,11 +383,11 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_MULTI_LINE),
     DesSlot::F(ff::F_EXT_ALLOW_INPUT_EMPTY_MULTIPLE_VALUES),
     DesSlot::F(ff::F_EXT_ALLOW_MULTIPLE_VALUES_DUPLICATES),
+    DesSlot::F(ff::F_EXT_EXTENDED_EDIT),
     DesSlot::F(ff::F_EXT_DROP_LIST_BUTTON),
     // ExtendedEdit — после MultiLine/PasswordMode, до ChoiceButton/ExtendedEditMultipleValues/
     // EditFormat/ListChoiceMode/ChooseType/TextEdit (SSL-витнессы 33 InputField'ов, конфликтов 0;
     // напр. `PasswordMode > ExtendedEdit`, `MultiLine > ExtendedEdit > ChoiceButton`).
-    DesSlot::F(ff::F_EXT_EXTENDED_EDIT),
     DesSlot::F(ff::F_EXT_CHOICE_BUTTON),
     // choiceButtonPicture — ПОЗДНЕЕ поле тела InputField (Designer): после EditTextUpdate/TextEdit/
     // ChooseType/EEMV, ДО TextColor/BorderColor/HeightControlVariant/InputHint/TextSize (SSL-витнессы:
@@ -451,9 +452,9 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // (SSL Designer: AMI<MinValue×2 Календари, ChooseType<MinValue×2, TypeDomainEnabled<
     // MinValue×2 ЖурналРегистрации/ЗащитаПД, MinValue<ChoiceList×2; 0 контрпримеров —
     // прежняя ранняя позиция до MVDP/QuickChoice ломала все три).
+    DesSlot::F(ff::F_EXT_TEXT_EDIT),
     DesSlot::F(ff::F_EXT_MIN_VALUE),
     DesSlot::F(ff::F_EXT_MAX_VALUE),
-    DesSlot::F(ff::F_EXT_TEXT_EDIT),
     // editTextUpdate — СРАЗУ после TextEdit, ДО ChoiceParameters/ChoiceList/ChoiceButtonPicture
     // (SSL Designer: TextEdit<ETU×3, ListChoiceMode<ETU×3, IncompleteChoiceMode<ETU×1,
     // ETU<ChoiceList×3, ETU<ChoiceButtonPicture×5, ETU<BorderColor×1, ETU<ChoiceListHeight×1;
@@ -475,6 +476,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // InputHint/ChoiceHistoryOnInput/ContextMenu. Конфликтов 0.
     DesSlot::F(ff::F_EXT_AVAILABLE_TYPES),
     // InputField choiceList — ПОСЛЕ textEdit, ДО backColor (сверено).
+    DesSlot::F(ff::F_EXT_CHOICE_BUTTON_PICTURE),
     DesSlot::F(ff::F_EXT_CHOICE_LIST),
     // choiceListButton ПЕРЕД backColor (SSL Designer: AutoEditMode/TextEdit<ChoiceListButton,
     // ChoiceListButton<BackColor; напр. ПрограммыЭлектроннойПодписиИШифрования.ФормаЭлемента).
@@ -488,13 +490,12 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     // ChoiceListHeight<DLW×2, DLW<BackColor×1, 0 контрпримеров — прежняя позиция после
     // Spell* вскрыта ВопросыДляАнкетирования.ФормаЭлемента).
     DesSlot::F(ff::F_EXT_DROP_LIST_WIDTH),
+    DesSlot::F(ff::F_EXT_TEXT_COLOR),
     DesSlot::F(ff::F_EXT_BACK_COLOR),
     // choiceButtonPicture занимает ЭТУ позицию (после EditTextUpdate/BackColor, до TextColor) —
     // перенесён из ранней позиции choiceButton-семейства (witness: EditTextUpdate<CBP,
     // CBP<TextColor/InputHint).
-    DesSlot::F(ff::F_EXT_CHOICE_BUTTON_PICTURE),
     DesSlot::F(F_EXT_CHOICE_BUTTON_TITLE),
-    DesSlot::F(ff::F_EXT_TEXT_COLOR),
     // BorderColor — после цветов/ChoiceList/EditTextUpdate/ListChoiceMode, до
     // HeightControlVariant/ContextMenu (SSL-витнессы 42 InputField'ов; напр.
     // `BackColor > BorderColor`, `TextColor > BorderColor`, `BorderColor > HeightControlVariant`).
@@ -510,6 +511,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_SPELL_CHECKING_ON_TEXT_INPUT),
     // SpecialTextInputMode — ПОСЛЕ EEMV-кластера, ДО InputHint (ERP-witness МЧД003:
     // ExtendedEditMultipleValues→SpecialTextInputMode→ContextMenu; loose).
+    DesSlot::Font,
     DesSlot::F(F_EXT_SPECIAL_TEXT_INPUT_MODE),
     DesSlot::F(ff::F_EXT_INPUT_HINT),
     // picture (InputField-поиск) — ПОСЛЕ InputHint (SSL Designer: InputHint<Picture×2,
@@ -519,7 +521,6 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_PICTURE),
     // LabelField `<Font>` — ПЕРЕД UseCopy (witness VerticalStretch→Font→UseCopy;
     // Hiperlink/Height→Font→ContextMenu; метамодель LabelFieldExtInfo backColor→font→useCopy).
-    DesSlot::Font,
     DesSlot::F(ff::F_EXT_USE_COPY),
     // textSize — ЗАМЫКАЮЩЕЕ поле тела InputField в Designer, НЕПОСРЕДСТВЕННО перед ContextMenu
     // (witness SSL: InputHint→TextSize→ContextMenu; 82 экземпляра, все `Enlarged`). Опускается при
@@ -579,6 +580,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_BORDER),
     DesSlot::F(ff::F_EXT_FILE_DRAG_MODE),
     DesSlot::F(ff::F_EXT_PICTURE_COLOR),
+    DesSlot::F(F_EXT_ZOOMABLE),
     // TypeLink — поздний слот перед ChoiceHistoryOnInput/ContextMenu (ВСЕ 8 Designer-витнессов:
     // EditMode/AutoEditMode/ChooseType/AutoMaxWidth→TypeLink→ContextMenu; пара с
     // ChoiceHistoryOnInput не витнессирована — tie-break по метамодели typeLink 63 < 84).

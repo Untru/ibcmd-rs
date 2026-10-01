@@ -513,3 +513,25 @@ fn recalculation_identities_dimensions_and_generated_types_survive() {
     let bad = input.replace("</dimensions>", "<unknown>keep</unknown></dimensions>");
     assert!(codec::read_edt("CalculationRegister", &parse(bad.as_bytes()).unwrap().root).is_err());
 }
+
+#[test]
+fn formatted_document_commands_and_picture_zoom_survive_both_codecs() {
+    use formats_xml::form::{FormDialect, read_form, write_form};
+    use morph1c_core::ir::{FieldId, FormBody, FormControlKind, FormItem, PropertyValue};
+    let mut form = FormBody::new();
+    let mut text = FormItem::new(FormControlKind::new("FormattedDocumentField"), "Text", 1);
+    text.excluded_commands = vec!["Copy".into(), "Paste".into()];
+    let mut picture = FormItem::new(FormControlKind::new("PictureField"), "Picture", 2);
+    picture.ext_info.push((FieldId(957), PropertyValue::Bool(true)));
+    form.items = vec![text, picture];
+    for dialect in [FormDialect::Designer, FormDialect::Edt] {
+        let encoded = write_form(dialect, &form).unwrap();
+        let decoded = read_form(dialect, &encoded).unwrap();
+        assert_eq!(decoded.items[0].excluded_commands, form.items[0].excluded_commands);
+        assert_eq!(decoded.items[1].ext_info.iter().find(|(id, _)| *id == FieldId(957)).unwrap().1, PropertyValue::Bool(true));
+        let xml = std::str::from_utf8(&encoded).unwrap();
+        let leaf = if dialect == FormDialect::Designer { "ExcludedCommand" } else { "excludedCommands" };
+        let bad = xml.replace(&format!("<{leaf}>"), &format!("<{leaf} retained='yes'>"));
+        assert!(read_form(dialect, bad.as_bytes()).is_err());
+    }
+}

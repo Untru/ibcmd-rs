@@ -62,6 +62,7 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     push_des_attr(&mut root, body, fr::F_HORIZONTAL_SPACING);
     push_des_attr(&mut root, body, fr::F_CHILD_ITEMS_WIDTH);
     push_des_attr(&mut root, body, fr::F_ALLOW_FORM_CUSTOMIZE);
+    push_des_attr(&mut root, body, fr::F_ENABLED);
     push_des_attr(&mut root, body, fr::F_COMMAND_BAR_LOCATION);
     push_des_attr(&mut root, body, fr::F_VERTICAL_SCROLL);
     push_des_attr(&mut root, body, fr::F_CONVERSATIONS_REPRESENTATION);
@@ -110,7 +111,6 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     // ShowTitle<ShowCommandBar×4, CommandSet<ShowCloseButton×1, ShowCloseButton<ShowCommandBar×1,
     // ShowTitle<AutoCommandBar×12; контрпримеров 0 — прежняя позиция ПОСЛЕ ShowCommandBar
     // была слепой «Designer не эмитит никогда» и ломала ShowTitle→ShowCommandBar).
-    push_des_attr(&mut root, body, fr::F_ENABLED);
     push_des_attr(&mut root, body, fr::F_SHOW_TITLE);
     push_des_attr(&mut root, body, fr::F_SHOW_CLOSE_BUTTON);
     // Заголовок группы кнопок создания — ПОСЛЕ VerticalScroll/CommandSet, ДО ShowCommandBar/
