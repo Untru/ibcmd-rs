@@ -160,6 +160,8 @@ pub enum Codec {
     /// `x_ignore` в спеке (исключено из X-сравнения, см. `morph1c_testkit`). Локус даёт
     /// имя тега (`help`); структура фиксирована (byte-exact).
     HelpConst,
+    /// Complete ordered Configuration share-request records in either source dialect.
+    AllowedIncomingShareTypes(crate::configuration::ConfigDialect),
     /// EDT-only КОНСТАНТА `usePurposes` стаба формы: РОВНО два подряд
     /// `<usePurposes>PersonalComputer</usePurposes><usePurposes>MobileDevice</usePurposes>`
     /// (сверено 185/185). Навигирует от КОРНЯ источника (props_root формы), как

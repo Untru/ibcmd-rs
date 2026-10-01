@@ -23,6 +23,7 @@ mod extension;
 mod languages;
 mod mobile_functionalities;
 mod use_purposes;
+mod share_types;
 
 pub use child_objects::*;
 pub use contained_objects::*;
@@ -30,6 +31,7 @@ pub use extension::*;
 pub use languages::*;
 pub use mobile_functionalities::*;
 pub use use_purposes::*;
+pub use share_types::*;
 
 /// Диалект формата для Configuration-кодеков.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

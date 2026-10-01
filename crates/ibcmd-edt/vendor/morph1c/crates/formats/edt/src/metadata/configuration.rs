@@ -90,6 +90,7 @@ impl LocusMap for EdtConfiguration {
                 &["usedMobileApplicationFunctionalities"],
                 Codec::MobileFunctionalities(ConfigDialect::Edt),
             ),
+            cfg::F_ALLOWED_INCOMING_SHARE_TYPES => fp(&["allowedIncomingShareRequestTypes"], Codec::AllowedIncomingShareTypes(ConfigDialect::Edt)),
             cfg::F_WINDOWS_OPEN_VARIANT => fp(&["clientApplicationWindowsOpenVariant"], Codec::EnumText),
             cfg::F_MAIN_SECTION_PICTURE => fp(&["mainSectionPicture"], Codec::PlainText),
             cfg::F_DEFAULT_LANGUAGE => fp(&["defaultLanguage"], Codec::PlainText),
@@ -201,6 +202,7 @@ static EDT_ORDER: &[FieldId] = &[
     cfg::F_VERSION,
     cfg::F_UPDATE_CATALOG_ADDRESS,
     cfg::F_INCLUDE_HELP,
+    cfg::F_HELP,
     // ERP-witnessed блок (Configuration.mdo:29–34, порядок = metamodel: includeHelpInContents →
     // useManagedForm… → useOrdinaryForm… → reportsVariantsStorage → defaultReport*Form →
     // usedMobileApplicationFunctionalities).
@@ -211,8 +213,10 @@ static EDT_ORDER: &[FieldId] = &[
     cfg::F_DEFAULT_REPORT_VARIANT_FORM,
     cfg::F_DEFAULT_REPORT_SETTINGS_FORM,
     cfg::F_USED_MOBILE_FUNCTIONALITIES,
+    cfg::F_ALLOWED_INCOMING_SHARE_TYPES,
     cfg::F_WINDOWS_OPEN_VARIANT,
     cfg::F_MAIN_SECTION_PICTURE,
+    cfg::F_SHORT_CAPTION,
     cfg::F_DEFAULT_LANGUAGE,
     cfg::F_BRIEF_INFORMATION,
     cfg::F_DETAILED_INFORMATION,
@@ -226,6 +230,7 @@ static EDT_ORDER: &[FieldId] = &[
     cfg::F_MODALITY_USE_MODE,
     cfg::F_SYNC_PLATFORM_CALL_USE_MODE,
     cfg::F_INTERFACE_COMPATIBILITY_MODE,
+    cfg::F_VERSION85_MIGRATION_MODE,
     cfg::F_COMPATIBILITY_MODE,
     cfg::F_LANGUAGES,
     cfg::F_CHILD_OBJECTS,

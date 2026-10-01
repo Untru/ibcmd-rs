@@ -127,7 +127,7 @@ pub const F_USED_MOBILE_FUNCTIONALITIES: FieldId = FieldId(43);
 pub const F_STANDALONE_RESTRICTION_ROLES: FieldId = FieldId(44);
 /// `mobileApplicationURLs` — Designer-only ref/empty. Default "".
 pub const F_MOBILE_APPLICATION_URLS: FieldId = FieldId(45);
-/// `allowedIncomingShareRequestTypes` — Designer-only ref/empty. Default "".
+/// Ordered five-field share-request records. Default [].
 pub const F_ALLOWED_INCOMING_SHARE_TYPES: FieldId = FieldId(46);
 /// `mainClientApplicationWindowInterfaceVariant` — Designer-only enum. Default NavigationLeft.
 pub const F_MAIN_WINDOW_INTERFACE_VARIANT: FieldId = FieldId(47);
@@ -361,10 +361,10 @@ fn build_fields() -> Vec<FieldSpec> {
         .x_ignored(),
         dref(F_STANDALONE_RESTRICTION_ROLES, "standaloneConfigurationRestrictionRoles"),
         dref(F_MOBILE_APPLICATION_URLS, "mobileApplicationURLs"),
-        dref(F_ALLOWED_INCOMING_SHARE_TYPES, "allowedIncomingShareRequestTypes"),
-        denum(F_MAIN_WINDOW_INTERFACE_VARIANT, "mainClientApplicationWindowInterfaceVariant", "NavigationLeft"),
-        denum(F_CLIENT_APPLICATION_THEME, "clientApplicationTheme", "Auto"),
+        FieldSpec::with_default(F_ALLOWED_INCOMING_SHARE_TYPES, "allowedIncomingShareRequestTypes", ValueKind::List, empty_list()),
         denum(F_MAIN_WINDOW_MODE, "mainClientApplicationWindowMode", "Normal"),
+        denum(F_CLIENT_APPLICATION_THEME, "clientApplicationTheme", "Auto"),
+        denum(F_MAIN_WINDOW_INTERFACE_VARIANT, "mainClientApplicationWindowInterfaceVariant", "NavigationLeft"),
         neutral_enum(F_WINDOWS_OPEN_VARIANT, "clientApplicationWindowsOpenVariant"),
         // mainSectionPicture: EDT-only пустой узел `<mainSectionPicture/>`, present РОВНО
         // при наличии картинки (см. `picture_absent`); Designer не несёт → x_ignore.

@@ -53,6 +53,19 @@ pub fn attach_help_pages(
     obj: &mut MetadataObject,
 ) -> Result<(), ConvertError> {
     let (pages, resources) = read_help_sidecar(format, kind, descriptor_path, &obj.name)?;
+    if format == Format::Edt && kind == "CommonCommand" {
+        let field = morph1c_core::spec::metadata::common_command::F_HELP;
+        let declared = obj.properties.iter().any(|(id, value)| {
+            *id == field && matches!(value, morph1c_core::ir::value::PropertyValue::Bool(true))
+        });
+        if declared == pages.is_empty() {
+            return Err(ConvertError::Read {
+                kind: kind.to_string(),
+                object: obj.name.clone(),
+                reason: "CommonCommand help marker and owned help pages disagree".into(),
+            });
+        }
+    }
     if pages.is_empty() {
         return Ok(());
     }

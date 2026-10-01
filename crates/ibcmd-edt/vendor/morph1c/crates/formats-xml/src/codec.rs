@@ -117,6 +117,10 @@ pub(crate) fn claim_locus(root: &Element, locus: &XmlLocus, codec: &Codec, versi
         configuration::claim_child_objects(*dialect, root);
         return;
     }
+    if let Codec::AllowedIncomingShareTypes(dialect) = codec {
+        let _ = configuration::decode_share_types(*dialect, root);
+        return;
+    }
     if let Codec::LanguagesEntity = codec {
         configuration::claim_languages_edt(root);
         return;
@@ -319,6 +323,7 @@ fn claim_element_for_codec(el: &Element, codec: &Codec, version: FormatVersion) 
         | Codec::PredefinedDataCoa
         | Codec::ContainedObjects(_)
         | Codec::ConfigChildObjects(_)
+        | Codec::AllowedIncomingShareTypes(_)
         | Codec::LanguagesEntity => {}
     }
 }
@@ -724,6 +729,7 @@ pub(crate) fn decode_with_codec(
         | Codec::PredefinedDataCoa
         | Codec::ContainedObjects(_)
         | Codec::ConfigChildObjects(_)
+        | Codec::AllowedIncomingShareTypes(_)
         | Codec::LanguagesEntity => {
             Decoded::Error("from-root codec must be decoded from root, not a located cell".into())
         }
@@ -1117,6 +1123,12 @@ pub(crate) fn encode_with_codec(
         }
         return Ok(());
     }
+    if let Codec::AllowedIncomingShareTypes(dialect) = codec {
+        for element in configuration::emit_share_types(*dialect, value)? {
+            sink.children.push(element);
+        }
+        return Ok(());
+    }
     // Configuration languages — EDT-only inline-сущности (multi-node) от value.
     if let Codec::LanguagesEntity = codec {
         for el in configuration::emit_languages_edt(value)? {
@@ -1457,6 +1469,7 @@ pub(crate) fn encode_with_codec(
         | Codec::PredefinedDataCoa
         | Codec::ContainedObjects(_)
         | Codec::ConfigChildObjects(_)
+        | Codec::AllowedIncomingShareTypes(_)
         | Codec::LanguagesEntity => {
             Err("multi-node codec must be emitted before locus dispatch".into())
         }

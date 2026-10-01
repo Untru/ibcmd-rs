@@ -40,6 +40,7 @@ impl LocusMap for EdtCommonCommand {
                 fp(&["picture"], Codec::PictureRef(formats_xml::picture::PictureDialect::Edt))
             }
             cc::F_SHORTCUT => fp(&["shortcut"], Codec::PlainText),
+            cc::F_HELP => fp(&["help"], Codec::HelpConst),
             cc::F_INCLUDE_HELP => fp(&["includeHelpInContents"], Codec::BoolPresence),
             cc::F_COMMAND_PARAMETER_TYPE => {
                 fp(&["commandParameterType"], Codec::Type(formats_xml::TypeDialect::Edt))
@@ -92,6 +93,7 @@ static EDT_ORDER: &[FieldId] = &[
     cc::F_PICTURE,
     cc::F_SHORTCUT,
     cc::F_INCLUDE_HELP,
+    cc::F_HELP,
     cc::F_ON_MAIN_SERVER_UNAVALABLE,
 ];
 

@@ -179,7 +179,7 @@ impl LocusMap for DesignerConfiguration {
             }
             cfg::F_STANDALONE_RESTRICTION_ROLES => plain(PP_STANDALONE_ROLES),
             cfg::F_MOBILE_APPLICATION_URLS => plain(PP_MOBILE_URLS),
-            cfg::F_ALLOWED_INCOMING_SHARE_TYPES => plain(PP_ALLOWED_SHARE),
+            cfg::F_ALLOWED_INCOMING_SHARE_TYPES => p(PP_ALLOWED_SHARE, Codec::AllowedIncomingShareTypes(ConfigDialect::Designer)),
             cfg::F_MAIN_WINDOW_INTERFACE_VARIANT => enum_t(PP_MAIN_WIN_INTERFACE),
             cfg::F_CLIENT_APPLICATION_THEME => enum_t(PP_CLIENT_THEME),
             cfg::F_MAIN_WINDOW_MODE => enum_t(PP_MAIN_WIN_MODE),

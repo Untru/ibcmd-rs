@@ -55,6 +55,8 @@ pub const F_PARAMETER_USE_MODE: FieldId = FieldId(10);
 pub const F_MODIFIES_DATA: FieldId = FieldId(11);
 /// `onMainServerUnavalableBehavior` — поведение при недоступности (перечислимый). Default = `Auto`.
 pub const F_ON_MAIN_SERVER_UNAVALABLE: FieldId = FieldId(12);
+/// EDT help-page marker; native pages are carried in the owned Help sidecar.
+pub const F_HELP: FieldId = FieldId(13);
 
 /// Сконструировать [`FieldSpec`] вида `CommonCommand` в каноническом порядке.
 fn build_fields() -> Vec<FieldSpec> {
@@ -90,6 +92,7 @@ fn build_fields() -> Vec<FieldSpec> {
             ValueKind::Bool,
             PropertyValue::Bool(false),
         ),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)).x_ignored(),
         // CommandParameterType — описание типов; default = ПУСТОЕ (`parts:[]`).
         FieldSpec::with_default(
             F_COMMAND_PARAMETER_TYPE,

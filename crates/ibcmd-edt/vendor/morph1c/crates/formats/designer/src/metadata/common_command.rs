@@ -56,6 +56,7 @@ impl LocusMap for DesignerCommonCommand {
                 fp("Picture", Codec::PictureRef(formats_xml::picture::PictureDialect::Designer))
             }
             cc::F_SHORTCUT => fp("Shortcut", Codec::PlainText),
+            cc::F_HELP => return None, // Native Help.xml/pages sidecar carries complete help.
             cc::F_INCLUDE_HELP => fp("IncludeHelpInContents", Codec::BoolText),
             cc::F_COMMAND_PARAMETER_TYPE => {
                 fp("CommandParameterType", Codec::Type(formats_xml::TypeDialect::Designer))

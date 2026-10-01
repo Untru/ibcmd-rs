@@ -378,6 +378,9 @@ impl<M: LocusMap + ?Sized> Projection for XmlProjection<'_, M> {
         if let Codec::LanguagesEntity = fp.codec {
             return configuration::decode_languages_edt(&source.root);
         }
+        if let Codec::AllowedIncomingShareTypes(dialect) = fp.codec {
+            return configuration::decode_share_types(dialect, &source.root);
+        }
         let located = self.locate(&source.root, &fp.locus);
         decode_with_codec(&fp.codec, located, expected, self.version)
     }

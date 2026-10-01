@@ -36,6 +36,8 @@ pub fn decode_languages_edt(root: &Element) -> Decoded {
         let mut name = String::new();
         let mut lang_code = String::new();
         let mut synonym: Vec<PropertyValue> = Vec::new();
+        let mut seen_name = false;
+        let mut seen_code = false;
         for child in &el.children {
             if !child.prefix.is_empty() {
                 return Decoded::Error(format!(
@@ -45,6 +47,8 @@ pub fn decode_languages_edt(root: &Element) -> Decoded {
             }
             match child.local.as_str() {
                 "name" => {
+                    if seen_name { return Decoded::Error("duplicate languages name".into()); }
+                    seen_name = true;
                     if !child.attrs.is_empty() || !child.children.is_empty() {
                         return Decoded::Error("<languages>/<name> must be a text leaf".into());
                     }
@@ -52,6 +56,8 @@ pub fn decode_languages_edt(root: &Element) -> Decoded {
                     name = child.text.clone();
                 }
                 "languageCode" => {
+                    if seen_code { return Decoded::Error("duplicate languages languageCode".into()); }
+                    seen_code = true;
                     if !child.attrs.is_empty() || !child.children.is_empty() {
                         return Decoded::Error(
                             "<languages>/<languageCode> must be a text leaf".into(),
@@ -156,7 +162,6 @@ pub fn emit_languages_edt(value: &PropertyValue) -> Result<Vec<OutElement>, Stri
             if synonym.len() % 2 != 0 {
                 return Err("languages synonym must be key/value pairs".into());
             }
-            let mut syn = OutElement::branch("", "synonym");
             let mut it = synonym.iter();
             while let (Some(k), Some(v)) = (it.next(), it.next()) {
                 let ks = match k {
@@ -167,10 +172,11 @@ pub fn emit_languages_edt(value: &PropertyValue) -> Result<Vec<OutElement>, Stri
                     PropertyValue::Str(s) => s,
                     o => return Err(format!("synonym value must be Str, got {:?}", o.kind())),
                 };
+                let mut syn = OutElement::branch("", "synonym");
                 syn.push(OutElement::leaf("", "key", ks.clone()));
                 syn.push(OutElement::leaf("", "value", vs.clone()));
+                el.push(syn);
             }
-            el.push(syn);
         }
         el.push(OutElement::leaf("", "languageCode", lang_code.to_string()));
         out.push(el);
