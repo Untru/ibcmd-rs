@@ -11,7 +11,7 @@ source inventories are in `crates/ibcmd-edt/vendor/morph1c/{UPSTREAM,LOCAL}-FILE
 | Upstream source | Host use | Boundary |
 | --- | --- | --- |
 | `crates/core/src/{engine,resolve,spec,ir,version}` and build inventories | Metadata field specs, version defaults and private codec intermediate | Never a second public canonical model; no public morph types |
-| `crates/formats-xml` | Typed ordered XML/body codecs, forms, rights, XDTO, DCS and projections | Host validates UTF-8/XML depth, event/attribute budgets and source-derived filenames first |
+| `crates/formats-xml` | Typed ordered XML/body codecs, forms, rights, XDTO, DCS and projections | Host completely validates UTF-8/XML and source-derived filename safety first |
 | `crates/formats/{edt,designer}` | Descriptor read/write registry and typed source conversion | Namespace/version/totality guards retained; BOM/EOL spelling is host provenance |
 | `crates/pipeline` source-family modules | Modules, forms, templates, pictures, help, schedules, command interfaces, children and languages | CF/detection/survey/CLI entrypoints removed; full bodies always read; error-collection skip mode removed |
 
@@ -24,6 +24,9 @@ source data does not constitute installed-platform acceptance.
 
 `ibcmd-edt` exposes `Project`, bounded `SourceTree` inventory, `ConversionOptions`,
 file accounting and the established `ibcmd-core::CanonicalConfiguration`.
+The CLI uses the additive `DirectorySource`/`DirectoryConversion` path: owned
+disk snapshots retain payloads, while inventories retain paths, identities,
+lengths and hashes. Existing memory API contracts remain available.
 The public metadata bridge uses the existing XML metadata-envelope source
 decoder, preserving only its exact family-specific named Form/Template/Subsystem
 and Recalculation references beside UUID-bearing children: ordered scalar/typed
@@ -33,7 +36,7 @@ canonical contracts. Standalone Form/Template/Subsystem/Recalculation owners are
 linked only through validated explicit ChildObjects references and exact descriptor
 paths; neighbouring paths alone do not establish ownership.
 Module/form/template/binary bodies are content-addressed
-asset references, with bytes retained by the source tree. Physical import
+asset references, with bytes retained by the source tree or owned disk stage. Physical import
 family-codec restrictions are not used as a second EDT format gate.
 
 ## Safety and reversibility
@@ -46,12 +49,17 @@ container metadata. Unknown PMF fields, project fields/settings and DT-INF files
 are rejected. Native EDT to XML to EDT is not a byte-exact Eclipse-control-file
 round trip. No control files are added to native XML inventories.
 
-Both readers reject symlinks/reparse points, unsafe/colliding paths and budgets
+Both readers reject symlinks/reparse points and unsafe/colliding paths
 before borrowed parsing. No editor/build folders are silently skipped. All
 metadata/child/help names used as file components are checked before borrowed
-body reads. Source snapshots are private and use the same explicit large source
-budgets as publication; destination publication remains the host's no-clobber
-staged writer. No product conversion invokes Java, EDT or a native platform.
+body reads. Disk inventory and publication use chunked copy/hash and complete
+streaming XML inspection; they impose no default file-count, file-size,
+total-size or path-depth validity ceilings. Actual filesystem errors remain
+errors. Destination publication uses the existing exclusive atomic rename
+after verifying the sibling stage. Core metadata/value budgets and private
+codec payload allocation are separate remaining scalability work; removing
+inventory ceilings alone does not establish unlimited whole-configuration
+support. No product conversion invokes Java, EDT or a native platform.
 
 The supported project model is explicit EDT 2025.2.3 with XML 2.20 or 2.21.
 XML-to-EDT requires an explicit runtime version agreeing with the XML profile;

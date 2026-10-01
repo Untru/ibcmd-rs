@@ -10,9 +10,11 @@ captures remain in the F: laboratory.
 The native `Ext/MobileClientSignature.bin` and authentic EDT
 `Configuration/MobileClientSign.bin` contain the same 44-byte version-2
 artifact. The installed reader reports `Unsupported version of file
-MobileDigiSign.bin`. A bounded read-only investigation reproduces its text-list
-tail failure; no supported equivalent framing was found. Replacing it with a
-basic version-0 object changes the model class and is not an accepted repair.
+MobileDigiSign.bin`. Investigation reproduced its text-list tail failure.
+The subsequent [model-bound version-2 transport](mobile-signature.md) preserves
+the complete version-2 model through the installed reader and writer, including
+nonempty digest groups and quoted text. Replacing it with a version-0 object
+would change the model class and remains an invalid repair.
 
 The exact SDK jars, source bytes, probe commands and unchanged-source hashes
 are bound under `F:\ibcmd\lab\07\mobile-signature-reader-probe`.
@@ -37,10 +39,14 @@ native SDK capture. The original and post-EDT form SHA-256 values are
 and `62673c0b0bb93d16380c439a1bdb2ff79c76dd586de857b3807889c60ac2d0e3`.
 The raw tree comparisons retain this difference.
 
-Native reader/writer support must retain the typed per-use flag and pixel.
-An EDT projection that cannot represent them must reject the conversion
-before publication. Keeping original XML for an unchanged return does not
-establish that EDT can import those source semantics without loss.
+The adapter now retains the typed per-use flag and pixel through an explicit
+[versioned form resource](picture-semantics.md), independent of unchanged-source
+provenance. Descriptor references remain compatible with the installed EDT
+model. The adapter reads this resource when converting back to native XML;
+an EDT-only export does not preserve the additional per-use values. Installed
+EDT import and validation of the generated resource remain separate acceptance
+checks. This is a transport for the missing semantics, rather than a reason to
+exclude the configuration.
 
 ## Acceptance scope
 
