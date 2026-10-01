@@ -6,7 +6,6 @@ use std::io::Read;
 use std::path::Path;
 
 const MAX_XML_DEPTH: usize = 128;
-const MAX_XML_EVENTS: usize = 2_000_000;
 const MAX_XML_ATTRIBUTES: usize = 256;
 
 /// Run before either XML parser builds a recursive tree. All source-derived names
@@ -15,18 +14,22 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
     let mut reader = Reader::from_reader(bytes);
     reader.config_mut().check_end_names = true;
     let mut depth = 0usize;
-    let mut events = 0usize;
     let mut names = Vec::new();
     let mut form_body = false;
     let mut dump_info = false;
     loop {
-        events += 1;
-        if events > MAX_XML_EVENTS {
-            return Err(EdtError::new(format!("{path}: XML event budget exceeded")));
-        }
+        let before = reader.buffer_position();
         let event = reader
             .read_event()
             .map_err(|e| EdtError::new(format!("{path}: {e}")))?;
+        // A streaming scan is bounded by its input, not by the number of cells
+        // or XML events. Every non-EOF event must consume source bytes, so a
+        // large valid asset cannot hit an arbitrary event-count ceiling.
+        if !matches!(event, Event::Eof) && reader.buffer_position() <= before {
+            return Err(EdtError::new(format!(
+                "{path}: XML reader made no progress"
+            )));
+        }
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let local = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
@@ -327,6 +330,24 @@ fn reparse(_: &fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_flat_xml_is_limited_by_input_not_event_count() {
+        // More than two million events, the ceiling that rejected real MXL.
+        let mut xml = String::from("<document>");
+        for _ in 0..700_000 {
+            xml.push_str("<cell>x</cell>");
+        }
+        xml.push_str("</document>");
+        validate_xml("Template.xml", xml.as_bytes()).unwrap();
+
+        // Reaching the end of a large input must still validate its final tag.
+        let end = xml.rfind("</document>").unwrap();
+        xml.truncate(end);
+        xml.push_str("</different>");
+        assert!(validate_xml("Template.xml", xml.as_bytes()).is_err());
+        xml.truncate(end);
+        assert!(validate_xml("Template.xml", xml.as_bytes()).is_err());
+    }
     #[test]
     fn dump_qualified_references_do_not_extend_filesystem_names() {
         let name = "DataProcessor.СопоставлениеОбъектовИнформационныхБаз.TabularSection.ТаблицаАвтоматическиСопоставленныхОбъектов.Attribute.УникальныйИдентификаторПриемника";
