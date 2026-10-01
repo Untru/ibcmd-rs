@@ -47,6 +47,7 @@ pub(crate) fn edt_auto_table(item: &FormItem) -> Result<OutElement, FormError> {
 /// все регионы (поля/колонки/добавления/autoCommandBar/декораторы). Внешнюю обёртку/xsi:type
 /// ставит вызывающий.
 pub(crate) fn edt_table_body_into(el: &mut OutElement, item: &FormItem) -> Result<(), FormError> {
+    super::super::event_owners::validate_table_owned(item)?;
     el.push(OutElement::leaf("", "name", item.name.clone()));
     // id=0 (главная autoTable) EDT ОПУСКАЕТ; ⟺ Designer `id="0"` (см. push_edt_id).
     push_edt_id(el, item.id);

@@ -829,6 +829,7 @@ pub(crate) fn read_edt_table_body(el: &Element) -> Result<FormItem, FormError> {
             unclaimed_labels(el)
         )));
     }
+    super::super::event_owners::validate_table_owned(&item)?;
     Ok(item)
 }
 
@@ -837,7 +838,7 @@ pub(crate) const DYNAMIC_LIST_EXT_KIND: &str = "form:DynamicListTableExtInfo";
 
 /// Прочитать EDT `<extInfo xsi:type="form:DynamicListTableExtInfo">` → [`DynamicListExt`].
 /// Несёт СОБСТВЕННЫЕ обработчики (`<handlers>` — `OnGetDataAtServer`/…; хранятся ОТДЕЛЬНО, для
-/// X сливаются в `item.events`) + канонические поля (`autoRefreshPeriod`/`period`/
+/// остаются отдельным семантическим владельцем) + канонические поля (`autoRefreshPeriod`/`period`/
 /// `topLevelParent`/`showRoot`/`allowGettingCurrentRowURL`/`userSettingsGroup`; Keep-политики
 /// заполняют дефолты Designer-ВСЕГДА-полей). Чужой xsi:type / незнакомый под-элемент — §1.0-ошибка.
 pub(crate) fn read_edt_dynamic_list_ext(ex: &Element) -> Result<DynamicListExt, FormError> {

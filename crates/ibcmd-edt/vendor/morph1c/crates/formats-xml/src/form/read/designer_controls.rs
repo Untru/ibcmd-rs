@@ -420,7 +420,7 @@ pub(crate) fn read_designer_table(el: &Element) -> Result<FormItem, FormError> {
     }
     // extInfo динамического списка (Designer — ИНЛАЙН в `<Table>`): маркер — `<AutoRefresh>`
     // (у обычных таблиц данных отсутствует; весь блок появляется вместе). Читаем ПОЛЯ таблично
-    // (Designer сливает СОБСТВЕННЫЕ обработчики в единый `<Events>` ⇒ events здесь пусты).
+    // Обработчики разделяются после чтения единого `<Events>` по runtime-владельцам.
     if el
         .child("AutoRefresh")
         .filter(|c| c.prefix.is_empty())
@@ -522,6 +522,7 @@ pub(crate) fn read_designer_table(el: &Element) -> Result<FormItem, FormError> {
             unclaimed_labels(el)
         )));
     }
+    super::super::event_owners::partition_native_table(&mut item)?;
     Ok(item)
 }
 

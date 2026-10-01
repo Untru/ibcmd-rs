@@ -105,7 +105,7 @@ pub(crate) fn designer_table_control(
                     el.push(designer_font_named("FooterFont", f));
                 }
             }
-            DesSlot::Events => push_designer_events(&mut el, item),
+            DesSlot::Events => push_designer_events(&mut el, item)?,
             DesSlot::ChildItems => {
                 if !item.children.is_empty() {
                     let mut ci = OutElement::branch("", "ChildItems");

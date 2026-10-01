@@ -88,6 +88,10 @@ pub struct FormItem {
     pub ext_info: Vec<(FieldId, PropertyValue)>,
     /// Обработчики событий узла (имя события → имя процедуры-обработчика).
     pub events: Vec<FormEvent>,
+    /// Native flattened Table event names/order only. Current typed handlers
+    /// remain authoritative; replay requires both owner orders and kind to match.
+    #[serde(skip)]
+    pub native_table_event_order: Option<NativeFormEventOrder>,
     /// Расширенная подсказка контрола (`extendedTooltip`/`ExtendedTooltip`), если есть.
     /// Несёт имя+id+ТЕЛО ([`DecoratorRef`]). ОБА формата несут СОДЕРЖАНИЕ тела (заголовок/
     /// `maxWidth`/`autoMax*`/`horizontalStretch`/события) — оно X-СРАВНИМО (после реконсиляции
@@ -150,8 +154,8 @@ pub struct FormItem {
     /// ИНЛАЙН-полями `<Table>` (`AutoRefresh`/`Period`/`TopLevelParent`/`ShowRoot`/…). Несёт
     /// набор канонических полей ([`DynamicListExt::fields`]) плюс СОБСТВЕННЫЕ обработчики
     /// (EDT `<extInfo><handlers>` — `OnGetDataAtServer`/…; Designer сливает их в единый
-    /// табличный `<Events>` вместе с обычными событиями контрола) ⇒ X сливает
-    /// [`DynamicListExt::events`] в [`Self::events`] (см. `normalize_form_for_x`). `None` ⇒
+    /// табличный `<Events>` вместе с обычными событиями контрола). Оба владельца и
+    /// их порядок сохраняются отдельно в семантическом IR. `None` ⇒
     /// Таблица НЕ является динамическим списком (обычная таблица данных). X-сравним (оба формата
     /// несут одинаковый канон-набор полей; расхождение значения ⇒ X=FALSE, не маскируется).
     #[serde(default)]
@@ -208,8 +212,8 @@ pub struct FormItem {
 /// # Обработчики
 /// EDT держит СОБСТВЕННЫЕ обработчики динамического списка (`OnGetDataAtServer`/…) в
 /// `<extInfo><handlers>`; Designer сливает их в единый табличный `<Events>` (в платформенном
-/// порядке — за обычными событиями контрола). Хранятся ОТДЕЛЬНО в [`Self::events`] (чтобы EDT-
-/// запись легла byte-exact в обёртку), а для X сливаются в [`FormItem::events`].
+/// порядке). Хранятся ОТДЕЛЬНО в [`Self::events`]: оба ридера восстанавливают
+/// владельца по точной runtime-метамодели, сохраняют порядок и текущие handlers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct DynamicListExt {
     /// Канонические поля extInfo по [`FieldId`], в КАНОНИЧЕСКОМ (= EDT-эмиссия) порядке —
@@ -219,7 +223,7 @@ pub struct DynamicListExt {
     /// Дефолты пер-форматных `Keep`-полей заполнены на read обоими ридерами ⇒ канон-bag равен.
     pub fields: Vec<(FieldId, PropertyValue)>,
     /// СОБСТВЕННЫЕ обработчики динамического списка (EDT `<extInfo><handlers>`), в исходном
-    /// порядке. Designer сливает их в табличный `<Events>` ⇒ X сливает их в [`FormItem::events`].
+    /// порядке. Designer объединяет их физически; исходный порядок держит отдельный facet.
     pub events: Vec<FormEvent>,
 }
 
@@ -249,6 +253,7 @@ impl FormItem {
             properties: Vec::new(),
             ext_info: Vec::new(),
             events: Vec::new(),
+            native_table_event_order: None,
             footer_font: None,
             ext_tooltip: None,
             context_menu: None,

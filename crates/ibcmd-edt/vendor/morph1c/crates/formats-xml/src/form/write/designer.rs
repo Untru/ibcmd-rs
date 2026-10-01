@@ -684,31 +684,18 @@ pub(crate) fn designer_parameter(p: &FormParameter) -> Result<OutElement, FormEr
 }
 
 /// Дописать Designer `<Events>` контрола, если есть.
-pub(crate) fn push_designer_events(el: &mut OutElement, item: &FormItem) {
-    // Designer держит ВСЕ события контрола в едином `<Events>`. Для Таблицы-динамического-списка
-    // канон-IR держит СОБСТВЕННЫЕ обработчики отдельно (`dynamic_list_ext.events`, EDT-обёртка);
-    // Designer-запись СЛИВАЕТ их в `<Events>` в ПЛАТФОРМЕННОМ (guid) порядке — тот же ключ, что
-    // у формы (`morph1c_core::ir::merge_table_events`, табличное guid-пространство).
-    // Designer-round-trip: `dynamic_list_ext.events` пуст (Designer-ридер кладёт всё в
-    // `item.events`) ⇒ слияние тождественно, byte-exact сохранён; edt→designer:
-    // extInfo-обработчики попадают в `<Events>` (не теряются) на СВОЁ место.
-    //
-    // ⚠ r34: прежнее «за обычными событиями» (конкатенация) НЕВЕРНО — `OnGetDataAtServer`
-    // (9736…) встаёт МЕЖДУ табличными событиями. Ценз по 604 таблицам-ДС (SSL 14 + ERP 590):
-    // guid-порядок 604/604, конкатенация ошибалась в 105 (SSL 8 + ERP 97).
-    let dyn_events: &[morph1c_core::ir::FormEvent] = item
-        .dynamic_list_ext
-        .as_ref()
-        .map(|d| d.events.as_slice())
-        .unwrap_or(&[]);
-    if item.events.is_empty() && dyn_events.is_empty() {
-        return;
+pub(crate) fn push_designer_events(el: &mut OutElement, item: &FormItem) -> Result<(), FormError> {
+    let ordered = if item.kind.as_str() == "Table" {
+        super::super::event_owners::native_table_order(item)?
+    } else {
+        item.events.iter().collect()
+    };
+    if !ordered.is_empty() {
+        let mut events = OutElement::branch("", "Events");
+        for event in ordered { events.push(designer_event(event)); }
+        el.push(events);
     }
-    let mut events = OutElement::branch("", "Events");
-    for ev in morph1c_core::ir::merge_table_events(&item.events, dyn_events) {
-        events.push(designer_event(ev));
-    }
-    el.push(events);
+    Ok(())
 }
 
 #[cfg(any())]
