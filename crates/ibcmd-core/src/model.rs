@@ -303,6 +303,12 @@ pub struct GeneratedType {
     kind: GeneratedTypeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     value_id: Option<ObjectUuid>,
+    #[serde(default, skip_serializing_if = "alias_is_false")]
+    owner_identity_alias: bool,
+}
+
+fn alias_is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl GeneratedType {
@@ -315,6 +321,7 @@ impl GeneratedType {
             uuid,
             kind,
             value_id: None,
+            owner_identity_alias: false,
         }
     }
 
@@ -338,6 +345,29 @@ impl GeneratedType {
     /// Returns the independently sourced generated ValueId, when declared.
     pub const fn value_id(&self) -> Option<ObjectUuid> {
         self.value_id
+    }
+
+    /// Declares that this Enum list type shares its own object's identity.
+    /// Graph validation checks the complete Enum/List/TypeId/ValueId relationship.
+    /// Distinct declarations remain the default; this flag is retained on the wire.
+    pub const fn with_owner_identity_alias(mut self) -> Self {
+        self.owner_identity_alias = true;
+        self
+    }
+
+    /// Whether the generated declaration explicitly aliases its own object UUID.
+    pub const fn is_owner_identity_alias(&self) -> bool {
+        self.owner_identity_alias
+    }
+
+    pub(crate) fn valid_owner_identity_alias(&self, object: &CanonicalObject) -> bool {
+        self.owner_identity_alias
+            && object.kind().as_str() == "Enum"
+            && self.kind.as_str() == "List"
+            && self.uuid == object.identity().uuid()
+            && self.value_id.is_some_and(|value| {
+                value != self.uuid && value.as_bytes().iter().any(|byte| *byte != 0)
+            })
     }
 }
 
