@@ -9,6 +9,7 @@ use crate::node::{
 };
 
 const UTF8_BOM: &[u8; 3] = b"\xef\xbb\xbf";
+mod inspection;
 
 /// Reason a document could not be read.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +75,17 @@ impl XmlReader {
     /// Uses the same lexical and document checks as `from_slice`.
     pub fn inspect_slice(input: &[u8]) -> Result<QName, XmlError> {
         Ok(Self::parse(input, false)?.root().name().clone())
+    }
+
+    /// Inspects a complete UTF-8 source using two streaming passes.
+    ///
+    /// The seekable input starts at its current position. Complete lexical
+    /// checks precede event inspection, preserving the document reader's error
+    /// priority without retaining the input, node tree, or a line-position map.
+    pub fn inspect_reader<R: std::io::BufRead + std::io::Seek>(
+        input: R,
+    ) -> Result<QName, XmlError> {
+        inspection::inspect(input)
     }
 
     fn parse(input: &[u8], retain_tree: bool) -> Result<XmlDocument, XmlError> {

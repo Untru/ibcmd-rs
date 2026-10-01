@@ -77,7 +77,9 @@ pub fn publish_new_with_limits(
 }
 
 #[cfg(target_os = "linux")]
-fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
+/// Atomically renames a caller-validated staged directory without replacement.
+#[doc(hidden)]
+pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
     rustix::fs::renameat_with(
         rustix::fs::CWD,
         source,
@@ -89,14 +91,18 @@ fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
 }
 
 #[cfg(windows)]
-fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
+/// Atomically renames a caller-validated staged directory without replacement.
+#[doc(hidden)]
+pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
     // std::fs::rename can replace an empty directory on Windows. Use the
     // safe wrapper around MoveFileExW with no replacement flag instead.
     renamore::rename_exclusive(source, dest)
 }
 
 #[cfg(not(any(windows, target_os = "linux")))]
-fn rename_directory_new(_source: &Path, _dest: &Path) -> std::io::Result<()> {
+/// Refuses atomic publication on systems without an exclusive rename primitive.
+#[doc(hidden)]
+pub fn rename_directory_new(_source: &Path, _dest: &Path) -> std::io::Result<()> {
     Err(std::io::Error::new(
         std::io::ErrorKind::Unsupported,
         "atomic directory publication without replacement is not supported on this OS",

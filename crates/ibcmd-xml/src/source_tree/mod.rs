@@ -9,7 +9,62 @@ use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
 pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree};
+#[doc(hidden)]
+pub use writer::rename_directory_new;
 pub use writer::{SourceTreeWriter, publish_new, publish_new_with_limits};
+
+/// Classifies a relative source path without reading its payload.
+/// Classification does not validate path safety or source XML.
+pub fn classify_source_path(path: &str) -> SourceKind {
+    reader::classify(path)
+}
+
+/// Checks relative source path safety without applying resource quotas.
+/// The filesystem determines its representable component and path lengths.
+pub fn validate_source_path_safety(value: &str) -> Result<(), SourceTreeError> {
+    safe_relative_path(value).map(|_| ())
+}
+
+/// Inspects complete XML before deriving the root or first-level source UUID.
+pub fn inspect_source_uuid<R: std::io::BufRead + std::io::Seek>(
+    path: &str,
+    mut input: R,
+) -> Result<Option<ObjectUuid>, SourceTreeError> {
+    use std::io::SeekFrom;
+    let path = SourcePath(safe_relative_path(path)?.into());
+    let origin = input.stream_position()?;
+    crate::XmlReader::inspect_reader(&mut input).map_err(|error| SourceTreeError::Xml {
+        path: path.clone(),
+        message: error.to_string(),
+    })?;
+    input.seek(SeekFrom::Start(origin))?;
+    reader::derive_uuid_from_reader(&path, input)
+}
+
+fn safe_relative_path(value: &str) -> Result<String, SourceTreeError> {
+    if value.starts_with("\\\\") || value.starts_with('/') || value.as_bytes().get(1) == Some(&b':')
+    {
+        return Err(SourceTreeError::UnsafePath(value.to_string()));
+    }
+    let value = value.replace('\\', "/");
+    if value.is_empty()
+        || value.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.ends_with(['.', ' '])
+                || part.chars().any(|character| {
+                    character.is_control()
+                        || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+                })
+                || reserved(part)
+                || matches!(part, ".git" | "target" | ".idea" | ".vscode")
+        })
+    {
+        return Err(SourceTreeError::UnsafePath(value));
+    }
+    Ok(value)
+}
 
 /// Absolute inventory bounds, including a complete ERP UH source tree and
 /// reversible EDT preservation records. Readers retain smaller defaults.
@@ -27,31 +82,15 @@ pub const MAX_SOURCE_PATH_BYTES: usize = 4_096;
 pub struct SourcePath(Box<str>);
 impl SourcePath {
     pub fn new(value: impl AsRef<str>) -> Result<Self, SourceTreeError> {
-        let value = value.as_ref();
-        if value.starts_with("\\\\")
-            || value.starts_with('/')
-            || value.as_bytes().get(1) == Some(&b':')
-        {
-            return Err(SourceTreeError::UnsafePath(value.to_string()));
-        }
-        let value = value.replace('\\', "/");
-        if value.is_empty() || value.len() > MAX_SOURCE_PATH_BYTES {
+        let value = safe_relative_path(value.as_ref())?;
+        if value.len() > MAX_SOURCE_PATH_BYTES {
             return Err(SourceTreeError::UnsafePath(value));
         }
         let parts: Vec<_> = value.split('/').collect();
         if parts.len() > MAX_SOURCE_DEPTH
-            || parts.iter().any(|p| {
-                p.is_empty()
-                    || *p == "."
-                    || *p == ".."
-                    || p.len() > MAX_SOURCE_COMPONENT_BYTES
-                    || p.ends_with(['.', ' '])
-                    || p.chars().any(|c| {
-                        c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-                    })
-                    || reserved(p)
-                    || matches!(*p, ".git" | "target" | ".idea" | ".vscode")
-            })
+            || parts
+                .iter()
+                .any(|part| part.len() > MAX_SOURCE_COMPONENT_BYTES)
         {
             return Err(SourceTreeError::UnsafePath(value));
         }

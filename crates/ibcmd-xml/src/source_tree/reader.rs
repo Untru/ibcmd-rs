@@ -317,16 +317,26 @@ pub(crate) fn derive_uuid_from_bytes(
     path: &SourcePath,
     bytes: &[u8],
 ) -> Result<Option<ObjectUuid>, SourceTreeError> {
+    derive_uuid_from_reader(path, bytes)
+}
+
+pub(crate) fn derive_uuid_from_reader<R: std::io::BufRead>(
+    path: &SourcePath,
+    input: R,
+) -> Result<Option<ObjectUuid>, SourceTreeError> {
     use quick_xml::{Reader, events::Event};
-    let mut reader = Reader::from_reader(bytes);
+    let mut reader = Reader::from_reader(input);
+    let mut buffer = Vec::new();
     let mut depth = 0usize;
     let mut count = 0usize;
     let mut candidate = None;
     loop {
-        let event = reader.read_event().map_err(|e| SourceTreeError::Xml {
-            path: path.clone(),
-            message: e.to_string(),
-        })?;
+        let event = reader
+            .read_event_into(&mut buffer)
+            .map_err(|e| SourceTreeError::Xml {
+                path: path.clone(),
+                message: e.to_string(),
+            })?;
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 if depth <= 1 {
@@ -374,6 +384,7 @@ pub(crate) fn derive_uuid_from_bytes(
             Event::Eof => break,
             _ => {}
         }
+        buffer.clear();
     }
     if count > 1 {
         Err(SourceTreeError::AmbiguousUuid { path: path.clone() })
