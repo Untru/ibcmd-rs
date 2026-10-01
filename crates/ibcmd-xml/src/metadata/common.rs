@@ -18,7 +18,7 @@ use ibcmd_core::opaque::{OpaqueFacet, OpaqueFacets, OpaquePlacement};
 use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
 use ibcmd_core::source_policy::SourceOperationPolicy;
 use ibcmd_core::storage::Sha256Digest;
-use ibcmd_core::value::{CanonicalField, CanonicalText, CanonicalValue};
+use ibcmd_core::value::{CanonicalField, CanonicalText, CanonicalValue, CanonicalValueKind};
 
 use super::fallback::Fallback;
 use crate::{
@@ -782,6 +782,7 @@ struct ObjectDecoder<'a> {
     names: BTreeSet<String>,
     containers: BTreeSet<&'static str>,
     generated_source: Option<&'static str>,
+    generated_names: BTreeMap<ObjectUuid, Option<String>>,
 }
 impl<'a> ObjectDecoder<'a> {
     fn new(
@@ -821,11 +822,44 @@ impl<'a> ObjectDecoder<'a> {
             names: BTreeSet::new(),
             containers: BTreeSet::new(),
             generated_source: None,
+            generated_names: BTreeMap::new(),
         })
     }
     fn finish(mut self) -> Result<CanonicalObject, MetadataDecodeError> {
         if !self.names.contains("Name") {
             return Err(MetadataDecodeError::Missing("Name"));
+        }
+        // Genuine native EnumList declarations can share the Enum's own TypeId.
+        // Claim only the complete source name/role/value relationship; all other
+        // identity collisions remain ordinary graph-validation failures.
+        if self.parts.kind.as_str() == "Enum" {
+            let name = self.parts.properties.iter().find_map(|field| {
+                if field.name().as_str() == "Name"
+                    && let CanonicalValueKind::Text(value) = field.value().kind()
+                {
+                    Some(value.as_str())
+                } else {
+                    None
+                }
+            });
+            if let Some(name) = name {
+                let expected_name = format!("EnumList.{name}");
+                for generated in &mut self.parts.generated_types {
+                    if generated.kind().as_str() == "List"
+                        && generated.uuid() == self.uuid
+                        && generated.value_id().is_some_and(|value| {
+                            value != self.uuid && value.as_bytes().iter().any(|byte| *byte != 0)
+                        })
+                        && self
+                            .generated_names
+                            .get(&generated.uuid())
+                            .and_then(Option::as_deref)
+                            == Some(expected_name.as_str())
+                    {
+                        *generated = generated.clone().with_owner_identity_alias();
+                    }
+                }
+            }
         }
         push_family_guard(&self.profile, &self.path, &mut self.facets)?;
         self.parts.opaque_facets =
@@ -872,6 +906,7 @@ fn decode_object_node<'a>(
                 child,
                 &mut parts.properties,
                 &mut parts.generated_types,
+                &mut state.generated_names,
                 names,
                 profile,
                 path,
@@ -894,6 +929,7 @@ fn decode_object_node<'a>(
             let has_generated = decode_generated_types(
                 child,
                 &mut parts.generated_types,
+                &mut state.generated_names,
                 profile,
                 path,
                 local_facets,
@@ -912,6 +948,7 @@ fn decode_object_node<'a>(
             let has_generated = decode_generated_types(
                 child,
                 &mut parts.generated_types,
+                &mut state.generated_names,
                 profile,
                 path,
                 local_facets,
@@ -1201,6 +1238,7 @@ fn decode_properties(
     e: &XmlElement,
     out: &mut Vec<CanonicalField>,
     generated: &mut Vec<GeneratedType>,
+    generated_names: &mut BTreeMap<ObjectUuid, Option<String>>,
     names: &mut BTreeSet<String>,
     profile: &ProfileId,
     path: &ObjectPath,
@@ -1232,6 +1270,7 @@ fn decode_properties(
             has_generated |= decode_generated_types(
                 child,
                 generated,
+                generated_names,
                 profile,
                 path,
                 facets,
@@ -1405,6 +1444,7 @@ fn synonym_value(
 fn decode_generated_types(
     e: &XmlElement,
     out: &mut Vec<GeneratedType>,
+    generated_names: &mut BTreeMap<ObjectUuid, Option<String>>,
     profile: &ProfileId,
     path: &ObjectPath,
     facets: &mut FacetSet,
@@ -1471,6 +1511,7 @@ fn decode_generated_types(
         }
         let type_id = type_id.ok_or(MetadataDecodeError::Missing("GeneratedType TypeId"))?;
         let mut category = None;
+        let mut source_name = None;
         for attr in child.attributes() {
             if let AttributeKind::Ordinary(name) = attr.kind()
                 && name.local() == "category"
@@ -1480,6 +1521,15 @@ fn decode_generated_types(
                     return Err(MetadataDecodeError::Duplicate("GeneratedType category"));
                 }
                 category = Some(attr.value());
+            }
+            if let AttributeKind::Ordinary(name) = attr.kind()
+                && name.local() == "name"
+                && name.prefix().is_none()
+            {
+                if source_name.is_some() {
+                    return Err(MetadataDecodeError::Duplicate("GeneratedType name"));
+                }
+                source_name = Some(attr.value().to_owned());
             }
         }
         let category = category.unwrap_or("generated");
@@ -1517,6 +1567,7 @@ fn decode_generated_types(
         if !generated.insert(uuid) {
             return Err(MetadataDecodeError::Duplicate("GeneratedType UUID"));
         }
+        generated_names.insert(uuid, source_name);
         let generated_type = GeneratedType::new(
             uuid,
             GeneratedTypeKind::new(category)
@@ -2186,6 +2237,248 @@ mod tests {
     }
     fn profile() -> ProfileId {
         ProfileId::parse("xml:2.20").unwrap()
+    }
+
+    fn enum_owner_alias_fixture(layout: &str) -> String {
+        let generated = "<GeneratedType name='EnumList.ВидыКадровыхСобытий' category='List' future='retained'><TypeId>b2c547fd-343e-4bc1-9763-795b28132ed4</TypeId><ValueId>b2c547fd-343e-fbc1-9763-795b28132ed4</ValueId><Future>retained</Future></GeneratedType>";
+        let properties = "<Properties><Name>ВидыКадровыхСобытий</Name></Properties>";
+        let body = match layout {
+            "InternalInfo" => format!(
+                "<InternalInfo>{}</InternalInfo>{properties}",
+                generated
+                    .replace("<GeneratedType", "<xr:GeneratedType")
+                    .replace("</GeneratedType>", "</xr:GeneratedType>")
+                    .replace("<TypeId>", "<xr:TypeId>")
+                    .replace("</TypeId>", "</xr:TypeId>")
+                    .replace("<ValueId>", "<xr:ValueId>")
+                    .replace("</ValueId>", "</xr:ValueId>")
+            ),
+            "GeneratedTypes" => format!("{properties}<GeneratedTypes>{generated}</GeneratedTypes>"),
+            "Properties/GeneratedTypes" => format!(
+                "<Properties><Name>ВидыКадровыхСобытий</Name><GeneratedTypes>{generated}</GeneratedTypes></Properties>"
+            ),
+            _ => unreachable!("known generated layout"),
+        };
+        format!(
+            "<MetaDataObject xmlns='{MD_NAMESPACE}' xmlns:xr='{XR_NAMESPACE}'><Enum uuid='b2c547fd-343e-4bc1-9763-795b28132ed4'>{body}</Enum></MetaDataObject>"
+        )
+    }
+
+    #[test]
+    fn enum_owner_identity_alias_requires_exact_source_relationship_in_all_layouts() {
+        for layout in [
+            "InternalInfo",
+            "GeneratedTypes",
+            "Properties/GeneratedTypes",
+        ] {
+            let xml = enum_owner_alias_fixture(layout);
+            let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+            for policy in [
+                SourceOperationPolicy::Bounded,
+                SourceOperationPolicy::Source,
+            ] {
+                let envelope = decode_source_metadata_envelope_with_policy(
+                    &document,
+                    profile(),
+                    path(),
+                    policy,
+                )
+                .unwrap();
+                let generated = &envelope.root().generated_types()[0];
+                assert!(generated.is_owner_identity_alias(), "{layout} {policy:?}");
+                assert_eq!(generated.uuid(), envelope.root().identity().uuid());
+                assert_ne!(generated.value_id(), Some(generated.uuid()));
+                assert_eq!(envelope.configuration().unwrap().objects().len(), 1);
+                assert_eq!(envelope.emit(&profile()).unwrap(), xml.as_bytes());
+                assert!(
+                    envelope
+                        .root()
+                        .opaque_facets()
+                        .as_slice()
+                        .iter()
+                        .any(|facet| {
+                            facet
+                                .emit_permit(&profile())
+                                .unwrap()
+                                .bytes()
+                                .windows(b"future='retained'".len())
+                                .any(|window| window == b"future='retained'")
+                        })
+                );
+                let unchanged_model = envelope
+                    .clone()
+                    .with_model(envelope.root().clone(), Vec::new())
+                    .unwrap();
+                assert!(unchanged_model.emit(&profile()).is_err());
+            }
+            assert!(
+                decode_metadata_envelope(&document, profile(), path())
+                    .unwrap()
+                    .root()
+                    .generated_types()[0]
+                    .is_owner_identity_alias()
+            );
+        }
+    }
+
+    #[test]
+    fn enum_owner_identity_alias_does_not_claim_other_collisions_or_spoofed_names() {
+        let xml = enum_owner_alias_fixture("GeneratedTypes");
+        let replacements = [
+            (
+                "name='EnumList.ВидыКадровыхСобытий'",
+                "name='EnumList.Other'",
+            ),
+            (
+                "name='EnumList.ВидыКадровыхСобытий'",
+                "name='EnumRef.ВидыКадровыхСобытий'",
+            ),
+            (
+                "name='EnumList.ВидыКадровыхСобытий'",
+                "name='enumList.ВидыКадровыхСобытий'",
+            ),
+            ("name='EnumList.ВидыКадровыхСобытий'", ""),
+            (
+                "name='EnumList.ВидыКадровыхСобытий'",
+                "xmlns:fake='urn:unknown' fake:name='EnumList.ВидыКадровыхСобытий'",
+            ),
+            ("category='List'", "category='list'"),
+            ("category='List'", "category='Manager'"),
+            ("category='List'", ""),
+            ("<Name>ВидыКадровыхСобытий</Name>", "<Name>Other</Name>"),
+            (
+                "<ValueId>b2c547fd-343e-fbc1-9763-795b28132ed4</ValueId>",
+                "",
+            ),
+            (
+                "<ValueId>b2c547fd-343e-fbc1-9763-795b28132ed4</ValueId>",
+                "<ValueId>b2c547fd-343e-4bc1-9763-795b28132ed4</ValueId>",
+            ),
+            (
+                "<ValueId>b2c547fd-343e-fbc1-9763-795b28132ed4</ValueId>",
+                "<ValueId>00000000-0000-0000-0000-000000000000</ValueId>",
+            ),
+        ];
+        let mut negatives: Vec<String> = replacements
+            .iter()
+            .map(|(from, to)| xml.replace(from, to))
+            .collect();
+        negatives.push(
+            xml.replace("<Enum ", "<Catalog ")
+                .replace("</Enum>", "</Catalog>"),
+        );
+        negatives.push(xml.replace("</GeneratedTypes>", "<GeneratedType name='EnumList.ВидыКадровыхСобытий' category='List'><TypeId>b2c547fd-343e-4bc1-9763-795b28132ed4</TypeId><ValueId>33333333-3333-4333-8333-333333333333</ValueId></GeneratedType></GeneratedTypes>"));
+        for (index, negative) in negatives.iter().enumerate() {
+            let document = XmlReader::from_slice(negative.as_bytes()).unwrap();
+            for policy in [
+                SourceOperationPolicy::Bounded,
+                SourceOperationPolicy::Source,
+            ] {
+                assert!(
+                    decode_source_metadata_envelope_with_policy(
+                        &document,
+                        profile(),
+                        path(),
+                        policy
+                    )
+                    .is_err(),
+                    "negative {index} {policy:?}"
+                );
+            }
+        }
+        let distinct = xml.replace(
+            "<TypeId>b2c547fd-343e-4bc1-9763-795b28132ed4</TypeId>",
+            "<TypeId>11111111-1111-4111-8111-111111111111</TypeId>",
+        );
+        let document = XmlReader::from_slice(distinct.as_bytes()).unwrap();
+        let envelope = decode_source_metadata_envelope_with_policy(
+            &document,
+            profile(),
+            path(),
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert!(!envelope.root().generated_types()[0].is_owner_identity_alias());
+        assert_eq!(envelope.emit(&profile()).unwrap(), distinct.as_bytes());
+    }
+
+    #[test]
+    #[ignore = "requires independently prepared real UH native Enum directory"]
+    fn genuine_enum_owner_identity_aliases_keep_all_source_bytes_and_roles() {
+        let directory =
+            std::env::var_os("IBCMD_ENUM_ALIAS_NATIVE").expect("IBCMD_ENUM_ALIAS_NATIVE");
+        let mut accepted = 0;
+        for item in std::fs::read_dir(directory).unwrap() {
+            let path_on_disk = item.unwrap().path();
+            if path_on_disk
+                .extension()
+                .is_none_or(|extension| extension != "xml")
+            {
+                continue;
+            }
+            let bytes = std::fs::read(path_on_disk).unwrap();
+            let document = XmlReader::from_slice(&bytes).unwrap();
+            let current_profile = if document.root().attributes().iter().any(|attribute| {
+                matches!(attribute.kind(), AttributeKind::Ordinary(name) if name.local() == "version" && name.prefix().is_none())
+                    && attribute.value() == "2.21"
+            }) {
+                ProfileId::parse("xml:2.21").unwrap()
+            } else {
+                profile()
+            };
+            let root = document
+                .root()
+                .children()
+                .iter()
+                .find_map(|node| {
+                    if let XmlNode::Element(element) = node {
+                        Some(element)
+                    } else {
+                        None
+                    }
+                })
+                .unwrap();
+            let uid = uuid_attr(root).unwrap();
+            let Some(XmlNode::Element(info)) = root.children().iter().find(|node| matches!(node, XmlNode::Element(element) if element.name().local() == "InternalInfo")) else { continue; };
+            let has_own_type = info.children().iter().any(|node| {
+                let XmlNode::Element(generated) = node else { return false; };
+                generated.children().iter().any(|node| matches!(node, XmlNode::Element(type_id) if type_id.name().local() == "TypeId" && element_text(type_id).unwrap().is_some_and(|value| value == uid.to_string())))
+            });
+            if !has_own_type {
+                continue;
+            }
+            for policy in [
+                SourceOperationPolicy::Bounded,
+                SourceOperationPolicy::Source,
+            ] {
+                let envelope = decode_source_metadata_envelope_with_policy(
+                    &document,
+                    current_profile.clone(),
+                    path(),
+                    policy,
+                )
+                .unwrap();
+                let aliases: Vec<_> = envelope
+                    .root()
+                    .generated_types()
+                    .iter()
+                    .filter(|generated| generated.is_owner_identity_alias())
+                    .collect();
+                assert_eq!(aliases.len(), 1);
+                assert_eq!(aliases[0].kind().as_str(), "List");
+                assert_eq!(aliases[0].uuid(), uid);
+                assert_eq!(
+                    envelope.configuration().unwrap().objects().len(),
+                    1 + envelope.descendants().len()
+                );
+                assert_eq!(envelope.emit(&current_profile).unwrap(), bytes);
+            }
+            accepted += 1;
+        }
+        assert_eq!(
+            accepted, 13,
+            "independently inventoried real EnumList aliases"
+        );
     }
 
     #[test]
