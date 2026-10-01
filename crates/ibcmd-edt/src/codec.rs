@@ -591,14 +591,19 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
     let mut uuids = BTreeSet::new();
     let mut metadata_paths = BTreeSet::new();
     let mut named_owners = Vec::new();
-    for e in tree.entries() {
+    for (file_index, e) in tree.entries().iter().enumerate() {
         if !metadata_file(e)? {
             continue;
         }
         metadata_paths.insert(e.path().as_str());
         let doc = ibcmd_xml::XmlReader::from_slice(e.bytes()).map_err(EdtError::source)?;
+        // Filesystem paths and diagnostic segments have different bounds.
+        // Use the stable source-tree index; retain the exact physical path in
+        // errors below rather than truncating Cyrillic names or relaxing the
+        // common model's bounded diagnostic strings.
         let path = ObjectPath::new(vec![
-            PathSegment::name(e.path().as_str()).map_err(EdtError::source)?,
+            PathSegment::name("source_files").map_err(EdtError::source)?,
+            PathSegment::index(u32::try_from(file_index).map_err(EdtError::source)?),
         ])
         .map_err(EdtError::source)?;
         let envelope = ibcmd_xml::decode_source_metadata_envelope(&doc, profile.clone(), path)
@@ -938,6 +943,43 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canonical_bridge_accepts_long_physical_paths_and_retains_exact_error_path() {
+        let path = format!("CommonModules/{}.xml", "Отчет".repeat(24));
+        assert!(path.len() > ibcmd_core::diagnostic::MAX_PATH_NAME_BYTES);
+        let body = br#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.20"><CommonModule uuid="11111111-1111-4111-8111-111111111111"><Properties><Name>Module</Name></Properties></CommonModule></MetaDataObject>"#;
+        let tree = |bytes: &[u8]| {
+            SourceTree::new(vec![
+                SourceEntry::from_bytes(SourcePath::new(&path).unwrap(), bytes.to_vec()).unwrap(),
+            ])
+            .unwrap()
+        };
+        let options = ConversionOptions {
+            edt_version: "2025.2.3".into(),
+            xml_dialect: "2.20".into(),
+            runtime_version: Some("8.3.27".into()),
+        };
+        let model = canonical(&tree(body), &options).unwrap();
+        assert_eq!(model.objects().len(), 1);
+        let diagnostic_path = model.objects()[0].identity().path();
+        assert_eq!(
+            diagnostic_path,
+            &ObjectPath::new(vec![
+                PathSegment::name("source_files").unwrap(),
+                PathSegment::index(0),
+            ])
+            .unwrap()
+        );
+        let invalid = String::from_utf8(body.to_vec()).unwrap().replace(
+            "<Name>Module</Name>",
+            "<Name>Module</Name><Name>Duplicate</Name>",
+        );
+        let error = canonical(&tree(invalid.as_bytes()), &options)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains(&path), "{error}");
+        assert!(error.contains("canonical metadata bridge"), "{error}");
+    }
     #[test]
     fn inventory_reports_missing_and_changed_bodies_together() {
         let entry = |path: &str, bytes: &[u8]| {
