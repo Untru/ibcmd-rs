@@ -22,9 +22,11 @@ pub(crate) fn read_designer_command_interface(
         match panel.local.as_str() {
             "NavigationPanel" => np = read_designer_cmi_panel(panel)?,
             "CommandBar" => cb = read_designer_cmi_panel(panel)?,
-            other => return Err(FormError::Frame(format!(
-                "CommandInterface: unmodelled panel <{other}> (only NavigationPanel/CommandBar — §1.0)"
-            ))),
+            other => {
+                return Err(FormError::Frame(format!(
+                    "CommandInterface: unmodelled panel <{other}> (only NavigationPanel/CommandBar — §1.0)"
+                )));
+            }
         }
     }
     Ok((np, cb))
@@ -47,7 +49,11 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
         }
         item.claim();
         let command = leaf_text(item, "Command")?;
-        let command_parameter = item.child("Attribute").filter(|c| c.prefix.is_empty()).map(|_| leaf_text(item, "Attribute")).transpose()?;
+        let command_parameter = item
+            .child("Attribute")
+            .filter(|c| c.prefix.is_empty())
+            .map(|_| leaf_text(item, "Attribute"))
+            .transpose()?;
         // Type — Designer эмитит всегда (101/101: Auto/Added).
         let ty_el = item
             .child("Type")
@@ -104,7 +110,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
                     other => {
                         return Err(FormError::Frame(format!(
                             "Item <Visible><Common> is {other:?}, want true/false (§1.0)"
-                        )))
+                        )));
                     }
                 };
                 for v in &vis.children {
@@ -131,7 +137,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
                             return Err(FormError::Frame(format!(
                                 "Item <Visible><xr:Value name={:?}>={other:?}, want bool (§1.0)",
                                 name.value
-                            )))
+                            )));
                         }
                     };
                     user_visible_roles.push((name.value.clone(), val));
@@ -147,7 +153,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
             (false, Some(_)) => {
                 return Err(FormError::Frame(format!(
                     "Item {command:?}: <Visible> without <DefaultVisible> is unmodelled (§1.0)"
-                )))
+                )));
             }
         };
         expect_only_children(
@@ -178,7 +184,9 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
 /// Прочитать Designer `<MobileDeviceCommandBarContent>` → список скалярных значений. Каждый
 /// пункт — `<xr:Item><xr:Presentation/><xr:CheckState>0</xr:CheckState>
 /// <xr:Value xsi:type="xs:string">X</xr:Value></xr:Item>` (значение — через общий value-codec).
-pub(crate) fn read_designer_mobile_command_bar(el: &Element) -> Result<Vec<PropertyValue>, FormError> {
+pub(crate) fn read_designer_mobile_command_bar(
+    el: &Element,
+) -> Result<Vec<PropertyValue>, FormError> {
     el.claim();
     let mut out = Vec::new();
     for item in &el.children {
@@ -264,9 +272,7 @@ pub(crate) fn read_designer(root: Element) -> Result<FormBody, FormError> {
     // ридер отличает «тега нет, потому что свойство не задано» (омиссия = дефолт диалекта,
     // восстанавливаем) от «тега нет, потому что в ЭТОЙ версии свойства не существует»
     // (восстанавливать нечего — §1.0). Скоуп виден всему разбору тела, включая контролы.
-    morph1c_core::version::with_source_version(Some(profile.format), || {
-        read_designer_body(&root)
-    })
+    morph1c_core::version::with_source_version(Some(profile.format), || read_designer_body(&root))
 }
 
 /// Тело Designer-формы (после разбора конверта) — под скоупом версии источника.
@@ -622,7 +628,10 @@ pub(crate) fn read_designer_auto_command_bar(el: &Element) -> Result<AutoCommand
         }
         None => true,
     };
-    expect_only_children(el, &["Visible", "HorizontalAlign", "Autofill", "ChildItems"])?;
+    expect_only_children(
+        el,
+        &["Visible", "HorizontalAlign", "Autofill", "ChildItems"],
+    )?;
     Ok(AutoCommandBar {
         name,
         id,
@@ -660,7 +669,7 @@ pub(crate) fn read_designer_child_items(ci: &Element) -> Result<Vec<FormItem>, F
             other => {
                 return Err(FormError::Frame(format!(
                     "ChildItems: unsupported control <{other}> (§1.0 — no Raw)"
-                )))
+                )));
             }
         });
     }
@@ -1102,40 +1111,10 @@ pub(crate) fn read_designer_command(el: &Element) -> Result<FormCommand, FormErr
         &mut cmd.properties,
     )?;
 
-    // Picture: `<Picture><xr:Ref>Ref</xr:Ref><xr:LoadTransparent>B</xr:LoadTransparent>` — glue
-    // (денормализация вида ссылки; writer её реконструирует).
-    if let Some(p) = el.child("Picture").filter(|c| c.prefix.is_empty()) {
-        p.claim();
-        let r = p
-            .child("Ref")
-            .filter(|c| c.prefix == "xr")
-            .ok_or_else(|| FormError::Frame("Command Picture: no <xr:Ref>".into()))?;
-        r.claim_with_text();
-        let picture_ref = r.text.clone();
-        let lt = p
-            .child("LoadTransparent")
-            .filter(|c| c.prefix == "xr")
-            .ok_or_else(|| FormError::Frame("Command Picture: no <xr:LoadTransparent>".into()))?;
-        lt.claim_with_text();
-        // LoadTransparent — НЕЗАВИСИМЫЙ флаг (ERP witness: ИсточникиЗагрузкиПроизводственнойНСИ.
-        // ФормаСписка несёт CommonPicture c LoadTransparent="true"), НЕ дерив-сверка.
-        let load_transparent = match lt.text.as_str() {
-            "true" => true,
-            "false" => false,
-            other => {
-                return Err(FormError::Frame(format!(
-                    "Command Picture {picture_ref:?}: LoadTransparent={other:?}, want bool (§1.0)"
-                )))
-            }
-        };
-        if p.children.len() != 2 {
-            return Err(FormError::Frame(
-                "Command Picture: unexpected extra children (§1.0)".into(),
-            ));
-        }
+    if let Some(picture) = el.child("Picture").filter(|c| c.prefix.is_empty()) {
         cmd.properties.push((
             fc::F_PICTURE,
-            crate::form::fields::picture_canon(picture_ref, load_transparent),
+            crate::form::fields::decode_designer_picture(picture, "Picture")?,
         ));
     }
     // Action: `<Action>текст` — glue (Designer плоский текст ⟺ EDT handler-контейнер).
@@ -1213,7 +1192,7 @@ pub(crate) fn read_designer_command(el: &Element) -> Result<FormCommand, FormErr
             other => {
                 return Err(FormError::Frame(format!(
                     "Command Use <xr:Common>={other:?}, want bool (§1.0)"
-                )))
+                )));
             }
         };
         let mut entries = vec![PropertyValue::Bool(common)];
@@ -1236,7 +1215,7 @@ pub(crate) fn read_designer_command(el: &Element) -> Result<FormCommand, FormErr
                 other => {
                     return Err(FormError::Frame(format!(
                         "Command Use <xr:Value name={role:?}>={other:?}, want bool (§1.0)"
-                    )))
+                    )));
                 }
             };
             entries.push(PropertyValue::List(vec![
@@ -1276,4 +1255,3 @@ pub(crate) fn read_designer_command(el: &Element) -> Result<FormCommand, FormErr
     }
     Ok(cmd)
 }
-

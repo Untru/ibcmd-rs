@@ -50,8 +50,6 @@ pub(crate) fn read_pool() -> &'static rayon::ThreadPool {
     })
 }
 
-
-
 pub fn read_config(
     format: Format,
     src: &Path,
@@ -145,6 +143,12 @@ fn read_config_inner(
                     // Splash/MainSectionPicture images) → root_obj.modules/.config_pictures.
                     // Designer: root-level `Ext/`; EDT: siblings of `Configuration.mdo`.
                     crate::ext_read::attach_config_ext(format, &path, &mut root_obj)?;
+                    crate::help_read::attach_help_pages(
+                        format,
+                        root_fk.kind,
+                        &path,
+                        &mut root_obj,
+                    )?;
                     // The root descriptor's spec properties ARE the configuration's
                     // properties; its child-objects collection is carried on the root
                     // object's `children`, which we keep as a single root object so the
@@ -193,14 +197,17 @@ fn read_config_inner(
             objs.par_iter()
                 .map(|(name, path)| {
                     formats_xml::read::with_captured_in_text_eol(ambient_eol, || {
-                        morph1c_core::version::with_captured_roundtrip_target(ambient_target, || {
-                            // Версия ИСТОЧНИКА — тот же thread_local-готча: воркер её не
-                            // наследует, а без неё ридер снова достраивал бы свойства,
-                            // которых в дампе этой версии нет.
-                            morph1c_core::version::with_source_version(source_version, || {
-                                read_object_at(format, fk, name, path)
-                            })
-                        })
+                        morph1c_core::version::with_captured_roundtrip_target(
+                            ambient_target,
+                            || {
+                                // Версия ИСТОЧНИКА — тот же thread_local-готча: воркер её не
+                                // наследует, а без неё ридер снова достраивал бы свойства,
+                                // которых в дампе этой версии нет.
+                                morph1c_core::version::with_source_version(source_version, || {
+                                    read_object_at(format, fk, name, path)
+                                })
+                            },
+                        )
                     })
                 })
                 .collect()
@@ -248,8 +255,6 @@ fn read_config_inner(
 
     Ok((cfg, skipped))
 }
-
-
 
 /// Read a descriptor and all its source-family bodies.
 pub(crate) fn read_object_at(
@@ -500,7 +505,9 @@ fn validate_nested_membership(
 pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(), ConvertError> {
     // cf is container-based: a single file assembled from the whole IR, not a directory walk.
     if format == Format::Cf {
-        return Err(ConvertError::FormatNotSupported("CF excluded from source-only adapter".into()));
+        return Err(ConvertError::FormatNotSupported(
+            "CF excluded from source-only adapter".into(),
+        ));
     }
 
     let timing = std::env::var_os("MORPH1C_TIMING").is_some();

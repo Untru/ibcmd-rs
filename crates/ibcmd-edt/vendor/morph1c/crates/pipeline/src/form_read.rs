@@ -45,8 +45,8 @@
 use std::path::{Path, PathBuf};
 
 use formats_xml::form::{
-    read_form, read_list_settings_dcss, read_spreadsheet_mxlx, set_sidecar_ext, sidecar_slots,
-    FormDialect,
+    FormDialect, read_form, read_list_settings_dcss, read_spreadsheet_mxlx, set_sidecar_ext,
+    sidecar_slots,
 };
 use formats_xml::registry::Format;
 use morph1c_core::ir::form::{DecoratorBody, FormItem, FormPicture};
@@ -141,6 +141,52 @@ pub fn attach_form_body(
             Some(x) => x,
             None => return Ok(()), // unreachable (cf handled above) — kept defensive.
         };
+        let ordinary_path =
+            ordinary_form_body_path(format, &anchor).ok_or_else(|| ConvertError::Read {
+                kind: kind.to_string(),
+                object: name.clone(),
+                reason: "ordinary form layout is unavailable".into(),
+            })?;
+        let ordinary = declared_form_is_ordinary(obj, &name)?;
+        if ordinary_path.exists() {
+            if !ordinary
+                || body_path.exists()
+                || form_module_path(format, &anchor).is_some_and(|p| p.exists())
+            {
+                return Err(ConvertError::Read { kind: kind.to_string(), object: name.clone(), reason: "ordinary body conflicts with declared form type, managed body, or external Module.bsl".into() });
+            }
+            let bytes = read_ordinary_body(&ordinary_path)?;
+            let (help, help_resources) = if kind == OWN_FORM_KIND {
+                (Vec::new(), Vec::new())
+            } else {
+                crate::help_read::read_help_sidecar(format, kind, &anchor, &name)?
+            };
+            if format == Format::Designer && !help.is_empty() {
+                if let Some(child) = obj
+                    .children
+                    .iter_mut()
+                    .find(|c| is_form_ref_child(c) && c.name == name)
+                {
+                    crate::help_read::sync_form_ref_help_property(child)?;
+                }
+            }
+            obj.form_bodies.push(NamedFormBody {
+                name,
+                body: FormBody::new(),
+                ordinary_body: Some(bytes),
+                module: None,
+                help,
+                help_resources,
+            });
+            continue;
+        }
+        if ordinary && body_path.exists() {
+            return Err(ConvertError::Read {
+                kind: kind.to_string(),
+                object: name.clone(),
+                reason: "ordinary declaration carries a managed form body".into(),
+            });
+        }
         // The form body is OPTIONAL: absent ⇒ skip (a bodyless property-stub form — e.g.
         // s4_common's `ОбщФорма_*` — is a valid config that compiles; reflect the on-disk state
         // rather than erroring). Downstream honesty is at assemble (a form WITH a body errors
@@ -243,6 +289,7 @@ pub fn attach_form_body(
         }
 
         obj.form_bodies.push(NamedFormBody {
+            ordinary_body: None,
             name,
             body,
             module,
@@ -279,13 +326,13 @@ fn attach_edt_conditional_appearance(
         path: path.display().to_string(),
         reason: e.to_string(),
     })?;
-    let (ca_items, ca_without_lf_pal) = formats_xml::form::read_conditional_appearance_dcssca(
-        &bytes,
-    )
-        .map_err(|e| ConvertError::Read {
-            kind: kind.to_string(),
-            object: format!("{owner}.{form_name}"),
-            reason: format!("ConditionalAppearance.dcssca: {e}"),
+    let (ca_items, ca_without_lf_pal) =
+        formats_xml::form::read_conditional_appearance_dcssca(&bytes).map_err(|e| {
+            ConvertError::Read {
+                kind: kind.to_string(),
+                object: format!("{owner}.{form_name}"),
+                reason: format!("ConditionalAppearance.dcssca: {e}"),
+            }
         })?;
     body.conditional_appearance = ca_items;
     body.ca_envelope_without_lf_pal = ca_without_lf_pal;
@@ -350,13 +397,14 @@ fn attach_edt_spreadsheet_sidecars(
                 path: path.display().to_string(),
                 reason: e.to_string(),
             })?;
-            attr.chart_settings = Some(
-                formats_xml::form::read_chart_sidecar(&bytes).map_err(|e| ConvertError::Read {
-                    kind: kind.to_string(),
-                    object: object.clone(),
-                    reason: format!("chart sidecar {}: {e}", path.display()),
-                })?,
-            );
+            attr.chart_settings =
+                Some(formats_xml::form::read_chart_sidecar(&bytes).map_err(|e| {
+                    ConvertError::Read {
+                        kind: kind.to_string(),
+                        object: object.clone(),
+                        reason: format!("chart sidecar {}: {e}", path.display()),
+                    }
+                })?);
         }
         let path = spreadsheet_sidecar_path(form_dir, &attr.name);
         if !path.is_file() {
@@ -685,7 +733,7 @@ fn attach_form_picture_sidecars(
                                 slot.stem,
                                 slot.stem,
                                 ctl_dir.display()
-                            )))
+                            )));
                         }
                         _ => {
                             return Err(err(format!(
@@ -695,7 +743,7 @@ fn attach_form_picture_sidecars(
                                 found.len(),
                                 slot.stem,
                                 ctl_dir.display()
-                            )))
+                            )));
                         }
                     }
                 }
@@ -857,6 +905,104 @@ pub(crate) fn form_body_path(
         }
         Format::Cf => None,
     }
+}
+
+/// Maximum retained opaque ordinary body; checked before allocation and after a bounded read.
+pub(crate) const MAX_ORDINARY_FORM_BYTES: u64 = 32 * 1024 * 1024;
+pub(crate) fn ordinary_form_body_path(format: Format, anchor: &Path) -> Option<PathBuf> {
+    match format {
+        Format::Edt => Some(anchor.parent()?.join("Form.oform")),
+        Format::Designer => Some(
+            anchor
+                .parent()?
+                .join(anchor.file_stem()?)
+                .join("Ext/Form.bin"),
+        ),
+        Format::Cf => None,
+    }
+}
+pub(crate) fn declared_form_is_ordinary(
+    obj: &MetadataObject,
+    name: &str,
+) -> Result<bool, ConvertError> {
+    let owner = if obj.kind.as_str() == OWN_FORM_KIND && obj.name == name {
+        obj
+    } else {
+        obj.children
+            .iter()
+            .find(|c| is_form_ref_child(c) && c.name == name)
+            .ok_or_else(|| ConvertError::Read {
+                kind: obj.kind.as_str().to_string(),
+                object: name.to_string(),
+                reason: "form body has no exact declared owner".into(),
+            })?
+    };
+    let spec = morph1c_core::spec::registry::spec_for(owner.kind.as_str()).ok_or_else(|| {
+        ConvertError::Read {
+            kind: owner.kind.as_str().to_string(),
+            object: name.to_string(),
+            reason: "form kind has no metadata specification".into(),
+        }
+    })?;
+    let field = spec
+        .fields()
+        .iter()
+        .find(|f| f.name == "formType")
+        .ok_or_else(|| ConvertError::Read {
+            kind: owner.kind.as_str().to_string(),
+            object: name.to_string(),
+            reason: "form type field is not modeled".into(),
+        })?;
+    match owner
+        .properties
+        .iter()
+        .find(|(id, _)| *id == field.id)
+        .map(|(_, v)| v)
+    {
+        None => Ok(false),
+        Some(morph1c_core::ir::PropertyValue::Enum(token)) if token.as_str() == "Managed" => {
+            Ok(false)
+        }
+        Some(morph1c_core::ir::PropertyValue::Enum(token)) if token.as_str() == "Ordinary" => {
+            Ok(true)
+        }
+        _ => Err(ConvertError::Read {
+            kind: owner.kind.as_str().to_string(),
+            object: name.to_string(),
+            reason: "unknown declared form type".into(),
+        }),
+    }
+}
+fn read_ordinary_body(path: &Path) -> Result<Vec<u8>, ConvertError> {
+    use std::io::Read;
+    let read = || -> std::io::Result<Vec<u8>> {
+        let metadata = std::fs::symlink_metadata(path)?;
+        if !metadata.is_file()
+            || metadata.file_type().is_symlink()
+            || metadata.len() == 0
+            || metadata.len() > MAX_ORDINARY_FORM_BYTES
+        {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ordinary body is not a nonempty bounded regular file",
+            ));
+        }
+        let file = std::fs::File::open(path)?;
+        let mut bytes = Vec::with_capacity(metadata.len() as usize);
+        file.take(MAX_ORDINARY_FORM_BYTES + 1)
+            .read_to_end(&mut bytes)?;
+        if bytes.is_empty() || bytes.len() as u64 > MAX_ORDINARY_FORM_BYTES {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "ordinary body changed beyond bounds",
+            ));
+        }
+        Ok(bytes)
+    };
+    read().map_err(|e| ConvertError::Io {
+        path: path.display().to_string(),
+        reason: e.to_string(),
+    })
 }
 
 /// Form MODULE (`Module.bsl`) path beside the descriptor ANCHOR, per format layout (see module

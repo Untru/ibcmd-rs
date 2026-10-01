@@ -14,16 +14,16 @@
 use std::path::{Path, PathBuf};
 
 use formats_xml::form::{
-    write_form, write_list_settings_dcss, write_spreadsheet_mxlx, FormDialect,
+    FormDialect, write_form, write_list_settings_dcss, write_spreadsheet_mxlx,
 };
 use formats_xml::registry::Format;
 use morph1c_core::ir::{FormBody, FormDataAttribute, MetadataObject};
 
+use crate::ConvertError;
 use crate::form_read::{
     form_anchor_path, form_body_path, form_items_dir, form_module_path, list_settings_sidecar_path,
     spreadsheet_sidecar_path,
 };
-use crate::ConvertError;
 
 /// Emit every form body (and optional form module) `obj` carries beside its written descriptor.
 ///
@@ -78,6 +78,44 @@ pub fn write_form_bodies(
                     ),
                 }
             })?;
+        let declared_ordinary = crate::form_read::declared_form_is_ordinary(obj, &form.name)?;
+        if let Some(bytes) = &form.ordinary_body {
+            if !declared_ordinary
+                || form.body != FormBody::new()
+                || form.module.is_some()
+                || bytes.is_empty()
+                || bytes.len() as u64 > crate::form_read::MAX_ORDINARY_FORM_BYTES
+            {
+                return Err(ConvertError::Write { kind: kind.to_string(), object: form.name.clone(), reason: "ordinary form body conflicts with managed data/module/type or exceeds bounds".into() });
+            }
+            let path =
+                crate::form_read::ordinary_form_body_path(format, &anchor).ok_or_else(|| {
+                    ConvertError::Write {
+                        kind: kind.to_string(),
+                        object: form.name.clone(),
+                        reason: "ordinary form output layout unavailable".into(),
+                    }
+                })?;
+            write_file(&path, bytes)?;
+            if kind != "CommonForm" {
+                crate::help_read::write_help_sidecar(
+                    format,
+                    kind,
+                    &anchor,
+                    &form.name,
+                    &form.help,
+                    &form.help_resources,
+                )?;
+            }
+            continue;
+        }
+        if declared_ordinary {
+            return Err(ConvertError::Write {
+                kind: kind.to_string(),
+                object: form.name.clone(),
+                reason: "ordinary declaration cannot emit managed form data".into(),
+            });
+        }
         let (body_path, dialect) = form_body_path(format, &anchor).ok_or_else(|| {
             // Unreachable for edt/designer (both derive a path); typed for §1.0 anyway.
             ConvertError::Write {
@@ -199,13 +237,12 @@ fn write_edt_chart_sidecars(form_dir: &Path, body: &FormBody) -> Result<(), Conv
                 .join(&attr.name)
                 .join("ExtInfo")
                 .join(file);
-            let bytes = formats_xml::form::write_chart_sidecar(cs).map_err(|e| {
-                ConvertError::Read {
+            let bytes =
+                formats_xml::form::write_chart_sidecar(cs).map_err(|e| ConvertError::Read {
                     kind: "Form".to_string(),
                     object: attr.name.clone(),
                     reason: format!("chart sidecar write: {e}"),
-                }
-            })?;
+                })?;
             write_file(&path, &bytes)?;
         }
     }

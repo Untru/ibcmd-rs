@@ -283,6 +283,8 @@ pub enum ValueScalarKind {
     /// ошибаются на нём (§1.0 — layout вложенных значений не витнессирован). cf-ячейка
     /// эмитится по witness-ключу (`mine`) — UNVERIFIED, не отказ (рантайм-данные).
     ValueList,
+    /// Witnessed system enum scalar; stores the qualified EDT enum/member.
+    SystemEnum,
 }
 
 /// Значение стиля (`StyleItem.value`, §1.3-адъюнкт) — формат-нейтральный канон

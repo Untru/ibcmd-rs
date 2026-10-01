@@ -145,7 +145,13 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
     // фиксирована МЕЖДУ `xmlns:xsi` и `xmlns:form` (сверено 104/104). Выводим из
     // построенного дерева, чтобы не тащить presence-флаг через каждый кодек.
     if out_uses_prefix(&root, "core_1:") {
-        root.attrs.insert(0, ("xmlns:core_1".to_string(), "http://g5.1c.ru/v8/dt/data-composition-system/core".to_string()));
+        root.attrs.insert(
+            0,
+            (
+                "xmlns:core_1".to_string(),
+                "http://g5.1c.ru/v8/dt/data-composition-system/core".to_string(),
+            ),
+        );
     }
     if out_uses_core(&root) {
         root.attrs
@@ -190,7 +196,8 @@ pub(crate) fn edt_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
             rec.push(OutElement::leaf("", "type", it.ty.clone()));
         }
         if let Some(path) = &it.command_parameter {
-            let mut parameter = OutElement::branch("", "commandParameter").attr("xsi:type", "form:DataPath");
+            let mut parameter =
+                OutElement::branch("", "commandParameter").attr("xsi:type", "form:DataPath");
             parameter.push(OutElement::leaf("", "segments", path.clone()));
             rec.push(parameter);
         }
@@ -215,7 +222,9 @@ pub(crate) fn edt_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
                 }
                 for (role, val) in &it.user_visible_roles {
                     let mut f = OutElement::branch("", "for");
-                    if *val { f.push(OutElement::leaf("", "value", "true")); }
+                    if *val {
+                        f.push(OutElement::leaf("", "value", "true"));
+                    }
                     f.push(OutElement::leaf("", "role", role.clone()));
                     uv.push(f);
                 }
@@ -263,7 +272,9 @@ pub(crate) fn push_edt_attr(root: &mut OutElement, body: &FormBody, id: morph1c_
     }
 }
 
-pub(crate) fn edt_auto_command_bar(acb: &morph1c_core::ir::AutoCommandBar) -> Result<OutElement, FormError> {
+pub(crate) fn edt_auto_command_bar(
+    acb: &morph1c_core::ir::AutoCommandBar,
+) -> Result<OutElement, FormError> {
     let mut el = OutElement::branch("", "autoCommandBar");
     el.push(OutElement::leaf("", "name", acb.name.clone()));
     el.push(OutElement::leaf("", "id", acb.id.to_string()));
@@ -488,7 +499,7 @@ pub(crate) fn edt_form_command(cmd: &FormCommand) -> Result<OutElement, FormErro
         Some(other) => {
             return Err(FormError::Frame(format!(
                 "command use: expected List, got {other:?} (§1.0)"
-            )))
+            )));
         }
     }
     if let Some(PropertyValue::Str(s)) = get(fc::F_SHORTCUT) {
@@ -498,7 +509,14 @@ pub(crate) fn edt_form_command(cmd: &FormCommand) -> Result<OutElement, FormErro
     }
     if let Some(v) = get(fc::F_PICTURE) {
         // Канон `List([Ref, Bool(lt)])`; EDT LoadTransparent не несёт (lt игнор).
-        let (r, _lt) = super::super::fields::picture_ref_lt(v)?;
+        let (r, lt) = super::super::fields::picture_ref_lt(v)?;
+        if super::super::fields::picture_pixel(v).is_some()
+            || lt != super::super::fields::picture_lt_default(r)
+        {
+            return Err(FormError::Frame(
+                "EDT command PictureRef cannot represent per-use transparency/pixel".into(),
+            ));
+        }
         if !r.is_empty() {
             let mut p = OutElement::branch("", "picture").attr("xsi:type", "core:PictureRef");
             p.push(OutElement::leaf("", "picture", r.to_string()));

@@ -3,58 +3,58 @@
 
 // Shared imports live here in `read/mod.rs`; submodules pull them in via `use super::*`
 // (a child glob-import sees the parent module's private `use` aliases too).
-use super::fields::{read_fields_designer, read_fields_edt, Region};
+use super::fields::{Region, read_fields_designer, read_fields_edt};
 use super::projection::read_form_attrs;
 use super::tables;
 use super::{
-    designer_envelope, detect_form_profile, edt_envelope, witnessed_form_versions, FormDialect,
-    FormError, CORE_NS_URI, FORM_COMMAND_BAR_NAME, FORM_NS_URI, SCHEMA_NS_URI, SETTINGS_NS_URI,
-    XSI_NS_URI,
+    CORE_NS_URI, FORM_COMMAND_BAR_NAME, FORM_NS_URI, FormDialect, FormError, SCHEMA_NS_URI,
+    SETTINGS_NS_URI, XSI_NS_URI, designer_envelope, detect_form_profile, edt_envelope,
+    witnessed_form_versions,
 };
 use crate::descriptor::Element;
 use crate::value_codec::{self, ValueDialect};
-use crate::{parse, type_codec, EolStyle};
+use crate::{EolStyle, parse, type_codec};
 use morph1c_core::ir::value::{PropertyValue, Token};
 use morph1c_core::ir::{
     AdditionalColumns, AutoCommandBar, ContextMenuBody, DcsAvailableValue, DcsCalculatedField,
-    DcsCorValue, DcsField, DcsItem, DcsListSettings, DcsOrderExpression, DcsParamValue, DcsParameter,
-    DcsPresentation, DcsRightValue,
-    DcsSettingsGroup,
-    DcsSettingsParameterValue, DcsUseRestriction, DecoratorBody, DecoratorRef, DocumentFormInfo,
-    DynamicListAttrExt, DynamicListExt, FontRef, FormBody, FormCiItem, FormCommand,
-    FormControlKind, FormDataAttribute, FormEvent, FormItem, FormParameter, FormRootExtInfo,
-    ReportFormInfo, TooltipBody, TypeSpec, REPORT_FORM_AUTO,
+    DcsCorValue, DcsField, DcsItem, DcsListSettings, DcsOrderExpression, DcsParamValue,
+    DcsParameter, DcsPresentation, DcsRightValue, DcsSettingsGroup, DcsSettingsParameterValue,
+    DcsUseRestriction, DecoratorBody, DecoratorRef, DocumentFormInfo, DynamicListAttrExt,
+    DynamicListExt, FontRef, FormBody, FormCiItem, FormCommand, FormControlKind, FormDataAttribute,
+    FormEvent, FormItem, FormParameter, FormRootExtInfo, REPORT_FORM_AUTO, ReportFormInfo,
+    TooltipBody, TypeSpec,
 };
 // `MxlSpreadsheetSettings` — по полному пути модуля (не через re-export `ir::mod`, вне границ лейна).
-use morph1c_core::ir::form::{MxlLanguageInfo, MxlLanguageSettings, MxlNode, MxlSpreadsheetSettings};
+use morph1c_core::ir::form::{
+    MxlLanguageInfo, MxlLanguageSettings, MxlNode, MxlSpreadsheetSettings,
+};
 use morph1c_core::spec::forms::command as fc;
 use morph1c_core::spec::forms::controls::label_decoration as ld;
 use morph1c_core::spec::forms::controls::table as tb;
 
-
 mod common;
-mod font;
-mod mxl;
 mod dcs_settings;
-mod edt;
-mod edt_controls;
-mod edt_dcs;
 mod designer;
 mod designer_controls;
 mod designer_dcs;
+mod edt;
+mod edt_controls;
+mod edt_dcs;
+mod font;
+mod mxl;
 #[cfg(any())]
 mod tests;
 
 pub(crate) use common::*;
-pub(crate) use font::*;
-pub(crate) use mxl::*;
 pub(crate) use dcs_settings::*;
-pub(crate) use edt::*;
-pub(crate) use edt_controls::*;
-pub(crate) use edt_dcs::*;
 pub(crate) use designer::*;
 pub(crate) use designer_controls::*;
 pub(crate) use designer_dcs::*;
+pub(crate) use edt::*;
+pub(crate) use edt_controls::*;
+pub(crate) use edt_dcs::*;
+pub(crate) use font::*;
+pub(crate) use mxl::*;
 
 /// Прочитать байты тела формы в [`FormBody`] (byte-exact-обратимо).
 pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormError> {
@@ -81,10 +81,39 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
         other => return Err(FormError::Envelope(format!("unexpected decl: {other:?}"))),
     }
     let root = descriptor.root;
+    validate_qname_bindings(&root, &std::collections::BTreeMap::new())?;
     match dialect {
         FormDialect::Edt => read_edt(root),
         FormDialect::Designer => read_designer(root),
     }
+}
+
+fn validate_qname_bindings(
+    element: &Element,
+    inherited: &std::collections::BTreeMap<String, String>,
+) -> Result<(), FormError> {
+    let mut namespaces = inherited.clone();
+    for attribute in &element.attrs {
+        if let Some(prefix) = attribute.name.strip_prefix("xmlns:") {
+            namespaces.insert(prefix.into(), attribute.value.clone());
+        }
+    }
+    if let Some(attribute) = element.attr("xsi:type") {
+        if namespaces.get("xsi").map(String::as_str) != Some(XSI_NS_URI) {
+            return Err(FormError::Envelope(
+                "xsi:type requires the XML Schema instance namespace".into(),
+            ));
+        }
+        if let Some((prefix, local)) = attribute.value.split_once(':') {
+            if local.is_empty() || !namespaces.get(prefix).is_some_and(|uri| !uri.is_empty()) {
+                return Err(FormError::Envelope("xsi:type uses an unbound QName".into()));
+            }
+        }
+    }
+    for child in &element.children {
+        validate_qname_bindings(child, &namespaces)?;
+    }
+    Ok(())
 }
 
 /// Claim корневые ns-атрибуты + сверка. Возвращает ошибку при несоответствии.
@@ -135,4 +164,3 @@ pub(super) fn unclaimed_labels(root: &Element) -> Vec<String> {
     walk(root, &tag(root), &mut out);
     out
 }
-

@@ -15,6 +15,7 @@ pub(crate) const PRIMITIVES: &[(&str, &str)] = &[
 /// `(canon, qname)`. Только те, у кого local-name отличается; остальные
 /// платформенные — механический `v8:` + тот же local-name.
 const PLATFORM_ALIASES: &[(&str, &str)] = &[
+    ("ComparisonType", "ent:ComparisonType"),
     // EDT `ValueList` ↔ Designer `v8:ValueListType` (local-name РАЗНЫЙ!).
     ("ValueList", "v8:ValueListType"),
     // EDT `AnyRef` ↔ Designer `cfg:AnyIBRef` (local-name РАЗНЫЙ — Designer-имя для
@@ -284,6 +285,11 @@ pub(crate) fn inline_ns_for_qname(qname: &str) -> Option<(&'static str, &'static
 /// (Form>Attributes>Attribute>Type>v8:Type = 5). EDT-канон сверен твинами:
 /// `<types>Chart</types>` / `<types>GraphicalSchema</types>`.
 pub(crate) const AUTO_NS_TYPES: &[(&str, &str, &str)] = &[
+    (
+        "ConditionalAppearance",
+        "ConditionalAppearance",
+        "http://v8.1c.ru/8.3/data/entext",
+    ),
     ("Chart", "Chart", "http://v8.1c.ru/8.2/data/chart"),
     // «Диаграмма Ганта» — value-type реквизита формы (backing GanttChartField). ТОТ ЖЕ
     // авто-NS-паттерн и ТА ЖЕ uri, что `Chart` (`http://v8.1c.ru/8.2/data/chart`), иной лишь

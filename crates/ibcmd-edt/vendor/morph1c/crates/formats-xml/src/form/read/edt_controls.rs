@@ -59,7 +59,7 @@ pub(crate) fn read_edt_addition_control(el: &Element) -> Result<FormItem, FormEr
             (got, extra) => {
                 return Err(FormError::Frame(format!(
                     "form:Addition <title>: unexpected repetition shapes {got:?} + {extra:?} (§1.0)"
-                )))
+                )));
             }
         }
     }
@@ -1205,8 +1205,10 @@ pub(crate) fn read_edt_extended_tooltip(el: &Element) -> Result<DecoratorRef, Fo
         ));
     }
     if let Some(bc) = ext.child("backColor").filter(|c| c.prefix.is_empty()) {
-        body.ext_info
-            .push((ld::F_EXT_BACK_COLOR, crate::form::fields::decode_edt_color(bc, "backColor")?));
+        body.ext_info.push((
+            ld::F_EXT_BACK_COLOR,
+            crate::form::fields::decode_edt_color(bc, "backColor")?,
+        ));
     }
     if let Some(bc) = ext.child("borderColor").filter(|c| c.prefix.is_empty()) {
         body.ext_info.push((
@@ -1300,7 +1302,10 @@ pub(crate) fn read_edt_context_menu(el: &Element) -> Result<DecoratorRef, FormEr
 /// Отсутствие тега ⇒ `None`. Чтение лишь ПЕРВОГО `<title>` роняло доп-языки в несклеймленные
 /// узлы (§1.0; witness ERP PictureDecoration ДекорацияВнимание — `<title>×2` ru+en; класс —
 /// 24636 Label + 4136 Picture декораций с двумя заголовками).
-pub(crate) fn read_edt_title_multi(parent: &Element, tag: &str) -> Result<Option<PropertyValue>, FormError> {
+pub(crate) fn read_edt_title_multi(
+    parent: &Element,
+    tag: &str,
+) -> Result<Option<PropertyValue>, FormError> {
     let mut pairs = Vec::new();
     for t in parent
         .children
@@ -1312,7 +1317,7 @@ pub(crate) fn read_edt_title_multi(parent: &Element, tag: &str) -> Result<Option
             other => {
                 return Err(FormError::Frame(format!(
                     "<{tag}>: localized decode gave {other:?} (bug)"
-                )))
+                )));
             }
         }
     }
@@ -1386,15 +1391,10 @@ pub(crate) fn read_edt_common_flag(
             .filter(|c| c.local == "for" && c.prefix.is_empty())
         {
             f.claim();
-            let val = matches!(
-                read_bool_text(
-                    f.child("value").filter(|c| c.prefix.is_empty()).ok_or_else(|| {
-                        FormError::Frame(format!("<{tag}><for>: no <value> (§1.0)"))
-                    })?,
-                    "value"
-                )?,
-                PropertyValue::Bool(true)
-            );
+            let val = match f.child("value").filter(|c| c.prefix.is_empty()) {
+                None => false,
+                Some(v) => matches!(read_bool_text(v, "value")?, PropertyValue::Bool(true)),
+            };
             let role = leaf_text(f, "role")?;
             expect_only_children(f, &["value", "role"])?;
             roles.push((role, val));
@@ -1409,4 +1409,3 @@ pub(crate) fn read_edt_common_flag(
     read_common_true(el, tag)?;
     Ok((true, Vec::new()))
 }
-

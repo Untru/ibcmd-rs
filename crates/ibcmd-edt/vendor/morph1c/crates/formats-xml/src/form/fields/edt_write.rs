@@ -91,7 +91,10 @@ pub(crate) fn emit_field_edt(
 }
 
 /// Срендерить EDT-узел поля по кодеку.
-pub(crate) fn render_edt(entry: &FieldProj, value: &PropertyValue) -> Result<OutElement, FormError> {
+pub(crate) fn render_edt(
+    entry: &FieldProj,
+    value: &PropertyValue,
+) -> Result<OutElement, FormError> {
     let tag = entry.edt;
     Ok(match (entry.codec, value) {
         (Codec::Bool, PropertyValue::Bool(b)) => bool_leaf("", tag, *b),
@@ -106,7 +109,15 @@ pub(crate) fn render_edt(entry: &FieldProj, value: &PropertyValue) -> Result<Out
         (Codec::PictureRef, v) => {
             // Канон `List([Ref, Bool(lt)[, Pixel]])` (или голый `Ref` — дерив-совместимость). EDT
             // LoadTransparent НЕ несёт ⇒ `lt` тут игнорируется (edt-round-trip байт-точен).
-            let (r, _lt) = picture_ref_lt(v)?;
+            let (r, lt) = picture_ref_lt(v)?;
+            if !r.is_empty()
+                && !r.starts_with("abs:")
+                && (picture_pixel(v).is_some() || lt != picture_lt_default(r))
+            {
+                return Err(FormError::Frame(format!(
+                    "<{tag}>: EDT PictureRef cannot represent per-use transparency/pixel for {r:?}"
+                )));
+            }
             if r.is_empty() || r.starts_with("abs:") {
                 // Пустой канон `Ref("")` И designer-абсолют `Ref("abs:ext")` ⟺ EDT инлайн-маркер
                 // `form:FormPicture` (бинарь — в сайдкаре, не в дескрипторе). С прозрачным пикселем
@@ -172,7 +183,11 @@ pub(crate) fn render_edt(entry: &FieldProj, value: &PropertyValue) -> Result<Out
                         (pair.first(), pair.get(1))
                     {
                         let mut f = OutElement::branch("", "for");
-                        f.push(OutElement::leaf("", "value", if *v { "true" } else { "false" }));
+                        f.push(OutElement::leaf(
+                            "",
+                            "value",
+                            if *v { "true" } else { "false" },
+                        ));
                         f.push(OutElement::leaf("", "role", role.clone()));
                         el.push(f);
                     }
@@ -182,6 +197,16 @@ pub(crate) fn render_edt(entry: &FieldProj, value: &PropertyValue) -> Result<Out
         }
         (Codec::UndefinedValue, PropertyValue::Bool(true)) => {
             OutElement::self_closing("", tag).attr("xsi:type", "core:UndefinedValue")
+        }
+        (Codec::Border, PropertyValue::Ref(reference)) => {
+            if !reference.starts_with("Style.") || reference.len() <= 6 {
+                return Err(FormError::Frame(
+                    "BorderRef requires a named Style reference".into(),
+                ));
+            }
+            let mut el = OutElement::branch("", tag).attr("xsi:type", "core:BorderRef");
+            el.push(OutElement::leaf("", "border", reference.clone()));
+            el
         }
         (Codec::Border, PropertyValue::Enum(t)) => {
             // `<style>X` эмитится ⟺ стиль НЕ `WithoutBorder` (симметрично `decode_edt_border`:
@@ -216,7 +241,7 @@ pub(crate) fn render_edt(entry: &FieldProj, value: &PropertyValue) -> Result<Out
         (_, other) => {
             return Err(FormError::Frame(format!(
                 "EDT <{tag}>: value {other:?} does not match codec (§1.6)"
-            )))
+            )));
         }
     })
 }
@@ -232,7 +257,10 @@ pub(crate) fn edt_localized(tag: &str, pairs: &[(Lang, String)]) -> OutElement {
 }
 
 /// Эмитить EDT повторяемые `<choiceList>` из списка пар.
-pub(crate) fn emit_choice_list_edt(out: &mut OutElement, items: &[PropertyValue]) -> Result<(), FormError> {
+pub(crate) fn emit_choice_list_edt(
+    out: &mut OutElement,
+    items: &[PropertyValue],
+) -> Result<(), FormError> {
     for item in items {
         let (pres, val, pic) = choice_item(item)?;
         let mut cl = OutElement::branch("", "choiceList");
@@ -248,7 +276,7 @@ pub(crate) fn emit_choice_list_edt(out: &mut OutElement, items: &[PropertyValue]
             _ => {
                 return Err(FormError::Frame(
                     "choiceList presentation not Localized".into(),
-                ))
+                ));
             }
         }
         match val {

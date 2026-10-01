@@ -29,7 +29,7 @@ fn encode_edt_str_ref(
                 "Value: {kind_name} requires Str scalar (or None for explicit-empty <value/>), \
                  got {:?} (§1.0)",
                 other.map(|v| v.kind())
-            ))
+            ));
         }
     })
 }
@@ -54,14 +54,18 @@ fn encode_des_str_ref(
         }
         other => {
             return Err(format!(
-            "Value: {kind_name} requires Str scalar (or None for explicit-empty), got {:?} (§1.0)",
-            other.map(|v| v.kind())
-        ))
+                "Value: {kind_name} requires Str scalar (or None for explicit-empty), got {:?} (§1.0)",
+                other.map(|v| v.kind())
+            ));
         }
     })
 }
 
-pub(crate) fn encode_edt(prefix: &str, local: &str, spec: &ValueSpec) -> Result<OutElement, String> {
+pub(crate) fn encode_edt(
+    prefix: &str,
+    local: &str,
+    spec: &ValueSpec,
+) -> Result<OutElement, String> {
     let sc = || -> OutElement { OutElement::self_closing(prefix, local) };
     let with_value = |xsi: &str, text: &str| -> OutElement {
         let mut h = OutElement::branch(prefix, local).attr(XSI_TYPE, xsi);
@@ -69,6 +73,11 @@ pub(crate) fn encode_edt(prefix: &str, local: &str, spec: &ValueSpec) -> Result<
         h
     };
     Ok(match spec.kind {
+        ValueScalarKind::SystemEnum => {
+            let value = require_str(spec, "SystemEnum")?;
+            comparison_member(value)?;
+            with_value(EDT_SYSTEM_ENUM, value)
+        }
         ValueScalarKind::Undefined => sc().attr(XSI_TYPE, EDT_UNDEFINED),
         ValueScalarKind::Str => encode_edt_str_ref(prefix, local, EDT_STRING, spec, "Str")?,
         ValueScalarKind::Reference => {
@@ -108,11 +117,19 @@ pub(crate) fn encode_edt(prefix: &str, local: &str, spec: &ValueSpec) -> Result<
     })
 }
 
-pub(crate) fn encode_designer(prefix: &str, local: &str, spec: &ValueSpec) -> Result<OutElement, String> {
+pub(crate) fn encode_designer(
+    prefix: &str,
+    local: &str,
+    spec: &ValueSpec,
+) -> Result<OutElement, String> {
     let leaf = |xsi: &str, text: &str| -> OutElement {
         OutElement::leaf(prefix, local, text.to_string()).attr(XSI_TYPE, xsi)
     };
     Ok(match spec.kind {
+        ValueScalarKind::SystemEnum => leaf(
+            DES_COMPARISON_ENUM,
+            comparison_member(require_str(spec, "SystemEnum")?)?,
+        ),
         ValueScalarKind::Undefined => OutElement::self_closing(prefix, local).attr(XSI_NIL, "true"),
         ValueScalarKind::Str => encode_des_str_ref(prefix, local, DES_STRING, spec, "Str")?,
         ValueScalarKind::Reference => {

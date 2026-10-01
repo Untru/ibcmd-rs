@@ -182,6 +182,7 @@ pub struct EdtFormRef;
 impl LocusMap for EdtFormRef {
     fn lookup(&self, field: FieldId) -> Option<FieldProjection> {
         Some(match field {
+            fref::F_FORM_TYPE => FieldProjection::new(flat(&["formType"]), Codec::EnumText),
             fref::F_SYNONYM => FieldProjection::new(flat(&["synonym"]), Codec::LocalizedKeyVal),
             fref::F_COMMENT => FieldProjection::new(flat(&["comment"]), Codec::PlainText),
             fref::F_INCLUDE_HELP_IN_CONTENTS => {

@@ -47,7 +47,10 @@ pub(crate) fn border_split(canon: &str) -> (&str, &str) {
 }
 
 /// Разложить канон-период `List([Str(start), Str(end)])` в пару строк.
-pub(crate) fn period_pair<'a>(value: &'a PropertyValue, tag: &str) -> Result<(&'a str, &'a str), FormError> {
+pub(crate) fn period_pair<'a>(
+    value: &'a PropertyValue,
+    tag: &str,
+) -> Result<(&'a str, &'a str), FormError> {
     match value {
         PropertyValue::List(parts) if parts.len() == 2 => match (&parts[0], &parts[1]) {
             (PropertyValue::Str(s), PropertyValue::Str(e)) => Ok((s.as_str(), e.as_str())),
@@ -76,11 +79,7 @@ pub(crate) fn bool_leaf(prefix: &str, tag: &str, b: bool) -> OutElement {
 
 /// Строковый литерал bool (`true`/`false`) для xml-текста.
 pub(crate) fn bool_lit(b: bool) -> &'static str {
-    if b {
-        "true"
-    } else {
-        "false"
-    }
+    if b { "true" } else { "false" }
 }
 
 pub(crate) fn parse_int(s: &str, tag: &str) -> Result<i64, FormError> {
@@ -104,7 +103,11 @@ pub(crate) fn claim_xsi(el: &Element, tag: &str, want: &str) -> Result<(), FormE
 }
 
 /// Claim элемента + единственного ребёнка-листа `child`; вернуть его текст.
-pub(crate) fn require_single_leaf(el: &Element, tag: &str, child: &str) -> Result<String, FormError> {
+pub(crate) fn require_single_leaf(
+    el: &Element,
+    tag: &str,
+    child: &str,
+) -> Result<String, FormError> {
     el.claim();
     let c = el
         .child(child)
@@ -132,6 +135,7 @@ pub(crate) const WINDOWS_SYSTEM_COLORS: &[&str] = &[
     "DisabledText",
     "ButtonDarkShadow",
     "ScrollBar",
+    "ActiveTitleBar",
 ];
 
 /// Каноническая (EDT) кодировка цвета ← Designer-текст (`style:X`→`Style.X`, `pal:Y`→`Palette.Y`,
@@ -331,7 +335,6 @@ pub(crate) fn picture_ref_lt(v: &PropertyValue) -> Result<(&str, bool), FormErro
 // `<xr:Value xsi:type="FormChoiceListDesTimeValue">` c вложенными `<Presentation>` v8:item и
 // `<Value xsi:type="xs:…">`). Скалярное значение — через общий [`value_codec`].
 
-
 /// Разложить пункт в `(presentation, value, опц. picture)`. Пункт — `List([presentation, value])`
 /// (без картинки) ЛИБО `List([presentation, value, picture:Ref])` (с картинкой — RadioButtonField
 /// `СохранениеПечатнойФормы`). Картинка — [`PropertyValue::Ref`] (`CommonPicture.*` через PictureRef).
@@ -362,7 +365,6 @@ pub(crate) fn choice_item(
 // Presentation реконструируется пер-диалектно (EDT опускает, Designer self-close), в IR не хранится.
 // §1.0: непустой Presentation / чужой xsi / `FixedArray` / лишний ребёнок → ОШИБКА.
 
-
 /// EDT/Designer xsi:type обёртки значения параметра выбора.
 pub(crate) const FCLDTV_EDT: &str = "form:FormChoiceListDesTimeValue";
 pub(crate) const FCLDTV_DES: &str = "FormChoiceListDesTimeValue";
@@ -387,7 +389,9 @@ pub(crate) enum ChoiceParamValue<'a> {
 
 /// Разложить пункт choiceParameters в `(name, value)`. Пункт — `List([name:Str, value])`,
 /// где value = `Value(скаляр)` либо `List(Value…)` (FixedArray).
-pub(crate) fn choice_param_item(item: &PropertyValue) -> Result<(&str, ChoiceParamValue<'_>), FormError> {
+pub(crate) fn choice_param_item(
+    item: &PropertyValue,
+) -> Result<(&str, ChoiceParamValue<'_>), FormError> {
     match item {
         // Арность 1 = БЕЗ-ОБЁРТОЧНЫЙ Undefined (пустой выбор); значение в IR не хранится.
         PropertyValue::List(p) if p.len() == 1 => match &p[0] {
@@ -437,7 +441,6 @@ pub(crate) fn bare_undefined_spec() -> morph1c_core::ir::value::ValueSpec {
 //   на read (§1.0 при ином), реконструируется на write; в канон НЕ входит.
 // ВНИМАНИЕ: EDT-тег вложенного пути — СТРОЧНЫЙ `datapath` (не `dataPath` Codec::DataPath).
 
-
 /// Разложить канон typeLink в `(путь, linkItem)`.
 pub(crate) fn type_link_parts(v: &PropertyValue) -> Result<(&str, i64), FormError> {
     match v {
@@ -468,7 +471,7 @@ pub(crate) fn choice_parameter_link_parts(
                 Some(other) => {
                     return Err(FormError::Frame(format!(
                         "choiceParameterLinks item[2] must be Enum(changeMode), got {other:?} (§1.6)"
-                    )))
+                    )));
                 }
             };
             match (&p[0], &p[1]) {

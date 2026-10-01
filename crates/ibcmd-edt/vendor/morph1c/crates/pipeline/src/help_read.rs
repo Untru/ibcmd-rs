@@ -29,8 +29,8 @@
 
 use std::path::{Path, PathBuf};
 
-use formats_xml::registry::Format;
 use formats_xml::Element;
+use formats_xml::registry::Format;
 use morph1c_core::ir::{HelpPage, HelpResource, MetadataObject};
 
 use crate::ConvertError;
@@ -230,6 +230,16 @@ pub(crate) fn write_help_sidecar(
         }
         return Ok(());
     }
+    let mut languages = std::collections::BTreeSet::new();
+    for page in pages {
+        if !valid_language(&page.lang) || !languages.insert(&page.lang) || page.body.len() as u64 > MAX_HELP_FILE_BYTES {
+            return Err(ConvertError::Write {
+                kind: kind.to_string(),
+                object: owner_name.to_string(),
+                reason: "unsafe or duplicate help language".into(),
+            });
+        }
+    }
     let no_parent = || ConvertError::Write {
         kind: kind.to_string(),
         object: owner_name.to_string(),
@@ -249,7 +259,11 @@ pub(crate) fn write_help_sidecar(
         Format::Designer => {
             let dir = anchor_out.parent().ok_or_else(no_parent)?;
             let stem = anchor_out.file_stem().ok_or_else(no_parent)?;
-            let ext = dir.join(stem).join("Ext");
+            let ext = if kind == "Configuration" {
+                dir.join("Ext")
+            } else {
+                dir.join(stem).join("Ext")
+            };
             crate::form_write::write_file(
                 &ext.join("Help.xml"),
                 &serialize_help_descriptor(pages),
@@ -271,7 +285,11 @@ pub(crate) fn write_help_sidecar(
 /// Designer `Ext/Help/`), раскладка `_files/…` внутри идентична.
 fn write_help_resources(pages_dir: &Path, resources: &[HelpResource]) -> Result<(), ConvertError> {
     let files_dir = pages_dir.join(FILES_DIR);
+    let mut seen = std::collections::BTreeSet::new();
     for res in resources {
+        if res.rel_path.is_empty() || res.rel_path.contains('\\') || res.rel_path.contains(':') || res.rel_path.split('/').any(|part| part.is_empty() || part == "." || part == "..") || !seen.insert(&res.rel_path) || res.bytes.len() as u64 > MAX_HELP_FILE_BYTES {
+            return Err(ConvertError::Write { kind: "HelpResource".into(), object: res.rel_path.clone(), reason: "unsafe, duplicate, or oversized help resource".into() });
+        }
         // `rel_path` — `/`-разделённый канон; `join` на Windows принимает `/` как разделитель.
         crate::form_write::write_file(&files_dir.join(&res.rel_path), &res.bytes)?;
     }
@@ -337,6 +355,9 @@ fn read_edt_help(
             .and_then(|s| s.to_str())
             .ok_or_else(|| read_err(format!("help page {} has a non-UTF-8 name", path.display())))?
             .to_string();
+        if !valid_language(&lang) {
+            return Err(read_err("unsafe help page language".into()));
+        }
         pages.push(HelpPage {
             lang,
             body: read_page(kind, obj_name, &path, Format::Edt)?,
@@ -357,7 +378,11 @@ fn read_designer_help(
         (Some(d), Some(s)) => (d, s),
         _ => return Ok((Vec::new(), Vec::new())),
     };
-    let ext = dir.join(stem).join("Ext");
+    let ext = if kind == "Configuration" {
+        dir.join("Ext")
+    } else {
+        dir.join(stem).join("Ext")
+    };
     let help_xml = ext.join("Help.xml");
     if !help_xml.is_file() {
         return Ok((Vec::new(), Vec::new()));
@@ -488,7 +513,7 @@ fn collect_help_resources(
         if path.is_dir() {
             collect_help_resources(kind, obj_name, &path, &rel, out)?;
         } else if path.is_file() {
-            let bytes = std::fs::read(&path).map_err(|e| ConvertError::Io {
+            let bytes = read_help_file(&path).map_err(|e| ConvertError::Io {
                 path: path.display().to_string(),
                 reason: e.to_string(),
             })?;
@@ -510,6 +535,39 @@ fn collect_help_resources(
     Ok(())
 }
 
+/// Bound each help page/manifest/resource before allocation; the adapter also bounds the total source tree.
+const MAX_HELP_FILE_BYTES: u64 = 32 * 1024 * 1024;
+fn read_help_file(path: &Path) -> std::io::Result<Vec<u8>> {
+    use std::io::Read;
+    let metadata = std::fs::symlink_metadata(path)?;
+    if !metadata.is_file()
+        || metadata.file_type().is_symlink()
+        || metadata.len() > MAX_HELP_FILE_BYTES
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "help sidecar is not a bounded regular file",
+        ));
+    }
+    let file = std::fs::File::open(path)?;
+    let mut bytes = Vec::with_capacity(metadata.len() as usize);
+    file.take(MAX_HELP_FILE_BYTES + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > MAX_HELP_FILE_BYTES {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidData,
+            "help sidecar grew beyond limit",
+        ));
+    }
+    Ok(bytes)
+}
+fn valid_language(lang: &str) -> bool {
+    !lang.is_empty()
+        && lang.len() <= 64
+        && lang
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+}
+
 /// Прочитать ОДНУ страницу `<lang>.html` → канонический текст (BOM-снят, EOL=`\n`).
 /// §1.0-самопроверка: пере-кодирование канона в исходный диалект обязано воспроизвести
 /// исходные байты (незасвидетельствованное кодирование — громкий отказ, не тихая нормализация).
@@ -519,7 +577,7 @@ fn read_page(
     path: &Path,
     format: Format,
 ) -> Result<String, ConvertError> {
-    let bytes = std::fs::read(path).map_err(|e| ConvertError::Io {
+    let bytes = read_help_file(path).map_err(|e| ConvertError::Io {
         path: path.display().to_string(),
         reason: e.to_string(),
     })?;
@@ -571,7 +629,7 @@ pub(crate) fn parse_page_descriptor(
     path: &Path,
     obj_name: &str,
 ) -> Result<Vec<String>, ConvertError> {
-    let bytes = std::fs::read(path).map_err(|e| ConvertError::Io {
+    let bytes = read_help_file(path).map_err(|e| ConvertError::Io {
         path: path.display().to_string(),
         reason: e.to_string(),
     })?;
@@ -588,6 +646,11 @@ pub(crate) fn parse_page_descriptor(
             root.local
         )));
     }
+    let version = root
+        .attr("version")
+        .ok_or_else(|| read_err("Help.xml: missing version".into()))?;
+    let version =
+        crate::sidecar_version::parse_witnessed(&version.value, "Help.xml").map_err(read_err)?;
     let mut langs = Vec::with_capacity(root.children.len());
     for child in &root.children {
         if child.local != "Page" {
@@ -599,11 +662,24 @@ pub(crate) fn parse_page_descriptor(
         if child.text.is_empty() {
             return Err(read_err("Help.xml has an empty <Page> (§1.0)".into()));
         }
+        if !valid_language(&child.text) || langs.contains(&child.text) {
+            return Err(read_err(
+                "unsafe or duplicate Help.xml Page language".into(),
+            ));
+        }
         langs.push(child.text.clone());
     }
     if langs.is_empty() {
         return Err(read_err(
             "Help.xml declares no <Page> (§1.0 — empty descriptor unwitnessed)".into(),
+        ));
+    }
+    let names = langs.iter().map(String::as_str).collect::<Vec<_>>();
+    let reproduced =
+        morph1c_core::version::with_roundtrip_target(version, || serialize_page_descriptor(&names));
+    if reproduced != bytes {
+        return Err(read_err(
+            "Help.xml contains unmodeled syntax/content or non-witnessed serialization".into(),
         ));
     }
     Ok(langs)
@@ -616,8 +692,8 @@ pub(crate) fn parse_page_descriptor(
 ///
 /// Общая с манифестом HTMLDocument-макета (`Ext/Template.xml`) — см. [`parse_page_descriptor`].
 pub(crate) fn serialize_page_descriptor(langs: &[&str]) -> Vec<u8> {
-    let version = morph1c_core::version::current_roundtrip_target()
-        .unwrap_or(morph1c_core::version::SSL);
+    let version =
+        morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
     let mut s = String::new();
     s.push(BOM);
     s.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");

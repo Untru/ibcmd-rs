@@ -112,7 +112,10 @@ pub(crate) fn designer_attr_value(
 }
 
 /// Срендерить Designer-узел поля по кодеку.
-pub(crate) fn render_designer(entry: &FieldProj, value: &PropertyValue) -> Result<OutElement, FormError> {
+pub(crate) fn render_designer(
+    entry: &FieldProj,
+    value: &PropertyValue,
+) -> Result<OutElement, FormError> {
     let tag = entry.des;
     Ok(match (entry.codec, value) {
         (Codec::Bool, PropertyValue::Bool(b)) => bool_leaf("", tag, *b),
@@ -209,6 +212,14 @@ pub(crate) fn render_designer(entry: &FieldProj, value: &PropertyValue) -> Resul
         (Codec::UndefinedValue, PropertyValue::Bool(true)) => {
             OutElement::self_closing("", tag).attr("xsi:nil", "true")
         }
+        (Codec::Border, PropertyValue::Ref(reference)) => {
+            let Some(name) = reference.strip_prefix("Style.").filter(|n| !n.is_empty()) else {
+                return Err(FormError::Frame(
+                    "Border ref requires a named Style reference".into(),
+                ));
+            };
+            OutElement::self_closing("", tag).attr("ref", format!("style:{name}"))
+        }
         (Codec::Border, PropertyValue::Enum(t)) => {
             // Ширина — из канона (`@W`-суффикс, дефолт 1); keep-омиссии политик работают по
             // ПОЛНОМУ канону (`WithoutBorder@3` ≠ `WithoutBorder` ⇒ эмитится).
@@ -227,8 +238,8 @@ pub(crate) fn render_designer(entry: &FieldProj, value: &PropertyValue) -> Resul
                 s if s == ff::SCROLL_BAR_NEVER => "false",
                 other => {
                     return Err(FormError::Frame(format!(
-                    "Designer <{tag}>: scrollbar {other:?} not bool-encodable (policy bug — §1.6)"
-                )))
+                        "Designer <{tag}>: scrollbar {other:?} not bool-encodable (policy bug — §1.6)"
+                    )));
                 }
             };
             OutElement::leaf("", tag, b)
@@ -253,7 +264,7 @@ pub(crate) fn render_designer(entry: &FieldProj, value: &PropertyValue) -> Resul
         (_, other) => {
             return Err(FormError::Frame(format!(
                 "Designer <{tag}>: value {other:?} does not match codec (§1.6)"
-            )))
+            )));
         }
     })
 }
@@ -290,7 +301,7 @@ pub(crate) fn emit_choice_list_designer(items: &[PropertyValue]) -> Result<OutEl
             _ => {
                 return Err(FormError::Frame(
                     "choiceList presentation not Localized".into(),
-                ))
+                ));
             }
         }
         match val {
@@ -315,7 +326,9 @@ pub(crate) fn emit_choice_list_designer(items: &[PropertyValue]) -> Result<OutEl
 }
 
 /// Эмитить Designer-контейнер `<ChoiceParameters>` (c `<app:item>`-детьми) из списка пар.
-pub(crate) fn emit_choice_parameters_designer(items: &[PropertyValue]) -> Result<OutElement, FormError> {
+pub(crate) fn emit_choice_parameters_designer(
+    items: &[PropertyValue],
+) -> Result<OutElement, FormError> {
     let mut container = OutElement::branch("", "ChoiceParameters");
     for item in items {
         let (name, value) = choice_param_item(item)?;
@@ -356,10 +369,13 @@ pub(crate) fn emit_choice_parameters_designer(items: &[PropertyValue]) -> Result
                 wrap
             }
             // Прямой `<app:value xsi:nil="true"/>` (общий value_codec, без обёртки).
-            ChoiceParamValue::BareUndefined => {
-                value_codec::encode(ValueDialect::Designer, "app", "value", &bare_undefined_spec())
-                    .map_err(FormError::Frame)?
-            }
+            ChoiceParamValue::BareUndefined => value_codec::encode(
+                ValueDialect::Designer,
+                "app",
+                "value",
+                &bare_undefined_spec(),
+            )
+            .map_err(FormError::Frame)?,
         };
         it.push(app_value);
         container.push(it);

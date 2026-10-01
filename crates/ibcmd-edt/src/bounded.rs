@@ -17,6 +17,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
     let mut depth = 0usize;
     let mut events = 0usize;
     let mut names = Vec::new();
+    let mut form_body = false;
     loop {
         events += 1;
         if events > MAX_XML_EVENTS {
@@ -28,6 +29,9 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let local = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                if names.is_empty() && depth == 0 && local == "Form" {
+                    form_body = path.ends_with(".form") || path.ends_with("Form.xml");
+                }
                 for (n, a) in e.attributes().enumerate() {
                     if n >= MAX_XML_ATTRIBUTES {
                         return Err(EdtError::new(format!(
@@ -39,7 +43,11 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                         let value = a
                             .decode_and_unescape_value(reader.decoder())
                             .map_err(EdtError::source)?;
-                        component(&value)?;
+                        if form_body && matches!(a.key.as_ref(), b"name" | b"Name") {
+                            logical_form_name(&value)?;
+                        } else {
+                            component(&value)?;
+                        }
                     }
                 }
                 if matches!(event, Event::Start(_)) {
@@ -64,7 +72,14 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                     .nth(1)
                     .is_some_and(|p| p == "ChildObjects")
                 {
-                    component(value.trim()).map_err(|e| {
+                    let check = if form_body
+                        && matches!(names.last().map(String::as_str), Some("Name" | "name"))
+                    {
+                        logical_form_name(value.trim())
+                    } else {
+                        component(value.trim())
+                    };
+                    check.map_err(|e| {
                         EdtError::new(format!("{path}: unsafe metadata filename: {e}"))
                     })?;
                 }
@@ -116,6 +131,25 @@ pub(crate) fn component(value: &str) -> Result<(), EdtError> {
         return Err(EdtError::new("name is not a single path component"));
     }
     SourcePath::new(value).map_err(EdtError::source)?;
+    Ok(())
+}
+
+// Form identifiers can exceed portable filename limits without naming a file.
+// Only bounded long identifiers receive this exception; physical paths keep
+// SourcePath limits and borrowed file writes independently check components.
+fn logical_form_name(value: &str) -> Result<(), EdtError> {
+    if value.len() <= ibcmd_xml::source_tree::MAX_SOURCE_COMPONENT_BYTES {
+        return component(value);
+    }
+    if value.len() > 4096
+        || value.ends_with('.')
+        || value.contains("..")
+        || value
+            .chars()
+            .any(|c| !c.is_alphanumeric() && !matches!(c, '_' | '-' | '.'))
+    {
+        return Err(EdtError::new("unsafe or unbounded logical form identifier"));
+    }
     Ok(())
 }
 
@@ -259,4 +293,27 @@ fn reparse(metadata: &fs::Metadata) -> bool {
 #[cfg(not(windows))]
 fn reparse(_: &fs::Metadata) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn logical_form_names_do_not_extend_filesystem_names() {
+        let name = "ДлинноеИмяЭлемента".repeat(20);
+        assert!(name.len() > 255);
+        let form = format!("<Form><items name='{name}'/></Form>");
+        assert!(validate_xml("Form.form", form.as_bytes()).is_ok());
+        assert!(validate_xml("Descriptor.mdo", form.as_bytes()).is_err());
+        for name in [
+            format!("{name}/escape"),
+            format!("{name}\\escape"),
+            format!("{name}:escape"),
+            "а".repeat(4097),
+        ] {
+            let form = format!("<Form><name>{name}</name></Form>");
+            assert!(validate_xml("Form.form", form.as_bytes()).is_err());
+        }
+        assert!(SourcePath::new(name).is_err());
+    }
 }

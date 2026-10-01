@@ -1,11 +1,11 @@
 //! extInfo document/picture-подтипов FormField (LANE-F-5): HTML/Progress/Formatted/Text/
 //! Image/Spreadsheet/Calendar/TrackBar/Chart/Gantt/PDF/Flowchart/Period.
 
-use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
+use crate::form::fields::{Codec, DesOmit, FieldProj, Policy, Region, fp};
 use crate::form::tables::{
+    F_EXT_PIC_ENABLE_DRAG, F_EXT_VIEW_SCALING_MODE, F_EXT_ZOOMABLE, F_PIC_BORDER_COLOR,
     geo_auto_max_height, geo_auto_max_width, geo_h_stretch, geo_height, geo_max_height,
-    geo_max_width, geo_v_stretch, geo_width, keep, F_EXT_PIC_ENABLE_DRAG, F_EXT_VIEW_SCALING_MODE,
-    F_EXT_ZOOMABLE, F_PIC_BORDER_COLOR,
+    geo_max_width, geo_v_stretch, geo_width, keep,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 
@@ -115,6 +115,14 @@ pub(crate) static FORMATTED_FIELD_EXT: &[FieldProj] = &[
         Codec::EnumTok,
         Policy::Symmetric,
     ),
+    fp(
+        ff::F_EXT_BACK_COLOR,
+        "backColor",
+        "BackColor",
+        Region::Ext,
+        Codec::Color,
+        Policy::Symmetric,
+    ),
     // borderColor — Color Symmetric (ERP 8⟷8, всё style:FormBackColor). cf: Formatted ext[8]
     // (абляция s10: {4,4,{0},4}→{4,3,{-1},3}).
     fp(
@@ -141,6 +149,14 @@ pub(crate) static TEXT_FIELD_EXT: &[FieldProj] = &[
     geo_h_stretch(Policy::OppositeBool),
     geo_v_stretch(Policy::OppositeBool),
     // `output` — симметричный enum (оба опускают дефолт `Use`; witness Форма_ПоляДокументы).
+    fp(
+        ff::F_EXT_BACK_COLOR,
+        "backColor",
+        "BackColor",
+        Region::Ext,
+        Codec::Color,
+        Policy::Symmetric,
+    ),
     fp(
         ff::F_EXT_OUTPUT,
         "output",
@@ -772,6 +788,14 @@ pub(crate) static FLOWCHART_FIELD_EXT: &[FieldProj] = &[
     geo_h_stretch(Policy::OppositeBool),
     geo_v_stretch(Policy::OppositeBool),
     fp(
+        ff::F_EXT_OUTPUT,
+        "output",
+        "Output",
+        Region::Ext,
+        Codec::EnumMap(&[("Enable", "Enable")]),
+        Policy::Symmetric,
+    ),
+    fp(
         ff::F_EXT_EDIT,
         "edit",
         "Edit",
@@ -802,4 +826,3 @@ pub(crate) static PERIOD_FIELD_EXT: &[FieldProj] = &[
         ),
     ),
 ];
-

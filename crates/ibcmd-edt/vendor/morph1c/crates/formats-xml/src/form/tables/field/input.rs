@@ -1,11 +1,11 @@
 //! extInfo простых полей ввода: Input / CheckBox / Label / RadioButton.
 
-use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Keep, Policy, Region};
+use crate::form::fields::{Codec, DesOmit, FieldProj, Keep, Policy, Region, fp};
 use crate::form::tables::{
-    geo_auto_max_height, geo_auto_max_width, geo_h_stretch, geo_height, geo_max_height,
-    geo_max_width, geo_v_stretch, geo_width, keep, F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES,
-    F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST, F_EXT_SPECIAL_TEXT_INPUT_MODE,
-    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
+    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT, F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES,
+    F_EXT_MULTIPLE_PRESENT_PATH, F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST,
+    F_EXT_SPECIAL_TEXT_INPUT_MODE, geo_auto_max_height, geo_auto_max_width, geo_h_stretch,
+    geo_height, geo_max_height, geo_max_width, geo_v_stretch, geo_width, keep,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 use morph1c_core::spec::forms::controls::radio_button as rb;
@@ -510,6 +510,14 @@ pub(crate) static INPUT_FIELD_EXT: &[FieldProj] = &[
         Policy::Symmetric,
     ),
     fp(
+        F_EXT_MULTIPLE_PRESENT_PATH,
+        "multipleValuePresentDataPath",
+        "MultipleValuePresentDataPath",
+        Region::Ext,
+        Codec::DataPath,
+        Policy::Symmetric,
+    ),
+    fp(
         ff::F_EXT_DROP_LIST_WIDTH,
         "dropListWidth",
         "DropListWidth",
@@ -590,6 +598,14 @@ pub(crate) static CHECK_BOX_FIELD_EXT: &[FieldProj] = &[
         "EqualItemsWidth",
         Region::Ext,
         Codec::Bool,
+        Policy::Symmetric,
+    ),
+    fp(
+        ff::F_EXT_BACK_COLOR,
+        "backColor",
+        "BackColor",
+        Region::Ext,
+        Codec::Color,
         Policy::Symmetric,
     ),
 ];
@@ -800,4 +816,3 @@ pub(crate) static RADIO_BUTTON_FIELD_EXT: &[FieldProj] = &[
         ),
     ),
 ];
-

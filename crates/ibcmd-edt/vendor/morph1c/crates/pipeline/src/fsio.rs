@@ -105,6 +105,7 @@ pub fn accounting() -> bool {
 
 /// Accounted [`std::fs::create_dir_all`] — the ONE way the pipeline creates output directories.
 pub fn create_dir_all(path: &Path) -> io::Result<()> {
+    check_portable_path(path)?;
     if !accounting() {
         return std::fs::create_dir_all(path);
     }
@@ -125,6 +126,7 @@ pub fn create_dir_all(path: &Path) -> io::Result<()> {
 /// and rejected).
 pub fn write(path: impl AsRef<Path>, bytes: impl AsRef<[u8]>) -> io::Result<()> {
     let (path, bytes) = (path.as_ref(), bytes.as_ref());
+    check_portable_path(path)?;
     let r = timed_write(path, bytes);
     if accounting() {
         IO_FILES.fetch_add(1, Ordering::Relaxed);
@@ -153,6 +155,23 @@ fn write_inner(path: &Path, bytes: &[u8]) -> io::Result<()> {
     f.flush()
 }
 
+fn check_portable_path(path: &Path) -> io::Result<()> {
+    for component in path.components() {
+        if let std::path::Component::Normal(value) = component {
+            let value = value.to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "non-UTF8 source path")
+            })?;
+            if value.len() > 255 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "source filename exceeds portable component limit",
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(any())]
 mod tests {
     use super::*;
@@ -177,5 +196,4 @@ mod tests {
 
         let _ = std::fs::remove_file(&path);
     }
-
 }

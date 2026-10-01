@@ -83,7 +83,7 @@ pub(crate) fn read_fields_edt(
                             return Err(FormError::Frame(format!(
                                 "<{}>: localized decode gave {other:?} (bug)",
                                 entry.edt
-                            )))
+                            )));
                         }
                     }
                 }
@@ -211,6 +211,19 @@ fn decode_edt_period(el: &Element, tag: &str) -> Result<PropertyValue, FormError
 /// `<style>` присутствует ⟺ канон-стиль его текст; отсутствует ⟺ `WithoutBorder`. Ширина —
 /// часть канона (`@W`-суффикс при W≠1, см. [`border_canon`]).
 fn decode_edt_border(el: &Element, tag: &str) -> Result<PropertyValue, FormError> {
+    if el
+        .attr("xsi:type")
+        .is_some_and(|a| a.value == "core:BorderRef")
+    {
+        claim_xsi(el, tag, "core:BorderRef")?;
+        let reference = require_single_leaf(el, tag, "border")?;
+        if !reference.starts_with("Style.") || reference.len() <= 6 {
+            return Err(FormError::Frame(
+                "BorderRef requires a named Style reference".into(),
+            ));
+        }
+        return Ok(PropertyValue::Ref(reference));
+    }
     claim_xsi(el, tag, "core:BorderDef")?;
     el.claim();
     let style_el = el.child("style").filter(|c| c.prefix.is_empty());
@@ -278,18 +291,18 @@ pub(crate) fn decode_edt_picture(el: &Element, tag: &str) -> Result<PropertyValu
                     return Err(FormError::Frame(format!(
                         "<{tag}>: non-empty form:FormPicture must carry exactly one \
                          <transparentPixel> (§1.0)"
-                    )))
+                    )));
                 }
             };
             let pixel_ir = match crate::transparent_pixel::decode(only) {
                 morph1c_core::engine::Decoded::Present(v) => v,
                 morph1c_core::engine::Decoded::Error(e) => {
-                    return Err(FormError::Frame(format!("<{tag}>: {e}")))
+                    return Err(FormError::Frame(format!("<{tag}>: {e}")));
                 }
                 morph1c_core::engine::Decoded::Absent => {
                     return Err(FormError::Frame(format!(
                         "<{tag}>: empty <transparentPixel> (§1.0)"
-                    )))
+                    )));
                 }
             };
             let pixel = crate::transparent_pixel::pixel_of(&pixel_ir).map_err(FormError::Frame)?;
@@ -393,18 +406,19 @@ fn decode_edt_common_bool(el: &Element, tag: &str) -> Result<PropertyValue, Form
             .filter(|c| c.local == "for" && c.prefix.is_empty())
         {
             f.claim();
-            let ve = f
-                .child("value")
-                .filter(|c| c.prefix.is_empty())
-                .ok_or_else(|| FormError::Frame(format!("<{tag}><for>: no <value> (§1.0)")))?;
-            ve.claim_with_text();
-            let val = match ve.text.as_str() {
-                "true" => true,
-                "false" => false,
-                other => {
-                    return Err(FormError::Frame(format!(
-                        "<{tag}><for><value>={other:?}, want bool (§1.0)"
-                    )))
+            let val = match f.child("value").filter(|c| c.prefix.is_empty()) {
+                None => false,
+                Some(ve) => {
+                    ve.claim_with_text();
+                    match ve.text.as_str() {
+                        "true" => true,
+                        "false" => false,
+                        other => {
+                            return Err(FormError::Frame(format!(
+                                "<{tag}><for><value>={other:?}, want bool (§1.0)"
+                            )));
+                        }
+                    }
                 }
             };
             let re = f
@@ -454,7 +468,10 @@ fn decode_edt_localized(t: &Element) -> Result<PropertyValue, FormError> {
 }
 
 /// Прочитать повторяемые EDT `<choiceList>` хоста в список пар. Иные дети — §1.0-ошибка.
-pub(crate) fn read_choice_list_edt(host: &Element, tag: &str) -> Result<Vec<PropertyValue>, FormError> {
+pub(crate) fn read_choice_list_edt(
+    host: &Element,
+    tag: &str,
+) -> Result<Vec<PropertyValue>, FormError> {
     let mut items = Vec::new();
     for c in host
         .children
@@ -486,7 +503,7 @@ pub(crate) fn read_choice_list_edt(host: &Element, tag: &str) -> Result<Vec<Prop
                     _ => {
                         return Err(FormError::Frame(
                             "choiceList <presentation>: localized decode bug (§1.0)".into(),
-                        ))
+                        ));
                     }
                 }
             }
@@ -578,7 +595,10 @@ fn decode_fcldtv_edt(host: &Element) -> Result<PropertyValue, FormError> {
 }
 
 /// Прочитать повторяемые EDT `<choiceParameters>` хоста в список пар `[name, value]`.
-pub(crate) fn read_choice_parameters_edt(host: &Element, tag: &str) -> Result<Vec<PropertyValue>, FormError> {
+pub(crate) fn read_choice_parameters_edt(
+    host: &Element,
+    tag: &str,
+) -> Result<Vec<PropertyValue>, FormError> {
     let mut items = Vec::new();
     for c in host
         .children

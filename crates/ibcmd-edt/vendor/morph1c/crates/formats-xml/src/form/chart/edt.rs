@@ -54,7 +54,7 @@ pub fn read_chart_sidecar(bytes: &[u8]) -> Result<ChartSettings, FormError> {
         other => {
             return Err(FormError::Envelope(format!(
                 "chart sidecar: unexpected decl: {other:?}"
-            )))
+            )));
         }
     }
     let root = d.root;
@@ -65,7 +65,7 @@ pub fn read_chart_sidecar(bytes: &[u8]) -> Result<ChartSettings, FormError> {
             (p, l) => {
                 return Err(FormError::Envelope(format!(
                     "chart sidecar: unexpected root <{p}:{l}>"
-                )))
+                )));
             }
         };
     root.claim();
@@ -129,7 +129,7 @@ fn e_read_children(
                 return Err(frame(format!(
                     "chart {path}: EDT-форма поля <{}> не витнесснута (§1.0)",
                     el.local
-                )))
+                )));
             }
             _ => {}
         }
@@ -238,7 +238,7 @@ fn e_read_loc_pair(el: &Element, path: &str) -> Result<(Lang, String), FormError
                 return Err(frame(format!(
                     "chart {path}: незнакомый ребёнок <{}:{}> локализации (§1.0)",
                     c.prefix, c.local
-                )))
+                )));
             }
         }
     }
@@ -327,7 +327,7 @@ fn e_read_color(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                         return Err(frame(format!(
                             "chart {path}: незнакомая компонента цвета <{}> (§1.0)",
                             c.local
-                        )))
+                        )));
                     }
                 };
                 c.claim_with_text();
@@ -394,6 +394,7 @@ fn e_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
         "core:FontRef" => {
             let mut font = None;
             let mut height = None;
+            let mut flags = [None; 4];
             for c in &el.children {
                 match (c.prefix.as_str(), c.local.as_str()) {
                     ("", "font") if font.is_none() => {
@@ -406,11 +407,33 @@ fn e_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                         expect_attrs_claimed(c, path)?;
                         height = Some(c.text.clone());
                     }
+                    ("", name) if ["bold", "italic", "underline", "strikeout"].contains(&name) => {
+                        let index = ["bold", "italic", "underline", "strikeout"]
+                            .iter()
+                            .position(|n| *n == name)
+                            .unwrap();
+                        if flags[index].is_some() || !c.children.is_empty() {
+                            return Err(frame(format!(
+                                "chart {path}: duplicate/nonleaf font {name}"
+                            )));
+                        }
+                        c.claim_with_text();
+                        expect_attrs_claimed(c, path)?;
+                        flags[index] = Some(match c.text.as_str() {
+                            "true" => true,
+                            "false" => false,
+                            _ => {
+                                return Err(frame(format!(
+                                    "chart {path}: font {name} must be bool"
+                                )));
+                            }
+                        });
+                    }
                     _ => {
                         return Err(frame(format!(
                             "chart {path}: незнакомый ребёнок <{}> FontRef (§1.0)",
                             c.local
-                        )))
+                        )));
                     }
                 }
             }
@@ -425,6 +448,10 @@ fn e_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                 auto: false,
                 font_ref: Some(font),
                 height,
+                bold: flags[0],
+                italic: flags[1],
+                underline: flags[2],
+                strikeout: flags[3],
                 ..auto_font()
             }))
         }
@@ -456,7 +483,7 @@ fn e_read_line(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                 return Err(frame(format!(
                     "chart {path}: незнакомый ребёнок <{}> линии (§1.0)",
                     c.local
-                )))
+                )));
             }
         }
     }
@@ -490,7 +517,7 @@ fn e_read_border(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                 return Err(frame(format!(
                     "chart {path}: незнакомый ребёнок <{}> рамки (§1.0)",
                     c.local
-                )))
+                )));
             }
         }
     }
@@ -526,7 +553,7 @@ pub fn write_chart_sidecar(cs: &ChartSettings) -> Result<Vec<u8>, FormError> {
         other => {
             return Err(frame(format!(
                 "chart: незнакомый вид настроек диаграммы {other:?} (§1.0)"
-            )))
+            )));
         }
     };
     let mode = if is_edt_sourced(cs) {
@@ -978,19 +1005,25 @@ fn e_color_out(name: &str, canon: &str, path: &str) -> Result<OutElement, FormEr
 
 /// EDT-шрифт из канона [`FontRef`].
 fn e_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormError> {
-    if f.face_name.is_some()
-        || f.bold.is_some()
-        || f.italic.is_some()
-        || f.underline.is_some()
-        || f.strikeout.is_some()
-        || f.scale.is_some()
-    {
+    if f.face_name.is_some() || f.scale.is_some() {
         return Err(frame(format!(
             "chart {path}: шрифт с переопределениями (не AutoFont/StyleItem) не витнесснут (§1.0)"
         )));
     }
     match &f.font_ref {
-        None => Ok(OutElement::self_closing("", name).attr("xsi:type", "core:AutoFont")),
+        None => {
+            if f.height.is_some()
+                || f.bold.is_some()
+                || f.italic.is_some()
+                || f.underline.is_some()
+                || f.strikeout.is_some()
+            {
+                return Err(frame(format!(
+                    "chart {path}: unsupported AutoFont overrides"
+                )));
+            }
+            Ok(OutElement::self_closing("", name).attr("xsi:type", "core:AutoFont"))
+        }
         Some(r) => {
             if !r.starts_with("Style.") {
                 return Err(frame(format!(
@@ -1001,6 +1034,16 @@ fn e_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormErr
             el.push(OutElement::leaf("", "font", r.clone()));
             if let Some(h) = &f.height {
                 el.push(OutElement::leaf("", "height", edt_decimal(h)));
+            }
+            for (name, value) in [
+                ("bold", f.bold),
+                ("italic", f.italic),
+                ("underline", f.underline),
+                ("strikeout", f.strikeout),
+            ] {
+                if let Some(value) = value {
+                    el.push(OutElement::leaf("", name, value.to_string()));
+                }
             }
             Ok(el)
         }

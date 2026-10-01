@@ -7,7 +7,7 @@
 //! Политики/дефолты — свидетельства корпуса (cross-omission, см. `core/spec/forms/controls/
 //! {form_field,form_group}` и).
 
-use super::fields::{fp, Codec, DesOmit, FieldProj, Keep, Policy, Region};
+use super::fields::{Codec, DesOmit, FieldProj, Keep, Policy, Region, fp};
 use morph1c_core::ir::FieldId;
 use morph1c_core::spec::forms::controls::form_field as ff;
 
@@ -182,6 +182,12 @@ pub(super) const F_PIC_BORDER_COLOR: FieldId = FieldId(959);
 pub(super) const F_EXT_CHOICE_BUTTON_TITLE: FieldId = FieldId(960);
 /// BSP 8.5 InputField drop-list hint (localized pairs).
 pub(super) const F_EXT_DROP_LIST_HINT: FieldId = FieldId(961);
+/// UH InputField presentation path for multiple choices.
+pub(super) const F_EXT_MULTIPLE_PRESENT_PATH: FieldId = FieldId(962);
+/// UH group association to an existing logical table element.
+pub(super) const F_GRP_ASSOCIATED_TABLE: FieldId = FieldId(973);
+/// UH ColumnGroup title background color.
+pub(super) const F_GRP_TITLE_BACK_COLOR: FieldId = FieldId(974);
 
 /// extInfo UsualGroup: `hiddenStateTitleBackColor` (метамодель UsualGroupExtInfo#28; ERP 1×;
 /// cf {38}-композит cell[23] — абляция s10 style:BorderColor).

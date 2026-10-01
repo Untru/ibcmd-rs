@@ -63,12 +63,21 @@ pub(crate) fn read_edt(root: Element) -> Result<FormBody, FormError> {
     }
 
     fn uses_dcs_value(el: &Element) -> bool {
-        el.attrs.iter().any(|a| a.name == "xsi:type" && a.value == "core_1:DesignTimeValueValue") || el.children.iter().any(uses_dcs_value)
+        el.attrs
+            .iter()
+            .any(|a| a.name == "xsi:type" && a.value == "core_1:DesignTimeValueValue")
+            || el.children.iter().any(uses_dcs_value)
     }
     match (root.attr("xmlns:core_1"), uses_dcs_value(&root)) {
-        (Some(a), true) if a.value == "http://g5.1c.ru/v8/dt/data-composition-system/core" => a.claimed.set(true),
-        (None, false) => {},
-        _ => return Err(FormError::Envelope("DCS core namespace must bind interpreted DesignTimeValueValue".into())),
+        (Some(a), true) if a.value == "http://g5.1c.ru/v8/dt/data-composition-system/core" => {
+            a.claimed.set(true)
+        }
+        (None, false) => {}
+        _ => {
+            return Err(FormError::Envelope(
+                "DCS core namespace must bind interpreted DesignTimeValueValue".into(),
+            ));
+        }
     }
 
     let mut body = FormBody::new();
@@ -93,7 +102,7 @@ pub(crate) fn read_edt(root: Element) -> Result<FormBody, FormError> {
             (got, extra) => {
                 return Err(FormError::Frame(format!(
                     "form <title>: unexpected repetition shapes {got:?} + {extra:?} (§1.0)"
-                )))
+                )));
             }
         }
     }
@@ -348,10 +357,14 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
         }
         rec.claim();
         let command = leaf_text(rec, "command")?;
-        let command_parameter = rec.child("commandParameter").filter(|c| c.prefix.is_empty()).map(|parameter| {
-            super::super::fields::claim_xsi(parameter, "commandParameter", "form:DataPath")?;
-            super::super::fields::require_single_leaf(parameter, "commandParameter", "segments")
-        }).transpose()?;
+        let command_parameter = rec
+            .child("commandParameter")
+            .filter(|c| c.prefix.is_empty())
+            .map(|parameter| {
+                super::super::fields::claim_xsi(parameter, "commandParameter", "form:DataPath")?;
+                super::super::fields::require_single_leaf(parameter, "commandParameter", "segments")
+            })
+            .transpose()?;
         let ty = match rec.child("type").filter(|c| c.prefix.is_empty()) {
             Some(t) => {
                 t.claim_with_text();
@@ -382,7 +395,17 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
             )));
         }
         let (user_visible, user_visible_roles) = read_edt_user_visible(rec)?;
-        expect_only_children(rec, &["command", "type", "commandParameter", "group", "index", "userVisible"])?;
+        expect_only_children(
+            rec,
+            &[
+                "command",
+                "type",
+                "commandParameter",
+                "group",
+                "index",
+                "userVisible",
+            ],
+        )?;
         out.push(FormCiItem {
             command,
             ty,
@@ -402,7 +425,9 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
 /// </for>×N</userVisible>` (общий флаг + пер-ролевые исключения; ⟺ Designer `<Visible>
 /// <xr:Common>B</xr:Common><xr:Value name="R">B</xr:Value>×N`; witness ЗаказКлиента.ФормаСписка).
 /// Возвращает `(общий флаг, роли)`. §1.0: иной ребёнок → ошибка.
-pub(crate) fn read_edt_user_visible(rec: &Element) -> Result<(Option<bool>, Vec<(String, bool)>), FormError> {
+pub(crate) fn read_edt_user_visible(
+    rec: &Element,
+) -> Result<(Option<bool>, Vec<(String, bool)>), FormError> {
     let uv = match rec.child("userVisible").filter(|c| c.prefix.is_empty()) {
         Some(uv) => uv,
         None => return Ok((None, Vec::new())),
@@ -679,7 +704,7 @@ pub(crate) fn read_edt_data_attribute(el: &Element) -> Result<FormDataAttribute,
             (got, extra) => {
                 return Err(FormError::Frame(format!(
                     "attribute <title>: unexpected repetition shapes {got:?} + {extra:?} (§1.0)"
-                )))
+                )));
             }
         }
     }
@@ -1155,7 +1180,13 @@ pub(crate) fn read_edt_form_command(el: &Element) -> Result<FormCommand, FormErr
         .children
         .iter()
         .any(|c| c.local == "for" && c.prefix.is_empty());
-    if !has_roles {
+    if !has_roles && use_el.children.is_empty() && use_el.text.is_empty() {
+        use_el.claim();
+        cmd.properties.push((
+            tables::F_CMD_USE,
+            PropertyValue::List(vec![PropertyValue::Bool(false)]),
+        ));
+    } else if !has_roles {
         read_common_true(use_el, "use")?;
     } else {
         use_el.claim();
@@ -1311,4 +1342,3 @@ pub(crate) fn read_edt_form_command(el: &Element) -> Result<FormCommand, FormErr
     }
     Ok(cmd)
 }
-

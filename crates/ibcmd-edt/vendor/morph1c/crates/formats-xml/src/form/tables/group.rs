@@ -1,8 +1,9 @@
 //! FormGroup: общее тело + extInfo (UsualGroup/Pages/Page/ButtonGroup/CommandBar/ColumnGroup/Popup).
 
-use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Keep, Policy, Region};
+use crate::form::fields::{Codec, DesOmit, FieldProj, Keep, Policy, Region, fp};
 use crate::form::tables::{
-    fpa, keep, F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR, KEEP_BOOL_TRUE,
+    F_GRP_ASSOCIATED_TABLE, F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR,
+    F_GRP_TITLE_BACK_COLOR, KEEP_BOOL_TRUE, fpa, keep,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 use morph1c_core::spec::forms::controls::form_group as fg;
@@ -414,6 +415,14 @@ pub(crate) static USUAL_GROUP_EXT: &[FieldProj] = &[
             DesOmit::Eq(fg::DESIGNER_AUTO),
         ),
     ),
+    fp(
+        F_GRP_ASSOCIATED_TABLE,
+        "associatedTableElementId",
+        "AssociatedTableElementId",
+        Region::Ext,
+        Codec::Value,
+        Policy::Symmetric,
+    ),
     // hiddenStateTitleBackColor — Color Symmetric (метамодель UsualGroupExtInfo#28;
     // ERP 1⟷1). cf: {38}-композит cells[23] (абляция s10 style:BorderColor).
     fp(
@@ -454,6 +463,14 @@ pub(crate) static PAGES_EXT: &[FieldProj] = &[
             fg::DESIGNER_AUTO,
             DesOmit::Eq(fg::DESIGNER_AUTO),
         ),
+    ),
+    fp(
+        F_GRP_ASSOCIATED_TABLE,
+        "associatedTableElementId",
+        "AssociatedTableElementId",
+        Region::Ext,
+        Codec::Value,
+        Policy::Symmetric,
     ),
 ];
 
@@ -692,6 +709,14 @@ pub(crate) static COLUMN_GROUP_EXT: &[FieldProj] = &[
             DesOmit::Eq(fg::DESIGNER_AUTO_LOWER),
         ),
     ),
+    fp(
+        F_GRP_TITLE_BACK_COLOR,
+        "titleBackColor",
+        "TitleBackColor",
+        Region::Ext,
+        Codec::Color,
+        Policy::Symmetric,
+    ),
     // showInHeader: оба формата эмитят явный `true` (симметрично).
     fp(
         fg::F_EXT_SHOW_IN_HEADER,
@@ -837,4 +862,3 @@ pub(crate) static POPUP_EXT: &[FieldProj] = &[
         Policy::Symmetric,
     ),
 ];
-

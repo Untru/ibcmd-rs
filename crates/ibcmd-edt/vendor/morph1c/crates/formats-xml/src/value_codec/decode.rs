@@ -5,9 +5,17 @@ use super::*;
 pub(crate) fn decode_edt(host: &Element) -> Result<PropertyValue, String> {
     let xsi = claim_only_attr(host, XSI_TYPE)?;
     let spec = match xsi.as_str() {
+        EDT_SYSTEM_ENUM => {
+            let value = edt_require_value_child(host, EDT_SYSTEM_ENUM)?;
+            comparison_member(&value)?;
+            str_spec(ValueScalarKind::SystemEnum, value)
+        }
         EDT_UNDEFINED => {
             ensure_no_children(host)?;
-            ValueSpec { kind: ValueScalarKind::Undefined, scalar: None }
+            ValueSpec {
+                kind: ValueScalarKind::Undefined,
+                scalar: None,
+            }
         }
         EDT_STRING => decode_edt_str_ref(ValueScalarKind::Str, host)?,
         EDT_REFERENCE => decode_edt_str_ref(ValueScalarKind::Reference, host)?,
@@ -18,7 +26,7 @@ pub(crate) fn decode_edt(host: &Element) -> Result<PropertyValue, String> {
             Some(t) => {
                 return Err(format!(
                     "Value: EDT BooleanValue <value> must be \"true\" (false is self-close), got {t:?} (§1.0)"
-                ))
+                ));
             }
         },
         EDT_NUMBER => {
@@ -32,14 +40,20 @@ pub(crate) fn decode_edt(host: &Element) -> Result<PropertyValue, String> {
         EDT_TYPE_DESCRIPTION => {
             // Пустое ОписаниеТипов: ВСЕГДА несёт пустой `<value/>`-ребёнок (сверено).
             match edt_opt_value_child(host)? {
-                Some(t) if t.is_empty() => ValueSpec { kind: ValueScalarKind::TypeDescription, scalar: None },
+                Some(t) if t.is_empty() => ValueSpec {
+                    kind: ValueScalarKind::TypeDescription,
+                    scalar: None,
+                },
                 Some(t) => {
                     return Err(format!(
                         "Value: EDT TypeDescriptionValue <value> must be empty, got {t:?} (§1.0)"
-                    ))
+                    ));
                 }
                 None => {
-                    return Err("Value: EDT TypeDescriptionValue requires empty <value/> child (§1.0)".into())
+                    return Err(
+                        "Value: EDT TypeDescriptionValue requires empty <value/> child (§1.0)"
+                            .into(),
+                    );
                 }
             }
         }
@@ -53,13 +67,16 @@ pub(crate) fn decode_edt(host: &Element) -> Result<PropertyValue, String> {
         EDT_VALUE_LIST => {
             // Пустой типизированный список значений (self-close). Непустой layout НЕ витнессирован.
             ensure_no_children(host)?;
-            ValueSpec { kind: ValueScalarKind::ValueList, scalar: None }
+            ValueSpec {
+                kind: ValueScalarKind::ValueList,
+                scalar: None,
+            }
         }
         other => {
             return Err(format!(
                 "Value: unknown EDT xsi:type {other:?} (witnessed: Undefined/String/Boolean/\
                  Number/Date/Reference/TypeDescription/AccountType/ValueList — §1.0: no guess/passthrough)"
-            ))
+            ));
         }
     };
     Ok(PropertyValue::Value(spec))
@@ -88,6 +105,11 @@ pub(crate) fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
             host.claim_text();
             let text = host.text.clone();
             match xsi.as_str() {
+                DES_COMPARISON_ENUM => {
+                    let qualified = format!("DataCompositionComparisonType.{text}");
+                    comparison_member(&qualified)?;
+                    str_spec(ValueScalarKind::SystemEnum, qualified)
+                }
                 DES_STRING => str_spec(ValueScalarKind::Str, text),
                 DES_REFERENCE => str_spec(ValueScalarKind::Reference, text),
                 DES_DECIMAL => str_spec(ValueScalarKind::Number, text),
@@ -98,7 +120,7 @@ pub(crate) fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
                     other => {
                         return Err(format!(
                             "Value: Designer xs:boolean must be \"true\"/\"false\", got {other:?} (§1.0)"
-                        ))
+                        ));
                     }
                 },
                 DES_TYPE_DESCRIPTION => {
@@ -107,7 +129,10 @@ pub(crate) fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
                             "Value: Designer v8:TypeDescription must be empty (self-close), got {text:?} (§1.0)"
                         ));
                     }
-                    ValueSpec { kind: ValueScalarKind::TypeDescription, scalar: None }
+                    ValueSpec {
+                        kind: ValueScalarKind::TypeDescription,
+                        scalar: None,
+                    }
                 }
                 DES_ACCOUNT_TYPE => {
                     require_account_type_literal(&text)?;
@@ -119,21 +144,24 @@ pub(crate) fn decode_designer(host: &Element) -> Result<PropertyValue, String> {
                             "Value: Designer xr:ValueList must be empty (self-close), got {text:?} (§1.0)"
                         ));
                     }
-                    ValueSpec { kind: ValueScalarKind::ValueList, scalar: None }
+                    ValueSpec {
+                        kind: ValueScalarKind::ValueList,
+                        scalar: None,
+                    }
                 }
                 other => {
                     return Err(format!(
                         "Value: unknown Designer xsi:type {other:?} (witnessed: xs:string/xs:boolean/\
                          xs:decimal/xs:dateTime/xr:DesignTimeRef/v8:TypeDescription/ent:AccountType/xr:ValueList — §1.0)"
-                    ))
+                    ));
                 }
             }
         }
         (true, true) => {
-            return Err("Value: Designer host carries both xsi:nil and xsi:type (§1.0)".into())
+            return Err("Value: Designer host carries both xsi:nil and xsi:type (§1.0)".into());
         }
         (false, false) => {
-            return Err("Value: Designer host missing xsi:nil/xsi:type marker (§1.0)".into())
+            return Err("Value: Designer host missing xsi:nil/xsi:type marker (§1.0)".into());
         }
     };
     Ok(PropertyValue::Value(spec))
@@ -217,7 +245,7 @@ fn edt_opt_value_child(host: &Element) -> Result<Option<String>, String> {
             return Err(format!(
                 "Value: EDT expects <value> child, got <{}> (§1.0)",
                 qname(e)
-            ))
+            ));
         }
     };
     if !value_el.attrs.is_empty() || !value_el.children.is_empty() {

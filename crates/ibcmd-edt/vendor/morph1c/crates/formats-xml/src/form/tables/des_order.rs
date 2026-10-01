@@ -1,12 +1,13 @@
 //! Designer-порядки эмиссии (слот-массивы `DES_*_ORDER`) + `DesSlot`-энум.
 
 use crate::form::tables::{
-    F_DEC_SHORTCUT, F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES, F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST,
-    F_EXT_SPECIAL_TEXT_INPUT_MODE, F_EXT_VIEW_SCALING_MODE, F_FF_FOOTER_DATA_PATH,
-    F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR, F_FF_TITLE_BACK_COLOR,
-    F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR, F_LD_BORDER_COLOR,
-    F_PIC_BORDER_COLOR, F_FF_WIDTH_IN_CARD, F_BT_SERVER_UNAVAILABLE,
-    F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT, F_EXT_ZOOMABLE,
+    F_BT_SERVER_UNAVAILABLE, F_DEC_SHORTCUT, F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
+    F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES, F_EXT_MULTIPLE_PRESENT_PATH,
+    F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST, F_EXT_SPECIAL_TEXT_INPUT_MODE, F_EXT_VIEW_SCALING_MODE,
+    F_EXT_ZOOMABLE, F_FF_FOOTER_DATA_PATH, F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR,
+    F_FF_TITLE_BACK_COLOR, F_FF_WIDTH_IN_CARD, F_GRP_ASSOCIATED_TABLE,
+    F_GRP_HIDDEN_STATE_TITLE_BACK_COLOR, F_GRP_POPUP_BORDER_COLOR, F_GRP_TITLE_BACK_COLOR,
+    F_LD_BORDER_COLOR, F_PIC_BORDER_COLOR,
 };
 use morph1c_core::ir::FieldId;
 use morph1c_core::spec::forms::controls::button as bt;
@@ -433,6 +434,7 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_EDIT_FORMAT),
     DesSlot::F(ff::F_EXT_AUTO_CHOICE_INCOMPLETE),
     DesSlot::F(ff::F_EXT_MULTIPLE_VALUE_DATA_PATH),
+    DesSlot::F(F_EXT_MULTIPLE_PRESENT_PATH),
     // QuickChoice → ChoiceFoldersAndItems → AutoMarkIncomplete → ChooseType (SSL Designer:
     // QuickChoice<CFAI×1, CFAI<AutoMarkIncomplete×2, AutoMarkIncomplete<ChooseType×1,
     // QuickChoice<AutoMarkIncomplete×1 — ЕДИНСТВЕННЫЙ корпусный QC/AMI-witness; 0 контрпримеров.
@@ -677,6 +679,7 @@ pub(crate) static DES_GROUP_ORDER: &[DesSlot] = &[
     DesSlot::F(fg::F_EXT_HYPERLINK),
     // ColumnGroup-специфичные ext-поля (прочие группы их не несут — слот пропускается).
     DesSlot::F(fg::F_EXT_SHOW_IN_CARD),
+    DesSlot::F(F_GRP_TITLE_BACK_COLOR),
     DesSlot::F(fg::F_EXT_SHOW_IN_HEADER),
     // HeaderHorizontalAlign/FixingInTable — после ShowInHeader (ERP-witness
     // РетроБонусыКлиентов: ShowInHeader→HeaderHorizontalAlign→ExtendedTooltip).
@@ -690,6 +693,7 @@ pub(crate) static DES_GROUP_ORDER: &[DesSlot] = &[
     DesSlot::F(fg::F_EXT_TITLE_DATA_PATH),
     DesSlot::F(fg::F_EXT_SCROLL_ON_COMPRESS),
     DesSlot::F(fg::F_EXT_CURRENT_ROW_USE),
+    DesSlot::F(F_GRP_ASSOCIATED_TABLE),
     // Popup importance — ЗАМЫКАЮЩЕЕ поле, непосредственно перед ExtendedTooltip (SSL ×4:
     // Title→Importance→ExtendedTooltip ×3, Picture→Importance→ExtendedTooltip ×1).
     DesSlot::F(fg::F_EXT_IMPORTANCE),

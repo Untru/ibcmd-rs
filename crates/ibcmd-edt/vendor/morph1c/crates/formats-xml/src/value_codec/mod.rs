@@ -64,6 +64,28 @@ const XSI_TYPE: &str = "xsi:type";
 const XSI_NIL: &str = "xsi:nil";
 
 // EDT xsi-типы (`core:`-prefixed).
+const EDT_SYSTEM_ENUM: &str = "core:SysEnumValue";
+const DES_COMPARISON_ENUM: &str = "dcsset:DataCompositionComparisonType";
+
+fn comparison_member(value: &str) -> Result<&str, String> {
+    let Some(member) = value.strip_prefix("DataCompositionComparisonType.") else {
+        return Err("System enum requires DataCompositionComparisonType".into());
+    };
+    if ![
+        "Equal",
+        "NotEqual",
+        "InList",
+        "NotInList",
+        "InHierarchy",
+        "InListByHierarchy",
+    ]
+    .contains(&member)
+    {
+        return Err("Unwitnessed DataCompositionComparisonType member".into());
+    }
+    Ok(member)
+}
+
 const EDT_UNDEFINED: &str = "core:UndefinedValue";
 const EDT_STRING: &str = "core:StringValue";
 const EDT_BOOLEAN: &str = "core:BooleanValue";

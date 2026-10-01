@@ -204,17 +204,35 @@ fn d_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                 auto: false,
                 font_ref: Some(format!("Style.{name}")),
                 height,
+                bold: d_font_bool(el, "bold", path)?,
+                italic: d_font_bool(el, "italic", path)?,
+                underline: d_font_bool(el, "underline", path)?,
+                strikeout: d_font_bool(el, "strikeout", path)?,
                 ..auto_font()
             }
         }
         other => {
             return Err(frame(format!(
                 "chart {path}: шрифт kind={other:?} не витнесснут (§1.0)"
-            )))
+            )));
         }
     };
     expect_attrs_claimed(el, path)?;
     Ok(ChartValue::Font(font))
+}
+
+fn d_font_bool(el: &Element, name: &str, path: &str) -> Result<Option<bool>, FormError> {
+    match el.attr(name) {
+        None => Ok(None),
+        Some(a) => {
+            a.claimed.set(true);
+            match a.value.as_str() {
+                "true" => Ok(Some(true)),
+                "false" => Ok(Some(false)),
+                _ => Err(frame(format!("chart {path}: @{name} must be bool"))),
+            }
+        }
+    }
 }
 
 /// Designer-линия: `<l width="2" gap="false"><v8ui:style xsi:type="v8ui:ChartLineType">…`.
@@ -287,7 +305,7 @@ fn d_read_loc(el: &Element, path: &str) -> Result<ChartValue, FormError> {
                     return Err(frame(format!(
                         "chart {path}: незнакомый ребёнок <{}:{}> в v8:item (§1.0)",
                         c.prefix, c.local
-                    )))
+                    )));
                 }
             }
         }
@@ -352,7 +370,7 @@ fn d_read_data_items(el: &Element, path: &str) -> Result<ChartValue, FormError> 
                 other => {
                     return Err(frame(format!(
                         "chart {path}: незнакомое поле <{other}> в item (§1.0)"
-                    )))
+                    )));
                 }
             }
         }
@@ -565,20 +583,19 @@ fn d_composite_out(
 
 /// Designer-шрифт из канона [`FontRef`].
 fn d_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormError> {
-    if f.face_name.is_some()
-        || f.bold.is_some()
-        || f.italic.is_some()
-        || f.underline.is_some()
-        || f.strikeout.is_some()
-        || f.scale.is_some()
-    {
+    if f.face_name.is_some() || f.scale.is_some() {
         return Err(frame(format!(
             "chart {path}: шрифт с переопределениями (не AutoFont/StyleItem) не витнесснут (§1.0)"
         )));
     }
     match &f.font_ref {
         None => {
-            if f.height.is_some() {
+            if f.height.is_some()
+                || f.bold.is_some()
+                || f.italic.is_some()
+                || f.underline.is_some()
+                || f.strikeout.is_some()
+            {
                 return Err(frame(format!(
                     "chart {path}: AutoFont с height не витнесснут (§1.0)"
                 )));
@@ -595,6 +612,16 @@ fn d_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormErr
                 OutElement::self_closing("d4p1", name).attr("ref", format!("style:{style_name}"));
             if let Some(h) = &f.height {
                 el = el.attr("height", designer_decimal(h));
+            }
+            for (name, value) in [
+                ("bold", f.bold),
+                ("italic", f.italic),
+                ("underline", f.underline),
+                ("strikeout", f.strikeout),
+            ] {
+                if let Some(value) = value {
+                    el = el.attr(name, value.to_string());
+                }
             }
             Ok(el.attr("kind", "StyleItem"))
         }

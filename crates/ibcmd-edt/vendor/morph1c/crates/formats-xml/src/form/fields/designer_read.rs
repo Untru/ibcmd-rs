@@ -137,7 +137,7 @@ fn read_designer_edit_mode(
         (None, Some(_)) => {
             return Err(FormError::Frame(
                 "<AutoEditMode> without <EditMode>: unmodeled (§1.0)".into(),
-            ))
+            ));
         }
     };
     Ok(Some(PropertyValue::Enum(Token::new(canon))))
@@ -218,7 +218,7 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
                 other => {
                     return Err(FormError::Frame(format!(
                         "<{tag}><xr:Common>={other:?}, want bool (§1.0)"
-                    )))
+                    )));
                 }
             };
             let mut roles = Vec::new();
@@ -231,9 +231,9 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
                         "<{tag}>: unexpected extra children (§1.0)"
                     )));
                 }
-                let name = v
-                    .attr("name")
-                    .ok_or_else(|| FormError::Frame(format!("<{tag}><xr:Value>: no name (§1.0)")))?;
+                let name = v.attr("name").ok_or_else(|| {
+                    FormError::Frame(format!("<{tag}><xr:Value>: no name (§1.0)"))
+                })?;
                 name.claimed.set(true);
                 v.claim_with_text();
                 let val = match v.text.as_str() {
@@ -243,7 +243,7 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
                         return Err(FormError::Frame(format!(
                             "<{tag}><xr:Value name={:?}>={other:?}, want bool (§1.0)",
                             name.value
-                        )))
+                        )));
                     }
                 };
                 roles.push(PropertyValue::List(vec![
@@ -297,7 +297,7 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
                 other => {
                     return Err(FormError::Frame(format!(
                         "<{tag}>={other:?}: scrollbar wants bool (§1.0)"
-                    )))
+                    )));
                 }
             };
             if !el.children.is_empty() {
@@ -368,6 +368,25 @@ fn decode_designer_period(el: &Element, tag: &str) -> Result<PropertyValue, Form
 /// Designer `<Border width="1"><v8ui:style xsi:type="v8ui:ControlBorderType">WithoutBorder
 /// </v8ui:style></Border>` — эмитится ТОЛЬКО не-`Single` (Single Designer опускает через KEEP).
 fn decode_designer_border(el: &Element, tag: &str) -> Result<PropertyValue, FormError> {
+    if let Some(reference) = el.attr("ref") {
+        let Some(name) = reference
+            .value
+            .strip_prefix("style:")
+            .filter(|n| !n.is_empty())
+        else {
+            return Err(FormError::Frame(
+                "Border ref requires a named style reference".into(),
+            ));
+        };
+        if !el.children.is_empty() || !el.text.is_empty() {
+            return Err(FormError::Frame(
+                "Border ref must have no children or text".into(),
+            ));
+        }
+        reference.claimed.set(true);
+        el.claim();
+        return Ok(PropertyValue::Ref(format!("Style.{name}")));
+    }
     el.claim();
     let w = el
         .attr("width")
@@ -419,10 +438,22 @@ pub(crate) fn decode_designer_picture(el: &Element, tag: &str) -> Result<Propert
         .ok_or_else(|| FormError::Frame(format!("<{tag}>: no <xr:LoadTransparent>")))?;
     lt.claim_with_text();
     let load_transparent = picture_lt_value(&lt.text, tag)?;
-    if el.children.len() != 2 {
+    let pixel = el.child("TransparentPixel").filter(|c| c.prefix == "xr");
+    if el.children.len() != 2 + usize::from(pixel.is_some()) {
         return Err(FormError::Frame(format!(
-            "<{tag}>: unexpected extra children (§1.0)"
+            "<{tag}>: unexpected picture children"
         )));
+    }
+    if let Some(pixel) = pixel {
+        if !load_transparent {
+            return Err(FormError::Frame(
+                "Picture TransparentPixel requires LoadTransparent=true".into(),
+            ));
+        }
+        return Ok(picture_canon_px(
+            r.text.clone(),
+            decode_designer_transparent_pixel(pixel, tag)?,
+        ));
     }
     Ok(picture_canon(r.text.clone(), load_transparent))
 }
@@ -468,13 +499,13 @@ fn decode_designer_picture_abs(el: &Element, tag: &str) -> Result<PropertyValue,
             return Err(FormError::Frame(format!(
                 "<{tag}>: <xr:LoadTransparent>true</…> without <xr:TransparentPixel> — \
                  unwitnessed (LT denormalizes pixel presence, §1.0)"
-            )))
+            )));
         }
         (false, Some(_)) => {
             return Err(FormError::Frame(format!(
                 "<{tag}>: <xr:TransparentPixel> with <xr:LoadTransparent>false</…> — \
                  unwitnessed (LT denormalizes pixel presence, §1.0)"
-            )))
+            )));
         }
     };
     if el.children.len() != if has_pixel { 3 } else { 2 } {
@@ -683,8 +714,7 @@ fn decode_fcldtv_designer(host: &Element) -> Result<PropertyValue, FormError> {
                 pres.claim();
                 if !pres.children.is_empty() || !pres.text.is_empty() {
                     return Err(FormError::Frame(
-                        "choiceParameters v8:FixedArray <Presentation> must be empty (§1.0)"
-                            .into(),
+                        "choiceParameters v8:FixedArray <Presentation> must be empty (§1.0)".into(),
                     ));
                 }
             }
@@ -695,9 +725,7 @@ fn decode_fcldtv_designer(host: &Element) -> Result<PropertyValue, FormError> {
                     FormError::Frame("choiceParameters v8:FixedArray: no <Value> (§1.0)".into())
                 })?;
             inner.claim();
-            out.push(
-                value_codec::decode(ValueDialect::Designer, inner).map_err(FormError::Frame)?,
-            );
+            out.push(value_codec::decode(ValueDialect::Designer, inner).map_err(FormError::Frame)?);
         }
         return Ok(PropertyValue::List(out));
     }
@@ -707,7 +735,9 @@ fn decode_fcldtv_designer(host: &Element) -> Result<PropertyValue, FormError> {
 }
 
 /// Прочитать Designer-контейнер `<ChoiceParameters>` (c `<app:item>`-детьми) в список пар.
-pub(crate) fn read_choice_parameters_designer(cl: &Element) -> Result<Vec<PropertyValue>, FormError> {
+pub(crate) fn read_choice_parameters_designer(
+    cl: &Element,
+) -> Result<Vec<PropertyValue>, FormError> {
     cl.claim();
     if !cl.text.is_empty() {
         return Err(FormError::Frame(

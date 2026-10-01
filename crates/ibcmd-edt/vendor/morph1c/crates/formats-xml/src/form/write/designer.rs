@@ -11,8 +11,8 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     // `version=`) эмитится ТАРГЕТ-версией из амбьентного round-trip таргета
     // (`with_roundtrip_target`; вне scope — SSL 2.21, прежнее поведение). Не-witnessed
     // таргет → громкая ошибка (§1.0), зеркало `formats_designer::common::emit_root_envelope`.
-    let target = morph1c_core::version::current_roundtrip_target()
-        .unwrap_or(morph1c_core::version::SSL);
+    let target =
+        morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
     let profile = form_profile_for(target).ok_or_else(|| {
         FormError::Envelope(format!(
             "no Designer <Form> envelope profile for format {target} (witnessed: {})",
@@ -286,7 +286,11 @@ pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElemen
             // <xr:Common>true><xr:Value>×N`). Роли — после `<xr:Common>` (⟺ EDT `<for>`).
             if !uv || !it.user_visible_roles.is_empty() {
                 let mut vis = OutElement::branch("", "Visible");
-                vis.push(OutElement::leaf("xr", "Common", if uv { "true" } else { "false" }));
+                vis.push(OutElement::leaf(
+                    "xr",
+                    "Common",
+                    if uv { "true" } else { "false" },
+                ));
                 for (role, val) in &it.user_visible_roles {
                     vis.push(
                         OutElement::leaf("xr", "Value", if *val { "true" } else { "false" })
@@ -528,6 +532,13 @@ pub(crate) fn designer_command(cmd: &FormCommand) -> Result<OutElement, FormErro
                 "LoadTransparent",
                 if lt { "true" } else { "false" },
             ));
+            if let Some((x, y)) = super::super::fields::picture_pixel(v) {
+                p.push(
+                    OutElement::self_closing("xr", "TransparentPixel")
+                        .attr("x", x.to_string())
+                        .attr("y", y.to_string()),
+                );
+            }
             el.push(p);
         }
     }
