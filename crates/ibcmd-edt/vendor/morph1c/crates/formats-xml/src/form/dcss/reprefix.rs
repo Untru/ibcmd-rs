@@ -344,7 +344,8 @@ pub(crate) fn default_ns_to_dcsset(el: &mut Element) {
     if let Some(p) =
         inline_types_prefix(el.attrs.iter().map(|a| (a.name.as_str(), a.value.as_str())))
     {
-        if p != TYPES_PREFIX_DESIGNER {
+        // Filter right values retain the exact scoped source alias.
+        if el.local != "right" && p != TYPES_PREFIX_DESIGNER {
             for a in &mut el.attrs {
                 if a.name == format!("xmlns:{p}") {
                     a.name = format!("xmlns:{TYPES_PREFIX_DESIGNER}");
@@ -377,8 +378,9 @@ pub(crate) fn dcsset_to_default_ns(el: &mut OutElement) {
             }
         }
     }
-    if inline_types_prefix(el.attrs.iter().map(|(n, v)| (n.as_str(), v.as_str())))
-        .is_some_and(|p| p == TYPES_PREFIX_DESIGNER)
+    if el.local != "right"
+        && inline_types_prefix(el.attrs.iter().map(|(n, v)| (n.as_str(), v.as_str())))
+            .is_some_and(|p| p == TYPES_PREFIX_DESIGNER)
     {
         for (name, _) in &mut el.attrs {
             if name == &format!("xmlns:{TYPES_PREFIX_DESIGNER}") {

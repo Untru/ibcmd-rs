@@ -485,7 +485,7 @@ pub(crate) fn designer_dcs_settings_parameter_value(it: &DcsSettingsParameterVal
         }
         // ERP-witness ОтклоненияВСтоимостиТоваров: строковый параметр (Формат=ЧДЦ=2).
         DcsCorValue::Str(s) => {
-            el.push(OutElement::leaf("dcscor", "value", s.clone()).attr("xsi:type", "xs:string"));
+            el.push(designer_dcs_text_value_ns("dcscor", "value", s, "xs:string"));
         }
         DcsCorValue::LocalString(pairs) => {
             let mut v =
@@ -667,6 +667,7 @@ pub(crate) fn designer_dcs_item(it: &DcsItem) -> OutElement {
             selection,
             filter,
             appearance,
+            source_empty_appearance,
             presentation,
             view_mode,
             user_setting_id,
@@ -710,8 +711,12 @@ pub(crate) fn designer_dcs_item(it: &DcsItem) -> OutElement {
                 el.push(flt);
             }
             // `<dcsset:appearance>` (SC5) — ОПЦИОНАЛЕН: пусто ⇒ тег НЕ эмитим (ERP-witness тот же).
-            if !appearance.is_empty() {
-                let mut app = OutElement::branch("dcsset", "appearance");
+            if !appearance.is_empty() || *source_empty_appearance {
+                let mut app = if appearance.is_empty() {
+                    OutElement::self_closing("dcsset", "appearance")
+                } else {
+                    OutElement::branch("dcsset", "appearance")
+                };
                 for ai in appearance {
                     app.push(designer_dcs_settings_parameter_value(ai));
                 }
@@ -801,9 +806,10 @@ pub(crate) fn designer_dcs_right(right: &DcsRightValue) -> OutElement {
         DcsRightValue::DesignTimeValue(v) => text_leaf(v, "dcscor:DesignTimeValue"),
         DcsRightValue::TypeQName(v) => {
             // ИНЛАЙН-ns ПЕРЕД xsi:type (byte-порядок witness Взаимодействия).
+            let prefix = v.split_once(':').map_or("d8p1", |(prefix, _)| prefix);
             let mut el = OutElement::leaf("dcsset", "right", v.clone());
             el.attrs.push((
-                "xmlns:d8p1".to_string(),
+                format!("xmlns:{prefix}"),
                 "http://v8.1c.ru/8.2/data/types".to_string(),
             ));
             el.attrs

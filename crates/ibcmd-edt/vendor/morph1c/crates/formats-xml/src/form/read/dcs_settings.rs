@@ -500,8 +500,9 @@ pub(crate) fn read_dcs_conditional_appearance_item(it: &Element) -> Result<DcsIt
     expect_only_dcsset_children(flt, &["item"])?;
     // `<dcsset:appearance>` — ОПЦИОНАЛЕН: CA-элемент может нести лишь selection+filter БЕЗ
     // оформления (ERP-witness НДССостояниеРеализации0.ФормаРабочееМесто — «плейсхолдер»-строка).
-    // Отсутствие ⇒ пустой список ⇒ writer тег не эмитит (byte-exact).
+    // Distinguish absent from explicit empty container for exact source regeneration.
     let mut appearance = Vec::new();
+    let mut source_empty_appearance = false;
     if let Some(app) = it.child("appearance").filter(|c| c.prefix == "dcsset") {
         app.claim();
         for ai in app
@@ -511,6 +512,7 @@ pub(crate) fn read_dcs_conditional_appearance_item(it: &Element) -> Result<DcsIt
         {
             appearance.push(read_dcs_settings_parameter_value(ai)?);
         }
+        source_empty_appearance = appearance.is_empty();
         for c in &app.children {
             if !(c.prefix == "dcscor" && c.local == "item") {
                 return Err(FormError::Frame(format!(
@@ -540,6 +542,7 @@ pub(crate) fn read_dcs_conditional_appearance_item(it: &Element) -> Result<DcsIt
         selection,
         filter,
         appearance,
+        source_empty_appearance,
         presentation,
         view_mode,
         user_setting_id,
@@ -589,10 +592,6 @@ pub(crate) fn read_dcs_presentation_opt(
 
 /// URI ns типов (`v8:Type`-значение объявляет его ИНЛАЙН авто-префиксом `dNpM`).
 pub(crate) const TYPES_NS_82: &str = "http://v8.1c.ru/8.2/data/types";
-/// Designer-КАНОН авто-префикса types-ns (см. `dcss::TYPES_PREFIX_DESIGNER`) — под ним хранится
-/// QName в IR, чтобы cf-`reprefix` его снял, а sidecar-адаптер пере-префиксовал.
-pub(crate) const TYPES_PREFIX_CANON: &str = "d8p1";
-
 /// Найти ИНЛАЙН-объявление types-ns (`xmlns:dNpM="…8.2/data/types"`) на элементе-значении
 /// `v8:Type`, склеймить его и вернуть (авто-префикс `dNpM`, ЛОКАЛЬНОЕ ИМЯ типа из QName-текста).
 /// Авто-префикс локус-зависим (глубина: `d6p1` у DCS-параметра, `d8p1`/`d10p1` у отбора) —
@@ -617,7 +616,25 @@ pub(crate) fn claim_inline_type_prefix_local(el: &Element) -> Result<(String, St
             ))
         })?
         .to_string();
+    if !is_xml_ncname(&prefix) || !is_xml_ncname(&local) {
+        return Err(FormError::Frame("v8:Type value: invalid scoped QName".into()));
+    }
     Ok((prefix, local))
+}
+
+// XML 1.0 Fifth Edition NameStartChar/NameChar, excluding colon for NCName.
+// https://www.w3.org/TR/xml/#NT-NameStartChar
+fn is_xml_ncname(value: &str) -> bool {
+    fn start(c: char) -> bool {
+        matches!(c, 'A'..='Z' | '_' | 'a'..='z' | '\u{C0}'..='\u{D6}'
+            | '\u{D8}'..='\u{F6}' | '\u{F8}'..='\u{2FF}' | '\u{370}'..='\u{37D}'
+            | '\u{37F}'..='\u{1FFF}' | '\u{200C}'..='\u{200D}' | '\u{2070}'..='\u{218F}'
+            | '\u{2C00}'..='\u{2FEF}' | '\u{3001}'..='\u{D7FF}' | '\u{F900}'..='\u{FDCF}'
+            | '\u{FDF0}'..='\u{FFFD}' | '\u{10000}'..='\u{EFFFF}')
+    }
+    let mut chars=value.chars();
+    chars.next().is_some_and(start) && chars.all(|c| start(c)
+        || matches!(c, '-' | '.' | '0'..='9' | '\u{B7}' | '\u{300}'..='\u{36F}' | '\u{203F}'..='\u{2040}'))
 }
 
 /// То же, но возвращает лишь ЛОКАЛЬНОЕ ИМЯ (беспрефиксный канон DCS-параметра-значения).
@@ -673,15 +690,12 @@ pub(crate) fn read_dcs_right_value(right: &Element) -> Result<DcsRightValue, For
             Ok(DcsRightValue::DesignTimeValue(text_leaf(right)?))
         }
         "v8:Type" => {
-            // `<dcsset:right xmlns:dNpM="http://v8.1c.ru/8.2/data/types" xsi:type="v8:Type">
-            // dNpM:Undefined`. Авто-префикс `dNpM` локус-зависим (глубина отбора): Взаимодействия —
-            // `d8p1`, ЧекиККМ (вложенная FilterItemGroup) — `d10p1`. Принимаем ЛЮБОЙ и КАНОНИЗИРУЕМ
-            // текст к Designer-канону `d8p1:<local>` — под ним sidecar-адаптер и cf-`reprefix`
-            // умеют его пере-выводить (§1.0-тотальность по URI, запись пришпилена к d8p1).
+            // Preserve the exact inline alias bound to TYPES_NS_82. The private
+            // semantic serializer canonicalizes only that alias, retaining the type name.
             xt.claimed.set(true);
-            let (_prefix, local) = claim_inline_type_prefix_local(right)?;
-            let _ = text_leaf(right)?; // claim текста + запрет детей
-            Ok(DcsRightValue::TypeQName(format!("{TYPES_PREFIX_CANON}:{local}")))
+            let (prefix, local) = claim_inline_type_prefix_local(right)?;
+            let _ = text_leaf(right)?; // claim text and reject children
+            Ok(DcsRightValue::TypeQName(format!("{prefix}:{local}")))
         }
         "v8:StandardBeginningDate" => {
             xt.claimed.set(true);

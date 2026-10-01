@@ -475,6 +475,10 @@ pub enum DcsItem {
         filter: Vec<DcsItem>,
         /// Оформление (`dcsset:appearance` → `dcscor:item xsi:type="dcsset:SettingsParameterValue"`).
         appearance: Vec<DcsSettingsParameterValue>,
+        /// Native/sidecar lexical presence of an explicit empty appearance container.
+        /// Only consulted while the typed appearance remains empty; excluded from semantics.
+        #[serde(skip)]
+        source_empty_appearance: bool,
         /// Представление (`dcsset:presentation`; witness ERP — 209 CA-элементов несут имя).
         /// `None` ⇒ тег отсутствует. Позиция: ПОСЛЕ appearance.
         #[serde(default)]
@@ -569,8 +573,9 @@ pub enum DcsRightValue {
     /// `Перечисление.ТехническиеСтатусыМЧД.Отменена`; witness МашиночитаемыеДоверенности).
     DesignTimeValue(String),
     /// `v8:Type` с ИНЛАЙН `xmlns:d8p1="http://v8.1c.ru/8.2/data/types"`: текст — QName типа
-    /// (витнессированно РОВНО `d8p1:Undefined`; Взаимодействия). Инлайн-ns фиксирован.
-    TypeQName(String),
+    /// The inline namespace URI is fixed; its actual source alias is retained for
+    /// exact regeneration and excluded from the semantic QName identity.
+    TypeQName(#[serde(serialize_with = "serialize_type_qname_semantic")] String),
     /// `v8:ValueListType` — ПУСТОЙ список значений: `<v8:valueType/>` (самозакрытый) +
     /// `<v8:lastId xsi:type="xs:decimal">last_id</v8:lastId>` (witness ERP FilterItemComparison
     /// InList ДиспетчированиеПроизводства.`Выполнение`; ценз 9/9 — все пусты, lastId=`-1`).
@@ -590,6 +595,14 @@ pub enum DcsParameterUse {
 
 /// Only the witnessed DCS schema-parameter default: absence has false semantics.
 /// Presence remains in the private fields for exact native same-source output.
+fn serialize_type_qname_semantic<S: serde::Serializer>(
+    value: &str,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    let local = value.split_once(':').map_or(value, |(_, local)| local);
+    serializer.serialize_str(&format!("d8p1:{local}"))
+}
+
 fn serialize_parameter_restriction<S: serde::Serializer>(
     value: &Option<bool>,
     serializer: S,

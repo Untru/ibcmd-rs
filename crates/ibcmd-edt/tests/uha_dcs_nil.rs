@@ -38,6 +38,7 @@ fn witness() -> Vec<DcsItem> {
             user_setting_presentation: None,
         }],
         appearance: vec![],
+        source_empty_appearance: false,
         presentation: None,
         view_mode: None,
         user_setting_id: None,
