@@ -175,13 +175,12 @@ pub(crate) fn edt_dynamic_list_attr(dl: &DynamicListAttrExt) -> Result<OutElemen
         "getInvisibleFieldPresentations",
         dl.get_invisible_field_presentations,
     );
-    // calculatedFields (witness НеудаленныеОбъекты: ПОСЛЕ флагов).
-    for cf in &dl.calculated_fields {
-        ex.push(edt_dcs_calculated_field(cf)?);
-    }
-    // EXTENDED: fields ПОСЛЕ флагов, parameters ПОСЛЕ fields.
+    // Genuine UH and BSP use schema fields, then calculated fields, then parameters.
     for f in &dl.fields {
         ex.push(edt_dcs_field(f)?);
+    }
+    for cf in &dl.calculated_fields {
+        ex.push(edt_dcs_calculated_field(cf)?);
     }
     for p in &dl.parameters {
         ex.push(edt_dcs_parameter(p)?);

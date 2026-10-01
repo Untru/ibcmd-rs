@@ -337,3 +337,119 @@ fn genuine_repeated_parameter_values_survive_both_formats() {
         assert_eq!(result, original);
     }
 }
+fn dcs_orders(bytes: &[u8]) -> Vec<Vec<String>> {
+    fn visit(el: &formats_xml::Element, out: &mut Vec<Vec<String>>) {
+        if matches!(
+            el.attr("xsi:type").map(|a| a.value.as_str()),
+            Some("form:DynamicListExtInfo" | "DynamicList")
+        ) {
+            let tags = el
+                .children
+                .iter()
+                .filter(|c| {
+                    matches!(
+                        c.local.as_str(),
+                        "fields"
+                            | "calculatedFields"
+                            | "parameters"
+                            | "Field"
+                            | "CalculatedField"
+                            | "Parameter"
+                            | "keyType"
+                            | "keyField"
+                            | "KeyType"
+                            | "KeyField"
+                            | "MainTable"
+                            | "AutoSaveUserSettings"
+                    )
+                })
+                .map(|c| c.local.clone())
+                .collect();
+            out.push(tags);
+            for c in &el.children {
+                if matches!(c.local.as_str(), "parameters" | "Parameter") {
+                    out.push(c.children.iter().map(|v| v.local.clone()).collect());
+                }
+            }
+        }
+        for c in &el.children {
+            visit(c, out);
+        }
+    }
+    let root = formats_xml::read::parse(bytes).unwrap();
+    let mut result = vec![];
+    visit(&root.root, &mut result);
+    result
+}
+#[test]
+fn schema_writers_follow_witnessed_field_calculated_parameter_and_usage_order() {
+    let content = SCHEMA.replace(
+        "<use>Always</use>",
+        "<availableAsField>false</availableAsField><use>Always</use>",
+    );
+    let body = read_form(FormDialect::Edt, &form(&content, "")).unwrap();
+    for (dialect, field, calculated, parameters) in [
+        (FormDialect::Edt, "fields", "calculatedFields", "parameters"),
+        (
+            FormDialect::Designer,
+            "Field",
+            "CalculatedField",
+            "Parameter",
+        ),
+    ] {
+        let bytes = write_form(dialect, &body).unwrap();
+        let orders = dcs_orders(&bytes);
+        let groups = &orders[0];
+        assert!(
+            groups.iter().position(|s| s == field).unwrap()
+                < groups.iter().position(|s| s == calculated).unwrap()
+        );
+        assert!(
+            groups.iter().position(|s| s == calculated).unwrap()
+                < groups.iter().position(|s| s == parameters).unwrap()
+        );
+        let parameter = orders
+            .iter()
+            .find(|s| s.iter().any(|v| v == "use"))
+            .unwrap();
+        assert!(
+            parameter
+                .iter()
+                .position(|s| s == "availableAsField")
+                .unwrap()
+                < parameter.iter().position(|s| s == "use").unwrap()
+        );
+    }
+}
+#[test]
+#[ignore = "requires genuine F lab DCS order witnesses"]
+fn genuine_dcs_writers_preserve_schema_and_parameter_element_order() {
+    let lab = std::path::PathBuf::from(std::env::var("IBCMD_DCS_ORDER_LAB").unwrap());
+    let cases = [
+        (
+            FormDialect::Edt,
+            "uha83-failing-forms-edt-r1",
+            "Form.form",
+            vec!["10", "28", "38"],
+        ),
+        (
+            FormDialect::Designer,
+            "uha83-failing-forms-xml-r1",
+            "Form.xml",
+            vec!["101", "118", "40"],
+        ),
+    ];
+    let mut count = 0;
+    for (dialect, folder, name, ids) in cases {
+        for id in ids {
+            let source = std::fs::read(lab.join(folder).join(id).join(name)).unwrap();
+            let body = read_form(dialect, &source).unwrap();
+            let written = write_form(dialect, &body).unwrap();
+            let expected = dcs_orders(&source);
+            assert!(!expected.is_empty());
+            assert_eq!(dcs_orders(&written), expected, "{folder}/{id}/{name}");
+            count += 1;
+        }
+    }
+    assert_eq!(count, 6);
+}

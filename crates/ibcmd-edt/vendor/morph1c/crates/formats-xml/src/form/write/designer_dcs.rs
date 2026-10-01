@@ -33,11 +33,12 @@ pub(crate) fn designer_dynamic_list_attr(
     if let Some(q) = &dl.query_text {
         s.push(OutElement::leaf("", "QueryText", q.clone()));
     }
-    for cf in &dl.calculated_fields {
-        s.push(designer_dcs_calculated_field(cf)?);
-    }
+    // Genuine native UH ordering: fields -> calculated fields -> parameters.
     for f in &dl.fields {
         s.push(designer_dcs_field(f)?);
+    }
+    for cf in &dl.calculated_fields {
+        s.push(designer_dcs_calculated_field(cf)?);
     }
     for p in &dl.parameters {
         s.push(designer_dcs_parameter(p)?);
@@ -53,14 +54,12 @@ pub(crate) fn designer_dynamic_list_attr(
     for kf in &dl.key_fields {
         s.push(OutElement::leaf("", "KeyField", kf.clone()));
     }
-    // AutoSaveUserSettings: Designer-дефолт true ⇒ эмитим лишь явный false (witness
-    // ГрупповоеИзменениеРеквизитов.ВыбранныеЭлементы: ПОСЛЕ KeyField, ДО ListSettings).
-    if !dl.auto_save_user_settings {
-        s.push(OutElement::leaf("", "AutoSaveUserSettings", "false"));
-    }
-    // MainTable — отсутствует у РАСШИРЕННОЙ формы (собственный DCS data-set).
+    // MainTable precedes explicit AutoSaveUserSettings (genuine UH case 40).
     if let Some(mt) = &dl.main_table {
         s.push(OutElement::leaf("", "MainTable", mt.clone()));
+    }
+    if !dl.auto_save_user_settings {
+        s.push(OutElement::leaf("", "AutoSaveUserSettings", "false"));
     }
     // GetInvisibleFieldPresentations: Designer-дефолт true ⇒ эмитим лишь явный false
     // (ERP-witness РежимыРаботыСотрудников: MainTable→GetInvisibleFieldPresentations→ListSettings).
@@ -309,7 +308,6 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
         el.push(OutElement::leaf("dcssch", "valueListAllowed", "true"));
     }
     if let Some(expression) = &p.expression { el.push(OutElement::leaf("dcssch", "expression", expression.clone())); }
-    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("dcssch", "use", "Always")); }
     if let Some(b) = p.available_as_field {
         el.push(OutElement::leaf(
             "dcssch",
@@ -317,6 +315,7 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
             if b { "true" } else { "false" },
         ));
     }
+    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("dcssch", "use", "Always")); }
     Ok(el)
 }
 

@@ -219,7 +219,6 @@ pub(crate) fn edt_dcs_parameter(p: &DcsParameter) -> Result<OutElement, FormErro
         el.push(OutElement::leaf("", "valueListAllowed", "true"));
     }
     if let Some(expression) = &p.expression { el.push(OutElement::leaf("", "expression", expression.clone())); }
-    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("", "use", "Always")); }
     if let Some(b) = p.available_as_field {
         el.push(OutElement::leaf(
             "",
@@ -227,6 +226,7 @@ pub(crate) fn edt_dcs_parameter(p: &DcsParameter) -> Result<OutElement, FormErro
             if b { "true" } else { "false" },
         ));
     }
+    if let Some(morph1c_core::ir::form::DcsParameterUse::Always) = p.usage { el.push(OutElement::leaf("", "use", "Always")); }
     Ok(el)
 }
 
