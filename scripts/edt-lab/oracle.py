@@ -367,6 +367,32 @@ def warm_workspace_multiset(log: Path, command_path: Path) -> tuple[Counter, lis
     return result, lexical
 
 
+WARM_XTEXT_LOGGER = "org.eclipse.xtext.conversion.impl.AbstractLexerBasedConverter"
+WARM_XTEXT_MESSAGE = "Only terminal rules are supported by lexer based converters but got ID which is an instance of ParserRule"
+
+
+def warm_stream_multiset(run: Path, label: str) -> tuple[Counter, list[dict]]:
+    """Every stream line is claimed; no arbitrary warning/error is omitted."""
+    result, lexical = Counter(), []
+    for suffix in ("stdout", "stderr"):
+        raw = (run / f"{label}.{suffix}").read_bytes()
+        text = raw.decode("utf-8", errors="strict")
+        if raw and not raw.endswith(b"\n"):
+            raise OracleError("Malformed/partial warm validation stream; raw output retained")
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            match = re.fullmatch(r"([0-9]+) +\[derived_data_executor_([0-9]+)\] +WARN +"
+                + re.escape(WARM_XTEXT_LOGGER) + r" +- " + re.escape(WARM_XTEXT_MESSAGE), line)
+            if suffix != "stdout" or not match:
+                raise OracleError("Unclassified warm validation stdout/stderr; raw output retained")
+            result[("WARN", WARM_XTEXT_LOGGER, WARM_XTEXT_MESSAGE)] += 1
+            lexical.append({"kind": "known_xtext_converter_warn", "stream": suffix,
+                "raw_line": line, "elapsed_milliseconds": match[1], "executor_number": match[2],
+                "raw_line_sha256": hashlib.sha256(line.encode("utf-8")).hexdigest()})
+    return result, lexical
+
+
 def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
                              prefix: str, stem: str, passes: int, original: Path | None = None) -> dict:
     """Recompute every capture fact; supplied summaries never authorize a pass."""
@@ -376,7 +402,7 @@ def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
     original_before = snapshot(original) if original else None
     if original_before and any(before[key] != original_before[key] for key in ("files", "file_count", "total_bytes", "tree_sha256")):
         raise OracleError("Warm copy differs from immutable authentic source")
-    labels, records, workspace_counters, previous = [], [], [], b""
+    labels, records, workspace_counters, stream_counters, previous = [], [], [], [], b""
     for index in range(1, passes + 1):
         label = f"{prefix}-pass-{index:03d}"
         labels.append(label)
@@ -406,10 +432,8 @@ def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
                 raise OracleError("Warm validation modified or checked a different source project")
             if original and json.loads((run / f"{label}.immutable-{phase}.json").read_text(encoding="utf-8")) != original_before:
                 raise OracleError("Immutable authentic source changed during a warm pass")
-        for suffix in ("stdout", "stderr"):
-            content = (run / f"{label}.{suffix}").read_bytes()
-            if content.decode("utf-8", errors="strict").strip():
-                raise OracleError("Unclassified warm validation stdout/stderr; raw output retained")
+        stream_counter, stream_lexical = warm_stream_multiset(run, label)
+        stream_counters.append(stream_counter)
         validation_multiset(tsv)  # malformed rows are always fatal
         raw = (run / f"{label}.workspace-log").read_bytes()
         delta = workspace_append_delta(previous, raw)
@@ -421,6 +445,7 @@ def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
         record = {"label": label, "command_sha256": digest(run / f"{label}.command.json"),
                   "fifo_command_sha256": fifo_hashes,
                   "workspace_lexical_context": lexical,
+                  "stream_lexical_context": stream_lexical,
                   "tsv": tsv.name, "tsv_sha256": digest(tsv), "workspace_log_sha256": digest(run / f"{label}.workspace-log"),
                   "workspace_prefix_bytes": len(previous), "workspace_phase_bytes": len(delta),
                   "workspace_phase_sha256": digest(phase_path), "project_sha256": before["tree_sha256"],
@@ -443,6 +468,7 @@ def warm_validation_evidence(args, run: Path, project: Path, workspace: Path,
             "immutable_original": str(original) if original else None,
             "final_consecutive_all_diagnostics_stable": stable,
             "final_consecutive_all_workspace_records_stable": workspace_counters[-2] == workspace_counters[-1],
+            "final_consecutive_stream_records_stable": stream_counters[-2] == stream_counters[-1],
             "records": records,
             "final_label": labels[-1], "final_tsv": final.name}
 
@@ -493,7 +519,8 @@ def warm_validate(args, run: Path, project: Path, workspace: Path, prefix: str, 
     evidence = warm_validation_evidence(args, run, project, workspace, prefix, stem, passes, original)
     write_json(run / f"{stem}-warm.json", evidence)
     if not evidence["final_consecutive_all_diagnostics_stable"] \
-            or not evidence["final_consecutive_all_workspace_records_stable"]:
+            or not evidence["final_consecutive_all_workspace_records_stable"] \
+            or not evidence["final_consecutive_stream_records_stable"]:
         raise OracleError("Final consecutive ALL diagnostic Counters/workspace records are not stable; every pass retained")
     with (run / f"{stem}.tsv").open("xb") as target:
         with (run / evidence["final_tsv"]).open("rb") as source:
@@ -508,6 +535,7 @@ def bind_warm_validation(args, run: Path, project: Path, workspace: Path,
     recorded = json.loads((run / f"{stem}-warm.json").read_text(encoding="utf-8"))
     if evidence != recorded or not evidence["final_consecutive_all_diagnostics_stable"] \
             or not evidence["final_consecutive_all_workspace_records_stable"] \
+            or not evidence["final_consecutive_stream_records_stable"] \
             or digest(run / f"{stem}.tsv") != evidence["records"][-1]["tsv_sha256"]:
         raise OracleError("Warm capture summary/stability/final TSV disagrees with complete records")
     return evidence
@@ -536,15 +564,22 @@ def compare_warm_phase_errors(control: Path, baseline: Path, generated: Path,
         a = Counter({key: count for key, count in a.items() if key not in known})
         b = Counter({key: count for key, count in b.items() if key not in known})
         structured = compare_validation_tsv(baseline / original["tsv"], generated / candidate["tsv"])
+        source_streams, source_stream_lexical = warm_stream_multiset(baseline, original["label"])
+        target_streams, target_stream_lexical = warm_stream_multiset(generated, candidate["label"])
         phases.append({"baseline_label": original["label"], "candidate_label": candidate["label"],
                        "all_tsv_diagnostics": structured,
                        "baseline_lexical_context": source_lexical, "candidate_lexical_context": target_lexical,
+                       "baseline_stream_lexical_context": source_stream_lexical, "candidate_stream_lexical_context": target_stream_lexical,
+                       "baseline_stream_records": [{"severity": key[0], "logger": key[1], "message": key[2], "count": count} for key, count in sorted(source_streams.items())],
+                       "candidate_stream_records": [{"severity": key[0], "logger": key[1], "message": key[2], "count": count} for key, count in sorted(target_streams.items())],
+                       "new_stream_record_count": sum((target_streams - source_streams).values()),
                        "baseline_tsv_unresolved": summarize_validation_tsv(baseline / original["tsv"])["unresolved_source_diagnostics"],
                        "candidate_tsv_unresolved": summarize_validation_tsv(generated / candidate["tsv"])["unresolved_source_diagnostics"],
                        "baseline_nonambient": rows(a), "candidate_nonambient": rows(b),
                        "new_nonambient": rows(b - a), "removed_nonambient": rows(a - b)})
     return {"no_new_nonambient_errors": not any(phase["new_nonambient"] for phase in phases),
             "no_new_all_tsv_diagnostics": all(phase["all_tsv_diagnostics"]["no_new_diagnostics"] for phase in phases),
+            "no_new_stream_records": not any(phase["new_stream_record_count"] for phase in phases),
             "clean_source": not any(any(row["severity"] in ("4", "8") for row in phase["baseline_nonambient"]) or phase["baseline_tsv_unresolved"] for phase in phases),
             "clean_generated_validation": not any(any(row["severity"] in ("4", "8") for row in phase["candidate_nonambient"]) or phase["candidate_tsv_unresolved"] for phase in phases),
             "phases": phases, "workspace_record_scope": "ALL ENTRY severities 0/1/2/4/8; closed registration JVM identity and bound validation command context only",
@@ -1200,7 +1235,7 @@ def accept(args, run: Path) -> None:
     write_json(run / "generated-edt-same-serializer-comparison.json", generated_comparison)
     diagnostic_failure = not ambient_comparison["no_unmatched_error_diagnostics"] or not validation_comparison["no_new_diagnostics"] \
         or bool(warm_errors and (not warm_errors["no_new_nonambient_errors"]
-                                 or not warm_errors["no_new_all_tsv_diagnostics"]))
+                                 or not warm_errors["no_new_all_tsv_diagnostics"] or not warm_errors["no_new_stream_records"]))
     passed = not diagnostic_failure and direct_comparison["equal"] and generated_comparison["equal"] and unchanged_return["equal"]
     result = {"status": "PASS" if passed else "FAIL",
         "verdicts": verdicts, "ours_version": ours_version, "ours_executable_sha256": ours_hash,
@@ -1216,6 +1251,7 @@ def accept(args, run: Path) -> None:
         **({"warm_validation_passes": warm_generated["passes"],
             "warm_phase_no_new_nonambient_errors": warm_errors["no_new_nonambient_errors"],
             "warm_phase_all_tsv_no_new_diagnostics": warm_errors["no_new_all_tsv_diagnostics"],
+            "warm_phase_stream_no_new_diagnostics": warm_errors["no_new_stream_records"],
             "clean_source": warm_errors["clean_source"] and not summarize_validation_tsv(validation_capture / "validation.tsv")["unresolved_source_diagnostics"],
             "clean_import": warm_errors["clean_generated_validation"] and ambient_comparison["no_unmatched_error_diagnostics"],
             "error_free_generated_configuration": not summarize_validation_tsv(generated_tsv)["unresolved_source_diagnostics"]

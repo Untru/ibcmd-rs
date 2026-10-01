@@ -16,7 +16,7 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
-    def warm_fixture(self, root, *, rows=None, logs=None, mutate=None):
+    def warm_fixture(self, root, *, rows=None, logs=None, streams=None, mutate=None):
         """Synthetic captures exercise bindings only; no EDT executable is run."""
         run, original = root / "run", root / "original"
         run.mkdir(parents=True)
@@ -32,6 +32,7 @@ class EvidenceControls(unittest.TestCase):
             lock_script=root / "synthetic-lock.ps1", lock_track="edt-synthetic-warm")
         rows = [b"", b"", b""] if rows is None else rows
         logs = [b"", b"", b""] if logs is None else logs
+        streams = [(b"", b"")] * 3 if streams is None else streams
         calls, history = [], b""
         def capture(_, __, label, workspace, operation):
             nonlocal history
@@ -49,8 +50,8 @@ class EvidenceControls(unittest.TestCase):
                     lock_argv.extend(["-TimeoutMin", str(max(1, args.timeout // 60))])
                 oracle.write_json(run / f"{label}-lock-{action}.command.json",
                     {"argv": lock_argv, "cwd": str(run), "exit_code": 0})
-            for suffix in ("stdout", "stderr"):
-                (run / f"{label}.{suffix}").write_bytes(b"")
+            for suffix, content in zip(("stdout", "stderr"), streams[index]):
+                (run / f"{label}.{suffix}").write_bytes(content)
             history += f"!SESSION synthetic-pass-{index + 1}\n".encode() + logs[index]
             (run / f"{label}.workspace-log").write_bytes(history)
             if mutate:
@@ -331,6 +332,58 @@ class EvidenceControls(unittest.TestCase):
             result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
             self.assertFalse(result["no_new_nonambient_errors"])
             self.assertEqual(result["phases"][0]["new_nonambient"][0]["severity"], "2")
+
+    def test_warm_exact_xtext_warning_claims_context_but_never_ignores_changed_or_unknown_lines(self):
+        line = f"0    [derived_data_executor_9] WARN  {oracle.WARM_XTEXT_LOGGER}  - {oracle.WARM_XTEXT_MESSAGE}\n"
+        for mutation in (None, "context", "logger", "body", "severity", "thread", "stderr", "partial", "extra", "count"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                value = line
+                if mutation == "context": value = line.replace("0    [", "124    [").replace("executor_9", "executor_31")
+                if mutation == "logger": value = line.replace(oracle.WARM_XTEXT_LOGGER, "unknown.Logger")
+                if mutation == "body": value = line.replace("ParserRule", "TerminalRule")
+                if mutation == "severity": value = line.replace("WARN", "ERROR")
+                if mutation == "thread": value = line.replace("derived_data_executor_9", "Exporter_9")
+                if mutation == "partial": value = line.rstrip("\n")
+                if mutation == "extra": value = line + "Unknown warning\n"
+                if mutation == "count": value = line * 2
+                (root / "pass.stdout").write_text("" if mutation == "stderr" else value, encoding="utf-8")
+                (root / "pass.stderr").write_text(value if mutation == "stderr" else "", encoding="utf-8")
+                if mutation not in (None, "context", "count"):
+                    with self.assertRaises(oracle.OracleError): oracle.warm_stream_multiset(root, "pass")
+                else:
+                    counter, lexical = oracle.warm_stream_multiset(root, "pass")
+                    self.assertEqual(sum(counter.values()), 2 if mutation == "count" else 1)
+                    self.assertEqual(next(iter(counter)), ("WARN", oracle.WARM_XTEXT_LOGGER, oracle.WARM_XTEXT_MESSAGE))
+                    self.assertTrue(all(row["raw_line_sha256"] for row in lexical))
+
+    def test_warm_xtext_warning_count_and_phase_are_compared_before_clean_final_passes(self):
+        line = f"0    [derived_data_executor_9] WARN  {oracle.WARM_XTEXT_LOGGER}  - {oracle.WARM_XTEXT_MESSAGE}\n".encode()
+        for mutation in (None, "count", "new_phase"):
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                baseline = self.warm_fixture(root / "baseline", streams=[(line, b""), (b"", b""), (b"", b"")])
+                first = line * 2 if mutation == "count" else line.replace(b"executor_9", b"executor_3")
+                later = line if mutation == "new_phase" else b""
+                candidate = self.warm_fixture(root / "candidate", streams=[(first, b""), (later, b""), (later, b"")])
+                control = root / "control"; control.mkdir()
+                for label in ("edt-control-validate", "edt-control-export"):
+                    (control / f"{label}.workspace-log").write_bytes(b"")
+                result = oracle.compare_warm_phase_errors(control, baseline[0], candidate[0], baseline[4], candidate[4])
+                self.assertEqual(result["no_new_stream_records"], mutation is None)
+                self.assertTrue(candidate[4]["final_consecutive_stream_records_stable"])
+
+    def test_warm_final_stream_counter_must_stabilize_as_well_as_tsv_and_workspace(self):
+        line = f"0    [derived_data_executor_9] WARN  {oracle.WARM_XTEXT_LOGGER}  - {oracle.WARM_XTEXT_MESSAGE}\n".encode()
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(oracle.OracleError, "not stable"):
+                self.warm_fixture(Path(folder), streams=[(b"", b""), (line, b""), (b"", b"")])
+            run = Path(folder) / "run"
+            evidence = json.loads((run / "validation-warm.json").read_text(encoding="utf-8"))
+            self.assertTrue(evidence["final_consecutive_all_diagnostics_stable"])
+            self.assertTrue(evidence["final_consecutive_all_workspace_records_stable"])
+            self.assertFalse(evidence["final_consecutive_stream_records_stable"])
+            self.assertFalse((run / "validation.tsv").exists())
 
     def test_partial_route_keeps_raw_divergences_and_uses_heavy_fifo(self):
         with tempfile.TemporaryDirectory() as folder:
