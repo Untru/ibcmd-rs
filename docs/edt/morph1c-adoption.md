@@ -73,6 +73,16 @@ The private property bag uses stable FieldId lookup; Designer and EDT projection
 enumeration orders differ. Only that bag is sorted as borrowed references for streamed semantic fingerprinting;
 children, modules, forms, templates, values and all other ordered arrays remain
 ordered. Public canonical properties and retained original XML remain ordered.
+Local source-only additions cover accumulation-register aggregates, calculation
+register recalculations (including generated types and dimensions), and chart of
+calculation types predefined items with their dependency lists. Their closed
+grammars map EDT inline descriptors to native XML sidecars; all typed fields are
+included in the same semantic fingerprint. Unknown cells, namespaces and enum
+values fail explicitly. Configuration help, localized short caption and the
+witnessed 8.5 interface migration mode use existing typed property/body contracts.
+These additions are local adaptations, recorded separately from pinned upstream
+file hashes. PaletteColors metadata and EnumValue color remain unsupported;
+full 8.5 acceptance cannot be claimed while those source fields are present.
 Structured body formatting equivalence is restricted to explicitly listed typed
 body roots with codec-defined BOM/EOL/indent conventions, respecting mixed text
 and inherited `xml:space`. Unknown XML bodies require exact bytes. Prolog/epilog
@@ -88,6 +98,12 @@ BSP/UH acceptance. Tests cover exact XML return, typed provenance-stripped retur
 public properties/assets, changed modules, added/deleted files, altered DT-INF,
 tampered retained XML with updated hashes, unsafe names, parser depth, unsupported
 source/control files, meaningful whitespace and prolog preservation.
+Typed-extra tests also change aggregate payloads while recomputing manifest
+hashes, and prove an edited aggregate survives conversion after explicit removal
+of provenance. An opt-in, bounded read-only corpus witness compares aggregate,
+recalculation and calculation-predefined semantics between independently
+prepared native XML and installed-EDT project files. It invokes no native tool and
+does not substitute for whole-project import/export acceptance.
 
 Installed EDT/native acceptance is recorded separately by the oracle harness.
 Upstream's acceptance claims are references for investigation, not acceptance

@@ -40,6 +40,7 @@ pub mod ref_list;
 pub mod registry;
 pub mod rights;
 pub mod shortcut;
+pub mod source_extensions;
 pub mod std_attrs_generic;
 pub mod std_attrs_ir;
 pub mod std_tabular_sections;

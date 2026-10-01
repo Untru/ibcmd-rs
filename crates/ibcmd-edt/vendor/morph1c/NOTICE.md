@@ -27,3 +27,6 @@ Local modifications include source-only orchestration, strict error propagation,
 bounded host validation, four-worker read cap, source lexical provenance and
 host packaging/lint compatibility. The snapshot is not an unmodified upstream
 distribution and does not imply that upstream acceptance proves host acceptance.
+Local typed source extensions for aggregates, calculation recalculations and
+predefined items are new adapter code, not original pinned upstream files.
+Their paths and distributed hashes are recorded in LOCAL-FILES.json only.

@@ -26,6 +26,7 @@
 pub mod fsio;
 pub mod layout;
 pub mod registry;
+mod source_extensions;
 
 use std::path::Path;
 
@@ -88,19 +89,7 @@ pub use preflight::{check, preflight, KindStatus, KindSupport, PreflightEntry, P
 /// self-checked by re-encoding) plus every object DESCRIPTOR — but not yet the object BODIES
 /// (module/form/template/… `<uuid>.N` elements), so `cf → edt/xml` reproduces the descriptor
 /// tree byte-exactly and still misses the body sidecars.
-pub const SIDECAR_NOTE: &str =
-    "whole-config conversion: descriptors AND bodies are transcoded for every TARGET (edt/xml/cf) \
-     — module .bsl sidecars (Module/ObjectModule/ManagerModule/RecordSetModule/\
-     ValueManagerModule), object COMMAND modules, FORM bodies, template bodies (TextDocument / \
-     SpreadsheetDocument-MXL / GeographicalSchema / DCS / blob), Role rights tables, HELP pages, \
-     predefined data, command interfaces, pictures, XDTO schemas, BusinessProcess flowcharts, \
-     ScheduledJob schedules, and the config-level Ext of the root Configuration. Verified on the \
-     whole SSL configuration: edt->cf AND xml->cf both load and report vrunner cf_compare == 0. \
-     REMAINING GAP: cf as a SOURCE reads the configuration ROOT (self-checked by re-encoding), \
-     the Language entities and every object DESCRIPTOR — but not yet the object BODIES \
-     (<uuid>.N), so cf->edt/xml reproduces the descriptor tree byte-exactly (witnessed: \
-     coverage s1_core/s3_bizproc/s7_pending/s9_new decompile to a tree IDENTICAL to the \
-     platform's own dump) and still misses the body sidecars.";
+pub const SIDECAR_NOTE: &str = "source-only EDT/XML conversion requires typed coverage of every descriptor and body; unsupported kinds or source cells fail closed. Installed EDT/native acceptance belongs to the host oracle.";
 
 /// Parse a TARGET-format selector from a CLI token (`edt` / `xml` / `cf`).
 ///

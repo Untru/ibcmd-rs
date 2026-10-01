@@ -258,6 +258,7 @@ pub fn read_descriptor<M: LocusMap>(
     // `<ChildObjects>`, которого НЕТ в parent-LocusMap. Поэтому детей читаем+claim'им
     // первыми (каждый проверяет свою тотальность сам). Лист-вид: bindings/children
     // пусты → no-op.
+    let extensions = formats_xml::source_extensions::read_designer_refs(kind, &root).map_err(DesignerError::Envelope)?;
     let source = XmlSource {
         root,
         fields: spec.fields().iter().map(|f| f.id).collect(),
@@ -285,6 +286,7 @@ pub fn read_descriptor<M: LocusMap>(
     obj.this_node = this_node;
     obj.properties = bag;
     obj.children = children;
+    obj.source_extensions = extensions;
     Ok(obj)
 }
 
@@ -449,6 +451,7 @@ pub fn write_descriptor_versioned<M: LocusMap>(
         cm.push(OutElement::self_closing("", "ChildObjects"));
     }
 
+    formats_xml::source_extensions::write_designer_refs(&obj.source_extensions, &mut cm);
     root.push(cm);
 
     Ok(render(&DESIGNER_ENVELOPE, &root))

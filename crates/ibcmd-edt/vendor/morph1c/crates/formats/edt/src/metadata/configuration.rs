@@ -63,6 +63,9 @@ impl LocusMap for EdtConfiguration {
             cfg::F_VERSION => fp(&["version"], Codec::PlainText),
             cfg::F_UPDATE_CATALOG_ADDRESS => fp(&["updateCatalogAddress"], Codec::PlainText),
             cfg::F_INCLUDE_HELP => fp(&["includeHelpInContents"], Codec::BoolPresence),
+            cfg::F_HELP => fp(&["help"], Codec::HelpConst),
+            cfg::F_SHORT_CAPTION => fp(&["shortCaption"], Codec::LocalizedKeyVal),
+            cfg::F_VERSION85_MIGRATION_MODE => fp(&["version85InterfaceMigrationMode"], Codec::EnumText),
             // Считались Designer-only (SSL их не витнессил в .mdo), но ERP-корень несёт все
             // шесть (witness `ERP/edt/src/Configuration/Configuration.mdo`): bool-пара —
             // текст `true` (BoolPresence, как соседний includeHelpInContents; false → EDT

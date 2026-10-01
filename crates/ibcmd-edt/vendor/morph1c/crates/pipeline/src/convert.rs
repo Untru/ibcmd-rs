@@ -304,6 +304,7 @@ pub(crate) fn read_object_at(
     // WITHOUT it a designer-sourced IR resolves NO `<Owner>.<PredefinedName>` reference (the cf
     // registry harvests those paths from this very block) — `designer→cf` refused 2 objects.
     crate::predefined_read::attach_predefined(format, fk.kind, path, &mut obj)?;
+    crate::source_extensions::attach(format, path, &mut obj)?;
     if bodies {
         // Rights-table sidecar (`Rights.rights` / `Ext/Rights.xml`) → `obj.rights` (Role `<uuid>.0`).
         crate::rights_read::attach_rights_body(format, fk.kind, path, &mut obj)?;
@@ -386,6 +387,7 @@ fn write_object(
     // SILENTLY DROPS the module source / rights table / XDTO schema / form body — a real
     // content loss the platform then compiles differently (§1.0/§1.6). No-op for objects /
     // kinds that carry no such body. cf never reaches here (handled by the caller).
+    crate::source_extensions::emit(format, out, obj)?;
     let kind = obj.kind.as_str();
     crate::form_write::write_form_bodies(format, out, obj)?;
     if kind == "Configuration" {

@@ -8,7 +8,8 @@
     "Host bounded XML/path/inventory validation and staged publication",
     "Descriptor syntax BOM/EOL spelling retained in host lexical provenance rather than codec gate",
     "Private semantic serialization sorts only properties by stable FieldId using borrowed references",
-    "Unused CF helpers removed; host-compatible Rust 1.85 manifests and lint corrections; upstream unit tests disabled"
+    "Unused CF helpers removed; host-compatible Rust 1.85 manifests and lint corrections; upstream unit tests disabled",
+    "Locally implemented typed aggregates/recalculations/calculation-predefined sidecars and witnessed Configuration source properties; closed namespace/field guards"
   ],
   "files": [
     {
@@ -57,7 +58,11 @@
     },
     {
       "path": "crates/core/src/ir/mod.rs",
-      "sha256": "2b4f6e1bc82ccf33eb6d6eca9ca173bfcd37413fc6a41431efeb3331f5dda31e"
+      "sha256": "31020989197540c898ed5eaed611b62370cb8204de90dc5a886bb9e705251310"
+    },
+    {
+      "path": "crates/core/src/ir/source_extensions.rs",
+      "sha256": "1ce76ea39717e5e6e6613790856138c78d5a0c182dfbf45c895bc1086592ec9b"
     },
     {
       "path": "crates/core/src/ir/value.rs",
@@ -1013,7 +1018,7 @@
     },
     {
       "path": "crates/core/src/spec/metadata/configuration.rs",
-      "sha256": "a9bea43a1e7c88099a8f120a3f5b6f234936031a07a41f0ab1e1da10b353ce57"
+      "sha256": "e64d771e87659149707797a1147c4c961ea475ce6a4d276e845cea2d52460177"
     },
     {
       "path": "crates/core/src/spec/metadata/constant.rs",
@@ -1429,7 +1434,7 @@
     },
     {
       "path": "crates/formats/designer/src/lib.rs",
-      "sha256": "18628dfb2282a91e7270774008447ea966b1bc44b28a27d95173ecea464bb3bb"
+      "sha256": "96c1bc6ad2254712842b1fa0698aff5d35fb1e6bf66be49d071ac3f8b1bddc27"
     },
     {
       "path": "crates/formats/designer/src/metadata/_generated/README.md",
@@ -1641,7 +1646,7 @@
     },
     {
       "path": "crates/formats/edt/src/lib.rs",
-      "sha256": "edf691e70a4229f8c74fb985f1f1e17f628854096ea9767db1eec2d2bf1a8a69"
+      "sha256": "7e19d6d05eaf5adc0de8e43deea2014acb1dc0585d25d7fd50b4f77788adb43f"
     },
     {
       "path": "crates/formats/edt/src/metadata/_generated/README.md",
@@ -1713,7 +1718,7 @@
     },
     {
       "path": "crates/formats/edt/src/metadata/configuration.rs",
-      "sha256": "8549c790f638bec0e95bf20ac0b85aa39a0bb5a2173eb64b295776ccd6c0f3ec"
+      "sha256": "2f6df06de8956d46bbae3bdc4c99425fd3fd7aeda4268be6a8b5ad697b31b5a2"
     },
     {
       "path": "crates/formats/edt/src/metadata/constant.rs",
@@ -2169,7 +2174,7 @@
     },
     {
       "path": "crates/formats-xml/src/lib.rs",
-      "sha256": "ec766c1e7c51545087cf1cea5a86ae3ee594d8aee3eab1ca05d9a9a01b28931b"
+      "sha256": "5072efef033acc50d3cdbda603d1ab9d8aebdc0e50bf6ad9fb2250c291ce06f2"
     },
     {
       "path": "crates/formats-xml/src/link_by_type.rs",
@@ -2226,6 +2231,10 @@
     {
       "path": "crates/formats-xml/src/shortcut.rs",
       "sha256": "69656b88dd6028f96c9d3abd08a9122d2ac773df2e20c560abd41e9853b90119"
+    },
+    {
+      "path": "crates/formats-xml/src/source_extensions.rs",
+      "sha256": "f550ae070da1e97224f3ddd6cef84a3f4db5467a71117bcde7a24cd7aab9c6ec"
     },
     {
       "path": "crates/formats-xml/src/std_attrs_generic/common.rs",
@@ -2369,7 +2378,7 @@
     },
     {
       "path": "crates/pipeline/src/convert.rs",
-      "sha256": "0049d697900d71a090be3c59aa29875573e1e4f8319858d7f73005aab18dbc25"
+      "sha256": "9f02cf14dc0f14d70fd92f96e9fea37a09e0261cc8bc723171f4e5272a9ca6b5"
     },
     {
       "path": "crates/pipeline/src/dcs_read.rs",
@@ -2429,7 +2438,7 @@
     },
     {
       "path": "crates/pipeline/src/lib.rs",
-      "sha256": "02d165d5cc1b03db9a7951b35437e6983f22a706b4f0282e43411a85b2c8092c"
+      "sha256": "84987c14596aef70413c17434e50a59321bc2d809df5ca41043790272c64232c"
     },
     {
       "path": "crates/pipeline/src/module_read.rs",
@@ -2466,6 +2475,10 @@
     {
       "path": "crates/pipeline/src/sidecar_version.rs",
       "sha256": "b48b41cba3623d515d8a510465b35c1ec10471278bd3b69ef57dd4bd9f5daf75"
+    },
+    {
+      "path": "crates/pipeline/src/source_extensions.rs",
+      "sha256": "58f93fe97abafead813c16a74a272b0eda3b86c698dde41b9f30c17a3ac1eab8"
     },
     {
       "path": "crates/pipeline/src/standalone_content_read.rs",
@@ -2525,7 +2538,7 @@
     },
     {
       "path": "NOTICE.md",
-      "sha256": "bab423a5a53c4f8823be278896dc1acc0556e5c595ca19b3be575f4d5348ceb5"
+      "sha256": "af7db79c9f5372033eef82c8640a72164c9c51dd36b54848c5df4a21db72639d"
     },
     {
       "path": "UPSTREAM-FILES.json",

@@ -397,6 +397,14 @@ pub fn decode_metadata_envelope(
 /// Decode a source-file envelope, preserving known named sibling descriptors
 /// as ordered reference facets. This is independent of physical CF codec
 /// availability; unknown bare children still require UUIDs and fail closed.
+///
+/// Complete source configurations can exceed the generic/family shape (for
+/// example, the independently inventoried UH root has 25,977 bare references).
+/// This entry point explicitly permits at most 1,048,576 nodes and 65,536
+/// non-guard opaque facets; generic/family entry points keep 16,384 and 4,096.
+/// The shared 32 MiB document/opaque byte limits, depth, attributes and namespace
+/// bounds do not change. Exceeding a bound returns an error without truncation.
+/// Revalidation through [`MetadataEnvelope::with_model`] retains this policy.
 pub fn decode_source_metadata_envelope(
     document: &XmlDocument,
     source_profile: ProfileId,

@@ -27,13 +27,15 @@ pub const MAX_GENERATED_TYPES: usize = 4_096;
 pub const MAX_OBJECT_ASSETS: usize = 16_384;
 /// Maximum aggregate members retained by one canonical object.
 pub const MAX_OBJECT_MEMBERS: usize = 262_144;
-/// Maximum canonical objects retained by one configuration.
+/// Hard ceiling for canonical objects in a complete configuration, enforced by
+/// constructors and streaming deserialization without relaxing object limits.
 pub const MAX_CONFIGURATION_OBJECTS: usize = 262_144;
-/// Maximum aggregate members across all configuration objects.
+/// Hard ceiling for aggregate members across all configuration objects.
 pub const MAX_CONFIGURATION_MEMBERS: usize = 8_388_608;
 /// Maximum variable-sized retained bytes in one canonical object.
 pub const MAX_OBJECT_RETAINED_BYTES: usize = 134_217_728;
-/// Maximum variable-sized retained bytes in one canonical configuration.
+/// Hard ceiling for variable-sized retained bytes in a complete canonical graph;
+/// source file bytes are not a substitute for this canonical accounting.
 pub const MAX_CONFIGURATION_RETAINED_BYTES: usize = 1_073_741_824;
 
 /// Failure to construct or revalidate the bounded canonical graph model.

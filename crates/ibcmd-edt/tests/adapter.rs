@@ -266,3 +266,103 @@ fn literal_backslash_filename_is_rejected_before_path_normalization() {
     let error = read_xml_source(directory.path(), ReaderLimits::default()).unwrap_err();
     assert!(error.to_string().contains("non-portable project filename"));
 }
+
+fn aggregate_fixture() -> SourceTree {
+    let source = fixture();
+    let configuration = source
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == "Configuration.xml")
+        .unwrap();
+    let xml = String::from_utf8(configuration.bytes().to_vec()).unwrap();
+    let root_start = xml.find("<MetaDataObject").unwrap();
+    let root_end = xml[root_start..].find('>').unwrap() + root_start + 1;
+    let header = &xml[..root_end];
+    let descriptor = format!(
+        "{header}<AccumulationRegister uuid=\"99999999-9999-9999-9999-999999999999\"><Properties><Name>TestAggregates</Name><RegisterType>Turnovers</RegisterType></Properties><ChildObjects/></AccumulationRegister></MetaDataObject>"
+    );
+    let changed = xml.replace(
+        "</ChildObjects>",
+        "<AccumulationRegister>TestAggregates</AccumulationRegister></ChildObjects>",
+    );
+    let source = mutate(&source, "Configuration.xml", changed.into_bytes());
+    let source = mutate(
+        &source,
+        "AccumulationRegisters/TestAggregates.xml",
+        descriptor.into_bytes(),
+    );
+    mutate(&source,"AccumulationRegisters/TestAggregates/Ext/Aggregates.xml",br#"<?xml version="1.0" encoding="UTF-8"?><AccumulationRegisterAggregates xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21"><Aggregate id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"><Use>Always</Use><Periodicity>Day</Periodicity><Dimensions/></Aggregate></AccumulationRegisterAggregates>"#.to_vec())
+}
+#[test]
+fn typed_extra_tampering_and_explicit_edited_conversion() {
+    let generated = xml_to_edt(&aggregate_fixture(), &options()).unwrap().tree;
+    let original_path =
+        ".ibcmd-provenance/xml/AccumulationRegisters/TestAggregates/Ext/Aggregates.xml";
+    let original = generated
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == original_path)
+        .unwrap();
+    let changed = String::from_utf8(original.bytes().to_vec())
+        .unwrap()
+        .replace(
+            "<Periodicity>Day</Periodicity>",
+            "<Periodicity>Month</Periodicity>",
+        )
+        .into_bytes();
+    let hash = format!("{:x}", Sha256::digest(&changed));
+    let tree = mutate(&generated, original_path, changed);
+    let manifest = tree
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == ".ibcmd-provenance/manifest.json")
+        .unwrap();
+    let mut value: serde_json::Value = serde_json::from_slice(manifest.bytes()).unwrap();
+    value["original"]["AccumulationRegisters/TestAggregates/Ext/Aggregates.xml"] =
+        serde_json::Value::String(hash);
+    let tree = mutate(
+        &tree,
+        ".ibcmd-provenance/manifest.json",
+        serde_json::to_vec(&value).unwrap(),
+    );
+    assert!(
+        edt_to_xml(&Project::from_tree(tree).unwrap(), &options())
+            .unwrap_err()
+            .to_string()
+            .contains("disagrees")
+    );
+    let path = "src/AccumulationRegisters/TestAggregates/TestAggregates.mdo";
+    let descriptor = generated
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == path)
+        .unwrap();
+    let changed = String::from_utf8(descriptor.bytes().to_vec())
+        .unwrap()
+        .replace(
+            "<periodicity>Day</periodicity>",
+            "<periodicity>Month</periodicity>",
+        )
+        .into_bytes();
+    let tree = mutate(&generated, path, changed);
+    let clean = SourceTree::new(
+        tree.entries()
+            .iter()
+            .filter(|e| !e.path().as_str().starts_with(".ibcmd-provenance/"))
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    let converted = edt_to_xml(&Project::from_tree(clean).unwrap(), &options()).unwrap();
+    let body = converted
+        .tree
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == "AccumulationRegisters/TestAggregates/Ext/Aggregates.xml")
+        .unwrap();
+    assert!(
+        std::str::from_utf8(body.bytes())
+            .unwrap()
+            .contains("<Periodicity>Month</Periodicity>")
+    );
+}

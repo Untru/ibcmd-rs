@@ -613,6 +613,7 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
                     "Template" => "Templates",
                     "Subsystem" => "Subsystems",
                     "Recalculation" => "Recalculations",
+                    "Table" => "Tables",
                     _ => continue,
                 };
                 let name = child
@@ -685,9 +686,15 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
                 obj.kind().clone(),
                 obj.provenance().clone(),
             );
-            parts.owner = obj
-                .owner()
-                .or_else(|| declared_owners.get(&obj.identity().uuid()).copied());
+            let declared = declared_owners.get(&obj.identity().uuid()).copied();
+            if let (Some(existing), Some(declared)) = (obj.owner(), declared)
+                && existing != declared
+            {
+                return Err(EdtError::new(
+                    "embedded and declared metadata ownership conflict",
+                ));
+            }
+            parts.owner = obj.owner().or(declared);
             parts.properties = obj.properties().to_vec();
             parts.references = obj.references().to_vec();
             parts.generated_types = obj.generated_types().to_vec();
@@ -818,6 +825,7 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
                     | "PredefinedData"
                     | "Schedule"
                     | "ExchangePlanContent"
+                    | "AccumulationRegisterAggregates"
             )
         {
             return Ok(false);
@@ -889,6 +897,24 @@ mod tests {
                     .contains(expected)
             );
         }
+    }
+
+    #[test]
+    fn external_table_owner_requires_exact_declared_reference() {
+        let tree=SourceTree::new(vec![body("ExternalDataSources/X.xml",r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><ExternalDataSource uuid="11111111-1111-1111-1111-111111111111"><Properties><Name>X</Name></Properties><ChildObjects><Table>Y</Table></ChildObjects></ExternalDataSource></MetaDataObject>"#),body("ExternalDataSources/X/Tables/Y.xml",r#"<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" version="2.21"><Table uuid="22222222-2222-2222-2222-222222222222"><Properties><Name>Y</Name></Properties></Table></MetaDataObject>"#)]).unwrap();
+        let configuration = canonical(
+            &tree,
+            &ConversionOptions {
+                edt_version: "2025.2.3".into(),
+                xml_dialect: "2.21".into(),
+                runtime_version: Some("8.5.1".into()),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            configuration.objects()[1].owner(),
+            Some(configuration.objects()[0].identity().uuid())
+        );
     }
 
     #[test]

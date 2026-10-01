@@ -208,6 +208,8 @@ pub const F_KEEP_MAPPING: FieldId = FieldId(76);
 /// `configurationExtensionPurpose` — назначение расширения (`Customization`; только корень
 /// расширения). Default "" (absent-маркер). Литерал одинаков в edt и designer.
 pub const F_EXT_PURPOSE: FieldId = FieldId(77);
+/// Typed source help-presence marker, paired with actual help-page sidecars.
+pub const F_HELP: FieldId = FieldId(78);
 
 /// Witnessed Checked-флаги `<extension>` корня расширения (s13_extension/Configuration.mdo,
 /// назначение Customization): заимствованные свойства корня, которые EDT помечает
@@ -371,6 +373,7 @@ fn build_fields() -> Vec<FieldSpec> {
         dref(F_DEFAULT_INTERFACE, "defaultInterface"),
         loc(F_CAPTION, "caption"),
         loc(F_SHORT_CAPTION, "shortCaption"),
+        FieldSpec::with_default(F_HELP, "help", ValueKind::Bool, PropertyValue::Bool(false)).x_ignored(),
         dref(F_DEFAULT_STYLE, "defaultStyle"),
         str_f(F_DEFAULT_LANGUAGE, "defaultLanguage"),
         loc(F_BRIEF_INFORMATION, "briefInformation"),

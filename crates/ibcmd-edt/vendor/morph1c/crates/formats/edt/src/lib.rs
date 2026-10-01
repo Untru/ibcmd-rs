@@ -255,6 +255,7 @@ pub fn read_descriptor<M: LocusMap>(
     // ребёнок ПРОВЕРЯЕТ свою тотальность сам и claim'ит своё под-дерево в исходном
     // дереве. После этого parent-leftover увидит детей востребованными. (Лист-вид:
     // bindings/children пусты → no-op.)
+    let extensions = formats_xml::source_extensions::read_edt(kind, &root).map_err(EdtError::Envelope)?;
     let source = XmlSource {
         root,
         fields: spec.fields().iter().map(|f| f.id).collect(),
@@ -279,6 +280,7 @@ pub fn read_descriptor<M: LocusMap>(
     obj.this_node = this_node;
     obj.properties = bag;
     obj.children = children;
+    obj.source_extensions = extensions;
     // modules/forms/templates остаются пустыми (вне дескриптора).
     Ok(obj)
 }
@@ -382,6 +384,8 @@ pub fn write_descriptor<M: LocusMap>(
     for node in trailing_props {
         root.push(node);
     }
+
+    formats_xml::source_extensions::write_edt(&obj.source_extensions, &mut root).map_err(EdtError::Envelope)?;
 
     // Доп. ns корня (xsi/core) — declare-iff-used: объявляем РОВНО те, чей префикс тело
     // реально использует (`xsi:type`, `core:…`). Вставляем ПЕРЕД `xmlns:mdclass` (порядок

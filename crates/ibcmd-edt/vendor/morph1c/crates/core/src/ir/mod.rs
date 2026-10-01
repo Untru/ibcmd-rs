@@ -23,6 +23,7 @@
 
 pub mod form;
 pub mod value;
+pub mod source_extensions;
 
 use serde::{Deserialize, Serialize};
 
@@ -863,6 +864,8 @@ pub struct MetadataObject {
     /// Макеты/шаблоны объекта. Опаковые (MXL/картинки) живут как
     /// [`PropertyValue::Blob`] внутри свойств шаблона.
     pub templates: Vec<Template>,
+    #[serde(default)]
+    pub source_extensions: source_extensions::SourceExtensions,
 }
 
 impl MetadataObject {
@@ -897,6 +900,7 @@ impl MetadataObject {
             forms: Vec::new(),
             form_bodies: Vec::new(),
             templates: Vec::new(),
+            source_extensions: source_extensions::SourceExtensions::default(),
         }
     }
 
