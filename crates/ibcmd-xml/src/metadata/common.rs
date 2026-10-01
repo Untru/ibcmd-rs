@@ -30,6 +30,21 @@ const MAX_METADATA_BYTES: usize = 33_554_432;
 const MAX_METADATA_ATTRIBUTES: usize = 65_536;
 const MAX_METADATA_NAMESPACES: usize = 4_096;
 const MAX_METADATA_NAMESPACE_BYTES: usize = 1_048_576;
+// Whole source-file envelopes have many sibling references; family codecs keep
+// their original small shape. Byte/depth/attribute/namespace limits stay common.
+#[derive(Clone, Copy, Debug)]
+struct MetadataShapePolicy {
+    nodes: usize,
+    facets: usize,
+}
+const DEFAULT_METADATA_POLICY: MetadataShapePolicy = MetadataShapePolicy {
+    nodes: MAX_METADATA_NODES,
+    facets: MAX_METADATA_FACETS,
+};
+const SOURCE_METADATA_POLICY: MetadataShapePolicy = MetadataShapePolicy {
+    nodes: 1_048_576,
+    facets: 65_536,
+};
 pub(super) const MD_NAMESPACE: &str = "http://v8.1c.ru/8.3/MDClasses";
 pub(super) const V8_NAMESPACE: &str = "http://v8.1c.ru/8.1/data/core";
 pub(super) const XR_NAMESPACE: &str = "http://v8.1c.ru/8.3/xcf/readable";
@@ -79,18 +94,21 @@ struct FacetBudget {
 struct FacetSet {
     values: Vec<OpaqueFacet>,
     budget: Rc<RefCell<FacetBudget>>,
+    policy: MetadataShapePolicy,
 }
 impl FacetSet {
-    fn root() -> Self {
+    fn root(policy: MetadataShapePolicy) -> Self {
         Self {
             values: Vec::new(),
             budget: Rc::new(RefCell::new(FacetBudget::default())),
+            policy,
         }
     }
     fn child_with(parent: &Self, values: Vec<OpaqueFacet>) -> Self {
         Self {
             values,
             budget: Rc::clone(&parent.budget),
+            policy: parent.policy,
         }
     }
     fn reserve(&self, bytes: usize) -> Result<(), MetadataDecodeError> {
@@ -103,7 +121,7 @@ impl FacetSet {
             .bytes
             .checked_add(bytes)
             .ok_or(MetadataDecodeError::ResourceLimit("opaque bytes"))?;
-        if budget.count > MAX_METADATA_FACETS {
+        if budget.count > self.policy.facets {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
         if budget.bytes > MAX_METADATA_BYTES {
@@ -119,6 +137,7 @@ pub struct MetadataEnvelope {
     descendants: Vec<CanonicalObject>,
     fallback: Fallback,
     source_model_unchanged: bool,
+    shape_policy: MetadataShapePolicy,
 }
 impl MetadataEnvelope {
     pub fn from_parts(
@@ -126,15 +145,22 @@ impl MetadataEnvelope {
         descendants: Vec<CanonicalObject>,
         source_document: XmlDocument,
     ) -> Result<Self, MetadataDecodeError> {
-        Self::from_parts_with_state(root, descendants, source_document, false)
+        Self::from_parts_with_state(
+            root,
+            descendants,
+            source_document,
+            false,
+            DEFAULT_METADATA_POLICY,
+        )
     }
     fn from_parts_with_state(
         root: CanonicalObject,
         descendants: Vec<CanonicalObject>,
         source_document: XmlDocument,
         source_model_unchanged: bool,
+        shape_policy: MetadataShapePolicy,
     ) -> Result<Self, MetadataDecodeError> {
-        let actual = inspect_metadata_family(&source_document)?;
+        let actual = inspect_metadata_family_with_policy(&source_document, shape_policy)?;
         if actual.as_str() != root.kind().as_str() {
             return Err(MetadataDecodeError::InvalidEnvelope(
                 "source document family differs from canonical root",
@@ -199,7 +225,7 @@ impl MetadataEnvelope {
                     .ok_or(MetadataDecodeError::ResourceLimit("opaque bytes"))?;
             }
         }
-        if facet_count > MAX_METADATA_FACETS {
+        if facet_count > shape_policy.facets {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
         if facet_bytes > MAX_METADATA_BYTES {
@@ -210,6 +236,7 @@ impl MetadataEnvelope {
             descendants,
             fallback: Fallback::new(source_document),
             source_model_unchanged,
+            shape_policy,
         };
         let configuration = envelope
             .configuration()
@@ -229,7 +256,13 @@ impl MetadataEnvelope {
         root: CanonicalObject,
         descendants: Vec<CanonicalObject>,
     ) -> Result<Self, MetadataDecodeError> {
-        Self::from_parts(root, descendants, self.fallback.into_document())
+        Self::from_parts_with_state(
+            root,
+            descendants,
+            self.fallback.into_document(),
+            false,
+            self.shape_policy,
+        )
     }
     pub fn root(&self) -> &CanonicalObject {
         &self.root
@@ -316,7 +349,14 @@ impl Error for MetadataDecodeError {}
 pub(crate) fn inspect_metadata_family(
     document: &XmlDocument,
 ) -> Result<FamilyId, MetadataDecodeError> {
-    check_document(document)?;
+    inspect_metadata_family_with_policy(document, DEFAULT_METADATA_POLICY)
+}
+
+fn inspect_metadata_family_with_policy(
+    document: &XmlDocument,
+    shape_policy: MetadataShapePolicy,
+) -> Result<FamilyId, MetadataDecodeError> {
+    check_document_with_policy(document, shape_policy)?;
     let uris = resolve_namespaces(document.root())?;
     let expected = uri_of(document.root(), &uris);
     if !matches!(expected, None | Some(MD_NAMESPACE))
@@ -354,6 +394,54 @@ pub fn decode_metadata_envelope(
     decode_metadata_envelope_with_child_references(document, source_profile, object_path, &[])
 }
 
+/// Decode a source-file envelope, preserving known named sibling descriptors
+/// as ordered reference facets. This is independent of physical CF codec
+/// availability; unknown bare children still require UUIDs and fail closed.
+pub fn decode_source_metadata_envelope(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    let family = inspect_metadata_family_with_policy(document, SOURCE_METADATA_POLICY)?;
+    if family.as_str() == "Configuration" {
+        return decode_configuration_envelope_with_policy(
+            document,
+            source_profile,
+            object_path,
+            SOURCE_METADATA_POLICY,
+        );
+    }
+    let references: &[&str] = match family.as_str() {
+        "Subsystem" => &["Subsystem"],
+        "ExternalDataSource" => &["Table"],
+        "CalculationRegister" => &["Form", "Template", "Recalculation"],
+        "Catalog"
+        | "Document"
+        | "Enum"
+        | "Report"
+        | "DataProcessor"
+        | "SettingsStorage"
+        | "DocumentJournal"
+        | "ExchangePlan"
+        | "BusinessProcess"
+        | "Task"
+        | "InformationRegister"
+        | "AccumulationRegister"
+        | "AccountingRegister"
+        | "ChartOfAccounts"
+        | "ChartOfCalculationTypes"
+        | "ChartOfCharacteristicTypes" => &["Form", "Template"],
+        _ => &[],
+    };
+    decode_metadata_envelope_with_policy(
+        document,
+        source_profile,
+        object_path,
+        references,
+        SOURCE_METADATA_POLICY,
+    )
+}
+
 /// Decodes the root `Configuration` object while treating its named
 /// `ChildObjects` entries as references to sibling source files.
 ///
@@ -366,12 +454,26 @@ pub fn decode_configuration_envelope(
     source_profile: ProfileId,
     object_path: ObjectPath,
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
-    if inspect_metadata_family(document)?.as_str() != "Configuration" {
+    decode_configuration_envelope_with_policy(
+        document,
+        source_profile,
+        object_path,
+        DEFAULT_METADATA_POLICY,
+    )
+}
+
+fn decode_configuration_envelope_with_policy(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    shape_policy: MetadataShapePolicy,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    if inspect_metadata_family_with_policy(document, shape_policy)?.as_str() != "Configuration" {
         return Err(MetadataDecodeError::InvalidEnvelope(
             "metadata object is not Configuration",
         ));
     }
-    decode_metadata_envelope_with_child_references(
+    decode_metadata_envelope_with_policy(
         document,
         source_profile,
         object_path,
@@ -424,6 +526,7 @@ pub fn decode_configuration_envelope(
             "ExternalDataSource",
             "IntegrationService",
         ],
+        shape_policy,
     )
 }
 
@@ -441,7 +544,23 @@ pub(super) fn decode_metadata_envelope_with_child_references(
     object_path: ObjectPath,
     child_reference_kinds: &[&str],
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
-    check_document(document)?;
+    decode_metadata_envelope_with_policy(
+        document,
+        source_profile,
+        object_path,
+        child_reference_kinds,
+        DEFAULT_METADATA_POLICY,
+    )
+}
+
+fn decode_metadata_envelope_with_policy(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    child_reference_kinds: &[&str],
+    shape_policy: MetadataShapePolicy,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    check_document_with_policy(document, shape_policy)?;
     let uris = resolve_namespaces(document.root())?;
     let expected = uri_of(document.root(), &uris);
     if !matches!(expected, None | Some(MD_NAMESPACE))
@@ -476,7 +595,7 @@ pub(super) fn decode_metadata_envelope_with_child_references(
         ));
     }
     let mut descendants = Vec::new();
-    let mut facet_set = FacetSet::root();
+    let mut facet_set = FacetSet::root(shape_policy);
     for (ordinal, node) in document.before_root().iter().enumerate() {
         retain_as(
             node,
@@ -534,7 +653,7 @@ pub(super) fn decode_metadata_envelope_with_child_references(
         expected,
         child_reference_kinds,
     )?;
-    MetadataEnvelope::from_parts_with_state(root, descendants, document.clone(), true)
+    MetadataEnvelope::from_parts_with_state(root, descendants, document.clone(), true, shape_policy)
 }
 
 /// Decodes after checking that caller-selected exact source profile is one of
@@ -1637,7 +1756,14 @@ fn checked_add(
     }
     Ok(())
 }
+#[cfg(test)]
 fn check_document(document: &XmlDocument) -> Result<(), MetadataDecodeError> {
+    check_document_with_policy(document, DEFAULT_METADATA_POLICY)
+}
+fn check_document_with_policy(
+    document: &XmlDocument,
+    shape_policy: MetadataShapePolicy,
+) -> Result<(), MetadataDecodeError> {
     let mut budget = Budget::default();
     if document.has_utf8_bom() {
         checked_add(&mut budget.bytes, 3, MAX_METADATA_BYTES, "bytes")?;
@@ -1649,9 +1775,9 @@ fn check_document(document: &XmlDocument) -> Result<(), MetadataDecodeError> {
         checked_add(&mut budget.bytes, value.len(), MAX_METADATA_BYTES, "bytes")?;
     }
     for node in document.before_root().iter().chain(document.after_root()) {
-        check_node(node, 0, &mut budget)?;
+        check_node(node, 0, &mut budget, shape_policy)?;
     }
-    check_tree(document.root(), 0, &mut budget)?;
+    check_tree(document.root(), 0, &mut budget, shape_policy)?;
     if document_lexical_len(document)? > MAX_METADATA_BYTES {
         return Err(MetadataDecodeError::ResourceLimit("bytes"));
     }
@@ -1662,11 +1788,16 @@ fn check_document(document: &XmlDocument) -> Result<(), MetadataDecodeError> {
         .map_err(|error| MetadataDecodeError::Xml(error.to_string()))?;
     Ok(())
 }
-fn check_node(node: &XmlNode, depth: usize, b: &mut Budget) -> Result<(), MetadataDecodeError> {
+fn check_node(
+    node: &XmlNode,
+    depth: usize,
+    b: &mut Budget,
+    shape_policy: MetadataShapePolicy,
+) -> Result<(), MetadataDecodeError> {
     if let XmlNode::Element(element) = node {
-        return check_tree(element, depth, b);
+        return check_tree(element, depth, b, shape_policy);
     }
-    checked_add(&mut b.nodes, 1, MAX_METADATA_NODES, "nodes")?;
+    checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
     if let Some(raw) = node.raw() {
         return checked_add(&mut b.bytes, raw.len(), MAX_METADATA_BYTES, "bytes");
     }
@@ -1684,11 +1815,16 @@ fn check_node(node: &XmlNode, depth: usize, b: &mut Budget) -> Result<(), Metada
         }
     }
 }
-fn check_tree(e: &XmlElement, depth: usize, b: &mut Budget) -> Result<(), MetadataDecodeError> {
+fn check_tree(
+    e: &XmlElement,
+    depth: usize,
+    b: &mut Budget,
+    shape_policy: MetadataShapePolicy,
+) -> Result<(), MetadataDecodeError> {
     if depth > MAX_METADATA_DEPTH {
         return Err(MetadataDecodeError::ResourceLimit("depth"));
     }
-    checked_add(&mut b.nodes, 1, MAX_METADATA_NODES, "nodes")?;
+    checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
     if let Some(raw) = e.raw_start() {
         checked_add(&mut b.bytes, raw.len(), MAX_METADATA_BYTES, "bytes")?;
     }
@@ -1745,7 +1881,7 @@ fn check_tree(e: &XmlElement, depth: usize, b: &mut Budget) -> Result<(), Metada
         }
     }
     for n in e.children() {
-        check_node(n, depth + 1, b)?;
+        check_node(n, depth + 1, b, shape_policy)?;
     }
     Ok(())
 }
@@ -1764,6 +1900,92 @@ mod tests {
     }
     fn profile() -> ProfileId {
         ProfileId::parse("xml:2.20").unwrap()
+    }
+
+    #[test]
+    fn source_configuration_preserves_large_ordered_reference_inventory_and_policy() {
+        // The independent UH corpus has this many bare Configuration references.
+        // Interleaved whitespace also exercises the aggregate opaque-facet bound.
+        const REFERENCES: usize = 25_977;
+        let mut xml = String::from(
+            "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.20'><Configuration uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties><ChildObjects>\n  ",
+        );
+        for index in 0..REFERENCES {
+            xml.push_str(&format!("<Catalog>Sibling{index:05}</Catalog>\n  "));
+        }
+        xml.push_str("</ChildObjects></Configuration></MetaDataObject>");
+        let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        for result in [
+            decode_metadata_envelope(&document, profile(), path()),
+            decode_configuration_envelope(&document, profile(), path()),
+        ] {
+            assert!(matches!(
+                result,
+                Err(MetadataDecodeError::ResourceLimit("nodes"))
+            ));
+        }
+        let envelope = decode_source_metadata_envelope(&document, profile(), path()).unwrap();
+        assert!(envelope.descendants().is_empty());
+        let references: Vec<_> = envelope
+            .root()
+            .opaque_facets()
+            .as_slice()
+            .iter()
+            .filter(|facet| facet.placement().kind().as_str() == "xml:child-object-reference")
+            .collect();
+        assert_eq!(references.len(), REFERENCES);
+        for (index, reference) in references.iter().enumerate() {
+            let permit = reference.emit_permit(&profile()).unwrap();
+            assert_eq!(
+                permit.bytes(),
+                format!("<Catalog>Sibling{index:05}</Catalog>").as_bytes()
+            );
+            assert_eq!(reference.placement().ordinal() as usize, index * 2 + 1);
+        }
+        assert_eq!(
+            MetadataRegistry::default()
+                .encode(&envelope, &profile())
+                .unwrap(),
+            xml.as_bytes()
+        );
+        // Revalidating an edited source envelope retains its explicit source
+        // shape, while still refusing unchanged-source emission after an edit.
+        let edited = envelope
+            .clone()
+            .with_model(envelope.root().clone(), Vec::new())
+            .unwrap();
+        assert!(!edited.source_model_unchanged());
+        assert!(matches!(
+            MetadataRegistry::default().encode(&edited, &profile()),
+            Err(MetadataEncodeError::ModelChanged { .. })
+        ));
+        assert!(
+            MetadataEnvelope::from_parts(envelope.root().clone(), Vec::new(), document).is_err()
+        );
+    }
+
+    #[test]
+    fn source_shape_bounds_still_reject_without_allocating_the_maximum() {
+        let element = XmlElement::new(QName::new("X").unwrap());
+        let mut budget = Budget {
+            nodes: SOURCE_METADATA_POLICY.nodes,
+            ..Budget::default()
+        };
+        assert!(matches!(
+            check_tree(&element, 0, &mut budget, SOURCE_METADATA_POLICY),
+            Err(MetadataDecodeError::ResourceLimit("nodes"))
+        ));
+        let facets = FacetSet::root(SOURCE_METADATA_POLICY);
+        facets.budget.borrow_mut().count = SOURCE_METADATA_POLICY.facets;
+        assert!(matches!(
+            facets.reserve(0),
+            Err(MetadataDecodeError::ResourceLimit("opaque facets"))
+        ));
+        let facets = FacetSet::root(SOURCE_METADATA_POLICY);
+        assert!(matches!(
+            facets.reserve(MAX_METADATA_BYTES + 1),
+            Err(MetadataDecodeError::ResourceLimit("opaque bytes"))
+        ));
     }
 
     fn metadata_ast(root_attributes: Vec<Attribute>) -> XmlDocument {
@@ -1830,6 +2052,50 @@ mod tests {
         CanonicalObject::new(parts).unwrap()
     }
 
+    #[test]
+    fn source_envelopes_preserve_exact_sibling_reference_kinds_without_weakening_generic_decode() {
+        for (family, child) in [
+            ("Catalog", "Form"),
+            ("Document", "Template"),
+            ("Subsystem", "Subsystem"),
+            ("CalculationRegister", "Recalculation"),
+            ("ExternalDataSource", "Table"),
+        ] {
+            let source = format!(
+                "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.20'><{family} uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties><ChildObjects><{child}>Sibling</{child}></ChildObjects></{family}></MetaDataObject>"
+            );
+            let document = XmlReader::from_slice(source.as_bytes()).unwrap();
+            assert!(decode_metadata_envelope(&document, profile(), path()).is_err());
+            let envelope = decode_source_metadata_envelope(&document, profile(), path()).unwrap();
+            assert!(envelope.descendants().is_empty());
+            assert!(
+                envelope
+                    .root()
+                    .opaque_facets()
+                    .as_slice()
+                    .iter()
+                    .any(|facet| facet.placement().kind().as_str() == "xml:child-object-reference")
+            );
+            assert_eq!(
+                MetadataRegistry::default()
+                    .encode(&envelope, &profile())
+                    .unwrap(),
+                source.as_bytes()
+            );
+            let unknown = source.replace(
+                &format!("<{child}>Sibling</{child}>"),
+                "<FutureChild>Sibling</FutureChild>",
+            );
+            assert!(
+                decode_source_metadata_envelope(
+                    &XmlReader::from_slice(unknown.as_bytes()).unwrap(),
+                    profile(),
+                    path()
+                )
+                .is_err()
+            );
+        }
+    }
     #[test]
     fn typed_envelope_keeps_unknown_slots_and_same_profile_bytes() {
         let input = b"<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.20'><CommonModule uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Portable</Name><Synonym><v8:item xmlns:v8='http://v8.1c.ru/8.1/data/core'><v8:lang>ru</v8:lang><v8:content>\xD0\x9F</v8:content></v8:item></Synonym><Future x='1'/></Properties><!-- retained --></CommonModule></MetaDataObject>";
@@ -2652,7 +2918,7 @@ mod tests {
         ));
         assert!(crate::XmlWriter::to_vec(&document, LexicalPolicy::Preserve).is_err());
 
-        let mut facets = FacetSet::root();
+        let mut facets = FacetSet::root(DEFAULT_METADATA_POLICY);
         assert!(matches!(
             retain_as(
                 &document.root().children()[0],
@@ -2720,7 +2986,7 @@ mod tests {
         let node = XmlNode::Element(changed);
         let predicted = node_lexical_len(&node).unwrap();
         assert!(predicted > MAX_METADATA_BYTES);
-        let facets = FacetSet::root();
+        let facets = FacetSet::root(DEFAULT_METADATA_POLICY);
         assert!(matches!(
             facets.reserve(predicted),
             Err(MetadataDecodeError::ResourceLimit("opaque bytes"))

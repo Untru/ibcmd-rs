@@ -17,7 +17,7 @@ pub const CROSS_PROFILE_OPAQUE_EMIT_CODE: &str = "opaque.cross-profile-emit-forb
 /// Maximum encoded length of an open placement-kind token.
 pub const MAX_OPAQUE_PLACEMENT_KIND_BYTES: usize = 128;
 /// Maximum number of ordered opaque facets in one collection.
-pub const MAX_OPAQUE_FACETS: usize = 16_384;
+pub const MAX_OPAQUE_FACETS: usize = 65_536;
 /// Maximum aggregate variable-sized bytes retained by one facet collection.
 pub const MAX_OPAQUE_RETAINED_BYTES: usize = 67_108_864;
 
