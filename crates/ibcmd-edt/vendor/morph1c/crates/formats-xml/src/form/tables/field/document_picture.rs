@@ -1,11 +1,11 @@
 //! extInfo document/picture-подтипов FormField (LANE-F-5): HTML/Progress/Formatted/Text/
 //! Image/Spreadsheet/Calendar/TrackBar/Chart/Gantt/PDF/Flowchart/Period.
 
-use crate::form::fields::{Codec, DesOmit, FieldProj, Policy, Region, fp};
+use crate::form::fields::{fp, Codec, DesOmit, FieldProj, Policy, Region};
 use crate::form::tables::{
-    F_EXT_PIC_ENABLE_DRAG, F_EXT_VIEW_SCALING_MODE, F_EXT_ZOOMABLE, F_PIC_BORDER_COLOR,
     geo_auto_max_height, geo_auto_max_width, geo_h_stretch, geo_height, geo_max_height,
-    geo_max_width, geo_v_stretch, geo_width, keep,
+    geo_max_width, geo_v_stretch, geo_width, keep, F_EXT_PIC_ENABLE_DRAG, F_EXT_VIEW_SCALING_MODE,
+    F_EXT_ZOOMABLE, F_PIC_BORDER_COLOR,
 };
 use morph1c_core::spec::forms::controls::form_field as ff;
 
@@ -422,12 +422,14 @@ pub(crate) static SPREADSHEET_FIELD_EXT: &[FieldProj] = &[
         "drawingSelectionShowMode",
         "DrawingSelectionShowMode",
         Region::Ext,
-        Codec::EnumTok,
+        // Installed Form.xcore declares precisely Show/DontShow/Auto. Native UH
+        // carries Show explicitly: omitting every value destroyed this setting.
+        Codec::EnumMap(&[("Show", "Show"), ("DontShow", "DontShow"), ("Auto", "Auto")]),
         keep(
             ff::DRAWING_SELECTION_SHOW_MODE_FILL,
             None,
             ff::DRAWING_SELECTION_SHOW_MODE_FILL,
-            DesOmit::Always,
+            DesOmit::Eq(ff::DRAWING_SELECTION_SHOW_MODE_FILL),
         ),
     ),
     fp(

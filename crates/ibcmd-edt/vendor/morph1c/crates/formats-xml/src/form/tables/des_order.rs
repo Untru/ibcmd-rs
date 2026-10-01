@@ -2,7 +2,7 @@
 
 use crate::form::tables::{
     F_BT_SERVER_UNAVAILABLE, F_DEC_SHORTCUT, F_EXT_CHOICE_BUTTON_TITLE, F_EXT_DROP_LIST_HINT,
-    F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES, F_EXT_MULTIPLE_PRESENT_PATH,
+    F_EXT_ITEM_WIDTH, F_EXT_MARK_NEGATIVES, F_EXT_MULTIPLE_PRESENT_PATH, F_EXT_PIC_ENABLE_DRAG,
     F_EXT_SHOW_CHECK_BOXES_IN_DROP_LIST, F_EXT_SPECIAL_TEXT_INPUT_MODE, F_EXT_VIEW_SCALING_MODE,
     F_EXT_ZOOMABLE, F_FF_FOOTER_DATA_PATH, F_FF_FOOTER_PICTURE, F_FF_FOOTER_TEXT_COLOR,
     F_FF_TITLE_BACK_COLOR, F_FF_WIDTH_IN_CARD, F_GRP_ASSOCIATED_TABLE,
@@ -566,6 +566,9 @@ pub(crate) static DES_FIELD_ORDER: &[DesSlot] = &[
     DesSlot::F(ff::F_EXT_PICTURE_SIZE),
     DesSlot::F(ff::F_EXT_PIC_HYPERLINK),
     DesSlot::F(ff::F_EXT_NONSELECTED_PICTURE_TEXT),
+    // Native UH image fields carry per-use drag enablement after the picture text.
+    // The typed reader already retained this property; emission must be total.
+    DesSlot::F(F_EXT_PIC_ENABLE_DRAG),
     DesSlot::F(ff::F_EXT_VALUES_PICTURE),
     // borderColor — СРАЗУ за ValuesPicture, ДО Border (witness Новости.ФормаНовости:
     // ValuesPicture→BorderColor→Border; ERP-волна). Designer-порядок ОБРАТЕН EDT
@@ -725,6 +728,8 @@ pub(crate) static DES_SPREADSHEET_ORDER: &[DesSlot] = &[
     // TitleBackColor — общий body-слот (тотальность write; Spreadsheet-витнесса нет).
     DesSlot::F(F_FF_TITLE_BACK_COLOR),
     DesSlot::F(ff::F_TITLE_LOCATION),
+    DesSlot::F(ff::F_TOOL_TIP),
+    DesSlot::F(ff::F_TOOL_TIP_REPRESENTATION),
     DesSlot::TableCommandSet,
     DesSlot::F(ff::F_EDIT_MODE),
     // FooterDataPath/FooterTextColor — общие body-слоты после EditMode (тотальность write).

@@ -101,7 +101,16 @@ pub(crate) fn render_edt(
     Ok(match (entry.codec, value) {
         (Codec::Bool, PropertyValue::Bool(b)) => bool_leaf("", tag, *b),
         (Codec::Int, PropertyValue::Int(n)) => OutElement::leaf("", tag, n.to_string()),
-        (Codec::EnumTok | Codec::EnumMap(_), PropertyValue::Enum(t)) => {
+        (Codec::EnumTok, PropertyValue::Enum(t)) => {
+            OutElement::leaf("", tag, t.as_str().to_string())
+        }
+        (Codec::EnumMap(map), PropertyValue::Enum(t)) => {
+            if !map.iter().any(|(_, edt)| *edt == t.as_str()) {
+                return Err(FormError::Frame(format!(
+                    "<{tag}>: unknown typed EDT enumeration {:?}",
+                    t.as_str()
+                )));
+            }
             OutElement::leaf("", tag, t.as_str().to_string())
         }
         (Codec::Text, PropertyValue::Str(s)) => OutElement::leaf("", tag, s.clone()),
