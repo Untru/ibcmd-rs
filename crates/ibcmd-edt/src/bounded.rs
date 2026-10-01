@@ -18,6 +18,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
     let mut events = 0usize;
     let mut names = Vec::new();
     let mut form_body = false;
+    let mut dump_info = false;
     loop {
         events += 1;
         if events > MAX_XML_EVENTS {
@@ -32,6 +33,24 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                 if names.is_empty() && depth == 0 && local == "Form" {
                     form_body = path.ends_with(".form") || path.ends_with("Form.xml");
                 }
+                if names.is_empty()
+                    && depth == 0
+                    && local == "ConfigDumpInfo"
+                    && matches!(
+                        path,
+                        "ConfigDumpInfo.xml" | ".ibcmd-provenance/xml/ConfigDumpInfo.xml"
+                    )
+                {
+                    for a in e.attributes().take(MAX_XML_ATTRIBUTES) {
+                        let a = a.map_err(EdtError::source)?;
+                        if a.key.as_ref() == b"xmlns" {
+                            dump_info = a
+                                .decode_and_unescape_value(reader.decoder())
+                                .map_err(EdtError::source)?
+                                == "http://v8.1c.ru/8.3/xcf/dumpinfo";
+                        }
+                    }
+                }
                 for (n, a) in e.attributes().enumerate() {
                     if n >= MAX_XML_ATTRIBUTES {
                         return Err(EdtError::new(format!(
@@ -44,6 +63,15 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                             .decode_and_unescape_value(reader.decoder())
                             .map_err(EdtError::source)?;
                         if form_body && matches!(a.key.as_ref(), b"name" | b"Name") {
+                            logical_form_name(&value)?;
+                        } else if dump_info
+                            && a.key.as_ref() == b"name"
+                            && local == "Metadata"
+                            && names.get(1).map(String::as_str) == Some("ConfigVersions")
+                            && names[2..].iter().all(|name| name == "Metadata")
+                        {
+                            // Dump manifest references are qualified logical
+                            // identities, never filesystem components.
                             logical_form_name(&value)?;
                         } else {
                             component(&value)?;
@@ -134,7 +162,8 @@ pub(crate) fn component(value: &str) -> Result<(), EdtError> {
     Ok(())
 }
 
-// Form identifiers can exceed portable filename limits without naming a file.
+// Form identifiers and dump references can exceed portable filename limits
+// without naming a file.
 // Only bounded long identifiers receive this exception; physical paths keep
 // SourcePath limits and borrowed file writes independently check components.
 fn logical_form_name(value: &str) -> Result<(), EdtError> {
@@ -298,6 +327,41 @@ fn reparse(_: &fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn dump_qualified_references_do_not_extend_filesystem_names() {
+        let name = "DataProcessor.СопоставлениеОбъектовИнформационныхБаз.TabularSection.ТаблицаАвтоматическиСопоставленныхОбъектов.Attribute.УникальныйИдентификаторПриемника";
+        assert!(name.len() > ibcmd_xml::source_tree::MAX_SOURCE_COMPONENT_BYTES);
+        let dump = |name: &str| {
+            format!(
+                "<ConfigDumpInfo xmlns='http://v8.1c.ru/8.3/xcf/dumpinfo'><ConfigVersions><Metadata name='Catalog.Parent'><Metadata name='{name}'/></Metadata></ConfigVersions></ConfigDumpInfo>"
+            )
+        };
+        let body = dump(name);
+        for path in [
+            "ConfigDumpInfo.xml",
+            ".ibcmd-provenance/xml/ConfigDumpInfo.xml",
+        ] {
+            validate_xml(path, body.as_bytes()).unwrap();
+        }
+        assert!(validate_xml("Descriptor.mdo", body.as_bytes()).is_err());
+        assert!(
+            validate_xml(
+                "ConfigDumpInfo.xml",
+                body.replace("http://v8.1c.ru/8.3/xcf/dumpinfo", "urn:unknown")
+                    .as_bytes(),
+            )
+            .is_err()
+        );
+        for unsafe_name in [
+            format!("{name}/escape"),
+            format!("{name}\\escape"),
+            format!("{name}:escape"),
+            "а".repeat(4097),
+        ] {
+            assert!(validate_xml("ConfigDumpInfo.xml", dump(&unsafe_name).as_bytes()).is_err());
+        }
+        assert!(SourcePath::new(name).is_err());
+    }
     #[test]
     fn logical_form_names_do_not_extend_filesystem_names() {
         let name = "ДлинноеИмяЭлемента".repeat(20);
