@@ -6,6 +6,7 @@ use ibcmd_core::identity::ObjectUuid;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
 
 pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree};
 pub use writer::{SourceTreeWriter, publish_new, publish_new_with_limits};
@@ -109,7 +110,9 @@ pub enum SourceKind {
 pub struct SourceEntry {
     path: SourcePath,
     kind: SourceKind,
-    bytes: Box<[u8]>,
+    // Source trees are immutable. Sharing their byte buffers prevents inventory
+    // and provenance clones from copying an entire multi-gigabyte configuration.
+    bytes: Arc<Vec<u8>>,
     uuid: Option<ObjectUuid>,
     digest: ibcmd_core::storage::Sha256Digest,
 }
@@ -162,7 +165,7 @@ impl SourceEntry {
             path,
             kind,
             digest: ibcmd_core::storage::Sha256Digest::for_bytes(&bytes),
-            bytes: bytes.into(),
+            bytes: Arc::new(bytes),
             uuid,
         })
     }
