@@ -793,7 +793,9 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
         return Ok(true);
     }
     let mobile_format = match a.path().as_str() {
-        "Ext/MobileClientSignature.bin" => Some(Format::Designer),
+        "Ext/MobileClientSignature.bin"
+        | "src/Configuration/MobileClientSignature.bin"
+        | "Configuration/MobileClientSignature.bin" => Some(Format::Designer),
         "src/Configuration/MobileClientSign.bin" | "Configuration/MobileClientSign.bin" => {
             Some(Format::Edt)
         }
@@ -1049,6 +1051,28 @@ mod tests {
         assert!(same_body(&body(root, native), &body(root, carrier.as_bytes())).is_err());
         let edt = "src/Configuration/MobileClientSign.bin";
         assert!(same_body(&body(edt, native), &body(edt, carrier.as_bytes())).unwrap());
+        for preferred in [
+            "src/Configuration/MobileClientSignature.bin",
+            "Configuration/MobileClientSignature.bin",
+        ] {
+            assert!(same_body(&body(preferred, native), &body(preferred, &lexical)).unwrap());
+            assert!(
+                same_body(
+                    &body(preferred, native),
+                    &body(preferred, carrier.as_bytes())
+                )
+                .is_err()
+            );
+            assert!(
+                !same_body(
+                    &body(preferred, native),
+                    &body(preferred, changed.as_bytes())
+                )
+                .unwrap()
+            );
+        }
+        let unrelated = "src/CommonModules/X/MobileClientSignature.bin";
+        assert!(!same_body(&body(unrelated, native), &body(unrelated, &lexical)).unwrap());
     }
     #[test]
     fn large_mxl_inventory_and_body_guard_avoid_per_node_dom() {
