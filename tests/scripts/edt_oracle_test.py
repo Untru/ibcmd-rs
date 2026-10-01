@@ -16,6 +16,70 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_route_specific_tree_equality_keeps_serializer_differences_visible(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            native, edt = root / "native", root / "edt"
+            native.mkdir(); edt.mkdir()
+            (native / "Configuration.xml").write_bytes(b"<Configuration>A</Configuration>")
+            (native / "ConfigDumpInfo.xml").write_bytes(b"native-generation")
+            (edt / "Configuration.xml").write_bytes(b"<Configuration>\nA\n</Configuration>")
+            a, b = oracle.snapshot(native), oracle.snapshot(edt)
+            self.assertFalse(oracle.compare_tree_snapshots(a, b, excluded_paths=("ConfigDumpInfo.xml",))["equal"])
+            self.assertTrue(oracle.compare_tree_snapshots(a, a)["equal"])
+            self.assertTrue(oracle.compare_tree_snapshots(b, b)["equal"])
+            # The exception is direct EDT data only; unchanged return must keep CDI.
+            (edt / "Configuration.xml").write_bytes((native / "Configuration.xml").read_bytes())
+            c = oracle.snapshot(edt)
+            comparison = oracle.compare_tree_snapshots(a, c, excluded_paths=("ConfigDumpInfo.xml",))
+            self.assertTrue(comparison["equal"])
+            self.assertEqual(comparison["original_excluded_rows"][0]["left"]["sha256"], oracle.digest(native / "ConfigDumpInfo.xml"))
+            self.assertFalse(oracle.compare_tree_snapshots(a, c)["equal"])
+
+    def test_validation_no_new_compares_exact_multiset_except_timestamp_and_project(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            original, generated = root / "original.tsv", root / "generated.tsv"
+            row = "2026-10-01T11:18:24+0300\tMajor\tConfiguration error\tOriginalProject\tvalidator\tmodule\tline 39\tInherited error\n"
+            original.write_text(row, encoding="utf-8")
+            changed_label = row.replace("11:18:24", "12:30:00").replace("OriginalProject", "GeneratedProject")
+            generated.write_text(changed_label, encoding="utf-8")
+            self.assertTrue(oracle.compare_validation_tsv(original, generated)["exact_multiset_equal"])
+            for mutation in (changed_label * 2, changed_label.replace("line 39", "line 40"),
+                             changed_label.replace("Inherited error", "Inherited  error"),
+                             changed_label.replace("Major", "Critical")):
+                generated.write_text(mutation, encoding="utf-8")
+                self.assertFalse(oracle.compare_validation_tsv(original, generated)["no_new_diagnostics"])
+            generated.write_text("", encoding="utf-8")
+            self.assertTrue(oracle.compare_validation_tsv(original, generated)["no_new_diagnostics"])
+            generated.write_text("truncated\trow\n", encoding="utf-8")
+            with self.assertRaises(oracle.OracleError):
+                oracle.compare_validation_tsv(original, generated)
+
+    def test_ambient_control_matches_full_records_and_never_blanket_errors(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            control, original, generated = root / "control", root / "original", root / "generated"
+            for directory in (control, original, generated):
+                directory.mkdir()
+            ambient = ("!ENTRY com._1c.g5.v8.dt.core 4 0 2026-10-01 11:18:24\n"
+                "!MESSAGE Error while reading the library metainformation\n!STACK 0\n"
+                "com._1c.g5.v8.dt.core.library.InvalidLibraryDescriptorException: The library compatibility mode is not specified in the library file\nExact stack\n\n")
+            for directory, labels in ((control, ["edt-control-validate", "edt-control-export"]),
+                                      (original, ["import"]), (generated, ["export"])):
+                for label in labels:
+                    (directory / f"{label}.workspace-log").write_text(ambient, encoding="utf-8")
+                    (directory / f"{label}.stdout").write_bytes(b"")
+                    (directory / f"{label}.stderr").write_bytes(b"")
+            (generated / "export.workspace-log").write_text(ambient.replace("11:18:24", "12:00:00"), encoding="utf-8")
+            stages = (control, [(original, "import")], [(generated, "export")])
+            self.assertTrue(oracle.compare_ambient_diagnostics(*stages)["no_unmatched_error_diagnostics"])
+            (generated / "export.workspace-log").write_text(ambient.replace("Exact stack", "Different stack"), encoding="utf-8")
+            self.assertFalse(oracle.compare_ambient_diagnostics(*stages)["no_unmatched_error_diagnostics"])
+            (generated / "export.workspace-log").write_text(ambient, encoding="utf-8")
+            (generated / "export.stdout").write_bytes(b"ERROR source validator failed")
+            self.assertFalse(oracle.compare_ambient_diagnostics(*stages)["no_unmatched_error_diagnostics"])
+
     def test_validation_tsv_retains_source_errors_and_unknown_categories(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "validation.tsv"
@@ -200,7 +264,23 @@ class EvidenceControls(unittest.TestCase):
             values = self.native_capture_fixture(Path(folder))
             result = oracle.validate_native_reference(*values)
             self.assertEqual(result["source_edt_xml_tree_sha256"], "source-hash")
-            self.assertEqual(len(result["command_evidence_sha256"]), 6)
+            self.assertEqual(len(result["command_evidence_sha256"]), 5)
+
+    def test_optional_failed_apply_probe_does_not_replace_import_export_proof(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            values = self.native_capture_fixture(root)
+            invocation_path, result_path, command_path = root / "invocation.json", root / "result.json", root / "native-apply.command.json"
+            invocation = json.loads(invocation_path.read_text()); invocation["probe_apply"] = True
+            result = json.loads(result_path.read_text()); result["activation_probe"] = {"status": "FAIL", "exit_code": 7}
+            command = json.loads(command_path.read_text()); command["exit_code"] = 7
+            for path, value in ((invocation_path, invocation), (result_path, result), (command_path, command)):
+                path.write_text(json.dumps(value), encoding="utf-8")
+            self.assertEqual(oracle.validate_native_reference(*values)["activation_probe"]["status"], "FAIL")
+            command["argv"] = [part.replace("ibcmd_rs_04_edt07_test", "some_other_db") for part in command["argv"]]
+            command_path.write_text(json.dumps(command), encoding="utf-8")
+            with self.assertRaises(oracle.OracleError):
+                oracle.validate_native_reference(*values)
 
     def test_native_reference_wrong_input_failed_command_version_and_manifest_rejected(self):
         for corruption in ("input", "command", "version", "manifest", "database", "executable"):
@@ -213,7 +293,7 @@ class EvidenceControls(unittest.TestCase):
                     path = root / "input-before.json"
                     data = json.loads(path.read_text()); data["tree_sha256"] = "another-source"
                 elif corruption == "command":
-                    path = root / "native-apply.command.json"
+                    path = root / "native-import.command.json"
                     data = json.loads(path.read_text()); data["exit_code"] = 7
                 elif corruption == "version":
                     (root / "native-version.stdout").write_bytes(b"8.5.1.11500")

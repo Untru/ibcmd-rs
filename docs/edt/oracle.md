@@ -35,8 +35,11 @@ acceptance. Original native XML is an immutable independent input captured by
 the native platform in earlier laboratory runs, not an ibcmd-rs round trip.
 Acceptance additionally requires `--reference`: a fresh native export after
 loading this authentic EDT project's exported XML into a disposable native
-infobase. Its creation is a separate laboratory operation with native import,
-apply, export, database ownership and cleanup evidence. This harness does not
+infobase. Its creation is a separate laboratory operation with fresh creation,
+native import/export and database ownership evidence. Database activation
+(`APPLY`) is an optional, separately recorded `--probe-apply` operation; a failed
+activation probe remains visible and does not replace or invalidate successful
+configuration import/export proof. This harness does not
 create or modify a database. `accept` binds the adjacent `native_reference.py`
 capture's successful result, every required command, exact build/version output,
 executable and harness hashes, input-before/after manifests and current exported
@@ -45,26 +48,44 @@ Comparing only the pre-EDT original XML would mix
 EDT's own materialization of defaults/order with converter errors.
 
 `accept` checks those captured inputs again and uses the exact candidate binary
-for two independent directions:
+for three route-specific checks:
 
-1. Authentic EDT, with no ibcmd-rs provenance, -> our XML.
+1. Authentic EDT, with no ibcmd-rs provenance, -> our XML must match the fresh
+   post-EDT native SDK export. Only `ConfigDumpInfo.xml` is excluded, with original
+   path/hash rows retained; EDT cannot invent native storage generations.
 2. Native XML -> our EDT -> a disposable complete project copy with the entire
-   `.ibcmd-provenance` directory removed -> installed EDT XML export. The harness
-   does not add missing project scaffolding or restore cached native XML.
+   `.ibcmd-provenance` directory removed -> installed EDT XML export must match
+   the authentic installed-EDT XML baseline, using the same serializer. The
+   harness does not add project scaffolding or restore cached native XML.
+3. Native XML -> our EDT -> unchanged our XML must match every original file
+   byte for byte, including `ConfigDumpInfo.xml`.
 
 Both results enter existing `source-three-way-oracle`, together with native XML
 and genuine EDT's export of its native import. The native branch uses the fresh
 post-EDT reference, not the pre-import corpus. Reports must contain unique,
-nonempty rows and complete matching summaries. `PASS` requires all configuration
-data rows to agree in both comparisons and unchanged inputs/binary. The derived
-comparison excludes only `ConfigDumpInfo.xml`, with original excluded-row hashes
-and the complete raw report hash. Raw reports preserve its structural asymmetry.
-A zero EDT exit code is
-not a comparison verdict. Raw divergences remain failures requiring explicit
-investigation; the harness does not suppress XML whitespace, namespaces, absent
-bodies or serializer differences. Compiler diagnostics remain in workspace and
-command logs. ERROR/FATAL diagnostics give `PREPARED_WITH_DIAGNOSTICS` and prevent
-acceptance PASS; there is no blanket exception for a zero exit or shutdown errors.
+nonempty rows and complete matching summaries. Full three-way reports retain
+all serializer divergences. Native-versus-EDT differences do not substitute for
+the route-specific equality criteria. `PASS` requires all three criteria and
+unchanged inputs/binary; no XML whitespace, namespaces, absent bodies or file
+differences are normalized away. The raw report and sole direct-route CDI
+exclusion retain their hashes.
+
+Acceptance additionally binds `--validation-capture` to genuine structured
+validation of this exact authentic project. Installed EDT validates the generated
+project, and its exact diagnostic multiset must add no entries or multiplicities.
+Only TSV timestamp and project-label columns are excluded; severity, category,
+validator, object, position and message remain exact, including existing source
+errors. Raw inherited diagnostics and added/removed rows remain available.
+
+`--ambient-control` must be a completed installed-EDT empty project with zero TSV
+source diagnostics, bound tool/harness/command hashes and unchanged template.
+Only four evidenced record classes are candidates: the exact library descriptor
+exception, absent headless workbench lifecycle event, and two severity-8 state
+update records. Every plugin/severity/code/full message and stack must also match
+the bound control. The report retains exact original/generated counts and their
+differential. New or unmatched workspace errors, stdout ERROR/FATAL/exception
+lines and additional structured diagnostics prevent PASS. There is no general
+exception for a zero exit, shutdown errors or source errors.
 
 ## Commands
 
@@ -82,7 +103,9 @@ raw TSV and workspace logs, and checks that the original project remains intact.
 Its `CAPTURED` status is an evidence capture, never a validation or acceptance PASS.
 The TSV summary preserves its raw hash and every configuration-error row.
 Unknown categories and malformed rows remain unresolved source diagnostics;
-they cannot silently become a clean result.
+the standalone summary cannot silently call them clean. Acceptance compares the
+complete baseline and generated multiset even for unfamiliar categories; malformed
+rows are rejected.
 The `control` mode uses the same CLI options and prepared template to create a
 synthetic empty EDT project, retaining only root platform properties, contained
 object identifiers and the inline language. It validates and exports that project
@@ -114,11 +137,19 @@ python scripts/edt-lab/oracle.py validate `
   --prepared F:\ibcmd\lab\07\oracle-bsp85-example `
   --run F:\ibcmd\lab\07\validate-bsp85-example --lock-script $lock --heap-gib 32
 
+python scripts/edt-lab/oracle.py control `
+  --native $native --source-version 2.21 --runtime 8.5.1 `
+  --native-tool-version 8.5.1.1150 --edt-exe $edt --edt-version 2025.2.3 --edt-build 2025.2.3.30 `
+  --prepared F:\ibcmd\lab\07\oracle-bsp85-example `
+  --run F:\ibcmd\lab\07\empty-control-example --lock-script $lock --heap-gib 16
+
 python scripts/edt-lab/oracle.py accept `
   --native $native --source-version 2.21 --runtime 8.5.1 `
   --native-tool-version 8.5.1.1150 --edt-exe $edt --edt-version 2025.2.3 --edt-build 2025.2.3.30 `
   --prepared F:\ibcmd\lab\07\oracle-bsp85-example `
   --reference F:\ibcmd\lab\07\native-reference-bsp85-example\native-xml `
+  --validation-capture F:\ibcmd\lab\07\validate-bsp85-example `
+  --ambient-control F:\ibcmd\lab\07\empty-control-example `
   --ours-exe F:\ibcmd\lab\07\target-root\debug\ibcmd-rs.exe `
   --run F:\ibcmd\lab\07\accept-bsp85-example --lock-script $lock
 ```
@@ -145,8 +176,11 @@ The separate genuine validation capture under
 execution environments and compilation. The raw TSV and derived summary are
 retained. The UH85 import under `F:\ibcmd\lab\07\oracle-uha85-r2` also logged
 `Unsupported version of file MobileDigiSign.bin` in the installed EDT workspace.
-These actual source diagnostics are unresolved failures, independently of
-startup, headless and shutdown log messages.
+The source TSV errors remain preserved baseline diagnostics; generated projects
+must not add to them. The unsupported MobileDigiSign runtime error is not an
+approved ambient class. The actual empty EDT control under
+`F:\ibcmd\lab\07\empty-edt-control83-r1` emitted zero TSV rows while reproducing
+the four exact environment record classes described above.
 
 The source issue remains subject to the completed BSP and ERP UH acceptance
 reports, review of diagnostics and complete differences. Neither an import

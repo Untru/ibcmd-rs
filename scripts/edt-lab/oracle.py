@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
 import hashlib
@@ -222,6 +223,162 @@ def summarize_validation_tsv(path: Path) -> dict:
             "configuration_error_count": len(errors), "configuration_errors": errors,
             "malformed_rows": malformed, "unclassified_rows": unknown,
             "unresolved_source_diagnostics": bool(errors or malformed or unknown)}
+
+
+def validation_multiset(path: Path) -> Counter:
+    result = Counter()
+    for number, line in enumerate(path.read_bytes().decode("utf-8-sig").splitlines(), 1):
+        fields = line.split("\t")
+        if len(fields) < 8 or not re.match(r"^\d{4}-\d{2}-\d{2}T", fields[0]):
+            raise OracleError(f"Malformed validation TSV row {number}")
+        # Ignore ONLY the execution timestamp and imported project label.
+        result[tuple(fields[1:3] + fields[4:])] += 1
+    return result
+
+
+def compare_validation_tsv(original: Path, generated: Path) -> dict:
+    before, after = validation_multiset(original), validation_multiset(generated)
+    def rows(values):
+        return [{"diagnostic": list(row), "count": count} for row, count in sorted(values.items())]
+    added, removed = after - before, before - after
+    return {"no_new_diagnostics": not added, "exact_multiset_equal": before == after,
+            "ignored_columns": ["timestamp", "project_label"],
+            "original_sha256": digest(original), "generated_sha256": digest(generated),
+            "original_row_count": sum(before.values()), "generated_row_count": sum(after.values()),
+            "added_diagnostics": rows(added), "removed_diagnostics": rows(removed)}
+
+
+def compare_tree_snapshots(left: dict, right: dict, *, excluded_paths=()) -> dict:
+    a = {row["path"]: row for row in left["files"]}
+    b = {row["path"]: row for row in right["files"]}
+    differing, excluded = [], []
+    for path in sorted(a.keys() | b.keys()):
+        row = {"path": path, "left": a.get(path), "right": b.get(path)}
+        if path in excluded_paths:
+            excluded.append(row)
+        elif a.get(path) != b.get(path):
+            differing.append(row)
+    return {"equal": not differing, "left_tree_sha256": left["tree_sha256"],
+            "right_tree_sha256": right["tree_sha256"], "differing_rows": differing,
+            "excluded_paths": list(excluded_paths), "original_excluded_rows": excluded}
+
+
+def workspace_error_multiset(log: Path) -> Counter:
+    if not log.is_file():
+        raise OracleError(f"Missing captured workspace diagnostics: {log}")
+    result = Counter()
+    for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION) )", log.read_bytes().decode("utf-8")):
+        match = re.match(r"!ENTRY (\S+) ([48]) (\S+) [^\r\n]+\r?\n", block)
+        if match:
+            # Full plugin/severity/code/message/stack; exclude only header time
+            # and separator blank lines. Never collapse message/stack whitespace.
+            key = (match[1], match[2], match[3], block[match.end():].rstrip("\r\n"))
+            result[key] += 1
+    return result
+
+
+def is_ambient_record(record: tuple) -> bool:
+    plugin, severity, code, body = record
+    if code != "0":
+        return False
+    if plugin == "com._1c.g5.v8.dt.core" and severity == "4":
+        return body.splitlines()[:3] == ["!MESSAGE Error while reading the library metainformation", "!STACK 0",
+            "com._1c.g5.v8.dt.core.library.InvalidLibraryDescriptorException: The library compatibility mode is not specified in the library file"]
+    if plugin == "com.e1c.g5.dt.applications.infobases.ui" and severity == "4":
+        return body == "!MESSAGE Skipping the lifecycle event because workbench is not running"
+    return plugin == "com._1c.g5.v8.dt.common" and severity == "8" and body in (
+        "!MESSAGE Updating workspace state", "!MESSAGE Updating infobase states")
+
+
+def bind_diagnostic_capture(capture: Path, args, *, control=False, project_snapshot=None) -> dict:
+    no_links(capture)
+    invocation = json.loads((capture / "invocation.json").read_text(encoding="utf-8"))
+    if digest(capture / "harness-source.py") != invocation["harness_sha256"]:
+        raise OracleError("Diagnostic capture harness identity changed")
+    version = json.loads((capture / "edt-version.json").read_text(encoding="utf-8"))
+    if version["actual"] != args.edt_build or version["executable_sha256"] != digest(args.edt_exe):
+        raise OracleError("Diagnostic capture installed EDT identity mismatch")
+    if not control and (invocation["source_version"] != args.source_version or invocation["runtime"] != args.runtime):
+        raise OracleError("Diagnostic capture profile mismatch")
+    if (capture / "edt-version.stdout").read_bytes().decode("utf-8").strip() != args.edt_build:
+        raise OracleError("Diagnostic capture actual version output mismatch")
+    label = "edt-control-validate" if control else "edt-validate"
+    tsv = capture / ("control-validation.tsv" if control else "validation.tsv")
+    result = json.loads((capture / ("control.json" if control else "validation.json")).read_text(encoding="utf-8"))
+    if result["status"] != "CAPTURED" or result.get("template_project_unchanged" if control else "prepared_project_unchanged") is not True:
+        raise OracleError("Diagnostic capture did not complete with unchanged original")
+    labels = ["edt-version", label, "edt-control-export"] if control else ["edt-version", label]
+    hashes, raw_hashes = {}, {}
+    for stage in labels:
+        command_path = capture / f"{stage}.command.json"
+        command = json.loads(command_path.read_text(encoding="utf-8"))
+        argv = command["argv"]
+        operation = "export" if stage.endswith("export") else "version" if stage == "edt-version" else "validate"
+        if command["exit_code"] != 0 or command.get("timeout") or Path(argv[0]) != args.edt_exe \
+                or "-command" not in argv or argv[argv.index("-command") + 1] != operation:
+            raise OracleError("Diagnostic capture command failed or uses another tool")
+        if operation == "validate" and ("--file" not in argv or argv[argv.index("--file") + 1] != str(tsv)):
+            raise OracleError("Diagnostic command did not write this exact TSV")
+        if operation == "validate":
+            source_project = capture / ("EmptyEdtDiagnosticControl" if control else "project-copy")
+            if "--project-list" not in argv or argv[argv.index("--project-list") + 1:] != [str(source_project)]:
+                raise OracleError("Diagnostic command checked another project")
+        hashes[stage] = digest(command_path)
+        for suffix in ("stdout", "stderr", "workspace-log"):
+            raw = capture / f"{stage}.{suffix}"
+            raw_hashes[raw.name] = digest(raw)
+    if control:
+        if invocation["mode"] != "control" or validation_multiset(tsv):
+            raise OracleError("Ambient control is not a genuinely validated empty diagnostic project")
+        for stage in ("edt-control-validate", "edt-control-export"):
+            if command_diagnostics(capture, [stage])[stage]["error_count"] or any(
+                    not is_ambient_record(record) for record in workspace_error_multiset(capture / f"{stage}.workspace-log")):
+                raise OracleError("Empty diagnostic control contains an unapproved runtime error")
+        before = json.loads((capture / "control-project-before.json").read_text(encoding="utf-8"))
+        if {row["path"] for row in before["files"]} != {".project", "DT-INF/PROJECT.PMF", "src/Configuration/Configuration.mdo"}:
+            raise OracleError("Ambient control contains more than an empty configuration scaffold")
+        require_xml(capture / "control-installed-export", require_dump_info=False)
+    else:
+        if invocation["mode"] != "validate" or digest(tsv) != result["tsv_sha256"]:
+            raise OracleError("Validation TSV identity mismatch")
+        for name in ("authentic-project-before.json", "authentic-project-after.json"):
+            if json.loads((capture / name).read_text(encoding="utf-8")) != project_snapshot:
+                raise OracleError("Validation capture belongs to another authentic EDT project")
+        copied = json.loads((capture / "validated-project-copy.json").read_text(encoding="utf-8"))
+        if Path(copied["root"]) != capture / "project-copy" or any(
+                copied[key] != project_snapshot[key] for key in ("files", "file_count", "total_bytes", "tree_sha256")):
+            raise OracleError("Validated disposable copy was not byte equal to the authentic project")
+    return {"capture": str(capture), "tsv_sha256": digest(tsv), "harness_sha256": invocation["harness_sha256"],
+            "capture_runtime": invocation["runtime"], "capture_source_version": invocation["source_version"],
+            "command_hashes": hashes, "raw_diagnostic_hashes": raw_hashes,
+            "result_sha256": digest(capture / ("control.json" if control else "validation.json"))}
+
+
+def compare_ambient_diagnostics(control: Path, original: list[tuple[Path, str]],
+                                generated: list[tuple[Path, str]]) -> dict:
+    known = Counter()
+    for label in ("edt-control-validate", "edt-control-export"):
+        known.update({key: count for key, count in workspace_error_multiset(control / f"{label}.workspace-log").items()
+                      if is_ambient_record(key)})
+    def inspect(stages):
+        values, stdout_errors = Counter(), []
+        for root, label in stages:
+            values.update(workspace_error_multiset(root / f"{label}.workspace-log"))
+            stdout_errors.extend(command_diagnostics(root, [label])[label]["error_lines"])
+        unmatched = {key: count for key, count in values.items() if key not in known}
+        return values, unmatched, stdout_errors
+    before, before_unknown, before_stdout = inspect(original)
+    after, after_unknown, after_stdout = inspect(generated)
+    def rows(values):
+        return [{"plugin": key[0], "severity": key[1], "code": key[2],
+                 "message_and_stack": key[3], "count": count} for key, count in sorted(values.items())]
+    return {"no_unmatched_error_diagnostics": not (before_unknown or after_unknown or before_stdout or after_stdout),
+            "exact_control_classes": rows(known), "original_workspace_entries": rows(before),
+            "generated_workspace_entries": rows(after), "added_workspace_entries": rows(after - before),
+            "removed_workspace_entries": rows(before - after),
+            "original_unmatched_entries": rows(before_unknown), "generated_unmatched_entries": rows(after_unknown),
+            "original_stdout_errors": before_stdout, "generated_stdout_errors": after_stdout,
+            "note": "Only exact full records observed in the zero-source-error empty installed-EDT control are classified as ambient; all raw errors remain preserved"}
 
 
 def require_xml(root: Path, *, require_dump_info=True) -> None:
@@ -465,7 +622,6 @@ def validate_native_reference(reference: Path, baseline: dict, native_build: str
         "native-version": ["--version"],
         "native-create": ["infobase", "create"],
         "native-import": ["infobase", "config", "import"],
-        "native-apply": ["infobase", "config", "apply"],
         "native-export": ["infobase", "config", "export"],
     }
     commands = {}
@@ -495,15 +651,30 @@ def validate_native_reference(reference: Path, baseline: dict, native_build: str
             if label == "native-export" and str(reference) not in argv:
                 raise OracleError("Native export command did not create this reference")
         commands[label] = digest(capture / f"{label}.command.json")
+    activation = result.get("activation_probe", {"status": "NOT_REQUESTED"})
+    if invocation.get("probe_apply", False):
+        probe = evidence("native-apply.command.json")
+        argv = probe["argv"]
+        if probe.get("timeout") or probe.get("timeout_or_log_limit") or Path(argv[0]) != native \
+                or argv[1:4] != ["infobase", "config", "apply"] \
+                or f"--db-name={database}" not in argv \
+                or any(flag not in argv for flag in ("--dbms=MSSQLServer", "--db-server=localhost", f"--data={capture / 'ibdata'}")) \
+                or activation.get("exit_code") != probe["exit_code"] \
+                or activation.get("status") != ("PASS" if probe["exit_code"] == 0 else "FAIL"):
+            raise OracleError("Optional activation probe evidence does not match its recorded outcome")
+        commands["optional-native-apply"] = digest(capture / "native-apply.command.json")
+    elif activation.get("status") != "NOT_REQUESTED":
+        raise OracleError("Unrequested activation outcome was supplied")
     return {"capture": str(capture), "database": database, "native_build": native_build,
             "result_sha256": digest(capture / "result.json"), "command_evidence_sha256": commands,
+            "activation_probe": activation,
             "source_edt_xml_tree_sha256": baseline["tree_sha256"],
             "native_reference_tree_sha256": current_reference["tree_sha256"]}
 
 
 def accept(args, run: Path) -> None:
-    if not args.prepared or not args.ours_exe or not args.reference:
-        raise OracleError("accept requires --prepared, --ours-exe, and --reference captured after native loading of this EDT export")
+    if not args.prepared or not args.ours_exe or not args.reference or not args.validation_capture or not args.ambient_control:
+        raise OracleError("accept requires --prepared, --ours-exe, --reference, --validation-capture and --ambient-control")
     prepared_root = args.prepared.absolute()
     no_links(prepared_root)
     prepared = json.loads((prepared_root / "prepared.json").read_text(encoding="utf-8"))
@@ -526,6 +697,12 @@ def accept(args, run: Path) -> None:
     require_project(project, args.runtime)
     require_xml(baseline_xml, require_dump_info=False)
     project_before = snapshot(project)
+    validation_capture = args.validation_capture.absolute()
+    ambient_control = args.ambient_control.absolute()
+    validation_binding = bind_diagnostic_capture(validation_capture, args, project_snapshot=project_before)
+    control_binding = bind_diagnostic_capture(ambient_control, args, control=True)
+    write_json(run / "baseline-validation-binding.json", validation_binding)
+    write_json(run / "ambient-control-binding.json", control_binding)
     baseline_before = snapshot(baseline_xml)
     if baseline_before != json.loads((prepared_root / "edt-native-xml.json").read_text(encoding="utf-8")):
         raise OracleError("Installed EDT baseline export changed")
@@ -559,8 +736,18 @@ def accept(args, run: Path) -> None:
     # conversion is complete configuration data without inventing such a file.
     require_xml(converted_xml, require_dump_info=False)
     require_project(generated, args.runtime)
-    write_json(run / "ours-authentic-edt-xml.json", snapshot(converted_xml))
+    converted_before = snapshot(converted_xml)
+    write_json(run / "ours-authentic-edt-xml.json", converted_before)
     write_json(run / "ours-generated-edt.json", snapshot(generated))
+    returned_xml = run / "ours-unchanged-return-xml"
+    run_command(run, "convert-generated-edt-unchanged", [str(args.ours_exe), "convert", str(generated), str(returned_xml),
+        "--source-format", "edt", "--target-format", "xml", "--source-profile", profile_edt,
+        "--target-profile", profile_xml, "--report", str(run / "convert-generated-edt-unchanged.report.json")], args.timeout)
+    require_xml(returned_xml)
+    returned_before = snapshot(returned_xml)
+    write_json(run / "ours-unchanged-return-xml.json", returned_before)
+    unchanged_return = compare_tree_snapshots(native_before, returned_before)
+    write_json(run / "unchanged-return-exact-comparison.json", unchanged_return)
     stripped = run / "generated-edt-without-provenance"
     # Validate and copy the complete project. Only the disposable copy is edited.
     shutil.copytree(generated, stripped, symlinks=False)
@@ -579,7 +766,16 @@ def accept(args, run: Path) -> None:
     edt(args, run, "edt-export-generated", run / "generated-workspace", ["export", "--project",
         str(stripped), "--configuration-files", str(generated_xml)])
     require_xml(generated_xml, require_dump_info=False)
-    write_json(run / "edt-generated-xml.json", snapshot(generated_xml))
+    generated_before = snapshot(generated_xml)
+    write_json(run / "edt-generated-xml.json", generated_before)
+    generated_tsv = run / "generated-validation.tsv"
+    edt(args, run, "edt-validate-generated", run / "generated-workspace", ["validate", "--file", str(generated_tsv),
+        "--project-list", str(stripped)])
+    if not generated_tsv.is_file():
+        raise OracleError("Generated project validate did not produce TSV")
+    validation_comparison = compare_validation_tsv(validation_capture / "validation.tsv", generated_tsv)
+    write_json(run / "generated-validation-summary.json", summarize_validation_tsv(generated_tsv))
+    write_json(run / "validation-differential.json", validation_comparison)
     write_json(run / "stripped-project-after.json", snapshot(stripped))
     verdicts = {}
     for label, candidate in (("authentic-edt-to-xml", converted_xml),
@@ -598,18 +794,32 @@ def accept(args, run: Path) -> None:
         raise OracleError("An immutable input changed during acceptance")
     if digest(args.ours_exe) != ours_hash:
         raise OracleError("Candidate executable changed during acceptance")
+    if bind_diagnostic_capture(validation_capture, args, project_snapshot=project_before) != validation_binding \
+            or bind_diagnostic_capture(ambient_control, args, control=True) != control_binding:
+        raise OracleError("Diagnostic capture evidence changed during acceptance")
     # Older preparation captures predate workspace severity collection. Read
     # their preserved raw stage logs rather than trusting an obsolete summary.
     original_diagnostics = command_diagnostics(prepared_root,
                                                ["edt-import-native", "edt-export-native"])
     write_json(run / "prepared-diagnostics-recomputed.json", original_diagnostics)
-    generated_diagnostics = command_diagnostics(run, ["edt-export-generated"])
+    generated_diagnostics = command_diagnostics(run, ["edt-export-generated", "edt-validate-generated"])
     write_json(run / "edt-diagnostics.json", generated_diagnostics)
-    diagnostic_failure = has_error_diagnostics([
-        *original_diagnostics.values(), *generated_diagnostics.values()])
-    result = {"status": "PASS" if not diagnostic_failure and all(
-        item["configuration_data_all_equal"] for item in verdicts.values()) else "FAIL",
+    ambient_comparison = compare_ambient_diagnostics(ambient_control,
+        [(prepared_root, "edt-import-native"), (prepared_root, "edt-export-native"), (validation_capture, "edt-validate")],
+        [(run, "edt-export-generated"), (run, "edt-validate-generated")])
+    write_json(run / "ambient-diagnostic-differential.json", ambient_comparison)
+    direct_comparison = compare_tree_snapshots(reference_before, converted_before, excluded_paths=("ConfigDumpInfo.xml",))
+    generated_comparison = compare_tree_snapshots(baseline_before, generated_before)
+    write_json(run / "direct-edt-native-sdk-comparison.json", direct_comparison)
+    write_json(run / "generated-edt-same-serializer-comparison.json", generated_comparison)
+    diagnostic_failure = not ambient_comparison["no_unmatched_error_diagnostics"] or not validation_comparison["no_new_diagnostics"]
+    passed = not diagnostic_failure and direct_comparison["equal"] and generated_comparison["equal"] and unchanged_return["equal"]
+    result = {"status": "PASS" if passed else "FAIL",
         "verdicts": verdicts, "ours_version": ours_version, "ours_executable_sha256": ours_hash,
+        "route_criteria": {"direct_edt_matches_post_edt_native_sdk": direct_comparison["equal"],
+            "generated_edt_matches_authentic_installed_edt_serializer": generated_comparison["equal"],
+            "unchanged_return_exact_including_dump_info": unchanged_return["equal"]},
+        "structured_validation_no_new_diagnostics": validation_comparison["no_new_diagnostics"],
         "edt_version": actual_edt_version, "native_unchanged": True,
         "native_reference": str(reference),
         "native_reference_scope": "Native export after loading the authentic installed-EDT XML export; native capture runs outside this offline comparator",
@@ -618,7 +828,7 @@ def accept(args, run: Path) -> None:
         "note": "Raw divergences require investigation; EDT rc=0 is not equality acceptance"}
     write_json(run / "acceptance.json", result)
     if result["status"] != "PASS":
-        raise OracleError("Complete raw three-way comparison found divergences; see acceptance.json")
+        raise OracleError("Route equality or diagnostic regression gate failed; see acceptance.json")
 
 
 def parser():
@@ -638,6 +848,8 @@ def parser():
     result.add_argument("--prepared", type=Path)
     result.add_argument("--ours-exe", type=Path)
     result.add_argument("--reference", type=Path, help="Independent native export after loading authentic EDT project/export")
+    result.add_argument("--validation-capture", type=Path, help="Completed structured validation of this authentic prepared EDT project")
+    result.add_argument("--ambient-control", type=Path, help="Completed zero-source-error empty installed-EDT diagnostic control")
     result.add_argument("--heap-gib", type=int, default=8)
     return result
 
