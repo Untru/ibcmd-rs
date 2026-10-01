@@ -28,7 +28,9 @@ pub(crate) fn designer_table_control(
             // в канон (EDT-написание) и удержанная presence-точным флагом. Возвращаем её ЗДЕСЬ,
             // ровно тем контролам, что её несли (5/312 SSL). См. `FormItem::row_picture_path_unavailable`.
             DesSlot::F(id)
-                if *id == tb::F_ROW_PICTURE_DATA_PATH && item.row_picture_path_unavailable =>
+                if *id == tb::F_ROW_PICTURE_DATA_PATH
+                    && (item.row_picture_path_unavailable
+                        || matches!(item.get(*id), Some(PropertyValue::Ref(path)) if super::super::availability::unavailable(path))) =>
             {
                 if let Some(entry) = common.iter().find(|e| e.id == *id) {
                     let sigiled: Vec<(morph1c_core::ir::FieldId, PropertyValue)> = item
@@ -342,7 +344,10 @@ pub(crate) fn designer_decorator(tag: &str, d: &DecoratorRef) -> Result<OutEleme
 ///
 /// БАГФИКС (как EDT): движок эмитит `HorizontalStretch=false` (Symmetric) — прежний ручной писатель
 /// эмитил лишь `true`, теряя `<HorizontalStretch>false>` из источника.
-pub(crate) fn push_designer_tooltip_body(el: &mut OutElement, body: &TooltipBody) -> Result<(), FormError> {
+pub(crate) fn push_designer_tooltip_body(
+    el: &mut OutElement,
+    body: &TooltipBody,
+) -> Result<(), FormError> {
     let get = |id: morph1c_core::ir::FieldId| {
         body.properties
             .iter()
@@ -508,7 +513,11 @@ pub(crate) fn designer_data_attribute_named(
     ] {
         if !allowed || !roles.is_empty() {
             let mut v = OutElement::branch("", tag);
-            v.push(OutElement::leaf("xr", "Common", if allowed { "true" } else { "false" }));
+            v.push(OutElement::leaf(
+                "xr",
+                "Common",
+                if allowed { "true" } else { "false" },
+            ));
             for (role, val) in roles.iter() {
                 v.push(
                     OutElement::leaf("xr", "Value", if *val { "true" } else { "false" })
@@ -539,7 +548,7 @@ pub(crate) fn designer_data_attribute_named(
     // денормализация, снятая на чтении в канон (EDT-написание). Возвращаем её РОВНО тем путям,
     // что её несли (`designer_unavailable_paths`). См. `FormDataAttribute` в ir/form.rs.
     let sigil = |p: &String| -> String {
-        if a.designer_unavailable_paths.contains(p) {
+        if a.designer_unavailable_paths.contains(p) || super::super::availability::unavailable(p) {
             format!("~{p}")
         } else {
             p.clone()

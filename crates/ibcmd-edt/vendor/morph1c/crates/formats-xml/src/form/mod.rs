@@ -18,6 +18,7 @@ use std::sync::OnceLock;
 
 use crate::emit::Envelope;
 
+mod availability;
 mod chart;
 mod dcss;
 mod fields;

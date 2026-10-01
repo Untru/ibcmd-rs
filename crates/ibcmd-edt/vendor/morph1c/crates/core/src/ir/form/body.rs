@@ -69,6 +69,9 @@ pub struct FormBody {
     /// Projection context only; independent per-use BOOL/pixel remain semantic IR.
     #[serde(skip)]
     pub common_picture_transparency: std::collections::BTreeMap<String, bool>,
+    /// Native source spelling must remain exact; derived SDK path glyphs are EDT-only.
+    #[serde(skip)]
+    pub designer_path_spelling: bool,
     /// Локализованный заголовок формы (`<title>`/`<Title>`), если задан. Оба формата
     /// эмитят его явно (X-сравнимо). `None` ⇒ форма без заголовка (как пилот).
     pub title: Option<PropertyValue>,
@@ -388,6 +391,7 @@ impl FormBody {
         FormBody {
             designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
             common_picture_transparency: std::collections::BTreeMap::new(),
+            designer_path_spelling: false,
             ca_envelope_without_lf_pal: false,
             title: None,
             attributes: Vec::new(),

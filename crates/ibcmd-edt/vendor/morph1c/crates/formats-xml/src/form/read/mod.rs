@@ -94,6 +94,7 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
             }
             let mut body = read_designer(root)?;
             body.designer_checkbox_auto_presence = presence;
+            body.designer_path_spelling = true;
             Ok(body)
         }
     }

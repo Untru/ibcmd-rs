@@ -63,7 +63,9 @@ pub fn write_form(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, Form
             &body.common_picture_transparency,
             || write_edt(body),
         ),
-        FormDialect::Designer => write_designer(body),
+        FormDialect::Designer => {
+            super::availability::with_availability(body, || write_designer(body))
+        }
     }
 }
 

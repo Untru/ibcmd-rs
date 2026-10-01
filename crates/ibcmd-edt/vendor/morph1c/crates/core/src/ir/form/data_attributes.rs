@@ -64,7 +64,7 @@ pub struct FormDataAttribute {
     /// ⇒ КАНОН = EDT-написание (пути без `~`), сигил держится этим множеством: `read_designer`
     /// снимает и запоминает, `write_designer` возвращает, `normalize_attr_for_x` зануляет.
     /// EDT-сторона его не несёт (пусто).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(skip)]
     pub designer_unavailable_paths: Vec<String>,
     /// КОЛОНКИ табличного реквизита (`ValueTable`): EDT — повторяемые `<columns>`-дети
     /// `<attributes>`; Designer — `<Columns><Column name id>` под `<Attribute>`. Рекурсивно
