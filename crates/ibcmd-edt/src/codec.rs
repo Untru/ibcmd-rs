@@ -556,6 +556,7 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
 fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfiguration, EdtError> {
     let profile = ProfileId::parse(&format!("xml-{}", o.xml_dialect)).map_err(EdtError::source)?;
     let mut objects = Vec::new();
+    let mut model_budget = ibcmd_core::model::CanonicalConfigurationBudget::default();
     let mut owners = BTreeMap::new();
     let mut uuids = BTreeSet::new();
     let mut metadata_paths = BTreeSet::new();
@@ -631,6 +632,7 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
         }
         for object in std::iter::once(envelope.root()).chain(envelope.descendants()) {
             if uuids.insert(object.identity().uuid()) {
+                model_budget.add_object(object).map_err(EdtError::source)?;
                 objects.push(object.clone());
             } else {
                 return Err(EdtError::new(format!(
@@ -663,10 +665,18 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
                 _ => "application/octet-stream",
             })
             .map_err(EdtError::source)?;
-            asset_map.entry(*uuid).or_insert_with(Vec::new).push(
-                AssetReference::new(e.digest(), e.bytes().len() as u64, media)
-                    .map_err(EdtError::source)?,
-            );
+            let asset = AssetReference::new(e.digest(), e.bytes().len() as u64, media)
+                .map_err(EdtError::source)?;
+            model_budget
+                .add_asset_reference(&asset)
+                .map_err(EdtError::source)?;
+            let assets = asset_map.entry(*uuid).or_insert_with(Vec::new);
+            if assets.len() >= ibcmd_core::model::MAX_OBJECT_ASSETS {
+                return Err(EdtError::new(
+                    "canonical object asset reference budget exceeded",
+                ));
+            }
+            assets.push(asset);
         }
     }
     let mut declared_owners = BTreeMap::new();
@@ -678,6 +688,7 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             return Err(EdtError::new("conflicting declared metadata ownership"));
         }
     }
+    let mut final_budget = ibcmd_core::model::CanonicalConfigurationBudget::default();
     let objects = objects
         .into_iter()
         .map(|obj| {
@@ -700,7 +711,9 @@ fn canonical(tree: &SourceTree, o: &ConversionOptions) -> Result<CanonicalConfig
             parts.generated_types = obj.generated_types().to_vec();
             parts.opaque_facets = obj.opaque_facets().clone();
             parts.assets = asset_map.remove(&obj.identity().uuid()).unwrap_or_default();
-            CanonicalObject::new(parts).map_err(EdtError::source)
+            let object = CanonicalObject::new(parts).map_err(EdtError::source)?;
+            final_budget.add_object(&object).map_err(EdtError::source)?;
+            Ok(object)
         })
         .collect::<Result<Vec<_>, _>>()?;
     CanonicalConfiguration::new(objects).map_err(EdtError::source)

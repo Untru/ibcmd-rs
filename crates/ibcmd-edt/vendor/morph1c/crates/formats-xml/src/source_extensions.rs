@@ -214,6 +214,17 @@ pub fn read_edt(kind: &str, root: &Element) -> Result<SourceExtensions, String> 
     }
     Ok(out)
 }
+/// XML item code does not retain the EDT value variant independently of its
+/// chart owner. Reject contradictory edited source rather than erase the variant.
+pub fn validate_predefined_code_kind(obj: &morph1c_core::ir::MetadataObject) -> Result<(), String> {
+    if let Some(items) = &obj.source_extensions.calculation_predefined {
+        let numeric = matches!(obj.get(morph1c_core::spec::metadata::chart_of_calculation_types::F_CODE_TYPE), Some(morph1c_core::ir::PropertyValue::Enum(token)) if token.as_str() == "Number");
+        if items.iter().any(|item| item.numeric_code != numeric) {
+            return Err("calculation predefined code value type disagrees with owner CodeType".into());
+        }
+    }
+    Ok(())
+}
 pub fn read_designer_refs(kind: &str, root: &Element) -> Result<SourceExtensions, String> {
     let mut out = SourceExtensions::default();
     if kind == "CalculationRegister" {

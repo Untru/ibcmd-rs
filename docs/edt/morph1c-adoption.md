@@ -81,8 +81,16 @@ included in the same semantic fingerprint. Unknown cells, namespaces and enum
 values fail explicitly. Configuration help, localized short caption and the
 witnessed 8.5 interface migration mode use existing typed property/body contracts.
 These additions are local adaptations, recorded separately from pinned upstream
-file hashes. PaletteColors metadata and EnumValue color remain unsupported;
-full 8.5 acceptance cannot be claimed while those source fields are present.
+file hashes. Local PaletteColor metadata and EnumValue color projections reuse
+the existing form RGB/reference converters with exact QName namespace bindings;
+PaletteColor requires an explicit XML 2.21 profile. Color extras, duplicate or
+out-of-range RGB components and unknown references fail explicitly.
+Client application interface regions are optional typed groups: an absent top
+region stays absent, while panel membership and unset/definition tables remain
+validated. No group UUID is synthesized for an absent region.
+The canonical bridge checks core object/member/retained-byte budgets before
+cloning metadata or retaining asset references, checks each owner's asset count,
+and checks the final graph including separately declared ownership.
 Structured body formatting equivalence is restricted to explicitly listed typed
 body roots with codec-defined BOM/EOL/indent conventions, respecting mixed text
 and inherited `xml:space`. Unknown XML bodies require exact bytes. Prolog/epilog

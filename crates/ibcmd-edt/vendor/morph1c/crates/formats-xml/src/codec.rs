@@ -187,6 +187,7 @@ fn claim_element_for_codec(el: &Element, codec: &Codec, version: FormatVersion) 
             el.claim();
             style_value_codec::claim(*dialect, el);
         }
+        Codec::MetadataColor(dialect) => { let _ = crate::metadata_color::decode(*dialect, el); }
         // ChoiceParameterLinks: host claimed; claim подструктуру как читает decode.
         Codec::ChoiceParameterLinks(dialect) => {
             el.claim();
@@ -475,6 +476,14 @@ pub(crate) fn decode_with_codec(
                 Err(e) => Decoded::Error(e),
             },
             Located::Attr(_) => Decoded::Error("Value codec on attribute is unsupported".into()),
+            Located::PrefixMismatch { local, want, got } => prefix_err(&local, want, &got),
+            Located::Absent => Decoded::Absent,
+        },
+        Codec::MetadataColor(dialect) => match located {
+            Located::Element(host) => match crate::metadata_color::decode(*dialect, host) {
+                Ok(v) => Decoded::Present(v), Err(e) => Decoded::Error(e),
+            },
+            Located::Attr(_) => Decoded::Error("MetadataColor cannot decode an attribute".into()),
             Located::PrefixMismatch { local, want, got } => prefix_err(&local, want, &got),
             Located::Absent => Decoded::Absent,
         },
@@ -1256,6 +1265,10 @@ pub(crate) fn encode_with_codec(
                 Ok(())
             }
             other => Err(format!("Value codec expects Value, got {:?}", other.kind())),
+        },
+        Codec::MetadataColor(dialect) => {
+            sink.children.push(crate::metadata_color::encode(*dialect, ns, tag, value)?);
+            Ok(())
         },
         Codec::StyleValue(dialect) => match value {
             PropertyValue::StyleValue(spec) => {

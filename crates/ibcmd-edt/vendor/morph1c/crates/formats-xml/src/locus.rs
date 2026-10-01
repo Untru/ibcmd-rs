@@ -103,6 +103,8 @@ pub enum Codec {
     ///
     /// [`StyleValueSpec`]: morph1c_core::ir::value::StyleValueSpec
     StyleValue(crate::style_value_codec::StyleValueDialect),
+    /// Metadata color scalar, reusing the form RGB/reference codec.
+    MetadataColor(crate::metadata_color::Dialect),
     /// ОБОБЩЁННЫЙ (data-driven) вариативный платформенный блок `standardAttributes`/
     /// `StandardAttributes` структурного вида (Catalog/Document/DocumentJournal/Task/
     /// BusinessProcess/ChartOfCharacteristicTypes/ExchangePlan). Читает `&'static

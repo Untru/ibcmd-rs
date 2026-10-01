@@ -632,9 +632,9 @@ pub struct HomePageItem {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ClientApplicationInterface {
     /// Верхняя группа панелей (`<top>`; cf-секция 1).
-    pub top: CaiGroup,
+    pub top: Option<CaiGroup>,
     /// Левая группа панелей (`<left>`; cf-секция 3).
-    pub left: CaiGroup,
+    pub left: Option<CaiGroup>,
 }
 
 /// Группа панелей интерфейса клиентского приложения (`<group id=…>` Designer /

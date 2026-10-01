@@ -572,9 +572,9 @@ fn panel_uuid_for_name(name: &str) -> Result<&'static str, String> {
 fn unset_panels(cai: &ClientApplicationInterface) -> Vec<&'static str> {
     let used: Vec<&str> = cai
         .top
-        .panels
         .iter()
-        .chain(cai.left.panels.iter())
+        .chain(cai.left.iter())
+        .flat_map(|group| &group.panels)
         .map(|p| p.name.as_str())
         .collect();
     STANDARD_CLIENT_PANELS
@@ -626,9 +626,12 @@ fn parse_cai_designer(bytes: &[u8]) -> Result<ClientApplicationInterface, String
     let text = std::str::from_utf8(body).map_err(|e| format!("not UTF-8: {e}"))?;
     let mut cur = Cursor::new(text);
     cur.expect(CAI_DESIGNER_HEAD)?;
-    let mut groups: Vec<CaiGroup> = Vec::new();
+    let mut groups: Vec<Option<CaiGroup>> = Vec::new();
     for region in ["top", "left"] {
-        cur.expect(&format!("\t<{region}>\r\n\t\t<group id=\""))?;
+        if !cur.try_expect(&format!("\t<{region}>\r\n\t\t<group id=\"")) {
+            groups.push(None);
+            continue;
+        }
         let id = name_text(cur.until("\">\r\n")?)?;
         let mut panels = Vec::new();
         while cur.try_expect("\t\t\t<group>\r\n\t\t\t\t<panel id=\"") {
@@ -640,7 +643,7 @@ fn parse_cai_designer(bytes: &[u8]) -> Result<ClientApplicationInterface, String
             });
         }
         cur.expect(&format!("\t\t</group>\r\n\t</{region}>\r\n"))?;
-        groups.push(CaiGroup { id, panels });
+        groups.push(Some(CaiGroup { id, panels }));
     }
     // `<panelDef>`-список: ПОЛНАЯ таблица в её порядке (witnessed ERP; §1.0 — отклонение
     // означает не смоделированную проекцию, не тихий пере-порядок).
@@ -659,6 +662,7 @@ fn serialize_cai_designer(cai: &ClientApplicationInterface) -> Vec<u8> {
     let mut out = String::new();
     out.push_str(CAI_DESIGNER_HEAD);
     for (region, group) in [("top", &cai.top), ("left", &cai.left)] {
+        let Some(group) = group else { continue };
         out.push_str(&format!("\t<{region}>\r\n\t\t<group id=\""));
         out.push_str(&group.id);
         out.push_str("\">\r\n");
@@ -696,9 +700,12 @@ fn parse_cai_edt(bytes: &[u8]) -> Result<ClientApplicationInterface, String> {
     let text = std::str::from_utf8(bytes).map_err(|e| format!("not UTF-8: {e}"))?;
     let mut cur = Cursor::new(text);
     cur.expect(CAI_EDT_HEAD)?;
-    let mut groups: Vec<CaiGroup> = Vec::new();
+    let mut groups: Vec<Option<CaiGroup>> = Vec::new();
     for region in ["top", "left"] {
-        cur.expect(&format!("  <{region} xsi:type=\"cai:CaiGroup\" id=\""))?;
+        if !cur.try_expect(&format!("  <{region} xsi:type=\"cai:CaiGroup\" id=\"")) {
+            groups.push(None);
+            continue;
+        }
         let id = name_text(cur.until("\">\r\n")?)?;
         let mut panels = Vec::new();
         while cur.try_expect("    <panels id=\"") {
@@ -714,7 +721,7 @@ fn parse_cai_edt(bytes: &[u8]) -> Result<ClientApplicationInterface, String> {
             panels.push(CaiPanel { id: pid, name });
         }
         cur.expect(&format!("  </{region}>\r\n"))?;
-        groups.push(CaiGroup { id, panels });
+        groups.push(Some(CaiGroup { id, panels }));
     }
     let left = groups.pop().expect("two regions parsed");
     let top = groups.pop().expect("two regions parsed");
@@ -735,6 +742,7 @@ fn serialize_cai_edt(cai: &ClientApplicationInterface) -> Vec<u8> {
     let mut out = String::new();
     out.push_str(CAI_EDT_HEAD);
     for (region, group) in [("top", &cai.top), ("left", &cai.left)] {
+        let Some(group) = group else { continue };
         out.push_str(&format!("  <{region} xsi:type=\"cai:CaiGroup\" id=\""));
         out.push_str(&group.id);
         out.push_str("\">\r\n");

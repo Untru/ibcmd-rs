@@ -163,7 +163,7 @@ impl LocusMap for DesignerEnumValue {
         } else if field == EV_COMMENT {
             Some(FieldProjection::new(elem(EV_P_COMMENT, ""), Codec::PlainText))
         } else if field == EV_COLOR {
-            Some(FieldProjection::new(elem(EV_P_COLOR, ""), Codec::EnumText))
+            Some(FieldProjection::new(elem(EV_P_COLOR, ""), Codec::MetadataColor(formats_xml::metadata_color::Dialect::Designer)))
         } else {
             None
         }

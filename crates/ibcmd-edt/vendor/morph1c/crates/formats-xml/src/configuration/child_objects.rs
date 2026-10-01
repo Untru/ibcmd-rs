@@ -43,6 +43,7 @@ pub const CHILD_KIND_TABLE: &[ChildKind] = &[
         kind: "StyleItem",
         edt_plural: "styleItems",
     },
+    ChildKind { kind: "PaletteColor", edt_plural: "paletteColors" },
     ChildKind {
         kind: "Style",
         edt_plural: "styles",

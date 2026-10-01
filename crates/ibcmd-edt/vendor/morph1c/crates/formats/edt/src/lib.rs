@@ -161,6 +161,7 @@ pub fn read_descriptor<M: LocusMap>(
     // Каркас claim'ит сам узел корня (его атрибуты/детей claim'им по отдельности
     // ниже и в движке); иначе корень попал бы в `leftover` (§1.0).
     root.claim();
+    formats_xml::metadata_color::validate_edt_bindings(&root).map_err(EdtError::Envelope)?;
 
     // Пер-вид доп. ns-объявления корня (напр. EDT Enum: xmlns:xsi+xmlns:core, нужные
     // const-блоку standardAttributes). Claim+сверка URI; отсутствие → ошибка ЛИБО
@@ -281,6 +282,7 @@ pub fn read_descriptor<M: LocusMap>(
     obj.properties = bag;
     obj.children = children;
     obj.source_extensions = extensions;
+    formats_xml::source_extensions::validate_predefined_code_kind(&obj).map_err(EdtError::Envelope)?;
     // modules/forms/templates остаются пустыми (вне дескриптора).
     Ok(obj)
 }

@@ -21,6 +21,63 @@ fn fixture() -> SourceTree {
     )
     .unwrap()
 }
+#[test]
+fn client_interface_preserves_absent_top_region_and_rejects_unknown_region() {
+    let head = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ClientApplicationInterface xmlns=\"http://v8.1c.ru/8.2/managed-application/core\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xsi:type=\"InterfaceLayouter\">\r\n";
+    let left = "\t<left>\r\n\t\t<group id=\"11111111-1111-1111-1111-111111111111\">\r\n\t\t\t<group>\r\n\t\t\t\t<panel id=\"22222222-2222-2222-2222-222222222222\">\r\n\t\t\t\t\t<uuid>b553047f-c9aa-4157-978d-448ecad24248</uuid>\r\n\t\t\t\t</panel>\r\n\t\t\t</group>\r\n\t\t</group>\r\n\t</left>\r\n";
+    let mut body = format!("\u{feff}{head}{left}");
+    for (_, id) in morph1c_core::ir::STANDARD_CLIENT_PANELS {
+        body.push_str(&format!("\t<panelDef id=\"{id}\"/>\r\n"));
+    }
+    body.push_str("</ClientApplicationInterface>");
+    let source = mutate(
+        &fixture(),
+        "Ext/ClientApplicationInterface.xml",
+        body.as_bytes().to_vec(),
+    );
+    let edt = xml_to_edt(&source, &options()).unwrap();
+    let cai = edt
+        .tree
+        .entries()
+        .iter()
+        .find(|e| {
+            e.path()
+                .as_str()
+                .ends_with("ClientApplicationInterface.cai")
+        })
+        .unwrap();
+    let text = std::str::from_utf8(cai.bytes()).unwrap();
+    assert!(!text.contains("<top "));
+    assert!(text.contains("<left "));
+    let stripped = SourceTree::new(
+        edt.tree
+            .entries()
+            .iter()
+            .filter(|e| !e.path().as_str().starts_with(".ibcmd-provenance/"))
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    let returned = edt_to_xml(&Project::from_tree(stripped.clone()).unwrap(), &options()).unwrap();
+    assert_eq!(
+        returned
+            .tree
+            .entries()
+            .iter()
+            .find(|e| e.path().as_str() == "Ext/ClientApplicationInterface.xml")
+            .unwrap()
+            .bytes(),
+        body.as_bytes()
+    );
+    let bad = mutate(
+        &stripped,
+        cai.path().as_str(),
+        text.replace("<left ", "<right ")
+            .replace("</left>", "</right>")
+            .into_bytes(),
+    );
+    assert!(edt_to_xml(&Project::from_tree(bad).unwrap(), &options()).is_err());
+}
 fn mutate(tree: &SourceTree, path: &str, bytes: Vec<u8>) -> SourceTree {
     let mut entries = tree
         .entries()
@@ -292,6 +349,79 @@ fn aggregate_fixture() -> SourceTree {
         descriptor.into_bytes(),
     );
     mutate(&source,"AccumulationRegisters/TestAggregates/Ext/Aggregates.xml",br#"<?xml version="1.0" encoding="UTF-8"?><AccumulationRegisterAggregates xmlns="http://v8.1c.ru/8.3/xcf/extrnprops" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.21"><Aggregate id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"><Use>Always</Use><Periodicity>Day</Periodicity><Dimensions/></Aggregate></AccumulationRegisterAggregates>"#.to_vec())
+}
+#[test]
+fn palette_metadata_edited_rgb_survives_without_provenance() {
+    let source = fixture();
+    let config = source
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == "Configuration.xml")
+        .unwrap();
+    let xml = String::from_utf8(config.bytes().to_vec()).unwrap();
+    let start = xml.find("<MetaDataObject").unwrap();
+    let end = start + xml[start..].find('>').unwrap() + 1;
+    let descriptor = format!(
+        "{}<PaletteColor uuid=\"99999999-9999-9999-9999-999999999999\"><Properties><Name>TestPalette</Name><Synonym/><Comment/><Color>#FFEC9D</Color></Properties></PaletteColor></MetaDataObject>",
+        &xml[..end]
+    );
+    let source = mutate(
+        &source,
+        "Configuration.xml",
+        xml.replace(
+            "</ChildObjects>",
+            "<PaletteColor>TestPalette</PaletteColor></ChildObjects>",
+        )
+        .into_bytes(),
+    );
+    let source = mutate(
+        &source,
+        "PaletteColors/TestPalette.xml",
+        descriptor.as_bytes().to_vec(),
+    );
+    let generated = xml_to_edt(&source, &options()).unwrap().tree;
+    let path = "src/PaletteColors/TestPalette/TestPalette.mdo";
+    let color = generated
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == path)
+        .unwrap();
+    let edited = std::str::from_utf8(color.bytes())
+        .unwrap()
+        .replace("<blue>157</blue>", "<blue>128</blue>");
+    let tree = mutate(&generated, path, edited.into_bytes());
+    let stripped = SourceTree::new(
+        tree.entries()
+            .iter()
+            .filter(|e| !e.path().as_str().starts_with(".ibcmd-provenance/"))
+            .cloned()
+            .collect(),
+    )
+    .unwrap();
+    let returned = edt_to_xml(&Project::from_tree(stripped).unwrap(), &options()).unwrap();
+    let color = returned
+        .tree
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == "PaletteColors/TestPalette.xml")
+        .unwrap();
+    assert!(
+        std::str::from_utf8(color.bytes())
+            .unwrap()
+            .contains("<Color>#FFEC80</Color>")
+    );
+    let registry =
+        morph1c_pipeline::registry::FormatRegistry::for_format(morph1c_pipeline::Format::Designer)
+            .unwrap();
+    assert!(
+        (registry.get("PaletteColor").unwrap().read)(
+            descriptor
+                .replace("version=\"2.21\"", "version=\"2.20\"")
+                .as_bytes()
+        )
+        .unwrap_err()
+        .contains("2.21")
+    );
 }
 #[test]
 fn typed_extra_tampering_and_explicit_edited_conversion() {

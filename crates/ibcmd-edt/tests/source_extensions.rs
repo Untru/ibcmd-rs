@@ -8,14 +8,15 @@ fn authentic_bsp_common_source_features_agree() {
     let edt = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_BSP_EDT").unwrap());
     let xml = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_BSP_XML").unwrap());
     let lab = std::path::PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").unwrap());
-    let read = |path: &std::path::Path| {
+    let read_bytes = |path: &std::path::Path| {
         let snapshot = tempfile::tempdir_in(&lab).unwrap();
         let name = path.file_name().unwrap().to_str().unwrap();
         std::fs::copy(path, snapshot.path().join(name)).unwrap();
         let tree = ibcmd_edt::read_xml_source(snapshot.path(), ibcmd_edt::ReaderLimits::default())
             .unwrap();
-        parse(tree.entries()[0].bytes()).unwrap()
+        tree.entries()[0].bytes().to_vec()
     };
+    let read = |path: &std::path::Path| parse(&read_bytes(path)).unwrap();
     let e = read(&edt.join(
         "src/AccumulationRegisters/_ДемоОборотыПоСчетамНаОплату/_ДемоОборотыПоСчетамНаОплату.mdo",
     ));
@@ -61,6 +62,91 @@ fn authentic_bsp_common_source_features_agree() {
             codec::read_recalculation(&x.root.children[0], false, Some("_ДемоОсновныеНачисления"))
                 .unwrap()
         ]
+    );
+    for (kind, path) in [
+        ("PaletteColor", "PaletteColors/ВниманиеБИПЦветФона"),
+        ("Enum", "Enums/УдалитьСостоянияИнтеграцииОбъектов"),
+    ] {
+        let name = path.rsplit('/').next().unwrap();
+        let e = read(&edt.join(format!("src/{path}/{name}.mdo")));
+        let x = read(&xml.join(format!("{path}.xml")));
+        let registry_e =
+            morph1c_pipeline::registry::FormatRegistry::for_format(morph1c_pipeline::Format::Edt)
+                .unwrap();
+        let registry_x = morph1c_pipeline::registry::FormatRegistry::for_format(
+            morph1c_pipeline::Format::Designer,
+        )
+        .unwrap();
+        let er = (registry_e.get(kind).unwrap().read)(&read_bytes(
+            &edt.join(format!("src/{path}/{name}.mdo")),
+        ))
+        .unwrap();
+        let xr =
+            (registry_x.get(kind).unwrap().read)(&read_bytes(&xml.join(format!("{path}.xml"))))
+                .unwrap();
+        assert_eq!(
+            serde_json::to_value(er).unwrap(),
+            serde_json::to_value(xr).unwrap(),
+            "{kind} typed properties"
+        );
+        // Above raw descriptor inputs were independently bounded by the helper.
+        assert_eq!(e.root.local, kind);
+        assert_eq!(x.root.local, "MetaDataObject");
+    }
+}
+
+#[test]
+fn metadata_colors_reuse_rgb_refs_and_reject_unknowns() {
+    use formats_xml::metadata_color::{self, Dialect};
+    let rgb = r#"<color xsi:type="core:ColorDef"><red>255</red><green>236</green><blue>157</blue></color>"#;
+    let value = metadata_color::decode(Dialect::Edt, &parse(rgb.as_bytes()).unwrap().root).unwrap();
+    assert_eq!(
+        metadata_color::decode(
+            Dialect::Designer,
+            &parse(b"<Color>#FFEC9D</Color>").unwrap().root
+        )
+        .unwrap(),
+        value
+    );
+    for bad in [
+        rgb.replace("</color>", "<alpha>1</alpha></color>"),
+        rgb.replace("255", "256"),
+        rgb.replace("</blue>", "</blue><blue>0</blue>"),
+        rgb.replace("<red>", "<red changed=\"yes\">"),
+        rgb.replace("core:ColorDef", "core:Unknown"),
+    ] {
+        assert!(
+            metadata_color::decode(Dialect::Edt, &parse(bad.as_bytes()).unwrap().root).is_err()
+        );
+    }
+    let source = r#"<test xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><color xsi:type="core:ColorRef"><color>Palette.Blue</color></color></test>"#;
+    metadata_color::validate_edt_bindings(&parse(source.as_bytes()).unwrap().root).unwrap();
+    for bad in [
+        source.replace(" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\"", ""),
+        source.replace("http://g5.1c.ru/v8/dt/mcore", "urn:wrong"),
+        source.replace(
+            " xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"",
+            "",
+        ),
+    ] {
+        assert!(
+            metadata_color::validate_edt_bindings(&parse(bad.as_bytes()).unwrap().root).is_err()
+        );
+    }
+    let value = metadata_color::decode(
+        Dialect::Edt,
+        &parse(r#"<color xsi:type="core:ColorRef"><color>Palette.Blue</color></color>"#.as_bytes())
+            .unwrap()
+            .root,
+    )
+    .unwrap();
+    assert_eq!(
+        metadata_color::decode(
+            Dialect::Designer,
+            &parse(b"<Color>pal:Blue</Color>").unwrap().root
+        )
+        .unwrap(),
+        value
     );
 }
 fn roundtrip(source: &str, kind: &str) -> morph1c_core::ir::source_extensions::SourceExtensions {
@@ -147,6 +233,30 @@ fn render(root: &formats_xml::OutElement) -> Vec<u8> {
 fn calculation_predefined_preserves_dependency_lists() {
     let input = r#"<test xmlns:core="http://g5.1c.ru/v8/dt/mcore" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><predefined><items id="11111111-1111-1111-1111-111111111111"><name>A</name><description>Caption</description><code xsi:type="core:StringValue"><value>00001</value></code><actionPeriodIsBase>true</actionPeriodIsBase><displaced>ChartOfCalculationTypes.Test.B</displaced><base>ChartOfCalculationTypes.Test.C</base><leading>ChartOfCalculationTypes.Test.D</leading></items></predefined></test>"#;
     let extras = roundtrip(input, "ChartOfCalculationTypes");
+    let mut owner = morph1c_core::ir::MetadataObject::new(
+        morph1c_core::ir::ObjectKind::new("ChartOfCalculationTypes"),
+        "Test",
+        morph1c_core::ir::Uuid([0x99; 16]),
+    );
+    owner.source_extensions = extras.clone();
+    codec::validate_predefined_code_kind(&owner).unwrap();
+    owner.properties.push((
+        morph1c_core::spec::metadata::chart_of_calculation_types::F_CODE_TYPE,
+        morph1c_core::ir::PropertyValue::Enum(morph1c_core::ir::Token::new("Number")),
+    ));
+    assert!(codec::validate_predefined_code_kind(&owner).is_err());
+    owner.source_extensions = codec::read_edt(
+        "ChartOfCalculationTypes",
+        &parse(
+            input
+                .replace("core:StringValue", "core:NumberValue")
+                .as_bytes(),
+        )
+        .unwrap()
+        .root,
+    )
+    .unwrap();
+    codec::validate_predefined_code_kind(&owner).unwrap();
     let values = extras.calculation_predefined.unwrap();
     let doc = parse(&render(&codec::sidecar_envelope(
         codec::emit_calculation_predefined(&values, false),

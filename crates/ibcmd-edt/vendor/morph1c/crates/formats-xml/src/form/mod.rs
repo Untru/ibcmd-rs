@@ -21,6 +21,7 @@ use crate::emit::Envelope;
 mod chart;
 mod dcss;
 mod fields;
+pub(crate) use fields::{color_from_designer, color_to_designer, render_edt_color, decode_edt_color};
 mod mxlx;
 mod pictures;
 mod projection;

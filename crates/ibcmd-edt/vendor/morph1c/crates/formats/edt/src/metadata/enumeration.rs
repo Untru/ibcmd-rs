@@ -156,6 +156,7 @@ impl LocusMap for EdtEnum {
 
 const EV_P_SYNONYM: &[&str] = &["synonym"];
 const EV_P_COMMENT: &[&str] = &["comment"];
+const EV_P_COLOR: &[&str] = &["color"];
 
 /// Карта проекции EDT для child-вида `Enum.EnumValue`. Локусы относительны элемента
 /// `<enumValues>` (props_wrapped=false).
@@ -167,6 +168,8 @@ impl LocusMap for EdtEnumValue {
             Some(FieldProjection::new(flat(EV_P_SYNONYM), Codec::LocalizedKeyVal))
         } else if field == EV_COMMENT {
             Some(FieldProjection::new(flat(EV_P_COMMENT), Codec::PlainText))
+        } else if field == morph1c_core::spec::metadata::enum_enum_value::F_COLOR {
+            Some(FieldProjection::new(flat(EV_P_COLOR), Codec::MetadataColor(formats_xml::metadata_color::Dialect::Edt)))
         } else {
             // `color` — Designer-only (EDT EnumValue его не несёт).
             None
