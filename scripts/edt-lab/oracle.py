@@ -259,6 +259,48 @@ def prepare(args, run: Path) -> None:
         "edt_xml": str(exported), "note": "Preparation is not conversion acceptance"})
 
 
+def validate_project(args, run: Path) -> None:
+    """Capture actual EDT validation independently of conversion acceptance."""
+    if not args.prepared:
+        raise OracleError("validate requires --prepared")
+    prepared_root = args.prepared.absolute()
+    no_links(prepared_root)
+    prepared = json.loads((prepared_root / "prepared.json").read_text(encoding="utf-8"))
+    if prepared["source_version"] != args.source_version or prepared["runtime"] != args.runtime \
+            or prepared["edt_version"] != args.edt_build \
+            or prepared["edt_profile_release"] != args.edt_version:
+        raise OracleError("Validation profile disagrees with prepared project")
+    project = Path(prepared["project"])
+    if not project.is_relative_to(prepared_root):
+        raise OracleError("Prepared project escapes its evidence directory")
+    require_project(project, args.runtime)
+    before = snapshot(project)
+    if before != json.loads((prepared_root / "authentic-project-after.json").read_text(encoding="utf-8")):
+        raise OracleError("Prepared project changed before validation")
+    write_json(run / "authentic-project-before.json", before)
+    check_edt_version(args, run)
+    disposable = run / "project-copy"
+    shutil.copytree(project, disposable, symlinks=False)
+    output = run / "validation.tsv"
+    edt(args, run, "edt-validate", run / "validation-workspace", ["validate", "--file",
+        str(output), "--project-list", str(disposable)])
+    if not output.is_file():
+        raise OracleError("Installed EDT validate did not produce the requested TSV")
+    no_links(output)
+    diagnostics = command_diagnostics(run, ["edt-validate"])
+    write_json(run / "edt-diagnostics.json", diagnostics)
+    after = snapshot(project)
+    write_json(run / "authentic-project-after.json", after)
+    if before != after:
+        raise OracleError("Validation modified the immutable prepared project")
+    write_json(run / "validated-project-copy.json", snapshot(disposable))
+    write_json(run / "validation.json", {"status": "CAPTURED",
+        "tsv": str(output), "tsv_sha256": digest(output), "tsv_bytes": output.stat().st_size,
+        "prepared_project_unchanged": True,
+        "unresolved_edt_error_diagnostics": has_error_diagnostics(diagnostics.values()),
+        "note": "Raw installed-EDT TSV and workspace diagnostics require inspection; this capture is not acceptance PASS"})
+
+
 def validate_raw_report(path: Path) -> dict:
     report = json.loads(path.read_text(encoding="utf-8"))
     rows = report["rows"]
@@ -481,7 +523,7 @@ def accept(args, run: Path) -> None:
 
 def parser():
     result = argparse.ArgumentParser(description=__doc__)
-    result.add_argument("mode", choices=("prepare", "accept"))
+    result.add_argument("mode", choices=("prepare", "validate", "accept"))
     result.add_argument("--native", type=Path, required=True)
     result.add_argument("--source-version", choices=("2.20", "2.21"), required=True)
     result.add_argument("--runtime", choices=("8.3.27", "8.5.1"), required=True)
@@ -525,10 +567,12 @@ def main() -> int:
             "harness_sha256": hashlib.sha256(harness_source).hexdigest()})
         if args.mode == "prepare":
             prepare(args, args.run)
+        elif args.mode == "validate":
+            validate_project(args, args.run)
         else:
             accept(args, args.run)
         status = json.loads((args.run / "prepared.json").read_text(encoding="utf-8"))["status"] \
-            if args.mode == "prepare" else "PASS"
+            if args.mode == "prepare" else "CAPTURED" if args.mode == "validate" else "PASS"
         print(f"{status}: {args.run}", flush=True)
         return 0
     except (OracleError, OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError) as error:

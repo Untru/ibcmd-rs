@@ -75,6 +75,11 @@ existing EDT project automatically. `version` reports the exact installed build;
 the profile names use the declared release series (for example `2025.2.3`), while
 evidence records the complete build (`2025.2.3.30`). Launcher `-help` emits
 UTF-16LE and actual EDT command output emits UTF-8; raw logs preserve both.
+The installed `help validate` positively documents `validate --file TSV
+--project-list PROJECT...`, which imports absent projects before checking them.
+The separate `validate` mode copies a prepared authentic project, captures this
+raw TSV and workspace logs, and checks that the original project remains intact.
+Its `CAPTURED` status is an evidence capture, never a validation or acceptance PASS.
 
 ```powershell
 $edt = 'C:\Program Files\1C\1CE\components\1c-edt-2025.2.3+30-x86_64\1cedtcli.exe'
@@ -93,6 +98,12 @@ python scripts/edt-lab/native_reference.py `
   --ibcmd 'C:\Program Files\1cv8\8.5.1.1150\bin\ibcmd.exe' `
   --native-build 8.5.1.1150 `
   --restore-script F:\ibcmd\lab\04\tools\restore-clone.ps1 --lock-script $lock
+
+python scripts/edt-lab/oracle.py validate `
+  --native $native --source-version 2.21 --runtime 8.5.1 `
+  --native-tool-version 8.5.1.1150 --edt-exe $edt --edt-version 2025.2.3 --edt-build 2025.2.3.30 `
+  --prepared F:\ibcmd\lab\07\oracle-bsp85-example `
+  --run F:\ibcmd\lab\07\validate-bsp85-example --lock-script $lock --heap-gib 32
 
 python scripts/edt-lab/oracle.py accept `
   --native $native --source-version 2.21 --runtime 8.5.1 `

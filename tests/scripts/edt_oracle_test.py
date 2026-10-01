@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import sys
 import tempfile
+from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 sys.dont_write_bytecode = True
 MODULE = Path(__file__).resolve().parents[2] / "scripts/edt-lab/oracle.py"
@@ -14,6 +16,28 @@ spec.loader.exec_module(oracle)
 
 
 class EvidenceControls(unittest.TestCase):
+    def test_zero_exit_validation_without_tsv_is_rejected(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            prepared = root / "prepared"
+            project = prepared / "project"
+            for relative in (".project", "DT-INF/PROJECT.PMF", "src/Configuration/Configuration.mdo"):
+                path = project / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("Runtime-Version: 8.5.1\n", encoding="utf-8")
+            oracle.write_json(prepared / "prepared.json", {
+                "project": str(project), "source_version": "2.21", "runtime": "8.5.1",
+                "edt_version": "2025.2.3.30", "edt_profile_release": "2025.2.3"})
+            oracle.write_json(prepared / "authentic-project-after.json", oracle.snapshot(project))
+            run = root / "run"
+            run.mkdir()
+            args = SimpleNamespace(prepared=prepared, source_version="2.21", runtime="8.5.1",
+                edt_build="2025.2.3.30", edt_version="2025.2.3")
+            with patch.object(oracle, "check_edt_version"), patch.object(oracle, "edt", return_value=b"done"):
+                with self.assertRaisesRegex(oracle.OracleError, "did not produce"):
+                    oracle.validate_project(args, run)
+            self.assertFalse((run / "validation.json").exists())
+
     def test_nonzero_command_preserves_exact_failure_and_logs(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
