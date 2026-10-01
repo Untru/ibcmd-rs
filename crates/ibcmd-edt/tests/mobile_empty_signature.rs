@@ -148,7 +148,7 @@ fn exact_carrier_only_and_nonempty_signature_body_remains_verbatim() {
         String::from_utf8(CARRIER.to_vec()).unwrap() + "trailing",
         String::from_utf8(CARRIER.to_vec())
             .unwrap()
-            .replace("\"\",\"\"", "\"nonempty\",\"\""),
+            .replace("{-1}", "{2}"),
     ] {
         std::fs::write(&path, malformed).unwrap();
         assert!(read_config(Format::Edt, dir.path(), &ConvertOptions::default()).is_err());
@@ -164,7 +164,10 @@ fn exact_carrier_only_and_nonempty_signature_body_remains_verbatim() {
         .flat_map(|o| &o.config_blobs)
         .find(|b| b.slot == "MobileClientSignature")
         .unwrap();
-    assert_eq!(blob.bytes, full);
+    assert_eq!(
+        blob.mobile_signature_lexical.as_ref().unwrap().source_bytes,
+        full
+    );
     let out = tempfile::tempdir().unwrap();
     write_config(Format::Designer, &loaded, out.path()).unwrap();
     assert_eq!(

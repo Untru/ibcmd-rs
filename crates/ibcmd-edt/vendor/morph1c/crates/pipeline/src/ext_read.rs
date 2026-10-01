@@ -48,8 +48,9 @@
 //! The full model is equal, original44 bytes remain host lexical provenance,
 //! and an independently model-bound native-name sibling makes official XML export
 //! prefer native-compatible bytes. The old single-file raw39 failure remains evidence.
-//! Nonempty/unknown signatures retain the verbatim contract and require their
-//! independent SDK gates; this exception does not claim universal support.
+//! Complete Converted v2 groups retain every UUID/name, quoted key/digest and
+//! boolean. Only typed empty group counts are adapted; unchanged nonempty member
+//! bytes stay verbatim. Unknown/legacy bodies keep their opaque contract.
 //!
 //! cf-СТОРОНА: запись — `formats_cf::assemble` (`CONFIG_BLOB_SLOTS`, verbatim-лист
 //! `<host>.N`); ЧТЕНИЕ cf → IR корневые Ext-тела НЕ подхватывает (cf-декомпиляция
@@ -61,6 +62,9 @@ use formats_xml::registry::Format;
 use morph1c_core::ir::{ConfigBlob, ConfigPicture, MetadataObject, Module};
 
 use crate::ConvertError;
+
+mod mobile_signature;
+use mobile_signature::ConvertedSignatureFrame;
 
 /// The root object's kind (the only kind this pass touches).
 const CONFIGURATION_KIND: &str = "Configuration";
@@ -95,133 +99,21 @@ const CONFIG_BLOB_SLOTS: &[(&str, &str, &str)] = &[
 
 // Exact converted-v2 empty signature witnessed through the installed SDK EObject,
 // resource serializer, headless import/validation and a fresh native database.
-// Other signatures keep their complete verbatim body; this narrow adaptation
-// does not certify their SDK acceptance. Official XML export prefers a separately
+// Full v2 groups are bound to the installed SDK's UUID/name member schema.
+// Unknown/legacy signatures remain verbatim. Official XML export prefers a separately
 // model-bound native-name file; its reader-name carrier remains EDT-loadable.
-const EMPTY_SIGNATURE_NATIVE: &[u8] = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
-const EMPTY_SIGNATURE_EDT: &[u8] = b"{2,\"\",\"\",\n{\n{-1},\n{-1},\n{-1},\n{-1}\n},0}";
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct EmptyConvertedMobileSignature {
-    public_key: String,
-    digest: String,
-    // Installed MobileClientDigestTypes order: enums/infoRegKeys/refs/regKeys.
-    group_lengths: [usize; 4],
-    converted: bool,
-}
-impl EmptyConvertedMobileSignature {
-    fn decode(bytes: &[u8], format: Format) -> Result<Option<Self>, String> {
-        let bytes = bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes);
-        let native = empty_signature_flag(bytes, b"0");
-        let carrier = empty_signature_flag(bytes, b"-1");
-        let converted = native.or(if format == Format::Edt { carrier } else { None });
-        let Some(converted) = converted else {
-            if has_negative_digest_count(bytes) {
-                return Err("unsupported mobile-signature negative-count carrier; only the exact empty Converted v2 EDT shape is interpreted".into());
-            }
-            return Ok(None);
-        };
-        Ok(Some(Self {
-            public_key: String::new(),
-            digest: String::new(),
-            group_lengths: [0; 4],
-            converted,
-        }))
-    }
-    fn encode(&self, format: Format) -> Result<Vec<u8>, String> {
-        if !self.public_key.is_empty() || !self.digest.is_empty() || self.group_lengths != [0; 4] {
-            return Err(
-                "mobile signature exceeds the witnessed complete empty Converted v2 model".into(),
-            );
-        }
-        let mut bytes = if format == Format::Edt {
-            EMPTY_SIGNATURE_EDT
-        } else {
-            EMPTY_SIGNATURE_NATIVE
-        }
-        .to_vec();
-        let flag = bytes.len() - 2;
-        bytes[flag] = if self.converted { b'1' } else { b'0' };
-        Ok(bytes)
-    }
-}
-
-/// Private host bridge: only the complete witnessed Converted empty-v2 model
-/// receives canonical bytes. Unknown/nonempty bodies return None, requiring the
+/// Private host bridge: the complete witnessed Converted v2 model
+/// receives canonical bytes. Unknown/legacy bodies return None, requiring the
 /// host's existing raw-byte fidelity check. This does not waive any SDK gate.
+/// The historical bridge name is retained for the host; partial groups are included.
 #[doc(hidden)]
 pub fn canonical_empty_mobile_signature(
     bytes: &[u8],
     format: Format,
 ) -> Result<Option<Vec<u8>>, String> {
-    EmptyConvertedMobileSignature::decode(bytes, format)?
+    ConvertedSignatureFrame::decode(bytes, format)?
         .map(|model| model.encode(Format::Designer))
         .transpose()
-}
-
-// Recognize complete tokens, not whitespace-stripped byte concatenations:
-// e.g. `- 1` cannot become the witnessed `-1` carrier. No document-sized buffer.
-fn empty_signature_flag(bytes: &[u8], count: &[u8]) -> Option<bool> {
-    let mut rest = bytes;
-    let mut eat = |token: &[u8]| {
-        rest = rest.trim_ascii_start();
-        if let Some(tail) = rest.strip_prefix(token) {
-            rest = tail;
-            true
-        } else {
-            false
-        }
-    };
-    for token in [
-        b"{".as_slice(),
-        b"2",
-        b",",
-        b"\"\"",
-        b",",
-        b"\"\"",
-        b",",
-        b"{",
-    ] {
-        if !eat(token) {
-            return None;
-        }
-    }
-    for group in 0..4 {
-        if group > 0 && !eat(b",") {
-            return None;
-        }
-        if !eat(b"{") || !eat(count) || !eat(b"}") {
-            return None;
-        }
-    }
-    for token in [b"}".as_slice(), b","] {
-        if !eat(token) {
-            return None;
-        }
-    }
-    let converted = if eat(b"0") {
-        false
-    } else if eat(b"1") {
-        true
-    } else {
-        return None;
-    };
-    if !eat(b"}") || !rest.trim_ascii().is_empty() {
-        return None;
-    }
-    Some(converted)
-}
-fn has_negative_digest_count(bytes: &[u8]) -> bool {
-    let mut quoted = false;
-    for (i, byte) in bytes.iter().enumerate() {
-        if *byte == b'"' {
-            quoted = !quoted;
-        }
-        if !quoted && *byte == b'{' && bytes[i + 1..].trim_ascii_start().starts_with(b"-") {
-            return true;
-        }
-    }
-    false
 }
 
 /// Пер-форматное имя файла VERBATIM-сайдкара по записи [`CONFIG_BLOB_SLOTS`]. cf сюда не
@@ -319,21 +211,16 @@ pub fn attach_config_ext(
         let bytes = read_bytes(&path)?;
         let mut lexical = None;
         let bytes = if entry.0 == "MobileClientSignature" {
-            match EmptyConvertedMobileSignature::decode(&bytes, format)
+            match ConvertedSignatureFrame::decode(&bytes, format)
                 .map_err(|reason| read_err(entry.0, reason))?
             {
                 Some(model) => {
                     let canonical = model
                         .encode(Format::Designer)
                         .map_err(|reason| read_err(entry.0, reason))?;
-                    // Carrier39 cannot be a native lexical facet. Source44/35
-                    // already has native-compatible zero counts and is kept.
-                    if empty_signature_flag(
-                        bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(&bytes),
-                        b"0",
-                    )
-                    .is_some()
-                    {
+                    // A top-level -1 carrier cannot be a native lexical facet.
+                    // Full native frames preserve their independently bound bytes.
+                    if model.native_compatible {
                         lexical = Some(morph1c_core::ir::MobileSignatureLexical {
                             canonical_bytes: canonical.clone(),
                             source_bytes: bytes,
@@ -355,7 +242,7 @@ pub fn attach_config_ext(
                     .ok_or_else(|| {
                         read_err(
                             entry.0,
-                            "Preferred signature is not the complete witnessed empty model".into(),
+                            "Preferred signature is not a complete Converted v2 model".into(),
                         )
                     })?;
                 if canonical != bytes
@@ -626,7 +513,7 @@ pub fn write_config_ext(
                 )
             })?;
         let bytes = if blob.slot == "MobileClientSignature" {
-            match EmptyConvertedMobileSignature::decode(&blob.bytes, Format::Designer)
+            match ConvertedSignatureFrame::decode(&blob.bytes, Format::Designer)
                 .map_err(|reason| write_err(obj, reason))?
             {
                 Some(model) => {
@@ -654,11 +541,29 @@ pub fn write_config_ext(
                             std::borrow::Cow::Owned(canonical)
                         }
                     } else {
-                        std::borrow::Cow::Owned(
-                            model
+                        let source_frame =
+                            blob.mobile_signature_lexical.as_ref().and_then(|facet| {
+                                if facet.canonical_bytes != canonical {
+                                    return None;
+                                }
+                                let frame = ConvertedSignatureFrame::decode(
+                                    &facet.source_bytes,
+                                    Format::Designer,
+                                )
+                                .ok()
+                                .flatten()?;
+                                if frame.encode(Format::Designer).ok().as_ref() != Some(&canonical)
+                                {
+                                    return None;
+                                }
+                                Some(frame.carrier_bytes(&facet.source_bytes))
+                            });
+                        std::borrow::Cow::Owned(match source_frame {
+                            Some(source) => source,
+                            None => model
                                 .encode(format)
                                 .map_err(|reason| write_err(obj, reason))?,
-                        )
+                        })
                     }
                 }
                 None => std::borrow::Cow::Borrowed(blob.bytes.as_slice()),
