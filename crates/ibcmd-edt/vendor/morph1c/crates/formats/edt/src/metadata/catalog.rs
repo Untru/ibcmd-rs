@@ -89,9 +89,11 @@ impl LocusMap for EdtCatalog {
             // auxiliary{Object,List,Choice}Form платформенный EDT НЕСЁТ (sparse при
             // не-дефолте; witnessed ERP `Catalog.Сценарии` — полный full-ref
             // `Catalog.<Имя>.Form.<Форма>`, тот же формат, что default*Form).
-            // auxiliaryFolderForm/auxiliaryFolderChoiceForm — UNWITNESSED (0 в ERP-корпусе),
-            // остаются непровешенными (честный uncovered-отказ, не угадываем).
+            // UH authentic EDT Catalog.ВидыОтчетов additionally witnesses
+            // auxiliaryFolderForm with the same full-reference spelling as Designer.
+            // auxiliaryFolderChoiceForm remains unwitnessed and unprojected.
             cat::F_AUX_OBJECT_FORM => fp(&["auxiliaryObjectForm"], Codec::PlainText),
+            cat::F_AUX_FOLDER_FORM => fp(&["auxiliaryFolderForm"], Codec::PlainText),
             cat::F_AUX_LIST_FORM => fp(&["auxiliaryListForm"], Codec::PlainText),
             cat::F_AUX_CHOICE_FORM => fp(&["auxiliaryChoiceForm"], Codec::PlainText),
             cat::F_INCLUDE_HELP_IN_CONTENTS => fp(&["includeHelpInContents"], Codec::BoolPresence),
@@ -201,6 +203,7 @@ static ROOT_ORDER: &[FieldId] = &[
     // `Catalog.Сценарии`: defaultChoiceForm → auxObject → auxList → auxChoice; метамодель
     // Catalog: 59 defaultFolderChoiceForm, 60..64 auxiliary*, 65 choiceHistoryOnInput).
     cat::F_AUX_OBJECT_FORM,
+    cat::F_AUX_FOLDER_FORM,
     cat::F_AUX_LIST_FORM,
     cat::F_AUX_CHOICE_FORM,
     // choiceHistoryOnInput — ПОСЛЕ defaultFolderChoiceForm (witnessed ERP

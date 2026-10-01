@@ -47,7 +47,11 @@ impl LocusMap for EdtInformationRegister {
             ir::F_EDIT_TYPE => fp(&["editType"], Codec::EnumText),
             ir::F_DEFAULT_RECORD_FORM => fp(&["defaultRecordForm"], Codec::PlainText),
             ir::F_DEFAULT_LIST_FORM => fp(&["defaultListForm"], Codec::PlainText),
-            // auxiliary*Form — Designer-only пустые (EDT не несёт).
+            // UH authentic EDT InformationRegister.ИзмененныеОбъектыДляВыгрузки
+            // carries the same full-reference auxiliary list slot as Designer.
+            ir::F_AUXILIARY_LIST_FORM => fp(&["auxiliaryListForm"], Codec::PlainText),
+            // UH ИменаФайловИКаталогов also carries the auxiliary record role.
+            ir::F_AUXILIARY_RECORD_FORM => fp(&["auxiliaryRecordForm"], Codec::PlainText),
             ir::F_STANDARD_ATTRIBUTES => fp(
                 &["standardAttributes"],
                 Codec::StdAttrs {

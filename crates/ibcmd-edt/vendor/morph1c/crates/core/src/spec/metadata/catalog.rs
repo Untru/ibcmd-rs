@@ -265,6 +265,8 @@ const S_CHOICE_FORM: usize = 10;
 // Description (КлассификаторДОПОГЭПД, мирСкважины; witnessed cf prop 9288a8ed…: Use=1,
 // DontUse=0). EDT: лист ОПУЩЕН ⟺ DontUse (дефолт слота), явный `Use` — прежние байты.
 const S_DATA_HISTORY: usize = 11;
+// Genuine UH ПредметыКомментирования/Description: mutable multiLine=true.
+const S_MULTI_LINE: usize = 12;
 
 /// 9 предопределённых атрибута КОРНЯ. `name_consts[0]` = TypeReductionMode
 /// (Owner=Deny, иначе TransformValues — сверено 74/74).
@@ -298,6 +300,7 @@ const VAR_SLOTS: &[VarSlotKind] = &[
     VarSlotKind::Str,               // mask (ERP-witnessed)
     VarSlotKind::Str,               // choiceForm (ERP-witnessed; путь Kind.Name.Form.F)
     VarSlotKind::Enum("DontUse"), // dataHistory (ERP-witnessed переменная)
+    VarSlotKind::Bool, // multiLine (UH witnessed Description=true)
 ];
 
 /// EDT-листья блока (позиционный порядок, сверено корпусом; позиции новых листьев —
@@ -328,6 +331,7 @@ const EDT_LEAVES: &[EdtLeaf] = &[
     EdtLeaf::OptCp("choiceParameters", S_CHOICE_PARAMS),
     EdtLeaf::OptEnum("fullTextSearch", S_FULL_TEXT),
     EdtLeaf::OptStr("mask", S_MASK),
+    EdtLeaf::OptBool("multiLine", S_MULTI_LINE),
     EdtLeaf::ConstValueUndef { tag: "minValue" },
     EdtLeaf::ConstValueUndef { tag: "maxValue" },
     EdtLeaf::OptStr("choiceForm", S_CHOICE_FORM),
@@ -337,7 +341,7 @@ const EDT_LEAVES: &[EdtLeaf] = &[
 const DENSE_LEAVES: &[(&str, DenseLeaf)] = &[
     ("LinkByType", DenseLeaf::Empty),
     ("FillChecking", DenseLeaf::VarEnum(S_FILL_CHECKING)),
-    ("MultiLine", DenseLeaf::Text("false")),
+    ("MultiLine", DenseLeaf::VarBool(S_MULTI_LINE)),
     ("FillFromFillingValue", DenseLeaf::VarBool(S_FILL_FROM)),
     ("CreateOnInput", DenseLeaf::Text("Auto")),
     ("TypeReductionMode", DenseLeaf::VarNameConst(NameConstWhich::C0)),

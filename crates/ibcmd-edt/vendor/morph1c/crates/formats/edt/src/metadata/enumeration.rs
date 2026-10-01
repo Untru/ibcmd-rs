@@ -17,8 +17,9 @@
 //!   defaultListForm → defaultChoiceForm; сверено `СтатусыПриглашений.mdo`, несущим оба);
 //! * `listPresentation`/`extendedListPresentation`/`explanation` → `LocalizedKeyVal`
 //!   (в SSL почти все пусты → EDT разрежён их опускает; 1 explanation непуст);
-//! * Designer-only пустые поля (`characteristics`, `auxiliary*Form`) — НЕ проецируются
-//!   EDT (lookup → `None`; разрежённый EDT их не несёт — не витнессированы и в ERP).
+//! * auxiliaryListForm/auxiliaryChoiceForm are full-reference PlainText slots, witnessed
+//!   in authentic UH Enum.УдалитьПредметыАренды; empty defaults stay sparse.
+//! * Empty characteristics remains unprojected in EDT.
 //!
 //! ДОЧЕРНЯЯ коллекция `EnumValue` → inline `<enumValues uuid><name>…` (плоско, без
 //! `<Properties>`-обёртки); рекурсию ведёт `formats_xml::children`.
@@ -41,6 +42,7 @@ use morph1c_core::spec::metadata::enum_form_ref::enum_form_ref;
 use morph1c_core::spec::metadata::enum_template_ref as tref;
 use morph1c_core::spec::metadata::enum_template_ref::enum_template_ref;
 use morph1c_core::spec::metadata::enumeration::{
+    F_AUXILIARY_CHOICE_FORM, F_AUXILIARY_LIST_FORM,
     F_CHOICE_HISTORY_ON_INPUT, F_CHOICE_MODE, F_COMMENT, F_DEFAULT_CHOICE_FORM,
     F_DEFAULT_LIST_FORM, F_EXPLANATION, F_EXTENDED_LIST_PRESENTATION, F_LIST_PRESENTATION,
     F_QUICK_CHOICE, F_STANDARD_ATTRIBUTES, F_SYNONYM, F_USE_STANDARD_COMMANDS,
@@ -98,6 +100,10 @@ impl EdtEnum {
             // Witness ERP: 17 перечислений (напр. `ВариантыДействийПоРасхождениямВАкте
             // ПослеПриемки`) несут <defaultChoiceForm> после <choiceMode>.
             FieldProjection::new(flat(P_DEFAULT_CHOICE_FORM), Codec::PlainText)
+        } else if field == F_AUXILIARY_LIST_FORM {
+            FieldProjection::new(flat(&["auxiliaryListForm"]), Codec::PlainText)
+        } else if field == F_AUXILIARY_CHOICE_FORM {
+            FieldProjection::new(flat(&["auxiliaryChoiceForm"]), Codec::PlainText)
         } else if field == F_LIST_PRESENTATION {
             FieldProjection::new(flat(P_LIST_PRESENTATION), Codec::LocalizedKeyVal)
         } else if field == F_EXTENDED_LIST_PRESENTATION {
@@ -105,8 +111,7 @@ impl EdtEnum {
         } else if field == F_EXPLANATION {
             FieldProjection::new(flat(P_EXPLANATION), Codec::LocalizedKeyVal)
         } else {
-            // Designer-only пустые поля (characteristics/auxiliary*Form) — EDT их не несёт
-            // (разрежён; не витнессированы и в ERP): not projected.
+            // Unwitnessed Designer-only characteristics remains unprojected.
             return None;
         };
         Some(fp)
