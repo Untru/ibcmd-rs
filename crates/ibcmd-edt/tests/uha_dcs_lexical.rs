@@ -88,7 +88,10 @@ fn scoped_qname_and_explicit_empty_appearance_regenerate_without_changing_semant
         text.replace("http://v8.1c.ru/8.2/data/types", "urn:unknown:type"),
         text.replace("d10p1:Undefined</dcsset:right>", "d10p1:</dcsset:right>"),
         text.replace("d10p1:Undefined</dcsset:right>", "d10p1:a:b</dcsset:right>"),
-        text.replace("d10p1:Undefined</dcsset:right>", "d10p1:1bad</dcsset:right>"),
+        text.replace(
+            "d10p1:Undefined</dcsset:right>",
+            "d10p1:1bad</dcsset:right>",
+        ),
         text.replace("d10p1:Undefined</dcsset:right>", "d10p1:a$</dcsset:right>"),
         text.replace(
             "<dcsset:appearance/>",
@@ -102,9 +105,16 @@ fn scoped_qname_and_explicit_empty_appearance_regenerate_without_changing_semant
         assert!(read_form(FormDialect::Designer, bad.as_bytes()).is_err());
     }
     for name in ["Тип", "_Тип1", "Τύπος", "A\u{301}", "\u{10000}Type"] {
-        let unicode=text.replace("d10p1:Undefined</dcsset:right>",&format!("d10p1:{name}</dcsset:right>"));
-        let decoded=read_form(FormDialect::Designer,unicode.as_bytes()).unwrap();
-        assert!(String::from_utf8(write_form(FormDialect::Designer,&decoded).unwrap()).unwrap().contains(&format!(">d10p1:{name}</dcsset:right>")));
+        let unicode = text.replace(
+            "d10p1:Undefined</dcsset:right>",
+            &format!("d10p1:{name}</dcsset:right>"),
+        );
+        let decoded = read_form(FormDialect::Designer, unicode.as_bytes()).unwrap();
+        assert!(
+            String::from_utf8(write_form(FormDialect::Designer, &decoded).unwrap())
+                .unwrap()
+                .contains(&format!(">d10p1:{name}</dcsset:right>"))
+        );
     }
 }
 
