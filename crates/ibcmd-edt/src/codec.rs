@@ -426,11 +426,8 @@ pub(crate) fn xml_to_edt(
     let mut entries = Vec::new();
     for e in converted.entries() {
         entries.push(
-            SourceEntry::from_bytes(
-                SourcePath::new(format!("src/{}", e.path())).map_err(EdtError::source)?,
-                e.bytes().to_vec(),
-            )
-            .map_err(EdtError::source)?,
+            e.with_path(SourcePath::new(format!("src/{}", e.path())).map_err(EdtError::source)?)
+                .map_err(EdtError::source)?,
         );
     }
     drop(converted);
@@ -1027,6 +1024,76 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "read-only whole native corpus host model acceptance; requires shared heavy FIFO and F lab"]
+    fn whole_native_host_model_acceptance() {
+        let root = std::path::PathBuf::from(
+            std::env::var_os("IBCMD_EDT_NATIVE_MODEL_ROOT").expect("native corpus"),
+        );
+        let output = std::path::PathBuf::from(
+            std::env::var_os("IBCMD_EDT_NATIVE_MODEL_REPORT").expect("new F lab report"),
+        );
+        assert!(root.is_absolute() && output.is_absolute());
+        assert!(output.starts_with(std::path::Path::new("F:/ibcmd/lab/07")));
+        assert!(!output.exists(), "immutable report already exists");
+        let started = std::time::Instant::now();
+        let tree = bounded::read_tree(&root, large_limits()).unwrap();
+        let inventory_elapsed = started.elapsed().as_secs_f64();
+        #[derive(serde::Serialize)]
+        struct SourceHashRow<'a> {
+            path: &'a str,
+            bytes: usize,
+            sha256: String,
+        }
+        use sha2::Digest;
+        let source_rows = tree
+            .entries()
+            .iter()
+            .map(|entry| SourceHashRow {
+                path: entry.path().as_str(),
+                bytes: entry.bytes().len(),
+                sha256: entry.digest().to_string(),
+            })
+            .collect::<Vec<_>>();
+        let source_hash = format!(
+            "{:x}",
+            sha2::Sha256::digest(serde_json::to_vec(&source_rows).unwrap())
+        );
+        let source_bytes = source_rows.iter().map(|row| row.bytes as u64).sum::<u64>();
+        drop(source_rows);
+        let options = ConversionOptions {
+            edt_version: "2025.2.3".into(),
+            xml_dialect: std::env::var("IBCMD_EDT_NATIVE_MODEL_DIALECT")
+                .unwrap_or_else(|_| "2.20".into()),
+            runtime_version: None,
+        };
+        let result = canonical(&tree, &options);
+        let report = match &result {
+            Ok(model) => serde_json::json!({
+                "status": "PASS", "source": root, "files": tree.entries().len(),
+                "source_tree_sha256": source_hash, "source_bytes": source_bytes,
+                "objects": model.len(),
+                "assets": model.objects().iter().map(|o| o.assets().len()).sum::<usize>(),
+                "inventory_seconds": inventory_elapsed,
+                "elapsed_seconds": started.elapsed().as_secs_f64(),
+            }),
+            Err(error) => serde_json::json!({
+                "status": "FAIL", "source": root, "files": tree.entries().len(),
+                "source_tree_sha256": source_hash, "source_bytes": source_bytes,
+                "inventory_seconds": inventory_elapsed,
+                "elapsed_seconds": started.elapsed().as_secs_f64(), "error": error.to_string(),
+            }),
+        };
+        use std::io::Write;
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(output)
+            .unwrap();
+        file.write_all(&serde_json::to_vec_pretty(&report).unwrap())
+            .unwrap();
+        result.unwrap();
+    }
     #[test]
     fn mobile_empty_signature_equivalence_is_scoped_to_the_root_blob() {
         let native = b"{2,\"\",\"\",\n{\n{0},\n{0},\n{0},\n{0}\n},0}";
