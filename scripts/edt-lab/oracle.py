@@ -192,6 +192,10 @@ def command_diagnostics(run: Path, labels: list[str]) -> dict:
     return result
 
 
+def has_error_diagnostics(values) -> bool:
+    return any(item["error_count"] or item.get("workspace_error_count", 0) for item in values)
+
+
 def require_xml(root: Path, *, require_dump_info=True) -> None:
     names = ("Configuration.xml", "ConfigDumpInfo.xml") if require_dump_info else ("Configuration.xml",)
     for name in names:
@@ -247,8 +251,8 @@ def prepare(args, run: Path) -> None:
         raise OracleError("EDT modified the original native corpus")
     diagnostics = command_diagnostics(run, ["edt-import-native", "edt-export-native"])
     write_json(run / "edt-diagnostics.json", diagnostics)
-    write_json(run / "prepared.json", {"status": "PREPARED_WITH_DIAGNOSTICS" if any(
-        item["error_count"] for item in diagnostics.values()) else "PREPARED", "native": str(args.native),
+    write_json(run / "prepared.json", {"status": "PREPARED_WITH_DIAGNOSTICS" if
+        has_error_diagnostics(diagnostics.values()) else "PREPARED", "native": str(args.native),
         "source_version": args.source_version, "native_tool_version": args.native_tool_version,
         "edt_version": version, "edt_profile_release": args.edt_version,
         "runtime": args.runtime, "project": str(project),
@@ -376,7 +380,7 @@ def accept(args, run: Path) -> None:
     original_diagnostics = json.loads((prepared_root / "edt-diagnostics.json").read_text(encoding="utf-8"))
     generated_diagnostics = command_diagnostics(run, ["edt-export-generated"])
     write_json(run / "edt-diagnostics.json", generated_diagnostics)
-    diagnostic_failure = any(item["error_count"] for item in [
+    diagnostic_failure = has_error_diagnostics([
         *original_diagnostics.values(), *generated_diagnostics.values()])
     result = {"status": "PASS" if not diagnostic_failure and all(
         item["configuration_data_all_equal"] for item in verdicts.values()) else "FAIL",

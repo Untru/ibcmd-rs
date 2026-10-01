@@ -95,6 +95,18 @@ class EvidenceControls(unittest.TestCase):
                 "print('[Validator] ERROR CompositeEValidator - Error executing EValidator')"], 10)
             report = oracle.command_diagnostics(root, ["bad-diagnostic"])
             self.assertEqual(report["bad-diagnostic"]["error_count"], 1)
+            self.assertTrue(oracle.has_error_diagnostics(report.values()))
+
+    def test_workspace_error_is_not_hidden_by_clean_stdout(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / "stage.stdout").write_bytes(b"done")
+            (root / "stage.stderr").write_bytes(b"")
+            (root / "stage.workspace-log").write_bytes(
+                b"!ENTRY org.eclipse.xtext.validation.CompositeEValidator 4 0 2026-10-01\n")
+            report = oracle.command_diagnostics(root, ["stage"])
+            self.assertEqual(report["stage"]["error_count"], 0)
+            self.assertTrue(oracle.has_error_diagnostics(report.values()))
 
 
 if __name__ == "__main__":
