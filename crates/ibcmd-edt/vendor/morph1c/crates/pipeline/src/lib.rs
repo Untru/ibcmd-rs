@@ -80,6 +80,8 @@ pub use convert::{read_config, write_config};
 pub use form_read::attach_form_body;
 #[doc(hidden)]
 pub use form_write::write_form_bodies;
+#[doc(hidden)]
+pub use sdk_body_projection::mxl_newlines as project_mxl_content_newlines;
 pub use preflight::{check, preflight, KindStatus, KindSupport, PreflightEntry, PreflightReport};
 
 /// Honest note surfaced by `convert`/`check`: what a whole-config conversion actually carries,

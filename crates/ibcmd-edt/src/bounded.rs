@@ -17,6 +17,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
     let mut names = Vec::new();
     let mut form_body = false;
     let mut dump_info = false;
+    let mut streamed_mxl = false;
     loop {
         let before = reader.buffer_position();
         let event = reader
@@ -33,6 +34,28 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
         match event {
             Event::Start(ref e) | Event::Empty(ref e) => {
                 let local = String::from_utf8_lossy(e.local_name().as_ref()).into_owned();
+                if names.is_empty() && depth == 0 && local == "document" {
+                    let name = e.name();
+                    let raw = std::str::from_utf8(name.as_ref()).map_err(EdtError::source)?;
+                    let namespace_key = raw
+                        .split_once(':')
+                        .map_or_else(|| "xmlns".to_owned(), |(p, _)| format!("xmlns:{p}"));
+                    for a in e.attributes() {
+                        let a = a.map_err(EdtError::source)?;
+                        if a.key.as_ref() == namespace_key.as_bytes() {
+                            streamed_mxl = a
+                                .decode_and_unescape_value(reader.decoder())
+                                .map_err(EdtError::source)?
+                                == "http://v8.1c.ru/8.2/data/spreadsheet";
+                        }
+                    }
+                    if streamed_mxl {
+                        // The MXL codec is iterative and never derives physical
+                        // filenames from cell text/attributes. Use the shared
+                        // complete XML checks without recursive-model ceilings.
+                        ibcmd_xml::XmlReader::inspect_slice(bytes).map_err(EdtError::source)?;
+                    }
+                }
                 if names.is_empty() && depth == 0 && local == "Form" {
                     form_body = path.ends_with(".form") || path.ends_with("Form.xml");
                 }
@@ -55,13 +78,13 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                     }
                 }
                 for (n, a) in e.attributes().enumerate() {
-                    if n >= MAX_XML_ATTRIBUTES {
+                    if !streamed_mxl && n >= MAX_XML_ATTRIBUTES {
                         return Err(EdtError::new(format!(
                             "{path}: XML attribute budget exceeded"
                         )));
                     }
                     let a = a.map_err(EdtError::source)?;
-                    if matches!(a.key.as_ref(), b"name" | b"Name" | b"lang") {
+                    if !streamed_mxl && matches!(a.key.as_ref(), b"name" | b"Name" | b"lang") {
                         let value = a
                             .decode_and_unescape_value(reader.decoder())
                             .map_err(EdtError::source)?;
@@ -83,7 +106,7 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                 }
                 if matches!(event, Event::Start(_)) {
                     depth += 1;
-                    if depth > MAX_XML_DEPTH {
+                    if !streamed_mxl && depth > MAX_XML_DEPTH {
                         return Err(EdtError::new(format!("{path}: XML depth budget exceeded")));
                     }
                     names.push(local);
@@ -92,16 +115,23 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
             Event::Text(e) => {
                 let value = e.decode().map_err(EdtError::source)?;
                 let value = quick_xml::escape::unescape(&value).map_err(EdtError::source)?;
-                if matches!(
-                    names.last().map(String::as_str),
-                    Some(
-                        "Name" | "name" | "LanguageCode" | "languageCode" | "lang" | "Page" | "Abs"
-                    )
-                ) || names
-                    .iter()
-                    .rev()
-                    .nth(1)
-                    .is_some_and(|p| p == "ChildObjects")
+                if !streamed_mxl
+                    && (matches!(
+                        names.last().map(String::as_str),
+                        Some(
+                            "Name"
+                                | "name"
+                                | "LanguageCode"
+                                | "languageCode"
+                                | "lang"
+                                | "Page"
+                                | "Abs"
+                        )
+                    ) || names
+                        .iter()
+                        .rev()
+                        .nth(1)
+                        .is_some_and(|p| p == "ChildObjects"))
                 {
                     let check = if form_body
                         && matches!(names.last().map(String::as_str), Some("Name" | "name"))
@@ -114,10 +144,12 @@ pub(crate) fn validate_xml(path: &str, bytes: &[u8]) -> Result<(), EdtError> {
                         EdtError::new(format!("{path}: unsafe metadata filename: {e}"))
                     })?;
                 }
-                if matches!(
-                    names.last().map(String::as_str),
-                    Some("parentSubsystem" | "ParentSubsystem")
-                ) {
+                if !streamed_mxl
+                    && matches!(
+                        names.last().map(String::as_str),
+                        Some("parentSubsystem" | "ParentSubsystem")
+                    )
+                {
                     // Qualified subsystem identities are dotted; no filesystem escape.
                     if value.contains('/')
                         || value.contains('\\')
@@ -330,6 +362,37 @@ fn reparse(_: &fs::Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn streamed_mxl_depth_and_cell_names_are_not_metadata_limits() {
+        let mut xml = String::from("<document xmlns='http://v8.1c.ru/8.2/data/spreadsheet'");
+        for i in 0..300 {
+            xml.push_str(&format!(" a{i}='value'"));
+        }
+        xml.push('>');
+        for _ in 0..400 {
+            xml.push_str("<nested>");
+        }
+        xml.push_str("<Name>../ThisIsCellText</Name>");
+        for _ in 0..400 {
+            xml.push_str("</nested>");
+        }
+        xml.push_str("</document>");
+        validate_xml("Template.mxlx", xml.as_bytes()).unwrap();
+        assert!(
+            validate_xml(
+                "Descriptor.mdo",
+                xml.replace("data/spreadsheet", "unknown").as_bytes()
+            )
+            .is_err()
+        );
+        for unsafe_xml in [
+            "<!DOCTYPE document><document xmlns='http://v8.1c.ru/8.2/data/spreadsheet'/>",
+            "<document xmlns='http://v8.1c.ru/8.2/data/spreadsheet'><![CDATA[text]]></document>",
+            "<document xmlns='http://v8.1c.ru/8.2/data/spreadsheet'>&unknown;</document>",
+        ] {
+            assert!(validate_xml("Template.mxlx", unsafe_xml.as_bytes()).is_err());
+        }
+    }
     #[test]
     fn large_flat_xml_is_limited_by_input_not_event_count() {
         // More than two million events, the ceiling that rejected real MXL.

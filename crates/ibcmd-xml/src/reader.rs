@@ -66,6 +66,17 @@ pub struct XmlReader;
 impl XmlReader {
     /// Parses a complete UTF-8 XML document without trimming text.
     pub fn from_slice(input: &[u8]) -> Result<XmlDocument, XmlError> {
+        Self::parse(input, true)
+    }
+
+    /// Validates the complete document and returns its root name without
+    /// retaining a node for every cell of a large XML source asset.
+    /// Uses the same lexical and document checks as `from_slice`.
+    pub fn inspect_slice(input: &[u8]) -> Result<QName, XmlError> {
+        Ok(Self::parse(input, false)?.root().name().clone())
+    }
+
+    fn parse(input: &[u8], retain_tree: bool) -> Result<XmlDocument, XmlError> {
         if std::str::from_utf8(input).is_err() {
             return Err(error(input, 0, XmlErrorCause::InvalidUtf8));
         }
@@ -100,6 +111,7 @@ impl XmlReader {
         let mut after = Vec::new();
         let mut root = None;
         let mut has_doctype = false;
+        let mut seen_before = false;
         loop {
             let start = reader.buffer_position() as usize + bom_search_start;
             let event = match reader.read_event_into(&mut buf) {
@@ -116,11 +128,7 @@ impl XmlReader {
             match event {
                 Event::Eof => break,
                 Event::Decl(e) => {
-                    if !stack.is_empty()
-                        || root.is_some()
-                        || declaration.is_some()
-                        || !before.is_empty()
-                    {
+                    if !stack.is_empty() || root.is_some() || declaration.is_some() || seen_before {
                         return Err(error(
                             input,
                             start,
@@ -159,6 +167,7 @@ impl XmlReader {
                         ),
                         &mut stack,
                         &mut root,
+                        retain_tree,
                     )?;
                 }
                 Event::End(_) => {
@@ -182,6 +191,7 @@ impl XmlReader {
                         ),
                         &mut stack,
                         &mut root,
+                        retain_tree,
                     )?;
                 }
                 Event::Text(e) => {
@@ -194,9 +204,9 @@ impl XmlReader {
                         pos,
                         XmlNode::Text(XmlText::parsed(value, lexeme(input, start, pos)?)),
                         &mut stack,
-                        &mut before,
-                        &mut after,
+                        (&mut before, &mut after),
                         root.is_some(),
+                        retain_tree,
                     )?;
                 }
                 Event::CData(e) => push_node(
@@ -207,9 +217,9 @@ impl XmlReader {
                         lexeme(input, start, pos)?,
                     )),
                     &mut stack,
-                    &mut before,
-                    &mut after,
+                    (&mut before, &mut after),
                     root.is_some(),
+                    retain_tree,
                 )?,
                 Event::Comment(e) => push_node(
                     input,
@@ -219,9 +229,9 @@ impl XmlReader {
                         lexeme(input, start, pos)?,
                     )),
                     &mut stack,
-                    &mut before,
-                    &mut after,
+                    (&mut before, &mut after),
                     root.is_some(),
+                    retain_tree,
                 )?,
                 Event::PI(e) => push_node(
                     input,
@@ -231,9 +241,9 @@ impl XmlReader {
                         lexeme(input, start, pos)?,
                     )),
                     &mut stack,
-                    &mut before,
-                    &mut after,
+                    (&mut before, &mut after),
                     root.is_some(),
+                    retain_tree,
                 )?,
                 Event::DocType(e) => {
                     if !stack.is_empty() || root.is_some() || has_doctype {
@@ -253,10 +263,15 @@ impl XmlReader {
                         lexeme(input, start, pos)?,
                     )),
                     &mut stack,
-                    &mut before,
-                    &mut after,
+                    (&mut before, &mut after),
                     root.is_some(),
+                    retain_tree,
                 )?,
+            }
+            seen_before |= !before.is_empty();
+            if !retain_tree {
+                before.clear();
+                after.clear();
             }
             buf.clear();
         }
@@ -530,9 +545,12 @@ fn push_element(
     element: XmlElement,
     stack: &mut [Building],
     root: &mut Option<XmlElement>,
+    retain_tree: bool,
 ) -> Result<(), XmlError> {
     if let Some(parent) = stack.last_mut() {
-        parent.children.push(XmlNode::Element(element));
+        if retain_tree {
+            parent.children.push(XmlNode::Element(element));
+        }
     } else if root.replace(element).is_some() {
         return Err(error(input, pos, XmlErrorCause::MultipleRoots));
     }
@@ -543,14 +561,17 @@ fn push_node(
     pos: usize,
     node: XmlNode,
     stack: &mut [Building],
-    before: &mut Vec<XmlNode>,
-    after: &mut Vec<XmlNode>,
+    outside: (&mut Vec<XmlNode>, &mut Vec<XmlNode>),
     has_root: bool,
+    retain_tree: bool,
 ) -> Result<(), XmlError> {
     if let Some(parent) = stack.last_mut() {
-        parent.children.push(node);
+        if retain_tree {
+            parent.children.push(node);
+        }
         return Ok(());
     }
+    let (before, after) = outside;
     match node {
         XmlNode::Text(ref s) if s.value().trim().is_empty() => {
             if has_root {

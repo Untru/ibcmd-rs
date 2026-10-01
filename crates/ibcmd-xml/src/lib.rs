@@ -131,6 +131,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn streaming_inspection_keeps_document_and_lexical_validation() {
+        for input in [
+            b"<root/>".as_slice(),
+            b"\xef\xbb\xbf<?xml version='1.0'?><p:r xmlns:p='urn:p'>a&amp;&#x42;<![CDATA[x]]><!-- ok --><p:e/></p:r>",
+            b"<!DOCTYPE root><root/>",
+            b"<root/><second/>",
+            b"<root><unclosed>",
+            b"<root></different>",
+            b"<root a='1' a='2'/>",
+            b"<root>&unknown;</root>",
+            b"<root>&#0;</root>",
+            b"<root>\x01</root>",
+            b"<root>\xff</root>",
+            b"text<root/>",
+            b"<root/>text",
+            b"<!-- prior --><?xml version='1.0'?><root/>",
+            b" <?xml version='1.0'?><root/>",
+            b"<?xml version='2.0'?><root/>",
+            b"<root><!-- bad -- comment --></root>",
+            b"<root/><!DOCTYPE root>",
+            b"<root>\xef\xbb\xbf</root>",
+        ] {
+            match (XmlReader::from_slice(input), XmlReader::inspect_slice(input)) {
+                (Ok(document), Ok(name)) => assert_eq!(document.root().name(), &name),
+                (Err(full), Err(streaming)) => assert_eq!(full, streaming),
+                outcomes => panic!("validation differs for {input:?}: {outcomes:?}"),
+            }
+        }
+    }
+
+    #[test]
     fn crate_identity_is_stable() {
         assert_eq!(env!("CARGO_PKG_NAME"), "ibcmd-xml");
     }

@@ -758,8 +758,37 @@ fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
     if !entry.path().as_str().ends_with(".xml") {
         return Ok(false);
     }
-    let doc = ibcmd_xml::XmlReader::from_slice(entry.bytes()).map_err(EdtError::source)?;
-    Ok(doc.root().name().local() == "MetaDataObject")
+    Ok(body_root(entry.bytes())?.0 == "MetaDataObject")
+}
+
+// SourceEntry and bounded preflight already validate complete inputs. Peek
+// only the root for codec dispatch; do not rebuild a giant source asset DOM.
+fn body_root(bytes: &[u8]) -> Result<(String, String), EdtError> {
+    let mut reader = quick_xml::Reader::from_reader(bytes);
+    loop {
+        match reader.read_event().map_err(EdtError::source)? {
+            quick_xml::events::Event::Start(e) | quick_xml::events::Event::Empty(e) => {
+                let name = e.name();
+                let raw = std::str::from_utf8(name.as_ref()).map_err(EdtError::source)?;
+                let key = raw
+                    .split_once(':')
+                    .map_or_else(|| "xmlns".to_owned(), |(p, _)| format!("xmlns:{p}"));
+                let mut uri = String::new();
+                for a in e.attributes() {
+                    let a = a.map_err(EdtError::source)?;
+                    if a.key.as_ref() == key.as_bytes() {
+                        uri = a
+                            .decode_and_unescape_value(reader.decoder())
+                            .map_err(EdtError::source)?
+                            .into_owned();
+                    }
+                }
+                return Ok((raw.rsplit(':').next().unwrap_or(raw).to_owned(), uri));
+            }
+            quick_xml::events::Event::Eof => return Err(EdtError::new("missing XML body root")),
+            _ => {}
+        }
+    }
 }
 
 fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
@@ -777,6 +806,45 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
         })
     };
     if structured(a) && structured(b) && !a.path().as_str().ends_with(".html") {
+        let root_a = body_root(a.bytes())?;
+        let root_b = body_root(b.bytes())?;
+        if root_a != root_b {
+            return Ok(false);
+        }
+        if root_a
+            == (
+                "document".into(),
+                "http://v8.1c.ru/8.2/data/spreadsheet".into(),
+            )
+        {
+            fn strip_bom(bytes: &[u8]) -> &[u8] {
+                bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)
+            }
+            let a = morph1c_pipeline::project_mxl_content_newlines(strip_bom(a.bytes()), false)
+                .map_err(EdtError::source)?;
+            let b = morph1c_pipeline::project_mxl_content_newlines(strip_bom(b.bytes()), false)
+                .map_err(EdtError::source)?;
+            return Ok(a == b);
+        }
+        if !matches!(
+            root_a.0.as_str(),
+            "CommandInterface"
+                | "MainSectionCommandInterface"
+                | "ClientApplicationInterface"
+                | "HomePageWorkArea"
+                | "Rights"
+                | "Form"
+                | "DataCompositionSchema"
+                | "dataCompositionSchema"
+                | "DataCompositionSettings"
+                | "Style"
+                | "PredefinedData"
+                | "Schedule"
+                | "ExchangePlanContent"
+                | "AccumulationRegisterAggregates"
+        ) {
+            return Ok(false);
+        }
         fn normalized(
             e: &ibcmd_xml::XmlElement,
             inherited: &BTreeMap<String, String>,
@@ -943,6 +1011,33 @@ fn same_body(a: &SourceEntry, b: &SourceEntry) -> Result<bool, EdtError> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn large_mxl_inventory_and_body_guard_avoid_per_node_dom() {
+        let path = SourcePath::new("CommonTemplates/Large/Ext/Template.xml").unwrap();
+        let mut xml = String::from(
+            "<document xmlns='http://v8.1c.ru/8.2/data/spreadsheet' xmlns:v8='http://v8.1c.ru/8.1/data/core'>",
+        );
+        for _ in 0..1_050_000 {
+            xml.push_str("<row/>");
+        }
+        xml.push_str("<v8:content>line1\r\nline2</v8:content></document>");
+        let original = SourceEntry::from_bytes(path.clone(), xml.as_bytes().to_vec()).unwrap();
+        assert!(!metadata_file(&original).unwrap());
+        let regenerated = SourceEntry::from_bytes(
+            path.clone(),
+            xml.replace("line1\r\nline2", "line1\nline2").into_bytes(),
+        )
+        .unwrap();
+        assert!(same_body(&original, &regenerated).unwrap());
+        let changed = SourceEntry::from_bytes(
+            path.clone(),
+            xml.replace("line1\r\nline2", "line1\nchanged").into_bytes(),
+        )
+        .unwrap();
+        assert!(!same_body(&original, &changed).unwrap());
+        let malformed = xml.replace("</document>", "</different>");
+        assert!(SourceEntry::from_bytes(path, malformed.into_bytes()).is_err());
+    }
     #[test]
     fn canonical_bridge_accepts_long_physical_paths_and_retains_exact_error_path() {
         let path = format!("CommonModules/{}.xml", "Отчет".repeat(24));

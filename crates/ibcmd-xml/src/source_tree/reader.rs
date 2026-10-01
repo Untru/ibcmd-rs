@@ -178,36 +178,9 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Sou
             if s.total > s.limits.total_bytes {
                 return Err(SourceTreeError::TotalTooLarge);
             }
-            let mut kind = classify(path.as_str());
-            let xml = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
-                Some(
-                    crate::XmlReader::from_slice(&bytes).map_err(|e| SourceTreeError::Xml {
-                        path: path.clone(),
-                        message: e.to_string(),
-                    })?,
-                )
-            } else {
-                None
-            };
-            if matches!(kind, SourceKind::OtherXml)
-                && xml.as_ref().is_some_and(|d| {
-                    matches!(
-                        d.root().name().local(),
-                        "MetaDataObject" | "Configuration" | "DefinedType"
-                    )
-                })
-            {
-                kind = SourceKind::MetadataXml
-            }
-            let uuid = if matches!(
-                kind,
-                SourceKind::ConfigurationRoot | SourceKind::MetadataXml
-            ) {
-                derive_uuid(&path, xml.as_ref().unwrap())?
-            } else {
-                None
-            };
-            s.out.push(SourceEntry::new(path, kind, bytes, uuid)?);
+            // Use the same streaming body validation and descriptor identity
+            // rules for both disk inventories and entries built by adapters.
+            s.out.push(SourceEntry::from_bytes(path, bytes)?);
         }
     }
     Ok(())

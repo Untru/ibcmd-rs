@@ -116,9 +116,9 @@ pub struct SourceEntry {
 impl SourceEntry {
     pub fn from_bytes(path: SourcePath, bytes: Vec<u8>) -> Result<Self, SourceTreeError> {
         let mut kind = reader::classify(path.as_str());
-        let document = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
+        let root = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
             Some(
-                crate::XmlReader::from_slice(&bytes).map_err(|e| SourceTreeError::Xml {
+                crate::XmlReader::inspect_slice(&bytes).map_err(|e| SourceTreeError::Xml {
                     path: path.clone(),
                     message: e.to_string(),
                 })?,
@@ -127,9 +127,9 @@ impl SourceEntry {
             None
         };
         if matches!(kind, SourceKind::OtherXml)
-            && document.as_ref().is_some_and(|d| {
+            && root.as_ref().is_some_and(|name| {
                 matches!(
-                    d.root().name().local(),
+                    name.local(),
                     "MetaDataObject" | "Configuration" | "DefinedType"
                 )
             })
@@ -140,7 +140,12 @@ impl SourceEntry {
             kind,
             SourceKind::ConfigurationRoot | SourceKind::MetadataXml
         ) {
-            reader::derive_uuid(&path, document.as_ref().unwrap())?
+            let document =
+                crate::XmlReader::from_slice(&bytes).map_err(|e| SourceTreeError::Xml {
+                    path: path.clone(),
+                    message: e.to_string(),
+                })?;
+            reader::derive_uuid(&path, &document)?
         } else {
             None
         };
