@@ -1,5 +1,6 @@
 //! Deterministic diagnostics and fail-closed loss handling.
 
+use crate::source_policy::SourceOperationPolicy;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::error::Error;
@@ -261,7 +262,20 @@ pub struct PathSegment(PathSegmentValue);
 impl PathSegment {
     /// Creates a named segment after validating its borrowed value.
     pub fn name(value: &str) -> Result<Self, DiagnosticBuildError> {
-        validate_text("path segment", value, MAX_PATH_NAME_BYTES, false)?;
+        Self::name_with_policy(value, SourceOperationPolicy::Bounded)
+    }
+
+    /// Retains an exact path name under an explicit source resource policy.
+    pub fn name_with_policy(
+        value: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, DiagnosticBuildError> {
+        validate_text(
+            "path segment",
+            value,
+            policy.maximum(MAX_PATH_NAME_BYTES),
+            false,
+        )?;
         Ok(Self(PathSegmentValue::Name(value.into())))
     }
 
@@ -339,6 +353,51 @@ trait BoundedPath: Sized {
     fn from_bounded_segments(segments: Vec<PathSegment>) -> Self;
 }
 
+#[cfg(test)]
+mod source_path_policy_tests {
+    use super::*;
+
+    #[test]
+    fn source_paths_keep_exact_names_order_and_fail_atomic_bounded_push() {
+        let source = SourceOperationPolicy::Source;
+        let name = "Ж".repeat(MAX_PATH_NAME_BYTES / 2 + 1);
+        assert!(PathSegment::name(&name).is_err());
+        let segment = PathSegment::name_with_policy(&name, source).unwrap();
+        assert!(ObjectPath::new(vec![segment.clone()]).is_err());
+        let mut path = ObjectPath::new_with_policy(vec![segment], source).unwrap();
+        let before = path.clone();
+        assert!(path.push(PathSegment::index(1)).is_err());
+        assert_eq!(path, before);
+        path.push_with_policy(PathSegment::index(1), source)
+            .unwrap();
+        assert_eq!(path.segments()[0].as_name(), Some(name.as_str()));
+        assert_eq!(path.segments()[1].as_index(), Some(1));
+        assert!(
+            serde_json::from_str::<ObjectPath>(&serde_json::to_string(&path).unwrap()).is_err()
+        );
+        let segments: Vec<_> = (0..=MAX_PATH_SEGMENTS)
+            .map(|index| PathSegment::index(index as u32))
+            .collect();
+        assert!(PropertyPath::new(segments.clone()).is_err());
+        let path = PropertyPath::new_with_policy(segments, source).unwrap();
+        assert_eq!(path.segments().len(), MAX_PATH_SEGMENTS + 1);
+        assert!(
+            serde_json::from_str::<PropertyPath>(&serde_json::to_string(&path).unwrap()).is_err()
+        );
+        for invalid in ["", "bad\nname"] {
+            assert!(PathSegment::name_with_policy(invalid, source).is_err());
+        }
+        let normal = vec![PathSegment::name("a/b~c").unwrap(), PathSegment::index(1)];
+        let bounded = ObjectPath::new(normal.clone()).unwrap();
+        let from_source = ObjectPath::new_with_policy(normal, source).unwrap();
+        assert_eq!(bounded, from_source);
+        assert_eq!(
+            serde_json::to_vec(&bounded).unwrap(),
+            serde_json::to_vec(&from_source).unwrap()
+        );
+    }
+}
+
 struct BoundedPathVisitor<T>(PhantomData<fn() -> T>);
 
 impl<'de, T> Visitor<'de> for BoundedPathVisitor<T>
@@ -389,10 +448,27 @@ macro_rules! diagnostic_path {
         impl $name {
             /// Creates a path after enforcing the public segment-count bound.
             pub fn new(segments: Vec<PathSegment>) -> Result<Self, DiagnosticBuildError> {
-                if segments.len() > MAX_PATH_SEGMENTS {
-                    return Err(DiagnosticBuildError::TooManyPathSegments {
-                        maximum: MAX_PATH_SEGMENTS,
-                    });
+                Self::new_with_policy(segments, SourceOperationPolicy::Bounded)
+            }
+
+            /// Creates an ordered source path without inferring limits from input.
+            pub fn new_with_policy(
+                segments: Vec<PathSegment>,
+                policy: SourceOperationPolicy,
+            ) -> Result<Self, DiagnosticBuildError> {
+                let maximum = policy.maximum(MAX_PATH_SEGMENTS);
+                if segments.len() > maximum {
+                    return Err(DiagnosticBuildError::TooManyPathSegments { maximum });
+                }
+                for segment in &segments {
+                    if let Some(name) = segment.as_name() {
+                        validate_text(
+                            "path segment",
+                            name,
+                            policy.maximum(MAX_PATH_NAME_BYTES),
+                            false,
+                        )?;
+                    }
                 }
                 Ok(Self(segments))
             }
@@ -404,10 +480,33 @@ macro_rules! diagnostic_path {
 
             /// Appends a segment while preserving the bound.
             pub fn push(&mut self, segment: PathSegment) -> Result<(), DiagnosticBuildError> {
-                if self.0.len() == MAX_PATH_SEGMENTS {
-                    return Err(DiagnosticBuildError::TooManyPathSegments {
-                        maximum: MAX_PATH_SEGMENTS,
-                    });
+                self.push_with_policy(segment, SourceOperationPolicy::Bounded)
+            }
+
+            /// Appends an exact source segment under an explicit resource policy.
+            pub fn push_with_policy(
+                &mut self,
+                segment: PathSegment,
+                policy: SourceOperationPolicy,
+            ) -> Result<(), DiagnosticBuildError> {
+                let maximum = policy.maximum(MAX_PATH_SEGMENTS);
+                if self.0.len() >= maximum {
+                    return Err(DiagnosticBuildError::TooManyPathSegments { maximum });
+                }
+                if let Some(name) = segment.as_name() {
+                    validate_text(
+                        "path segment",
+                        name,
+                        policy.maximum(MAX_PATH_NAME_BYTES),
+                        false,
+                    )?;
+                }
+                if policy == SourceOperationPolicy::Bounded {
+                    for existing in &self.0 {
+                        if let Some(name) = existing.as_name() {
+                            validate_text("path segment", name, MAX_PATH_NAME_BYTES, false)?;
+                        }
+                    }
                 }
                 self.0.push(segment);
                 Ok(())
