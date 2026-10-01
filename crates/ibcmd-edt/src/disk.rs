@@ -104,7 +104,8 @@ impl Inventory {
                     .checked_add(byte_len)
                     .ok_or_else(|| EdtError::new("source byte accounting overflow"))?;
                 let inspect_path = target.unwrap_or(root).join(&relative);
-                let (kind, descriptor, uuid) = inspect(&relative, &inspect_path)?;
+                let (kind, descriptor, uuid) = inspect(&relative, &inspect_path)
+                    .map_err(|error| EdtError::new(format!("{relative}: {error}")))?;
                 if let Some(uuid) = uuid
                     && let Some(previous) = identities.insert(uuid, relative.clone())
                 {
@@ -364,6 +365,38 @@ mod tests {
         );
         binary_template_roundtrip(owner.path(), &original);
     }
+    #[test]
+    #[ignore = "hash-bound genuine TextDocument with XML encoding declaration; F lab only"]
+    fn genuine_text_xml_declaration_remains_opaque() {
+        let lab = PathBuf::from(std::env::var_os("IBCMD_EDT_LAB").expect("F lab"));
+        let evidence: serde_json::Value = serde_json::from_slice(
+            &fs::read(lab.join("uha-opaque-nonutf8-declarations-r1.json")).unwrap(),
+        )
+        .unwrap();
+        let witness = &evidence["first_by_inventory_directory_order"];
+        assert_eq!(witness["template_type"], "TextDocument");
+        let original_path = PathBuf::from(evidence["source"].as_str().unwrap())
+            .join(witness["path"].as_str().unwrap());
+        let original = fs::read(&original_path).unwrap();
+        assert_eq!(
+            format!("{:x}", Sha256::digest(&original)),
+            "986c0f1577250d3c8b8c82df56fbe4d39d2016acbbce98ead3a4e744d91004de"
+        );
+        assert_eq!(
+            format!(
+                "{:x}",
+                Sha256::digest(fs::read(witness["descriptor_path"].as_str().unwrap()).unwrap())
+            ),
+            "b4ebcb4d428251a11b369afd11a0312e86814f1d77b61ca0bd1871d29379da57"
+        );
+        let owner = tempfile::Builder::new()
+            .prefix("opaque-text-")
+            .tempdir_in(&lab)
+            .unwrap();
+        let body = original.strip_prefix(b"\xef\xbb\xbf").unwrap();
+        opaque_template_roundtrip(owner.path(), body, "TextDocument", "Template.txt");
+        assert_eq!(fs::read(original_path).unwrap(), original);
+    }
     fn binary_template_roundtrip(owner: &Path, original: &[u8]) {
         opaque_template_roundtrip(owner, original, "BinaryData", "Template.bin");
     }
@@ -486,6 +519,7 @@ mod tests {
             b"<?xml version='1.0'?><broken>".as_slice(),
             b"<?xml version='1.0'?><!DOCTYPE payload [<!ENTITY e 'literal'>]><payload>&e;</payload>",
             b"<?xml version='1.0'?><payload>\0\xff</payload>",
+            b"<?xml version='1.0' encoding='windows-1251'?><payload/>",
         ] {
             let owner = tempfile::tempdir().unwrap();
             binary_template_roundtrip(owner.path(), bytes);
@@ -543,7 +577,12 @@ mod tests {
             b"<?xml version='1.0'?><broken>",
         )
         .unwrap();
-        assert!(crate::read_directory_source(&source.root).is_err());
+        assert!(
+            crate::read_directory_source(&source.root)
+                .unwrap_err()
+                .to_string()
+                .contains("Configuration.xml:")
+        );
     }
     #[test]
     fn source_operation_opaque_deep_xml_is_fully_accounted_in_both_routes() {
@@ -594,7 +633,18 @@ mod tests {
             .unwrap();
         };
         phase("inventory", None);
-        let inventory = Inventory::scan(&root).unwrap();
+        let inventory = match Inventory::scan(&root) {
+            Ok(inventory) => inventory,
+            Err(error) => {
+                fs::write(&output, serde_json::to_vec_pretty(&serde_json::json!({
+                    "status": "FAIL", "phase": "inventory", "source": root,
+                    "elapsed_seconds": started.elapsed().as_secs_f64(), "error": error.to_string(),
+                    "canonical_model_attempted": false, "source_inventory_complete": false
+                })).unwrap()).unwrap();
+                phase("failed_inventory", None);
+                panic!("inventory failed: {error}");
+            }
+        };
         let inventory_seconds = started.elapsed().as_secs_f64();
         #[derive(serde::Serialize)]
         struct Row<'a> {
