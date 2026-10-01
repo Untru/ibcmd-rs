@@ -61,6 +61,8 @@ pub struct OutElement {
     pub text: Option<String>,
     /// Эмитить как самозакрывающийся (`<tag/>`), даже без текста/детей.
     pub self_closing: bool,
+    /// Private typed QName dialect facet; never rendered as XML.
+    pub(crate) source_type_qname_native: Option<bool>,
 }
 
 impl OutElement {
@@ -73,6 +75,7 @@ impl OutElement {
             children: Vec::new(),
             text: None,
             self_closing: false,
+            source_type_qname_native: None,
         }
     }
 

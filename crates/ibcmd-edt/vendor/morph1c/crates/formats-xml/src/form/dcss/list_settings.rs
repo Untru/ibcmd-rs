@@ -86,6 +86,7 @@ pub fn read_list_settings_dcss(bytes: &[u8]) -> Result<DcsListSettings, FormErro
     default_ns_to_dcsset(&mut root);
     let mut ls = read_designer_list_settings(&root)?;
     ls.envelope_without_pal = envelope_without_pal;
+    super::super::read::mark_edt_dcs_list(&mut ls);
     // §1.0 тотальность по всему дереву сайдкара.
     let leftover = root.unclaimed_count();
     if leftover != 0 {
@@ -118,5 +119,6 @@ pub fn write_list_settings_dcss(ls: &DcsListSettings) -> Vec<u8> {
     for c in inline.children {
         root.push(c);
     }
+    super::super::write::bind_dcs_type_qname_depth(&mut root, false);
     render(&dcss_envelope(), &root)
 }

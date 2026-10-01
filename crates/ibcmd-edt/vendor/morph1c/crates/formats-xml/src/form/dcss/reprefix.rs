@@ -320,6 +320,7 @@ pub(crate) fn reprefix(
             .chain(attrs)
             .collect(),
         children: Vec::new(),
+        source_type_qname_native: el.source_type_qname_native,
         text,
         self_closing: el.self_closing,
     };

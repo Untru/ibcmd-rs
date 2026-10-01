@@ -575,7 +575,7 @@ pub enum DcsRightValue {
     /// `v8:Type` с ИНЛАЙН `xmlns:d8p1="http://v8.1c.ru/8.2/data/types"`: текст — QName типа
     /// The inline namespace URI is fixed; its actual source alias is retained for
     /// exact regeneration and excluded from the semantic QName identity.
-    TypeQName(#[serde(serialize_with = "serialize_type_qname_semantic")] String),
+    TypeQName(#[serde(serialize_with = "serialize_type_qname_semantic")] DcsTypeQName),
     /// `v8:ValueListType` — ПУСТОЙ список значений: `<v8:valueType/>` (самозакрытый) +
     /// `<v8:lastId xsi:type="xs:decimal">last_id</v8:lastId>` (witness ERP FilterItemComparison
     /// InList ДиспетчированиеПроизводства.`Выполнение`; ценз 9/9 — все пусты, lastId=`-1`).
@@ -584,6 +584,31 @@ pub enum DcsRightValue {
         /// Значение `<v8:lastId xsi:type="xs:decimal">` (напр. `-1`).
         last_id: String,
     },
+}
+
+/// Typed QName plus a private lexical source dialect. The fixed namespace URI
+/// and local name determine semantics; the source alias is retained only within
+/// its dialect. No source flag is serialized into semantic fingerprints.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct DcsTypeQName {
+    pub qname: String,
+    #[serde(skip)]
+    pub native_source: bool,
+}
+
+impl From<String> for DcsTypeQName {
+    fn from(qname: String) -> Self {
+        Self {
+            qname,
+            native_source: true,
+        }
+    }
+}
+impl From<&str> for DcsTypeQName {
+    fn from(qname: &str) -> Self {
+        qname.to_owned().into()
+    }
 }
 
 /// Explicit schema parameter usage witnessed in independent UH native/EDT pairs.
@@ -596,10 +621,13 @@ pub enum DcsParameterUse {
 /// Only the witnessed DCS schema-parameter default: absence has false semantics.
 /// Presence remains in the private fields for exact native same-source output.
 fn serialize_type_qname_semantic<S: serde::Serializer>(
-    value: &str,
+    value: &DcsTypeQName,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    let local = value.split_once(':').map_or(value, |(_, local)| local);
+    let local = value
+        .qname
+        .split_once(':')
+        .map_or(value.qname.as_str(), |(_, local)| local);
     serializer.serialize_str(&format!("d8p1:{local}"))
 }
 

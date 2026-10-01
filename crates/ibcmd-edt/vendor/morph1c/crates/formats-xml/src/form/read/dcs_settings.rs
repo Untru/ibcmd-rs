@@ -695,7 +695,7 @@ pub(crate) fn read_dcs_right_value(right: &Element) -> Result<DcsRightValue, For
             xt.claimed.set(true);
             let (prefix, local) = claim_inline_type_prefix_local(right)?;
             let _ = text_leaf(right)?; // claim text and reject children
-            Ok(DcsRightValue::TypeQName(format!("{prefix}:{local}")))
+            Ok(DcsRightValue::TypeQName(format!("{prefix}:{local}").into()))
         }
         "v8:StandardBeginningDate" => {
             xt.claimed.set(true);
@@ -833,3 +833,43 @@ pub(crate) fn expect_only_dcsset_children(el: &Element, allowed: &[&str]) -> Res
     Ok(())
 }
 
+
+/// The shared native reader validates the QName. EDT sidecar entry points then
+/// record its actual source dialect, without changing any semantic values.
+pub(crate) fn mark_edt_dcs_items(items: &mut [DcsItem]) {
+    for item in items {
+        match item {
+            DcsItem::FilterComparison { right, .. } => {
+                for value in right {
+                    if let DcsRightValue::TypeQName(qname) = value {
+                        qname.native_source = false;
+                    }
+                }
+            }
+            DcsItem::ConditionalAppearance { filter, .. } => mark_edt_dcs_items(filter),
+            DcsItem::StructureGroup {
+                group_items,
+                nested,
+                ..
+            } => {
+                mark_edt_dcs_items(group_items);
+                mark_edt_dcs_items(nested);
+            }
+            DcsItem::FilterGroup { items, .. } => mark_edt_dcs_items(items),
+            _ => {}
+        }
+    }
+}
+pub(crate) fn mark_edt_dcs_list(settings: &mut DcsListSettings) {
+    for group in [
+        &mut settings.filter,
+        &mut settings.order,
+        &mut settings.conditional_appearance,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        mark_edt_dcs_items(&mut group.items);
+    }
+    mark_edt_dcs_items(&mut settings.structure_items);
+}

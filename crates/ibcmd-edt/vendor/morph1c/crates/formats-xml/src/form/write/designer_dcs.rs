@@ -806,8 +806,9 @@ pub(crate) fn designer_dcs_right(right: &DcsRightValue) -> OutElement {
         DcsRightValue::DesignTimeValue(v) => text_leaf(v, "dcscor:DesignTimeValue"),
         DcsRightValue::TypeQName(v) => {
             // ИНЛАЙН-ns ПЕРЕД xsi:type (byte-порядок witness Взаимодействия).
-            let prefix = v.split_once(':').map_or("d8p1", |(prefix, _)| prefix);
-            let mut el = OutElement::leaf("dcsset", "right", v.clone());
+            let prefix = v.qname.split_once(':').map_or("d8p1", |(prefix, _)| prefix);
+            let mut el = OutElement::leaf("dcsset", "right", v.qname.clone());
+            el.source_type_qname_native = Some(v.native_source);
             el.attrs.push((
                 format!("xmlns:{prefix}"),
                 "http://v8.1c.ru/8.2/data/types".to_string(),
@@ -871,4 +872,39 @@ pub(crate) fn designer_dcs_text_value_ns(prefix: &str, local: &str, v: &str, xt:
     } else {
         OutElement::leaf(prefix, local, v.to_string()).attr("xsi:type", xt)
     }
+}
+
+/// Bind only typed DCS right-value aliases produced by the shared writer.
+/// SDK aliases use the element's actual one-based depth in the final document.
+/// Native and EDT source aliases are retained unchanged within their dialect.
+pub(crate) fn bind_dcs_type_qname_depth(root: &mut OutElement, target_native: bool) {
+    fn visit(el: &mut OutElement, depth: usize, target_native: bool) {
+        if el
+            .source_type_qname_native
+            .is_some_and(|source| source != target_native)
+            && el.local == "right"
+            && matches!(el.prefix.as_str(), "" | "dcsset")
+            && el
+                .attrs
+                .iter()
+                .any(|(name, value)| name == "xsi:type" && value == "v8:Type")
+        {
+            if let Some((prefix, local)) = el.text.as_deref().and_then(|text| text.split_once(':'))
+            {
+                let declaration = format!("xmlns:{prefix}");
+                if let Some((name, _)) = el.attrs.iter_mut().find(|(name, uri)| {
+                    name == &declaration && uri == "http://v8.1c.ru/8.2/data/types"
+                }) {
+                    let target = format!("d{depth}p1");
+                    *name = format!("xmlns:{target}");
+                    el.text = Some(format!("{target}:{local}"));
+                    el.source_type_qname_native = Some(target_native);
+                }
+            }
+        }
+        for child in &mut el.children {
+            visit(child, depth + 1, target_native);
+        }
+    }
+    visit(root, 1, target_native);
 }

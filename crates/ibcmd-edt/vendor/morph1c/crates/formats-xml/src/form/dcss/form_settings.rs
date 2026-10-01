@@ -277,6 +277,7 @@ pub fn read_conditional_appearance_dcssca(
             unclaimed_labels(&root)
         )));
     }
+    super::super::read::mark_edt_dcs_items(&mut out);
     Ok((out, envelope_without_lf_pal))
 }
 
@@ -299,5 +300,6 @@ pub fn write_conditional_appearance_dcssca(items: &[DcsItem], without_lf_pal: bo
         dcsset_to_default_ns(&mut el);
         root.push(el);
     }
+    super::super::write::bind_dcs_type_qname_depth(&mut root, false);
     render(&dcss_envelope(), &root)
 }
