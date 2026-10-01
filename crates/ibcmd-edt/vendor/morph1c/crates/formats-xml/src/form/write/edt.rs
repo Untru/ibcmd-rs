@@ -7,6 +7,12 @@ use super::*;
 // ============================== EDT ==============================
 
 pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
+    let mut root = edt_root(body)?;
+    super::super::wire_order::apply(FormDialect::Edt, body, &mut root)?;
+    Ok(render(&edt_envelope(), &root))
+}
+
+pub(crate) fn edt_root(body: &FormBody) -> Result<OutElement, FormError> {
     let mut root = OutElement::branch("form", "Form").attr("xmlns:form", FORM_NS_URI);
 
     // 0) форм-заголовок `<title>` (если задан) — ПЕРВЫЙ ребёнок корня. Мультиязычный —
@@ -181,7 +187,7 @@ pub(crate) fn write_edt(body: &FormBody) -> Result<Vec<u8>, FormError> {
             .push(("xmlns:settings".to_string(), SETTINGS_NS_URI.to_string()));
     }
 
-    Ok(render(&edt_envelope(), &root))
+    Ok(root)
 }
 
 /// Собрать EDT панель командного интерфейса (`navigationPanel`/`commandBar`). Пустой список ⇒

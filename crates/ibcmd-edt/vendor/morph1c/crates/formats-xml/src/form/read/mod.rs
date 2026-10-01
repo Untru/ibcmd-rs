@@ -82,8 +82,8 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
     }
     let root = descriptor.root;
     validate_qname_bindings(&root, &std::collections::BTreeMap::new())?;
-    match dialect {
-        FormDialect::Edt => read_edt(root),
+    let mut body = match dialect {
+        FormDialect::Edt => read_edt(&root),
         FormDialect::Designer => {
             let mut presence = std::collections::BTreeMap::new();
             if root
@@ -92,12 +92,15 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
             {
                 collect_xml220_checkbox_presence(&root, &mut presence)?;
             }
-            let mut body = read_designer(root)?;
+            let mut body = read_designer(&root)?;
             body.designer_checkbox_auto_presence = presence;
             body.designer_path_spelling = true;
             Ok(body)
         }
-    }
+    }?;
+    // Both readers have already rejected every unclaimed node/attribute.
+    body.source_wire_order = Some(super::wire_order::capture(dialect, &root, &body)?);
+    Ok(body)
 }
 
 fn collect_xml220_checkbox_presence(

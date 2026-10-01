@@ -105,7 +105,7 @@ pub(crate) fn render_edt(
             OutElement::leaf("", tag, t.as_str().to_string())
         }
         (Codec::EnumMap(map), PropertyValue::Enum(t)) => {
-            if !map.iter().any(|(_, edt)| *edt == t.as_str()) {
+            if !map.iter().any(|(canon, _)| *canon == t.as_str()) {
                 return Err(FormError::Frame(format!(
                     "<{tag}>: unknown typed EDT enumeration {:?}",
                     t.as_str()

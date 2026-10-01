@@ -243,7 +243,7 @@ pub(crate) fn read_designer_mobile_command_bar(
 
 // ============================== Designer ==============================
 
-pub(crate) fn read_designer(root: Element) -> Result<FormBody, FormError> {
+pub(crate) fn read_designer(root: &Element) -> Result<FormBody, FormError> {
     if !root.prefix.is_empty() || root.local != "Form" {
         return Err(FormError::Envelope(format!(
             "unexpected root <{}>",

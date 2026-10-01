@@ -6,7 +6,7 @@ use super::*;
 
 // ============================== EDT ==============================
 
-pub(crate) fn read_edt(root: Element) -> Result<FormBody, FormError> {
+pub(crate) fn read_edt(root: &Element) -> Result<FormBody, FormError> {
     if root.prefix != "form" || root.local != "Form" {
         return Err(FormError::Envelope(format!(
             "unexpected root <{}:{}>",

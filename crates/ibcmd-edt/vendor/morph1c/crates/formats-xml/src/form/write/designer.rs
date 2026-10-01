@@ -7,6 +7,12 @@ use super::*;
 // ============================== Designer ==============================
 
 pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
+    let mut root = designer_root(body)?;
+    super::super::wire_order::apply(FormDialect::Designer, body, &mut root)?;
+    Ok(render(&designer_envelope(), &root))
+}
+
+pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // Версия ПИСАТЕЛЯ (FORMATS.md §1: формат выхода — параметр): конверт (`ns-блок` +
     // `version=`) эмитится ТАРГЕТ-версией из амбьентного round-trip таргета
     // (`with_roundtrip_target`; вне scope — SSL 2.21, прежнее поведение). Не-witnessed
@@ -260,7 +266,9 @@ pub(crate) fn write_designer(body: &FormBody) -> Result<Vec<u8>, FormError> {
     if target == morph1c_core::version::FormatVersion::new(2, 20) {
         project_xml220_checkbox_type(&mut root, &body.designer_checkbox_auto_presence);
     }
-    Ok(render(&designer_envelope(), &root))
+    super::super::wire_order::bind_column_type_depth(&mut root);
+    super::designer_dcs::bind_dcs_type_qname_depth(&mut root, true);
+    Ok(root)
 }
 
 /// Собрать Designer панель командного интерфейса (`NavigationPanel`/`CommandBar`) — по `<Item>`

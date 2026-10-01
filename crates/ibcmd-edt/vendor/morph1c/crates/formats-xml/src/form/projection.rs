@@ -547,6 +547,10 @@ fn table(dialect: FormDialect) -> &'static [AttrProj] {
     }
 }
 
+pub(super) fn lexical_property_tags(dialect: FormDialect) -> Vec<&'static str> {
+    table(dialect).iter().map(|field| field.tag).collect()
+}
+
 fn find(dialect: FormDialect, id: FieldId) -> Option<&'static AttrProj> {
     table(dialect).iter().find(|a| a.id == id)
 }

@@ -60,6 +60,10 @@ pub struct FormCiItem {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormBody {
+    /// Closed property-slot source ordering only, never source values or semantic arrays.
+    /// The adapter populates this facet after the entire typed descriptor is claimed.
+    #[serde(skip)]
+    pub source_wire_order: Option<FormWireOrder>,
     /// Native XML 2.20 lexical presence of Auto CheckBoxType. This source-only
     /// spelling facet does not change the independently typed CheckBoxType value.
     /// It is excluded from semantic serialization; edited nondefault values win.
@@ -395,10 +399,20 @@ impl FormCommand {
     }
 }
 
+/// Lexical source ordering of independently decoded, singleton known property slots.
+/// Keys bind the control-kind/id ancestry. Values contain only slot names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FormWireOrder {
+    pub designer: bool,
+    pub version: Option<String>,
+    pub scopes: std::collections::BTreeMap<String, Vec<String>>,
+}
+
 impl FormBody {
     /// Создать пустое тело формы.
     pub fn new() -> Self {
         FormBody {
+            source_wire_order: None,
             designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
             common_picture_transparency: std::collections::BTreeMap::new(),
             designer_path_spelling: false,
