@@ -264,6 +264,79 @@ pub(crate) fn classify(p: &str) -> SourceKind {
         SourceKind::Other
     }
 }
+// Complete grammar is already checked by inspect_slice. Identity uses only
+// root/direct-child attributes, so it never needs a body DOM for large Rights
+// or other source sidecars classified alongside metadata descriptors.
+pub(crate) fn derive_uuid_from_bytes(
+    path: &SourcePath,
+    bytes: &[u8],
+) -> Result<Option<ObjectUuid>, SourceTreeError> {
+    use quick_xml::{Reader, events::Event};
+    let mut reader = Reader::from_reader(bytes);
+    let mut depth = 0usize;
+    let mut count = 0usize;
+    let mut candidate = None;
+    loop {
+        let event = reader.read_event().map_err(|e| SourceTreeError::Xml {
+            path: path.clone(),
+            message: e.to_string(),
+        })?;
+        match event {
+            Event::Start(ref e) | Event::Empty(ref e) => {
+                if depth <= 1 {
+                    for a in e.attributes() {
+                        let a = a.map_err(|e| SourceTreeError::Xml {
+                            path: path.clone(),
+                            message: e.to_string(),
+                        })?;
+                        let key = a.key.as_ref();
+                        if key == b"xmlns" || key.starts_with(b"xmlns:") {
+                            continue;
+                        }
+                        if key
+                            .rsplit(|b| *b == b':')
+                            .next()
+                            .unwrap_or(key)
+                            .eq_ignore_ascii_case(b"uuid")
+                        {
+                            let value =
+                                a.decode_and_unescape_value(reader.decoder()).map_err(|e| {
+                                    SourceTreeError::Xml {
+                                        path: path.clone(),
+                                        message: e.to_string(),
+                                    }
+                                })?;
+                            let uuid = ObjectUuid::parse(&value)
+                                .map_err(|_| SourceTreeError::InvalidUuid { path: path.clone() })?;
+                            count += 1;
+                            candidate = Some(uuid);
+                        }
+                    }
+                    if depth == 0 && count > 0 {
+                        return if count == 1 {
+                            Ok(candidate)
+                        } else {
+                            Err(SourceTreeError::AmbiguousUuid { path: path.clone() })
+                        };
+                    }
+                }
+                if matches!(event, Event::Start(_)) {
+                    depth += 1;
+                }
+            }
+            Event::End(_) => depth -= 1,
+            Event::Eof => break,
+            _ => {}
+        }
+    }
+    if count > 1 {
+        Err(SourceTreeError::AmbiguousUuid { path: path.clone() })
+    } else {
+        Ok(candidate)
+    }
+}
+
+#[cfg(test)]
 pub(crate) fn derive_uuid(
     path: &SourcePath,
     d: &crate::XmlDocument,

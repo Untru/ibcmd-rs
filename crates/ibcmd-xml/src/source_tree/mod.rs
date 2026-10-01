@@ -140,12 +140,7 @@ impl SourceEntry {
             kind,
             SourceKind::ConfigurationRoot | SourceKind::MetadataXml
         ) {
-            let document =
-                crate::XmlReader::from_slice(&bytes).map_err(|e| SourceTreeError::Xml {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })?;
-            reader::derive_uuid(&path, &document)?
+            reader::derive_uuid_from_bytes(&path, &bytes)?
         } else {
             None
         };
@@ -414,6 +409,28 @@ mod tests {
             "a/.vscode/x",
         ] {
             assert!(SourcePath::new(path).is_err(), "{path}");
+        }
+    }
+
+    #[test]
+    fn streaming_identity_keeps_shallow_uuid_precedence() {
+        let path = SourcePath::new("Roles/R/Ext/Rights.xml").unwrap();
+        let u = "12345678-90ab-cdef-0123-456789abcdef";
+        for source in [
+            "<root><child/></root>".to_owned(),
+            format!("<root uuid='{u}'><child uuid='invalid'/></root>"),
+            format!("<root><child uuid='{u}'/></root>"),
+            format!("<root><child><nested uuid='{u}'/></child></root>"),
+            format!("<root xmlns:uuid='{u}'/>"),
+            format!("<root xmlns:p='urn:p' uuid='{u}' p:UUID='{u}'/>"),
+            format!("<root><child uuid='{u}'/><other uuid='{u}'/></root>"),
+            format!("<root><child uuid='{u}'/><other uuid='{u}'/><bad uuid='invalid'/></root>"),
+            format!("<root uuid='invalid'><child uuid='{u}'/></root>"),
+        ] {
+            let doc = crate::XmlReader::from_slice(source.as_bytes()).unwrap();
+            let old = reader::derive_uuid(&path, &doc);
+            let streaming = reader::derive_uuid_from_bytes(&path, source.as_bytes());
+            assert_eq!(format!("{old:?}"), format!("{streaming:?}"), "{source}");
         }
     }
 
