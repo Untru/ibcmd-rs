@@ -62,6 +62,7 @@ mod predefined_read;
 mod preflight;
 mod rights_read;
 mod schedule_read;
+mod sdk_body_projection;
 mod sidecar_version;
 mod standalone_content_read;
 mod style_read;

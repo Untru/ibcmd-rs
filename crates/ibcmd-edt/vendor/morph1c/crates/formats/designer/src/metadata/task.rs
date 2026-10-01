@@ -123,6 +123,12 @@ impl LocusMap for DesignerTask {
         task_bindings()
     }
 
+    fn child_emit_order(&self) -> Option<&'static [&'static str]> {
+        // Installed SDK BSP witness: Forms precede AddressingAttributes.
+        // Other collections retain their relative specification order.
+        Some(&["Attribute", "TabularSection", "Form", "AddressingAttribute", "Template", "Command"])
+    }
+
     fn emit_empty_child_container(&self) -> bool {
         // Все Designer-Task несут `<ChildObjects>`.
         true

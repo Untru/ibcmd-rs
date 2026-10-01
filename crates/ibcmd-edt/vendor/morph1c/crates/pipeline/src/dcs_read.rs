@@ -13,6 +13,10 @@
 //! sibling file; this pass reads it into `child.templates[0].body` so `--to cf` can emit the
 //! `<tmpl-uuid>.0` body ([`formats_cf::assemble_cf`]).
 //!
+//! EDT read/write also projects the resolved, inline current-config TypeSet
+//! AnyRef spelling through the existing AnyRef/AnyIBRef type alias. Native
+//! bodies remain verbatim; query text is never interpreted as a type QName.
+//!
 //! # Scope (EDT-authoritative)
 //! The EDT `.mdo` carries the template stub INLINE (`<templates uuid=… templateType=…>`), so the
 //! Report child MetadataObject read from it already carries the uuid + `templateType`. This pass
@@ -105,7 +109,7 @@ pub fn attach_dcs_bodies(
                 })?;
                 let stripped = bytes.strip_prefix(BOM).unwrap_or(&bytes);
                 let body = match format {
-                    Format::Edt => transcode_text_node_newlines(stripped, false),
+                    Format::Edt => crate::sdk_body_projection::dcs_alias(&crate::sdk_body_projection::text_newlines(stripped, false)?, false)?,
                     _ => stripped.to_vec(),
                 };
                 if !obj.templates.is_empty() {
@@ -157,7 +161,7 @@ pub fn attach_dcs_bodies(
         // normalization (module docs) → undo it; Designer bodies are already canonical.
         let stripped = bytes.strip_prefix(BOM).unwrap_or(&bytes);
         let body = match format {
-            Format::Edt => transcode_text_node_newlines(stripped, false),
+            Format::Edt => crate::sdk_body_projection::dcs_alias(&crate::sdk_body_projection::text_newlines(stripped, false)?, false)?,
             _ => stripped.to_vec(),
         };
         // §1.0: the descriptor read must not populate the child's templates — only this pass does.
@@ -265,7 +269,7 @@ pub fn write_dcs_bodies(
                     v.extend_from_slice(body);
                     v
                 } else {
-                    transcode_text_node_newlines(body, true)
+                    crate::sdk_body_projection::text_newlines(&crate::sdk_body_projection::dcs_alias(body, true)?, true)?
                 };
                 crate::form_write::write_file(&path, &bytes)?;
             }
@@ -295,7 +299,7 @@ pub fn write_dcs_bodies(
             v.extend_from_slice(body);
             v
         } else {
-            transcode_text_node_newlines(body, true)
+            crate::sdk_body_projection::text_newlines(&crate::sdk_body_projection::dcs_alias(body, true)?, true)?
         };
         crate::form_write::write_file(&path, &bytes)?;
     }

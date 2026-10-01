@@ -459,7 +459,16 @@ pub fn write_children_named<M: LocusMap + ?Sized>(
     name_prefix: &str,
 ) -> Result<Vec<OutElement>, ChildError> {
     let mut out = Vec::new();
-    for slot in parent_spec.children() {
+    let mut slots = parent_spec.children().iter().collect::<Vec<_>>();
+    if let Some(order) = parent_map.child_emit_order() {
+        if order.len() != slots.len()
+            || slots.iter().any(|slot| order.iter().filter(|name| **name == slot.collection).count() != 1)
+        {
+            return Err(ChildError::Frame(format!("{}: incomplete or duplicate physical child order", parent_spec.entity)));
+        }
+        slots.sort_by_key(|slot| order.iter().position(|name| *name == slot.collection).unwrap());
+    }
+    for slot in slots {
         let loc = parent_map
             .child_collection(slot.collection)
             .ok_or_else(|| {

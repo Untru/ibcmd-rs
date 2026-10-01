@@ -94,8 +94,13 @@ pub fn attach_mxl_bodies(
         path: path.display().to_string(),
         reason: e.to_string(),
     })?;
-    // Canonical body = BOM-stripped bytes (EDT has none, Designer has one → equal after strip).
-    let body = bytes.strip_prefix(BOM).unwrap_or(&bytes).to_vec();
+    // Preserve native-source bytes; EDT materializes localized text EOL as CRLF,
+    // while the SDK's native export uses LF inside v8:content. Picture/base64
+    // and structural text stay untouched by this scoped projection.
+    let stripped = bytes.strip_prefix(BOM).unwrap_or(&bytes);
+    let body = if format == Format::Edt {
+        crate::sdk_body_projection::mxl_newlines(stripped, false)?
+    } else { stripped.to_vec() };
     // §1.0: never silently overwrite an already-attached body (the descriptor read + the
     // TextDocument pass must not populate `templates` for a SpreadsheetDocument template).
     if !obj.templates.is_empty() {
@@ -151,7 +156,10 @@ fn attach_child_mxl_bodies(
             path: path.display().to_string(),
             reason: e.to_string(),
         })?;
-        let body = bytes.strip_prefix(BOM).unwrap_or(&bytes).to_vec();
+        let stripped = bytes.strip_prefix(BOM).unwrap_or(&bytes);
+        let body = if format == Format::Edt {
+            crate::sdk_body_projection::mxl_newlines(stripped, false)?
+        } else { stripped.to_vec() };
         // §1.0: only this pass populates a SpreadsheetDocument child's templates.
         if !child.templates.is_empty() {
             return Err(ConvertError::Read {
@@ -234,7 +242,8 @@ fn write_mxl_body(format: Format, path: &Path, body: &[u8]) -> Result<(), Conver
             b.extend_from_slice(body);
             b
         }
-        Format::Edt | Format::Cf => body.to_vec(),
+        Format::Edt => crate::sdk_body_projection::mxl_newlines(body, true)?,
+        Format::Cf => body.to_vec(),
     };
     crate::form_write::write_file(path, &bytes)
 }

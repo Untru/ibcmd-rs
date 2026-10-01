@@ -42,6 +42,13 @@ pub trait LocusMap {
         &[]
     }
 
+    /// Physical collection order for this format only. Canonical child order
+    /// remains the entity specification's order; items within a collection keep
+    /// their source order. A supplied order must list every collection once.
+    fn child_emit_order(&self) -> Option<&'static [&'static str]> {
+        None
+    }
+
     /// ДОПОЛНИТЕЛЬНЫЕ объявления ns на корне дескриптора (`(имя_атрибута, URI)`), сверх
     /// базового envelope формата — ПЕР-ВИД envelope-константа. Напр. EDT `Enum` несёт
     /// `xmlns:xsi`+`xmlns:core` (их требует const-блок `standardAttributes` с
