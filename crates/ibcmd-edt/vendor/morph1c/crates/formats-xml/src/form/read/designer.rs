@@ -513,15 +513,15 @@ pub(crate) fn derive_root_ext_info_kind(attrs: &[FormDataAttribute]) -> Option<S
         "TaskObject" => "form:TaskFormExtInfo",
         // Опечатка платформы (`Proces`, не `Process`) — витнессирована в EDT-корпусе как есть.
         "BusinessProcessObject" => "form:BusinessProcesFormExtInfo",
-        // ChartOfAccounts / ChartOfCalculationTypes ОБЪЕКТНЫЕ формы (ERP-волна). Их корневой extInfo
-        // — ТОЛЬКО объект-подобный триплет {24,25,26}, как у Task/BusinessProcess: витнессирован
-        // байт-точно на erp.cf (ChartOfAccounts.Хозрасчетный/ФормаСчета `5c68eba9-….0` и
-        // ChartOfCalculationTypes.Начисления/ФормаВидаРасчета `872c2f96-….0` — оба несут
-        // ext-count=3, `3,24,{"B",0},25,{"U"},26,{"B",1}`, БЕЗ key-0 семейной ячейки Catalog-форм),
-        // подтверждён синтетик-оракулом (модульная форма → count=3, безмодульная → count=0).
-        "ChartOfAccountsObject" => "form:ChartOfAccountsObjectFormExtInfo",
-        "ChartOfCalculationTypesObject" => "form:ChartOfCalculationTypesObjectFormExtInfo",
-        "DataProcessorObject" => "form:ObjectFormExtInfo",
+        // Authentic BSP EDT uses ObjectFormExtInfo for the main attributes
+        // ExchangePlanObject (_ДемоАвтономнаяРабота/ФормаУзла), ChartOfAccountsObject
+        // (_ДемоОсновной/ФормаСчета), and ChartOfCalculationTypesObject
+        // (_ДемоОсновныеНачисления/ФормаЭлемента). CF storage group labels do not
+        // determine EDT's XML xsi:type.
+        "DataProcessorObject"
+        | "ExchangePlanObject"
+        | "ChartOfAccountsObject"
+        | "ChartOfCalculationTypesObject" => "form:ObjectFormExtInfo",
         "ReportObject" => "form:ReportFormExtInfo",
         "ConstantsSet" => "form:ConstantsFormExtInfo",
         "InformationRegisterRecordManager" => "form:InformationRegisterManagerFormExtInfo",
