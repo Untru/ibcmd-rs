@@ -26,7 +26,9 @@
     "Witnessed image drag and spreadsheet tooltip/drawing fields plus DCS explicit-empty appearance and scoped type aliases regenerate complete typed values; lexical facets never replace edited semantics",
     "Typed form wire-order facets retain only validated known slot names and same-dialect placement; arrays preserve semantic order, legal repeated groups may be interleaved, and edited or unknown fields never replay source values",
     "DCS typed right QName aliases retain same-dialect lexical spelling and bind opposite-dialect output to the actual physical XML depth, with URI/local-type semantics independently compared",
-    "Strict complete v2 mobile signature framing validates all four UUID/name groups, quoted key/digest values and the converted flag; model-bound reader carrier changes only typed empty top-level group counts and official-export-preferred sibling retains exact native bytes"
+    "Strict complete v2 mobile signature framing validates all four UUID/name groups, quoted key/digest values and the converted flag; model-bound reader carrier changes only typed empty top-level group counts and official-export-preferred sibling retains exact native bytes",
+    "Per-use picture semantics use a closed typed form resource keyed by declared form UUID, slot and current binding; pixel/ref/localized-text values enter semantic comparison and are rebuilt from current typed values",
+    "Installed SDK event-owner tables partition ordered handlers between Form and extInfo; native source ordering is replayed only when current ordered names and extension kind match, and edits emit current handlers using witnessed physical event GUIDs"
   ],
   "files": [
     {
@@ -59,7 +61,7 @@
     },
     {
       "path": "crates/core/src/ir/form/body.rs",
-      "sha256": "96451856ad3f9049e774342ec3ca4f9496ef3ca8937798a0b7fd344db02aabac"
+      "sha256": "c922edb52c8be9339d2ff170fa90cb74626fec79f2d6a46a86bcca83ddee4600"
     },
     {
       "path": "crates/core/src/ir/form/data_attributes.rs",
@@ -75,7 +77,7 @@
     },
     {
       "path": "crates/core/src/ir/form/event_order.rs",
-      "sha256": "4b1e739b5bfd4c3620e1cfd98130c214af32be684cb029230b6b1ffb2cf2adb6"
+      "sha256": "862b311738adf644d791c4d50eee7daa5e85ee8b731a18e99a02a025b812fdb3"
     },
     {
       "path": "crates/core/src/ir/form/items.rs",
@@ -83,7 +85,11 @@
     },
     {
       "path": "crates/core/src/ir/form/mod.rs",
-      "sha256": "122801ea462c9a8963616cccad21dada4f3b10ea3ba3059406730559b7bba444"
+      "sha256": "ec956b59f2b3c4cc4c05348bfc4e8df2216f94ae86a754874ec015d8248f3c9e"
+    },
+    {
+      "path": "crates/core/src/ir/form/picture_semantics.rs",
+      "sha256": "2ca618094e4a70af5887bc6c6d7dceb52394d1998ff75bcec741b79701051dfc"
     },
     {
       "path": "crates/core/src/ir/mod.rs",
@@ -1447,7 +1453,7 @@
     },
     {
       "path": "crates/formats-xml/Cargo.toml",
-      "sha256": "ba524ff39408c58281b0de7bebc299654172a93fb1ec3e42bdddeb151ced6542"
+      "sha256": "e5c09419f92b33f01790b3b3fb258aa842d94b6e98aabbc38215382bccdfeb0a"
     },
     {
       "path": "crates/formats-xml/src/characteristics.rs",
@@ -1582,6 +1588,10 @@
       "sha256": "42766a63c2f4436e982e52881eabb18d2c30ea6a49752d804e95b71481e0b1d7"
     },
     {
+      "path": "crates/formats-xml/src/form/event_owners.rs",
+      "sha256": "48e155c73f2f45cc7bf3681208bcd1edd4d0573e0f0ecfb48f6dcab2f3fb1d6d"
+    },
+    {
       "path": "crates/formats-xml/src/form/fields/common.rs",
       "sha256": "8fbefd2472e46e775b82c09195ff946ec9fca9b8e631ca916074238389174fb3"
     },
@@ -1615,7 +1625,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/mod.rs",
-      "sha256": "d5b63ac7070e5ea0a40bae8447c3b74c5f0606eb4eaa5a132796cb785042ceca"
+      "sha256": "907b32a5c7854a0c203958b7fa7359f92b087901dd623e0323d3996304874772"
     },
     {
       "path": "crates/formats-xml/src/form/mxlx.rs",
@@ -1626,8 +1636,12 @@
       "sha256": "838ac10fb0f92f096c7e2a30d754292a29e8adaef7fe66e2ee42e3d4ef49ed38"
     },
     {
+      "path": "crates/formats-xml/src/form/picture_semantics.rs",
+      "sha256": "638e1396591d359fe0862360cd7a73e2b0d26291ee5487b438e400de1a5f0dd9"
+    },
+    {
       "path": "crates/formats-xml/src/form/pictures.rs",
-      "sha256": "9f643d4d9be51945a5192ab3b89d81fd37d6bd034a006308b273d6a00bbe9aca"
+      "sha256": "5f6cbeff423cb46e1168803905b597fe61d0263d4338d2c69a9e37a11a1f4770"
     },
     {
       "path": "crates/formats-xml/src/form/projection.rs",
@@ -1643,7 +1657,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/designer.rs",
-      "sha256": "d8b7b2204d5edd1968b31ae9281be5e066331f356e4689a78fba899a87a3b8d1"
+      "sha256": "c81fba1739604a44f3baa168d9a172194c565f2b7aa9730c4a8c779ec86673c6"
     },
     {
       "path": "crates/formats-xml/src/form/read/designer_controls.rs",
@@ -1655,7 +1669,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/edt.rs",
-      "sha256": "2b00ab4966f79a1bfaf05b97c309fb6b30256b09241706a3e64e4e8020875f5a"
+      "sha256": "042e2575bba7c621395c6c7d33a87ce797c11f9d6b0181adfaa51c5026eb69db"
     },
     {
       "path": "crates/formats-xml/src/form/read/edt_controls.rs",
@@ -1731,7 +1745,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/designer.rs",
-      "sha256": "f6d7bf337ebf1662580dc82a326650830990754d3b768cd6fa0bd5fe9e29913f"
+      "sha256": "7814057a23b11ef9c82872189d25a2b6e369cc06d3b87d1e0fe658065eb2e044"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_controls.rs",
@@ -1743,7 +1757,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/edt.rs",
-      "sha256": "5bff65c63451a42ccf46d6288e82e3de7589465ac3cd1ab9a4caaf86522dc0c3"
+      "sha256": "8352d376856aac703a11e3de1ef79d7b94a19d34f6ebf3d604cbda04645bd21d"
     },
     {
       "path": "crates/formats-xml/src/form/write/edt_controls.rs",
@@ -2463,7 +2477,7 @@
     },
     {
       "path": "crates/pipeline/src/form_read.rs",
-      "sha256": "27c3e268eeec651631b2d28d6d5b377b64736670ebdb4a07ac2e17416a5055ea"
+      "sha256": "0448a819c69c69834418cb7e3c03bfece03d09946e011c1727a58d548a023263"
     },
     {
       "path": "crates/pipeline/src/form_ref_read.rs",
@@ -2471,7 +2485,7 @@
     },
     {
       "path": "crates/pipeline/src/form_write.rs",
-      "sha256": "c2c25ceb0758b77ba074b2c63613458881292e83e236341790e2c9ade2ba214d"
+      "sha256": "b7e07c84ecfcd5d990359e4e89f536a3cae5e214675c0534197e3f33fb12d2ef"
     },
     {
       "path": "crates/pipeline/src/fsio.rs",
@@ -2515,7 +2529,7 @@
     },
     {
       "path": "crates/pipeline/src/picture_read.rs",
-      "sha256": "4b9803a5d331c958b789042212361229f638d1cc289a558f630554d758bcdf75"
+      "sha256": "2792226fb85494a3f60aae1f202e2a14b1216c7fa4fea0984d0604019882e859"
     },
     {
       "path": "crates/pipeline/src/predefined_read.rs",
@@ -2602,5 +2616,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "cc099fa006dee35db4221b04099f90ea2f5308a1"
+  "local_source_snapshot": "57b64eaa63f428f25717cc493453b5616ad9bf30"
 }
