@@ -157,6 +157,7 @@ mod tests {
 
     fn sample_table() -> RightsTable {
         RightsTable {
+            source_layout: None,
             set_for_new_objects: false,
             set_for_attributes_by_default: true,
             independent_rights_of_child_objects: false,

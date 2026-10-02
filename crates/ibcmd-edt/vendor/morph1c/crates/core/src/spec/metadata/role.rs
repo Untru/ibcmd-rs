@@ -56,7 +56,12 @@ fn build_fields() -> Vec<FieldSpec> {
         )
         .normalized(Normalize::LocalizedSortByLang),
         // comment: Str, default "".
-        FieldSpec::with_default(F_COMMENT, "comment", ValueKind::Str, PropertyValue::Str(String::new())),
+        FieldSpec::with_default(
+            F_COMMENT,
+            "comment",
+            ValueKind::Str,
+            PropertyValue::Str(String::new()),
+        ),
     ]
 }
 
@@ -89,7 +94,7 @@ pub fn role() -> &'static EntitySpec {
 /// ограничений (порядок структурен — часть идентичности значения, byte-exact R сохраняет
 /// его). §1.0: любой объект/право/флаг/шаблон/элемент, не покрытый этой формой, —
 /// типизированная ошибка кодека (не best-effort).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RightsTable {
     /// `<setForNewObjects>` — устанавливать права для новых объектов.
     pub set_for_new_objects: bool,
@@ -102,7 +107,53 @@ pub struct RightsTable {
     /// Шаблоны ограничения доступа (`<restrictionTemplate>` — top-level, ПОСЛЕ объектов),
     /// в исходном порядке: `(имя, условие)`. Пусто у большинства ролей.
     pub restriction_templates: Vec<RestrictionTemplate>,
+    /// Source-only framing. It contains no names, fields, conditions or prior
+    /// payload bytes and does not participate in canonical serialization/equality.
+    #[serde(skip)]
+    pub source_layout: Option<RightsSourceLayout>,
 }
+
+/// Lexical layout of a successfully claimed Rights sidecar. A newline bit is
+/// true for CRLF and false for LF; condition order is restrictions then templates.
+#[derive(Debug, Clone)]
+pub struct RightsSourceLayout {
+    pub designer: bool,
+    pub bom: bool,
+    pub lf_markup: bool,
+    pub trailing_newline: bool,
+    /// SHA256 of ALL current semantic fields at read, excluding this facet.
+    pub canonical_sha256: [u8; 32],
+    pub condition_newlines: Vec<Vec<bool>>,
+}
+
+impl PartialEq for RightsTable {
+    fn eq(&self, other: &Self) -> bool {
+        // Exhaustive patterns make any future semantic field a compile error
+        // until its equality behavior is explicitly accounted for here.
+        let Self {
+            set_for_new_objects,
+            set_for_attributes_by_default,
+            independent_rights_of_child_objects,
+            objects,
+            restriction_templates,
+            source_layout: _,
+        } = self;
+        let Self {
+            set_for_new_objects: other_new,
+            set_for_attributes_by_default: other_attributes,
+            independent_rights_of_child_objects: other_children,
+            objects: other_objects,
+            restriction_templates: other_templates,
+            source_layout: _,
+        } = other;
+        set_for_new_objects == other_new
+            && set_for_attributes_by_default == other_attributes
+            && independent_rights_of_child_objects == other_children
+            && objects == other_objects
+            && restriction_templates == other_templates
+    }
+}
+impl Eq for RightsTable {}
 
 /// Права роли на ОДИН объект метаданных (`<object>`): полное имя `Kind.Name` + список
 /// прав в исходном порядке.

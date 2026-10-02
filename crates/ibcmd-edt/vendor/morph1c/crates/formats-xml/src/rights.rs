@@ -21,10 +21,11 @@
 //! в [`RightsTable`]; текст имён переносится ВЕРБАТИМ (в корпусе XML-эскейпов нет — любой
 //! `<`/`&` в тексте имени сорвал бы парс тега → ошибка, а не тихий best-effort).
 
-use std::sync::OnceLock;
+use sha2::{Digest, Sha256};
+use std::{borrow::Cow, sync::OnceLock};
 
 use morph1c_core::spec::metadata::role::{
-    RestrictionTemplate, Right, RightRestriction, RightsObject, RightsTable,
+    RestrictionTemplate, Right, RightRestriction, RightsObject, RightsSourceLayout, RightsTable,
 };
 use morph1c_core::version::{FormatVersion, SSL};
 
@@ -86,8 +87,9 @@ fn designer_rights_versions() -> &'static [FormatVersion] {
 
 /// Собрать полный открывающий тег Designer `<Rights …>` витнессированной версии `v`.
 fn designer_rights_open(v: FormatVersion) -> Vec<u8> {
-    let mut out =
-        Vec::with_capacity(DESIGNER_RIGHTS_OPEN_PREFIX.len() + DESIGNER_RIGHTS_OPEN_SUFFIX.len() + 8);
+    let mut out = Vec::with_capacity(
+        DESIGNER_RIGHTS_OPEN_PREFIX.len() + DESIGNER_RIGHTS_OPEN_SUFFIX.len() + 8,
+    );
     out.extend_from_slice(DESIGNER_RIGHTS_OPEN_PREFIX);
     out.extend_from_slice(v.to_string().as_bytes());
     out.extend_from_slice(DESIGNER_RIGHTS_OPEN_SUFFIX);
@@ -108,11 +110,14 @@ fn witnessed_rights_versions() -> String {
 /// прав ЛИБО не-witnessed версия (вызывающий решает, ошибка это или нет; [`read`] с
 /// `DesignerRights` в обоих случаях отказывает громко).
 pub fn detect_designer_rights_version(bytes: &[u8]) -> Option<FormatVersion> {
-    let rest = bytes
-        .strip_prefix(BOM)?
-        .strip_prefix(XML_DECL)?
+    let rest = bytes.strip_prefix(BOM).unwrap_or(bytes);
+    let lf_markup = rest.starts_with(structural_literal(XML_DECL, true).as_ref());
+    let declaration = structural_literal(XML_DECL, lf_markup);
+    let suffix = structural_literal(DESIGNER_RIGHTS_OPEN_SUFFIX, lf_markup);
+    let rest = rest
+        .strip_prefix(declaration.as_ref())?
         .strip_prefix(DESIGNER_RIGHTS_OPEN_PREFIX)?;
-    let end = find(rest, DESIGNER_RIGHTS_OPEN_SUFFIX)?;
+    let end = find(rest, suffix.as_ref())?;
     let vstr = std::str::from_utf8(&rest[..end]).ok()?;
     designer_rights_versions()
         .iter()
@@ -192,6 +197,94 @@ fn condition_from_canon(text: &str, fmt: SidecarFormat) -> String {
     }
 }
 
+/// Adapt only codec-authored XML literals, never text values or whole output.
+fn structural_literal(literal: &[u8], lf_markup: bool) -> Cow<'_, [u8]> {
+    if !lf_markup {
+        return Cow::Borrowed(literal);
+    }
+    let mut out = Vec::with_capacity(literal.len());
+    let mut index = 0;
+    while index < literal.len() {
+        if literal[index] == b'\r' && literal.get(index + 1) == Some(&b'\n') {
+            index += 1;
+        }
+        out.push(literal[index]);
+        index += 1;
+    }
+    Cow::Owned(out)
+}
+
+/// The source layout is skipped by serde. Hash the entire current semantic
+/// table through streaming serialization, without cloning any conditions.
+fn canonical_digest(table: &RightsTable) -> Result<[u8; 32], RightsError> {
+    struct HashWriter(Sha256);
+    impl std::io::Write for HashWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut writer = std::io::BufWriter::with_capacity(64 * 1024, HashWriter(Sha256::new()));
+    serde_json::to_writer(&mut writer, table)
+        .map_err(|error| RightsError(format!("canonical rights serialization: {error}")))?;
+    let writer = writer
+        .into_inner()
+        .map_err(|error| RightsError(format!("canonical rights serialization flush: {error}")))?;
+    Ok(writer.0.finalize().into())
+}
+
+fn newline_pattern(text: &str) -> Vec<bool> {
+    let bytes = text.as_bytes();
+    bytes
+        .iter()
+        .enumerate()
+        .filter_map(|(index, byte)| {
+            (*byte == b'\n').then(|| index > 0 && bytes[index - 1] == b'\r')
+        })
+        .collect()
+}
+
+fn conditions(table: &RightsTable) -> impl Iterator<Item = &str> {
+    table
+        .objects
+        .iter()
+        .flat_map(|object| object.rights.iter())
+        .flat_map(|right| right.restrictions.iter())
+        .map(|restriction| restriction.condition.as_str())
+        .chain(
+            table
+                .restriction_templates
+                .iter()
+                .map(|template| template.condition.as_str()),
+        )
+}
+
+fn restore_condition(text: &str, pattern: &[bool]) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut newline = 0;
+    for (index, piece) in text.split('\n').enumerate() {
+        if index != 0 {
+            if pattern[newline] {
+                out.push('\r');
+            }
+            out.push('\n');
+            newline += 1;
+        }
+        // A CR immediately before LF belongs to that newline. Standalone CR
+        // elsewhere, including the last piece, remains current text data.
+        let piece = if index < pattern.len() {
+            piece.strip_suffix('\r').unwrap_or(piece)
+        } else {
+            piece
+        };
+        out.push_str(piece);
+    }
+    out
+}
+
 // --- READ: байты спутника → RightsTable -----------------------------------------------
 
 /// Курсор строгого байтового спуска по телу спутника: потребляет ТОЧНЫЕ литералы, иначе
@@ -202,16 +295,27 @@ struct Cursor<'a> {
     data: &'a [u8],
     pos: usize,
     fmt: SidecarFormat,
+    lf_markup: bool,
+    condition_newlines: Vec<Vec<bool>>,
 }
 
 impl<'a> Cursor<'a> {
     fn new(data: &'a [u8], fmt: SidecarFormat) -> Self {
-        Cursor { data, pos: 0, fmt }
+        let rest = data.strip_prefix(BOM).unwrap_or(data);
+        let lf_markup = rest.starts_with(structural_literal(XML_DECL, true).as_ref());
+        Cursor {
+            data,
+            pos: 0,
+            fmt,
+            lf_markup,
+            condition_newlines: Vec::new(),
+        }
     }
 
     /// Потребить точный литерал `lit` или ошибка с контекстом.
     fn expect(&mut self, lit: &[u8], ctx: &str) -> Result<(), RightsError> {
-        if self.data[self.pos..].starts_with(lit) {
+        let lit = structural_literal(lit, self.lf_markup);
+        if self.data[self.pos..].starts_with(lit.as_ref()) {
             self.pos += lit.len();
             Ok(())
         } else {
@@ -219,7 +323,7 @@ impl<'a> Cursor<'a> {
             err(format!(
                 "at offset {}: expected {ctx} {:?}, found {:?}",
                 self.pos,
-                String::from_utf8_lossy(lit),
+                String::from_utf8_lossy(lit.as_ref()),
                 String::from_utf8_lossy(got)
             ))
         }
@@ -227,18 +331,19 @@ impl<'a> Cursor<'a> {
 
     /// Взгляд: начинается ли остаток с `lit` (без потребления).
     fn peek(&self, lit: &[u8]) -> bool {
-        self.data[self.pos..].starts_with(lit)
+        self.data[self.pos..].starts_with(structural_literal(lit, self.lf_markup).as_ref())
     }
 
     /// Прочитать текст до `close` (не включая), потребить `close`. Текст НЕ должен нести
     /// `<` (иначе это вложенный тег, а не лист-текст → ошибка §1.0). Возвращает текст.
     fn take_text_until(&mut self, close: &[u8], ctx: &str) -> Result<&'a str, RightsError> {
+        let close = structural_literal(close, self.lf_markup);
         let rest = &self.data[self.pos..];
-        let end = find(rest, close).ok_or_else(|| {
+        let end = find(rest, close.as_ref()).ok_or_else(|| {
             RightsError(format!(
                 "at offset {}: unterminated {ctx} (no {:?})",
                 self.pos,
-                String::from_utf8_lossy(close)
+                String::from_utf8_lossy(close.as_ref())
             ))
         })?;
         let text_bytes = &rest[..end];
@@ -252,6 +357,12 @@ impl<'a> Cursor<'a> {
             .map_err(|e| RightsError(format!("at offset {}: non-utf8 {ctx}: {e}", self.pos)))?;
         self.pos += end + close.len();
         Ok(text)
+    }
+
+    fn condition(&mut self, close: &[u8], ctx: &str) -> Result<String, RightsError> {
+        let text = self.take_text_until(close, ctx)?;
+        self.condition_newlines.push(newline_pattern(text));
+        Ok(condition_to_canon(text, self.fmt))
     }
 
     /// Остались ли ещё непрочитанные байты.
@@ -290,9 +401,10 @@ pub fn read(bytes: &[u8], fmt: SidecarFormat) -> Result<RightsTable, RightsError
     let mut c = Cursor::new(bytes, fmt);
 
     // --- envelope: BOM (по формату) + XML-декларация + открывающий <Rights …> ---
-    if fmt.has_bom() {
+    let bom = c.peek(BOM);
+    if fmt.has_bom() && bom {
         c.expect(BOM, "BOM")?;
-    } else if c.peek(BOM) {
+    } else if !fmt.has_bom() && bom {
         return err("EDT rights sidecar must not carry a BOM");
     }
     c.expect(XML_DECL, "XML declaration")?;
@@ -305,7 +417,10 @@ pub fn read(bytes: &[u8], fmt: SidecarFormat) -> Result<RightsTable, RightsError
             c.expect(DESIGNER_RIGHTS_OPEN_PREFIX, "<Rights> open tag")?;
             let vstr =
                 c.take_text_until(DESIGNER_RIGHTS_OPEN_SUFFIX, "<Rights> version attribute")?;
-            if !designer_rights_versions().iter().any(|v| v.to_string() == vstr) {
+            if !designer_rights_versions()
+                .iter()
+                .any(|v| v.to_string() == vstr)
+            {
                 return err(format!(
                     "unrecognized Designer <Rights> format version {vstr:?} \
                      (witnessed: {})",
@@ -338,8 +453,9 @@ pub fn read(bytes: &[u8], fmt: SidecarFormat) -> Result<RightsTable, RightsError
 
     // --- закрытие корня + трейлер по формату ---
     c.expect(RIGHTS_CLOSE, "</Rights>")?;
-    if fmt.has_trailing_crlf() {
-        c.expect(TRAILING_CRLF, "trailing CRLF")?;
+    let trailing_newline = c.peek(TRAILING_CRLF);
+    if fmt.has_trailing_crlf() || trailing_newline {
+        c.expect(TRAILING_CRLF, "trailing newline")?;
     }
     if !c.at_end() {
         return err(format!(
@@ -348,13 +464,23 @@ pub fn read(bytes: &[u8], fmt: SidecarFormat) -> Result<RightsTable, RightsError
         ));
     }
 
-    Ok(RightsTable {
+    let mut table = RightsTable {
         set_for_new_objects,
         set_for_attributes_by_default,
         independent_rights_of_child_objects,
         objects,
         restriction_templates,
-    })
+        source_layout: None,
+    };
+    table.source_layout = Some(RightsSourceLayout {
+        designer: fmt == SidecarFormat::DesignerRights,
+        bom,
+        lf_markup: c.lf_markup,
+        trailing_newline,
+        canonical_sha256: canonical_digest(&table)?,
+        condition_newlines: c.condition_newlines,
+    });
+    Ok(table)
 }
 
 /// Прочитать один флаг `\t<tag>bool</tag>\r\n`.
@@ -422,7 +548,7 @@ fn read_restriction(c: &mut Cursor) -> Result<RightRestriction, RightsError> {
     c.expect(b"\t\t\t\t<condition>", "<condition>")?;
     // Многострочный BSL/SQL (с &amp;/&gt;/&lt;; без литерального '<'). EOL — к КАНОНУ (CRLF):
     // Designer хранит внутренние переводы строк голым LF (см. `condition_to_canon`).
-    let condition = condition_to_canon(c.take_text_until(b"</condition>\r\n", "condition")?, c.fmt);
+    let condition = c.condition(b"</condition>\r\n", "condition")?;
     c.expect(
         b"\t\t\t</restrictionByCondition>\r\n",
         "</restrictionByCondition>",
@@ -438,15 +564,26 @@ fn read_restriction_template(c: &mut Cursor) -> Result<RestrictionTemplate, Righ
         .take_text_until(b"</name>\r\n", "template name")?
         .to_string();
     c.expect(b"\t\t<condition>", "<restrictionTemplate><condition>")?;
-    let condition = condition_to_canon(
-        c.take_text_until(b"</condition>\r\n", "template condition")?,
-        c.fmt,
-    );
+    let condition = c.condition(b"</condition>\r\n", "template condition")?;
     c.expect(b"\t</restrictionTemplate>\r\n", "</restrictionTemplate>")?;
     Ok(RestrictionTemplate { name, condition })
 }
 
 // --- WRITE: RightsTable → байты спутника (byte-exact) ---------------------------------
+
+struct RightsOutput {
+    bytes: Vec<u8>,
+    lf_markup: bool,
+}
+impl RightsOutput {
+    fn literal(&mut self, literal: &[u8]) {
+        self.bytes
+            .extend_from_slice(structural_literal(literal, self.lf_markup).as_ref());
+    }
+    fn value(&mut self, value: &[u8]) {
+        self.bytes.extend_from_slice(value);
+    }
+}
 
 /// Регенерировать байты спутника из [`RightsTable`] под envelope формата `fmt` (byte-exact
 /// с источником, если IR получен `read(…, fmt)` при том же таргете). НЕ эхо входа —
@@ -463,13 +600,37 @@ pub fn write(table: &RightsTable, fmt: SidecarFormat) -> Result<Vec<u8>, RightsE
             "rights::write called with non-Rights sidecar format {fmt:?}"
         ));
     }
-    let mut out = Vec::new();
-    if fmt.has_bom() {
-        out.extend_from_slice(BOM);
+    let source = table
+        .source_layout
+        .as_ref()
+        .filter(|layout| layout.designer == (fmt == SidecarFormat::DesignerRights));
+    let lf_markup = source.is_some_and(|layout| layout.lf_markup);
+    let bom = source.map_or(fmt.has_bom(), |layout| layout.bom);
+    let trailing_newline = source.map_or(fmt.has_trailing_crlf(), |layout| layout.trailing_newline);
+    let pattern_layout = source.filter(|layout| {
+        fmt == SidecarFormat::DesignerRights
+            && layout.condition_newlines.len() == conditions(table).count()
+            && conditions(table)
+                .zip(&layout.condition_newlines)
+                .all(|(text, pattern)| {
+                    text.bytes().filter(|byte| *byte == b'\n').count() == pattern.len()
+                })
+    });
+    let pattern_layout = match pattern_layout {
+        Some(layout) if layout.canonical_sha256 == canonical_digest(table)? => Some(layout),
+        _ => None,
+    };
+    let mut condition_index = 0;
+    let mut out = RightsOutput {
+        bytes: Vec::new(),
+        lf_markup,
+    };
+    if bom {
+        out.literal(BOM);
     }
-    out.extend_from_slice(XML_DECL);
+    out.literal(XML_DECL);
     match fmt {
-        SidecarFormat::EdtRights => out.extend_from_slice(EDT_RIGHTS_OPEN),
+        SidecarFormat::EdtRights => out.literal(EDT_RIGHTS_OPEN),
         SidecarFormat::DesignerRights => {
             let target = morph1c_core::version::current_roundtrip_target().unwrap_or(SSL);
             if !designer_rights_versions().contains(&target) {
@@ -479,7 +640,7 @@ pub fn write(table: &RightsTable, fmt: SidecarFormat) -> Result<Vec<u8>, RightsE
                     witnessed_rights_versions()
                 ));
             }
-            out.extend_from_slice(&designer_rights_open(target));
+            out.literal(&designer_rights_open(target));
         }
         // Guard `is_rights` выше делает XDTO-арм недостижимым.
         SidecarFormat::EdtXdto | SidecarFormat::DesignerXdto => {
@@ -500,49 +661,61 @@ pub fn write(table: &RightsTable, fmt: SidecarFormat) -> Result<Vec<u8>, RightsE
     );
 
     for obj in &table.objects {
-        out.extend_from_slice(b"\t<object>\r\n\t\t<name>");
-        out.extend_from_slice(obj.name.as_bytes());
-        out.extend_from_slice(b"</name>\r\n");
+        out.literal(b"\t<object>\r\n\t\t<name>");
+        out.value(obj.name.as_bytes());
+        out.literal(b"</name>\r\n");
         for right in &obj.rights {
-            out.extend_from_slice(b"\t\t<right>\r\n\t\t\t<name>");
-            out.extend_from_slice(right.name.as_bytes());
-            out.extend_from_slice(b"</name>\r\n\t\t\t<value>");
-            out.extend_from_slice(bool_str(right.value).as_bytes());
-            out.extend_from_slice(b"</value>\r\n");
+            out.literal(b"\t\t<right>\r\n\t\t\t<name>");
+            out.value(right.name.as_bytes());
+            out.literal(b"</name>\r\n\t\t\t<value>");
+            out.value(bool_str(right.value).as_bytes());
+            out.literal(b"</value>\r\n");
             for r in &right.restrictions {
-                out.extend_from_slice(b"\t\t\t<restrictionByCondition>\r\n");
+                out.literal(b"\t\t\t<restrictionByCondition>\r\n");
                 if let Some(field) = &r.field {
-                    out.extend_from_slice(b"\t\t\t\t<field>");
-                    out.extend_from_slice(field.as_bytes());
-                    out.extend_from_slice(b"</field>\r\n");
+                    out.literal(b"\t\t\t\t<field>");
+                    out.value(field.as_bytes());
+                    out.literal(b"</field>\r\n");
                 }
-                out.extend_from_slice(b"\t\t\t\t<condition>");
-                out.extend_from_slice(condition_from_canon(&r.condition, fmt).as_bytes());
-                out.extend_from_slice(b"</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
+                out.literal(b"\t\t\t\t<condition>");
+                let condition = pattern_layout.map_or_else(
+                    || condition_from_canon(&r.condition, fmt),
+                    |layout| {
+                        restore_condition(&r.condition, &layout.condition_newlines[condition_index])
+                    },
+                );
+                condition_index += 1;
+                out.value(condition.as_bytes());
+                out.literal(b"</condition>\r\n\t\t\t</restrictionByCondition>\r\n");
             }
-            out.extend_from_slice(b"\t\t</right>\r\n");
+            out.literal(b"\t\t</right>\r\n");
         }
-        out.extend_from_slice(b"\t</object>\r\n");
+        out.literal(b"\t</object>\r\n");
     }
 
     // <restrictionTemplate> — top-level, ПОСЛЕ всех объектов.
     for tpl in &table.restriction_templates {
-        out.extend_from_slice(b"\t<restrictionTemplate>\r\n\t\t<name>");
-        out.extend_from_slice(tpl.name.as_bytes());
-        out.extend_from_slice(b"</name>\r\n\t\t<condition>");
-        out.extend_from_slice(condition_from_canon(&tpl.condition, fmt).as_bytes());
-        out.extend_from_slice(b"</condition>\r\n\t</restrictionTemplate>\r\n");
+        out.literal(b"\t<restrictionTemplate>\r\n\t\t<name>");
+        out.value(tpl.name.as_bytes());
+        out.literal(b"</name>\r\n\t\t<condition>");
+        let condition = pattern_layout.map_or_else(
+            || condition_from_canon(&tpl.condition, fmt),
+            |layout| restore_condition(&tpl.condition, &layout.condition_newlines[condition_index]),
+        );
+        condition_index += 1;
+        out.value(condition.as_bytes());
+        out.literal(b"</condition>\r\n\t</restrictionTemplate>\r\n");
     }
 
-    out.extend_from_slice(RIGHTS_CLOSE);
-    if fmt.has_trailing_crlf() {
-        out.extend_from_slice(TRAILING_CRLF);
+    out.literal(RIGHTS_CLOSE);
+    if trailing_newline {
+        out.literal(TRAILING_CRLF);
     }
-    Ok(out)
+    Ok(out.bytes)
 }
 
-fn write_flag(out: &mut Vec<u8>, tag: &str, value: bool) {
-    out.extend_from_slice(format!("\t<{tag}>{}</{tag}>\r\n", bool_str(value)).as_bytes());
+fn write_flag(out: &mut RightsOutput, tag: &str, value: bool) {
+    out.literal(format!("\t<{tag}>{}</{tag}>\r\n", bool_str(value)).as_bytes());
 }
 
 fn bool_str(b: bool) -> &'static str {

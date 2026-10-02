@@ -88,6 +88,7 @@ fn explicit_noop_view_keeps_every_wire_field_and_wrong_type_body_exact() {
             independent_rights_of_child_objects: true,
             objects: vec![],
             restriction_templates: vec![],
+            source_layout: None,
         });
         obj.xdto_schema = Some(b"xdto".to_vec());
         obj.ws_definition = Some(WsDefinition {

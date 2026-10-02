@@ -282,10 +282,12 @@ fn preflight(lane: &Lane, fmt: SidecarFormat, path: &Path) -> Result<Row, String
                     if returned != table {
                         return Err("cross-dialect canonical mismatch".into());
                     }
-                    if write(&returned, fmt, version)? != original {
-                        return Err("cross-dialect return byte mismatch".into());
-                    }
-                    Ok(json!({"output_sha256":sha(&bytes),"length":bytes.len()}))
+                    let raw_return = write(&returned, fmt, version)?;
+                    // Source-only framing is not transported by the opposite XML dialect.
+                    // Record raw return honestly; public provenance is a separate product gate.
+                    Ok(json!({"output_sha256":sha(&bytes),"length":bytes.len(),
+                        "canonical_equal":true,"raw_return_byte_exact":raw_return==original,
+                        "raw_return_sha256":sha(&raw_return),"raw_return_length":raw_return.len()}))
                 })
             });
             check(
@@ -339,6 +341,7 @@ fn synthetic() -> RightsTable {
             }],
         }],
         restriction_templates: Vec::new(),
+        source_layout: None,
     }
 }
 #[test]
