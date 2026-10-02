@@ -571,6 +571,15 @@ pub struct CommandGroupFragment {
     pub commands: Vec<String>,
 }
 
+/// One ordered subsystem visibility record with complete per-role values.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SubsystemVisibility {
+    pub subsystem: String,
+    pub common_visible: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub role_values: Vec<RoleVisibility>,
+}
+
 /// Командный интерфейс подсистемы (`Subsystem`) — канонический IR текстового спутника
 /// `CommandInterface.cmi` (EDT) / `Ext/CommandInterface.xml` (Designer). Несёт до четырёх
 /// регионов в фиксированном порядке эмиссии: `commandsVisibility`, `commandsPlacement`,
@@ -578,6 +587,9 @@ pub struct CommandGroupFragment {
 /// `GroupsOrder` — см. `pipeline::cmi_read`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommandInterface {
+    /// Ordered subsystem visibility, independent of command visibility.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub subsystems_visibility: Vec<SubsystemVisibility>,
     /// Видимость команд в ИСХОДНОМ порядке (позиционно значимо: cf-тело `<uuid>.1`
     /// эмитит команды в этом порядке).
     pub commands: Vec<CommandVisibility>,

@@ -50,10 +50,11 @@
 
 use std::path::{Path, PathBuf};
 
-use formats_xml::registry::Format;
 use formats_xml::Element;
+use formats_xml::registry::Format;
 use morph1c_core::ir::{
     CommandGroupFragment, CommandInterface, CommandVisibility, MetadataObject, RoleVisibility,
+    SubsystemVisibility,
 };
 use morph1c_core::version::FormatVersion;
 
@@ -195,6 +196,7 @@ pub(crate) fn serialize_edt(ci: &CommandInterface) -> Vec<u8> {
         }
         s.push_str("  </commandsVisibility>\r\n");
     }
+    emit_subsystem_visibility_edt(&mut s, &ci.subsystems_visibility);
     // Regions in fixed emission order after visibility (RE: SSL Администрирование /
     // ОценкаПроизводительности + ERP census): commandsPlacement, commandsOrder,
     // subsystemsOrder — each present only when non-empty. `placementFragments`/
@@ -295,10 +297,16 @@ pub(crate) fn serialize_designer_with_placement(
         }
         s.push_str("\t</CommandsVisibility>\r\n");
     }
+    emit_subsystem_visibility_designer(&mut s, &ci.subsystems_visibility);
     // Regions after visibility (Designer per-command TRANSPOSED shape). CommandsPlacement carries
     // `<Placement>TEXT</Placement>` per command (Auto — подсистемы, Manual — конфиг-уровень);
     // CommandsOrder does not.
-    emit_designer_region(&mut s, "CommandsPlacement", Some(placement_text), &ci.placement);
+    emit_designer_region(
+        &mut s,
+        "CommandsPlacement",
+        Some(placement_text),
+        &ci.placement,
+    );
     emit_designer_region(&mut s, "CommandsOrder", None, &ci.order);
     // `SubsystemsOrder` — ПЕРЕД производным GroupsOrder (witnessed ERP: во всех 18 файлах, где
     // есть и CommandsOrder, и SubsystemsOrder, порядок именно такой).
@@ -421,6 +429,7 @@ pub(crate) fn parse_command_interface_with_placement(
 fn parse_edt(root: &Element) -> Result<CommandInterface, String> {
     let mut ci = CommandInterface {
         commands: Vec::new(),
+        subsystems_visibility: Vec::new(),
         placement: Vec::new(),
         order: Vec::new(),
         subsystems_order: Vec::new(),
@@ -435,6 +444,9 @@ fn parse_edt(root: &Element) -> Result<CommandInterface, String> {
         }
         match region.local.as_str() {
             "commandsVisibility" => ci.commands = parse_edt_visibility(region)?,
+            "subsystemsVisibility" => {
+                ci.subsystems_visibility = parse_subsystem_visibility(region, Format::Edt)?
+            }
             "commandsPlacement" => {
                 ci.placement = parse_edt_fragments(region, "placementFragments")?
             }
@@ -445,7 +457,7 @@ fn parse_edt(root: &Element) -> Result<CommandInterface, String> {
                     "CommandInterface carries unmodelled region <{other}> (only \
                      <commandsVisibility>/<commandsPlacement>/<commandsOrder>/<subsystemsOrder> \
                      are reproducible in the cf <uuid>.1 body, §1.0 — no silent skip)"
-                ))
+                ));
             }
         }
     }
@@ -499,6 +511,208 @@ fn parse_edt_visibility(region: &Element) -> Result<Vec<CommandVisibility>, Stri
         });
     }
     Ok(commands)
+}
+
+// Subsystem visibility is a typed ordered list; every source node and attribute
+// is consumed. It shares the existing visibility model, not command identity.
+fn visibility_node(
+    el: &Element,
+    name: &str,
+    prefix: &str,
+    attrs: &[&str],
+    leaf: bool,
+) -> Result<(), String> {
+    if el.local != name
+        || el.prefix != prefix
+        || el.attrs.len() != attrs.len()
+        || el.attrs.iter().any(|a| !attrs.contains(&a.name.as_str()))
+        || (leaf && !el.children.is_empty())
+        || (!leaf && !el.text.is_empty())
+    {
+        return Err(format!(
+            "subsystems visibility: unconsumed/ambiguous <{name}> shape"
+        ));
+    }
+    Ok(())
+}
+
+fn parse_subsystem_visibility(
+    region: &Element,
+    format: Format,
+) -> Result<Vec<SubsystemVisibility>, String> {
+    let mut out = Vec::new();
+    let (region_name, item_name) = match format {
+        Format::Edt => ("subsystemsVisibility", "visibilityFragments"),
+        Format::Designer => ("SubsystemsVisibility", "Subsystem"),
+        Format::Cf => return Err("cf has no subsystem visibility XML".into()),
+    };
+    visibility_node(region, region_name, "", &[], false)?;
+    for item in &region.children {
+        let (subsystem, common_visible, role_values) = match format {
+            Format::Edt => {
+                visibility_node(item, item_name, "", &[], false)?;
+                if item.children.len() != 2
+                    || item.children[0].local != "subsystem"
+                    || item.children[1].local != "visible"
+                {
+                    return Err(
+                        "subsystem visibility fragment requires subsystem followed by visible"
+                            .into(),
+                    );
+                }
+                let reference = &item.children[0];
+                visibility_node(reference, "subsystem", "", &[], true)?;
+                let visible = &item.children[1];
+                visibility_node(visible, "visible", "", &[], false)?;
+                let mut common = false;
+                let mut common_seen = false;
+                let mut roles = Vec::new();
+                for child in &visible.children {
+                    match child.local.as_str() {
+                        "common" if !common_seen && roles.is_empty() => {
+                            visibility_node(child, "common", "", &[], true)?;
+                            common = parse_bool(&child.text, "common")?;
+                            common_seen = true;
+                        }
+                        "for" => {
+                            visibility_node(child, "for", "", &[], false)?;
+                            if !matches!(child.children.len(), 1 | 2) {
+                                return Err("subsystem visibility role requires one role and optional value".into());
+                            }
+                            for field in &child.children {
+                                if !matches!(field.local.as_str(), "role" | "value") {
+                                    return Err("unknown subsystem role field".into());
+                                }
+                                visibility_node(field, &field.local, "", &[], true)?;
+                            }
+                            roles.push(parse_edt_for(child)?);
+                        }
+                        _ => {
+                            return Err(
+                                "unknown/duplicate/out-of-order subsystem visibility field".into()
+                            );
+                        }
+                    }
+                }
+                (reference.text.clone(), common, roles)
+            }
+            Format::Designer => {
+                visibility_node(item, item_name, "", &["name"], false)?;
+                if item.children.len() != 1 {
+                    return Err("Subsystem requires exactly one Visibility".into());
+                }
+                let visibility = &item.children[0];
+                visibility_node(visibility, "Visibility", "", &[], false)?;
+                let mut common = None;
+                let mut roles = Vec::new();
+                for field in &visibility.children {
+                    match field.local.as_str() {
+                        "Common" if common.is_none() && roles.is_empty() => {
+                            visibility_node(field, "Common", "xr", &[], true)?;
+                            common = Some(parse_bool(&field.text, "Common")?);
+                        }
+                        "Value" if common.is_some() => {
+                            visibility_node(field, "Value", "xr", &["name"], true)?;
+                            roles.push(RoleVisibility {
+                                role: field.attrs[0].value.clone(),
+                                visible: parse_bool(&field.text, "Value")?,
+                            });
+                        }
+                        _ => {
+                            return Err(
+                                "unknown/duplicate/out-of-order native subsystem visibility field"
+                                    .into(),
+                            );
+                        }
+                    }
+                }
+                (
+                    item.attrs[0].value.clone(),
+                    common.ok_or("subsystem Visibility lacks Common")?,
+                    roles,
+                )
+            }
+            Format::Cf => unreachable!(),
+        };
+        if !subsystem.starts_with("Subsystem.")
+            || subsystem.len() == "Subsystem.".len()
+            || role_values
+                .iter()
+                .any(|r| !r.role.starts_with("Role.") || r.role.len() == "Role.".len())
+        {
+            return Err(
+                "subsystem visibility requires complete Subsystem and Role references".into(),
+            );
+        }
+        out.push(SubsystemVisibility {
+            subsystem,
+            common_visible,
+            role_values,
+        });
+    }
+    Ok(out)
+}
+
+fn visibility_escape(text: &str) -> String {
+    text.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn emit_subsystem_visibility_edt(s: &mut String, rows: &[SubsystemVisibility]) {
+    if rows.is_empty() {
+        return;
+    }
+    s.push_str("  <subsystemsVisibility>\r\n");
+    for row in rows {
+        s.push_str("    <visibilityFragments>\r\n      <subsystem>");
+        s.push_str(&visibility_escape(&row.subsystem));
+        s.push_str("</subsystem>\r\n");
+        if !row.common_visible && row.role_values.is_empty() {
+            s.push_str("      <visible/>\r\n");
+        } else {
+            s.push_str("      <visible>\r\n");
+            if row.common_visible {
+                s.push_str("        <common>true</common>\r\n");
+            }
+            for role in &row.role_values {
+                s.push_str("        <for>\r\n");
+                if role.visible {
+                    s.push_str("          <value>true</value>\r\n");
+                }
+                s.push_str("          <role>");
+                s.push_str(&visibility_escape(&role.role));
+                s.push_str("</role>\r\n        </for>\r\n");
+            }
+            s.push_str("      </visible>\r\n");
+        }
+        s.push_str("    </visibilityFragments>\r\n");
+    }
+    s.push_str("  </subsystemsVisibility>\r\n");
+}
+
+fn emit_subsystem_visibility_designer(s: &mut String, rows: &[SubsystemVisibility]) {
+    if rows.is_empty() {
+        return;
+    }
+    s.push_str("\t<SubsystemsVisibility>\r\n");
+    for row in rows {
+        s.push_str("\t\t<Subsystem name=\"");
+        s.push_str(&visibility_escape(&row.subsystem));
+        s.push_str("\">\r\n\t\t\t<Visibility>\r\n\t\t\t\t<xr:Common>");
+        s.push_str(if row.common_visible { "true" } else { "false" });
+        s.push_str("</xr:Common>\r\n");
+        for role in &row.role_values {
+            s.push_str("\t\t\t\t<xr:Value name=\"");
+            s.push_str(&visibility_escape(&role.role));
+            s.push_str("\">");
+            s.push_str(if role.visible { "true" } else { "false" });
+            s.push_str("</xr:Value>\r\n");
+        }
+        s.push_str("\t\t\t</Visibility>\r\n\t\t</Subsystem>\r\n");
+    }
+    s.push_str("\t</SubsystemsVisibility>\r\n");
 }
 
 /// EDT grouped region (`commandsPlacement`/`commandsOrder`) → fragments. Each `frag_name`
@@ -571,7 +785,7 @@ fn parse_edt_visible(frag: &Element) -> Result<(bool, Vec<RoleVisibility>), Stri
                 return Err(format!(
                     "<visible> carries unmodelled child <{other}> (only <common>/<for> \
                      witnessed, §1.0)"
-                ))
+                ));
             }
         }
     }
@@ -637,6 +851,7 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
     crate::sidecar_version::parse_witnessed(&version.value, "CommandInterface")?;
     let mut ci = CommandInterface {
         commands: Vec::new(),
+        subsystems_visibility: Vec::new(),
         placement: Vec::new(),
         order: Vec::new(),
         subsystems_order: Vec::new(),
@@ -651,6 +866,9 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
         }
         match region.local.as_str() {
             "CommandsVisibility" => ci.commands = parse_designer_visibility(region)?,
+            "SubsystemsVisibility" => {
+                ci.subsystems_visibility = parse_subsystem_visibility(region, Format::Designer)?
+            }
             "CommandsPlacement" => {
                 ci.placement = parse_designer_fragments(region, Some(placement_text))?
             }
@@ -669,7 +887,7 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
                      <CommandsVisibility>/<CommandsPlacement>/<CommandsOrder>/<SubsystemsOrder>/\
                      <GroupsOrder> are reproducible in the cf <uuid>.1 body, §1.0 — no silent \
                      skip)"
-                ))
+                ));
             }
         }
     }
@@ -754,7 +972,7 @@ fn parse_designer_visibility(region: &Element) -> Result<Vec<CommandVisibility>,
                     return Err(format!(
                         "<Visibility> carries unmodelled child <{other}> (only <xr:Common>/\
                          <xr:Value> witnessed, §1.0)"
-                    ))
+                    ));
                 }
             }
         }
@@ -816,7 +1034,7 @@ fn parse_designer_fragments(
                     return Err(format!(
                         "{} <Command> carries unexpected <{other}> (§1.0)",
                         region.local
-                    ))
+                    ));
                 }
             }
         }
