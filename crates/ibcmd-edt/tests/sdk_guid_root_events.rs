@@ -79,20 +79,40 @@ fn empty_duplicate_and_known_wrong_owner_fail_closed() {
     ] {
         let mut value = body();
         value.events[1].name = name.into();
+        value.root_ext_info = match name {
+            "BeforeWrite" | "ValueChoice" => Some("form:CatalogFormExtInfo"),
+            "AfterComposeResult" => Some("form:ReportFormExtInfo"),
+            "BeforeStart" => Some("form:BusinessProcesFormExtInfo"),
+            "BeforeExecute" => Some("form:TaskFormExtInfo"),
+            _ => None,
+        }
+        .map(|kind| FormRootExtInfo {
+            kind: kind.into(),
+            events: vec![],
+            user_settings_group: None,
+        });
         for dialect in [FormDialect::Edt, FormDialect::Designer] {
             assert!(
                 with_roundtrip_target(FormatVersion::new(2, 20), || write_form(dialect, &value))
                     .is_err()
             );
-            let valid = write(&body(), dialect, 20);
+            let mut valid_body = body();
+            valid_body.root_ext_info = value.root_ext_info.clone();
+            let valid = write(&valid_body, dialect, 20);
             let bad = String::from_utf8(valid).unwrap().replace(GUID, name);
-            assert!(
-                with_source_version(Some(FormatVersion::new(2, 20)), || read_form(
-                    dialect,
-                    bad.as_bytes()
-                ))
-                .is_err()
-            );
+            let result = with_source_version(Some(FormatVersion::new(2, 20)), || {
+                read_form(dialect, bad.as_bytes())
+            });
+            if matches!(dialect, FormDialect::Designer) && !name.is_empty() {
+                // This native fixture has no main attribute declaring an
+                // attached extension. Its CURRENT owner is therefore the open
+                // form body, even though the source IR seeded an extension.
+                let current = result.unwrap();
+                assert!(current.root_ext_info.is_none());
+                assert!(current.events.iter().any(|event| event.name == name));
+            } else {
+                assert!(result.is_err());
+            }
         }
     }
     let mut duplicate = body();

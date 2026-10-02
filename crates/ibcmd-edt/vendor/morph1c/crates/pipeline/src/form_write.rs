@@ -156,6 +156,17 @@ pub fn write_form_bodies(
             )?;
         }
 
+        if format == Format::Designer {
+            if let Some(bytes) = formats_xml::form::write_event_semantics_resource(
+                &form.body, crate::form_read::declared_form_uuid(obj, &form.name)?,
+            ).map_err(|error| ConvertError::Write {
+                kind: kind.into(), object: form.name.clone(), reason: error.to_string(),
+            })? {
+                write_file(&body_path.parent().expect("form body has a parent")
+                    .join(formats_xml::form::EVENT_SEMANTICS_RESOURCE), &bytes)?;
+            }
+        }
+
         // EDT: the spreadsheet-document BODY of a form attribute lives in a SIDECAR
         // (`Attributes/<attr>/ExtInfo/SpreadsheetData.mxlx`; `Form.form` carries only the empty
         // marker), while Designer inlines it into `Ext/Form.xml` (handled by the codec above).

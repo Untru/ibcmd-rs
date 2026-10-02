@@ -8,6 +8,9 @@ pub(crate) fn read_handlers(h: &Element) -> Result<FormEvent, FormError> {
     let event = leaf_text(h, "event")?;
     let name = leaf_text(h, "name")?;
     expect_only_children(h, &["event", "name"])?;
+    if event.is_empty() || name.is_empty() {
+        return Err(FormError::Frame("event identity and handler must be nonempty".into()));
+    }
     Ok(FormEvent {
         name: event,
         handler: name,

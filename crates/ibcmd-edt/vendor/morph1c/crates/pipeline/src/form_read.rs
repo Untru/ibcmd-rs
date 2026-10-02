@@ -267,6 +267,21 @@ pub fn attach_form_body(
             }
         }
 
+        if format == Format::Designer {
+            let resource = body_path.parent().expect("form body has a parent")
+                .join(formats_xml::form::EVENT_SEMANTICS_RESOURCE);
+            if resource.exists() {
+                let bytes = read_regular_source(&resource).map_err(|error| ConvertError::Io {
+                    path: resource.display().to_string(), reason: error.to_string(),
+                })?;
+                formats_xml::form::apply_event_semantics_resource(
+                    &mut body, declared_form_uuid(obj, &name)?, &bytes,
+                ).map_err(|error| ConvertError::Read {
+                    kind: kind.into(), object: name.clone(), reason: error.to_string(),
+                })?;
+            }
+        }
+
         // EDT: the spreadsheet-document BODY of a form attribute is a SIDECAR
         // (`Attributes/<attr>/ExtInfo/SpreadsheetData.mxlx` beside `Form.form`), while `Form.form`
         // itself carries only the empty `form:SpreadsheetDocumentExtInfo` marker. Attach it into

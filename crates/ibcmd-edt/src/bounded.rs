@@ -205,11 +205,11 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                         if form_body
                             && native_form_namespace
                             && native_form_namespaces.iter().all(|&native| native)
-                            && names.as_slice() == ["Form", "Events"]
+                            && formats_xml::form::is_native_form_event_path(&names)
                             && local == "Event"
                             && a.key.as_ref() == b"name"
                         {
-                            // Root Event.name is an open typed symbolic reference,
+                            // Event.name is a typed symbolic reference in this known role,
                             // never a filename. Full XML inspection and the form
                             // codec's empty/duplicate/owner checks remain mandatory.
                             continue;
@@ -609,6 +609,74 @@ mod tests {
             )
             .is_err()
         );
+    }
+
+    #[test]
+    fn known_control_event_symbols_are_scalars_with_exact_native_ancestry() {
+        let ns = "http://v8.1c.ru/8.3/xcf/logform";
+        for owner in ["Table", "InputField", "UsualGroup", "LabelDecoration"] {
+            let xml = format!(
+                "<Form xmlns='{ns}'><ChildItems><UsualGroup name='Group' id='2'><ChildItems><{owner} name='Control' id='1'><Events><Event name='urn:future/../Событие'>Handler</Event></Events></{owner}></ChildItems></UsualGroup></ChildItems></Form>"
+            );
+            validate_xml("Ext/Form.xml", xml.as_bytes()).unwrap();
+            validate_xml_source_reader("Ext/Form.xml", std::io::Cursor::new(xml.as_bytes()))
+                .unwrap();
+            for bad in [
+                xml.replace("<Event name=", "<Event xmlns='urn:wrong' name="),
+                xml.replace("<Events>", "<Events xmlns='urn:wrong'>"),
+                xml.replace("ChildItems", "UnknownChildren"),
+                xml.replace(owner, "UnknownControl"),
+                xml.replace("name='Control'", "name='urn:future/../Control'"),
+                xml.replace("Handler", "&unknown;"),
+            ] {
+                assert!(validate_xml("Ext/Form.xml", bad.as_bytes()).is_err());
+                assert!(
+                    validate_xml_source_reader(
+                        "Ext/Form.xml",
+                        std::io::Cursor::new(bad.as_bytes())
+                    )
+                    .is_err()
+                );
+            }
+        }
+        for inside in [
+            "<ChildItems><Table name='T' id='2'><SearchStringAddition name='A' id='3'>EVENTS</SearchStringAddition></Table></ChildItems>",
+            "<ChildItems><Table name='T' id='2'><ViewStatusAddition name='A' id='3'>EVENTS</ViewStatusAddition></Table></ChildItems>",
+            "<ChildItems><PDFDocumentField name='P' id='2'><SearchControlAddition name='A' id='3'>EVENTS</SearchControlAddition></PDFDocumentField></ChildItems>",
+            "<ChildItems><SearchStringAddition name='A' id='3'>EVENTS</SearchStringAddition></ChildItems>",
+            "<ChildItems><Table name='T' id='2'><ContextMenu name='M' id='3'><ChildItems><InputField name='I' id='4'>EVENTS</InputField></ChildItems></ContextMenu></Table></ChildItems>",
+            "<AutoCommandBar name='A' id='2'><ChildItems><InputField name='I' id='4'>EVENTS</InputField></ChildItems></AutoCommandBar>",
+            "<ChildItems><GanttChartField name='G' id='2'><Table name='T' id='3'>EVENTS</Table></GanttChartField></ChildItems>",
+            "<ChildItems><Button name='B' id='2'><ExtendedTooltip name='E' id='3'>EVENTS</ExtendedTooltip></Button></ChildItems>",
+        ] {
+            let content = inside.replace(
+                "EVENTS",
+                "<Events><Event name='urn:future/../Событие'>Handler</Event></Events>",
+            );
+            let xml = format!("<Form xmlns='{ns}'>{content}</Form>");
+            validate_xml("Ext/Form.xml", xml.as_bytes()).unwrap();
+            validate_xml_source_reader("Ext/Form.xml", std::io::Cursor::new(xml.as_bytes()))
+                .unwrap();
+            for bad in [
+                xml.replace("<Event name=", "<Event xmlns='urn:wrong' name="),
+                xml.replace("<Events>", "<Events xmlns='urn:wrong'>"),
+                xml.replace("<Events>", "<Unknown><Events>")
+                    .replace("</Events>", "</Events></Unknown>"),
+            ] {
+                assert!(validate_xml("Ext/Form.xml", bad.as_bytes()).is_err());
+                assert!(
+                    validate_xml_source_reader(
+                        "Ext/Form.xml",
+                        std::io::Cursor::new(bad.as_bytes())
+                    )
+                    .is_err()
+                );
+            }
+        }
+        let bad = format!(
+            "<Form xmlns='{ns}'><ChildItems><Button name='Button' id='1'><Events><Event name='urn:future/../Событие'>Handler</Event></Events></Button></ChildItems></Form>"
+        );
+        assert!(validate_xml("Ext/Form.xml", bad.as_bytes()).is_err());
     }
     use super::*;
     #[test]

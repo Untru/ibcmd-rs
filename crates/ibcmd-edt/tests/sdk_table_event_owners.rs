@@ -135,10 +135,7 @@ fn wrong_owner_duplicate_unknown_and_unknown_ext_kind_fail_closed() {
         assert!(read_form(FormDialect::Edt, bytes.replace(from, to).as_bytes()).is_err());
     }
     let native = String::from_utf8(write_form(FormDialect::Designer, &body).unwrap()).unwrap();
-    for (from, to) in [
-        ("OnGetDataAtServer", "OnChange"),
-        ("BeforeRowChange", "UnknownEvent"),
-    ] {
+    for (from, to) in [("OnGetDataAtServer", "OnChange"), ("BeforeRowChange", "")] {
         assert!(read_form(FormDialect::Designer, native.replace(from, to).as_bytes()).is_err());
     }
 }

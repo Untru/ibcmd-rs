@@ -19,7 +19,13 @@ use std::sync::OnceLock;
 use crate::emit::Envelope;
 
 mod availability;
+mod event_catalog;
+mod event_semantics;
+mod strict_resource;
 mod event_owners;
+#[doc(hidden)]
+pub use event_owners::is_native_form_event_path;
+pub use event_semantics::{EVENT_SEMANTICS_RESOURCE, apply_event_semantics_resource, write_event_semantics_resource, same_event_semantics_resource, event_semantics_resource_count};
 mod chart;
 mod dcss;
 mod fields;

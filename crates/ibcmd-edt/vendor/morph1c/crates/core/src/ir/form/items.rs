@@ -1,5 +1,42 @@
 use super::*;
 
+fn deserialize_unique_event_owners<'de, D: serde::Deserializer<'de>>(deserializer: D)
+    -> Result<std::collections::BTreeMap<String, FieldEventOwner>, D::Error> {
+    struct Unique;
+    impl<'de> serde::de::Visitor<'de> for Unique {
+        type Value = std::collections::BTreeMap<String, FieldEventOwner>;
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("unique current event owner names")
+        }
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
+            let mut result = std::collections::BTreeMap::new();
+            while let Some((name, owner)) = map.next_entry::<String, FieldEventOwner>()? {
+                if result.insert(name, owner).is_some() {
+                    return Err(serde::de::Error::custom("duplicate current event owner name"));
+                }
+            }
+            Ok(result)
+        }
+    }
+    deserializer.deserialize_map(Unique)
+}
+
+/// Semantic ownership of a current FormField event, independent of wire order.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum FieldEventOwner { Body, Extension }
+
+/// Complete declared partition of current field identities. Handler values
+/// live only in FormItem.events; this map cannot substitute stale values.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FieldEventOwners {
+    pub extension_kind: String,
+    pub extension_attached: bool,
+    #[serde(deserialize_with = "deserialize_unique_event_owners")]
+    pub owners: std::collections::BTreeMap<String, FieldEventOwner>,
+}
+
+
 /// Вид контрола формы — канонический, формат-нейтральный идентификатор типа узла
 /// (`InputField`, `Table`, `LabelDecoration`, `UsualGroup`, …).
 ///
@@ -92,6 +129,18 @@ pub struct FormItem {
     /// remain authoritative; replay requires both owner orders and kind to match.
     #[serde(skip)]
     pub native_table_event_order: Option<NativeFormEventOrder>,
+    /// Semantic current body/extension ownership for FormField handlers.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub field_event_owners: Option<FieldEventOwners>,
+    /// Independent SDK FormFieldType::None, projected as native InputField.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub field_type_none: bool,
+    /// Actual attached SDK FieldExtInfo kind, independent of the base type.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub field_extension_kind: Option<String>,
+    /// Native flattened field names/order only; no handler values.
+    #[serde(skip)]
+    pub native_field_event_order: Option<NativeFormEventOrder>,
     /// Расширенная подсказка контрола (`extendedTooltip`/`ExtendedTooltip`), если есть.
     /// Несёт имя+id+ТЕЛО ([`DecoratorRef`]). ОБА формата несут СОДЕРЖАНИЕ тела (заголовок/
     /// `maxWidth`/`autoMax*`/`horizontalStretch`/события) — оно X-СРАВНИМО (после реконсиляции
@@ -254,6 +303,10 @@ impl FormItem {
             ext_info: Vec::new(),
             events: Vec::new(),
             native_table_event_order: None,
+            field_event_owners: None,
+            field_type_none: false,
+            field_extension_kind: None,
+            native_field_event_order: None,
             footer_font: None,
             ext_tooltip: None,
             context_menu: None,

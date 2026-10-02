@@ -962,6 +962,12 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
         // JSON lexical freedom; unrelated JSON remains byte-exact.
         return Ok(formats_xml::form::same_picture_semantics_resource(a, b));
     }
+    if parts.last().copied() == Some(formats_xml::form::EVENT_SEMANTICS_RESOURCE)
+        && (parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
+            || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
+    {
+        return Ok(formats_xml::form::same_event_semantics_resource(a, b));
+    }
     let mobile_format = match path {
         "Ext/MobileClientSignature.bin"
         | "src/Configuration/MobileClientSignature.bin"

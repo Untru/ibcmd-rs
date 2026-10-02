@@ -227,3 +227,34 @@ The extension ledger reports resource/slot counts. Native SDK projection alone
 does not preserve glyph; exact adapter roundtrips include the explicit resource.
 Unknown fields, duplicate slots, deleted images, owner mismatches and forged
 provenance are rejected; edited or deleted current glyph changes the output.
+
+## Form event ownership and independent field state
+
+The installed SDK allows open nonempty symbolic event references in Form,
+Table and FormField body containers. A nested extension excludes events owned
+by its actual parent; the base container excludes only the events of its
+actually attached extension. Unknown references in group, decoration and
+addition extensions follow their different SDK parent policy. Event names are
+scalar identities and receive no UUID or filename grammar. XML namespaces,
+typed ancestry, duplicate identities and current handler validation remain
+enforced.
+
+Field type and extension presence are separate SDK properties. Registered SDK
+model validation accepts type None with LabelField or CheckBox extensions,
+while the actual native writer projects None as InputField. Explicit mismatched
+types produce SDK diagnostic 200. Historical primary evidence is in
+`F:/ibcmd/lab/07/field-extension-primary-root-independent-review-r1.json`;
+these small model probes do not establish full headless project acceptance.
+
+The adapter uses `ibcmd-form-event-semantics.v1.json` beside the owning native
+form only for state that the native projection cannot retain. A record binds
+the declared form UUID, exact typed control path and complete current event
+identities to the independent type and actual extension state. Top-level
+handler values come from the current native form. When its InputField projection
+cannot carry an actual extension's auto-table or additions, the resource owns
+their complete current typed subtrees once, including nested handlers.
+Extension values that require transport participate in semantic fingerprints.
+The extension ledger
+reports actual resources and owner records; a bare SDK native projection alone
+cannot preserve all this state. Complete project conversion and matched SDK
+validation remain separate acceptance gates.

@@ -496,6 +496,8 @@ pub(crate) fn designer_item(item: &FormItem) -> Result<OutElement, FormError> {
         ),
         _ if tables::field_kind(k).is_some() => {
             let fk = tables::field_kind(k).expect("checked");
+            let projection = super::super::event_owners::native_field_projection(item)?;
+            let item = projection.as_ref().unwrap_or(item);
             // Designer-тег может расходиться с каноном (SpreadSheetDocumentField).
             designer_table_control(
                 item,
@@ -688,6 +690,8 @@ pub(crate) fn designer_parameter(p: &FormParameter) -> Result<OutElement, FormEr
 pub(crate) fn push_designer_events(el: &mut OutElement, item: &FormItem) -> Result<(), FormError> {
     let ordered = if item.kind.as_str() == "Table" {
         super::super::event_owners::native_table_order(item)?
+    } else if tables::field_kind(item.kind.as_str()).is_some() {
+        super::super::event_owners::native_field_order(item)?
     } else {
         item.events.iter().collect()
     };

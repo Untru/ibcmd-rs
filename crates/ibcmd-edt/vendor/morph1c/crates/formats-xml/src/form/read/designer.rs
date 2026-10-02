@@ -618,6 +618,9 @@ pub(crate) fn read_designer_event(ev: &Element) -> Result<FormEvent, FormError> 
     let name = attr_value(ev, "name")?;
     ev.claim_with_text();
     expect_no_children(ev)?;
+    if name.is_empty() || ev.text.is_empty() {
+        return Err(FormError::Frame("event identity and handler must be nonempty".into()));
+    }
     Ok(FormEvent {
         name,
         handler: ev.text.clone(),

@@ -220,6 +220,7 @@ pub(crate) fn read_designer_field(
             fk.kind, item.name
         )));
     }
+    super::super::event_owners::partition_native_field(&mut item)?;
     Ok(item)
 }
 

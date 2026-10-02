@@ -291,13 +291,16 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
     xt.claimed.set(true);
     let name = leaf_text(el, "name")?;
     let id = leaf_int(el, "id")?;
-    let ftype = leaf_text(el, "type")?;
-    let fk = tables::field_kind(&ftype).ok_or_else(|| {
+    let ftype = el.child("type").filter(|child| child.prefix.is_empty())
+        .map(|_| leaf_text(el, "type")).transpose()?.unwrap_or_else(|| "None".into());
+    let none_type = ftype == "None";
+    let fk = tables::field_kind(if none_type { "InputField" } else { &ftype }).ok_or_else(|| {
         FormError::Frame(format!(
             "FormField type={ftype:?}: unsupported control kind (§1.0 — no Raw)"
         ))
     })?;
     let mut item = FormItem::new(FormControlKind::new(fk.kind), name, id);
+    item.field_type_none = none_type;
 
     // Общие поля тела (таблично; политики пер-форматных дефолтов внутри).
     read_fields_edt(
@@ -335,6 +338,7 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
     {
         item.events.push(read_handlers(h)?);
     }
+    let body_event_count = item.events.len();
     // Decorator-стабы.
     if let Some(t) = el.child("extendedTooltip").filter(|c| c.prefix.is_empty()) {
         item.ext_tooltip = Some(read_edt_extended_tooltip(t)?);
@@ -344,15 +348,23 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
     }
     // extInfo: типо-специфичные события + поля.
     let ext = el.child("extInfo").filter(|c| c.prefix.is_empty());
+    let actual_ext = if let Some(ex) = ext {
+        let xsi = ex.attr("xsi:type").ok_or_else(|| FormError::Frame("FormField extInfo: no xsi:type".into()))?;
+        tables::FIELD_KINDS.iter().find(|kind| kind.ext_xsi == xsi.value)
+            .ok_or_else(|| FormError::Frame("FormField: unknown actual extension kind".into()))?
+    } else { fk };
+    if ext.is_some() && actual_ext.ext_xsi != fk.ext_xsi {
+        item.field_extension_kind = Some(actual_ext.ext_xsi.into());
+    }
     if let Some(ex) = ext {
         ex.claim();
         let xti = ex
             .attr("xsi:type")
             .ok_or_else(|| FormError::Frame("FormField extInfo: no xsi:type".into()))?;
-        if xti.value != fk.ext_xsi {
+        if xti.value != actual_ext.ext_xsi {
             return Err(FormError::Frame(format!(
                 "FormField extInfo xsi:type={:?}, want {:?}",
-                xti.value, fk.ext_xsi
+                xti.value, actual_ext.ext_xsi
             )));
         }
         xti.claimed.set(true);
@@ -363,17 +375,17 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
         {
             item.events.push(read_handlers(h)?);
         }
-        read_fields_edt(fk.kind, Some(ex), fk.ext, Region::Ext, &mut item.ext_info)?;
+        read_fields_edt(actual_ext.kind, Some(ex), actual_ext.ext, Region::Ext, &mut item.ext_info)?;
         // АВТО-ТАБЛИЦА (GanttChartField): `<extInfo><autoTable>` — структурно полная Таблица без
         // xsi:type-обёртки. Читается Table-движком в item.auto_table (X-сравнима как обычная таблица).
-        if tables::field_kind_has_auto_table(fk.kind) {
+        if tables::field_kind_has_auto_table(actual_ext.kind) {
             if let Some(at) = ex.child("autoTable").filter(|c| c.prefix.is_empty()) {
                 item.auto_table = Some(Box::new(read_edt_auto_table(at)?));
             }
         }
         // ДОБАВЛЕНИЯ extInfo (PDFDocumentField): `<extInfo><viewStatusAddition>` — тот же
         // Addition-контрол, что у Таблицы. Читается в item.additions.
-        if tables::field_kind_has_ext_additions(fk.kind) {
+        if tables::field_kind_has_ext_additions(actual_ext.kind) {
             for ak in tables::ADDITION_KINDS {
                 if let Some(a) = ex.child(ak.edt_tag).filter(|c| c.prefix.is_empty()) {
                     item.additions.push(read_edt_addition(a, ak)?);
@@ -384,7 +396,7 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
         // textSize(55)→font(56); Radio: horizontalStretch(9)→font(10); Text/Formatted/Picture —
         // свои хвостовые позиции). Witnessed виды — [`tables::field_kind_carries_font`];
         // у прочих НЕ витнессирован — громкая §1.0-ошибка через expect_only ниже.
-        if tables::field_kind_carries_font(fk.kind) {
+        if tables::field_kind_carries_font(actual_ext.kind) {
             if let Some(fnt) = ex.child("font").filter(|c| c.prefix.is_empty()) {
                 item.font = Some(read_edt_font(fnt)?);
             }
@@ -392,20 +404,20 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
         // Разрешённые НЕ-полевые дети extInfo: handlers всегда; font — у font-видов;
         // autoTable — у GanttChartField; addition-теги — у PDFDocumentField.
         let mut ext_head: Vec<&str> = vec!["handlers"];
-        if tables::field_kind_carries_font(fk.kind) {
+        if tables::field_kind_carries_font(actual_ext.kind) {
             ext_head.push("font");
         }
-        if tables::field_kind_has_auto_table(fk.kind) {
+        if tables::field_kind_has_auto_table(actual_ext.kind) {
             ext_head.push("autoTable");
         }
-        if tables::field_kind_has_ext_additions(fk.kind) {
+        if tables::field_kind_has_ext_additions(actual_ext.kind) {
             for ak in tables::ADDITION_KINDS {
                 ext_head.push(ak.edt_tag);
             }
         }
-        expect_only_children_ext(ex, &ext_head, fk.ext.iter().map(|e| e.edt))?;
+        expect_only_children_ext(ex, &ext_head, actual_ext.ext.iter().map(|e| e.edt))?;
     } else {
-        read_fields_edt(fk.kind, None, fk.ext, Region::Ext, &mut item.ext_info)?;
+        read_fields_edt(actual_ext.kind, None, actual_ext.ext, Region::Ext, &mut item.ext_info)?;
     }
 
     expect_only_children_ext(
@@ -428,9 +440,10 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
     if leftover != 0 {
         return Err(FormError::Frame(format!(
             "FormField {:?} ({}): {leftover} unconsumed node(s) (§1.0)",
-            item.name, fk.kind
+            item.name, actual_ext.kind
         )));
     }
+    super::super::event_owners::bind_edt_field_events(&mut item, body_event_count, ext.is_some())?;
     Ok(item)
 }
 

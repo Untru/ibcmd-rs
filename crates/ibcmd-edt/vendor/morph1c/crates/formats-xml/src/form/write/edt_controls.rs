@@ -491,6 +491,9 @@ pub(crate) fn edt_form_field(
     item: &FormItem,
     fk: &'static tables::FieldKind,
 ) -> Result<OutElement, FormError> {
+    let actual_ext = super::super::event_owners::field_extension_kind(item)?;
+    let (body_events, ext_events, extension_attached) =
+        super::super::event_owners::field_owned_events(item)?;
     let mut el = OutElement::branch("", "items").attr("xsi:type", "form:FormField");
     el.push(OutElement::leaf("", "name", item.name.clone()));
     el.push(OutElement::leaf("", "id", item.id.to_string()));
@@ -511,7 +514,7 @@ pub(crate) fn edt_form_field(
         el.push(OutElement::leaf("", "excludedCommands", x.clone()));
     }
     // Тело-события: `OnChange` (общее поле-событие; прочие — extInfo).
-    for ev in item.events.iter().filter(|e| e.name == FIELD_BODY_EVENT) {
+    for ev in body_events {
         el.push(edt_handlers_ctrl(ev));
     }
     if let Some(t) = &item.ext_tooltip {
@@ -520,7 +523,7 @@ pub(crate) fn edt_form_field(
     if let Some(c) = &item.context_menu {
         el.push(edt_context_menu(c)?);
     }
-    el.push(OutElement::leaf("", "type", fk.kind));
+    if !item.field_type_none { el.push(OutElement::leaf("", "type", fk.kind)); }
     for entry in tail {
         emit_field_edt(&mut el, entry, &item.properties)?;
         // footerFont — сразу ПОСЛЕ строки footerTextColor (метамодель футер-блока;
@@ -532,27 +535,32 @@ pub(crate) fn edt_form_field(
             }
         }
     }
-    let ext_events: Vec<&morph1c_core::ir::FormEvent> = item
-        .events
-        .iter()
-        .filter(|e| e.name != FIELD_BODY_EVENT)
-        .collect();
-    el.push(edt_ext_info_ref(
-        fk.ext_xsi,
-        fk.ext,
-        &item.ext_info,
-        &ext_events,
-        item.font.as_ref(),
-        item.auto_table.as_deref(),
-        &item.additions,
-    )?);
+    if extension_attached {
+        el.push(edt_ext_info_ref(
+            actual_ext.ext_xsi,
+            actual_ext.ext,
+            &item.ext_info,
+            &ext_events,
+            item.font.as_ref(),
+            item.auto_table.as_deref(),
+            &item.additions,
+        )?);
+    } else {
+        let mut defaults = Vec::new();
+        super::super::fields::read_fields_edt(actual_ext.kind, None, actual_ext.ext, super::super::fields::Region::Ext, &mut defaults)?;
+        if item.ext_info != defaults || item.font.is_some()
+            || item.auto_table.is_some() || !item.additions.is_empty()
+        {
+            return Err(FormError::Frame("absent field extension has current extension data".into()));
+        }
+    }
     Ok(el)
 }
 
 /// Единственное событие ТЕЛА FormField (сверено 172/172 body-handlers корпуса); все прочие
 /// события полей живут в extInfo. Разбиение канонического плоского списка на write — по
 /// имени события; Designer несёт единый `<Events>` (OnChange первым — сверено).
-const FIELD_BODY_EVENT: &str = "OnChange";
+
 
 /// EDT `<extInfo xsi:type="…">`: события (handlers) + таблица полей; пустой ⇒ самозакрытие.
 pub(crate) fn edt_ext_info(
