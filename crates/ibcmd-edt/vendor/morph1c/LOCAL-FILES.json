@@ -41,7 +41,10 @@
     "Metadata command pictures preserve per-owner UUID, kind, current reference, load-transparent and transparent-pixel semantics through a strict typed resource; changed or deleted owners cannot replay stale values",
     "Metadata and form help preserve current ordered language identifiers and complete page resources; explicit markers and owned pages must agree, with no fixed Russian-only replacement",
     "EDT metadata command transparency resolves the current CommonPicture nullable point; validated per-use resources override contextual defaults without fabricating per-use pixel coordinates",
-    "CommonPicture native true/no-pixel wrappers retain the installed SDK auto-transparency sentinel; an optional source-presence boolean guards exact native spelling without replaying point values or overriding edits"
+    "CommonPicture native true/no-pixel wrappers retain the installed SDK auto-transparency sentinel; an optional source-presence boolean guards exact native spelling without replaying point values or overriding edits",
+    "Root MdPicture Logo, Splash and MainSectionPicture preserve both current persisted EInt Points through the existing property bag; native transparency spelling is guarded by the current point and glyph uses a closed declared-root semantic resource",
+    "Root ParentConfigurations resources retain the complete SDK sibling directory as safe relative identities and current opaque bytes, with a unique current root binary attachment and fingerprint-visible ordered resources",
+    "Command interfaces preserve ordered subsystem visibility, common visibility and ordered role values through typed native and EDT readers/writers without discarding unknown structure"
   ],
   "files": [
     {
@@ -106,11 +109,11 @@
     },
     {
       "path": "crates/core/src/ir/mod.rs",
-      "sha256": "0f16ed367039e489a374b0893a07eeae7424ffd57e7519d010f7efbec92c69d0"
+      "sha256": "9c0af17452545c4263f0899abcb935fd088f0e8bd1da09ec6002515da84dc03c"
     },
     {
       "path": "crates/core/src/ir/semantic_view.rs",
-      "sha256": "3690ffb8d9a3c7d813ee4a3f76c3056c9b66a83371a6a94a3f832b81536a0664"
+      "sha256": "3d9256059bced4104e257bb6ca523b46bc5f5d2e449ce4e5ae0a6ba6fbdbc155"
     },
     {
       "path": "crates/core/src/ir/source_extensions.rs",
@@ -1070,7 +1073,7 @@
     },
     {
       "path": "crates/core/src/spec/metadata/configuration.rs",
-      "sha256": "4160327c67d411a36f594c2686c49df39db5f0f31b614732e1601326dbaf2800"
+      "sha256": "b57ede871dcc137439a32478af0114020bc7567625f194dd03d8ea8d3ecec450"
     },
     {
       "path": "crates/core/src/spec/metadata/constant.rs",
@@ -1490,7 +1493,7 @@
     },
     {
       "path": "crates/formats-xml/src/codec.rs",
-      "sha256": "02c3820c8cbd6264bef7afcc13ff3271cbd2b4918d833b51888d51ce2a11167a"
+      "sha256": "6707dc07097f629f3fc50e46edbdaa2dde9279e624097e8eac700327e6210422"
     },
     {
       "path": "crates/formats-xml/src/common_attribute_content.rs",
@@ -1830,7 +1833,7 @@
     },
     {
       "path": "crates/formats-xml/src/lib.rs",
-      "sha256": "128acabdba3a40db6a38f25a109dcd2f0a554c1750225b85455a8d89e514b4a0"
+      "sha256": "04968f312331e77135cb95c6f71041a504d5e2f160ace80d86fc6176ae18ce0f"
     },
     {
       "path": "crates/formats-xml/src/link_by_type.rs",
@@ -1838,7 +1841,11 @@
     },
     {
       "path": "crates/formats-xml/src/locus.rs",
-      "sha256": "aaa0b7017a2744a8bbc13725abea9d29cb866f2f5b92f5ea64383d0bca498020"
+      "sha256": "62b0aeacbf1f1fa378afa3081c56ec8d3396a559adf93606c8810cc6ab4b1d13"
+    },
+    {
+      "path": "crates/formats-xml/src/md_picture.rs",
+      "sha256": "386690c4e17a10e8a091c2540c3b98c0de52343f0fd32ccf24f594b238dfecca"
     },
     {
       "path": "crates/formats-xml/src/metadata_color.rs",
@@ -2114,7 +2121,7 @@
     },
     {
       "path": "crates/formats/designer/src/metadata/configuration.rs",
-      "sha256": "21934372eb041b4d2429b2343d0a8c58180348856035352c76098575cc365819"
+      "sha256": "cda39b10faff4d081a00b7b3b1eca5792779efba06b2cdd3bef4b51622471091"
     },
     {
       "path": "crates/formats/designer/src/metadata/constant.rs",
@@ -2330,7 +2337,7 @@
     },
     {
       "path": "crates/formats/edt/src/metadata/configuration.rs",
-      "sha256": "e977c4d944d54dc6d12df108e27c3a3ea5c47bd61a987e4eb3015ef1edb8f516"
+      "sha256": "9171a8f8c6ec102682476232ff7ec5301670d17907c09f28e453cc9909d0c356"
     },
     {
       "path": "crates/formats/edt/src/metadata/constant.rs",
@@ -2470,7 +2477,7 @@
     },
     {
       "path": "crates/pipeline/src/cmi_read.rs",
-      "sha256": "9c9d363fea217452fe67ce636e10dd78ed20c5cbac275411dab5d2b02d0b2419"
+      "sha256": "b40fe739201bcdd9f3f1b2504daef7ac6d1c931849392d8ae65cadff75f5b724"
     },
     {
       "path": "crates/pipeline/src/command_module_read.rs",
@@ -2494,7 +2501,7 @@
     },
     {
       "path": "crates/pipeline/src/ext_read.rs",
-      "sha256": "28447cdea3b4610d38e022929795050b211081b0fb13c84c49714c8843b79658"
+      "sha256": "bf779ade75e237c5abfec6aac1e97ea260ac58a36ba5490ba839d68e52eb0e0f"
     },
     {
       "path": "crates/pipeline/src/ext_read/mobile_signature.rs",
@@ -2546,7 +2553,7 @@
     },
     {
       "path": "crates/pipeline/src/lib.rs",
-      "sha256": "fe4774c81699ab4825f9e543b3fa32582d27fd8c43ecb81730bf20b285d550eb"
+      "sha256": "77cac42f0073f780a7bc00599d63ad47969b91781f4628c33f87f083c223be32"
     },
     {
       "path": "crates/pipeline/src/metadata_picture_semantics.rs",
@@ -2561,8 +2568,12 @@
       "sha256": "dd97a970fcbababb9321aed2f2b871d493bea2ecb25a05ce15bf97e15368359e"
     },
     {
+      "path": "crates/pipeline/src/parent_configuration_read.rs",
+      "sha256": "aa1211d81abad590477b0e7c9f50cf8e5077a47c2a195607d12dbee51964250f"
+    },
+    {
       "path": "crates/pipeline/src/picture_read.rs",
-      "sha256": "135ece265aa5dc7aeff4ecc47a20c79c71ff8249c6107729b6f9039413ab48ce"
+      "sha256": "2b2c1105234037e88072f57f126438780bb212cbcbd58c51a086fc695acc47eb"
     },
     {
       "path": "crates/pipeline/src/predefined_read.rs",
@@ -2653,5 +2664,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "4c10f1a0a46d422bc5c26968732a1fa3e6d131da"
+  "local_source_snapshot": "29326c657fea221a0d13d06824de8ba5fb0ee4ca"
 }
