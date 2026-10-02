@@ -44,7 +44,11 @@
     "CommonPicture native true/no-pixel wrappers retain the installed SDK auto-transparency sentinel; an optional source-presence boolean guards exact native spelling without replaying point values or overriding edits",
     "Root MdPicture Logo, Splash and MainSectionPicture preserve both current persisted EInt Points through the existing property bag; native transparency spelling is guarded by the current point and glyph uses a closed declared-root semantic resource",
     "Root ParentConfigurations resources retain the complete SDK sibling directory as safe relative identities and current opaque bytes, with a unique current root binary attachment and fingerprint-visible ordered resources",
-    "Command interfaces preserve ordered subsystem visibility, common visibility and ordered role values through typed native and EDT readers/writers without discarding unknown structure"
+    "Command interfaces preserve ordered subsystem visibility, common visibility and ordered role values through typed native and EDT readers/writers without discarding unknown structure",
+    "Low-level form readers and writers use the effective emitted or parsed format profile for typed defaults and same-source presence even when no caller version context is supplied",
+    "SDK Form Event reference proxies with a UUID-shaped symbolic name retain the exact current name, handler and order at the root; malformed names, misplaced extension events and duplicate owners remain errors",
+    "XML 2.21 form defaults retain current legacy table-line booleans and Main/Normal/Supplementary button importance with a closed names-only source-presence facet; profile-specific native scalar ordering preserves current edited values and same-origin spelling",
+    "Installed metadata window defaults, EDT explicit root command-panel names, current tooltip alignment and native unavailable-path projection are preserved through typed fields without excluding configuration files or replaying stale source values"
   ],
   "files": [
     {
@@ -77,7 +81,7 @@
     },
     {
       "path": "crates/core/src/ir/form/body.rs",
-      "sha256": "c922edb52c8be9339d2ff170fa90cb74626fec79f2d6a46a86bcca83ddee4600"
+      "sha256": "d2f46c29345a512df3fa1d1527b07f41ccfc4f604290138cd11c0a219e423060"
     },
     {
       "path": "crates/core/src/ir/form/data_attributes.rs",
@@ -89,7 +93,7 @@
     },
     {
       "path": "crates/core/src/ir/form/decorations.rs",
-      "sha256": "4f317ab4db21422d12b5094fc2971bc3b04c25ed3c77a6e70e50b381ae9841c7"
+      "sha256": "99910b59e77219c1697f2ba3770d5a65d7cd1672e9be77be969c5312fdaa48fc"
     },
     {
       "path": "crates/core/src/ir/form/event_order.rs",
@@ -1073,7 +1077,7 @@
     },
     {
       "path": "crates/core/src/spec/metadata/configuration.rs",
-      "sha256": "b57ede871dcc137439a32478af0114020bc7567625f194dd03d8ea8d3ecec450"
+      "sha256": "b9c8ae03703f32a3ed44075b93379d7b761e330bb47d865c32f36d8e64ad115e"
     },
     {
       "path": "crates/core/src/spec/metadata/constant.rs",
@@ -1553,7 +1557,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/availability.rs",
-      "sha256": "97fcdc5b3a3efebc6f91ea537b4712387b87d3c397a73874930a76cf56f61a0a"
+      "sha256": "45f5fda9264979df856d37d23a8c1e317d9ac9baa280c3542b8e6f32d357cb9e"
     },
     {
       "path": "crates/formats-xml/src/form/chart/common.rs",
@@ -1613,7 +1617,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/event_owners.rs",
-      "sha256": "a3e3356b9fcb31013d0a075938684e862659ee4a585a52d520274cd738e4e828"
+      "sha256": "9dc01e68fbe3e66e1a6922f7a2b87e6a6d6406b421902e73e2f9cf6f726a7d1a"
     },
     {
       "path": "crates/formats-xml/src/form/fields/common.rs",
@@ -1637,7 +1641,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/fields/mod.rs",
-      "sha256": "3a42bde0d732d59717931d78d8c9645b563bd1ad01b8ccf4fe9c3c7ef70e26f8"
+      "sha256": "628e49049bae73a8902e51dabf00b8547fdb60d628853c94f4801183bab5a3e6"
     },
     {
       "path": "crates/formats-xml/src/form/fields/policy.rs",
@@ -1693,11 +1697,11 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/edt.rs",
-      "sha256": "042e2575bba7c621395c6c7d33a87ce797c11f9d6b0181adfaa51c5026eb69db"
+      "sha256": "de6a45d637d2d7aaea3ea69d22339de5aaa8ea1413de41e2afb63297487f67ba"
     },
     {
       "path": "crates/formats-xml/src/form/read/edt_controls.rs",
-      "sha256": "f2f13132e4193d078ef9d0b2183eb9785f88dbba61a24bc3dce8d5f8e0c5336a"
+      "sha256": "39680c807e0bf973f0643903bf96b01997f570a0b74cee13b816a388898b5788"
     },
     {
       "path": "crates/formats-xml/src/form/read/edt_dcs.rs",
@@ -1709,7 +1713,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/read/mod.rs",
-      "sha256": "6a6465be359f94e90fe3d0bfe29811297c3812c4e0a44d62a5f5ac56fc704fbb"
+      "sha256": "3a25dc24e5cd1cf9ac9094a5fcb5f5b07987a2519c2a20d76c07999246c21376"
     },
     {
       "path": "crates/formats-xml/src/form/read/mxl.rs",
@@ -1765,15 +1769,15 @@
     },
     {
       "path": "crates/formats-xml/src/form/wire_order.rs",
-      "sha256": "85e79c411b18eea9a7704905579b6bd5993ab1ae4efe2c6141504a34d17e906c"
+      "sha256": "9858d84ce0d036c838d53674625aa4631b079896c872ac11680fabf7508a9b73"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer.rs",
-      "sha256": "80bde1211b2ab58b0354a977271ad21f57f68d89112a78001259d51b64710d22"
+      "sha256": "e91075f3741e849afa8c7960db5bc6034d0f6dffaf6aeecd6543d2a54acbc92f"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_controls.rs",
-      "sha256": "489f7fc8ed81f51a5fd7bd440956808fc8cbbdeaae7ab6e334d6be05a85bbb4d"
+      "sha256": "244a711a5b7830dd1eddcc5e029eae60918c59d07883c8bfde6697c5deddf06e"
     },
     {
       "path": "crates/formats-xml/src/form/write/designer_dcs.rs",
@@ -1781,7 +1785,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/edt.rs",
-      "sha256": "8352d376856aac703a11e3de1ef79d7b94a19d34f6ebf3d604cbda04645bd21d"
+      "sha256": "33a47e14a7e12805579ca56a77f2efa38cef2da144e664dd49ef26ea0f90f741"
     },
     {
       "path": "crates/formats-xml/src/form/write/edt_controls.rs",
@@ -1801,7 +1805,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/mod.rs",
-      "sha256": "cdad98b26fe1b90bb92c086bcee2e498f88fd2262a4a73128bd8d5666bd5206b"
+      "sha256": "899f75785af101fa68d0279858ef968a2773f2ad3d3f7726d1ea11ae4ff497e0"
     },
     {
       "path": "crates/formats-xml/src/form/write/mxl.rs",
@@ -1809,7 +1813,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/write/tooltip.rs",
-      "sha256": "8426d6bf840886d0c76157cae0efcad46d14b30ab66474e09da7d3c52df5ead2"
+      "sha256": "49f05bcc7b3c0621a48c7e90ec104d2b3c06ad6f0d1acffb5d6ea2b819092cf9"
     },
     {
       "path": "crates/formats-xml/src/form_tree.rs",
@@ -2664,5 +2668,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "29326c657fea221a0d13d06824de8ba5fb0ee4ca"
+  "local_source_snapshot": "bab64027e915f283635cd65bfd04e813b2e8e5a7"
 }
