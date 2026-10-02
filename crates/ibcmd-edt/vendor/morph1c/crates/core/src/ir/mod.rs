@@ -25,6 +25,7 @@ pub mod form;
 pub mod value;
 pub mod source_extensions;
 pub mod semantic_view;
+pub mod additional_indexes;
 
 use serde::{Deserialize, Serialize};
 
@@ -730,6 +731,10 @@ pub struct MetadataObject {
     /// прочих видов байт-идентичными.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rights: Option<crate::spec::metadata::role::RightsTable>,
+    /// Optional additional-index attachment. None and an explicitly empty
+    /// attachment are distinct; index and field order are current semantic data.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub additional_indexes: Option<Vec<additional_indexes::AdditionalIndex>>,
     /// Схема XDTO-пакета (`XDTOPackage`) — канонический (BOM-снятый) текст XML-спутника
     /// `Package.xdto` (EDT) / `Ext/Package.bin` (Designer). Носится ОТДЕЛЬНО от `properties`
     /// (как `rights` / `templates[].body` — это спутник, не спек-свойство): whole-config read
@@ -914,6 +919,7 @@ impl MetadataObject {
             internal_info: None,
             this_node: None,
             rights: None,
+            additional_indexes: None,
             xdto_schema: None,
             ws_definition: None,
             flowchart: None,

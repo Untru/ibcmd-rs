@@ -287,6 +287,7 @@ pub(crate) fn read_object_at(
     if bodies {
         // Module-body sidecar (`Module.bsl`) → `obj.modules` (a `--to cf` assembly emits `<uuid>.0`).
         crate::module_read::attach_module_body(format, fk.kind, path, &mut obj)?;
+        crate::additional_indexes_read::attach(format, path, &mut obj)?;
         // Command-module sidecars (`Commands/<Cmd>/CommandModule.bsl`) → each command CHILD's `modules`.
         crate::command_module_read::attach_command_modules(format, fk.kind, path, &mut obj)?;
         // Help-page sidecars (`Help/<lang>.html` / `Ext/Help.xml`+`Ext/Help/<lang>.html`) → `obj.help`.
@@ -428,6 +429,7 @@ fn write_object(
     // Predefined data → Designer `Ext/Predefined.xml` (EDT emits it inline in the descriptor).
     crate::predefined_read::write_predefined(format, kind, out, obj)?;
     crate::rights_read::write_rights_body(format, kind, out, obj)?;
+    crate::additional_indexes_read::write(format, out, obj)?;
     crate::xdto_read::write_xdto_schema(format, kind, out, obj)?;
     // WSReference WSDL set (`WsDefinitions.wsdl`+`<N>.xsd` / `Ext/WSDefinition.xml`+`Ext/<N>.xsd`).
     crate::ws_definition_read::write_ws_definition(format, kind, out, obj)?;

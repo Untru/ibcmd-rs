@@ -295,6 +295,67 @@ fn malformed_envelopes_and_unknown_body_are_still_rejected() {
 
 const LIST_SIDECAR: &str =
     "src/Reports/Appearance/Forms/List/Attributes/Dynamic/ExtInfo/ListSettings.dcss";
+
+#[test]
+fn complete_appearance_accounting_accepts_lexical_changes_and_rejects_unknown_cells() {
+    for minor in [20, 21] {
+        let options = options(minor);
+        let generated = strip(&xml_to_edt(&source(minor), &options).unwrap().tree);
+        let original = std::str::from_utf8(sidecar(&generated)).unwrap();
+        let changed = original
+            .replace("<selection/>", "<selection></selection>")
+            .replace("<filter/>", "<filter></filter>");
+        assert_ne!(changed, original);
+        let current = replace(&generated, SIDECAR, changed.into_bytes());
+        let native = edt_to_xml(&Project::from_tree(current.clone()).unwrap(), &options)
+            .unwrap()
+            .tree;
+        let returned = xml_to_edt(&native, &options).unwrap().tree;
+        assert_eq!(
+            read_conditional_appearance_dcssca(sidecar(&returned)).unwrap(),
+            read_conditional_appearance_dcssca(sidecar(&current)).unwrap()
+        );
+        let directory = tempfile::tempdir().unwrap();
+        ibcmd_xml::source_tree::publish_new(&current, directory.path().join("project")).unwrap();
+        let native = ibcmd_edt::read_directory_project(directory.path().join("project"))
+            .unwrap()
+            .edt_to_xml(&options)
+            .unwrap();
+        native.publish_new(directory.path().join("native")).unwrap();
+        let returned = ibcmd_edt::read_directory_source(directory.path().join("native"))
+            .unwrap()
+            .xml_to_edt(&options)
+            .unwrap();
+        returned
+            .publish_new(directory.path().join("returned"))
+            .unwrap();
+        let returned =
+            read_xml_source(directory.path().join("returned"), ReaderLimits::default()).unwrap();
+        assert_eq!(
+            read_conditional_appearance_dcssca(sidecar(&returned)).unwrap(),
+            read_conditional_appearance_dcssca(sidecar(&current)).unwrap()
+        );
+        for invalid in [
+            original.replace(
+                "</ConditionalAppearance>",
+                "<unknown/></ConditionalAppearance>",
+            ),
+            original.replace("<selection/>", "<selection unknown=\"true\"/>"),
+            format!("{original}<another/>"),
+            original.replace(
+                "http://v8.1c.ru/8.1/data-composition-system/settings",
+                "urn:wrong",
+            ),
+        ] {
+            let input = replace(&generated, SIDECAR, invalid.into_bytes());
+            assert!(
+                Project::from_tree(input)
+                    .and_then(|project| edt_to_xml(&project, &options))
+                    .is_err()
+            );
+        }
+    }
+}
 const MXL_SIDECAR: &str =
     "src/Reports/Appearance/Forms/List/Attributes/Sheet/ExtInfo/SpreadsheetData.mxlx";
 const PAL_DECL: &str = " xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\"";

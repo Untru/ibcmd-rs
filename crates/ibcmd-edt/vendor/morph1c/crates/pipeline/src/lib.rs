@@ -39,6 +39,7 @@ pub use registry::FormatRegistry;
 pub use morph1c_core::version::parse_v8version;
 
 mod blob_template_read;
+mod additional_indexes_read;
 mod cmi_read;
 mod config_interface_read;
 mod command_module_read;

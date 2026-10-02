@@ -130,6 +130,9 @@ impl Serialize for Object<'_> {
         if obj.rights.is_some() {
             state.serialize_field("rights", &obj.rights)?;
         }
+        if obj.additional_indexes.is_some() {
+            state.serialize_field("additional_indexes", &obj.additional_indexes)?;
+        }
         if obj.xdto_schema.is_some() {
             state.serialize_field("xdto_schema", &obj.xdto_schema)?;
         }

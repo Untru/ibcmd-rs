@@ -15,6 +15,7 @@
 //! `core/spec` и движке; здесь — только имена тегов/ns и байтовая обёртка (§1.6).
 
 pub mod characteristics;
+pub mod additional_indexes;
 pub mod children;
 pub mod choice_param_links;
 pub mod choice_parameters;

@@ -62,8 +62,9 @@ fn read_module_body(path: &Path) -> Result<ModuleBody, ConvertError> {
 /// Упорядоченные слоты модуль-сайдкаров вида (метамодель, witnessed на
 /// `.fixtures/coverage/{designer,edt}/s15_subordinate` + `SSL/edt/src`). Пустой срез — вид
 /// модулей-сайдкаров не несёт. Расширять ТОЛЬКО по witnessed-раскладке:
-/// Bot/WebSocketClient формально несут слот `Module`, но witnessed-фикстуры модулей не
-/// содержат — их подключение отложено до появления витнесса (§1.0: не фабрикуем раскладку;
+/// Bot.Module и Sequence.RecordSetModule подтверждены полным корпусом УХ.
+/// WebSocketClient формально несёт слот `Module`, но witnessed-фикстуры его не
+/// содержат — подключение отложено до появления витнесса (§1.0: не фабрикуем раскладку;
 /// IntegrationService ПОДКЛЮЧЁН — ERP-витнесс `IntegrationServices/ОбменСообщениями`).
 /// CommonCommand несёт `CommandModule.bsl` СИБЛИНГОМ дескриптора (та же раскладка,
 /// что `Module.bsl`, — witnessed SSL 63/63; НЕ путь `Commands/<Cmd>/…` дочерних команд —
@@ -79,7 +80,8 @@ fn module_slots(kind: &str) -> &'static [&'static str] {
         // `<Kind>s/<Name>/Module.bsl`; IntegrationService — witnessed ERP 1/1
         // `IntegrationServices/ОбменСообщениями/{Module.bsl | Ext/Module.bsl}`, cf-тело
         // `<uuid>.0` = тот же module-контейнер `{info,text}`, RE erp.cf `c512a1cd-….0`).
-        "WebService" | "HTTPService" | "IntegrationService" => &["Module"],
+        "WebService" | "HTTPService" | "IntegrationService" | "Bot" => &["Module"],
+        "Sequence" => &["RecordSetModule"],
         // Ссылочно-объектные виды: объектный + менеджерный модуль.
         "Catalog"
         | "Document"
@@ -326,6 +328,8 @@ mod tests {
         assert_eq!(module_slots("WebService"), ["Module"]);
         assert_eq!(module_slots("HTTPService"), ["Module"]);
         assert_eq!(module_slots("IntegrationService"), ["Module"]);
+        assert_eq!(module_slots("Bot"), ["Module"]);
+        assert_eq!(module_slots("Sequence"), ["RecordSetModule"]);
         for k in [
             "Catalog",
             "Document",
@@ -363,7 +367,7 @@ mod tests {
         // Виды без witnessed-модулей — пусто (в т.ч. сервисы без витнесса и чужие сайдкары).
         // (IntegrationService ВЫВЕДЕН из этого списка: его слот Module witnessed на ERP —
         // `IntegrationServices/ОбменСообщениями` + cf-тело `c512a1cd-….0`.)
-        for k in ["Role", "Subsystem", "Bot", "WebSocketClient", "CommonForm"] {
+        for k in ["Role", "Subsystem", "WebSocketClient", "CommonForm"] {
             assert!(module_slots(k).is_empty(), "{k}");
         }
     }

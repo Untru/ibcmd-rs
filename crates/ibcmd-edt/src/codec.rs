@@ -999,6 +999,28 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
                 == formats_xml::form::read_chart_sidecar(b).map_err(EdtError::source)?,
         );
     }
+    let additional_index_format = match parts.as_slice() {
+        [_, _, "AdditionalIndexes.aindex"] => Some(Format::Edt),
+        [_, _, "Ext", "AdditionalIndexes.xml"] => Some(Format::Designer),
+        _ => None,
+    };
+    if let Some(format) = additional_index_format {
+        return Ok(
+            formats_xml::additional_indexes::read(a, format).map_err(EdtError::new)?
+                == formats_xml::additional_indexes::read(b, format).map_err(EdtError::new)?,
+        );
+    }
+    let appearance_sidecar_path = (parts.len() == 3 && parts[0] == "CommonForms")
+        || (parts.len() == 5 && parts[2] == "Forms");
+    if appearance_sidecar_path && parts.last().copied() == Some("ConditionalAppearance.dcssca") {
+        // The strict typed codec consumes the complete known sidecar, including
+        // every value and ordered item. Empty-element/indentation spelling is
+        // physical; unknown fields, attributes and namespaces remain errors.
+        return Ok(formats_xml::form::read_conditional_appearance_dcssca(a)
+            .map_err(EdtError::source)?
+            == formats_xml::form::read_conditional_appearance_dcssca(b)
+                .map_err(EdtError::source)?);
+    }
     let mobile_format = match path {
         "Ext/MobileClientSignature.bin"
         | "src/Configuration/MobileClientSignature.bin"
