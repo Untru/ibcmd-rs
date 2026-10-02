@@ -705,3 +705,24 @@ SDK также не означают её запуск или успешную �
 - `F:\ibcmd\lab\07\audit-223758b8-release-final-r11\result.json` — аудит артефакта.
 - `F:\ibcmd\lab\07\ci-223758b8-final-r1.json` — исходные результаты восьми заданий CI.
 - `F:\ibcmd\lab\07\full-gate-223758b8-preparation-r1` — полная привязка архива и точные аргументы четырёх запусков.
+## FilterCriterion host bridge finding (2026-10-02 UTC)
+
+The frozen `223758b8` full UH 8.3 EDT-to-XML command exited with code 2 after
+1,736.009 seconds, before publication. Its complete report is retained at
+`F:/ibcmd/lab/07/convert-uha83-223758b8-full-pair-r1/authentic-edt-to-native-xml.report.json`
+(SHA-256 `77deda925bc34281eb18b237e1e5e95498040c3e369bb7fa5cff23f398377bef`).
+The failure is `canonical metadata bridge: Missing("uuid")` for
+`FilterCriteria/ДокументыВНАПоОснованию.xml`. The root UUID is present; the host
+bridge incorrectly treated its name-only `Form` reference as an inline object.
+The fix adds only `FilterCriterion`'s known `Form` reference to the source
+decoder. Commands still require UUIDs; unknown bare children and `Template`
+references remain rejected. Both bounded and scalable source policies are tested.
+
+The focused corrected host bridge was exercised against all 16 FilterCriterion
+and 20 WebService descriptor pairs in each genuine UH 8.3/8.5 corpus, including
+both vendor-written native projections and nested canonical ownership. All 144
+original EDT/native descriptor files were hashed before and after, unchanged.
+The receipt is `F:/ibcmd/lab/07/filter-criterion-host-bridge-r1/result.json`
+(SHA-256 `00121562ae22230673515905c745d880a635569fa638f9e7576e54ea72b5bd6c`).
+This focused pass does not replace full conversion, exact tree comparison, or
+installed-EDT acceptance. The failed full run remains evidence, not a pass.

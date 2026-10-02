@@ -257,6 +257,37 @@ fn genuine_sparse_metadata_census() {
                 std::fs::write(directory.join("regenerated.xml"), &regenerated_xml).unwrap();
             }
             assert!(regenerated_xml == xbytes, "{kind} genuine XML same-source");
+            // Exercise the actual host bridge too: a successfully decoded
+            // vendor descriptor alone does not prove canonical compatibility.
+            // FilterCriterion forms are named external descriptor references;
+            // its commands remain UUID-bearing inline canonical objects.
+            for current in [&e, &x] {
+                let bytes = write(Format::Designer, current, version);
+                let document = ibcmd_xml::XmlReader::from_slice(&bytes).unwrap();
+                let mut pending = current.children.iter().collect::<Vec<_>>();
+                let mut inline_objects = 0;
+                while let Some(child) = pending.pop() {
+                    if child.kind.as_str() != "FilterCriterion.FormRef" {
+                        inline_objects += 1;
+                        pending.extend(&child.children);
+                    }
+                }
+                for policy in [
+                    ibcmd_core::source_policy::SourceOperationPolicy::Bounded,
+                    ibcmd_core::source_policy::SourceOperationPolicy::Source,
+                ] {
+                    let envelope = ibcmd_xml::decode_source_metadata_envelope_with_policy(
+                        &document,
+                        ibcmd_core::artifact::ProfileId::parse(&format!("xml-2.{}", version.minor))
+                            .unwrap(),
+                        ibcmd_core::diagnostic::ObjectPath::root(),
+                        policy,
+                    )
+                    .unwrap();
+                    assert_eq!(envelope.root().kind().as_str(), kind);
+                    assert_eq!(envelope.descendants().len(), inline_objects);
+                }
+            }
             for source in [&e, &x] {
                 // This focused test does not load external form descriptors.
                 // Cross-codec checks cover descriptor-owned properties and
@@ -273,6 +304,8 @@ fn genuine_sparse_metadata_census() {
                     assert!(same_descriptor_children(&result, &descriptor_owned));
                 }
             }
+            assert_eq!(std::fs::read(&ep).unwrap(), ebytes);
+            assert_eq!(std::fs::read(&np).unwrap(), xbytes);
             count += 1;
         }
         counts.insert(kind, count);

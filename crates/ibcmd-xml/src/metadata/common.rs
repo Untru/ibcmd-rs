@@ -496,6 +496,7 @@ pub fn decode_source_metadata_envelope_with_policy(
     let references: &[&str] = match family.as_str() {
         "Subsystem" => &["Subsystem"],
         "ExternalDataSource" => &["Table"],
+        "FilterCriterion" => &["Form"],
         "CalculationRegister" => &["Form", "Template", "Recalculation"],
         "Catalog"
         | "Document"
@@ -3008,6 +3009,7 @@ mod tests {
             ("Subsystem", "Subsystem"),
             ("CalculationRegister", "Recalculation"),
             ("ExternalDataSource", "Table"),
+            ("FilterCriterion", "Form"),
         ] {
             let source = format!(
                 "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.20'><{family} uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties><ChildObjects><{child}>Sibling</{child}></ChildObjects></{family}></MetaDataObject>"
@@ -3042,6 +3044,49 @@ mod tests {
                 )
                 .is_err()
             );
+        }
+    }
+    #[test]
+    fn source_filter_criterion_forms_are_references_but_commands_require_identity() {
+        let source = "<MetaDataObject xmlns='http://v8.1c.ru/8.3/MDClasses' version='2.20'><FilterCriterion uuid='11111111-1111-4111-8111-111111111111'><Properties><Name>Owner</Name></Properties><ChildObjects><Form>List</Form><Command uuid='22222222-2222-4222-8222-222222222222'><Properties><Name>Open</Name></Properties></Command></ChildObjects></FilterCriterion></MetaDataObject>";
+        for policy in [
+            SourceOperationPolicy::Bounded,
+            SourceOperationPolicy::Source,
+        ] {
+            let envelope = decode_source_metadata_envelope_with_policy(
+                &XmlReader::from_slice(source.as_bytes()).unwrap(),
+                profile(),
+                path(),
+                policy,
+            )
+            .unwrap();
+            assert_eq!(envelope.descendants().len(), 1);
+            assert_eq!(envelope.descendants()[0].kind().as_str(), "Command");
+            assert_eq!(
+                envelope.descendants()[0].owner(),
+                Some(envelope.root().identity().uuid())
+            );
+            assert_eq!(
+                MetadataRegistry::default()
+                    .encode(&envelope, &profile())
+                    .unwrap(),
+                source.as_bytes()
+            );
+            for invalid in [
+                source.replace(" uuid='22222222-2222-4222-8222-222222222222'", ""),
+                source.replace("<Form>List</Form>", "<Template>List</Template>"),
+                source.replace("<Form>List</Form>", "<FutureChild>List</FutureChild>"),
+            ] {
+                assert!(
+                    decode_source_metadata_envelope_with_policy(
+                        &XmlReader::from_slice(invalid.as_bytes()).unwrap(),
+                        profile(),
+                        path(),
+                        policy,
+                    )
+                    .is_err()
+                );
+            }
         }
     }
     #[test]
