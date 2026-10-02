@@ -1,0 +1,133 @@
+{
+  "scope": "Native N1 body S scoped science; original exit1 remains; no full matrix/OWN/product rule",
+  "historical_source_head": "7260f89668020d318d8a4ce11e54adda84bb0cf2",
+  "terminal_checkpoint_sha256": "E5E357EA83FD31647D011FF69D4FF649D539F846FA36D3434DC3A7BDE7E4F518",
+  "files": [
+    {
+      "file": "native-oracle-body-resume-terminal-checkpoint-v1.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-terminal-checkpoint-v1.json",
+      "bytes": 91840,
+      "sha256": "E5E357EA83FD31647D011FF69D4FF649D539F846FA36D3434DC3A7BDE7E4F518"
+    },
+    {
+      "file": "native-oracle-body-resume-terminal-analysis-v1.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-terminal-analysis-v1.json",
+      "bytes": 63146,
+      "sha256": "ACD528C520F24DBE7562A7C63C4EFA1642F4F45CAFDD342367B9462510831D9D"
+    },
+    {
+      "file": "terminal.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1-launch\\terminal.json",
+      "bytes": 1672,
+      "sha256": "AD170F7F48B03F58B1530BF0CC385B6E1FF5449104053F89BA4579572E83D469"
+    },
+    {
+      "file": "final-state.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\final-state.json",
+      "bytes": 353,
+      "sha256": "99FE1E1D45F17705260054B7FED49BF3816A61C9FBB828D9844849E85CFA5BE4"
+    },
+    {
+      "file": "058-n1-marker-observation.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\058-n1-marker-observation.json",
+      "bytes": 817,
+      "sha256": "388BFB73B5CFBDA89A8D4B260C9FCF88B311C8BB08D251A45F65B3416B131F78"
+    },
+    {
+      "file": "marker-observation.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\marker-observation.json",
+      "bytes": 4414,
+      "sha256": "790EBD366D1D2768AFE20091CC80618316E8E694A99C056F1C3BD832F561C872"
+    },
+    {
+      "file": "staged-header.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\staged-header.json",
+      "bytes": 2535,
+      "sha256": "C61891639054EB15093A8FEF9543FF8CB55D8E667FBA15E5FFC68E4E0289CB84"
+    },
+    {
+      "file": "identity.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\identity.json",
+      "bytes": 356,
+      "sha256": "FCCFE99AFCAABC8DF7B16AC746D83AA17548D582C84453B25783CE6F30ABB70B"
+    },
+    {
+      "file": "028-actual-n1-five-row-stage.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\028-actual-n1-five-row-stage.json",
+      "bytes": 375,
+      "sha256": "17D61E76C76D14A7FBD517D4812531B21282FA36089C6F1D7601487F29102CC2"
+    },
+    {
+      "file": "035-n1-staged-verify.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\035-n1-staged-verify.json",
+      "bytes": 145,
+      "sha256": "7FD0BAFC20CD6AD16F6B0AB127EF2ECD3A34D1FA83541F94A45D084D125D7D3B"
+    },
+    {
+      "file": "024-body-e-import.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\024-body-e-import.json",
+      "bytes": 479,
+      "sha256": "C3FA9477193E39E0FF0448DD95D819646C91BA8D2A30F7BAFC992D8F2E1E0B00"
+    },
+    {
+      "file": "054-body-e-apply.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\054-body-e-apply.json",
+      "bytes": 1748,
+      "sha256": "25EB1E0FCA64D094A14DAA88239FE64A130127A545E44294A6F8935315E48C47"
+    },
+    {
+      "file": "016-body-e-import-acquire.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\016-body-e-import-acquire.json",
+      "bytes": 136,
+      "sha256": "3B818A64C70C925F2F499864E732FDC3E0C3BAE4594BD8B27A7E26D20DCB3561"
+    },
+    {
+      "file": "025-body-e-import-release.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\025-body-e-import-release.json",
+      "bytes": 136,
+      "sha256": "3A7BEF6C487E4AE639274C98FBF2CE76DF0998C4D0D1D35EAAC578E2B33C9835"
+    },
+    {
+      "file": "045-body-e-apply-acquire.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\045-body-e-apply-acquire.json",
+      "bytes": 136,
+      "sha256": "3B818A64C70C925F2F499864E732FDC3E0C3BAE4594BD8B27A7E26D20DCB3561"
+    },
+    {
+      "file": "055-body-e-apply-release.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\055-body-e-apply-release.json",
+      "bytes": 136,
+      "sha256": "3A7BEF6C487E4AE639274C98FBF2CE76DF0998C4D0D1D35EAAC578E2B33C9835"
+    },
+    {
+      "file": "body-e-import-native-acquire-lease.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\body-e-import-native-acquire-lease.json",
+      "bytes": 407,
+      "sha256": "8F922910F1301709AA37E6603076451CE2EFEDE993C8DA96A622A41295A02BE2"
+    },
+    {
+      "file": "body-e-apply-native-acquire-lease.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\native-oracle-body-resume-v1\\body-e-apply-native-acquire-lease.json",
+      "bytes": 407,
+      "sha256": "AB621920AD124C3AAEB0768156B4523E05C434999E054D502C1A0A0902BFBF9F"
+    },
+    {
+      "file": "review-N1resume-physical-recompute-s1-mix.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\review-N1resume-physical-recompute-s1-mix.json",
+      "bytes": 3328,
+      "sha256": "A9D94321482FDA8ED838A7A1F22FF18C3F7F25E4D5D56D082D14B5D869A2964B"
+    },
+    {
+      "file": "review-N1-terminal-E5E3-s1-mix.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\review-N1-terminal-E5E3-s1-mix.json",
+      "bytes": 2197,
+      "sha256": "DF8A5745BE0BF87FDBE7F5E864D119A59FCB62170FA9605BC11FF95CE9A5D7D9"
+    },
+    {
+      "file": "review-N1-resume-terminal-E5E-root-v1.json",
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\review-N1-resume-terminal-E5E-root-v1.json",
+      "bytes": 1211,
+      "sha256": "F68EB4F91D68297DE77CAD8172955FCF57F7EDD5B41E1D0001263933EC5CB606"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "ExitCode": 0,
+  "Stdout": "{\"before\": \"n1-resume-v1-body-e-initial-v1\", \"staged\": \"n1-resume-v1-body-e-staged-v1\", \"staged_rows\": 5, \"changed_version_entries\": [\"16b3681c-426d-4d6f-9ffe-588a23974222\", \"16b3681c-426d-4d6f-9ffe-588a23974222.0\", \"root\", \"version\", \"versions\"], \"descriptor_semantically_unchanged\": true}\r\n",
+  "Stderr": ""
+}

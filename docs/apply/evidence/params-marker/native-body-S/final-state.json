@@ -1,0 +1,13 @@
+{
+  "worker_used": false,
+  "restore_executed_this_run": false,
+  "bound_names": [],
+  "drop_attempted": false,
+  "uncertain": false,
+  "OWN_applied": false,
+  "database": "ibcmd_rs_05_marker_w3_n1_body_v3_c9e54c",
+  "native_release_attempted": true,
+  "existing_DB_resume": true,
+  "restore_confirmed": true,
+  "native_potential": false
+}
