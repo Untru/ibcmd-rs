@@ -27,6 +27,10 @@ mod event_owners;
 pub use event_owners::is_native_form_event_path;
 pub use event_semantics::{EVENT_SEMANTICS_RESOURCE, apply_event_semantics_resource, write_event_semantics_resource, same_event_semantics_resource, event_semantics_resource_count};
 mod chart;
+mod chart_semantics;
+mod series_info;
+mod trend_transport;
+pub use chart_semantics::{CHART_SEMANTICS_RESOURCE, project_chart_semantics, apply_chart_semantics_resource, same_chart_semantics_resource, chart_semantics_resource_count};
 mod dcss;
 mod fields;
 mod report_refs;
@@ -40,15 +44,15 @@ mod picture_semantics;
 mod pictures;
 pub use picture_defaults::resolve_common_picture_transparency;
 pub use picture_semantics::{
-    PICTURE_SEMANTICS_RESOURCE, bind_picture_semantics, picture_semantics_resource_count,
-    project_picture_semantics, read_picture_semantics_resource, same_picture_semantics_resource,
+    PICTURE_SEMANTICS_RESOURCE, apply_native_picture_resource, write_native_picture_resource, attach_choice_picture_assets, choice_picture_assets, bind_picture_semantics, picture_semantics_resource_count,
+    project_native_picture_glyphs, project_picture_semantics, read_picture_semantics_resource, same_picture_semantics_resource,
 };
 mod projection;
 mod read;
 mod tables;
 mod write;
 
-pub use chart::{designer_dense_chart_settings, read_chart_sidecar, write_chart_sidecar};
+pub use chart::{designer_dense_chart_settings, project_native_trends, native_percentage_integer,native_percentage_projection, percentage_numeric_equal, read_chart_sidecar, write_chart_sidecar};
 pub use dcss::{
     DcsSettingsSection, read_conditional_appearance_dcssca, read_list_settings_dcss,
     write_conditional_appearance_dcssca, write_form_settings_blob, write_list_settings_dcss,
@@ -319,3 +323,6 @@ pub(crate) const FORM_COMMAND_BAR_NAME: &str = "FormCommandBar";
 
 #[cfg(any())]
 mod tests;
+
+#[doc(hidden)]
+pub use chart::normalize_big_decimal;

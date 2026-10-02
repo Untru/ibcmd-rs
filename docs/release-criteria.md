@@ -96,12 +96,20 @@ The archive contains exactly one versioned root and this allowlist:
 - `compatibility/matrix.json`;
 - `compatibility/matrix.schema.json`;
 - `sbom.cdx.json`.
+- `third-party/ibcmd-number-format/{Cargo.toml,src/lib.rs,LICENSE,NOTICE.md}`,
+  the complete source and notices of the separately licensed Rust number formatter.
+- `third-party/morph1c/{LICENSE-APACHE,NOTICE.md}`, the selected license and
+  attribution notice of the source-only codec snapshot.
 
 No DLL/shared library, Java archive/class, EDT/OSGi payload, vendor executable,
 or hidden runtime can be added without making `scripts/audit_release.py` fail.
 The audit also rejects platform-oracle markers and commands in the default
 binary and verifies that the archived binary and SBOM exactly equal the audited
 files.
+The number formatter is a Rust translation of OpenJDK 17 binary64 emission,
+licensed `GPL-2.0-only WITH Classpath-exception-2.0`. Its original notice and
+exception are retained, its actual license enters the SBOM, and the audit
+checks all four distributed source/notice files against the repository source.
 
 The CycloneDX 1.5 SBOM is generated from Cargo's locked, normal-dependency
 graph. Components and dependency edges are sorted, registry checksums are read

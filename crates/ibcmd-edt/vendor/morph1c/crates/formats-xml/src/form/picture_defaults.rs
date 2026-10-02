@@ -5,10 +5,9 @@
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 
-use morph1c_core::ir::{DecoratorBody, DecoratorRef, FormBody, FormItem, PropertyValue};
-use morph1c_core::spec::forms::command as fc;
+use morph1c_core::ir::{FormBody, PropertyValue};
 
-use super::{FormError, fields, pictures, tables};
+use super::{FormError, fields};
 
 thread_local! {
     static DEFAULTS: RefCell<BTreeMap<String, bool>> = const { RefCell::new(BTreeMap::new()) };
@@ -63,91 +62,7 @@ pub fn resolve_common_picture_transparency(
         }
         Ok(())
     };
-    visit_body(body, &mut resolve)?;
+    super::picture_semantics::visit(body, &mut |_, value| resolve(value))?;
     body.common_picture_transparency = used;
-    Ok(())
-}
-
-fn visit_body(
-    body: &mut FormBody,
-    visit: &mut impl FnMut(&mut PropertyValue) -> Result<(), FormError>,
-) -> Result<(), FormError> {
-    for command in &mut body.commands {
-        if let Some((_, picture)) = command
-            .properties
-            .iter_mut()
-            .find(|(id, _)| *id == fc::F_PICTURE)
-        {
-            visit(picture)?;
-        }
-    }
-    visit_items(&mut body.items, visit)?;
-    if let Some(bar) = &mut body.auto_command_bar {
-        visit_items(&mut bar.items, visit)?;
-    }
-    Ok(())
-}
-
-fn visit_items(
-    items: &mut [FormItem],
-    visit: &mut impl FnMut(&mut PropertyValue) -> Result<(), FormError>,
-) -> Result<(), FormError> {
-    for item in items {
-        for slot in pictures::picture_slots(&item.kind) {
-            let bag = if slot.ext {
-                &mut item.ext_info
-            } else {
-                &mut item.properties
-            };
-            if let Some((_, value)) = bag.iter_mut().find(|(id, _)| *id == slot.id) {
-                visit(value)?;
-            }
-        }
-        // ChoiceList's optional third item is itself a typed picture, not an
-        // arbitrary nested list. Derive these slots from the same codec table.
-        if let Some(kind) = tables::field_kind(item.kind.as_str()) {
-            for projection in kind.ext {
-                if matches!(projection.codec, fields::Codec::ChoiceList) {
-                    if let Some((_, PropertyValue::List(choices))) = item
-                        .ext_info
-                        .iter_mut()
-                        .find(|(id, _)| *id == projection.id)
-                    {
-                        for choice in choices {
-                            if let PropertyValue::List(parts) = choice {
-                                if let Some(picture) = parts.get_mut(2) {
-                                    visit(picture)?;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        visit_items(&mut item.children, visit)?;
-        visit_items(&mut item.additions, visit)?;
-        if let Some(table) = &mut item.auto_table {
-            visit_items(std::slice::from_mut(table.as_mut()), visit)?;
-        }
-        if let Some(bar) = &mut item.auto_command_bar {
-            visit_items(&mut bar.items, visit)?;
-        }
-        for decorator in [&mut item.context_menu, &mut item.ext_tooltip]
-            .into_iter()
-            .flatten()
-        {
-            visit_decorator(decorator, visit)?;
-        }
-    }
-    Ok(())
-}
-
-fn visit_decorator(
-    decorator: &mut DecoratorRef,
-    visit: &mut impl FnMut(&mut PropertyValue) -> Result<(), FormError>,
-) -> Result<(), FormError> {
-    if let DecoratorBody::ContextMenu(menu) = &mut decorator.body {
-        visit_items(&mut menu.items, visit)?;
-    }
     Ok(())
 }

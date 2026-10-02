@@ -18,6 +18,7 @@ unsafe_code = "forbid"
 # Canonical IR + spec-driven engine + Projection trait. The XML substrate drives
 # `core::engine` and projects FieldId↔XML; it never re-implements decode/order/default.
 morph1c-core = { path = "../core" }
+ibcmd-number-format = { path = "../../../../../ibcmd-number-format" }
 # Streaming XML tokenizer. We use quick-xml ONLY to TOKENIZE the descriptor on READ
 # (so totality §1.0 is enforced over real events, not a hand-rolled scanner). The
 # byte-exact WRITE path does NOT use a generic XML writer (those do not round-trip
@@ -25,4 +26,5 @@ morph1c-core = { path = "../core" }
 quick-xml = "0.36"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["unbounded_depth"] }
+sha2 = "0.10"
 

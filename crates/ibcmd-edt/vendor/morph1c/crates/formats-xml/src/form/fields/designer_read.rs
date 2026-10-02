@@ -667,71 +667,48 @@ pub(crate) fn read_choice_list_designer(cl: &Element) -> Result<Vec<PropertyValu
 
 /// Designer: разобрать обёртку `<app:value xsi:type="FormChoiceListDesTimeValue">` → скаляр `ValueSpec`.
 /// Дети: пустой `<Presentation/>` + скаляр `<Value xsi:type="xs:…">`.
+// Native empty Picture is a null containment; nonempty values use the same
+// fully typed picture codec as other form fields.
 fn decode_fcldtv_designer(host: &Element) -> Result<PropertyValue, FormError> {
     claim_xsi(host, "value", FCLDTV_DES)?;
     host.claim();
-    let pres = host
-        .child("Presentation")
-        .filter(|c| c.prefix.is_empty())
-        .ok_or_else(|| {
-            FormError::Frame("choiceParameters value: no <Presentation> (§1.0)".into())
-        })?;
-    pres.claim();
-    if !pres.children.is_empty() || !pres.text.is_empty() {
-        return Err(FormError::Frame(
-            "choiceParameters <Presentation> must be empty (non-empty unmodeled — §1.0)".into(),
-        ));
-    }
-    let val = host
-        .child("Value")
-        .filter(|c| c.prefix.is_empty())
-        .ok_or_else(|| FormError::Frame("choiceParameters value: no <Value> (§1.0)".into()))?;
-    if host.children.len() != 2 {
-        return Err(FormError::Frame(
-            "choiceParameters FormChoiceListDesTimeValue: expected Presentation+Value (§1.0)"
-                .into(),
-        ));
-    }
-    // МАССИВ-значение (ERP-witness ТипыДействийЭтаповПодготовкиБюджетов): `<Value
-    // xsi:type="v8:FixedArray">` с `<v8:Value xsi:type=FCLDTV>`-детьми (пустой Presentation +
-    // скаляр `<Value>`). Канон — List(скаляры) (⟷ EDT `core:FixedArrayValue`).
-    if matches!(val.attr("xsi:type"), Some(a) if a.value == "v8:FixedArray") {
-        let xt = val.attr("xsi:type").expect("checked above");
-        xt.claimed.set(true);
-        val.claim();
-        let mut out = Vec::new();
-        for it in &val.children {
-            if it.local != "Value" || it.prefix != "v8" {
-                return Err(FormError::Frame(format!(
-                    "choiceParameters v8:FixedArray: expected <v8:Value>, got <{}:{}> (§1.0)",
-                    it.prefix, it.local
-                )));
+    let mut presentation = Vec::new();
+    let mut picture = None;
+    let mut value = None;
+    let mut saw_picture = false;
+    let mut saw_presentation = false;
+    for child in &host.children {
+        if !child.prefix.is_empty() { return Err(FormError::Frame("choice wrapper child namespace".into())); }
+        match child.local.as_str() {
+            "Presentation" if !saw_presentation => {
+                saw_presentation = true;
+                let PropertyValue::Localized(pairs) = decode_designer_localized(child)? else { unreachable!() };
+                presentation = pairs;
             }
-            claim_xsi(it, "v8:Value", FCLDTV_DES)?;
-            it.claim();
-            let pres = it.child("Presentation").filter(|c| c.prefix.is_empty());
-            if let Some(pres) = pres {
-                pres.claim();
-                if !pres.children.is_empty() || !pres.text.is_empty() {
-                    return Err(FormError::Frame(
-                        "choiceParameters v8:FixedArray <Presentation> must be empty (§1.0)".into(),
-                    ));
-                }
+            "Picture" if !saw_picture => {
+                saw_picture = true;
+                if child.children.is_empty() && child.attrs.is_empty() && child.text.is_empty() { child.claim(); }
+                else { picture = Some(decode_choice_picture(child)?); }
             }
-            let inner = it
-                .child("Value")
-                .filter(|c| c.prefix.is_empty())
-                .ok_or_else(|| {
-                    FormError::Frame("choiceParameters v8:FixedArray: no <Value> (§1.0)".into())
-                })?;
-            inner.claim();
-            out.push(value_codec::decode(ValueDialect::Designer, inner).map_err(FormError::Frame)?);
+            "Value" if value.is_none() => { value = Some(child); }
+            _ => return Err(FormError::Frame("choice wrapper unknown or duplicate child".into())),
         }
-        return Ok(PropertyValue::List(out));
     }
-    val.claim();
-    let value = value_codec::decode(ValueDialect::Designer, val).map_err(FormError::Frame)?;
-    Ok(value)
+    let val = value.ok_or_else(|| FormError::Frame("choice wrapper requires Value".into()))?;
+    let current = if matches!(val.attr("xsi:type"), Some(a) if a.value == "v8:FixedArray") {
+        claim_xsi(val, "Value", "v8:FixedArray")?;
+        val.claim();
+        let mut values = Vec::new();
+        for child in &val.children {
+            if child.local != "Value" || child.prefix != "v8" { return Err(FormError::Frame("choice FixedArray member namespace".into())); }
+            values.push(decode_fcldtv_designer(child)?);
+        }
+        PropertyValue::List(values)
+    } else {
+        val.claim();
+        value_codec::decode(ValueDialect::Designer, val).map_err(FormError::Frame)?
+    };
+    Ok(choice_wrapper_value(current, presentation, picture))
 }
 
 /// Прочитать Designer-контейнер `<ChoiceParameters>` (c `<app:item>`-детьми) в список пар.
@@ -864,4 +841,26 @@ fn read_choice_parameter_links_designer(cl: &Element) -> Result<Vec<PropertyValu
         items.push(PropertyValue::List(entry));
     }
     Ok(items)
+}
+
+fn decode_choice_picture(el: &Element) -> Result<PropertyValue, FormError> {
+    let Some(abs) = el.child("Abs").filter(|c| c.prefix == "xr") else {
+        return decode_designer_picture(el, "Picture");
+    };
+    super::super::picture_semantics::validate_asset_path(&abs.text)?;
+    el.claim(); abs.claim_with_text();
+    let lt = el.child("LoadTransparent").filter(|c| c.prefix == "xr")
+        .ok_or_else(|| FormError::Frame("choice Picture: missing LoadTransparent".into()))?;
+    lt.claim_with_text();
+    let flag = picture_lt_value(&lt.text, "Picture")?;
+    let pixel = el.child("TransparentPixel").filter(|c| c.prefix == "xr");
+    if el.children.len() != if pixel.is_some() { 3 } else { 2 } {
+        return Err(FormError::Frame("choice Picture: duplicate/unknown child".into()));
+    }
+    let reference = format!("abs-file:{}", abs.text);
+    match pixel {
+        Some(pixel) if flag => Ok(picture_canon_px(reference, decode_designer_transparent_pixel(pixel,"Picture")?)),
+        Some(_) => Err(FormError::Frame("choice Picture: pixel requires LoadTransparent=true".into())),
+        None => Ok(picture_canon(reference, flag)),
+    }
 }

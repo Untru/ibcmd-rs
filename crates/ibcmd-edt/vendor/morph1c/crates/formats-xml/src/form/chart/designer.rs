@@ -37,11 +37,14 @@ pub(crate) fn read_designer_chart_settings(
         a.claimed.set(true);
     }
     expect_attrs_claimed(s, "<Settings>")?;
+    super::data_items::validate_value_namespaces(s, true)?;
     let fields = d_read_children(&s.children, t, "<Settings>")?;
-    Ok(ChartSettings {
-        kind: kind.to_string(),
+    super::semantic::from_source(
+        kind,
         fields,
-    })
+        morph1c_core::ir::form::ChartSourceFormat::Designer,
+        s,
+    )
 }
 
 /// Прочитать designer-детей по таблице `t` (префикс `d4p1`), сохранив порядок файла.
@@ -61,6 +64,26 @@ fn d_read_children(
                 el.prefix, el.local
             )));
         }
+        if t == Tbl::SeriesItem && el.local == "trendline" {
+            let mut lines = Vec::new();
+            while i < children.len()
+                && children[i].prefix == "d4p1"
+                && children[i].local == "trendline"
+            {
+                let line = &children[i];
+                line.claim();
+                expect_attrs_claimed(line, path)?;
+                lines.push(d_read_children(&line.children, Tbl::Trend, path)?);
+                i += 1;
+            }
+            if out.iter().any(|(n, _)| n == "__associated_trendlines") {
+                return Err(frame(format!(
+                    "chart {path}: nonadjacent repeated trendlines"
+                )));
+            }
+            out.push(("__associated_trendlines".into(), ChartValue::Items(lines)));
+            continue;
+        }
         let row = row_by_designer_name(t, &el.local).ok_or_else(|| {
             frame(format!(
                 "chart {path}: незнакомое поле <{}> (§1.0)",
@@ -75,6 +98,20 @@ fn d_read_children(
         }
         seen.push(row.name);
         match row.shape {
+            Shape::Colors if t == Tbl::BackIntervals => {
+                let mut items = Vec::new();
+                while i < children.len()
+                    && children[i].prefix == "d4p1"
+                    && children[i].local == el.local
+                {
+                    let child = &children[i];
+                    let color = leaf_text(child, path)?;
+                    check_color_canon(&color, path)?;
+                    items.push(vec![("value".into(), ChartValue::Color(color))]);
+                    i += 1;
+                }
+                out.push((row.name.into(), ChartValue::Items(items)));
+            }
             Shape::SeriesItems | Shape::PointItems | Shape::Items(_) => {
                 let sub = match row.shape {
                     Shape::SeriesItems => Tbl::SeriesItem,
@@ -108,12 +145,118 @@ fn d_read_children(
             }
         }
     }
+    if t == Tbl::Chart {
+        collect_associated_trendlines(&mut out)?;
+    }
     Ok(out)
+}
+
+fn collect_associated_trendlines(fields: &mut Vec<(String, ChartValue)>) -> Result<(), FormError> {
+    let mut arrays = Vec::new();
+    for (name, value) in fields.iter_mut() {
+        if !matches!(name.as_str(), "realSeriesData" | "realExSeriesData") {
+            continue;
+        }
+        let groups: Vec<&mut Vec<(String, ChartValue)>> = match value {
+            ChartValue::Items(items) => items.iter_mut().collect(),
+            ChartValue::Nested(f) => vec![f],
+            _ => return Err(frame("chart: invalid current series shape".into())),
+        };
+        for f in groups {
+            if let Some(i) = f.iter().position(|(n, _)| n == "__associated_trendlines") {
+                let (_, lines) = f.remove(i);
+                let id = f
+                    .iter()
+                    .find(|(n, _)| n == "id")
+                    .map(|(_, v)| v.clone())
+                    .unwrap_or_else(|| ChartValue::Int("1".into()));
+                arrays.push(vec![("seriesId".into(), id), ("line".into(), lines)]);
+            }
+        }
+    }
+    if !arrays.is_empty() {
+        if fields.iter().any(|(n, _)| n == "trendLinesArray") {
+            return Err(frame(
+                "chart: ambiguous root and associated trendline declarations".into(),
+            ));
+        }
+        fields.push(("trendLinesArray".into(), ChartValue::Items(arrays)));
+    }
+    Ok(())
 }
 
 /// Прочитать ОДНО designer-значение по шейпу строки.
 fn d_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormError> {
     match row.shape {
+        Shape::Colors => {
+            el.claim();
+            expect_attrs_claimed(el, path)?;
+            if !el.text.is_empty() {
+                return Err(frame(format!("chart {path}: Color list has text")));
+            }
+            let mut items = Vec::new();
+            for child in &el.children {
+                if child.prefix != "v8" || child.local != "Value" || !child.children.is_empty() {
+                    return Err(frame(format!(
+                        "chart {path}: expected typed v8:Value Color"
+                    )));
+                }
+                child.claim_with_text();
+                let typ = child
+                    .attr("xsi:type")
+                    .ok_or_else(|| frame(format!("chart {path}: Color item missing type")))?;
+                if typ.value != "v8ui:Color" {
+                    return Err(frame(format!("chart {path}: incorrect Color item type")));
+                }
+                typ.claimed.set(true);
+                expect_attrs_claimed(child, path)?;
+                check_color_canon(&child.text, path)?;
+                items.push(vec![(
+                    "value".into(),
+                    ChartValue::Color(child.text.clone()),
+                )]);
+            }
+            Ok(ChartValue::Items(items))
+        }
+        Shape::Picture => super::picture::read(el, path, true),
+        Shape::Value
+            if matches!(
+                row.name,
+                "semitransparencyPercent" | "borderSemitransparencyPercent"
+            ) && el.attr("xsi:type").is_none() =>
+        {
+            let number = leaf_text(el, path)?;
+            if matches!(number.as_str(), "Infinity" | "-Infinity") {
+                return Ok(ChartValue::Value(Box::new(
+                    morph1c_core::ir::form::ChartTypedValue::Scalar(
+                        morph1c_core::ir::value::PropertyValue::Value(
+                            morph1c_core::ir::value::ValueSpec {
+                                kind: morph1c_core::ir::value::ValueScalarKind::Undefined,
+                                scalar: None,
+                            },
+                        ),
+                    ),
+                )));
+            }
+            if !super::semantic::valid_big_decimal(&number) {
+                return Err(frame(format!(
+                    "chart {path}: invalid NumberValue percentage"
+                )));
+            }
+            Ok(ChartValue::Value(Box::new(
+                morph1c_core::ir::form::ChartTypedValue::Scalar(
+                    morph1c_core::ir::value::PropertyValue::Value(
+                        morph1c_core::ir::value::ValueSpec {
+                            kind: morph1c_core::ir::value::ValueScalarKind::Number,
+                            scalar: Some(Box::new(morph1c_core::ir::value::PropertyValue::Str(
+                                designer_decimal(&number),
+                            ))),
+                        },
+                    ),
+                ),
+            )))
+        }
+        Shape::Value => super::data_items::read_value(el, path, true),
         Shape::Bool => Ok(ChartValue::Bool(parse_bool(&leaf_text(el, path)?, path)?)),
         Shape::Int => Ok(ChartValue::Int(leaf_text(el, path)?)),
         // Канон decimal — EDT-лексика (`10.0`), designer эмитит без `.0` (ср. FontRef::height).
@@ -132,7 +275,13 @@ fn d_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
         Shape::Rect => read_rect(el, "d4p1", path),
         Shape::Nested(t2) => {
             el.claim();
+            if t2 == Tbl::GaugeBands {
+                return d_read_gauge(el, path);
+            }
             expect_attrs_claimed(el, path)?;
+            if t2 == Tbl::Axis {
+                return d_read_axis(el, path);
+            }
             Ok(ChartValue::Nested(d_read_children(&el.children, t2, path)?))
         }
         Shape::ChartTable => {
@@ -153,7 +302,7 @@ fn d_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
                 path,
             )?))
         }
-        Shape::DataItems => d_read_data_items(el, path),
+        Shape::DataItems => super::data_items::read_native(el, path),
         Shape::QBands => {
             el.claim();
             if !el.children.is_empty() {
@@ -177,48 +326,7 @@ fn d_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
 
 /// Designer-шрифт: `<f kind="AutoFont"/>` | `<f ref="style:X" [height="6"] kind="StyleItem"/>`.
 fn d_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
-    el.claim();
-    if !el.children.is_empty() {
-        return Err(frame(format!(
-            "chart {path}: шрифт с детьми не витнесснут (§1.0)"
-        )));
-    }
-    let kind = attr_req(el, "kind", path)?;
-    let font = match kind.as_str() {
-        "AutoFont" => auto_font(),
-        "StyleItem" => {
-            let r = attr_req(el, "ref", path)?;
-            let name = r.strip_prefix("style:").ok_or_else(|| {
-                frame(format!(
-                    "chart {path}: ref={r:?} — не style:-ссылка шрифта (§1.0)"
-                ))
-            })?;
-            let height = match el.attr("height") {
-                Some(a) => {
-                    a.claimed.set(true);
-                    Some(edt_decimal(&a.value))
-                }
-                None => None,
-            };
-            FontRef {
-                auto: false,
-                font_ref: Some(format!("Style.{name}")),
-                height,
-                bold: d_font_bool(el, "bold", path)?,
-                italic: d_font_bool(el, "italic", path)?,
-                underline: d_font_bool(el, "underline", path)?,
-                strikeout: d_font_bool(el, "strikeout", path)?,
-                ..auto_font()
-            }
-        }
-        other => {
-            return Err(frame(format!(
-                "chart {path}: шрифт kind={other:?} не витнесснут (§1.0)"
-            )));
-        }
-    };
-    expect_attrs_claimed(el, path)?;
-    Ok(ChartValue::Font(font))
+    chart_read_designer_font(el, path)
 }
 
 fn d_font_bool(el: &Element, name: &str, path: &str) -> Result<Option<bool>, FormError> {
@@ -393,7 +501,11 @@ pub(crate) fn designer_chart_settings(cs: &ChartSettings) -> Result<OutElement, 
     let mut s = OutElement::branch("", "Settings")
         .attr("xmlns:d4p1", CHART_D4P1_NS_URI)
         .attr("xsi:type", format!("d4p1:{}", cs.kind));
-    for out in d_children_out(&cs.fields, t, &cs.kind)? {
+    let fields =
+        super::semantic::emission_fields(cs, morph1c_core::ir::form::ChartSourceFormat::Designer)?;
+    let mut output = d_children_out(&fields, t, &cs.kind)?;
+    super::semantic::restore_native_picture_layout(&mut output, cs)?;
+    for out in output {
         s.push(out);
     }
     Ok(s)
@@ -409,14 +521,80 @@ fn d_children_out(
     for (name, v) in fields {
         let row = row_by_name(t, name)
             .ok_or_else(|| frame(format!("chart {path}: незнакомое поле {name:?} (§1.0)")))?;
-        if !row.designer {
-            return Err(frame(format!(
-                "chart {path}: designer-форма поля {name:?} не витнесснута (EDT-only) (§1.0)"
-            )));
+        if t == Tbl::Chart && name == "trendLinesArray" {
+            continue;
         }
         outs.extend(d_value_out(row, v, &format!("{path}/{name}"))?);
     }
+    if t == Tbl::Chart {
+        emit_associated_trendlines(&mut outs, fields, path)?;
+    }
     Ok(outs)
+}
+
+fn emit_associated_trendlines(
+    outputs: &mut [OutElement],
+    fields: &[(String, ChartValue)],
+    path: &str,
+) -> Result<(), FormError> {
+    let Some((_, value)) = fields.iter().find(|(n, _)| n == "trendLinesArray") else {
+        return Ok(());
+    };
+    let ChartValue::Items(arrays) = value else {
+        return Err(frame("chart: trendLinesArray must be typed Items".into()));
+    };
+    let current = ChartSettings {
+        kind: "Chart".into(),
+        fields: fields.to_vec(),
+        source_layout: None,
+    };
+    let projected = super::semantic::project_native_trends(&current)?;
+    let projected_arrays = projected
+        .fields
+        .iter()
+        .find(|(n, _)| n == "trendLinesArray")
+        .map(|(_, v)| v);
+    if projected_arrays != Some(value) {
+        return Err(frame(
+            "chart: unprojected trend topology requires bound typed transport".into(),
+        ));
+    }
+    for series in outputs
+        .iter_mut()
+        .filter(|e| matches!(e.local.as_str(), "realSeriesData" | "realExSeriesData"))
+    {
+        let id = series
+            .children
+            .iter()
+            .find(|c| c.local == "id")
+            .and_then(|c| c.text.as_deref())
+            .unwrap_or("1");
+        let Some(array) = arrays.iter().find(|array| {
+            array
+                .iter()
+                .any(|(n, v)| n == "seriesId" && matches!(v,ChartValue::Int(key) if key == id))
+        }) else {
+            continue;
+        };
+        let Some(ChartValue::Items(lines)) =
+            array.iter().find(|(n, _)| n == "line").map(|(_, v)| v)
+        else {
+            return Err(frame(
+                "chart: trendline association requires current lines".into(),
+            ));
+        };
+        let mut generated = Vec::new();
+        for line in lines {
+            generated.push(d_composite_out("trendline", line, Tbl::Trend, path)?);
+        }
+        let position = series
+            .children
+            .iter()
+            .position(|e| e.local == "showGraphicalDataRepresentationInChartLegend")
+            .unwrap_or(series.children.len());
+        series.children.splice(position..position, generated);
+    }
+    Ok(())
 }
 
 /// Designer-эмиссия ОДНОГО поля (повторяемые шейпы дают несколько элементов).
@@ -424,15 +602,107 @@ fn d_value_out(row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutElement>,
     let name = row.d_name();
     let one = |el: OutElement| Ok(vec![el]);
     match (row.shape, v) {
+        (Shape::Colors, ChartValue::Items(items)) => {
+            if items.is_empty() {
+                return Ok(Vec::new());
+            }
+            if row.name == "contentCacheItem" {
+                let mut result = Vec::new();
+                for fields in items {
+                    let [(key, ChartValue::Color(color))] = fields.as_slice() else {
+                        return Err(frame(
+                            "chart: background Color collection item must be typed".into(),
+                        ));
+                    };
+                    if key != "value" {
+                        return Err(frame(
+                            "chart: background Color collection item has unknown field".into(),
+                        ));
+                    }
+                    check_color_canon(color, path)?;
+                    result.push(OutElement::leaf("d4p1", name, color.clone()));
+                }
+                return Ok(result);
+            }
+            let mut host = OutElement::branch("d4p1", name);
+            for fields in items {
+                let [(key, ChartValue::Color(color))] = fields.as_slice() else {
+                    return Err(frame(format!(
+                        "chart {path}: Color list item must have one typed value"
+                    )));
+                };
+                if key != "value" {
+                    return Err(frame(format!("chart {path}: unknown Color item field")));
+                }
+                check_color_canon(color, path)?;
+                host.push(
+                    OutElement::leaf("v8", "Value", color.clone()).attr("xsi:type", "v8ui:Color"),
+                );
+            }
+            one(host)
+        }
+        (Shape::Picture, value) => one(super::picture::write(name, value, path, true)?),
+        (Shape::Value, ChartValue::Value(value))
+            if matches!(
+                row.name,
+                "semitransparencyPercent" | "borderSemitransparencyPercent"
+            ) =>
+        {
+            use morph1c_core::ir::form::ChartTypedValue;
+            use morph1c_core::ir::value::{PropertyValue, ValueScalarKind};
+            if let ChartTypedValue::ProjectedNumber(number) = value.as_ref() {
+                if !super::semantic::valid_big_decimal(number)
+                    && !matches!(number.as_str(), "Infinity" | "-Infinity")
+                {
+                    return Err(frame(format!("chart {path}: invalid projected percentage")));
+                }
+                return one(OutElement::leaf("d4p1", name, number.clone()));
+            }
+            let ChartTypedValue::Scalar(PropertyValue::Value(v)) = value.as_ref() else {
+                return Err(frame(format!(
+                    "chart {path}: nonNumber percentage requires bound typed transport"
+                )));
+            };
+            if v.kind != ValueScalarKind::Number {
+                return Err(frame(format!(
+                    "chart {path}: nonNumber percentage requires bound typed transport"
+                )));
+            }
+            let Some(PropertyValue::Str(number)) = v.scalar.as_deref() else {
+                return Err(frame(format!(
+                    "chart {path}: NumberValue percentage lacks string scalar"
+                )));
+            };
+            if !super::semantic::valid_big_decimal(number) {
+                return Err(frame(format!(
+                    "chart {path}: invalid current NumberValue percentage"
+                )));
+            }
+            one(OutElement::leaf(
+                "d4p1",
+                name,
+                super::percent::native_percentage_projection(number)?.0,
+            ))
+        }
+        (Shape::Value, value) => one(super::data_items::write_value(name, value, path, true)?),
         (Shape::Bool, ChartValue::Bool(b)) => one(OutElement::leaf(
             "d4p1",
             name,
             if *b { "true" } else { "false" },
         )),
         (Shape::Int, ChartValue::Int(s)) => one(OutElement::leaf("d4p1", name, s.clone())),
-        (Shape::Dec, ChartValue::Int(s)) => {
-            one(OutElement::leaf("d4p1", name, designer_decimal(s)))
-        }
+        (Shape::Dec, ChartValue::Int(s)) => one(OutElement::leaf(
+            "d4p1",
+            name,
+            if matches!(
+                name,
+                "funnelNeckHeightPercent" | "funnelNeckWidthPercent" | "funnelGapSumPercent"
+            ) {
+                edt_decimal(&designer_decimal(s))
+            } else {
+                designer_decimal(s)
+            },
+        )),
         (Shape::Str | Shape::DateTime, ChartValue::Str(s)) => one(if s.is_empty() {
             OutElement::self_closing("d4p1", name)
         } else {
@@ -512,36 +782,7 @@ fn d_value_out(row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutElement>,
             Ok(outs)
         }
         (Shape::DataItems, ChartValue::Items(items)) => {
-            let mut host = OutElement::branch("d4p1", name);
-            for item in items {
-                let [(vn, vv)] = item.as_slice() else {
-                    return Err(frame(format!(
-                        "chart {path}: item realDataItems несёт не ровно valData (§1.0)"
-                    )));
-                };
-                let ChartValue::Int(text) = vv else {
-                    return Err(frame(format!(
-                        "chart {path}: valData — не лексическое число (§1.0)"
-                    )));
-                };
-                if vn != "valData" {
-                    return Err(frame(format!(
-                        "chart {path}: незнакомое поле {vn:?} в item realDataItems (§1.0)"
-                    )));
-                }
-                let mut it = OutElement::branch("d4p1", "item");
-                it.push(
-                    OutElement::leaf("d4p1", "valData", text.clone())
-                        .attr("xsi:type", "xs:decimal"),
-                );
-                it.push(OutElement::self_closing("d4p1", "valInfo").attr("xsi:nil", "true"));
-                it.push(OutElement::self_closing("d4p1", "toolTip"));
-                host.push(it);
-            }
-            if host.children.is_empty() {
-                host.self_closing = true;
-            }
-            one(host)
+            one(super::data_items::write_native(name, items, path)?)
         }
         (Shape::QBands, ChartValue::Nested(f)) => {
             let get = |n: &str| -> Result<bool, FormError> {
@@ -572,6 +813,117 @@ fn d_composite_out(
     path: &str,
 ) -> Result<OutElement, FormError> {
     let mut host = OutElement::branch("d4p1", name);
+    if t == Tbl::GaugeBands {
+        let mut children = Vec::new();
+        for (n, v) in fields {
+            if n == "useTextStr" || n == "useTooltipStr" {
+                let ChartValue::Bool(value) = v else {
+                    return Err(frame(format!("chart {path}: gauge flag must be boolean")));
+                };
+                host = host.attr(n, value.to_string());
+            } else {
+                children.push((n.clone(), v.clone()));
+            }
+        }
+        for out in d_children_out(&children, t, path)? {
+            host.push(out);
+        }
+        host.self_closing = host.children.is_empty();
+        return Ok(host);
+    }
+    if t == Tbl::Axis {
+        let value = |n: &str| fields.iter().find(|(s, _)| s == n).map(|(_, v)| v);
+        let default = value("baseValue")
+            .is_none_or(|v| matches!(v,ChartValue::Int(s) if s=="0" || s=="0.0"))
+            && ["minValueDetectionMethod", "maxValueDetectionMethod"]
+                .iter()
+                .all(|n| {
+                    value(n).is_none_or(|v| matches!(v,ChartValue::Enum(s) if s=="AutoDetect"))
+                });
+        if let Some(ChartValue::Nested(interval)) = value("interval") {
+            for side in ["left", "right"] {
+                let get = |suffix: &str| {
+                    interval
+                        .iter()
+                        .find(|(n, _)| n == &format!("{side}{suffix}"))
+                        .map(|(_, v)| v)
+                };
+                match get("IsNum") {
+                    Some(ChartValue::Bool(true))
+                        if !matches!(get("Date"), None | Some(ChartValue::Absent)) =>
+                    {
+                        return Err(frame(
+                            "chart: inactive axis date requires bound typed transport".into(),
+                        ));
+                    }
+                    Some(ChartValue::Bool(false))
+                        if !get("Num").is_none_or(
+                            |v| matches!(v,ChartValue::Int(n) if designer_decimal(n) == "0"),
+                        ) =>
+                    {
+                        return Err(frame(
+                            "chart: inactive axis number requires bound typed transport".into(),
+                        ));
+                    }
+                    Some(ChartValue::Bool(false))
+                        if matches!(get("Date"), None | Some(ChartValue::Absent)) =>
+                    {
+                        return Err(frame(
+                            "chart: nullable date-mode boundary requires bound typed transport"
+                                .into(),
+                        ));
+                    }
+                    _ => {}
+                }
+            }
+        }
+        let interval_default = value("interval").is_some_and(|v| match v {
+            ChartValue::Nested(f) => f.iter().all(|(n, v)| match (n.as_str(), v) {
+                ("leftIsNum" | "rightIsNum", ChartValue::Bool(b)) => *b,
+                ("leftNum" | "rightNum", ChartValue::Int(n)) => designer_decimal(n) == "0",
+                ("leftDate" | "rightDate", ChartValue::Absent) => true,
+                _ => false,
+            }),
+            _ => false,
+        });
+        // Preserve every current bound; never treat active nonzero values as defaults.
+        let default = default && interval_default;
+        if !default {
+            if let Some(ChartValue::Int(s)) = value("baseValue") {
+                host.push(OutElement::leaf("d4p1", "baseValue", designer_decimal(s)));
+            }
+            let interval = value("interval").and_then(|v| match v {
+                ChartValue::Nested(f) => Some(f),
+                _ => None,
+            });
+            for (side, tag) in [("left", "minValue"), ("right", "maxValue")] {
+                let get =
+                    |n: &str| interval.and_then(|f| f.iter().find(|(s, _)| s == n).map(|(_, v)| v));
+                let numeric = matches!(get(&format!("{side}IsNum")), Some(ChartValue::Bool(true)));
+                let data = get(&format!("{side}{}", if numeric { "Num" } else { "Date" }));
+                match data {
+                    Some(ChartValue::Int(s)) if numeric => host.push(
+                        OutElement::leaf("d4p1", tag, designer_decimal(s))
+                            .attr("xsi:type", "xs:decimal"),
+                    ),
+                    Some(ChartValue::Str(s)) if !numeric => host.push(
+                        OutElement::leaf("d4p1", tag, s.clone()).attr("xsi:type", "xs:dateTime"),
+                    ),
+                    None => {}
+                    _ => return Err(frame(format!("chart {path}: axis boundary type mismatch"))),
+                }
+            }
+            for n in ["minValueDetectionMethod", "maxValueDetectionMethod"] {
+                if let Some(ChartValue::Enum(s)) = value(n) {
+                    host.push(OutElement::leaf("d4p1", n, s.clone()));
+                }
+            }
+        }
+        if host.children.is_empty() {
+            host.self_closing = true;
+        }
+        return Ok(host);
+    }
     for out in d_children_out(fields, t, path)? {
         host.push(out);
     }
@@ -581,49 +933,75 @@ fn d_composite_out(
     Ok(host)
 }
 
+fn d_read_axis(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    let mut fields = Vec::new();
+    let mut interval = Vec::new();
+    let mut seen = Vec::new();
+    for c in &el.children {
+        if c.prefix != "d4p1" || seen.contains(&c.local) {
+            return Err(frame(format!(
+                "chart {path}: unknown or duplicate axis field"
+            )));
+        }
+        seen.push(c.local.clone());
+        match c.local.as_str() {
+            "baseValue" => fields.push((
+                c.local.clone(),
+                ChartValue::Int(designer_decimal(&leaf_text(c, path)?)),
+            )),
+            "minValueDetectionMethod" | "maxValueDetectionMethod" => {
+                fields.push((c.local.clone(), ChartValue::Enum(leaf_text(c, path)?)))
+            }
+            "minValue" | "maxValue" => {
+                let side = if c.local == "minValue" {
+                    "left"
+                } else {
+                    "right"
+                };
+                let xt = attr_req(c, "xsi:type", path)?;
+                let numeric = match xt.as_str() {
+                    "xs:decimal" => true,
+                    "xs:dateTime" => false,
+                    _ => {
+                        return Err(frame(format!(
+                            "chart {path}: unsupported axis boundary type"
+                        )));
+                    }
+                };
+                let text = leaf_text(c, path)?;
+                interval.push((format!("{side}IsNum"), ChartValue::Bool(numeric)));
+                interval.push((
+                    format!("{side}{}", if numeric { "Num" } else { "Date" }),
+                    if numeric {
+                        ChartValue::Int(designer_decimal(&text))
+                    } else {
+                        ChartValue::Str(text)
+                    },
+                ));
+            }
+            _ => return Err(frame(format!("chart {path}: unknown axis field"))),
+        }
+    }
+    if !interval.is_empty() {
+        fields.push(("interval".into(), ChartValue::Nested(interval)));
+    }
+    Ok(ChartValue::Nested(fields))
+}
+
 /// Designer-шрифт из канона [`FontRef`].
 fn d_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormError> {
-    if f.face_name.is_some() || f.scale.is_some() {
-        return Err(frame(format!(
-            "chart {path}: шрифт с переопределениями (не AutoFont/StyleItem) не витнесснут (§1.0)"
-        )));
-    }
-    match &f.font_ref {
-        None => {
-            if f.height.is_some()
-                || f.bold.is_some()
-                || f.italic.is_some()
-                || f.underline.is_some()
-                || f.strikeout.is_some()
-            {
-                return Err(frame(format!(
-                    "chart {path}: AutoFont с height не витнесснут (§1.0)"
-                )));
-            }
-            Ok(OutElement::self_closing("d4p1", name).attr("kind", "AutoFont"))
-        }
-        Some(r) => {
-            let style_name = r.strip_prefix("Style.").ok_or_else(|| {
-                frame(format!(
-                    "chart {path}: шрифт-ссылка {r:?} — не Style.-ссылка (§1.0)"
-                ))
-            })?;
-            let mut el =
-                OutElement::self_closing("d4p1", name).attr("ref", format!("style:{style_name}"));
-            if let Some(h) = &f.height {
-                el = el.attr("height", designer_decimal(h));
-            }
-            for (name, value) in [
-                ("bold", f.bold),
-                ("italic", f.italic),
-                ("underline", f.underline),
-                ("strikeout", f.strikeout),
-            ] {
-                if let Some(value) = value {
-                    el = el.attr(name, value.to_string());
-                }
-            }
-            Ok(el.attr("kind", "StyleItem"))
+    chart_designer_font_out(name, f, path)
+}
+
+fn d_read_gauge(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    let mut fields = Vec::new();
+    for n in ["useTextStr", "useTooltipStr"] {
+        if let Some(a) = el.attr(n) {
+            a.claimed.set(true);
+            fields.push((n.into(), ChartValue::Bool(parse_bool(&a.value, path)?)));
         }
     }
+    expect_attrs_claimed(el, path)?;
+    fields.extend(d_read_children(&el.children, Tbl::GaugeBands, path)?);
+    Ok(ChartValue::Nested(fields))
 }

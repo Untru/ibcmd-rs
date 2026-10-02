@@ -956,7 +956,9 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
     }
     if parts.last().copied() == Some(formats_xml::form::PICTURE_SEMANTICS_RESOURCE)
         && (parts.len() == 3 && parts[0] == "CommonForms"
-            || parts.len() == 5 && parts[2] == "Forms")
+            || parts.len() == 5 && parts[2] == "Forms"
+            || parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
+            || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
     {
         // Only the versioned form resource consumed by the typed pipeline has
         // JSON lexical freedom; unrelated JSON remains byte-exact.
@@ -967,6 +969,35 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
             || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
     {
         return Ok(formats_xml::form::same_event_semantics_resource(a, b));
+    }
+    if parts.last().copied() == Some(formats_xml::form::CHART_SEMANTICS_RESOURCE)
+        && (parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
+            || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
+    {
+        return Ok(formats_xml::form::same_chart_semantics_resource(a, b));
+    }
+    let chart_sidecar_path = (parts.len() == 6
+        && parts[0] == "CommonForms"
+        && parts[2] == "Attributes"
+        && parts[4] == "ExtInfo")
+        || (parts.len() == 8
+            && parts[2] == "Forms"
+            && parts[4] == "Attributes"
+            && parts[6] == "ExtInfo");
+    if chart_sidecar_path
+        && matches!(
+            parts.last().copied(),
+            Some("Chart.chart" | "GanttChart.chart")
+        )
+    {
+        // The strict chart codec accounts for every source node and attribute.
+        // Compare its complete current typed values: Java BigDecimal accepts
+        // BMP decimal digits which EDT subsequently writes as ASCII digits.
+        // This never substitutes an earlier value or ignores unknown XML.
+        return Ok(
+            formats_xml::form::read_chart_sidecar(a).map_err(EdtError::source)?
+                == formats_xml::form::read_chart_sidecar(b).map_err(EdtError::source)?,
+        );
     }
     let mobile_format = match path {
         "Ext/MobileClientSignature.bin"
@@ -1039,6 +1070,7 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
             inherited: &BTreeMap<String, String>,
             preserve_space: bool,
             ancestors: &[&str],
+            in_chart_settings: bool,
         ) -> Result<serde_json::Value, EdtError> {
             use ibcmd_xml::{AttributeKind, XmlNode};
             let mut namespaces = inherited.clone();
@@ -1089,6 +1121,29 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
             let name = expanded(e.name(), false)?;
             let mut path = ancestors.to_vec();
             path.push(name.as_str());
+            let in_chart_settings = in_chart_settings
+                || (name == "{http://v8.1c.ru/8.3/xcf/logform}Settings"
+                    && attrs
+                        .get("{http://www.w3.org/2001/XMLSchema-instance}type")
+                        .is_some_and(|value| {
+                            let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+                            matches!(local, "Chart" | "GanttChart")
+                                && namespaces.get(prefix).map(String::as_str)
+                                    == Some("http://v8.1c.ru/8.2/data/chart")
+                        }));
+            let chart_decimal = path.first().copied()
+                == Some("{http://v8.1c.ru/8.3/xcf/logform}Form")
+                && in_chart_settings
+                && attrs.len() == 1
+                && attrs
+                    .get("{http://www.w3.org/2001/XMLSchema-instance}type")
+                    .is_some_and(|value| {
+                        let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+                        local == "decimal"
+                            && namespaces.get(prefix).map(String::as_str)
+                                == Some("http://www.w3.org/2001/XMLSchema")
+                    })
+                && !branches;
             let sparse_cmi_false = path.first().copied()
                 == Some("{http://g5.1c.ru/v8/dt/form}Form")
                 && path.len() == 6
@@ -1111,11 +1166,48 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
                     == Some("form:ColumnGroupExtInfo")
                 && !mixed
                 && !preserve_space;
+            // Original SDK empty Picture import leaves this exact containment
+            // null; its 8.5.1 writer materializes the empty node. No other slot
+            // or nonempty picture shares this equivalence.
+            let native_form_uri = "http://v8.1c.ru/8.3/xcf/logform";
+            let type_is_choice = attrs
+                .get("{http://www.w3.org/2001/XMLSchema-instance}type")
+                .is_some_and(|value| {
+                    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+                    local == "FormChoiceListDesTimeValue"
+                        && namespaces.get(prefix).map(String::as_str) == Some(native_form_uri)
+                });
+            let nullable_choice_picture = path.first().copied()
+                == Some("{http://v8.1c.ru/8.3/xcf/logform}Form")
+                && path.iter().position(|p| *p == "{http://v8.1c.ru/8.3/xcf/logform}ChoiceParameters").is_some_and(|index| {
+                    let suffix = &path[index + 1..];
+                    suffix.len() >= 2 && suffix[0] == "{http://v8.1c.ru/8.2/managed-application/core}item"
+                        && suffix[1] == "{http://v8.1c.ru/8.2/managed-application/core}value"
+                        && suffix[2..].chunks(2).all(|pair| pair == ["{http://v8.1c.ru/8.3/xcf/logform}Value", "{http://v8.1c.ru/8.1/data/core}Value"])
+                })
+                && type_is_choice
+                && e.children().iter().filter(|node| matches!(node,
+                    ibcmd_xml::XmlNode::Element(child)
+                    if expanded(child.name(), false).is_ok_and(|n| n == "{http://v8.1c.ru/8.3/xcf/logform}Picture")
+                )).count() <= 1
+                && e.children().iter().filter(|node| matches!(node,
+                    ibcmd_xml::XmlNode::Element(child)
+                    if expanded(child.name(), false).is_ok_and(|n| n == "{http://v8.1c.ru/8.3/xcf/logform}Presentation")
+                )).count() <= 1
+                && attrs.len() == 1
+                && !mixed
+                && !preserve_space;
             let mut children = Vec::new();
             for node in e.children() {
                 match node {
                     XmlNode::Element(child) => {
-                        let value = normalized(child, &namespaces, preserve_space, &path)?;
+                        let value = normalized(
+                            child,
+                            &namespaces,
+                            preserve_space,
+                            &path,
+                            in_chart_settings,
+                        )?;
                         // Witnessed EDT CMI role boolean: absent <value> means
                         // false. Only this exact typed scalar spelling may omit.
                         if sparse_cmi_false
@@ -1130,12 +1222,41 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
                         {
                             continue;
                         }
+                        if nullable_choice_picture
+                            && (value
+                                == serde_json::json!([
+                                    "{http://v8.1c.ru/8.3/xcf/logform}Picture",
+                                    {},
+                                    []
+                                ])
+                                || value
+                                    == serde_json::json!([
+                                        "{http://v8.1c.ru/8.3/xcf/logform}Presentation",
+                                        {},
+                                        []
+                                    ]))
+                        {
+                            continue;
+                        }
                         children.push(value)
                     }
                     XmlNode::Text(t)
                         if branches && !preserve_space && !mixed && t.value().trim().is_empty() => {
                     }
-                    XmlNode::Text(t) => children.push(serde_json::json!(["text", t.value()])),
+                    XmlNode::Text(t) => {
+                        if chart_decimal {
+                            let digits = formats_xml::form::normalize_big_decimal(t.value())
+                                .ok_or_else(|| {
+                                    EdtError::new("invalid chart BigDecimal body value")
+                                })?;
+                            children.push(serde_json::json!([
+                                "text",
+                                digits.strip_suffix(".0").unwrap_or(&digits)
+                            ]));
+                        } else {
+                            children.push(serde_json::json!(["text", t.value()]));
+                        }
+                    }
                     XmlNode::Comment(t) => children.push(serde_json::json!(["comment", t.value()])),
                     _ => {
                         return Err(EdtError::new(
@@ -1183,8 +1304,8 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
             "xml".to_string(),
             "http://www.w3.org/XML/1998/namespace".to_string(),
         )]);
-        return Ok(normalized(da.root(), &namespaces, false, &[])?
-            == normalized(db.root(), &namespaces, false, &[])?);
+        return Ok(normalized(da.root(), &namespaces, false, &[], false)?
+            == normalized(db.root(), &namespaces, false, &[], false)?);
     }
     if path.ends_with(".bsl") || path.ends_with(".html") {
         let normalize = |bytes: &[u8]| {
@@ -1200,6 +1321,67 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nullable_choice_picture_guard_requires_exact_typed_role_and_empty_singleton() {
+        let frame = |picture: &str| {
+            format!(
+                r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><ChoiceParameters><app:item name="Filter"><app:value xsi:type="FormChoiceListDesTimeValue"><Presentation/><Value xsi:nil="true"/>{picture}</app:value></app:item></ChoiceParameters></Form>"#
+            )
+        };
+        let entry = |s: String| {
+            SourceEntry::from_bytes(
+                SourcePath::new("CommonForms/Test/Ext/Form.xml").unwrap(),
+                s.into_bytes(),
+            )
+            .unwrap()
+        };
+        assert!(same_body(&entry(frame("")), &entry(frame("<Picture/>"))).unwrap());
+        assert!(
+            same_body(
+                &entry(frame("").replace("<Presentation/>", "")),
+                &entry(frame("<Picture/>"))
+            )
+            .unwrap()
+        );
+        assert!(
+            !same_body(
+                &entry(frame("")),
+                &entry(
+                    frame("<Picture/>")
+                        .replace("<Presentation/>", "<Presentation/><Presentation/>")
+                )
+            )
+            .unwrap()
+        );
+
+        for picture in [
+            "<Picture unknown='true'/>",
+            "<Picture/><Picture/>",
+            "<Picture>value</Picture>",
+            "<Picture><Ref/></Picture>",
+            "<Picture xml:space='preserve'/>",
+            "<Picture xmlns='urn:unknown'/>",
+        ] {
+            assert!(!same_body(&entry(frame("")), &entry(frame(picture))).unwrap());
+        }
+        for (a, b) in [
+            (
+                frame("").replace("FormChoiceListDesTimeValue", "Other"),
+                frame("<Picture/>").replace("FormChoiceListDesTimeValue", "Other"),
+            ),
+            (
+                frame("").replace("ChoiceParameters", "Other"),
+                frame("<Picture/>").replace("ChoiceParameters", "Other"),
+            ),
+            (
+                frame("").replace("http://v8.1c.ru/8.3/xcf/logform", "urn:other"),
+                frame("<Picture/>").replace("http://v8.1c.ru/8.3/xcf/logform", "urn:other"),
+            ),
+        ] {
+            assert!(!same_body(&entry(a), &entry(b)).unwrap());
+        }
+    }
 
     #[test]
     fn explicit_source_inventory_policy_retains_all_asset_references_without_changing_defaults() {
@@ -1782,6 +1964,80 @@ mod tests {
         let duplicate = text.replace(valid, &format!("{valid}{valid}"));
         assert!(read_form(FormDialect::Edt, duplicate.as_bytes()).is_err());
     }
+    #[test]
+    fn number_digit_equivalence_is_scoped_to_typed_chart_settings() {
+        let source = r#"<Form xmlns="http://v8.1c.ru/8.3/xcf/logform" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:c="http://v8.1c.ru/8.2/data/chart"><Settings xsi:type="c:Chart"><c:dataValue xsi:type="xs:decimal">١.٥</c:dataValue></Settings></Form>"#;
+        let ascii = source.replace("١.٥", "1.5");
+        assert!(
+            same_body_bytes(
+                "CommonForms/Test/Ext/Form.xml",
+                source.as_bytes(),
+                ascii.as_bytes()
+            )
+            .unwrap()
+        );
+        assert!(
+            !same_body_bytes(
+                "CommonForms/Test/Ext/Form.xml",
+                source.as_bytes(),
+                ascii.replace("1.5", "2.75").as_bytes()
+            )
+            .unwrap()
+        );
+        for replacement in [
+            ("c:Chart", "c:Unknown"),
+            ("http://v8.1c.ru/8.2/data/chart", "urn:unknown"),
+            ("xs:decimal", "xs:string"),
+            ("<Settings xsi:type=\"c:Chart\">", "<Settings>"),
+        ] {
+            let other = source.replace(replacement.0, replacement.1);
+            assert!(
+                !same_body_bytes(
+                    "CommonForms/Test/Ext/Form.xml",
+                    other.as_bytes(),
+                    other.replace("١.٥", "1.5").as_bytes()
+                )
+                .unwrap()
+            );
+        }
+        let path = "src/CommonForms/Test/Attributes/Diagram/ExtInfo/Chart.chart";
+        let sidecar = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<chart:Chart xmlns:chart=\"http://g5.1c.ru/v8/dt/chart/model\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\"><realDataItems><dataValue xsi:type=\"core:NumberValue\"><value>١.٥</value></dataValue></realDataItems></chart:Chart>\r\n";
+        assert!(
+            same_body_bytes(
+                path,
+                sidecar.as_bytes(),
+                sidecar.replace("١.٥", "1.5").as_bytes()
+            )
+            .unwrap()
+        );
+        assert!(
+            !same_body_bytes(
+                path,
+                sidecar.as_bytes(),
+                sidecar.replace("١.٥", "2.75").as_bytes()
+            )
+            .unwrap()
+        );
+        assert!(
+            !same_body_bytes(
+                "Other/Chart.chart",
+                sidecar.as_bytes(),
+                sidecar.replace("١.٥", "1.5").as_bytes()
+            )
+            .unwrap()
+        );
+        assert!(
+            same_body_bytes(
+                path,
+                sidecar.as_bytes(),
+                sidecar
+                    .replace("</realDataItems>", "<unknown/></realDataItems>")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+    }
+
     #[test]
     fn only_typed_column_group_show_in_card_has_true_default_equivalence() {
         let source = r#"<form:Form xmlns:form="http://g5.1c.ru/v8/dt/form" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><items xsi:type="form:FormGroup"><extInfo xsi:type="form:ColumnGroupExtInfo"><showTitle>true</showTitle></extInfo></items></form:Form>"#;

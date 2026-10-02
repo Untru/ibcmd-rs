@@ -327,60 +327,52 @@ pub(crate) fn emit_choice_list_designer(items: &[PropertyValue]) -> Result<OutEl
     Ok(cl)
 }
 
-/// Эмитить Designer-контейнер `<ChoiceParameters>` (c `<app:item>`-детьми) из списка пар.
-pub(crate) fn emit_choice_parameters_designer(
-    items: &[PropertyValue],
-) -> Result<OutElement, FormError> {
+fn emit_choice_wrapper_designer(prefix: &str, name: &str, value: &PropertyValue) -> Result<OutElement, FormError> {
+    let (current, presentation, picture) = choice_wrapper_parts(value)?;
+    let mut wrap = OutElement::branch(prefix, name).attr("xsi:type", FCLDTV_DES);
+    if presentation.is_empty() { wrap.push(OutElement::self_closing("", "Presentation")); }
+    else { wrap.push(designer_localized("Presentation", presentation)); }
+    match current {
+        PropertyValue::Value(spec) => wrap.push(value_codec::encode(ValueDialect::Designer, "", "Value", spec).map_err(FormError::Frame)?),
+        PropertyValue::List(values) => {
+            let mut array = OutElement::branch("", "Value").attr("xsi:type", "v8:FixedArray");
+            for value in values { array.push(emit_choice_wrapper_designer("v8", "Value", value)?); }
+            wrap.push(array);
+        }
+        _ => return Err(FormError::Frame("choice wrapper value must be typed scalar or array".into())),
+    }
+    if let Some(picture) = picture {
+        let (reference, flag) = picture_ref_lt(picture)?;
+        if let Some(path) = reference.strip_prefix("abs-file:") {
+            super::super::picture_semantics::validate_asset_path(path)?;
+            let mut output = OutElement::branch("", "Picture");
+            output.push(OutElement::leaf("xr", "Abs", path));
+            output.push(OutElement::leaf("xr", "LoadTransparent", bool_lit(flag)));
+            if let Some((x,y)) = picture_pixel(picture) {
+                if !flag { return Err(FormError::Frame("choice Picture: pixel requires LoadTransparent=true".into())); }
+                output.push(OutElement::self_closing("xr", "TransparentPixel").attr("x", x.to_string()).attr("y", y.to_string()));
+            }
+            wrap.push(output);
+        } else { wrap.push(render_designer(&choice_picture_projection(), picture)?); }
+    }
+    else if morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL) >= morph1c_core::version::SSL {
+        wrap.push(OutElement::self_closing("", "Picture"));
+    }
+    Ok(wrap)
+}
+
+/// Emit every current wrapper including each ordered array member.
+pub(crate) fn emit_choice_parameters_designer(items: &[PropertyValue]) -> Result<OutElement, FormError> {
     let mut container = OutElement::branch("", "ChoiceParameters");
     for item in items {
         let (name, value) = choice_param_item(item)?;
-        let mut it = OutElement::branch("app", "item").attr("name", name.to_string());
-        // `<app:value>`: FormChoiceListDesTimeValue-обёртка (скаляр/массив) ЛИБО прямой
-        // `xsi:nil="true"` (без-обёрточный пустой выбор; твин EDT `core:UndefinedValue`).
-        let app_value = match value {
-            ChoiceParamValue::Scalar(spec) => {
-                let mut wrap = OutElement::branch("app", "value").attr("xsi:type", FCLDTV_DES);
-                wrap.push(OutElement::self_closing("", "Presentation"));
-                wrap.push(
-                    value_codec::encode(ValueDialect::Designer, "", "Value", spec)
-                        .map_err(FormError::Frame)?,
-                );
-                wrap
-            }
-            ChoiceParamValue::Array(arr) => {
-                let mut wrap = OutElement::branch("app", "value").attr("xsi:type", FCLDTV_DES);
-                wrap.push(OutElement::self_closing("", "Presentation"));
-                // `<Value xsi:type="v8:FixedArray">` c `<v8:Value xsi:type=FCLDTV>`-детьми
-                // (пустой Presentation + скаляр; ERP-witness).
-                let mut fa = OutElement::branch("", "Value").attr("xsi:type", "v8:FixedArray");
-                for v in arr {
-                    let PropertyValue::Value(spec) = v else {
-                        return Err(FormError::Frame(
-                            "choiceParameters array element must be Value (§1.6)".into(),
-                        ));
-                    };
-                    let mut vw = OutElement::branch("v8", "Value").attr("xsi:type", FCLDTV_DES);
-                    vw.push(OutElement::self_closing("", "Presentation"));
-                    vw.push(
-                        value_codec::encode(ValueDialect::Designer, "", "Value", spec)
-                            .map_err(FormError::Frame)?,
-                    );
-                    fa.push(vw);
-                }
-                wrap.push(fa);
-                wrap
-            }
-            // Прямой `<app:value xsi:nil="true"/>` (общий value_codec, без обёртки).
-            ChoiceParamValue::BareUndefined => value_codec::encode(
-                ValueDialect::Designer,
-                "app",
-                "value",
-                &bare_undefined_spec(),
-            )
-            .map_err(FormError::Frame)?,
+        let mut out_item = OutElement::branch("app", "item").attr("name", name.to_string());
+        let value = match value {
+            ChoiceParamValue::BareUndefined => value_codec::encode(ValueDialect::Designer, "app", "value", &bare_undefined_spec()).map_err(FormError::Frame)?,
+            ChoiceParamValue::Wrapped(value) => emit_choice_wrapper_designer("app", "value", value)?,
         };
-        it.push(app_value);
-        container.push(it);
+        out_item.push(value);
+        container.push(out_item);
     }
     Ok(container)
 }

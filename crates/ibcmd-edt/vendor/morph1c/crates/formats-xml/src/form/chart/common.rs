@@ -25,7 +25,7 @@ pub(crate) fn parse_bool(t: &str, path: &str) -> Result<bool, FormError> {
 
 /// EDT-лексика decimal-поля: designer `10` → `10.0` (без точки/экспоненты — дописать `.0`).
 pub(crate) fn edt_decimal(s: &str) -> String {
-    if s.contains(['.', 'e', 'E']) {
+    if matches!(s, "NaN" | "Infinity" | "-Infinity") || s.contains(['.', 'e', 'E']) {
         s.to_string()
     } else {
         format!("{s}.0")
@@ -90,32 +90,164 @@ pub(crate) fn leaf_text(el: &Element, path: &str) -> Result<String, FormError> {
     Ok(el.text.clone())
 }
 
-/// Канон цвета валиден? (`auto` | `#RRGGBB` | `style:Имя`; web:/win:-цвета не витнесснуты.)
+/// Chart colors use the same symbolic namespaces and RGB codec as form colors.
 pub(crate) fn check_color_canon(c: &str, path: &str) -> Result<(), FormError> {
-    let hex_ok =
-        c.len() == 7 && c.starts_with('#') && c[1..].chars().all(|ch| ch.is_ascii_hexdigit());
-    if c == "auto" || hex_ok || c.strip_prefix("style:").is_some_and(|n| !n.is_empty()) {
-        Ok(())
-    } else {
-        Err(frame(format!(
-            "chart {path}: цвет {c:?} — не витнесснутая форма (ожидались auto/#RRGGBB/style:Имя) (§1.0)"
-        )))
+    if c == "auto" {
+        return Ok(());
     }
+    if ["style:", "web:", "win:", "pal:"].contains(&c) {
+        return Err(frame(format!("chart {path}: empty color reference")));
+    }
+    super::super::fields::color_from_designer(c, path).map(|_| ())
 }
 
+/// Full shared FontRef decoder; chart-specific outer names do not change its grammar.
+pub(crate) fn chart_read_edt_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    let font = super::super::read::read_edt_font(el)?;
+    check_chart_font(&font, path)?;
+    expect_attrs_claimed(el, path)?;
+    Ok(ChartValue::Font(font))
+}
+
+pub(crate) fn chart_read_designer_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    let font = super::super::read::read_designer_font(el)?;
+    check_chart_font(&font, path)?;
+    expect_attrs_claimed(el, path)?;
+    Ok(ChartValue::Font(font))
+}
+
+fn check_chart_font(font: &FontRef, path: &str) -> Result<(), FormError> {
+    if let Some(reference) = &font.font_ref {
+        if font.auto || ["Style.", "System."].contains(&reference.as_str()) {
+            return Err(frame(format!("chart {path}: invalid font reference")));
+        }
+        super::super::read::font_kind_for(reference)?;
+    }
+    Ok(())
+}
+
+/// FontDef has ordinary defaults; AutoFont and FontRef overrides are unsettable
+/// and retain explicit false/zero values. No current nondefault value is removed.
+pub(crate) fn normalize_chart_font(mut font: FontRef) -> FontRef {
+    if !font.auto && font.font_ref.is_none() {
+        font.face_name = font.face_name.filter(|name| !name.is_empty());
+        font.height = font
+            .height
+            .filter(|height| height != "0" && height != "0.0");
+        font.bold = font.bold.filter(|value| *value);
+        font.italic = font.italic.filter(|value| *value);
+        font.underline = font.underline.filter(|value| *value);
+        font.strikeout = font.strikeout.filter(|value| *value);
+        font.scale = font.scale.filter(|scale| scale != "100");
+    }
+    font
+}
+
+pub(crate) fn chart_edt_font_out(
+    name: &str,
+    font: &FontRef,
+    path: &str,
+) -> Result<OutElement, FormError> {
+    check_chart_font(font, path)?;
+    let mut out = super::super::write::edt_font_named(name, font);
+    out.self_closing = out.children.is_empty();
+    Ok(out)
+}
+
+pub(crate) fn chart_designer_font_out(
+    name: &str,
+    font: &FontRef,
+    path: &str,
+) -> Result<OutElement, FormError> {
+    check_chart_font(font, path)?;
+    // FontDef.height is non-unsettable EFloat with default zero. The native
+    // writer emits it densely, while EDT may omit the default.
+    let mut current = font.clone();
+    if !current.auto && current.font_ref.is_none() && current.height.is_none() {
+        current.height = Some("0.0".into());
+    }
+    let mut out = super::super::write::designer_font_named(name, &current);
+    out.prefix = "d4p1".into();
+    Ok(out)
+}
+
+pub(crate) fn chart_read_edt_color(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    let value = super::super::fields::decode_edt_color(el, path)?;
+    let morph1c_core::ir::PropertyValue::Ref(reference) = value else {
+        return Err(frame(format!("chart {path}: expected color reference")));
+    };
+    let color = super::super::fields::color_to_designer(&reference, path)?;
+    check_color_canon(&color, path)?;
+    expect_attrs_claimed(el, path)?;
+    Ok(ChartValue::Color(color))
+}
+
+pub(crate) fn chart_edt_color_out(
+    name: &str,
+    color: &str,
+    path: &str,
+) -> Result<OutElement, FormError> {
+    check_color_canon(color, path)?;
+    let reference = super::super::fields::color_from_designer(color, path)?;
+    super::super::fields::render_edt_color(name, &reference)
+}
+
+/// Current AbstractLine.gap is an ordinary typed bool; sparse EDT absence means false.
+pub(crate) fn chart_read_edt_line(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    el.claim();
+    expect_attrs_claimed(el, path)?;
+    let mut width = None;
+    let mut style = None;
+    let mut gap = None;
+    for child in &el.children {
+        if !child.prefix.is_empty() {
+            return Err(frame(format!("chart {path}: unexpected line namespace")));
+        }
+        match child.local.as_str() {
+            "width" if width.is_none() => width = Some(leaf_text(child, path)?),
+            "style" if style.is_none() => style = Some(leaf_text(child, path)?),
+            "gap" if gap.is_none() => gap = Some(parse_bool(&leaf_text(child, path)?, path)?),
+            _ => {
+                return Err(frame(format!(
+                    "chart {path}: unknown or duplicate line child"
+                )));
+            }
+        }
+    }
+    Ok(ChartValue::Line {
+        style: style.unwrap_or_else(|| "None".into()),
+        width: width.unwrap_or_else(|| "0".into()),
+        gap: gap.unwrap_or(false),
+    })
+}
+
+pub(crate) fn chart_edt_line_out(
+    name: &str,
+    style: &str,
+    width: &str,
+    gap: bool,
+    _path: &str,
+) -> Result<OutElement, FormError> {
+    let mut out = OutElement::branch("", name);
+    out.push(OutElement::leaf("", "width", width));
+    if gap {
+        out.push(OutElement::leaf("", "gap", "true"));
+    }
+    out.push(OutElement::leaf("", "style", style));
+    Ok(out)
+}
 /// `#RRGGBB` → (r, g, b).
 pub(crate) fn parse_hex_color(c: &str, path: &str) -> Result<(u8, u8, u8), FormError> {
     let bad = || frame(format!("chart {path}: не-hex цвет {c:?} (§1.0)"));
     let h = c.strip_prefix('#').ok_or_else(bad)?;
-    if h.len() != 6 {
+    if h.len() != 6 || !h.bytes().all(|ch| ch.is_ascii_hexdigit()) {
         return Err(bad());
     }
     let p = |i: usize| u8::from_str_radix(&h[i..i + 2], 16).map_err(|_| bad());
     Ok((p(0)?, p(2)?, p(4)?))
 }
 
-/// АВТО-шрифт (в chart-контексте FontRef со всеми None ≡ designer `kind="AutoFont"` ≡ EDT
-/// `core:AutoFont`; абсолютные шрифты в диаграммах не витнесснуты и отказывают на чтении).
+/// An unmodified AutoFont; absolute and referenced fonts use the shared full codec.
 pub(crate) fn auto_font() -> FontRef {
     FontRef {
         auto: true,
@@ -187,7 +319,7 @@ pub(crate) fn read_rect(el: &Element, prefix: &str, path: &str) -> Result<ChartV
             other => {
                 return Err(frame(format!(
                     "chart {path}: незнакомая сторона прямоугольника <{other}> (§1.0)"
-                )))
+                )));
             }
         };
         if slot.is_some() {

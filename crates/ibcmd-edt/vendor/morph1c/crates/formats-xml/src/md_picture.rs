@@ -263,7 +263,7 @@ pub fn same_resource(a: &[u8], b: &[u8]) -> bool {
 // Original FormattingXmlResource accepts both its attributed default save shape
 // and the element shape used by genuine EDT descriptors. Claim all coordinates;
 // never permit duplicate or mixed representations of one Point.
-fn decode_point(host: &Element) -> Decoded {
+pub(crate) fn decode_point(host: &Element) -> Decoded {
     if host.attrs.is_empty() {
         return crate::transparent_pixel::decode(host);
     }

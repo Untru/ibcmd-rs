@@ -232,13 +232,19 @@ pub fn attach_form_body(
             object: format!("{}.{name}", obj.name),
             reason: e.to_string(),
         })?;
+        if format == Format::Designer {
+            let directory = body_path.parent().expect("form body has a parent");
+            formats_xml::form::attach_choice_picture_assets(&mut body, declared_form_uuid(obj, &name)?, |path| {
+                read_regular_source(&directory.join(path)).map_err(|e| formats_xml::form::FormError::Frame(e.to_string()))
+            }).map_err(|e| ConvertError::Read { kind: kind.into(), object: name.clone(), reason: e.to_string() })?;
+        }
         if format == Format::Edt {
             let resource = body_path
                 .parent()
                 .expect("form body has a parent")
                 .join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE);
             if resource.exists() {
-                let bytes = std::fs::read(&resource).map_err(|error| ConvertError::Io {
+                let bytes = read_regular_source(&resource).map_err(|error| ConvertError::Io {
                     path: resource.display().to_string(),
                     reason: error.to_string(),
                 })?;
@@ -282,6 +288,36 @@ pub fn attach_form_body(
             }
         }
 
+        if format == Format::Designer {
+            let resource = body_path.parent().expect("form body has a parent")
+                .join(formats_xml::form::CHART_SEMANTICS_RESOURCE);
+            if resource.exists() {
+                let bytes = read_regular_source(&resource).map_err(|error| ConvertError::Io {
+                    path: resource.display().to_string(), reason: error.to_string(),
+                })?;
+                formats_xml::form::apply_chart_semantics_resource(
+                    &mut body, declared_form_uuid(obj, &name)?, &bytes,
+                ).map_err(|error| ConvertError::Read {
+                    kind: kind.into(), object: name.clone(), reason: error.to_string(),
+                })?;
+            }
+        }
+
+        // Restore chart omissions first: their current item bindings refer to the
+        // native picture projection. Refresh asset identities after that restoration.
+        if format == Format::Designer {
+            let path=body_path.parent().expect("form parent").join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE);
+            if path.exists(){
+                if body_path.parent().expect("form parent").join(formats_xml::form::CHART_SEMANTICS_RESOURCE).exists(){
+                    let directory=body_path.parent().expect("form parent");
+                    formats_xml::form::attach_choice_picture_assets(&mut body,declared_form_uuid(obj,&name)?,|path|read_regular_source(&directory.join(path)).map_err(|e|formats_xml::form::FormError::Frame(e.to_string())))
+                        .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+                }
+                let bytes=read_regular_source(&path).map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?;
+                formats_xml::form::apply_native_picture_resource(&mut body,declared_form_uuid(obj,&name)?,&bytes)
+                    .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+            }
+        }
         // EDT: the spreadsheet-document BODY of a form attribute is a SIDECAR
         // (`Attributes/<attr>/ExtInfo/SpreadsheetData.mxlx` beside `Form.form`), while `Form.form`
         // itself carries only the empty `form:SpreadsheetDocumentExtInfo` marker. Attach it into

@@ -537,61 +537,40 @@ pub(crate) fn read_choice_list_edt(
     Ok(items)
 }
 
-/// EDT: разобрать обёртку `<value xsi:type="form:FormChoiceListDesTimeValue">` → скаляр `ValueSpec`.
-/// Presentation опущен (пуст); единственный ребёнок — скаляр `<value xsi:type="core:…">`.
+/// Current localized presentation, required value and optional typed picture.
 fn decode_fcldtv_edt(host: &Element) -> Result<PropertyValue, FormError> {
     claim_xsi(host, "value", FCLDTV_EDT)?;
     host.claim();
-    if host.children.len() != 1 {
-        return Err(FormError::Frame(
-            "choiceParameters FormChoiceListDesTimeValue: expected single <value> scalar \
-             (empty Presentation is omitted; non-empty unmodeled — §1.0)"
-                .into(),
-        ));
-    }
-    let sc = &host.children[0];
-    if sc.local != "value" || !sc.prefix.is_empty() {
-        return Err(FormError::Frame(format!(
-            "choiceParameters FormChoiceListDesTimeValue: expected <value>, got <{}> (§1.0)",
-            sc.local
-        )));
-    }
-    // МАССИВ-значение (ERP-witness ТипыДействийЭтаповПодготовкиБюджетов): `<value
-    // xsi:type="core:FixedArrayValue">` с `<values xsi:type=FCLDTV>`-детьми, каждый — та же
-    // обёртка со скаляром. Канон — List(скаляры) (⟷ Designer `v8:FixedArray`).
-    if matches!(sc.attr("xsi:type"), Some(a) if a.value == "core:FixedArrayValue") {
-        let xt = sc.attr("xsi:type").expect("checked above");
-        xt.claimed.set(true);
-        sc.claim();
-        let mut out = Vec::new();
-        for it in &sc.children {
-            if it.local != "values" || !it.prefix.is_empty() {
-                return Err(FormError::Frame(format!(
-                    "choiceParameters FixedArrayValue: expected <values>, got <{}> (§1.0)",
-                    it.local
-                )));
+    let mut presentation = Vec::new();
+    let mut picture = None;
+    let mut value = None;
+    for child in &host.children {
+        if !child.prefix.is_empty() { return Err(FormError::Frame("choice wrapper child namespace".into())); }
+        match child.local.as_str() {
+            "presentation" => {
+                let PropertyValue::Localized(pairs) = decode_edt_localized(child)? else { unreachable!() };
+                presentation.extend(pairs);
             }
-            claim_xsi(it, "values", FCLDTV_EDT)?;
-            it.claim();
-            if it.children.len() != 1 {
-                return Err(FormError::Frame(
-                    "choiceParameters FixedArrayValue <values>: expected single <value> (§1.0)"
-                        .into(),
-                ));
-            }
-            let inner = &it.children[0];
-            if inner.local != "value" || !inner.prefix.is_empty() {
-                return Err(FormError::Frame(
-                    "choiceParameters FixedArrayValue: inner <value> expected (§1.0)".into(),
-                ));
-            }
-            inner.claim();
-            out.push(value_codec::decode(ValueDialect::Edt, inner).map_err(FormError::Frame)?);
+            "picture" if picture.is_none() => { picture = Some(decode_choice_picture_edt(child)?); }
+            "value" if value.is_none() => { value = Some(child); }
+            _ => return Err(FormError::Frame("choice wrapper unknown or duplicate child".into())),
         }
-        return Ok(PropertyValue::List(out));
     }
-    sc.claim();
-    value_codec::decode(ValueDialect::Edt, sc).map_err(FormError::Frame)
+    let value = value.ok_or_else(|| FormError::Frame("choice wrapper requires value".into()))?;
+    let current = if matches!(value.attr("xsi:type"), Some(a) if a.value == "core:FixedArrayValue") {
+        claim_xsi(value, "value", "core:FixedArrayValue")?;
+        value.claim();
+        let mut values = Vec::new();
+        for child in &value.children {
+            if child.local != "values" || !child.prefix.is_empty() { return Err(FormError::Frame("choice FixedArray member namespace".into())); }
+            values.push(decode_fcldtv_edt(child)?);
+        }
+        PropertyValue::List(values)
+    } else {
+        value.claim();
+        value_codec::decode(ValueDialect::Edt, value).map_err(FormError::Frame)?
+    };
+    Ok(choice_wrapper_value(current, presentation, picture))
 }
 
 /// Прочитать повторяемые EDT `<choiceParameters>` хоста в список пар `[name, value]`.
@@ -715,4 +694,22 @@ fn read_choice_parameter_links_edt(
         items.push(PropertyValue::List(entry));
     }
     Ok(items)
+}
+
+fn decode_choice_picture_edt(el:&Element)->Result<PropertyValue,FormError>{
+    if el.attr("xsi:type").map(|a|a.value.as_str())!=Some("form:FormPicture"){return decode_edt_picture(el,"picture");}
+    claim_xsi(el,"picture","form:FormPicture")?;el.claim();
+    let(mut pixel,mut glyph)=(None,None);
+    for child in &el.children {
+        let slot=match(child.prefix.as_str(),child.local.as_str()){("","transparentPixel")=>&mut pixel,("","glyph")=>&mut glyph,_=>return Err(FormError::Frame("unknown FormPicture field".into()))};
+        if slot.is_some(){return Err(FormError::Frame("duplicate FormPicture Point".into()));}
+        let value=match crate::md_picture::decode_point(child){
+            morph1c_core::engine::Decoded::Present(value)=>value,
+            morph1c_core::engine::Decoded::Error(e)=>return Err(FormError::Frame(e)),
+            _=>return Err(FormError::Frame("missing FormPicture Point".into())),
+        };
+        *slot=Some(crate::transparent_pixel::pixel_of(&value).map_err(FormError::Frame)?);
+    }
+    let value=match pixel{Some(point)=>picture_canon_px(String::new(),point),None=>picture_canon(String::new(),false)};
+    picture_with_glyph(value,glyph)
 }

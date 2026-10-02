@@ -113,6 +113,16 @@ pub trait LocusMap {
         None
     }
 
+    /// Physical scalar order for the explicitly requested output version.
+    /// Existing maps retain their static order; canonical values and collection
+    /// item order remain unchanged.
+    fn field_emit_order_for_version(
+        &self,
+        _target: FormatVersion,
+    ) -> Option<std::borrow::Cow<'static, [FieldId]>> {
+        self.field_emit_order().map(std::borrow::Cow::Borrowed)
+    }
+
     /// Поля recursion-узла, физически эмитируемые ПОСЛЕ inline-детей (а не до), в ЭТОМ
     /// формате. Дефолт `&[]` — все свойства идут до детей (верно для всех видов, кроме
     /// EDT `Catalog.TabularSection`, где `<use>` стоит ПОСЛЕ `<attributes>`). Read

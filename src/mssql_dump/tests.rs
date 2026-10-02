@@ -37756,7 +37756,9 @@ fn debug_moxel_card_output_order() {
                 picture_index,
                 picture_size,
             } => (picture_index.to_string(), *picture_size),
+            MoxelDrawingKind::Shape(kind) => ("-".to_string(), *kind),
             MoxelDrawingKind::Chart(_) => ("-".to_string(), "Chart"),
+            MoxelDrawingKind::GanttChart(_) => ("-".to_string(), "GanttChart"),
         };
         println!(
             "drawing id={} fmt={} pic={} size={} begin=({}, {}) end=({}, {})",

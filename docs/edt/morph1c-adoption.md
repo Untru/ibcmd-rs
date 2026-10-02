@@ -6,6 +6,13 @@ Its workspace manifests declare `MIT OR Apache-2.0`; the copied snapshot chooses
 Apache-2.0 and includes a license and attribution notice. Original and adapted
 source inventories are in `crates/ibcmd-edt/vendor/morph1c/{UPSTREAM,LOCAL}-FILES.json`.
 
+The source-derived OpenJDK 17 number formatter is a separate Rust library,
+`crates/ibcmd-number-format`, outside this Apache-selected snapshot. It retains
+the original copyright and `GPL-2.0-only WITH Classpath-exception-2.0` license,
+including the exception for the modified library. Its notice records the
+original source SHA and the translation date. The release archive includes the
+complete modified library source and notices; its actual license is in the SBOM.
+
 ## Actual reuse boundary
 
 | Upstream source | Host use | Boundary |

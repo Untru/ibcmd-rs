@@ -412,6 +412,17 @@ pub fn emit_child_objects(
     dialect: ConfigDialect,
     value: &PropertyValue,
 ) -> Result<Vec<OutElement>, String> {
+    emit_child_objects_versioned(dialect, value, FormatVersion::new(2, 20))
+}
+
+/// Native 2.21 places the PaletteColor kind block after DefinedType. Only
+/// physical kind placement changes; current names within every kind retain
+/// their relative order. The version-neutral facade keeps its previous output.
+pub fn emit_child_objects_versioned(
+    dialect: ConfigDialect,
+    value: &PropertyValue,
+    target: FormatVersion,
+) -> Result<Vec<OutElement>, String> {
     let rows = unpack_rows(value)?;
     for r in &rows {
         if r.len() != 2 {
@@ -446,7 +457,35 @@ pub fn emit_child_objects(
             Ok(out)
         }
         ConfigDialect::Designer => {
+            let rows = if target == FormatVersion::new(2, 21) {
+                let (palette, mut rest): (Vec<_>, Vec<_>) =
+                    rows.into_iter().partition(|r| r[0] == "PaletteColor");
+                if !palette.is_empty() {
+                    let defined_rank = CHILD_KIND_TABLE
+                        .iter()
+                        .position(|k| k.kind == "DefinedType")
+                        .expect("closed child kind table includes DefinedType");
+                    let position = rest
+                        .iter()
+                        .rposition(|r| r[0] == "DefinedType")
+                        .map(|i| i + 1)
+                        .or_else(|| {
+                            rest.iter().position(|r| {
+                                CHILD_KIND_TABLE
+                                    .iter()
+                                    .position(|k| k.kind == r[0])
+                                    .is_some_and(|i| i > defined_rank)
+                            })
+                        })
+                        .unwrap_or(rest.len());
+                    rest.splice(position..position, palette);
+                }
+                rest
+            } else {
+                rows
+            };
             if rows.is_empty() {
+
                 return Ok(Vec::new());
             }
             let mut block = OutElement::branch("", "ChildObjects");

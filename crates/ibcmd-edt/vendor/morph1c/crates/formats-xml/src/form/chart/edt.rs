@@ -70,6 +70,28 @@ pub fn read_chart_sidecar(bytes: &[u8]) -> Result<ChartSettings, FormError> {
         };
     root.claim();
     claim_root_ns(&root, ns_block)?;
+    super::data_items::validate_value_namespaces(&root, false)?;
+    if let Some(namespace) = root.attr("xmlns:common") {
+        let mut pending = vec![&root];
+        let mut used = false;
+        while let Some(element) = pending.pop() {
+            used |= element
+                .resolved_type
+                .borrow()
+                .as_ref()
+                .is_some_and(|(uri, local)| {
+                    uri == "http://g5.1c.ru/v8/dt/metadata/common" && local == "ChartLineTypeValue"
+                });
+            pending.extend(&element.children);
+        }
+        if namespace.value != "http://g5.1c.ru/v8/dt/metadata/common" || !used {
+            return Err(frame(
+                "chart: root common namespace must bind a current ChartLineTypeValue".into(),
+            ));
+        }
+        namespace.claimed.set(true);
+    }
+
     let fields = e_read_children(&root.children, t, Frame::None, &format!("{kind}.chart"))?;
     let leftover = root.unclaimed_count();
     if leftover != 0 {
@@ -78,10 +100,12 @@ pub fn read_chart_sidecar(bytes: &[u8]) -> Result<ChartSettings, FormError> {
             unclaimed_labels(&root)
         )));
     }
-    Ok(ChartSettings {
-        kind: kind.to_string(),
+    super::semantic::from_source(
+        kind,
         fields,
-    })
+        morph1c_core::ir::form::ChartSourceFormat::Edt,
+        &root,
+    )
 }
 
 /// Прочитать EDT-детей по таблице `t` (без префикса), сохранив порядок и СВЕРИВ его с
@@ -89,12 +113,11 @@ pub fn read_chart_sidecar(bytes: &[u8]) -> Result<ChartSettings, FormError> {
 fn e_read_children(
     children: &[Element],
     t: Tbl,
-    fr: Frame,
+    _fr: Frame,
     path: &str,
 ) -> Result<Vec<(String, ChartValue)>, FormError> {
     let mut out: Vec<(String, ChartValue)> = Vec::new();
     let mut seen: Vec<&'static str> = Vec::new();
-    let mut last_rank: Option<u16> = None;
     let mut i = 0;
     while i < children.len() {
         let el = &children[i];
@@ -104,44 +127,15 @@ fn e_read_children(
                 el.prefix, el.local
             )));
         }
-        // Фрейм-константы item-контекста — клеймим, в IR не несём.
-        if fr != Frame::None && (el.local == "valInfo" || el.local == "key") {
-            claim_xsi(el, "core:UndefinedValue", path)?;
-            el.claim();
-            expect_attrs_claimed(el, path)?;
-            if !el.children.is_empty() || !el.text.is_empty() {
-                return Err(frame(format!(
-                    "chart {path}: <{}> — не Undefined-константа (§1.0)",
+        let row = rows(t)
+            .iter()
+            .find(|r| r.e_name() == el.local)
+            .ok_or_else(|| {
+                frame(format!(
+                    "chart {path}: незнакомое поле <{}> (§1.0)",
                     el.local
-                )));
-            }
-            i += 1;
-            continue;
-        }
-        let row = row_by_name(t, &el.local).ok_or_else(|| {
-            frame(format!(
-                "chart {path}: незнакомое поле <{}> (§1.0)",
-                el.local
-            ))
-        })?;
-        match row.edt {
-            Edt::OmitAlways | Edt::Unwitnessed => {
-                return Err(frame(format!(
-                    "chart {path}: EDT-форма поля <{}> не витнесснута (§1.0)",
-                    el.local
-                )));
-            }
-            _ => {}
-        }
-        if let Some(lr) = last_rank {
-            if row.edt_rank < lr {
-                return Err(frame(format!(
-                    "chart {path}: поле <{}> нарушает модельный порядок EDT (§1.0)",
-                    el.local
-                )));
-            }
-        }
-        last_rank = Some(row.edt_rank);
+                ))
+            })?;
         if seen.contains(&row.name) {
             return Err(frame(format!(
                 "chart {path}: поле <{}> повторяется не подряд (§1.0)",
@@ -151,6 +145,20 @@ fn e_read_children(
         seen.push(row.name);
         let sub_path = format!("{path}/{}", row.name);
         match row.shape {
+            Shape::Colors => {
+                let mut items = Vec::new();
+                while i < children.len()
+                    && children[i].prefix.is_empty()
+                    && children[i].local == el.local
+                {
+                    items.push(vec![(
+                        "value".into(),
+                        e_read_color(&children[i], &sub_path)?,
+                    )]);
+                    i += 1;
+                }
+                out.push((row.name.to_string(), ChartValue::Items(items)));
+            }
             Shape::Loc => {
                 let mut pairs = Vec::new();
                 while i < children.len()
@@ -162,7 +170,7 @@ fn e_read_children(
                 }
                 out.push((row.name.to_string(), ChartValue::Localized(pairs)));
             }
-            Shape::SeriesItems | Shape::PointItems | Shape::Items(_) => {
+            Shape::SeriesItems | Shape::PointItems | Shape::Items(_) | Shape::DataItems => {
                 let mut items = Vec::new();
                 while i < children.len()
                     && children[i].prefix.is_empty()
@@ -194,6 +202,7 @@ fn e_read_item(
         Shape::SeriesItems => e_read_series_props(host, path),
         Shape::PointItems => e_read_children(&host.children, Tbl::PointItem, Frame::Point, path),
         Shape::Items(t2) => e_read_children(&host.children, t2, Frame::None, path),
+        Shape::DataItems => super::data_items::read_edt(host, path),
         _ => unreachable!("e_read_item только для повторяемых шейпов"),
     }
 }
@@ -251,6 +260,9 @@ fn e_read_loc_pair(el: &Element, path: &str) -> Result<(Lang, String), FormError
 /// Прочитать ОДНО EDT-значение по шейпу строки.
 fn e_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormError> {
     match row.shape {
+        Shape::Picture => super::picture::read(el, path, false),
+        Shape::Colors => unreachable!("colors grouped by parent"),
+        Shape::Value => super::data_items::read_value(el, path, false),
         Shape::Bool => Ok(ChartValue::Bool(parse_bool(&leaf_text(el, path)?, path)?)),
         Shape::Int | Shape::Dec => Ok(ChartValue::Int(leaf_text(el, path)?)),
         Shape::Str | Shape::DateTime => Ok(ChartValue::Str(leaf_text(el, path)?)),
@@ -310,188 +322,17 @@ fn e_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
 /// EDT-цвет: `core:ColorDef` (r/g/b-дети; 0-компоненты опущены) → `#RRGGBB`;
 /// `core:ColorRef`+`Style.X` → `style:X`. Иные ссылки (System./web-цвета) не витнесснуты.
 fn e_read_color(el: &Element, path: &str) -> Result<ChartValue, FormError> {
-    el.claim();
-    let xt = el
-        .attr("xsi:type")
-        .ok_or_else(|| frame(format!("chart {path}: цвет без xsi:type (§1.0)")))?;
-    xt.claimed.set(true);
-    match xt.value.as_str() {
-        "core:ColorDef" => {
-            let mut rgb: [u8; 3] = [0, 0, 0];
-            for c in &el.children {
-                let idx = match (c.prefix.as_str(), c.local.as_str()) {
-                    ("", "red") => 0,
-                    ("", "green") => 1,
-                    ("", "blue") => 2,
-                    _ => {
-                        return Err(frame(format!(
-                            "chart {path}: незнакомая компонента цвета <{}> (§1.0)",
-                            c.local
-                        )));
-                    }
-                };
-                c.claim_with_text();
-                expect_attrs_claimed(c, path)?;
-                rgb[idx] = c.text.parse::<u8>().map_err(|_| {
-                    frame(format!(
-                        "chart {path}: компонента цвета {:?} — не байт (§1.0)",
-                        c.text
-                    ))
-                })?;
-            }
-            expect_attrs_claimed(el, path)?;
-            Ok(ChartValue::Color(format!(
-                "#{:02X}{:02X}{:02X}",
-                rgb[0], rgb[1], rgb[2]
-            )))
-        }
-        "core:ColorRef" => {
-            expect_attrs_claimed(el, path)?;
-            let [c] = el.children.as_slice() else {
-                return Err(frame(format!(
-                    "chart {path}: ColorRef без единственного <color> (§1.0)"
-                )));
-            };
-            if !c.prefix.is_empty() || c.local != "color" {
-                return Err(frame(format!(
-                    "chart {path}: незнакомый ребёнок <{}> ColorRef (§1.0)",
-                    c.local
-                )));
-            }
-            c.claim_with_text();
-            expect_attrs_claimed(c, path)?;
-            let name = c.text.strip_prefix("Style.").ok_or_else(|| {
-                frame(format!(
-                    "chart {path}: цвет-ссылка {:?} — не Style.-ссылка (§1.0)",
-                    c.text
-                ))
-            })?;
-            Ok(ChartValue::Color(format!("style:{name}")))
-        }
-        other => Err(frame(format!(
-            "chart {path}: цвет xsi:type={other:?} не витнесснут (§1.0)"
-        ))),
-    }
+    chart_read_edt_color(el, path)
 }
 
 /// EDT-шрифт: `core:AutoFont` (пустой) | `core:FontRef` (`<font>Style.X</font>` [+`<height>`]).
 fn e_read_font(el: &Element, path: &str) -> Result<ChartValue, FormError> {
-    el.claim();
-    let xt = el
-        .attr("xsi:type")
-        .ok_or_else(|| frame(format!("chart {path}: шрифт без xsi:type (§1.0)")))?;
-    xt.claimed.set(true);
-    expect_attrs_claimed(el, path)?;
-    match xt.value.as_str() {
-        "core:AutoFont" => {
-            if !el.children.is_empty() {
-                return Err(frame(format!(
-                    "chart {path}: AutoFont с детьми не витнесснут (§1.0)"
-                )));
-            }
-            Ok(ChartValue::Font(auto_font()))
-        }
-        "core:FontRef" => {
-            let mut font = None;
-            let mut height = None;
-            let mut flags = [None; 4];
-            for c in &el.children {
-                match (c.prefix.as_str(), c.local.as_str()) {
-                    ("", "font") if font.is_none() => {
-                        c.claim_with_text();
-                        expect_attrs_claimed(c, path)?;
-                        font = Some(c.text.clone());
-                    }
-                    ("", "height") if height.is_none() => {
-                        c.claim_with_text();
-                        expect_attrs_claimed(c, path)?;
-                        height = Some(c.text.clone());
-                    }
-                    ("", name) if ["bold", "italic", "underline", "strikeout"].contains(&name) => {
-                        let index = ["bold", "italic", "underline", "strikeout"]
-                            .iter()
-                            .position(|n| *n == name)
-                            .unwrap();
-                        if flags[index].is_some() || !c.children.is_empty() {
-                            return Err(frame(format!(
-                                "chart {path}: duplicate/nonleaf font {name}"
-                            )));
-                        }
-                        c.claim_with_text();
-                        expect_attrs_claimed(c, path)?;
-                        flags[index] = Some(match c.text.as_str() {
-                            "true" => true,
-                            "false" => false,
-                            _ => {
-                                return Err(frame(format!(
-                                    "chart {path}: font {name} must be bool"
-                                )));
-                            }
-                        });
-                    }
-                    _ => {
-                        return Err(frame(format!(
-                            "chart {path}: незнакомый ребёнок <{}> FontRef (§1.0)",
-                            c.local
-                        )));
-                    }
-                }
-            }
-            let font =
-                font.ok_or_else(|| frame(format!("chart {path}: FontRef без <font> (§1.0)")))?;
-            if !font.starts_with("Style.") {
-                return Err(frame(format!(
-                    "chart {path}: шрифт-ссылка {font:?} — не Style.-ссылка (§1.0)"
-                )));
-            }
-            Ok(ChartValue::Font(FontRef {
-                auto: false,
-                font_ref: Some(font),
-                height,
-                bold: flags[0],
-                italic: flags[1],
-                underline: flags[2],
-                strikeout: flags[3],
-                ..auto_font()
-            }))
-        }
-        other => Err(frame(format!(
-            "chart {path}: шрифт xsi:type={other:?} не витнесснут (§1.0)"
-        ))),
-    }
+    chart_read_edt_font(el, path)
 }
 
 /// EDT-линия: `<l><width>2</width><style>Solid</style></l>` (gap отсутствует = false).
 fn e_read_line(el: &Element, path: &str) -> Result<ChartValue, FormError> {
-    el.claim();
-    expect_attrs_claimed(el, path)?;
-    let mut width = None;
-    let mut style = None;
-    for c in &el.children {
-        match (c.prefix.as_str(), c.local.as_str()) {
-            ("", "width") if width.is_none() => {
-                c.claim_with_text();
-                expect_attrs_claimed(c, path)?;
-                width = Some(c.text.clone());
-            }
-            ("", "style") if style.is_none() => {
-                c.claim_with_text();
-                expect_attrs_claimed(c, path)?;
-                style = Some(c.text.clone());
-            }
-            _ => {
-                return Err(frame(format!(
-                    "chart {path}: незнакомый ребёнок <{}> линии (§1.0)",
-                    c.local
-                )));
-            }
-        }
-    }
-    Ok(ChartValue::Line {
-        style: style.ok_or_else(|| frame(format!("chart {path}: линия без <style> (§1.0)")))?,
-        width: width.ok_or_else(|| frame(format!("chart {path}: линия без <width> (§1.0)")))?,
-        gap: false,
-    })
+    chart_read_edt_line(el, path)
 }
 
 /// EDT-рамка: `core:BorderDef`; style опущен ⇔ WithoutBorder, width опущен ⇔ 0.
@@ -556,16 +397,55 @@ pub fn write_chart_sidecar(cs: &ChartSettings) -> Result<Vec<u8>, FormError> {
             )));
         }
     };
-    let mode = if is_edt_sourced(cs) {
-        Mode::Echo
-    } else {
-        Mode::Transcode
-    };
+    let mode = Mode::Echo;
+    let fields =
+        super::semantic::emission_fields(cs, morph1c_core::ir::form::ChartSourceFormat::Edt)?;
+    let mut outputs = e_children_out(&fields, t, mode, &cs.kind)?;
+    super::semantic::restore_edt_primitive_layout(&mut outputs, cs)?;
     let mut root = OutElement::branch(prefix, cs.kind.as_str());
-    for (name, uri) in ns_block {
-        root = root.attr(*name, *uri);
+    if let Some(layout) = cs.source_layout.as_ref().filter(|l| {
+        l.format == morph1c_core::ir::form::ChartSourceFormat::Edt && !l.root_namespaces.is_empty()
+    }) {
+        let mut seen = std::collections::HashSet::new();
+        for (name, uri) in &layout.root_namespaces {
+            if !seen.insert(name) {
+                return Err(frame("chart: duplicate source root namespace facet".into()));
+            }
+            if name == "xmlns:common" {
+                if uri != "http://g5.1c.ru/v8/dt/metadata/common" {
+                    return Err(frame("chart: invalid source common namespace facet".into()));
+                }
+                if has_current_common_type(&outputs) {
+                    root = root.attr(name, uri);
+                    restore_common_bindings(
+                        &mut outputs,
+                        &layout.common_inline_paths,
+                        &mut Vec::new(),
+                    );
+                }
+            } else {
+                if !ns_block
+                    .iter()
+                    .any(|(key, value)| name == key && uri == value)
+                {
+                    return Err(frame(
+                        "chart: unexpected source root namespace facet".into(),
+                    ));
+                }
+                root = root.attr(name, uri);
+            }
+        }
+        for (name, uri) in ns_block {
+            if !seen.contains(&name.to_string()) {
+                root = root.attr(*name, *uri);
+            }
+        }
+    } else {
+        for (name, uri) in ns_block {
+            root = root.attr(*name, *uri);
+        }
     }
-    for out in e_children_out(&cs.fields, t, mode, &cs.kind)? {
+    for out in outputs {
         root.push(out);
     }
     Ok(render(&super::super::edt_envelope(), &root))
@@ -574,15 +454,9 @@ pub fn write_chart_sidecar(cs: &ChartSettings) -> Result<Vec<u8>, FormError> {
 /// Источник — EDT-чтение? Детект по материализованной константе модели `translucenceMode`
 /// (EDT-модель несёт её в КАЖДОМ витнессе; designer её не сериализует вовсе).
 pub(super) fn is_edt_sourced(cs: &ChartSettings) -> bool {
-    let chart_fields: &[(String, ChartValue)] = if cs.kind == "GanttChart" {
-        match cs.fields.iter().find(|(n, _)| n == "chart") {
-            Some((_, ChartValue::Nested(f))) => f,
-            _ => return false,
-        }
-    } else {
-        &cs.fields
-    };
-    chart_fields.iter().any(|(n, _)| n == "translucenceMode")
+    cs.source_layout
+        .as_ref()
+        .is_some_and(|layout| layout.format == morph1c_core::ir::form::ChartSourceFormat::Edt)
 }
 
 /// EDT-эмиссия детей таблицы `t`: модельный порядок (`edt_rank`), в транскоде — омиссии,
@@ -593,54 +467,17 @@ fn e_children_out(
     mode: Mode,
     path: &str,
 ) -> Result<Vec<OutElement>, FormError> {
-    // §1.0: каждое имя источника известно таблице и уникально.
-    let mut names: Vec<&str> = Vec::new();
-    for (name, _) in fields {
-        if row_by_name(t, name).is_none() {
-            return Err(frame(format!(
-                "chart {path}: незнакомое поле {name:?} (§1.0)"
-            )));
+    let mut seen = std::collections::HashSet::new();
+    let mut outs = Vec::new();
+    for (name, value) in fields {
+        if !seen.insert(name) {
+            return Err(frame(format!("chart {path}: duplicate current field")));
         }
-        if names.contains(&name.as_str()) {
-            return Err(frame(format!("chart {path}: дубль поля {name:?} (§1.0)")));
-        }
-        names.push(name.as_str());
+        let row = row_by_name(t, name)
+            .ok_or_else(|| frame(format!("chart {path}: unknown current field {name}")))?;
+        outs.extend(e_value_outs(row, value, mode, &format!("{path}/{name}"))?);
     }
-    let mut ranked: Vec<(u16, OutElement)> = Vec::new();
-    for row in rows(t) {
-        let stored = fields.iter().find(|(n, _)| n == row.name).map(|(_, v)| v);
-        let value: Option<ChartValue> = match stored {
-            Some(v) => Some(v.clone()),
-            None if mode == Mode::Transcode && t == Tbl::Chart => chart_synth(row.name),
-            None => None,
-        };
-        let Some(mut value) = value else { continue };
-        if mode == Mode::Transcode {
-            value = e_transform(row, value, path)?;
-            if edt_omitted(row, &value) {
-                continue;
-            }
-        }
-        // Гейт невитнесснутых EDT-форм (в эхо-режиме недостижим — чтение их отвергло).
-        match row.edt {
-            Edt::OmitAlways => continue,
-            Edt::Unwitnessed => {
-                if std_omitted(&value) {
-                    continue;
-                }
-                return Err(frame(format!(
-                    "chart {path}: EDT-форма поля {:?} со значением {value:?} не витнесснута (§1.0)",
-                    row.name
-                )));
-            }
-            _ => {}
-        }
-        for out in e_value_outs(row, &value, mode, &format!("{path}/{}", row.name))? {
-            ranked.push((row.edt_rank, out));
-        }
-    }
-    ranked.sort_by_key(|(r, _)| *r);
-    Ok(ranked.into_iter().map(|(_, o)| o).collect())
+    Ok(outs)
 }
 
 /// Синтез EDT-only материализованных констант Chart-модели (транскод; значения — снятые
@@ -770,9 +607,26 @@ fn e_value_outs(
     mode: Mode,
     path: &str,
 ) -> Result<Vec<OutElement>, FormError> {
-    let name = row.name;
+    let name = row.e_name();
     let one = |el: OutElement| Ok(vec![el]);
     match (row.shape, v) {
+        (Shape::Colors, ChartValue::Items(items)) => {
+            let mut out = Vec::new();
+            for fields in items {
+                let [(key, ChartValue::Color(color))] = fields.as_slice() else {
+                    return Err(frame(format!(
+                        "chart {path}: Color list item must have one typed value"
+                    )));
+                };
+                if key != "value" {
+                    return Err(frame(format!("chart {path}: unknown Color item field")));
+                }
+                out.push(e_color_out(name, color, path)?);
+            }
+            Ok(out)
+        }
+        (Shape::Picture, value) => one(super::picture::write(name, value, path, false)?),
+        (Shape::Value, value) => one(super::data_items::write_value(name, value, path, false)?),
         (Shape::Bool, ChartValue::Bool(b)) => one(OutElement::leaf(
             "",
             name,
@@ -787,15 +641,7 @@ fn e_value_outs(
         (Shape::Color, ChartValue::Color(c)) => one(e_color_out(name, c, path)?),
         (Shape::Font, ChartValue::Font(f)) => one(e_font_out(name, f, path)?),
         (Shape::Line, ChartValue::Line { style, width, gap }) => {
-            if *gap {
-                return Err(frame(format!(
-                    "chart {path}: линия с gap=true в EDT не витнесснута (§1.0)"
-                )));
-            }
-            let mut l = OutElement::branch("", name);
-            l.push(OutElement::leaf("", "width", width.clone()));
-            l.push(OutElement::leaf("", "style", style.clone()));
-            one(l)
+            one(chart_edt_line_out(name, style, width, *gap, path)?)
         }
         (Shape::Border, ChartValue::Border { style, width }) => {
             let mut b = OutElement::self_closing("", name).attr("xsi:type", "core:BorderDef");
@@ -872,7 +718,10 @@ fn e_value_outs(
             }
             one(OutElement::self_closing("", name))
         }
-        (Shape::DataItems, _) => unreachable!("realDataItems отфильтрован (Edt::OmitAlways)"),
+        (Shape::DataItems, ChartValue::Items(items)) => items
+            .iter()
+            .map(|f| super::data_items::write_edt(name, f, path))
+            .collect(),
         (shape, other) => Err(frame(format!(
             "chart {path}: значение {other:?} не соответствует шейпу {shape:?} (§1.0)"
         ))),
@@ -909,16 +758,6 @@ fn e_item_out(
 ) -> Result<OutElement, FormError> {
     // Ранжированная сборка (эхо-порядок = модельный: сверен на чтении).
     let mut ranked: Vec<(u16, OutElement)> = Vec::new();
-    if let Some((vi_rank, key_rank)) = fr.ranks() {
-        ranked.push((
-            vi_rank,
-            OutElement::self_closing("", "valInfo").attr("xsi:type", "core:UndefinedValue"),
-        ));
-        ranked.push((
-            key_rank,
-            OutElement::self_closing("", "key").attr("xsi:type", "core:UndefinedValue"),
-        ));
-    }
     let mut names: Vec<&str> = Vec::new();
     for (n, _) in fields {
         if names.contains(&n.as_str()) {
@@ -981,73 +820,12 @@ fn e_item_out(
 
 /// EDT-цвет из канона.
 fn e_color_out(name: &str, canon: &str, path: &str) -> Result<OutElement, FormError> {
-    if canon == "auto" {
-        // «auto» кодируется ОТСУТСТВИЕМ поля — сюда попадает лишь эхо порченого файла.
-        return Err(frame(format!(
-            "chart {path}: цвет auto не имеет EDT-формы (кодируется омиссией) (§1.0)"
-        )));
-    }
-    if let Some(style) = canon.strip_prefix("style:") {
-        let mut el = OutElement::branch("", name).attr("xsi:type", "core:ColorRef");
-        el.push(OutElement::leaf("", "color", format!("Style.{style}")));
-        return Ok(el);
-    }
-    let (r, g, b) = parse_hex_color(canon, path)?;
-    let mut el = OutElement::self_closing("", name).attr("xsi:type", "core:ColorDef");
-    for (comp, val) in [("red", r), ("green", g), ("blue", b)] {
-        if val != 0 {
-            el.self_closing = false;
-            el.push(OutElement::leaf("", comp, val.to_string()));
-        }
-    }
-    Ok(el)
+    chart_edt_color_out(name, canon, path)
 }
 
 /// EDT-шрифт из канона [`FontRef`].
 fn e_font_out(name: &str, f: &FontRef, path: &str) -> Result<OutElement, FormError> {
-    if f.face_name.is_some() || f.scale.is_some() {
-        return Err(frame(format!(
-            "chart {path}: шрифт с переопределениями (не AutoFont/StyleItem) не витнесснут (§1.0)"
-        )));
-    }
-    match &f.font_ref {
-        None => {
-            if f.height.is_some()
-                || f.bold.is_some()
-                || f.italic.is_some()
-                || f.underline.is_some()
-                || f.strikeout.is_some()
-            {
-                return Err(frame(format!(
-                    "chart {path}: unsupported AutoFont overrides"
-                )));
-            }
-            Ok(OutElement::self_closing("", name).attr("xsi:type", "core:AutoFont"))
-        }
-        Some(r) => {
-            if !r.starts_with("Style.") {
-                return Err(frame(format!(
-                    "chart {path}: шрифт-ссылка {r:?} — не Style.-ссылка (§1.0)"
-                )));
-            }
-            let mut el = OutElement::branch("", name).attr("xsi:type", "core:FontRef");
-            el.push(OutElement::leaf("", "font", r.clone()));
-            if let Some(h) = &f.height {
-                el.push(OutElement::leaf("", "height", edt_decimal(h)));
-            }
-            for (name, value) in [
-                ("bold", f.bold),
-                ("italic", f.italic),
-                ("underline", f.underline),
-                ("strikeout", f.strikeout),
-            ] {
-                if let Some(value) = value {
-                    el.push(OutElement::leaf("", name, value.to_string()));
-                }
-            }
-            Ok(el)
-        }
-    }
+    chart_edt_font_out(name, f, path)
 }
 
 /// Вытащить поля из [`ChartValue::Nested`], иначе — отказ с именем поля.
@@ -1061,5 +839,34 @@ pub(super) fn expect_nested<'v>(
         other => Err(frame(format!(
             "chart {path}: поле {name:?} несёт {other:?} вместо композита (§1.0)"
         ))),
+    }
+}
+
+fn has_current_common_type(elements: &[OutElement]) -> bool {
+    elements.iter().any(|element| {
+        element
+            .attrs
+            .iter()
+            .any(|(name, value)| name == "xsi:type" && value == "common:ChartLineTypeValue")
+            || has_current_common_type(&element.children)
+    })
+}
+fn restore_common_bindings(
+    elements: &mut [OutElement],
+    paths: &[Vec<(String, usize)>],
+    path: &mut Vec<(String, usize)>,
+) {
+    let mut counts = std::collections::HashMap::new();
+    for element in elements {
+        let index = counts.entry(element.local.clone()).or_insert(0);
+        path.push((element.local.clone(), *index));
+        *index += 1;
+        if !paths.contains(path) {
+            element.attrs.retain(|(name, value)| {
+                !(name == "xmlns:common" && value == "http://g5.1c.ru/v8/dt/metadata/common")
+            });
+        }
+        restore_common_bindings(&mut element.children, paths, path);
+        path.pop();
     }
 }

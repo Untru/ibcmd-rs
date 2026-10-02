@@ -99,6 +99,19 @@ pub(crate) fn choice_picture_slots(kind: &FormControlKind) -> Vec<PictureSlot> {
     out
 }
 
+/// Choice parameter slots are selected from the actual closed projection table.
+pub(crate) fn choice_parameter_picture_slots(kind: &FormControlKind) -> Vec<PictureSlot> {
+    let mut slots = Vec::new();
+    if let Some(field) = tables::field_kind(kind.as_str()) {
+        for projection in field.ext {
+            if matches!(projection.codec, Codec::ChoiceParameters) {
+                slots.push(PictureSlot { id: projection.id, ext: matches!(projection.region, Region::Ext), stem: projection.des });
+            }
+        }
+    }
+    slots
+}
+
 /// Значение слота внутри контрола (из нужного бага).
 fn slot_value<'a>(item: &'a FormItem, s: &PictureSlot) -> Option<&'a PropertyValue> {
     let bag = if s.ext {

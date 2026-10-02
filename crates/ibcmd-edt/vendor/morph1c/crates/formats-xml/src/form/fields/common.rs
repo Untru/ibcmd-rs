@@ -123,26 +123,8 @@ pub(crate) fn require_single_leaf(
     Ok(c.text.clone())
 }
 
-/// Витнессированные имена системных цветов Windows (Designer `win:X` ⟺ EDT/canon `Windows.X`).
-/// ЗАМКНУТЫЙ allow-list по ERP-форм-корпусу (`<TextColor|BackColor|BorderColor>win:X`):
-/// ButtonText ×5, MenuBar ×5, DisabledText ×2, ButtonDarkShadow ×1, ScrollBar ×1 — витнессы
-/// Catalog.{ДокументыРеализацииПолномочийНалоговыхОрганов,МЧД003}.Форма*. Невитнессированное
-/// имя `win:` — типизированный отказ (§1.0), НЕ безусловный биекшн. `win:Highlight` — DCS-only
-/// (`dcscor:value v8ui:Color`), НЕ форм-цвет, поэтому здесь его нет.
-pub(crate) const WINDOWS_SYSTEM_COLORS: &[&str] = &[
-    "ButtonText",
-    "MenuBar",
-    "DisabledText",
-    "ButtonDarkShadow",
-    "ScrollBar",
-    "ActiveTitleBar",
-];
-
-/// Каноническая (EDT) кодировка цвета ← Designer-текст (`style:X`→`Style.X`, `pal:Y`→`Palette.Y`,
-/// `web:Z`→`Web.Z`, `win:W`→`Windows.W`). Домены витнессированы в форм-корпусе (`web:PaleGreen` —
-/// `НастройкиСинхронизацииДанных`; `win:*` — ERP, см. [`WINDOWS_SYSTEM_COLORS`]). Тот же
-/// префикс-биекшн, что у EDT (`<color>Windows.ButtonDarkShadow</color>` — витнесс
-/// Catalog.ДокументыРеализацииПолномочийНалоговыхОрганов.ФормаЭлемента).
+/// Symbolic color references use the SDK's prefix mapping, independently of which
+/// Windows names have appeared in a source corpus. A reference must name a target.
 pub(crate) fn color_from_designer(text: &str, tag: &str) -> Result<String, FormError> {
     if let Some(rest) = text.strip_prefix("style:") {
         Ok(format!("Style.{rest}"))
@@ -151,10 +133,9 @@ pub(crate) fn color_from_designer(text: &str, tag: &str) -> Result<String, FormE
     } else if let Some(rest) = text.strip_prefix("web:") {
         Ok(format!("Web.{rest}"))
     } else if let Some(rest) = text.strip_prefix("win:") {
-        // Системный цвет Windows — замкнутый allow-list (§1.0: невитнессированное имя — отказ).
-        if !WINDOWS_SYSTEM_COLORS.contains(&rest) {
+        if rest.is_empty() {
             return Err(FormError::Frame(format!(
-                "<{tag}>={text:?}: unwitnessed win: system color (§1.0 — witnessed {WINDOWS_SYSTEM_COLORS:?})"
+                "<{tag}>: empty Windows color reference"
             )));
         }
         Ok(format!("Windows.{rest}"))
@@ -183,10 +164,9 @@ pub(crate) fn color_to_designer(canon: &str, tag: &str) -> Result<String, FormEr
     } else if let Some(rest) = canon.strip_prefix("Web.") {
         Ok(format!("web:{rest}"))
     } else if let Some(rest) = canon.strip_prefix("Windows.") {
-        // Системный цвет Windows — тот же замкнутый allow-list (§1.0).
-        if !WINDOWS_SYSTEM_COLORS.contains(&rest) {
+        if rest.is_empty() {
             return Err(FormError::Frame(format!(
-                "<{tag}>={canon:?}: unwitnessed Windows. system color (§1.0 — witnessed {WINDOWS_SYSTEM_COLORS:?})"
+                "<{tag}>: empty Windows color reference"
             )));
         }
         Ok(format!("win:{rest}"))
@@ -224,6 +204,7 @@ pub(crate) fn render_edt_color(tag: &str, canon: &str) -> Result<OutElement, For
         }
         Ok(el)
     } else {
+        color_to_designer(canon, tag)?;
         let mut el = OutElement::branch("", tag).attr("xsi:type", "core:ColorRef");
         el.push(OutElement::leaf("", "color", canon.to_string()));
         Ok(el)
@@ -314,6 +295,14 @@ pub(crate) fn picture_pixel(v: &PropertyValue) -> Option<(i64, i64)> {
 /// не догадка).
 pub(crate) fn picture_ref_lt(v: &PropertyValue) -> Result<(&str, bool), FormError> {
     match v {
+        PropertyValue::List(p) if p.len() == 4 => {
+            let (PropertyValue::Ref(reference), PropertyValue::Bool(flag)) = (&p[0], &p[1]) else { return Err(FormError::Frame("malformed picture definition".into())); };
+            if !reference.is_empty() && !reference.starts_with("abs-file:") { return Err(FormError::Frame("glyph requires a picture definition".into())); }
+            let point = PropertyValue::List(vec![p[2].clone(),p[3].clone()]);
+            crate::md_picture::point(&point).map_err(FormError::Frame)?;
+            crate::md_picture::glyph(&point).map_err(FormError::Frame)?;
+            Ok((reference, *flag))
+        },
         PropertyValue::List(p) if p.len() == 2 || p.len() == 3 => match (&p[0], &p[1]) {
             (PropertyValue::Ref(r), PropertyValue::Bool(lt)) => Ok((r.as_str(), *lt)),
             _ => Err(FormError::Frame(
@@ -365,7 +354,8 @@ pub(crate) fn choice_item(
 //   </app:item></ChoiceParameters>` (Presentation — пустой self-close).
 // Канон одного пункта — `List([name:Str, value:Value])`; весь список — `List([пункт, …])`. Пустой
 // Presentation реконструируется пер-диалектно (EDT опускает, Designer self-close), в IR не хранится.
-// §1.0: непустой Presentation / чужой xsi / `FixedArray` / лишний ребёнок → ОШИБКА.
+// Current nonempty wrapper metadata is [Localized, value, optional picture];
+// a null picture and empty presentation retain the legacy plain value shape.
 
 /// EDT/Designer xsi:type обёртки значения параметра выбора.
 pub(crate) const FCLDTV_EDT: &str = "form:FormChoiceListDesTimeValue";
@@ -380,8 +370,8 @@ pub(crate) const FCLDTV_DES: &str = "FormChoiceListDesTimeValue";
 /// различаются в IR арностью пункта (`List([name])` — без-обёрточный; `List([name, value])` —
 /// завёрнутый).
 pub(crate) enum ChoiceParamValue<'a> {
-    Scalar(&'a morph1c_core::ir::value::ValueSpec),
-    Array(&'a [PropertyValue]),
+    /// Current wrapper metadata: [Localized, current value, optional picture].
+    Wrapped(&'a PropertyValue),
     /// Без-обёрточный `Undefined` (пустой выбор): EDT `<value xsi:type="core:UndefinedValue"/>`
     /// ⟺ Designer `<app:value xsi:nil="true"/>`. cf хранит его ПЛОСКОЙ `{"U"}`-ячейкой БЕЗ
     /// value-list-item-обёртки (эталон erp.cf ×7: `{0,1,"ПоОстаткам",{"U"}}` и т.п.) — в отличие
@@ -403,11 +393,16 @@ pub(crate) fn choice_param_item(
             )),
         },
         PropertyValue::List(p) if p.len() == 2 => match (&p[0], &p[1]) {
-            (PropertyValue::Str(name), PropertyValue::Value(spec)) => {
-                Ok((name.as_str(), ChoiceParamValue::Scalar(spec)))
+            (PropertyValue::Str(name), value @ PropertyValue::Value(_)) => {
+                Ok((name.as_str(), ChoiceParamValue::Wrapped(value)))
             }
-            (PropertyValue::Str(name), PropertyValue::List(arr)) => {
-                Ok((name.as_str(), ChoiceParamValue::Array(arr)))
+            (PropertyValue::Str(name), value @ PropertyValue::List(arr))
+                if matches!(arr.first(), Some(PropertyValue::Localized(_))) => {
+                choice_wrapper_parts(value)?;
+                Ok((name.as_str(), ChoiceParamValue::Wrapped(value)))
+            }
+            (PropertyValue::Str(name), value @ PropertyValue::List(_)) => {
+                Ok((name.as_str(), ChoiceParamValue::Wrapped(value)))
             }
             _ => Err(FormError::Frame(
                 "choiceParameters item must be [name:Str, value:Value|List] (§1.6)".into(),
@@ -417,6 +412,32 @@ pub(crate) fn choice_param_item(
             "choiceParameters item must be [name] | [name, value] (§1.0)".into(),
         )),
     }
+}
+
+/// Wrapper metadata is authoritative typed data, never a lexical source copy.
+/// Plain legacy values denote empty presentation and a null picture.
+pub(crate) fn choice_wrapper_parts(value: &PropertyValue)
+    -> Result<(&PropertyValue, &[(Lang, String)], Option<&PropertyValue>), FormError> {
+    if let PropertyValue::List(parts) = value {
+        if matches!(parts.first(), Some(PropertyValue::Localized(_))) {
+            if parts.len() != 2 && parts.len() != 3 {
+                return Err(FormError::Frame("choice wrapper metadata arity".into()));
+            }
+            let PropertyValue::Localized(presentation) = &parts[0] else { unreachable!() };
+            if let Some(picture) = parts.get(2) { picture_ref_lt(picture)?; }
+            return Ok((&parts[1], presentation, parts.get(2)));
+        }
+    }
+    Ok((value, &[], None))
+}
+pub(crate) fn choice_wrapper_value(value: PropertyValue, presentation: Vec<(Lang, String)>, picture: Option<PropertyValue>) -> PropertyValue {
+    if presentation.is_empty() && picture.is_none() { return value; }
+    let mut parts = vec![PropertyValue::Localized(presentation), value];
+    if let Some(picture) = picture { parts.push(picture); }
+    PropertyValue::List(parts)
+}
+pub(crate) fn choice_picture_projection() -> FieldProj {
+    fp(FieldId(0), "picture", "Picture", Region::Ext, Codec::PictureRef, Policy::Symmetric)
 }
 
 /// Канонический `Undefined`-скаляр для без-обёрточного пустого выбора choiceParameters.
@@ -490,4 +511,44 @@ pub(crate) fn choice_parameter_link_parts(
             "choiceParameterLinks item must be [name, path, changeMode?] (§1.0)".into(),
         )),
     }
+}
+
+pub(crate) fn picture_glyph(value: &PropertyValue) -> Result<Option<(i64, i64)>, FormError> {
+    if let PropertyValue::List(parts) = value {
+        if parts.len() == 4 {
+            picture_ref_lt(value)?;
+            return crate::md_picture::glyph(&PropertyValue::List(vec![
+                parts[2].clone(),
+                parts[3].clone(),
+            ]))
+            .map_err(FormError::Frame);
+        }
+    }
+    Ok(None)
+}
+pub(crate) fn picture_with_glyph(
+    value: PropertyValue,
+    glyph: Option<(i64, i64)>,
+) -> Result<PropertyValue, FormError> {
+    let Some(glyph) = glyph else {
+        let (reference, flag) = picture_ref_lt(&value)?;
+        return Ok(match picture_pixel(&value) {
+            Some(point) => picture_canon_px(reference.into(), point),
+            None => picture_canon(reference.into(), flag),
+        });
+    };
+    let (reference, flag) = picture_ref_lt(&value)?;
+    let point = picture_pixel(&value);
+    let PropertyValue::List(mut points) = crate::md_picture::present_with_glyph(point, Some(glyph))
+    else {
+        unreachable!()
+    };
+    let out = PropertyValue::List(vec![
+        PropertyValue::Ref(reference.into()),
+        PropertyValue::Bool(flag),
+        points.remove(0),
+        points.remove(0),
+    ]);
+    picture_ref_lt(&out)?;
+    Ok(out)
 }

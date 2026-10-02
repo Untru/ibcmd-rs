@@ -130,29 +130,12 @@ pub(crate) fn render_edt(
                 )));
             }
             if r.is_empty() || r.starts_with("abs:") {
-                // Пустой канон `Ref("")` И designer-абсолют `Ref("abs:ext")` ⟺ EDT инлайн-маркер
-                // `form:FormPicture` (бинарь — в сайдкаре, не в дескрипторе). С прозрачным пикселем
-                // маркер НЕПУСТ: несёт `<transparentPixel><x/><y/></transparentPixel>` (sparse-
-                // листья, общий кодек).
-                match picture_pixel(v) {
-                    None => OutElement::self_closing("", tag).attr("xsi:type", "form:FormPicture"),
-                    Some((x, y)) => {
-                        let mut el =
-                            OutElement::branch("", tag).attr("xsi:type", "form:FormPicture");
-                        el.push(
-                            crate::transparent_pixel::encode(
-                                "",
-                                "transparentPixel",
-                                &PropertyValue::List(vec![
-                                    PropertyValue::Int(x),
-                                    PropertyValue::Int(y),
-                                ]),
-                            )
-                            .map_err(FormError::Frame)?,
-                        );
-                        el
-                    }
-                }
+                let glyph = picture_glyph(v)?;
+                let point = crate::md_picture::present_with_glyph(picture_pixel(v),glyph);
+                let output = crate::md_picture::encode("",tag,&point).map_err(FormError::Frame)?;
+                if glyph.is_none() && picture_pixel(v).is_none(){
+                    OutElement::self_closing("",tag).attr("xsi:type","form:FormPicture")
+                }else{output.attr("xsi:type","form:FormPicture")}
             } else {
                 let mut el = OutElement::branch("", tag).attr("xsi:type", "core:PictureRef");
                 el.push(OutElement::leaf("", "picture", r.to_string()));
@@ -313,53 +296,32 @@ pub(crate) fn emit_choice_list_edt(
 }
 
 /// Эмитить EDT повторяемые `<choiceParameters>` из списка пар.
-pub(crate) fn emit_choice_parameters_edt(
-    out: &mut OutElement,
-    items: &[PropertyValue],
-) -> Result<(), FormError> {
+fn emit_choice_wrapper_edt(name: &str, value: &PropertyValue) -> Result<OutElement, FormError> {
+    let (current, presentation, picture) = choice_wrapper_parts(value)?;
+    let mut wrap = OutElement::branch("", name).attr("xsi:type", FCLDTV_EDT);
+    for pair in presentation { wrap.push(edt_localized("presentation", std::slice::from_ref(pair))); }
+    match current {
+        PropertyValue::Value(spec) => wrap.push(value_codec::encode(ValueDialect::Edt, "", "value", spec).map_err(FormError::Frame)?),
+        PropertyValue::List(values) => {
+            let mut array = OutElement::branch("", "value").attr("xsi:type", "core:FixedArrayValue");
+            for value in values { array.push(emit_choice_wrapper_edt("values", value)?); }
+            wrap.push(array);
+        }
+        _ => return Err(FormError::Frame("choice wrapper value must be typed scalar or array".into())),
+    }
+    if let Some(picture) = picture { wrap.push(render_edt(&choice_picture_projection(), picture)?); }
+    Ok(wrap)
+}
+
+pub(crate) fn emit_choice_parameters_edt(out: &mut OutElement, items: &[PropertyValue]) -> Result<(), FormError> {
     for item in items {
         let (name, value) = choice_param_item(item)?;
         let mut cp = OutElement::branch("", "choiceParameters");
         cp.push(OutElement::leaf("", "name", name.to_string()));
-        // `<value>`-ребёнок: FormChoiceListDesTimeValue-обёртка (скаляр/массив) ЛИБО прямой
-        // `core:UndefinedValue` (без-обёрточный пустой выбор — §1.0/round-trip, отличен от
-        // завёрнутого-Undefined).
-        let value_child = match value {
-            ChoiceParamValue::Scalar(spec) => {
-                let mut wrap = OutElement::branch("", "value").attr("xsi:type", FCLDTV_EDT);
-                wrap.push(
-                    value_codec::encode(ValueDialect::Edt, "", "value", spec)
-                        .map_err(FormError::Frame)?,
-                );
-                wrap
-            }
-            ChoiceParamValue::Array(arr) => {
-                let mut wrap = OutElement::branch("", "value").attr("xsi:type", FCLDTV_EDT);
-                let mut fa =
-                    OutElement::branch("", "value").attr("xsi:type", "core:FixedArrayValue");
-                for v in arr {
-                    let PropertyValue::Value(spec) = v else {
-                        return Err(FormError::Frame(
-                            "choiceParameters array element must be Value (§1.6)".into(),
-                        ));
-                    };
-                    let mut vw = OutElement::branch("", "values").attr("xsi:type", FCLDTV_EDT);
-                    vw.push(
-                        value_codec::encode(ValueDialect::Edt, "", "value", spec)
-                            .map_err(FormError::Frame)?,
-                    );
-                    fa.push(vw);
-                }
-                wrap.push(fa);
-                wrap
-            }
-            // Прямой `<value xsi:type="core:UndefinedValue"/>` (общий value_codec, без обёртки).
-            ChoiceParamValue::BareUndefined => {
-                value_codec::encode(ValueDialect::Edt, "", "value", &bare_undefined_spec())
-                    .map_err(FormError::Frame)?
-            }
-        };
-        cp.push(value_child);
+        cp.push(match value {
+            ChoiceParamValue::BareUndefined => value_codec::encode(ValueDialect::Edt, "", "value", &bare_undefined_spec()).map_err(FormError::Frame)?,
+            ChoiceParamValue::Wrapped(value) => emit_choice_wrapper_edt("value", value)?,
+        });
         out.push(cp);
     }
     Ok(())

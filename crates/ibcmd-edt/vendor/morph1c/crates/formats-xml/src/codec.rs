@@ -1096,7 +1096,7 @@ pub(crate) fn encode_with_codec(
     }
     // Configuration ChildObjects — multi-sibling (EDT) / `<ChildObjects>` (Designer) от value.
     if let Codec::ConfigChildObjects(dialect) = codec {
-        for el in configuration::emit_child_objects(*dialect, value)? {
+        for el in configuration::emit_child_objects_versioned(*dialect, value, version)? {
             sink.children.push(el);
         }
         return Ok(());

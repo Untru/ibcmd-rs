@@ -148,7 +148,9 @@ pub struct MxlSpreadsheetSettings {
     /// pal 10/10). Presence-бит для byte-exact re-emit сайдкара; `false` = SSL-флавор. Чисто
     /// EDT-сайдкар-концерн: `normalize_attr_for_x` зануляет весь `spreadsheet_settings` до X, а
     /// cf-Moxel строится из СТРУКТУРНЫХ полей (pal не читает) — так что бит невидим X и cf.
-    #[serde(default)]
+    /// Source-only namespace spelling; retained for same-format emission,
+    /// excluded from semantic serialization and provenance fingerprints.
+    #[serde(skip)]
     pub envelope_without_pal: bool,
     /// ОПЦИОНАЛЬНЫЙ префикс `<mxl:languageSettings>` (языки табличного документа). Присутствует у
     /// непустых/локализованных документов (RE: SSL CommonForm.РедактированиеТабличногоДокумента);
@@ -275,17 +277,73 @@ pub struct AdditionalColumns {
 /// Настройки диаграммы форм-реквизита (Designer `<Settings xsi:type="d4p1:Chart|GanttChart">`
 /// ⟷ EDT сайдкар `Attributes/<attr>/ExtInfo/Chart.chart|GanttChart.chart` ⟷ cf ext-клетка
 /// `{"#",3543ef08…/3a6e63bf…}`; ERP-witnessed 9 блоков в 5 формах, W17-линия).
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ChartSettings {
     /// `"Chart"` | `"GanttChart"`.
     pub kind: String,
     /// Поля верхнего уровня в порядке источника (имена — models/charts; валидация в кодеках).
     pub fields: Vec<(String, ChartValue)>,
+    /// Source spelling and field presence, never previous values or opaque bytes.
+    /// Writers resolve these names against current typed fields and SDK defaults.
+    #[serde(skip)]
+    pub source_layout: Option<ChartSourceLayout>,
+}
+
+impl PartialEq for ChartSettings {
+    fn eq(&self, other: &Self) -> bool {
+        self.kind == other.kind && self.fields == other.fields
+    }
+}
+
+/// Private dialect of a parsed chart's lexical field layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChartSourceFormat {
+    /// Native configuration XML.
+    Designer,
+    /// EDT chart resource.
+    Edt,
+}
+
+/// Lexical names only; no values may be restored from this facet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartSourceLayout {
+    /// Source dialect.
+    pub format: ChartSourceFormat,
+    /// Every composite's ordered field names, including explicit defaults.
+    pub composites: Vec<ChartCompositeLayout>,
+    /// Ordered, validated EDT root namespace declarations; no model values.
+    pub root_namespaces: Vec<(String, String)>,
+    /// Names/index paths of explicit common namespace redeclarations below the root.
+    pub common_inline_paths: Vec<Vec<(String, usize)>>,
+}
+
+/// A current typed composite is addressed by field names and repeated item indices.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChartCompositeLayout {
+    /// Empty for the root composite.
+    pub path: Vec<ChartLayoutSegment>,
+    /// Original field names in emission order.
+    pub fields: Vec<String>,
+}
+
+/// Typed lexical address, independent of values.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ChartLayoutSegment {
+    /// Composite field.
+    Field(String),
+    /// Ordered repeated item.
+    Item(usize),
 }
 
 /// Значение поля диаграммы (числа/decimal — ЛЕКСИЧЕСКИЕ String: byte-exact без формат-риска).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub enum ChartValue {
+    /// Absent nullable model field, distinct from explicit Null and Undefined values.
+    Absent,
+    /// Current nullable chart picture reference or owned bitmap definition.
+    Picture(Box<ChartPicture>),
+    /// Current typed mcore value, including its scalar kind and ordered payload.
+    Value(Box<ChartTypedValue>),
     /// Булево.
     Bool(bool),
     /// Целое (лексически).
@@ -331,6 +389,30 @@ pub enum ChartValue {
     Items(Vec<Vec<(String, ChartValue)>>),
     /// Вложенный композит (axis/scale/area…).
     Nested(Vec<(String, ChartValue)>),
+}
+
+/// Current chart mcore Picture, with complete owned resource data.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub enum ChartPicture {
+    /// Symbolic platform/CommonPicture reference and current native transparency.
+    Reference {
+        /// Current symbolic reference.
+        reference: String,
+        /// Current native LoadTransparent value.
+        load_transparent: bool,
+    },
+    /// Owned bitmap. The pipeline must attach the exact file bytes before publication.
+    Definition {
+        /// Current safely addressed resource filename; empty until EDT attachment.
+        file_name: String,
+        /// Current opaque bitmap data.
+        bytes: Vec<u8>,
+        /// Nullable current transparent pixel.
+        transparent_pixel: Option<(i64, i64)>,
+        /// Nullable current glyph dimensions.
+        glyph: Option<(i64, i64)>,
+    },
 }
 
 /// Порядок эмиссии РАСХОДИТСЯ: EDT — queryText, mainTable, флаги; Designer — ManualQuery,
@@ -402,6 +484,77 @@ pub struct DynamicListAttrExt {
     /// EXTENDED-форма. ОБА формата несут ⇒ X-сравнимы. Пусто ⇒ без явных параметров. См. [`DcsParameter`].
     #[serde(default)]
     pub parameters: Vec<DcsParameter>,
+}
+
+/// Current persisted mcore value in a chart, independent of its XML dialect.
+/// Collections are ordered; absent nullable fields use `ChartValue::Absent`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum ChartTypedValue {
+    /// Shared primitive ValueSpec or full TypeSpec, with its actual scalar kind.
+    Scalar(crate::ir::value::PropertyValue),
+    /// Explicit platform Null, distinct from absent and Undefined.
+    Null,
+    /// Ordered mcore ValueList.
+    ValueList(Vec<ChartTypedValue>),
+    /// Ordered mcore FixedArrayValue.
+    FixedArray(Vec<ChartTypedValue>),
+    /// BinaryValue's current encoded bytes.
+    Binary(String),
+    /// Current EEnum identity, independent of ambiguous native type QNames.
+    Enum {
+        /// Registered Ecore package identity.
+        package_uri: String,
+        /// Current enumeration type.
+        enum_type: String,
+        /// Current enumeration literal.
+        literal: String,
+    },
+    /// Current system enumeration spelling; nullable in the source model.
+    SysEnum(Option<String>),
+    /// Ephemeral native emission of an enum's complete literal, without its EPackage.
+    /// The bound current-value resource retains the source Enum identity.
+    ProjectedEnum {
+        /// Current native protocol type.
+        enum_type:String,
+        /// Complete current literal.
+          literal:String,
+      },
+    /// Ephemeral native percentage emission after exactly one SDK projection.
+    /// The bound resource retains the original current BigDecimal value.
+    ProjectedNumber(String),
+    /// Current standard period with optional boundary dates.
+    StandardPeriod {
+        /// Platform period variant.
+        variant: String,
+        /// Optional current start date.
+        start: Option<String>,
+        /// Optional current end date.
+        end: Option<String>,
+    },
+    /// Current chart line type value.
+    ChartLineType(String),
+    /// Current resolved symbolic ReferenceValue; None is its nullable target.
+    Reference(Option<String>),
+    /// Current unresolved reference, retaining both distinct typed UUIDs.
+    IrresolvableReference {
+        /// Referenced type identity.
+        ref_type_id: crate::ir::Uuid,
+        /// Referenced instance identity.
+        instance_id: crate::ir::Uuid,
+    },
+    /// Current full font and its typed overrides.
+    Font(FontRef),
+    /// Current color, using the shared canonical color notation.
+    Color(String),
+    /// Current symbolic BorderRef.
+    BorderRef(String),
+    /// Current absolute BorderDef.
+    Border {
+        /// Platform border style.
+        style: String,
+        /// Current width.
+        width: String,
+    },
 }
 
 fn serialize_semantic_list_settings<S: serde::Serializer>(

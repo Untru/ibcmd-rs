@@ -11,6 +11,7 @@ members = [
     "crates/ibcmd-v8",
     "crates/ibcmd-cf",
     "crates/ibcmd-edt",
+    "crates/ibcmd-number-format",
 ]
 resolver = "3"
 exclude = ["crates/ibcmd-edt/vendor/morph1c"]

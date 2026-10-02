@@ -140,13 +140,37 @@ pub fn write_form_bodies(
             None
         };
         let body = projection.as_ref().map_or(&form.body, |(body, _)| body);
+        let native_picture_projection=if format==Format::Designer { formats_xml::form::project_native_picture_glyphs(body).map_err(|e|ConvertError::Write{kind:kind.into(),object:form.name.clone(),reason:e.to_string()})? } else {None};
+        let body=native_picture_projection.as_ref().unwrap_or(body);
+        let chart_projection = if format == Format::Designer {
+            formats_xml::form::project_chart_semantics(
+                body, crate::form_read::declared_form_uuid(obj, &form.name)?,
+            ).map_err(|error| ConvertError::Write {
+                kind: kind.into(), object: form.name.clone(), reason: error.to_string(),
+            })?
+        } else {
+            None
+        };
+        let body = chart_projection.as_ref().map_or(body, |(body, _)| body);
         let bytes = write_form(dialect, body).map_err(|e| ConvertError::Write {
             kind: kind.to_string(),
             object: format!("{}.{}", obj.name, form.name),
             reason: e.to_string(),
         })?;
         write_file(&body_path, &bytes)?;
-        if let Some((_, Some(bytes))) = projection {
+        if format == Format::Designer {
+            for (path, bytes) in formats_xml::form::choice_picture_assets(&form.body,
+                crate::form_read::declared_form_uuid(obj, &form.name)?).map_err(|e| ConvertError::Write {
+                    kind: kind.into(), object: form.name.clone(), reason: e.to_string(),
+                })? {
+                write_file(&body_path.parent().expect("form body has a parent").join(path), &bytes)?;
+            }
+        }
+        if let Some((_, bytes)) = &chart_projection {
+            write_file(&body_path.parent().expect("form body has a parent")
+                .join(formats_xml::form::CHART_SEMANTICS_RESOURCE), &bytes)?;
+        }
+        if let Some((_, Some(bytes))) = &projection {
             write_file(
                 &body_path
                     .parent()
@@ -157,6 +181,10 @@ pub fn write_form_bodies(
         }
 
         if format == Format::Designer {
+            if let Some(bytes)=formats_xml::form::write_native_picture_resource(&form.body,crate::form_read::declared_form_uuid(obj,&form.name)?)
+                .map_err(|e|ConvertError::Write{kind:kind.into(),object:form.name.clone(),reason:e.to_string()})?{
+                write_file(&body_path.parent().expect("form parent").join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE),&bytes)?;
+            }
             if let Some(bytes) = formats_xml::form::write_event_semantics_resource(
                 &form.body, crate::form_read::declared_form_uuid(obj, &form.name)?,
             ).map_err(|error| ConvertError::Write {
@@ -182,7 +210,7 @@ pub fn write_form_bodies(
         if matches!(dialect, FormDialect::Edt) {
             if let Some(form_dir) = body_path.parent() {
                 write_edt_spreadsheet_sidecars(form_dir, kind, &obj.name, &form.name, &form.body)?;
-                write_edt_chart_sidecars(form_dir, &form.body)?;
+                write_edt_chart_sidecars(form_dir, body)?;
                 write_edt_list_settings_sidecars(form_dir, &form.body)?;
                 if !form.body.conditional_appearance.is_empty() {
                     write_file(

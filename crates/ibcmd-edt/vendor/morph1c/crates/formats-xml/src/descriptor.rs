@@ -6,7 +6,7 @@
 //! «востребованными» по мере того как проекция читает поля; `unclaimed_count`
 //! считает невостребованное → движок требует 0 (нет passthrough/Raw).
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 
 /// Атрибут элемента (`name="value"`), значение уже UNescape'нуто.
 #[derive(Debug, Clone)]
@@ -41,6 +41,12 @@ pub struct Element {
     /// `claimed`: контейнер/presence-узел claim'ит сам элемент, но НЕ произвольный
     /// текст — иначе мусорный текст между детьми (B1) проглатывался бы молча.
     pub text_claimed: Cell<bool>,
+    /// Validated expanded xsi:type QName used by context-dependent codecs.
+    pub(crate) resolved_type: RefCell<Option<(String, String)>>,
+    /// Expanded element name validated by a context-dependent namespace walk.
+    pub(crate) resolved_name: RefCell<Option<(String, String)>>,
+    /// Expanded QName text for native Type/TypeSet leaves.
+    pub(crate) resolved_text: RefCell<Option<(String, String)>>,
 }
 
 impl Element {
@@ -54,6 +60,9 @@ impl Element {
             text: String::new(),
             claimed: Cell::new(false),
             text_claimed: Cell::new(false),
+            resolved_type: RefCell::new(None),
+            resolved_name: RefCell::new(None),
+            resolved_text: RefCell::new(None),
         }
     }
 

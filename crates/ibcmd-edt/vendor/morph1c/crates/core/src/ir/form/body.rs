@@ -140,8 +140,10 @@ pub struct FormBody {
     pub conditional_appearance: Vec<DcsItem>,
     /// ERP-флавор конверта `.dcssca`: корень БЕЗ `xmlns:lf` И `xmlns:pal` (ценз ERP
     /// 506/506; SSL несёт полный 13-ns блок). Пара опциональна АТОМАРНО (половинчатый
-    /// флавор — §1.0-отказ ридера). `false` = SSL-флавор.
-    #[serde(default)]
+    /// флавор — §1.0-отказ ридера). `false` = SSL-флавор. This source-only namespace
+    /// spelling does not change the ordered typed DCS items; keep it for same-format
+    /// emission, outside semantic serialization and provenance fingerprints.
+    #[serde(skip)]
     pub ca_envelope_without_lf_pal: bool,
     /// Параметры формы (`<parameters>`/`<Parameters>`) в исходном порядке.
     pub parameters: Vec<FormParameter>,

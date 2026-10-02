@@ -1,83 +1,24 @@
-//! XML-кодеки НАСТРОЕК ДИАГРАММЫ форм-реквизита (Chart / GanttChart) — два диалекта:
-//! Designer-ИНЛАЙН `<Settings xmlns:d4p1="http://v8.1c.ru/8.2/data/chart"
-//! xsi:type="d4p1:Chart|GanttChart">` внутри `Ext/Form.xml` и EDT-САЙДКАР
-//! `Attributes/<attr>/ExtInfo/Chart.chart|GanttChart.chart` (`chart:Chart` /
-//! `ganttchart:GanttChart`, xcore-разрежённый).
+//! Typed Chart/GanttChart settings in EDT sidecars and native form Attributes.
 //!
-//! # Витнессы (9 носителей ERP, 5 форм; W17-линия, scratchpad chart_line)
-//! * nastr_demo — `Catalogs/ВариантыАнализаЦелевыхПоказателей/Forms/НастройкаДемоДанных/Диаграмма`;
-//! * proverka ×3 — `DataProcessors/ПроверкаКонтрагента/Forms/Форма/Диаграмма{Показателей,
-//!   РентабельностьАктивов,РентабельностьПродаж}` (мультиязычные text/vsFormat, splineMode,
-//!   placement-энумы, scale c gridLine/labelColor/labelFormat);
-//! * vypoln — `DataProcessors/ВыполнениеОпераций2_2/…/Диаграмма` (Pie: realSeriesData ×2 c
-//!   явными цветами, realPointData, realDataItems, StyleItem-шрифт с height, titleText серии);
-//! * planir ×3 — `DataProcessors/ПланированиеГрафикаПроизводства2_2/…` (GanttChart-обёртка +
-//!   2 Chart с Palette8-парой paletteKind/colorPaletteDescription);
-//! * sezon — `InformationRegisters/СезонныеКоэффициенты/…/Диаграмма` (опорная пара для таблицы
-//!   EDT-омиссий: поле есть в designer и нет в сайдкаре ⇔ xcore-дефолт).
+//! Both codecs read the current model, validate closed field/value grammars and
+//! share canonical properties. Original installed SDK model metadata provides
+//! scalar defaults, enum literals and native field order. Source layout holds
+//! names/order/presence only and never previous values or XML bytes.
 //!
-//! # Модель
-//! ЕДИНАЯ таблица знаний [`CHART_FIELDS`] (+под-таблицы композитов): имя поля, шейп значения,
-//! диалект-присутствие и политика EDT-омиссии. Порядок строк = DESIGNER-порядок 8.3.27 (он же
-//! порядок клеток cf-таблицы {74,…} — прототип verify2.py; клеточные константы `_NNN` и
-//! placement-блоки живут в cf-энкодере, НЕ здесь). Отдельно каждая строка несёт `edt_rank` —
-//! позицию в EDT-модели (`models/charts/charts.jsonl`, authoritative порядок xcore-эмиссии):
-//! порядки РАСХОДЯТСЯ (isPointsDesign/realDataItems/isTransposition/animation/rebuildTime/
-//! placement-энумы против tooltip/droplines-режимов), поэтому один порядок из другого не
-//! выводится — несём оба.
-//!
-//! Значения храним ЛЕКСИЧЕСКИ ([`ChartValue`]): числа/decimal/даты как текст, енум-литералы
-//! как есть. Валидация ЗНАЧЕНИЙ (витнесс-мапы енумов, валидируемые константы) — забота
-//! cf-энкодера; XML-сторона только транскодирует диалект-формы.
-//!
-//! # Два режима записи сайдкара ([`write_chart_sidecar`])
-//! * ЭХО (источник = EDT-чтение; детект — поле `translucenceMode`, EDT-модель несёт его
-//!   всегда): поля пишутся как прочитаны, без синтеза — byte-exact по построению (порядок
-//!   сверен с моделью ещё на чтении).
-//! * ТРАНСКОД (источник = Designer-чтение): поля сортируются по `edt_rank`, xcore-дефолты
-//!   ОПУСКАЮТСЯ (таблица омиссий снята сверкой sezon/proverka/vypoln/planir пар:
-//!   bool=false, int=0, строка/локализация пустые, цвет auto — плюс пер-полевые литералы
-//!   `chartType=Line`, `labelsLocation=Edge`, `paletteKind=Palette8`, `isRandomizedNewValues=true`
-//!   и т.д.), а EDT-ONLY константы модели СИНТЕЗИРУЮТСЯ (`translucenceMode=Auto`, bubble*-тройка,
-//!   colorPaletteDescription/referenceBands…, четыре пустых reference-блока, оси с
-//!   interval{leftIsNum,rightIsNum}, шкалы с материализованным titleArea/titlePlacement/
-//!   labelOrientation). Транскод сверен с живыми сайдкарами симулятором таблицы
-//!   (scratchpad chart_line/chart_sim.py): 8/9 витнессов БАЙТ-ИДЕНТИЧНЫ; девятый (vypoln)
-//!   несёт РОВНО ОДНУ дельту — EDT-экспортёр платформы пишет `isShowPointsScale=true` там,
-//!   где designer И cf несут `false` (квирк EDT-выгрузки; определитель не установлен —
-//!   1 витнесс, у остальных `isShowScale=true`). Значение НЕ подделываем: несём
-//!   designer/cf-истину (verify2: cf-клетка сходится с designer-значением 8/8).
-//!
-//! # §1.0
-//! Незнакомое имя поля/атрибута, невитнесснутая диалект-форма (цвет `web:`/`win:`, абсолютный
-//! шрифт, `gap=true` в EDT-линии, ненулевые isExpand/isIndicator/colorPriority точек и серий в
-//! EDT, непустая designer-ось, непустые gauge-бенды) — ГРОМКАЯ типизированная ошибка с именем
-//! свойства. Никаких Raw/passthrough. `realDataItems` — designer-only (витнесс vypoln: непустой
-//! в designer, отсутствует в сайдкаре) — в EDT НЕ эмитится никогда.
-//!
-//! # Плотнение EDT-бэга (`densify.rs`)
-//! [`designer_dense_chart_settings`] — АЛГЕБРАИЧЕСКАЯ ИНВЕРСИЯ транскода: EDT-бэг (xcore-
-//! разрежённый, с EDT-only константами) → designer-плотная форма, которую требует cf-энкодер.
-//! Ценз по ВСЕМУ ERP (25 сайдкаров): 25/25 без нарушений инверсии, cf-клетка совпадает с
-//! designer-путём на 24/25 (25-й — потеря EDT-выгрузки, см. док-коммент модуля).
-//!
-//! # Риски/границы
-//! * Плейсмент-ректы cf (`@PLACEMENT_BLOCK`, runtime-значения) — НЕ здесь; риск задокументирован
-//!   в cf-энкодере (SPEC_NOTES.md п.3).
-//! * Designer-ЗАПИСЬ — ЭХО cs.fields (X-байт-точность designer→designer); материализация
-//!   designer-плотной формы ИЗ EDT-источника для designer-ЗАПИСИ (не для cf) по-прежнему
-//!   не витнесснута: `designer_chart_settings` отказывает на первом EDT-only поле. Для cf
-//!   плотнение делает [`designer_dense_chart_settings`] (см. выше).
+//! Nullable fields remain distinct from explicit Null/Undefined. Persisted model
+//! properties that the target native writer omits require the form's separately
+//! bound typed semantic resource; the descriptor codec refuses unprojected state.
+//! Bitmap resources are attached by the pipeline, independently of XML parsing.
 
 // До подключения pipeline-волной модуль не имеет внешних вызовов — глушим dead_code,
 // чтобы централизованная сборка не шумела (тесты внизу держат кодеки живыми).
 #![allow(dead_code)]
 
 use super::read::{claim_root_ns, unclaimed_labels};
-use super::{FormError, CORE_NS_URI, FORM_DECL, XSI_NS_URI};
+use super::{CORE_NS_URI, FORM_DECL, FormError, XSI_NS_URI};
 use crate::descriptor::Element;
-use crate::emit::{render, OutElement};
-use crate::{parse, EolStyle};
+use crate::emit::{OutElement, render};
+use crate::{EolStyle, parse};
 use morph1c_core::ir::form::{ChartSettings, ChartValue};
 use morph1c_core::ir::{FontRef, Lang};
 
@@ -152,6 +93,21 @@ pub(crate) enum Tbl {
     BackIntervals,
     /// Gantt Collect (`collection`).
     Collect,
+    TrendArray,
+    Trend,
+    SeriesCalc,
+    GInterval,
+    GValue,
+    GLink,
+    TimeLabel,
+    CollectItem,
+    Point,
+    GaugeBands,
+    GaugeBand,
+    ReferenceLines,
+    ReferenceLine,
+    ReferenceBands,
+    ReferenceBand,
 }
 
 /// Шейп значения поля — как декодировать/кодировать обе диалект-формы.
@@ -167,6 +123,11 @@ pub(crate) enum Shape {
     Str,
     /// Дата Ганта — лексически (`2016-07-01T00:00:00`; форма в диалектах совпадает).
     DateTime,
+    Value,
+    /// Nullable current chart Picture model value.
+    Picture,
+    /// Ordered current Color values; native SDK wraps them in typed v8:Value.
+    Colors,
     /// Enum-литерал как есть (валидация значений — cf-энкодер).
     Enum,
     /// Цвет; канон = designer-текст `auto` | `#RRGGBB` | `style:Имя`.
@@ -269,22 +230,65 @@ impl Row {
         self.d_alias = Some(a);
         self
     }
+    fn e_name(&self) -> &'static str {
+        match self.name {
+            "isExpand" => "expand",
+            "isIndicator" => "indicator",
+            other => other,
+        }
+    }
     /// Имя поля в designer-диалекте.
     fn d_name(&self) -> &'static str {
         self.d_alias.unwrap_or(self.name)
     }
 }
 
-mod tables;
 mod common;
+mod data_items;
 mod densify;
 mod designer;
 mod edt;
+
+mod percent;
+mod picture;
+mod sdk_defaults;
+mod semantic;
+mod tables;
 #[cfg(any())]
 mod tests;
+mod value_border;
+mod value_enum;
+mod value_period;
 
-pub use densify::designer_dense_chart_settings;
-pub use edt::{read_chart_sidecar, write_chart_sidecar};
-pub(crate) use tables::*;
 pub(crate) use common::*;
+pub use densify::designer_dense_chart_settings;
 pub(crate) use designer::*;
+pub use edt::{read_chart_sidecar, write_chart_sidecar};
+pub use percent::{
+    native_percentage_integer, native_percentage_projection, percentage_numeric_equal,
+};
+pub use semantic::project_native_trends;
+pub(crate) use tables::*;
+pub(crate) fn validate_current_value(
+    value: &morph1c_core::ir::form::ChartTypedValue,
+) -> Result<(), FormError> {
+    data_items::write_value(
+        "value",
+        &ChartValue::Value(Box::new(value.clone())),
+        "current value resource",
+        false,
+    )
+    .map(|_| ())
+}
+pub(crate) fn is_native_enum_type(name: &str) -> bool {
+    value_enum::is_native_type_name(name)
+}
+pub(crate) fn native_enum_binding(
+    name: &str,
+    literal: &str,
+) -> morph1c_core::ir::form::ChartTypedValue {
+    value_enum::binding_value(name, literal)
+}
+
+#[doc(hidden)]
+pub use semantic::normalize_big_decimal;

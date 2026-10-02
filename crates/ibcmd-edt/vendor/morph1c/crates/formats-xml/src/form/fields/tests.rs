@@ -435,8 +435,7 @@ mod color_def_tests {
 #[cfg(any())]
 mod win_color_and_picture_tests {
     //! W25 (picture LoadTransparent — независимый флаг) и системные цвета Windows (`win:` ⟺
-    //! `Windows.`), оба ERP-only. §1.0: витнессированное round-trip'ит байт-точно, невитнесснутое —
-    //! типизированный отказ.
+    //! `Windows.`), using the shared SDK symbolic reference contract.
     use super::*;
 
     // --- Windows системные цвета (Designer `win:X` ⟺ canon/EDT `Windows.X`) ---
@@ -444,7 +443,7 @@ mod win_color_and_picture_tests {
     /// Каждый витнессированный `win:X` биективен с каноном `Windows.X` в ОБЕ стороны.
     #[test]
     fn win_system_color_designer_canon_bijection() {
-        for name in WINDOWS_SYSTEM_COLORS {
+        for name in ["ButtonText", "Highlight", "WindowText", "HotLight"] {
             let des = format!("win:{name}");
             let canon = color_from_designer(&des, "TextColor").expect("win→canon");
             assert_eq!(canon, format!("Windows.{name}"));
@@ -476,17 +475,12 @@ mod win_color_and_picture_tests {
         );
     }
 
-    /// §1.0: невитнессированное `win:`-имя — типизированный отказ (замкнутый allow-list).
+    /// Symbolic namespaces remain closed, and a Windows target cannot be empty.
     #[test]
-    fn win_system_color_unwitnessed_name_is_typed_error() {
-        let err = color_from_designer("win:HotTrackColor", "BackColor")
-            .expect_err("unwitnessed win: name must error");
-        assert!(
-            format!("{err}").contains("win:") || format!("{err}").contains("system color"),
-            "error names the encoding: {err}"
-        );
-        // Обратное направление тоже гейтится allow-list'ом.
-        assert!(color_to_designer("Windows.HotTrackColor", "BackColor").is_err());
+    fn win_system_color_empty_target_is_typed_error() {
+        assert!(color_from_designer("win:", "BackColor").is_err());
+        assert!(color_to_designer("Windows.", "BackColor").is_err());
+        assert!(color_from_designer("unknown:Highlight", "BackColor").is_err());
     }
 
     // --- picture LoadTransparent — независимый канон List([Ref, Bool]) ---

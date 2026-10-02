@@ -13,10 +13,75 @@ struct Objects<'a>(&'a [MetadataObject], TemplateBodyProjection);
 struct Object<'a>(&'a MetadataObject, TemplateBodyProjection);
 struct Templates<'a>(&'a MetadataObject, TemplateBodyProjection);
 struct TemplateView<'a>(&'a MetadataObject, &'a Template, TemplateBodyProjection);
-struct Properties<'a>(&'a [(FieldId, PropertyValue)]);
+struct Properties<'a>(&'a [(FieldId, PropertyValue)], bool);
+struct ConfigurationRoster<'a>(&'a PropertyValue);
+// The installed native writer relocates the PaletteColor block in 2.21.
+// Its location among different metadata kinds is physical spelling. Keep all
+// other rows in their current order, and every current palette name in order.
+// This borrowed view never changes the source IR or any writer input.
+impl Serialize for ConfigurationRoster<'_> {
+    fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
+        let PropertyValue::List(rows) = self.0 else {
+            return Err(serde::ser::Error::custom(
+                "Configuration roster must be a list",
+            ));
+        };
+        let mut rest = Vec::with_capacity(rows.len());
+        let mut palette = Vec::new();
+        for row in rows {
+            let PropertyValue::List(pair) = row else {
+                return Err(serde::ser::Error::custom(
+                    "Configuration roster row must be a pair",
+                ));
+            };
+            let [PropertyValue::Str(kind), PropertyValue::Str(name)] = pair.as_slice() else {
+                return Err(serde::ser::Error::custom(
+                    "Configuration roster row must contain kind and name",
+                ));
+            };
+            if name.is_empty()
+                || kind == "Configuration"
+                || kind.contains('.')
+                // Language is the existing inline Configuration child; it has
+                // no standalone metadata spec registration.
+                || (kind != "Language" && crate::spec::registry::spec_for(kind).is_none())
+            {
+                return Err(serde::ser::Error::custom(
+                    "Configuration roster has an unknown kind or empty name",
+                ));
+            }
+            if kind == "PaletteColor" {
+                palette.push(row);
+            } else {
+                rest.push(row);
+            }
+        }
+        rest.extend(palette);
+        // Preserve the ordinary PropertyValue::List JSON representation in this
+        // explicit semantic view; ordinary IR serialization remains unchanged.
+        #[derive(Serialize)]
+        enum BorrowedList<'a> {
+            List(Vec<&'a PropertyValue>),
+        }
+        BorrowedList::List(rest).serialize(s)
+    }
+}
 impl Serialize for Properties<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
-        super::serialize_semantic_properties(self.0, s)
+        if !self.1 {
+            return super::serialize_semantic_properties(self.0, s);
+        }
+        let mut ordered = self.0.iter().collect::<Vec<_>>();
+        ordered.sort_by_key(|(id, _)| *id);
+        let mut seq = s.serialize_seq(Some(ordered.len()))?;
+        for (id, value) in ordered {
+            if *id == crate::spec::metadata::configuration::F_CHILD_OBJECTS {
+                seq.serialize_element(&(id, ConfigurationRoster(value)))?;
+            } else {
+                seq.serialize_element(&(id, value))?;
+            }
+        }
+        seq.end()
     }
 }
 impl Serialize for Objects<'_> {
@@ -44,7 +109,7 @@ impl Serialize for ConfigurationSemanticView<'_> {
         if obj.source_version.is_some() {
             state.serialize_field("source_version", &obj.source_version)?;
         }
-        state.serialize_field("properties", &Properties(&obj.properties))?;
+        state.serialize_field("properties", &Properties(&obj.properties, true))?;
         state.serialize_field("objects", &Objects(&obj.objects, self.template_body))?;
         state.end()
     }
@@ -125,7 +190,10 @@ impl Serialize for Object<'_> {
         if !obj.style_records.is_empty() {
             state.serialize_field("style_records", &obj.style_records)?;
         }
-        state.serialize_field("properties", &Properties(&obj.properties))?;
+        state.serialize_field(
+            "properties",
+            &Properties(&obj.properties, obj.kind.as_str() == "Configuration"),
+        )?;
         state.serialize_field("children", &Objects(&obj.children, self.1))?;
         state.serialize_field("modules", &obj.modules)?;
         state.serialize_field("forms", &obj.forms)?;
@@ -142,7 +210,7 @@ impl Serialize for TemplateView<'_> {
         let obj = self.1;
         let mut state = s.serialize_struct("Template", 5)?;
         state.serialize_field("name", &obj.name)?;
-        state.serialize_field("properties", &Properties(&obj.properties))?;
+        state.serialize_field("properties", &Properties(&obj.properties, false))?;
         if obj.body.is_some() {
             let projected = (self.2)(self.0, obj).map_err(serde::ser::Error::custom)?;
             state.serialize_field("body", &projected.as_deref().or(obj.body.as_deref()))?;

@@ -442,10 +442,12 @@ dependencies = [
 name = "formats-xml"
 version = "0.1.0"
 dependencies = [
+ "ibcmd-number-format",
  "morph1c-core",
  "quick-xml 0.36.2",
  "serde",
  "serde_json",
+ "sha2",
 ]
 
 [[package]]
@@ -600,6 +602,10 @@ dependencies = [
  "sha2",
  "tempfile",
 ]
+
+[[package]]
+name = "ibcmd-number-format"
+version = "0.1.0"
 
 [[package]]
 name = "ibcmd-rs"

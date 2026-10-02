@@ -120,6 +120,34 @@ const fn bool_t(path: &'static [&'static str]) -> FieldProjection {
 pub struct DesignerConfiguration;
 
 impl LocusMap for DesignerConfiguration {
+    fn field_emit_order_for_version(
+        &self,
+        target: morph1c_core::version::FormatVersion,
+    ) -> Option<std::borrow::Cow<'static, [FieldId]>> {
+        if target != morph1c_core::version::FormatVersion::new(2, 21) {
+            return self.field_emit_order().map(std::borrow::Cow::Borrowed);
+        }
+        // Native 8.5 materializes Interface, Theme, Mode, WindowsOpen in this
+        // order. The EDT exporter retains the specification order instead.
+        // Reposition only these scalar fields; every current value is emitted
+        // by the ordinary typed projection, with repeated contents untouched.
+        let mut order = Vec::new();
+        for field in cfg::configuration().fields() {
+            if matches!(
+                field.id,
+                cfg::F_MAIN_WINDOW_MODE | cfg::F_CLIENT_APPLICATION_THEME
+            ) {
+                continue;
+            }
+            order.push(field.id);
+            if field.id == cfg::F_MAIN_WINDOW_INTERFACE_VARIANT {
+                order.push(cfg::F_CLIENT_APPLICATION_THEME);
+                order.push(cfg::F_MAIN_WINDOW_MODE);
+            }
+        }
+        Some(std::borrow::Cow::Owned(order))
+    }
+
     fn lookup(&self, field: FieldId) -> Option<FieldProjection> {
         Some(match field {
             cfg::F_SYNONYM => loc_kv(PP_SYNONYM),

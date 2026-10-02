@@ -388,6 +388,7 @@ pub fn write_descriptor_versioned<M: LocusMap>(
     // корня расширения) отделяем ДО хойста — зеркало `trailing_fields` EDT-писателя.
     // Дефолт `properties_head_fields()==&[]` ⇒ ВСЕ прочие виды байт-идентичны.
     let head_ids = map.properties_head_fields();
+    let emit_order = map.field_emit_order_for_version(target);
     let (mut head_sink, mut body_sink) = (XmlSink::default(), XmlSink::default());
     for (el, id) in sink.children.into_iter().zip(sink.order_tags) {
         let dst = if head_ids.contains(&id) {
@@ -398,7 +399,7 @@ pub fn write_descriptor_versioned<M: LocusMap>(
         dst.children.push(el);
         dst.order_tags.push(id);
     }
-    for child in head_sink.ordered(map.field_emit_order()) {
+    for child in head_sink.ordered(emit_order.as_deref()) {
         props.push(child);
     }
     props.push(OutElement::leaf("", NAME_ELEMENT, obj.name.clone()));
@@ -409,7 +410,7 @@ pub fn write_descriptor_versioned<M: LocusMap>(
     // `<<kind>>`); прочие виды таких узлов не эмитят (хойст — no-op). ns/local — критерий.
     let mut pre_property_blocks: Vec<OutElement> = Vec::new();
     let mut post_property_blocks: Vec<OutElement> = Vec::new();
-    for child in body_sink.ordered(map.field_emit_order()) {
+    for child in body_sink.ordered(emit_order.as_deref()) {
         if child.prefix.is_empty() && child.local == "InternalInfo" {
             pre_property_blocks.push(child);
         } else if child.prefix.is_empty() && child.local == "ChildObjects" {

@@ -72,6 +72,7 @@ pub fn designer_dense_chart_settings(cs: &ChartSettings) -> Result<ChartSettings
     Ok(ChartSettings {
         kind: cs.kind.clone(),
         fields: dense_children(&cs.fields, t, &cs.kind)?,
+        source_layout: cs.source_layout.clone(),
     })
 }
 

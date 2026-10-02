@@ -235,7 +235,9 @@ pub enum DcsParamValue {
 pub struct DcsListSettings {
     /// ERP-флавор конверта `.dcss`: корень БЕЗ `xmlns:pal` (ценз ERP 3673/3673; SSL несёт
     /// pal). Presence-бит для byte-exact re-emit; `false` = SSL-флавор.
-    #[serde(default)]
+    /// Source-only namespace spelling; retained for same-format emission,
+    /// excluded from semantic serialization and provenance fingerprints.
+    #[serde(skip)]
     pub envelope_without_pal: bool,
     /// Группа отбора (`dcsset:filter`). `None` ⇒ тег отсутствует.
     #[serde(default)]
