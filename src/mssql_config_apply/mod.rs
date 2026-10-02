@@ -30,6 +30,8 @@ pub mod errors;
 pub mod gate;
 pub mod model;
 pub mod objects;
+#[cfg(test)]
+mod params_marker;
 pub mod recovery;
 pub mod registrations;
 pub mod removals;
