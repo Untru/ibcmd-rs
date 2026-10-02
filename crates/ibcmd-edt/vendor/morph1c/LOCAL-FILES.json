@@ -60,7 +60,8 @@
     "Percentage values use the installed JDK17 numeric projection contract, exact BigDecimal integer low32-bit conversion and source-based binary64 formatting; an ephemeral native Number projection prevents duplicate rounding and a current typed resource restores lossy BigDecimal values",
     "ChoiceParameters preserve current typed ordered values, presentation and nullable pictures; picture definitions retain owned current asset bytes, safe declared paths and Points, with explicit typed glyph and partial-Point transport rather than invented SDK blob names",
     "NumberValue accepts exactly the original Java17 BMP Character.digit(char,10) decimal domain and signed32 exponent/effective scale; current digits are normalized to ASCII without retaining glyphs or replaying former numbers",
-    "Source-derived JDK17 binary64 formatting is a separately licensed ibcmd-number-format Rust component outside the Apache-selected morph1c snapshot; the release archive includes its complete source, Cargo.toml, original LICENSE and NOTICE and the SBOM records GPL-2.0-only WITH Classpath-exception-2.0"
+    "Source-derived JDK17 binary64 formatting is a separately licensed ibcmd-number-format Rust component outside the Apache-selected morph1c snapshot; the release archive includes its complete source, Cargo.toml, original LICENSE and NOTICE and the SBOM records GPL-2.0-only WITH Classpath-exception-2.0",
+    "Role rights preserve the complete ordered restrictionByCondition list on every right, including repeated fields and absent or explicit-empty fields; cross-format emission retains current condition text, field presence and append/delete/order edits without a one-restriction quota"
   ],
   "files": [
     {
@@ -1349,7 +1350,7 @@
     },
     {
       "path": "crates/core/src/spec/metadata/role.rs",
-      "sha256": "0b54b64db399a991b4fed8c94cc62cf5b80c111d2394a43ace73e912d9bb8bf6"
+      "sha256": "8e2709a673f202fe0853735c63524572e382515176de9de1c856b409f222b4f2"
     },
     {
       "path": "crates/core/src/spec/metadata/scheduled_job.rs",
@@ -1969,7 +1970,7 @@
     },
     {
       "path": "crates/formats-xml/src/rights.rs",
-      "sha256": "c07fa5e766d1206ccf44f76783e114e32e689893132d5716d07a4b198a7705c9"
+      "sha256": "c10e10dedc3d474c654c2b4cfc9e6334955b03c9874af1d0cc694beb444d31a2"
     },
     {
       "path": "crates/formats-xml/src/shortcut.rs",
@@ -2661,7 +2662,7 @@
     },
     {
       "path": "crates/pipeline/src/rights_read.rs",
-      "sha256": "0798e4041e64127cdbabeedd90c232d18ccd1dedaacc06958826ef09e0bdbed1"
+      "sha256": "b472a015b398bada39517015299250b8a2df0ce67d2d2c0d54bb25a0e7eb9f2f"
     },
     {
       "path": "crates/pipeline/src/schedule_read.rs",
@@ -2736,5 +2737,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "2e77457b9ff323dc639825fee59b0499870c0e5c"
+  "local_source_snapshot": "aa50cf60dfb33826f65bdcbf0422fbd65a414507"
 }
