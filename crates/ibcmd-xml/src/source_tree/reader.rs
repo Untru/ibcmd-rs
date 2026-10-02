@@ -147,7 +147,13 @@ fn visit(
         if n.contains('\\') {
             return Err(SourceTreeError::UnsafePath(n.into()));
         }
-        if matches!(n, ".git" | "target" | ".idea" | ".vscode") {
+        let entry_path = e.path();
+        let parent_resource = entry_path
+            .strip_prefix(root)
+            .ok()
+            .and_then(|p| p.to_str())
+            .is_some_and(|p| parent_configuration_resource(&p.replace('\\', "/")));
+        if !parent_resource && matches!(n, ".git" | "target" | ".idea" | ".vscode") {
             continue;
         }
         if ty.is_symlink() || (!ty.is_file() && !ty.is_dir()) {

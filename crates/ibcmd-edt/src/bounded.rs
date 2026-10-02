@@ -336,6 +336,13 @@ fn logical_form_name(value: &str) -> Result<(), EdtError> {
     component(value)
 }
 
+fn parent_configuration_resource(path: &str) -> bool {
+    let path = path.strip_prefix(".ibcmd-provenance/xml/").unwrap_or(path);
+    let path = path.strip_prefix("src/").unwrap_or(path);
+    path.starts_with("Ext/ParentConfigurations/")
+        || path.starts_with("Configuration/ParentConfigurations/")
+}
+
 /// XML is declared by the adapter document role, never guessed from payload.
 /// Raw carriers receive no acceptance exemption: full typed read/re-emission
 /// and complete accounting must claim their bytes before conversion succeeds.
@@ -351,11 +358,8 @@ pub(crate) fn declared_xml(path: &str) -> bool {
     if path.starts_with("Help/_files/") || path.contains("/Help/_files/") {
         return false;
     }
-    // The original SDK copies this root attachment's complete sibling directory.
-    // Only fully bound current parent bytes and complete replay accounting accept it.
-    if path.starts_with("Ext/ParentConfigurations/")
-        || path.starts_with("Configuration/ParentConfigurations/")
-    {
+    // Full typed owner/byte accounting remains mandatory for this raw directory.
+    if parent_configuration_resource(path) {
         return false;
     }
     let parts = path.split('/').collect::<Vec<_>>();
@@ -455,8 +459,19 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Edt
         let raw_name = raw_name
             .to_str()
             .ok_or_else(|| EdtError::new("non-UTF8 project filename"))?;
-        component(raw_name)
-            .map_err(|e| EdtError::new(format!("non-portable project filename: {e}")))?;
+        let path = e.path();
+        let relative = path.strip_prefix(root).map_err(EdtError::source)?;
+        let name = relative
+            .to_str()
+            .ok_or_else(|| EdtError::new("non-UTF8 project path"))?
+            .replace('\\', "/");
+        if raw_name.contains(['/', '\\']) {
+            return Err(EdtError::new("project filename contains a path separator"));
+        }
+        if !parent_configuration_resource(&name) {
+            component(raw_name)
+                .map_err(|e| EdtError::new(format!("non-portable project filename: {e}")))?;
+        }
         let metadata = fs::symlink_metadata(e.path()).map_err(EdtError::source)?;
         if metadata.file_type().is_symlink()
             || reparse(&metadata)
@@ -467,12 +482,6 @@ fn visit(root: &Path, dir: &Path, depth: usize, s: &mut State) -> Result<(), Edt
                 e.path().display()
             )));
         }
-        let path = e.path();
-        let relative = path.strip_prefix(root).map_err(EdtError::source)?;
-        let name = relative
-            .to_str()
-            .ok_or_else(|| EdtError::new("non-UTF8 project path"))?
-            .replace('\\', "/");
         SourcePath::new(&name).map_err(EdtError::source)?;
         if metadata.is_dir() {
             s.dirs += 1;

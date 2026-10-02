@@ -44,6 +44,20 @@ fn example() -> morph1c_core::ir::Configuration {
             bytes: b"complete current opaque body".to_vec(),
         },
     ];
+    for name in [
+        "target/payload.xml",
+        ".git/config",
+        ".idea/raw.mdo",
+        ".vscode/data.cf",
+    ] {
+        r.parent_configuration_resources
+            .push(ParentConfigurationResource {
+                path: name.into(),
+                bytes: b"<?xml opaque invalid\xff".to_vec(),
+            });
+    }
+    r.parent_configuration_resources
+        .sort_by(|a, b| a.path.cmp(&b.path));
     c
 }
 fn write(
@@ -107,7 +121,12 @@ fn recursive_opaque_resources_are_current_and_complete_in_both_dialects() {
             },
         )
         .unwrap();
-        root(&mut c).parent_configuration_resources[1].bytes[0] = 12;
+        root(&mut c)
+            .parent_configuration_resources
+            .iter_mut()
+            .find(|r| r.path == "original.cf")
+            .unwrap()
+            .bytes[0] = 12;
         let after = serde_json::to_vec(
             &morph1c_core::ir::semantic_view::ConfigurationSemanticView {
                 configuration: &c,

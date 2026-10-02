@@ -47,6 +47,7 @@ fn safe_relative_path(value: &str) -> Result<String, SourceTreeError> {
         return Err(SourceTreeError::UnsafePath(value.to_string()));
     }
     let value = value.replace('\\', "/");
+    let parent_resource = reader::parent_configuration_resource(&value);
     if value.is_empty()
         || value.split('/').any(|part| {
             part.is_empty()
@@ -58,7 +59,7 @@ fn safe_relative_path(value: &str) -> Result<String, SourceTreeError> {
                         || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
                 })
                 || reserved(part)
-                || matches!(part, ".git" | "target" | ".idea" | ".vscode")
+                || !parent_resource && matches!(part, ".git" | "target" | ".idea" | ".vscode")
         })
     {
         return Err(SourceTreeError::UnsafePath(value));
@@ -753,6 +754,35 @@ mod tests {
             assert!(
                 SourceEntry::from_bytes(SourcePath::new(path).unwrap(), payload.to_vec()).is_err()
             );
+        }
+    }
+
+    #[test]
+    fn parent_resource_artifact_names_are_payloads_and_remain_rejected_outside_owner_scope() {
+        let temp = Temp::new();
+        let bytes = b"<?xml opaque invalid\xff";
+        for name in [
+            "target/payload.xml",
+            ".git/config",
+            ".idea/raw.mdo",
+            ".vscode/data.cf",
+        ] {
+            let path = format!("Ext/ParentConfigurations/{name}");
+            let entry =
+                SourceEntry::from_bytes(SourcePath::new(&path).unwrap(), bytes.to_vec()).unwrap();
+            assert_eq!(entry.kind(), SourceKind::Binary);
+            temp.file(&path, bytes);
+            assert!(SourcePath::new(name).is_err());
+            assert!(validate_source_path_safety(name).is_err());
+            assert!(validate_source_path_safety(&path).is_ok());
+        }
+        assert_eq!(read_source_tree(&temp.0).unwrap().entries().len(), 4);
+        for bad in [
+            "Ext/ParentConfigurations/../target/payload.xml",
+            "Ext/ParentConfigurations/target/../../outside.xml",
+        ] {
+            assert!(SourcePath::new(bad).is_err());
+            assert!(validate_source_path_safety(bad).is_err());
         }
     }
 
