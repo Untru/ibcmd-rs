@@ -39,7 +39,9 @@
     "Installed metadata defaults retain omitted WebService operation lock modes as Automatic; FilterCriterion accepts only witnessed namespace declarations and custom parameter QNames use their actual physical depth",
     "Every form-reference kind retains the current ordered application-use-purpose subset instead of a constant desktop-and-mobile pair",
     "Metadata command pictures preserve per-owner UUID, kind, current reference, load-transparent and transparent-pixel semantics through a strict typed resource; changed or deleted owners cannot replay stale values",
-    "Metadata and form help preserve current ordered language identifiers and complete page resources; explicit markers and owned pages must agree, with no fixed Russian-only replacement"
+    "Metadata and form help preserve current ordered language identifiers and complete page resources; explicit markers and owned pages must agree, with no fixed Russian-only replacement",
+    "EDT metadata command transparency resolves the current CommonPicture nullable point; validated per-use resources override contextual defaults without fabricating per-use pixel coordinates",
+    "CommonPicture native true/no-pixel wrappers retain the installed SDK auto-transparency sentinel; an optional source-presence boolean guards exact native spelling without replaying point values or overriding edits"
   ],
   "files": [
     {
@@ -104,7 +106,7 @@
     },
     {
       "path": "crates/core/src/ir/mod.rs",
-      "sha256": "84e22d8ff9bfc302a1a0457555b8ad97d074873b094f136a03d46b59b8a2d801"
+      "sha256": "0f16ed367039e489a374b0893a07eeae7424ffd57e7519d010f7efbec92c69d0"
     },
     {
       "path": "crates/core/src/ir/semantic_view.rs",
@@ -1844,7 +1846,7 @@
     },
     {
       "path": "crates/formats-xml/src/metadata_picture_semantics.rs",
-      "sha256": "79aaeaad89c18a2c91b448f9acc7f025ee7c7de6cd29692cf3de9c24697f3c4e"
+      "sha256": "ec00204be1bb2c55320736857da71c5d03eae0757f4b0fd3b11f5d69f3cfcece"
     },
     {
       "path": "crates/formats-xml/src/picture.rs",
@@ -2480,7 +2482,7 @@
     },
     {
       "path": "crates/pipeline/src/convert.rs",
-      "sha256": "c68e0beb752d961fc57b42e0a2632ac91bd39cf4227518ec498042614ea9e40b"
+      "sha256": "d60b67dd70dfbb20935c0f67ef45ff726ea9d0354f622224ae28637b14ff3842"
     },
     {
       "path": "crates/pipeline/src/dcs_read.rs",
@@ -2560,7 +2562,7 @@
     },
     {
       "path": "crates/pipeline/src/picture_read.rs",
-      "sha256": "2792226fb85494a3f60aae1f202e2a14b1216c7fa4fea0984d0604019882e859"
+      "sha256": "135ece265aa5dc7aeff4ecc47a20c79c71ff8249c6107729b6f9039413ab48ce"
     },
     {
       "path": "crates/pipeline/src/predefined_read.rs",
@@ -2651,5 +2653,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "f36c029b0248d3e7dff38e981aa80cbb66b35efa"
+  "local_source_snapshot": "4c10f1a0a46d422bc5c26968732a1fa3e6d131da"
 }
