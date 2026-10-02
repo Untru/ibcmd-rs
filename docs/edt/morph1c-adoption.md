@@ -63,10 +63,15 @@ body reads. Disk inventory and publication use chunked copy/hash and complete
 streaming XML inspection; they impose no default file-count, file-size,
 total-size or path-depth validity ceilings. Actual filesystem errors remain
 errors. Destination publication uses the existing exclusive atomic rename
-after verifying the sibling stage. Core metadata/value budgets and private
-codec payload allocation are separate remaining scalability work; removing
-inventory ceilings alone does not establish unlimited whole-configuration
-support. No product conversion invokes Java, EDT or a native platform.
+after verifying the sibling stage. Both CLI directory routes explicitly use
+the Source operation policy for XML profile detection and canonical metadata,
+values, members and asset references. Checked accounting replaces fixed size
+quotas on that path; syntax, identity, ordering, ownership and provenance checks
+remain in force. Ordinary bounded memory APIs retain their existing contract.
+Actual IO and allocation failures remain errors. Full-corpus and installed-EDT
+acceptance is recorded separately; a successful size control does not establish
+that every configuration has been verified. No product conversion invokes Java,
+EDT or a native platform.
 
 The supported project model is explicit EDT 2025.2.3 with XML 2.20 or 2.21.
 XML-to-EDT requires an explicit runtime version agreeing with the XML profile;
@@ -117,9 +122,11 @@ codecs already preserve `choiceButtonPicture`. Strict parser censuses cover ever
 form in the genuine BSP 8.3 and 8.5 Designer/installed-EDT corpora; the laboratory
 JSON reports record exact inputs and outcomes. Parser coverage and paired field
 roundtrips are separate evidence from the installed-tool acceptance gate.
-The canonical bridge checks core object/member/retained-byte budgets before
-cloning metadata or retaining asset references, checks each owner's asset count,
-and checks the final graph including separately declared ownership.
+The canonical bridge propagates the explicit operation policy while accounting
+for objects, members, retained bytes and each owner's asset references before
+cloning metadata. It checks the final graph including separately declared
+ownership. CLI Source operations impose no fixed count or scalar-byte ceiling;
+ordinary bounded memory operations still enforce their published budgets.
 Structured body formatting equivalence is restricted to explicitly listed typed
 body roots with codec-defined BOM/EOL/indent conventions, respecting mixed text
 and inherited `xml:space`. Unknown XML bodies require exact bytes. Prolog/epilog
