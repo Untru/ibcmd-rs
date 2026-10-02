@@ -231,6 +231,8 @@ pub enum Codec {
     /// `List([Int(x), Int(y)])`; пустой `List` = «пикселя нет» (дефолт). См.
     /// [`crate::transparent_pixel`].
     TransparentPixel,
+    /// Root Configuration MdPicture with a nullable transparent Point.
+    MdPicture,
     /// `shortcut`/`Shortcut` command datatype `Shortcut` (key combination
     /// `Ctrl+S`/`F3`/…). BOTH formats carry it as leaf TEXT, differing only in the tag
     /// name (locus): EDT `<shortcut>Ctrl+S</shortcut>` (empty → omitted); Designer

@@ -52,7 +52,7 @@ impl Serialize for ConfigurationSemanticView<'_> {
 impl Serialize for Object<'_> {
     fn serialize<S: serde::Serializer>(&self, s: S) -> Result<S::Ok, S::Error> {
         let obj = self.0;
-        let mut state = s.serialize_struct("MetadataObject", 29)?;
+        let mut state = s.serialize_struct("MetadataObject", 30)?;
         state.serialize_field("kind", &obj.kind)?;
         state.serialize_field("name", &obj.name)?;
         state.serialize_field("uuid", &obj.uuid)?;
@@ -85,6 +85,12 @@ impl Serialize for Object<'_> {
         }
         if !obj.config_blobs.is_empty() {
             state.serialize_field("config_blobs", &obj.config_blobs)?;
+        }
+        if !obj.parent_configuration_resources.is_empty() {
+            state.serialize_field(
+                "parent_configuration_resources",
+                &obj.parent_configuration_resources,
+            )?;
         }
         if obj.standalone_content.is_some() {
             state.serialize_field("standalone_content", &obj.standalone_content)?;

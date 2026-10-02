@@ -194,3 +194,36 @@ No reusable SQL Server generation-switching, PostgreSQL backend (0.9), or file
 database storage/transactions (0.10) is supplied by this source-codec closure.
 Those tasks need their own implementation and evidence. No other milestone is
 implemented or closed merely by including these sources.
+
+## Root MdPicture semantics
+
+The source codec handles Logo, Splash and MainSectionPicture as typed picture
+presence plus current nullable transparentPixel and glyph Points, with image bytes retained
+separately. Native ExtPicture wrappers and EDT descriptor Point fields map to the
+same property value. Null and Point(-1,-1) remain distinct; native explicit sentinel
+coordinates retain their source spelling only while the current Point is unchanged.
+Point/image edits participate in semantic and inventory checks. A rehashed manifest
+cannot restore contradictory retained XML. Both XML2.20 and2.21 are exercised.
+
+The installed Configuration importer routes all three slots to MdPicture, which
+inherits PictureDef. MetadataPictureXmlExporter passes the current picture to
+MetadataPictureDefWriter, which reads getTransparentPixel; it does not force null.
+Historical bound primary artifacts: F:/ibcmd/lab/07/root-picture-sdk-contract-r1/result.json
+and F:/ibcmd/lab/07/root-mdpicture-model-proof-r9/result.json. The latter proves
+original SDK model save/load, both Point coordinate shapes and the persisted glyph
+field. Point exposes only signed EInt x/y; the complete signed32 domain is retained,
+and out-of-type coordinates are rejected. No name field is discarded. These are primary model
+proofs, not headless project acceptance. The original image exporter copies the
+current binary content directly; it does not crop or modify it using glyph.
+
+EDT persists glyph directly in each MdPicture descriptor. Native SDK picture
+wrappers omit glyph, so the adapter emits a closed, versioned semantic resource
+`Ext/ibcmd-root-picture-semantics.v1.json` only when glyph is present. Each record
+binds the current Configuration UUID and one declared slot with a unique current
+image. All coordinates remain fingerprint-visible typed properties; no source
+bytes are replayed. Native input consumes and regenerates this resource exactly
+once; EDT output uses its actual descriptor field without a redundant sidecar.
+The extension ledger reports resource/slot counts. Native SDK projection alone
+does not preserve glyph; exact adapter roundtrips include the explicit resource.
+Unknown fields, duplicate slots, deleted images, owner mismatches and forged
+provenance are rejected; edited or deleted current glyph changes the output.

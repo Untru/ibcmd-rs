@@ -177,16 +177,17 @@ impl SourceEntry {
         bytes: &[u8],
     ) -> Result<(SourceKind, Option<ObjectUuid>), SourceTreeError> {
         let mut kind = reader::classify(path.as_str());
-        let root = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
-            Some(
-                crate::XmlReader::inspect_slice(bytes).map_err(|e| SourceTreeError::Xml {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })?,
-            )
-        } else {
-            None
-        };
+        let root =
+            if kind != SourceKind::Binary && path.as_str().to_ascii_lowercase().ends_with(".xml") {
+                Some(
+                    crate::XmlReader::inspect_slice(bytes).map_err(|e| SourceTreeError::Xml {
+                        path: path.clone(),
+                        message: e.to_string(),
+                    })?,
+                )
+            } else {
+                None
+            };
         if matches!(kind, SourceKind::OtherXml)
             && root.as_ref().is_some_and(|name| {
                 matches!(
@@ -710,6 +711,51 @@ mod tests {
             );
         }
     }
+    #[test]
+    fn root_parent_attachment_resources_are_opaque_without_filename_sniffing() {
+        let temp = Temp::new();
+        let payload = b"<?xml bad <!DOCTYPE raw>\xff\0";
+        for prefix in [
+            "Ext/ParentConfigurations/",
+            "Configuration/ParentConfigurations/",
+            "src/Configuration/ParentConfigurations/",
+            ".ibcmd-provenance/xml/Ext/ParentConfigurations/",
+        ] {
+            for name in ["nested/payload.xml", "payload.mdo", "original.cf"] {
+                let path = format!("{prefix}{name}");
+                let entry =
+                    SourceEntry::from_bytes(SourcePath::new(&path).unwrap(), payload.to_vec())
+                        .unwrap();
+                assert_eq!(entry.kind(), SourceKind::Binary);
+                assert_eq!(entry.uuid(), None);
+                assert_eq!(entry.bytes(), payload);
+                assert!(
+                    entry
+                        .with_path(SourcePath::new("Catalogs/Declared.xml").unwrap())
+                        .is_err()
+                );
+                temp.file(&path, payload);
+            }
+        }
+        let tree = read_source_tree(&temp.0).unwrap();
+        assert_eq!(tree.entries().len(), 12);
+        assert!(
+            tree.entries()
+                .iter()
+                .all(|e| e.kind() == SourceKind::Binary && e.bytes() == payload)
+        );
+        for path in [
+            "Ext/ParentConfigurations.xml",
+            "Ext/Other/payload.xml",
+            "Catalogs/C/ParentConfigurations/payload.xml",
+            "Configuration/ParentConfigurationsExtra/payload.xml",
+        ] {
+            assert!(
+                SourceEntry::from_bytes(SourcePath::new(path).unwrap(), payload.to_vec()).is_err()
+            );
+        }
+    }
+
     #[test]
     fn metadata_ext_subfiles_include_root_and_nested_ext() {
         for path in ["Ext/Help.xml", "Catalogs/A/Ext/Help.xml"] {

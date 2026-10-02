@@ -255,6 +255,7 @@ fn claim_element_for_codec(el: &Element, codec: &Codec, version: FormatVersion) 
         Codec::TransparentPixel => {
             transparent_pixel::claim(el);
         }
+        Codec::MdPicture => crate::md_picture::claim(el),
         // Designer ChoiceParameters: host claimed; claim как читает decode_designer.
         Codec::ChoiceParameters(dialect) => {
             el.claim();
@@ -593,6 +594,12 @@ pub(crate) fn decode_with_codec(
         Codec::Shortcut => match located {
             Located::Element(host) => shortcut::decode(host),
             Located::Attr(_) => Decoded::Error("Shortcut on attribute unsupported".into()),
+            Located::PrefixMismatch { local, want, got } => prefix_err(&local, want, &got),
+            Located::Absent => Decoded::Absent,
+        },
+        Codec::MdPicture => match located {
+            Located::Element(host) => crate::md_picture::decode(host),
+            Located::Attr(_) => Decoded::Error("MdPicture on attribute unsupported".into()),
             Located::PrefixMismatch { local, want, got } => prefix_err(&local, want, &got),
             Located::Absent => Decoded::Absent,
         },
@@ -1326,6 +1333,7 @@ pub(crate) fn encode_with_codec(
             sink.children.push(shortcut::encode(ns, tag, value)?);
             Ok(())
         }
+        Codec::MdPicture => { sink.children.push(crate::md_picture::encode(ns, tag, value)?); Ok(()) }
         Codec::TransparentPixel => {
             sink.children
                 .push(transparent_pixel::encode(ns, tag, value)?);

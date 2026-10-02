@@ -231,7 +231,24 @@ fn visit(
     }
     Ok(())
 }
+pub(crate) fn parent_configuration_resource(path: &str) -> bool {
+    let path = path.strip_prefix(".ibcmd-provenance/xml/").unwrap_or(path);
+    [
+        "Ext/ParentConfigurations/",
+        "Configuration/ParentConfigurations/",
+        "src/Configuration/ParentConfigurations/",
+    ]
+    .iter()
+    .any(|prefix| {
+        path.strip_prefix(prefix)
+            .is_some_and(|relative| !relative.is_empty())
+    })
+}
+
 pub(crate) fn classify(p: &str) -> SourceKind {
+    if parent_configuration_resource(p) {
+        return SourceKind::Binary;
+    }
     let l = p.to_ascii_lowercase();
     let e = l.rsplit('.').next().unwrap_or("");
     if l == "configuration.xml" {

@@ -48,6 +48,7 @@ pub mod std_attrs_ir;
 pub mod std_tabular_sections;
 pub mod style_value_codec;
 pub mod transparent_pixel;
+pub mod md_picture;
 pub mod type_codec;
 pub mod value_codec;
 pub mod xdto;

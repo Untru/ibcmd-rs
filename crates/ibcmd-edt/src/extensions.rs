@@ -76,5 +76,20 @@ pub(crate) fn source_extensions_from_model(
             references,
         });
     }
+    for object in model
+        .objects
+        .iter()
+        .filter(|o| o.kind.as_str() == "Configuration")
+    {
+        if let Some(references) =
+            formats_xml::md_picture::resource_count(object).map_err(EdtError::new)?
+        {
+            extensions.push(SourceExtensionUse {
+                id: "ibcmd-root-picture-semantics/1",
+                resources: 1,
+                references,
+            });
+        }
+    }
     Ok(extensions)
 }

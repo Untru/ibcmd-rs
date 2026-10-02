@@ -92,11 +92,12 @@ impl LocusMap for EdtConfiguration {
             ),
             cfg::F_ALLOWED_INCOMING_SHARE_TYPES => fp(&["allowedIncomingShareRequestTypes"], Codec::AllowedIncomingShareTypes(ConfigDialect::Edt)),
             cfg::F_WINDOWS_OPEN_VARIANT => fp(&["clientApplicationWindowsOpenVariant"], Codec::EnumText),
-            cfg::F_MAIN_SECTION_PICTURE => fp(&["mainSectionPicture"], Codec::PlainText),
+            cfg::F_MAIN_SECTION_PICTURE => fp(&["mainSectionPicture"], Codec::MdPicture),
             cfg::F_DEFAULT_LANGUAGE => fp(&["defaultLanguage"], Codec::PlainText),
             cfg::F_BRIEF_INFORMATION => fp(&["briefInformation"], Codec::LocalizedKeyVal),
             cfg::F_DETAILED_INFORMATION => fp(&["detailedInformation"], Codec::LocalizedKeyVal),
-            cfg::F_SPLASH => fp(&["splash"], Codec::PlainText),
+            cfg::F_SPLASH => fp(&["splash"], Codec::MdPicture),
+            cfg::F_LOGO => fp(&["logo"], Codec::MdPicture),
             cfg::F_COPYRIGHT => fp(&["copyright"], Codec::LocalizedKeyVal),
             cfg::F_VENDOR_INFORMATION_ADDRESS => fp(&["vendorInformationAddress"], Codec::LocalizedKeyVal),
             // Localized-пара сиблингов `<configurationInformationAddress><key>ru… /<key>en…`
@@ -216,6 +217,7 @@ static EDT_ORDER: &[FieldId] = &[
     cfg::F_ALLOWED_INCOMING_SHARE_TYPES,
     cfg::F_WINDOWS_OPEN_VARIANT,
     cfg::F_MAIN_SECTION_PICTURE,
+    cfg::F_LOGO,
     cfg::F_SHORT_CAPTION,
     cfg::F_DEFAULT_LANGUAGE,
     cfg::F_BRIEF_INFORMATION,
@@ -264,27 +266,6 @@ fn write(obj: &MetadataObject) -> Result<Vec<u8>, String> {
                         .collect(),
                 ),
             ));
-        }
-        // Witnessed extension-`.mdo` НЕ несёт пустых узлов `<mainSectionPicture/>`/
-        // `<splash/>` (те существуют лишь при наличии картинок; presence гейтится файлами,
-        // см. `pipeline::ext_read`). Present-empty `Str("")` в bag корня расширения
-        // (EDT-источник с узлом либо pipeline-синтез из Ext-картинки — оба unwitnessed
-        // для .cfe) снимаем молча; НЕПУСТОЕ значение (не witnessed) — громко.
-        for fid in [cfg::F_MAIN_SECTION_PICTURE, cfg::F_SPLASH] {
-            if let Some(pos) = ext.properties.iter().position(|(id, _)| *id == fid) {
-                match &ext.properties[pos].1 {
-                    PropertyValue::Str(s) if s.is_empty() => {
-                        ext.properties.remove(pos);
-                    }
-                    other => {
-                        return Err(format!(
-                            "extension root carries a non-empty picture value {other:?} for \
-                             field {fid:?} — not part of the witnessed extension-root shape \
-                             (§1.0 — refusing to emit it silently)"
-                        ))
-                    }
-                }
-            }
         }
         return crate::write_descriptor(
             "Configuration",

@@ -265,13 +265,14 @@ fn picture_source(
 /// SDK's Point(-1,-1); false maps to null. Explicit coordinates are preserved. Shared with the config-level Ext pictures
 /// (`crate::ext_read`: `Ext/<Slot>.xml` wrappers of `Splash`/`MainSectionPicture` carry the
 /// IDENTICAL shape — verified byte-equal on s15; those refuse a pixel, unwitnessed there).
+#[cfg(any())]
 pub(crate) fn parse_wrapper(
     path: &Path,
     obj_name: &str,
 ) -> Result<(String, Option<(i64, i64)>), ConvertError> {
     parse_wrapper_with_presence(path, obj_name).map(|(name, point, _)| (name, point))
 }
-fn parse_wrapper_with_presence(
+pub(crate) fn parse_wrapper_with_presence(
     path: &Path,
     obj_name: &str,
 ) -> Result<(String, Option<(i64, i64)>, bool), ConvertError> {
@@ -379,10 +380,11 @@ fn file_name_of(path: &Path) -> String {
 /// `<xr:TransparentPixel x="N" y="M"/>` attr pair. Shared with the config-level Ext pictures
 /// (`crate::ext_read` — `Ext/<Slot>.xml` wrappers are byte-identical in shape, RE s15;
 /// those always pass `pixel=None`).
+#[cfg(any())]
 pub(crate) fn serialize_wrapper(file_name: &str, pixel: Option<(i64, i64)>) -> Vec<u8> {
     serialize_wrapper_with_presence(file_name, pixel, false)
 }
-fn serialize_wrapper_with_presence(file_name: &str, pixel: Option<(i64, i64)>, sentinel_explicit: bool) -> Vec<u8> {
+pub(crate) fn serialize_wrapper_with_presence(file_name: &str, pixel: Option<(i64, i64)>, sentinel_explicit: bool) -> Vec<u8> {
     let version = formats_designer::common::profile_for(crate::sidecar_version::write_target())
         .map(|p| p.version_value)
         // Реестр всегда несёт таргет (`write_target` возвращает только witnessed-версии);

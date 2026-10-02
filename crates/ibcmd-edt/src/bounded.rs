@@ -351,6 +351,13 @@ pub(crate) fn declared_xml(path: &str) -> bool {
     if path.starts_with("Help/_files/") || path.contains("/Help/_files/") {
         return false;
     }
+    // The original SDK copies this root attachment's complete sibling directory.
+    // Only fully bound current parent bytes and complete replay accounting accept it.
+    if path.starts_with("Ext/ParentConfigurations/")
+        || path.starts_with("Configuration/ParentConfigurations/")
+    {
+        return false;
+    }
     let parts = path.split('/').collect::<Vec<_>>();
     if matches!(parts.as_slice(), ["CommonPictures", _, "Ext", "Picture", _])
         || matches!(parts.as_slice(), ["CommonPictures", _, file] if file.starts_with("Picture.") && !file.ends_with(".mdo"))

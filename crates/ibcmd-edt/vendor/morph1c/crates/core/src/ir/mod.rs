@@ -206,24 +206,17 @@ pub struct WsDefinition {
     pub xsds: Vec<(String, Vec<u8>)>,
 }
 
-/// Картинка КОРНЯ конфигурации (`Splash` / `MainSectionPicture`) — слот + расширение +
-/// сырые байты изображения (config-level Ext, RE coverage/s15_subordinate).
-///
-/// Раскладка расходится с [`PictureBody`] (CommonPicture): у корня картинка живёт в
-/// config-level `Ext` и имя файла ПЕР-ФОРМАТНОЕ:
-/// * **EDT**: `src/Configuration/<Слот>.<ext>` (сиблинг `Configuration.mdo`, имя = слот);
-/// * **Designer**: `Ext/<Слот>.xml` (ExtPicture-обёртка, `<xr:Abs>Picture.<ext></xr:Abs>`,
-///   `LoadTransparent=false`) + сырое `Ext/<Слот>/Picture.<ext>`.
-///
-/// Сырые байты идентичны между форматами (§1.6, сверено s15) → канон несёт слот +
-/// расширение + байты; пер-форматные имена файлов регенерируются. Дескриптор ссылку НЕ несёт
-/// (EDT `<splash/>`/`<mainSectionPicture/>` — всегда-пустые узлы, Designer — ничего):
-/// присутствие картинки гейтится ФАЙЛОМ на диске. Спутник, не спек-свойство (как
-/// [`Module`]/[`PictureBody`]): whole-config read подгружает (`pipeline::ext_read`),
-/// whole-config write эмитит в пер-форматную раскладку.
+/// Root Logo/Splash/MainSectionPicture binary image. Descriptor-owned presence and
+/// CURRENT nullable transparentPixel/glyph Points live in the Configuration property bag;
+/// the binary body supplies the image extension and exact bytes.
+/// EDT writes Configuration/<Slot>.<ext>; native writes Ext/<Slot>.xml plus
+/// Ext/<Slot>/Picture.<ext>. Native sentinel coordinate presence is lexical only.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConfigPicture {
-    /// Слот картинки корня (`"Splash"` / `"MainSectionPicture"`).
+    /// Native explicit sentinel spelling only, guarded by current Point(-1,-1).
+    #[serde(skip)]
+    pub native_sentinel_explicit: bool,
+    /// Root picture slot: Logo, Splash or MainSectionPicture.
     pub slot: String,
     /// Расширение файла изображения без точки (`"png"`).
     pub ext: String,
@@ -260,6 +253,15 @@ pub struct ConfigBlob {
     /// it only while the canonical bytes match the recorded complete model.
     #[serde(skip)]
     pub mobile_signature_lexical: Option<MobileSignatureLexical>,
+}
+
+/// Complete opaque directory resources owned by the root parent binary attachment.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ParentConfigurationResource {
+    /// Safe relative identity below ParentConfigurations, with `/` separators.
+    pub path: String,
+    /// CURRENT exact payload bytes; never XML/CF sniffed or rewritten.
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -798,6 +800,9 @@ pub struct MetadataObject {
     /// `skip_serializing_if` держит RON-снапшоты прочих объектов байт-идентичными.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub config_blobs: Vec<ConfigBlob>,
+    /// Exact current resources of the root ParentConfigurations binary attachment.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub parent_configuration_resources: Vec<ParentConfigurationResource>,
     /// Состав автономной конфигурации ([`StandaloneContent`]) — СТРУКТУРНЫЙ конфиг-сайдкар
     /// КОРНЯ, подгружаемый whole-config read'ом (`pipeline::standalone_content_read`) из
     /// `Ext/StandaloneConfigurationContent.bin` (Designer) / `MobileApplicationContent.scc`
@@ -916,6 +921,7 @@ impl MetadataObject {
             picture: None,
             config_pictures: Vec::new(),
             config_blobs: Vec::new(),
+            parent_configuration_resources: Vec::new(),
             standalone_content: None,
             root_command_interface: None,
             main_section_command_interface: None,

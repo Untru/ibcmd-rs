@@ -57,6 +57,7 @@ mod language_read;
 mod language_write;
 mod module_read;
 mod mxl_read;
+mod parent_configuration_read;
 mod picture_read;
 mod metadata_picture_semantics;
 mod predefined_read;

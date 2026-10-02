@@ -210,6 +210,8 @@ pub const F_KEEP_MAPPING: FieldId = FieldId(76);
 pub const F_EXT_PURPOSE: FieldId = FieldId(77);
 /// Typed source help-presence marker, paired with actual help-page sidecars.
 pub const F_HELP: FieldId = FieldId(78);
+/// Root MdPicture Logo, two nullable persisted Points plus attached image.
+pub const F_LOGO: FieldId = FieldId(79);
 
 /// Witnessed Checked-флаги `<extension>` корня расширения (s13_extension/Configuration.mdo,
 /// назначение Customization): заимствованные свойства корня, которые EDT помечает
@@ -239,15 +241,9 @@ pub fn is_extension_root(bag: &[(FieldId, PropertyValue)]) -> bool {
 fn empty_str() -> PropertyValue {
     PropertyValue::Str(String::new())
 }
-/// Sentinel-дефолт «отсутствует» для EDT-only пустых picture-элементов
-/// (`<mainSectionPicture/>`/`<splash/>`). EDT несёт пустой узел РОВНО когда картинка
-/// существует (witnessed: s15 — оба узла + файлы; s1..s14 — ни узлов, ни файлов):
-/// present-empty `Str("")` ОТЛИЧАЕТСЯ от sentinel → узел эмитится; absent → sentinel
-/// == дефолт → сжимается из bag → узел не эмитится. Designer узла не несёт вовсе
-/// (x_ignore); present-empty при наличии картинки синтезирует `pipeline::ext_read`.
-/// Sentinel — NUL-байт, не встречающийся в реальных picture-ref.
+/// An empty outer List denotes absence; present MdPicture has transparentPixel/glyph nullable Point lists.
 fn picture_absent() -> PropertyValue {
-    PropertyValue::Str("\u{0}".to_string())
+    PropertyValue::List(Vec::new())
 }
 fn empty_loc() -> PropertyValue {
     PropertyValue::Localized(Vec::new())
@@ -368,7 +364,7 @@ fn build_fields() -> Vec<FieldSpec> {
         neutral_enum(F_WINDOWS_OPEN_VARIANT, "clientApplicationWindowsOpenVariant"),
         // mainSectionPicture: EDT-only пустой узел `<mainSectionPicture/>`, present РОВНО
         // при наличии картинки (см. `picture_absent`); Designer не несёт → x_ignore.
-        FieldSpec::with_default(F_MAIN_SECTION_PICTURE, "mainSectionPicture", ValueKind::Str, picture_absent())
+        FieldSpec::with_default(F_MAIN_SECTION_PICTURE, "mainSectionPicture", ValueKind::List, picture_absent())
             .x_ignored(),
         dref(F_DEFAULT_INTERFACE, "defaultInterface"),
         loc(F_CAPTION, "caption"),
@@ -380,7 +376,8 @@ fn build_fields() -> Vec<FieldSpec> {
         loc(F_DETAILED_INFORMATION, "detailedInformation"),
         // splash: EDT-only пустой узел `<splash/>`, present РОВНО при наличии картинки
         // (см. `picture_absent`); Designer не несёт → x_ignore.
-        FieldSpec::with_default(F_SPLASH, "splash", ValueKind::Str, picture_absent()).x_ignored(),
+        FieldSpec::with_default(F_SPLASH, "splash", ValueKind::List, picture_absent()).x_ignored(),
+        FieldSpec::with_default(F_LOGO, "logo", ValueKind::List, picture_absent()).x_ignored(),
         loc(F_COPYRIGHT, "copyright"),
         loc(F_VENDOR_INFORMATION_ADDRESS, "vendorInformationAddress"),
         loc(F_CONFIGURATION_INFORMATION_ADDRESS, "configurationInformationAddress"),

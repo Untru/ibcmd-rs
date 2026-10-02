@@ -862,6 +862,17 @@ pub(crate) fn canonical_inventory_with_policy(
 }
 
 pub(crate) fn metadata_file(entry: &SourceEntry) -> Result<bool, EdtError> {
+    let path = entry
+        .path()
+        .as_str()
+        .strip_prefix(".ibcmd-provenance/xml/")
+        .unwrap_or(entry.path().as_str());
+    if path.starts_with("Ext/ParentConfigurations/")
+        || path.starts_with("Configuration/ParentConfigurations/")
+        || path.starts_with("src/Configuration/ParentConfigurations/")
+    {
+        return Ok(false);
+    }
     if !entry.path().as_str().ends_with(".xml") {
         return Ok(false);
     }
@@ -934,6 +945,9 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
             morph1c_pipeline::dcs_qname_semantic_bytes(a).map_err(EdtError::new)?
                 == morph1c_pipeline::dcs_qname_semantic_bytes(b).map_err(EdtError::new)?,
         );
+    }
+    if relative == format!("Ext/{}", formats_xml::md_picture::RESOURCE) {
+        return Ok(formats_xml::md_picture::same_resource(a, b));
     }
     if parts.len() == 3
         && parts.last().copied() == Some(formats_xml::metadata_picture_semantics::RESOURCE)

@@ -1,7 +1,7 @@
 //! Attach / emit the CONFIG-LEVEL `Ext` sidecars of the root `Configuration` object
 //! (§1.0/§1.6): the four application modules (`ManagedApplicationModule` /
 //! `OrdinaryApplicationModule` / `SessionModule` / `ExternalConnectionModule`), the two
-//! root pictures (`Splash` / `MainSectionPicture`), the two VERBATIM binary sidecars
+//! root pictures (`Logo` / `Splash` / `MainSectionPicture`), the two VERBATIM binary sidecars
 //! (`ParentConfigurations` / `MobileClientSignature`), the STRUCTURED standalone-content
 //! sidecar (`StandaloneConfigurationContent.bin` / `MobileApplicationContent.scc` —
 //! delegated to [`crate::standalone_content_read`]) and the FOUR config-level interface
@@ -13,23 +13,17 @@
 //! every per-object kind (root-level `Ext/`, not `<Name>/Ext/`).
 //!
 //! # Layout beside the root descriptor (RE: coverage/s15_subordinate, both dialects)
-//! * **EDT** (root `src/Configuration/Configuration.mdo`): the sidecars are SIBLINGS of the
-//!   descriptor — modules `src/Configuration/<Slot>.bsl` (no BOM, CRLF), pictures
-//!   `src/Configuration/<Slot>.<ext>` (raw image, name = slot).
-//! * **Designer** (root `<root>/Configuration.xml`): a root-level `Ext/` dir —
-//!   modules `Ext/<Slot>.bsl` (UTF-8 BOM + CRLF), pictures `Ext/<Slot>.xml` (the SAME
-//!   `<ExtPicture>` wrapper as CommonPicture — `<xr:Abs>Picture.<ext></xr:Abs>`,
-//!   `LoadTransparent=false`) plus the raw image `Ext/<Slot>/Picture.<ext>`.
+//! * EDT: modules and raw `<Slot>.<ext>` images are siblings of Configuration.mdo.
+//! * Designer: modules and `<Slot>.xml` wrappers live under the root Ext directory;
+//!   raw images live under Ext/<Slot>/Picture.<ext>.
 //!
-//! Module sources equal modulo the BOM ([`crate::module_read::reencode_module_for_format`]
-//! re-encodes per format); the raw image bytes are IDENTICAL across formats (§1.6, verified
-//! byte-equal on s15). The root DESCRIPTOR carries no reference to any of these — presence
-//! is gated purely by the files on disk, absence is honest. EDT marks a present picture
-//! with an EMPTY descriptor node (`<splash/>`/`<mainSectionPicture/>`, witnessed: s15 has
-//! both nodes + files, s1..s14 have neither); Designer has no descriptor node at all, so
-//! [`attach_config_ext`] SYNTHESIZES the present-empty property from the attached file on
-//! Designer reads — a cross-write to EDT then regenerates the node exactly when the source
-//! actually carries the picture.
+//! Logo, Splash and MainSectionPicture are typed MdPicture values. Presence and
+//! CURRENT nullable transparent Point live in the Configuration property bag;
+//! binary bytes live in ConfigPicture. EDT carries the Point in its descriptor,
+//! native XML carries it in the ExtPicture wrapper. Null means LoadTransparent=false;
+//! Point(-1,-1) is the official true-without-coordinate sentinel. A native explicit
+//! sentinel coordinate has a source spelling facet guarded by the current Point.
+//! Descriptor/body disagreement fails before publishing a converted result.
 //!
 //! # Binary sidecars (ParentConfigurations / MobileClientSignature)
 //! Два бинарных конфиг-сайдкара носятся ДОСЛОВНО (это не модули: BOM/CRLF не трогаются,
@@ -78,8 +72,8 @@ const APP_MODULE_SLOTS: &[&str] = &[
     "ExternalConnectionModule",
 ];
 
-/// Ordered root-picture slots (witnessed on s15).
-const CONFIG_PICTURE_SLOTS: &[&str] = &["MainSectionPicture", "Splash"];
+/// Root MdPicture slots bound to installed Configuration metadata and importer.
+const CONFIG_PICTURE_SLOTS: &[&str] = &["MainSectionPicture", "Splash", "Logo"];
 
 /// `(IR-слот, designer-имя файла, edt-имя файла)` бинарных VERBATIM-сайдкаров корня —
 /// детерминированный порядок IR. ⚠️ EDT-имя `MobileClientSignature` — ДРУГОЕ
@@ -176,18 +170,23 @@ pub fn attach_config_ext(
         obj.modules.push(Module::text(slot, source));
     }
 
-    // (2) Root pictures — Splash / MainSectionPicture, deterministic slot order.
+    // (2) All three root MdPicture slots, with descriptor-owned current Points.
     for &slot in CONFIG_PICTURE_SLOTS {
-        if let Some(pic) = read_picture(format, &dir, slot)? {
+        if let Some(pic) = read_picture(format, &dir, slot, obj)? {
             obj.config_pictures.push(pic);
-            // Designer's root descriptor carries NO picture node at all, while EDT marks a
-            // present picture with a present-empty node (`<mainSectionPicture/>`/`<splash/>`,
-            // witnessed: s15 both / s1..s14 neither). Synthesize the present-empty property
-            // for Designer reads so a cross-write to EDT regenerates the node exactly when
-            // the picture exists; EDT reads already carry it from the descriptor itself.
+            // Native wrappers supply the same typed present-null/Point property
+            // which EDT carries in the corresponding descriptor node.
             if format == Format::Designer {
-                inject_present_empty_picture_prop(obj, slot);
+                inject_picture_prop(obj, slot, None);
             }
+        }
+    }
+
+    if format == Format::Designer {
+        let resource=dir.join(formats_xml::md_picture::RESOURCE);
+        if resource.is_file() {
+            let bytes=read_bytes(&resource)?;
+            formats_xml::md_picture::apply_resource(obj,&bytes).map_err(|e|read_err("MdPicture",e))?;
         }
     }
 
@@ -269,6 +268,8 @@ pub fn attach_config_ext(
         });
     }
 
+    crate::parent_configuration_read::attach(format, &dir, obj)?;
+
     // (4) СТРУКТУРНЫЙ сайдкар состава автономной конфигурации (designer
     // `StandaloneConfigurationContent.bin` / edt `MobileApplicationContent.scc`) —
     // XML-парс + §1.0-самопроверка в [`crate::standalone_content_read`]; отсутствие
@@ -283,17 +284,21 @@ pub fn attach_config_ext(
     Ok(())
 }
 
-/// Put the present-empty (`Str("")`) root-picture property for `slot` into `obj.properties`
-/// at its CANONICAL spec position (the bag from `engine::read` is in spec order). No-op if
-/// the bag already carries the field (EDT source: the descriptor node put it there).
-fn inject_present_empty_picture_prop(obj: &mut MetadataObject, slot: &str) {
-    use morph1c_core::ir::value::PropertyValue;
+fn picture_field(slot: &str) -> morph1c_core::ir::FieldId {
     use morph1c_core::spec::metadata::configuration as cfg;
-    let field = match slot {
+    match slot {
         "MainSectionPicture" => cfg::F_MAIN_SECTION_PICTURE,
         "Splash" => cfg::F_SPLASH,
-        _ => unreachable!("CONFIG_PICTURE_SLOTS is exhaustive"),
-    };
+        "Logo" => cfg::F_LOGO,
+        _ => unreachable!("validated root picture slot"),
+    }
+}
+
+/// Insert descriptor-owned MdPicture presence and current nullable Point in spec order.
+/// Native wrappers supply this field; EDT descriptors decode it before body attachment.
+fn inject_picture_prop(obj: &mut MetadataObject, slot: &str, point: Option<(i64, i64)>) {
+    use morph1c_core::spec::metadata::configuration as cfg;
+    let field = picture_field(slot);
     if obj.properties.iter().any(|(id, _)| *id == field) {
         return;
     }
@@ -311,7 +316,7 @@ fn inject_present_empty_picture_prop(obj: &mut MetadataObject, slot: &str) {
         .position(|(id, _)| rank(*id) > target)
         .unwrap_or(obj.properties.len());
     obj.properties
-        .insert(pos, (field, PropertyValue::Str(String::new())));
+        .insert(pos, (field, formats_xml::md_picture::present(point)));
 }
 
 /// Read ONE root picture slot from the Ext dir, per format. `None` = the slot honestly has
@@ -320,6 +325,7 @@ fn read_picture(
     format: Format,
     dir: &Path,
     slot: &str,
+    obj: &mut MetadataObject,
 ) -> Result<Option<ConfigPicture>, ConvertError> {
     match format {
         // EDT: the image is the sibling file whose stem is the slot (`Splash.png`).
@@ -355,11 +361,19 @@ fn read_picture(
             }
             let path = match found {
                 Some(p) => p,
-                None => return Ok(None),
+                None => {
+                    if obj.get(picture_field(slot)).is_some() {
+                        return Err(read_err(slot, "declared MdPicture has no matching image body".into()));
+                    }
+                    return Ok(None);
+                }
             };
+            let value = obj.get(picture_field(slot)).ok_or_else(|| read_err(slot, "image body has no declared MdPicture slot".into()))?;
+            formats_xml::md_picture::point(value).map_err(|e|read_err(slot,e))?;
             let ext = image_ext(&path, slot)?;
             let bytes = read_bytes(&path)?;
             Ok(Some(ConfigPicture {
+                native_sentinel_explicit: false,
                 slot: slot.to_string(),
                 ext,
                 bytes,
@@ -372,19 +386,8 @@ fn read_picture(
             if !wrapper.is_file() {
                 return Ok(None); // no wrapper ⇒ slot has no picture (honest).
             }
-            let (file_name, pixel) = crate::picture_read::parse_wrapper(&wrapper, slot)?;
-            // §1.0: config-root wrappers are witnessed pixel-less (`LoadTransparent=false`,
-            // s15 + ERP corpus); `ConfigPicture` has no canonical home for a transparent
-            // pixel → refuse loudly rather than drop it.
-            if pixel.is_some() {
-                return Err(read_err(
-                    slot,
-                    format!(
-                        "Ext/{slot}.xml carries <xr:TransparentPixel> — unwitnessed for \
-                         config-root pictures (§1.0)"
-                    ),
-                ));
-            }
+            let (file_name, pixel, native_sentinel_explicit) = crate::picture_read::parse_wrapper_with_presence(&wrapper, slot)?;
+            inject_picture_prop(obj, slot, pixel);
             let ref_path = Path::new(&file_name);
             // §1.0 witnessed-only: the wrapper references `Picture.<ext>` (same stem as
             // CommonPicture). Any other name is unwitnessed — refuse, don't guess.
@@ -401,6 +404,7 @@ fn read_picture(
             let ext = image_ext(&raw, slot)?;
             let bytes = read_bytes(&raw)?;
             Ok(Some(ConfigPicture {
+                native_sentinel_explicit,
                 slot: slot.to_string(),
                 ext,
                 bytes,
@@ -426,6 +430,7 @@ pub fn write_config_ext(
     if obj.modules.is_empty()
         && obj.config_pictures.is_empty()
         && obj.config_blobs.is_empty()
+        && obj.parent_configuration_resources.is_empty()
         && obj.standalone_content.is_none()
         && obj.root_command_interface.is_none()
         && obj.main_section_command_interface.is_none()
@@ -458,7 +463,8 @@ pub fn write_config_ext(
         )?;
     }
 
-    // (2) Root pictures.
+    // (2) Root pictures: descriptor presence and current Point are authoritative.
+    let mut picture_slots = std::collections::HashSet::new();
     for pic in &obj.config_pictures {
         if !CONFIG_PICTURE_SLOTS.contains(&pic.slot.as_str()) {
             return Err(write_err(
@@ -470,6 +476,9 @@ pub fn write_config_ext(
                 ),
             ));
         }
+        if !picture_slots.insert(pic.slot.as_str()) { return Err(write_err(obj, "duplicate root picture slot".into())); }
+        let field = picture_field(&pic.slot);
+        let point = obj.get(field).map(formats_xml::md_picture::point).transpose().map_err(|e|write_err(obj,e))?.flatten();
         match format {
             // EDT: raw image `<Slot>.<ext>` beside the descriptor.
             Format::Edt => {
@@ -484,11 +493,16 @@ pub fn write_config_ext(
                 crate::form_write::write_file(&dir.join(&pic.slot).join(&file_name), &pic.bytes)?;
                 crate::form_write::write_file(
                     &dir.join(format!("{}.xml", pic.slot)),
-                    // Config-root wrappers are pixel-less (witnessed s15 + ERP, §1.0).
-                    &crate::picture_read::serialize_wrapper(&file_name, None),
+                    &crate::picture_read::serialize_wrapper_with_presence(&file_name, point, pic.native_sentinel_explicit),
                 )?;
             }
             Format::Cf => unreachable!("cf returned above (no Ext dir)"),
+        }
+    }
+
+    if format == Format::Designer {
+        if let Some(resource)=formats_xml::md_picture::resource_bytes(obj).map_err(|e|write_err(obj,e))? {
+            crate::form_write::write_file(&dir.join(formats_xml::md_picture::RESOURCE),&resource)?;
         }
     }
 
@@ -597,6 +611,8 @@ pub fn write_config_ext(
             }
         }
     }
+
+    crate::parent_configuration_read::write(format, &dir, obj)?;
 
     // (4) Состав автономной конфигурации — пер-диалектная СТРУКТУРНАЯ запись
     // ([`crate::standalone_content_read`]; no-op при `standalone_content == None`).
@@ -1101,6 +1117,7 @@ mod tests {
         };
         let base = temp_base("ifaces");
         let empty_ci = CommandInterface {
+            subsystems_visibility: Vec::new(),
             commands: Vec::new(),
             placement: Vec::new(),
             order: Vec::new(),
@@ -1236,6 +1253,7 @@ mod tests {
     fn write_unknown_picture_slot_is_loud_error() {
         let mut obj = root();
         obj.config_pictures.push(ConfigPicture {
+            native_sentinel_explicit: false,
             slot: "Logo".into(),
             ext: "png".into(),
             bytes: vec![1, 2, 3],

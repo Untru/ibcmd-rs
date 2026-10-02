@@ -197,7 +197,7 @@ impl LocusMap for DesignerConfiguration {
             cfg::F_DETAILED_INFORMATION => loc_kv(PP_DETAILED_INFO),
             // splash: EDT-only — Designer не проецирует (как mainSectionPicture: presence
             // гейтится файлом Ext/Splash.xml, синтез — pipeline::ext_read).
-            cfg::F_SPLASH => return None,
+            cfg::F_SPLASH | cfg::F_LOGO => return None,
             cfg::F_COPYRIGHT => loc_kv(PP_COPYRIGHT),
             cfg::F_VENDOR_INFORMATION_ADDRESS => loc_kv(PP_VENDOR_INFO_ADDR),
             cfg::F_CONFIGURATION_INFORMATION_ADDRESS => loc_kv(PP_CONFIG_INFO_ADDR),

@@ -96,6 +96,7 @@ fn explicit_noop_view_keeps_every_wire_field_and_wrong_type_body_exact() {
         });
         obj.flowchart = Some(b"flow".to_vec());
         let ci = CommandInterface {
+            subsystems_visibility: Vec::new(),
             commands: vec![],
             placement: vec![],
             order: vec![],
@@ -107,6 +108,7 @@ fn explicit_noop_view_keeps_every_wire_field_and_wrong_type_body_exact() {
             bytes: b"picture".to_vec(),
         });
         obj.config_pictures.push(ConfigPicture {
+            native_sentinel_explicit: false,
             slot: "Splash".into(),
             ext: "png".into(),
             bytes: b"splash".to_vec(),
