@@ -702,7 +702,87 @@ pub(crate) fn normalize_data_composition_schema_template_documents_with_profiles
         with_area.extend_from_slice(&source[offset..]);
         source = with_area;
     }
-    Ok(source)
+    Ok(without_empty_local_string_items(source))
+}
+
+/// Drops the `<v8:item>` whose `<v8:content/>` is empty from a localized
+/// string, and closes a localized string that is left with no item.
+///
+/// Storage keeps such an item -- ERP WE 2.5 `Reports/
+/// БазаРаспределенияМатериаловИРабот/Templates/ОсновнаяСхемаКомпоновкиДанных`
+/// stores a `dcsat:Field` value of `<v8:item><v8:lang>ru</v8:lang>
+/// <v8:content/></v8:item>` -- but the platform publishes it as
+/// `<dcsat:value xsi:type="v8:LocalStringType"/>`, and not one
+/// `<v8:content/>` occurs in the `Templates/*/Ext/Template.xml` trees of ERP
+/// WE 2.5, БСП 3.1 and Документооборот 3.0 as the platform dumps them.
+fn without_empty_local_string_items(source: Vec<u8>) -> Vec<u8> {
+    const ITEM_OPEN: &str = "<v8:item>\r\n";
+    const LANG_CLOSE: &str = "</v8:lang>\r\n";
+    const OPEN_END: &str = " xsi:type=\"v8:LocalStringType\">\r\n";
+    let text = match String::from_utf8(source) {
+        Ok(text) => text,
+        Err(error) => return error.into_bytes(),
+    };
+    if !text.contains("<v8:content/>") {
+        return text.into_bytes();
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text.as_str();
+    while let Some(at) = rest.find(ITEM_OPEN) {
+        let line_start = rest[..at].rfind('\n').map_or(0, |index| index + 1);
+        let indent = &rest[line_start..at];
+        let item = &rest[line_start..];
+        let dropped = indent
+            .bytes()
+            .all(|byte| byte == b'\t')
+            .then_some(item)
+            .and_then(|item| item.strip_prefix(indent))
+            .and_then(|item| item.strip_prefix(ITEM_OPEN))
+            .and_then(|item| item.strip_prefix(indent))
+            .and_then(|item| item.strip_prefix("\t<v8:lang>"))
+            .and_then(|item| {
+                let end = item.find(LANG_CLOSE)?;
+                item[end + LANG_CLOSE.len()..].strip_prefix(indent)
+            })
+            .and_then(|item| item.strip_prefix("\t<v8:content/>\r\n"))
+            .and_then(|item| item.strip_prefix(indent))
+            .and_then(|item| item.strip_prefix("</v8:item>\r\n"))
+            .map(|after| item.len() - after.len());
+        match dropped {
+            Some(length) => {
+                out.push_str(&rest[..line_start]);
+                rest = &rest[line_start + length..];
+            }
+            None => {
+                out.push_str(&rest[..at + ITEM_OPEN.len()]);
+                rest = &rest[at + ITEM_OPEN.len()..];
+            }
+        }
+    }
+    out.push_str(rest);
+    // A localized string left with no item closes on its own.
+    let mut closed = String::with_capacity(out.len());
+    let mut rest = out.as_str();
+    while let Some(at) = rest.find(OPEN_END) {
+        let after = &rest[at + OPEN_END.len()..];
+        let tag_start = rest[..at].rfind('<').unwrap_or(at);
+        let name = rest[tag_start + 1..at]
+            .split(' ')
+            .next()
+            .unwrap_or_default();
+        let close = format!("</{name}>");
+        let trimmed = after.trim_start_matches('\t');
+        if !name.is_empty() && trimmed.starts_with(&close) {
+            closed.push_str(&rest[..at]);
+            closed.push_str(" xsi:type=\"v8:LocalStringType\"/>");
+            rest = &trimmed[close.len()..];
+        } else {
+            closed.push_str(&rest[..at + OPEN_END.len()]);
+            rest = after;
+        }
+    }
+    closed.push_str(rest);
+    closed.into_bytes()
 }
 
 pub(crate) fn data_composition_type_id_xml(

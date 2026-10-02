@@ -21,6 +21,7 @@
   },
   "evidence": [
     "docs/apply/own-apply.md",
+    "docs/evidence/cf-platform-8.5.md",
     "openspec/changes/complete-native-source-load-parity/evidence/empty-database-load-20260928.md",
     "openspec/changes/support-platform-8-5-live-activation/evidence/baseline-20260830.md",
     "tests/fixtures/native-evidence/8.5.1.1150/form-root-8.5.1-down-conversion/manifest.json"

@@ -211,7 +211,13 @@ pub(super) fn verify_patch_stage(
             source_root: &args.source_root,
             tree: TreeFiles::Scanned(manifest),
             removed,
-            path_prefix: &args.path_prefix,
+            // A partial import of files (#363) is checked on those files:
+            // the directory need not hold the rest of the objects' files.
+            path_prefix: if args.files.is_empty() {
+                &args.path_prefix
+            } else {
+                &args.files
+            },
             source_version: args.source_version,
         },
         state_base(

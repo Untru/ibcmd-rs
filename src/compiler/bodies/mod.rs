@@ -13,6 +13,7 @@ pub mod dynamic_list;
 pub mod form;
 pub mod form_chart;
 pub mod form_native;
+pub mod form_planner;
 pub mod interface_assets;
 pub mod mxl;
 pub(crate) mod mxl_native;

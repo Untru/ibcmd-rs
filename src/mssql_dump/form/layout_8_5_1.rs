@@ -273,8 +273,8 @@ pub(in crate::mssql_dump) fn down_convert_form_body_8_5_1(
     let mut trailing = Vec::with_capacity(body.trailing.len());
     // The base form of an adopted form is a record of its own: its items number
     // the same ids as the form's, so it is left as it is and its facts are kept
-    // apart (`form_extension::with_adopted_form_parts` converts it as a body of
-    // its own).
+    // apart (`form_extension::form_adoption` converts it as a body of its
+    // own).
     let base_slot = super::super::form_extension::adopted_base_record_slot(body);
     for (index, block) in body.trailing.iter().enumerate() {
         if Some(index) == base_slot {

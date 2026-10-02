@@ -140,6 +140,10 @@ const BUILTIN_TYPES: &[(&str, &str)] = &[
     // Type sets (`<v8:TypeSet>cfg:CatalogRef</v8:TypeSet>`): every object of
     // one family.
     ("cfg:AnyIBRef", "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
+    // The same type set as a configuration under an older compatibility
+    // mode spells it (`compatibility_mode_spells_any_ref`); read only, the
+    // id's name is the one above.
+    ("cfg:AnyRef", "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
     ("cfg:CatalogRef", "e61ef7b8-f3e1-4f4b-8ac7-676e90524997"),
     ("cfg:DocumentRef", "38bfd075-3e63-4aaa-a93e-94521380d579"),
     ("cfg:EnumRef", "474c3bf6-08b5-4ddc-a2ad-989cedf11583"),
@@ -288,7 +292,7 @@ const BUILTIN_LOCAL_TYPES: &[(&str, &str)] = &[
     ),
 ];
 
-fn builtin_type_id(name: &str) -> Option<&'static str> {
+pub(crate) fn builtin_type_id(name: &str) -> Option<&'static str> {
     if let Some((_, id)) = BUILTIN_TYPES
         .iter()
         .find(|(candidate, _)| *candidate == name)
@@ -1088,6 +1092,19 @@ pub mod corpus {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::super::brace::serialize;
+
+    #[test]
+    fn any_ref_reads_as_the_any_ib_ref_type_set() {
+        assert_eq!(
+            builtin_type_id("cfg:AnyRef"),
+            builtin_type_id("cfg:AnyIBRef")
+        );
+        assert!(builtin_type_id("cfg:AnyRef").is_some());
+        assert_eq!(
+            builtin_type_qname("280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
+            Some("cfg:AnyIBRef")
+        );
+    }
     use super::super::index::{ConfigIndex, GeneratedType};
     use super::super::xml::parse_element_tree;
     use super::*;

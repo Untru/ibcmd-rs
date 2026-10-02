@@ -5,8 +5,8 @@
 //! completes them in memory on load, taking the ids of the new items from the
 //! id after the largest one of the form ([`upgrade_items`]). (The base form of
 //! an adopted form and the call types of its handlers are written with the form
-//! itself, by `form_extension::with_adopted_form_parts`; [`add_call_types`]
-//! covers the adopted form that has no base form record.)
+//! itself, from the facts `form_extension::form_adoption` reads;
+//! [`add_call_types`] covers the adopted form that has no base form record.)
 
 const EOL: &str = "\r\n";
 
@@ -17,8 +17,8 @@ const CALL_TYPE: &str = " callType=\"Before\"";
 /// form that carries no base form record (one on record: the common form
 /// `СвязанныеДокументы` of the БСП 8.3.27 ServiceDesk, six commands and three
 /// events, all `Before`). A form with a base form record gets its call types
-/// from the event blocks of its body, with the base form, in
-/// `form_extension::with_adopted_form_parts`.
+/// from the event blocks of its body, with the base form, from the form writer
+/// itself (`form_extension::form_adoption`).
 pub(crate) fn add_call_types(xml: &str) -> Option<String> {
     let lines: Vec<&str> = xml.split(EOL).collect();
     let limit = lines

@@ -201,6 +201,8 @@ pub fn roundtrip_config(
             overwrite: args.overwrite,
             count_files: true,
             output_dir: baseline_dir.clone(),
+            base: None,
+            sync: false,
         })?)
     };
 
@@ -234,6 +236,7 @@ pub fn roundtrip_config(
         allow_non_lab: args.allow_non_lab,
         batch_size: args.batch_size,
         path_prefix: args.path_prefix.clone(),
+        files: Vec::new(),
         script_output: args.script_output.clone(),
         // A clone of the source database: its own rows are patched.
         stage_mode: InfobaseImportStageMode::Patch,
@@ -304,6 +307,8 @@ pub fn roundtrip_config(
         args.overwrite,
         true,
         selected_after_apply_file_names,
+        None,
+        false,
     )?;
 
     let diff = crate::plan::diff_source_trees(&baseline_dir, &after_apply_dir, &args.path_prefix)?;
@@ -381,6 +386,8 @@ pub fn sweep_config(args: &InfobaseConfigSweepArgs) -> Result<InfobaseConfigSwee
             overwrite: args.overwrite,
             count_files: true,
             output_dir: baseline_dir.clone(),
+            base: None,
+            sync: false,
         })?;
     }
 

@@ -215,8 +215,9 @@ test per family (`business_object.rs`). The tests fail on the previous layouts.
   the root of `Ext/Form.xml`.
 * **`BaseForm`.** A form the extension adopted carries the extended
   configuration's form after its own tree (container section 6 is `1`, section 7
-  is a complete form record). `form_extension::with_adopted_form_parts` (upstream
-  PR 387) writes it as `<BaseForm version="...">` after `</Parameters>`, one
+  is a complete form record). `form_extension::form_adoption` (upstream PR 387,
+  moved into the form writer by #414) writes it as a document of its own, which
+  the form writer closes its document with as `<BaseForm version="...">`, one
   level deeper, for every source of forms: the `.cfe` container and the SQL
   export share it. A form whose base form does not read is not emitted at all.
 * **`callType`.** The event block of a form body stores every handler of every
@@ -282,8 +283,8 @@ three БСП 8.5 extensions, `src/mssql_dump/extension/`):
 * **Forms.** The base form of an adopted form is a record of its own in the 8.5
   layout: its items number the same ids as the form's, so the form's
   down-conversion leaves it as it is (`adopted_base_record_slot`) and
-  `form_extension::with_adopted_form_parts` converts and completes it with its
-  own facts and writes it after the form's tree. A planner field
+  `form_extension::form_adoption` converts and completes it with its own facts
+  for the form writer to write after the form's tree. A planner field
   keeps its 8.3.27 property bag. The appended importance member of a button is
   `0` (`Main`) exactly for the default button (88 of 88 on ServiceDesk), so the
   writer adds `DefaultButton` there; the 8.3.27 slot that also says so is set on

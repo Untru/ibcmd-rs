@@ -91,6 +91,9 @@ pub enum ClientApplicationNode {
 pub struct ClientApplicationPanelDef {
     pub id: ObjectUuid,
     pub standard: bool,
+    /// The stored representation code of a standard panel that states an
+    /// `<spr>`: `0` `Picture`, `4` `PictureOnLeftAndText`.
+    pub representation: Option<&'static str>,
 }
 
 pub(crate) fn client_application_interface_plaintext(
@@ -114,10 +117,15 @@ pub(crate) fn client_application_interface_plaintext(
     for panel_def in &model.panel_defs {
         if panel_def.standard {
             fields.push(token("2"));
-            fields.push(platform_list(vec![
-                token(panel_def.id.to_string()),
-                token("0"),
-            ]));
+            let mut members = vec![token(panel_def.id.to_string())];
+            match panel_def.representation {
+                Some(code) => {
+                    members.push(token("2"));
+                    members.push(token(code));
+                }
+                None => members.push(token("0")),
+            }
+            fields.push(platform_list(members));
         } else {
             fields.push(token("1"));
             fields.push(platform_list(vec![

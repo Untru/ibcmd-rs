@@ -6520,6 +6520,9 @@ fn moxel_chart_type(code: &str) -> Option<&'static str> {
         // and both spell `chartType` code `6`, matching
         // `<d3p1:chartType>Column3D</d3p1:chartType>` in both native exports.
         "6" => Some("Column3D"),
+        // The form chart's table names `2` `Area` (Монитор
+        // `Catalogs/Запросы/Forms/ФормаАнализа`).
+        "2" => Some("Area"),
         _ => None,
     }
 }
@@ -7168,6 +7171,8 @@ fn gantt_series_key_record_base_data(text: &str) -> Option<String> {
 /// reader has not observed and therefore does not guess at.
 fn moxel_gantt_time_measure(code: &str) -> Option<&'static str> {
     match code.trim() {
+        // The form Gantt chart's table publishes `5` as `Second`.
+        "5" => Some("Second"),
         "10" => Some("Minute"),
         "20" => Some("Hour"),
         "30" => Some("Day"),
@@ -7266,7 +7271,16 @@ fn parse_moxel_gantt_chart(
     if text.len() > MAX_MOXEL_GANTT_CHART_BYTES {
         return None;
     }
-    let fields = split_1c_braced_fields(text, 0)?;
+    let mut fields = split_1c_braced_fields(text, 0)?.to_vec();
+    // Version 17 stops four members short of 18 (ERP WE 2.5 `Reports/
+    // АнализЖурналаРегистрации/Templates/ПродолжительностьРаботыРегламентныхЗаданий`)
+    // and the platform publishes for the missing 27..=30 what an 18 publishes
+    // for `{0,0,0}`, `0`, `0`, `0` -- the same reading the form attribute's
+    // Gantt settings take.
+    if fields.first().map(|field| field.trim()) == Some("17") && fields.len() == 27 {
+        fields[0] = "18";
+        fields.extend(["{0,0,0}", "0", "0", "0"]);
+    }
     // The record's own version. 19 carries two trailing members 18 does not,
     // and nothing else about the record moves: over the eleven `GanttChart`
     // records of the stand (both templates of ERP УХ 3.2.12.6, 1С:УТ
@@ -13700,6 +13714,16 @@ pub(super) fn push_moxel_localized_values_xml(
     if values.is_empty() && !present {
         return;
     }
+    // A language whose content is empty is not published: no
+    // `Templates/*/Ext/Template.xml` of ERP WE 2.5, БСП 3.1 or
+    // Документооборот 3.0 as the platform dumps them carries an empty
+    // `<v8:content>`, and ERP WE `Documents/СверкаВзаиморасчетов/Templates/
+    // ПФ_MXL_АктСверкиВзаимныхРасчетов` stores `{"ru",""}` for a format the
+    // platform writes as `<format/>`.
+    let values = values
+        .iter()
+        .filter(|value| !value.content.is_empty())
+        .collect::<Vec<_>>();
     if values.is_empty() {
         _ = write!(xml, "\t\t<{tag}/>\r\n");
         return;

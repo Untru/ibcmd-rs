@@ -103,6 +103,39 @@ fn metadata_use_standard_commands(kind: &str, text: &str, header: &MetadataHeade
         }
         return parse_1c_bool_field(fields.get(7).copied());
     }
+    if kind == "CommonForm" {
+        // Slot 4 of the `{4,...}` object record, as `form_metadata_properties`
+        // reads it for the form's own `CommonForms/<name>.xml`.
+        let fields = metadata_object_fields(text)?;
+        if fields.first().map(|value| value.trim()) != Some("4") {
+            return None;
+        }
+        return parse_1c_bool_field(fields.get(4).copied());
+    }
+    if kind == "DataProcessor" {
+        // Slot 5 (`UseStandardCommands`) of the `{17,...}` record. `Open`
+        // exists only with a default form: ERP 2.5 `DataProcessor.
+        // НастройкаСпособовОбеспеченияПотребностей` declares
+        // `UseStandardCommands=true` with an empty `<DefaultForm/>` and the
+        // platform keeps its `0:<uuid>` sentinel; across erpwe, erp, bsp, do
+        // and dm no processor with an empty default form is named with a
+        // `.StandardCommand.Open`.
+        let fields = metadata_object_fields(text)?;
+        if fields.first().map(|value| value.trim()) != Some("17") {
+            return None;
+        }
+        let uses = parse_1c_bool_field(fields.get(5).copied())?;
+        return Some(uses && parse_non_zero_uuid(fields.get(4)?.trim()).is_some());
+    }
+    if kind == "Constant" {
+        // Slot 7 of the constant object record, as
+        // `parse_constant_properties_from_text` reads it.
+        let marker = format!("{{1,0,{}}}", header.uuid);
+        let marker_start = text.find(&marker)?;
+        let start = text[..marker_start].rfind("{16,")?;
+        let fields = split_1c_braced_fields(text, start)?;
+        return parse_1c_bool_flag(fields.get(7)?.trim());
+    }
     let family = match kind {
         "Catalog" => owner_graph::OwnerGraphFamily::Catalog,
         // Same slot `parse_document_properties_from_text` reads for the
@@ -288,6 +321,13 @@ pub(super) struct MetadataConstantDeclaration {
 /// The declarations a dynamic list's resolvable-field universe is built from.
 #[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct MetadataFieldDeclarationIndex {
+    /// Whether a manual-query dynamic list leaves the main register's
+    /// dimensions out of its automatic fields: under compatibility 8.3.17
+    /// (Документооборот 3.0, ERP WE 2.5) the platform marks an unselected
+    /// dimension `~`, under 8.3.24 (Документооборот 3.0 Холдинг) it does
+    /// not. The boundary between is unobserved; the 8.3.19 boundary the
+    /// default-picture marker moves at is taken for it.
+    register_dimensions_withheld: bool,
     tables: BTreeMap<String, MetadataTableStandardAttributes>,
     /// Top-level data fields declared by each metadata table, folded to lower
     /// case. The object-reference index supplies these names independently of
@@ -323,6 +363,15 @@ pub(super) struct MetadataFieldDeclarationIndex {
 
 impl MetadataFieldDeclarationIndex {
     /// The index as the writer of `source_version` reads it.
+    pub(super) fn withholding_register_dimensions(mut self, withheld: bool) -> Self {
+        self.register_dimensions_withheld = withheld;
+        self
+    }
+
+    pub(super) fn register_dimensions_withheld(&self) -> bool {
+        self.register_dimensions_withheld
+    }
+
     pub(super) fn written_as(mut self, source_version: InfobaseConfigSourceVersion) -> Self {
         self.writes_value_storage_constants = source_version == InfobaseConfigSourceVersion::V2_21;
         self
@@ -2569,7 +2618,66 @@ pub(super) fn build_metadata_field_type_reference_index_from_texts(
     for pairs in found {
         index.extend(pairs);
     }
+    index.extend(catalog_single_owner_type_entries(rows));
     index
+}
+
+/// `owner-of:cfg:CatalogRef.<catalogue>` -> `cfg:CatalogRef.<owner>` for every
+/// catalogue whose `<Owners>` names exactly one catalogue: the type a chain
+/// reaches through the catalogue's `Owner`, so that a further member of the
+/// owner can be named. 1С:Конвертация данных `Catalogs/Свойства` binds
+/// `Объект.СвойствоВышестоящегоРелиза.Owner.Owner`.
+fn catalog_single_owner_type_entries(rows: &[MetadataTextRow]) -> Vec<(String, String)> {
+    let catalogs = rows
+        .iter()
+        .filter(|row| row.kind.as_deref() == Some("Catalog"))
+        .filter_map(|row| Some((row.header.as_ref()?.uuid.to_ascii_lowercase(), row)))
+        .collect::<BTreeMap<_, _>>();
+    let mut entries = Vec::new();
+    for row in catalogs.values() {
+        let Some(header) = row.header.as_ref() else {
+            continue;
+        };
+        let mut diagnostic = None;
+        let Some(graph) = decode_owner_graph_for_family_parser(
+            owner_graph::OwnerGraphFamily::Catalog,
+            &row.text,
+            header,
+            &mut diagnostic,
+        ) else {
+            continue;
+        };
+        let Some(owners) = graph
+            .owner_fields
+            .get(CATALOG_OWNER_FIELD_OWNERS)
+            .and_then(|field| split_information_register_braced_fields(field))
+        else {
+            continue;
+        };
+        if metadata_reference_collection_len(graph.owner_fields[CATALOG_OWNER_FIELD_OWNERS])
+            != Some(1)
+        {
+            continue;
+        }
+        let Some(owner_uuid) = owners.get(2).and_then(|owner| {
+            let typed = split_information_register_braced_fields(owner)?;
+            let payload = split_information_register_braced_fields(typed.get(2)?)?;
+            parse_information_register_non_zero_uuid(payload.get(1)?)
+        }) else {
+            continue;
+        };
+        let Some(owner) = catalogs
+            .get(&owner_uuid.to_ascii_lowercase())
+            .and_then(|owner| owner.header.as_ref())
+        else {
+            continue;
+        };
+        entries.push((
+            format!("owner-of:cfg:CatalogRef.{}", header.name),
+            format!("cfg:CatalogRef.{}", owner.name),
+        ));
+    }
+    entries
 }
 
 /// The *ordered* names of every information-register dimension that declares
@@ -3589,12 +3697,22 @@ fn configuration_properties_8_5_1(
     if fields.len() != 77 {
         return None;
     }
-    // Members 61-63 and 66-68 carry the four enumerations. One 8.5 tuple is
-    // on record (BSP 3.2.1.356), so only its combination is read; any other
-    // refuses rather than attributing codes to properties on a guess.
-    let codes = [61, 62, 63, 66, 67, 68].map(|index| fields[index].trim());
+    // Members 61, 63 and 66-68 carry the four enumerations; 62 is the 8.5
+    // code of `InterfaceCompatibilityMode`, which is read from member 38 (the
+    // compiler, `metadata_model::root`, writes 3 and 6 for
+    // `Version8_5EnableTaxi`, 2 and 2 for `TaxiEnableVersion8_2`).
+    // Two combinations are on record, so only they are read; any other
+    // refuses rather than attributing codes to properties on a guess:
+    // - BSP 3.2.1.356 under 8.5.1.1150: tabs, the 8.5 interface migration;
+    // - the configuration 8.5.1.1529 saved from an XML 2.20 tree at
+    //   compatibility 8.3.27 (`home_page/one_column_v85/input.cf`): the tree
+    //   names none of these properties, so the platform stored the values it
+    //   gives a configuration without them, the ones it prints for a
+    //   `{68,...}` tuple (above). Which of 67 and 68 is which is not known.
+    let codes = [61, 63, 66, 67, 68].map(|index| fields[index].trim());
     let (interface_variant, theme, windows_open_variant, migration_mode) = match codes {
-        ["0", "6", "0", "0", "0", "0"] => ("NavigationLeft", "Auto", "OpenDataInTabs", "Use"),
+        ["0", "0", "0", "0", "0"] => ("NavigationLeft", "Auto", "OpenDataInTabs", "Use"),
+        ["0", "0", "0", "1", "1"] => ("NavigationLeft", "Auto", "OpenDataInDialogs", "DontUse"),
         _ => return None,
     };
     let mut auxiliary_forms = Vec::with_capacity(8);
@@ -4462,7 +4580,9 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
     let fields = configuration_root_property_fields(text, uuid)?;
     let raw_fields = split_1c_braced_fields(fields.get(53)?.trim(), 0)?;
     let table_version = raw_fields.first()?.trim();
-    if !matches!(table_version, "1" | "2") {
+    // Version `0` is the table of the oldest roots (ISL 2.8, `{63,...}`), the
+    // same pair run as version `1`.
+    if !matches!(table_version, "0" | "1" | "2") {
         return None;
     }
     let count = raw_fields.get(1)?.trim().parse::<usize>().ok()?;
@@ -4478,6 +4598,45 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
     } else {
         parse_configuration_mobile_application_permission_messages(tail)?
     };
+    // An older table may skip ids: ERP WE 2.5 declares 29 pairs, ids `0..=27`
+    // and then `33`, and the platform prints every functionality of the full
+    // table, the ones the record does not carry as unused.
+    if matches!(table_version, "0" | "1")
+        && matches!(source_version, "2.20" | "2.21")
+        && tail.len() == 1
+        && trailing_field.trim() == "0"
+    {
+        let mut flags = BTreeMap::new();
+        for field in raw_fields.iter().skip(2).take(count) {
+            let pair = split_1c_braced_fields(field.trim(), 0)?;
+            if pair.len() != 2 {
+                return None;
+            }
+            let id = pair.first()?.trim().parse::<u32>().ok()?;
+            let flag = parse_1c_bool_flag(pair.get(1)?.trim())?;
+            if flags.insert(id, flag).is_some() {
+                return None;
+            }
+        }
+        let sequential = flags.keys().copied().eq(0..count as u32);
+        if !sequential {
+            if flags.keys().any(|id| {
+                !CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                    .iter()
+                    .any(|(known, _)| known == id)
+            }) {
+                return None;
+            }
+            let functionalities = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                .iter()
+                .map(|(id, name)| ConfigurationMobileApplicationFunctionality {
+                    name,
+                    use_functionality: flags.get(id).copied().unwrap_or(false),
+                })
+                .collect();
+            return Some((functionalities, permission_messages));
+        }
+    }
     let mut functionalities = Vec::with_capacity(38);
     for ((expected_id, name), field) in CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
         .iter()
@@ -4527,7 +4686,7 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         // functionalities it lacks as unused -- the same Configuration.xml as
         // the same configuration saved by 8.5 with all 38 pairs.
         ("2.20" | "2.21", n)
-            if table_version == "1"
+            if matches!(table_version, "0" | "1")
                 && n + 1 < full
                 && tail.len() == 1
                 && trailing_field.trim() == "0" =>
@@ -5008,6 +5167,18 @@ enum ConfigurationRootFooter {
 fn classify_configuration_root_footer(field: &str) -> Option<ConfigurationRootFooter> {
     let fields = split_1c_braced_fields(field, 0)?;
     let marker = split_1c_braced_fields(fields.first()?.trim(), 0)?;
+    // A root signed by its vendor spells the two strings of the bare footer
+    // as a public key and a signature (1C:ЗУП 3.1.18, `{{0,"MIIB…","MC0C…"}}`);
+    // it is the same bare footer otherwise.
+    if marker.len() == 3
+        && fields.len() == 1
+        && marker.first().map(|value| value.trim()) == Some("0")
+        && marker[1..].iter().all(|field| {
+            parse_1c_quoted_string(field.trim()).is_some_and(|value| !value.is_empty())
+        })
+    {
+        return Some(ConfigurationRootFooter::Bare);
+    }
     let marker_tail_valid = marker.len() == 3
         && marker
             .get(1)

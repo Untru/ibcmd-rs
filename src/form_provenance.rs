@@ -315,7 +315,14 @@ fn filters(input: &[String]) -> Result<Vec<String>> {
 }
 fn safe(p: &str) -> bool {
     let q = Path::new(p);
-    !q.is_absolute() && q.components().all(|c| matches!(c, Component::Normal(_)))
+    // A drive (`C:`) or a backslash is absolute or a separator on Windows
+    // whatever platform reads the manifest.
+    let windows_drive =
+        p.len() >= 2 && p.as_bytes()[1] == b':' && p.as_bytes()[0].is_ascii_alphabetic();
+    !windows_drive
+        && !p.contains('\\')
+        && !q.is_absolute()
+        && q.components().all(|c| matches!(c, Component::Normal(_)))
 }
 fn manifest_rows(v: &Value) -> Result<Vec<(String, PathBuf, String)>> {
     let mut r = Vec::new();

@@ -2511,14 +2511,33 @@ fn write_source_asset_inner(
             .with_dcs_profiles(adapter.provider_id().clone(), dcs_target_profile)
             .with_dcs_schema_namespace(context.forms_declare_dcs_schema_namespace)
             .with_form_compatibility(context.form_compatibility);
-            let extraction =
-                extract_form_body_xml_from_body_detailed_timed(body, &form_context, Some(timings))
-                    .with_context(|| {
-                        format!(
-                            "failed to extract form xml from source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
+            // What the writer spells for an adopted form beyond its body: the
+            // call types of its handlers and its base form, itself written by
+            // the same writer in the same dialect.
+            let adoption = super::form_extension::form_adoption(
+                body,
+                &form_context,
+                context.source_version,
+                context.object_refs,
+            )
+            .with_context(|| {
+                format!(
+                    "failed to write the base form of source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
+            let extraction = extract_form_body_xml_from_body_detailed_timed(
+                body,
+                &form_context,
+                adoption.as_ref(),
+                Some(timings),
+            )
+            .with_context(|| {
+                format!(
+                    "failed to extract form xml from source asset {}",
+                    asset.primary_path.display()
+                )
+            })?;
             match extraction {
                 DetailedFormBodyExtraction::Emitted {
                     xml,
@@ -2576,19 +2595,6 @@ fn write_source_asset_inner(
                         None => (xml, Vec::new()),
                     };
                     diagnostics = extraction_diagnostics;
-                    let xml = super::form_extension::with_adopted_form_parts(
-                        xml,
-                        body,
-                        &form_context,
-                        context.source_version,
-                        context.object_refs,
-                    )
-                    .with_context(|| {
-                        format!(
-                            "failed to write the adopted form parts of source asset {}",
-                            asset.primary_path.display()
-                        )
-                    })?;
                     let form_write_started = Instant::now();
                     let path = output_dir.join(&asset.primary_path);
                     if let Some(parent) = path.parent() {

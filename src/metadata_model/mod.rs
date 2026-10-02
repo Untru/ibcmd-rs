@@ -31,6 +31,7 @@ pub mod objects;
 pub mod registers;
 pub mod root;
 pub mod simple;
+pub mod standard_pictures;
 
 #[cfg(test)]
 mod collection_tests;

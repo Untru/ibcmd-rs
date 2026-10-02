@@ -37,9 +37,9 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use super::DescriptorContext;
 use super::brace::{Brace, NIL_UUID, parse_row};
-use super::common::{crlf_strings, stores_layout_8_5_1, up_convert_primitives_8_5_1};
+use super::common::{stores_layout_8_5_1, up_convert_primitives_8_5_1};
 use super::types::{design_time_ref, object_uuid};
-use super::xml::{Element, parse_element_tree};
+use super::xml::{Element, parse_element_tree_raw_line_breaks};
 use crate::brace_list;
 use crate::compiler::bodies::form_native::{format_native_color, format_native_font};
 
@@ -61,6 +61,20 @@ pub fn flowchart_row(owner_xml: &Path, context: &DescriptorContext) -> Result<Op
         SchemeOwner::BusinessProcess,
         context,
     )
+}
+
+/// A flowchart's strings as stored: every LF becomes CR LF, even one after a
+/// CR. The exporter drops one CR before each LF of a flowchart string, so a
+/// value holding CR LF itself is dumped CR LF and stored CR CR LF
+/// (Библиотека стандартных подсистем, `BusinessProcesses/Задание`: CR LF in
+/// the XML, CR CR LF stored), where a descriptor string is dumped as stored
+/// (`common::crlf_strings`).
+fn flowchart_strings(node: &mut Brace) {
+    match node {
+        Brace::Str(value) if value.contains('\n') => *value = value.replace('\n', "\r\n"),
+        Brace::List(items) => items.iter_mut().for_each(flowchart_strings),
+        _ => {}
+    }
 }
 
 /// `Ext/Template.xml` next to a template's XML.
@@ -106,11 +120,11 @@ fn scheme_row(
         return Ok(None);
     }
     let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
-    let schema = parse_element_tree(&bytes)
+    let schema = parse_element_tree_raw_line_breaks(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let pictures = path.with_extension("").join("Items");
     let mut row = Flowchart::new(&schema, context, owner, pictures)?.to_brace()?;
-    crlf_strings(&mut row);
+    flowchart_strings(&mut row);
     if stores_layout_8_5_1(context) {
         up_convert_primitives_8_5_1(&mut row);
     }

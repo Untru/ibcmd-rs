@@ -100,7 +100,16 @@ fn upgrade_form_record(text: &str) -> Option<String> {
         return None;
     }
     let wrapper_open = list_open(text, &root[1])?;
-    let (wrapper, _) = members(text, wrapper_open)?;
+    let (mut wrapper, _) = members(text, wrapper_open)?;
+    // One form record of 1C:Документооборот sits a level deeper,
+    // `{1,{0,{12,…}},{0}}`.
+    if wrapper.len() == 3 && member(text, &wrapper[0]) == "1" {
+        let inner_open = list_open(text, &wrapper[1])?;
+        wrapper = members(text, inner_open)?.0;
+        if member(text, wrapper.first()?) != "0" {
+            return None;
+        }
+    }
     if !matches!(member(text, wrapper.first()?), "0" | "4") {
         return None;
     }
@@ -544,6 +553,21 @@ mod tests {
         // Another wrapper, or a count that is no form's, keeps its tag.
         let other = old.replace("{1,\r\n{0,\r\n{12,", "{1,\r\n{7,\r\n{12,");
         assert!(upgrade_record_by_shape(&other, U).unwrap().contains("{12,"));
+    }
+
+    /// Evidence: 1C:Документооборот stores one form record one level deeper,
+    /// `{1,{1,{0,{12,…}},{0}},0}`; re-serialized by 8.3.27 it comes back as
+    /// `{1,{1,{0,{13,…}},{0}},0}`, like its five siblings stored as 13.
+    #[test]
+    fn a_nested_12_form_record_reads_as_13() {
+        let old = format!(
+            "{{1,\r\n{{1,\r\n{{0,\r\n{{12,\r\n{{1,\r\n{{0,0,{U}}},\"Ф\",\r\n{{0}},\"\",0,1,{P},3}},0,1,\r\n{{2,a,b}}\r\n}}\r\n}},\r\n{{0}}\r\n}},0}}"
+        );
+        let upgraded = upgrade_record_by_shape(&old, U).unwrap();
+        assert!(
+            upgraded.starts_with("{1,\r\n{1,\r\n{0,\r\n{13,"),
+            "{upgraded}"
+        );
     }
 
     #[test]

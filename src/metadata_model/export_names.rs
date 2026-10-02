@@ -248,6 +248,49 @@ pub fn root_kinds(root: &Brace) -> HashMap<String, &'static str> {
     out
 }
 
+/// The top-level objects the configuration's own row lists, as (kind, uuid),
+/// in the row's order (the configurator's order of each kind's objects).
+/// The same lists [`root_kinds`] reads.
+pub fn root_members(root: &Brace) -> Vec<(&'static str, String)> {
+    let classes = ROOT_CLASSES.iter().copied().collect::<HashMap<_, _>>();
+    let mut kinds = HashMap::new();
+    let mut out = Vec::new();
+    collect_root_members(root, &classes, &mut kinds, &mut out);
+    out
+}
+
+fn collect_root_members(
+    node: &Brace,
+    classes: &HashMap<&str, &'static str>,
+    seen: &mut HashMap<String, &'static str>,
+    out: &mut Vec<(&'static str, String)>,
+) {
+    let Some(members) = node.as_list() else {
+        return;
+    };
+    if let (Some(class), Some(count)) = (
+        members.first().and_then(Brace::as_atom),
+        members.get(1).and_then(Brace::as_atom),
+    ) && let Some(kind) = classes.get(class)
+        && let Ok(count) = count.parse::<usize>()
+        && members.len() == count + 2
+        && members[2..].iter().all(|member| member.as_atom().is_some())
+    {
+        for member in &members[2..] {
+            if let Some(uuid) = member.as_atom() {
+                let uuid = uuid.to_ascii_lowercase();
+                if seen.insert(uuid.clone(), kind).is_none() {
+                    out.push((*kind, uuid));
+                }
+            }
+        }
+        return;
+    }
+    for member in members {
+        collect_root_members(member, classes, seen, out);
+    }
+}
+
 fn collect_root_kinds(
     node: &Brace,
     classes: &HashMap<&str, &'static str>,
@@ -767,6 +810,21 @@ mod tests {
         assert_eq!(kinds.len(), 3);
         assert_eq!(kinds["aaaaaaaa-0000-0000-0000-000000000002"], "Catalog");
         assert_eq!(kinds["bbbbbbbb-0000-0000-0000-000000000001"], "Enum");
+        assert_eq!(
+            root_members(&parse_row(text.as_bytes()).unwrap()),
+            vec![
+                (
+                    "Catalog",
+                    "aaaaaaaa-0000-0000-0000-000000000001".to_string()
+                ),
+                (
+                    "Catalog",
+                    "aaaaaaaa-0000-0000-0000-000000000002".to_string()
+                ),
+                ("Enum", "bbbbbbbb-0000-0000-0000-000000000001".to_string()),
+            ],
+            "root_members keeps the row's order"
+        );
     }
 
     #[test]

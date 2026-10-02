@@ -146,6 +146,9 @@ struct Shared {
     /// Folders known to exist: every file creates its own folder first, and
     /// most files share theirs with others.
     folders: Mutex<HashSet<PathBuf>>,
+    /// The paths written, when asked for ([`OutputWriter::recording_written`]):
+    /// an export with `--sync` keeps what it wrote and removes the rest.
+    written: Mutex<Option<Vec<PathBuf>>>,
     files: AtomicU64,
     bytes: AtomicU64,
     folder_count: AtomicU64,
@@ -257,6 +260,14 @@ impl Shared {
                     }
                     fs::write(path, bytes)
                         .with_context(|| format!("failed to write {}", path.display()))?;
+                    if let Some(written) = self
+                        .written
+                        .lock()
+                        .unwrap_or_else(|poisoned| poisoned.into_inner())
+                        .as_mut()
+                    {
+                        written.push(path.clone());
+                    }
                 }
                 self.files.fetch_add(1, Ordering::Relaxed);
                 self.bytes.fetch_add(bytes.len() as u64, Ordering::Relaxed);
@@ -355,6 +366,17 @@ impl OutputWriter {
         self
     }
 
+    /// Keeps the path of every file written to the disk, for
+    /// [`OutputWriter::finish_with_written`].
+    pub(crate) fn recording_written(self) -> Self {
+        *self
+            .shared
+            .written
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Vec::new());
+        self
+    }
+
     /// Writes on the calling thread: every call is the write itself.
     pub(crate) fn inline() -> Self {
         Self::new(0, DEFAULT_BUDGET_BYTES)
@@ -374,6 +396,7 @@ impl OutputWriter {
             failed: AtomicBool::new(false),
             failure: Mutex::new(None),
             folders: Mutex::new(HashSet::new()),
+            written: Mutex::new(None),
             files: AtomicU64::new(0),
             bytes: AtomicU64::new(0),
             folder_count: AtomicU64::new(0),
@@ -459,6 +482,10 @@ impl OutputWriter {
     }
 
     fn submit(&self, job: Job) -> Result<()> {
+        // A caller that may be stopped (`crate::cancel`) stops here, at the
+        // next file: no file is handed to the writers after the request to
+        // stop (the ones already queued still land).
+        crate::cancel::check()?;
         if self.shared.failed.load(Ordering::SeqCst) {
             return Err(anyhow!(
                 "an earlier output write failed: {}",
@@ -486,6 +513,20 @@ impl OutputWriter {
             ));
         }
         Ok(())
+    }
+
+    /// [`OutputWriter::finish`], with the paths written when the writer was
+    /// [recording](OutputWriter::recording_written) them (empty otherwise).
+    pub(crate) fn finish_with_written(self) -> Result<(OutputWriteStats, Vec<PathBuf>)> {
+        let shared = Arc::clone(&self.shared);
+        let stats = self.finish()?;
+        let written = shared
+            .written
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .unwrap_or_default();
+        Ok((stats, written))
     }
 
     /// Waits for every queued write; the first failure, if any.

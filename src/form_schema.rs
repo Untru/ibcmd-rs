@@ -1248,33 +1248,16 @@ impl FormPageSchema {
         ) {
             return None;
         }
+        // Every member the canonical bag is read at sits in the same slot
+        // here: ERP WE 2.5.8 (4 271 short pages, compatibility 8.3.17) makes
+        // option members 3, 10, 11, 12, 13 and 15 and top-level slots 9, 14
+        // and 15 total functions of `ChildItemsWidth`, the spacing pair, the
+        // alignment pair, `ScrollOnCompress`, `EnableContentChange` and the
+        // stretch pair under the canonical tables. The grouping keeps its own
+        // short reader.
         Some(FormPageProperties {
-            enable_content_change: None,
-            horizontal_stretch: match fields.get(14).map(|field| field.trim()) {
-                Some("0") => Some(false),
-                Some("1") => Some(true),
-                _ => None,
-            },
-            vertical_stretch: match fields.get(15).map(|field| field.trim()) {
-                Some("0") => Some(false),
-                Some("1") => Some(true),
-                _ => None,
-            },
             group: None,
-            horizontal_align: None,
-            vertical_align: match options.get(13).map(|field| field.trim()) {
-                Some("0") => Some("Top"),
-                Some("1") => Some("Center"),
-                Some("2") => Some("Bottom"),
-                _ => None,
-            },
-            children_align: None,
-            child_items_width: None,
-            horizontal_spacing: None,
-            vertical_spacing: options
-                .get(Self::VERTICAL_SPACING_OPTION_SLOT)
-                .and_then(|field| form_item_spacing_xml(field)),
-            scroll_on_compress: None,
+            ..Self.properties(fields, options)
         })
     }
 
@@ -1951,7 +1934,14 @@ impl<'a> FormCommandSchema<'a> {
             }
             FormPictureValueKind::Reference => match picture_reference {
                 [kind, uuid] => kind.trim() == "0" && !uuid.trim().is_empty(),
-                [code] => code.trim().parse::<i32>().ok().is_some_and(|code| code < 0),
+                // A reference naming nothing, `{0}`, is published as
+                // `<xr:Ref>0</xr:Ref>` (ERP WE 2.5 `CommonForms/
+                // ФормаНастроекОтчета`, commands `ВыбратьПериод1`/`2`).
+                [code] => code
+                    .trim()
+                    .parse::<i32>()
+                    .ok()
+                    .is_some_and(|code| code <= 0),
                 _ => false,
             },
             _ => false,
@@ -6107,13 +6097,27 @@ impl FormChildItemShowTitleSchema {
         options: &[&str],
     ) -> Option<Self> {
         if item_tag == "Page" {
-            FormPageSchema::from_raw_layout(
+            // The short revision keeps `ShowTitle` and `BackColor` at the
+            // canonical option members too: ERP WE 2.5 pages publish
+            // `<BackColor>#FFFFFF</BackColor>` for member 9 `{3,0,{16777215}}`.
+            if FormPageSchema::from_raw_layout(
                 wrapper,
                 field_count,
                 item_tag,
                 direct_discriminator,
                 options,
-            )?;
+            )
+            .is_none()
+                && !FormPageSchema::is_short_revision(
+                    wrapper,
+                    field_count,
+                    item_tag,
+                    direct_discriminator,
+                    options,
+                )
+            {
+                return None;
+            }
             return Some(Self {
                 option_slot: 6,
                 back_color_option_slot: Some(9),
@@ -7151,7 +7155,11 @@ impl FormSpecialFieldSchema {
         let slot = match self.kind {
             FormSpecialFieldKind::ProgressBar => 11,
             FormSpecialFieldKind::TrackBar => 13,
-            FormSpecialFieldKind::Chart | FormSpecialFieldKind::GanttChart => return None,
+            // Gantt option member 6: `1` on every chart the platform writes no
+            // `AutoMaxWidth` for, `0` on Монитор `Catalogs/Блокировки` whose
+            // two charts publish `<AutoMaxWidth>false</AutoMaxWidth>`.
+            FormSpecialFieldKind::GanttChart => 6,
+            FormSpecialFieldKind::Chart => return None,
         };
         (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
@@ -7228,6 +7236,12 @@ impl FormSpecialFieldSchema {
     pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
         match self.kind {
             FormSpecialFieldKind::ProgressBar => form_group_vertical_align_xml(fields.get(54)?),
+            // The same shared slot on the Gantt chart: Монитор
+            // `Catalogs/Блокировки/Forms/ФормаЭлемента` stores `1` and the
+            // platform writes `Center`.
+            FormSpecialFieldKind::GanttChart => {
+                form_group_vertical_align_xml(fields.get(54 + self.top_level_offset)?)
+            }
             _ => None,
         }
     }
@@ -7236,10 +7250,16 @@ impl FormSpecialFieldSchema {
     /// 8.5.1.1150 BSP bar written `<MaxWidth>40</MaxWidth>`, `0` on the 20
     /// others (the member beside `AutoMaxWidth`, as on the other kinds).
     pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
-        if self.kind != FormSpecialFieldKind::ProgressBar {
-            return None;
-        }
-        let value = options.get(12)?.trim();
+        // The track bar keeps its cap in member 14, behind the `AutoMaxWidth`
+        // flag at 13 (1C:Документооборот `ТочностьПоискаРегулирование`:
+        // `...,{3,4,{0}},0,20,0,1,0}` writes `<AutoMaxWidth>false` and
+        // `<MaxWidth>20`); `0` is unwritten.
+        let slot = match self.kind {
+            FormSpecialFieldKind::ProgressBar => 12,
+            FormSpecialFieldKind::TrackBar => 14,
+            _ => return None,
+        };
+        let value = options.get(slot)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
@@ -7322,7 +7342,8 @@ impl FormTooltipRepresentationItemKind {
             "CalendarField" => Self::CalendarField,
             "ProgressBarField" => Self::ProgressBarField,
             "TrackBarField" => Self::TrackBarField,
-            "ChartField" => Self::ChartField,
+            // The Gantt chart field writes the property where the chart does.
+            "ChartField" | "GanttChartField" => Self::ChartField,
             "SpreadSheetDocumentField" => Self::SpreadSheetDocumentField,
             "HTMLDocumentField" => Self::HTMLDocumentField,
             "FormattedDocumentField" => Self::FormattedDocumentField,
@@ -9140,7 +9161,13 @@ impl FormSpreadsheetDocumentFieldProperties {
             // the platform writes `<ViewScalingMode>Normal</ViewScalingMode>`
             // on and `0` on the other 182, with no miss on either side.  The
             // slot had no reader, so none of the 40 was ever written.
-            view_scaling_mode: (option(19) == Some("1")).then_some("Normal"),
+            // `2` is `Large`: Монитор `Catalogs/Взаимоблокировки/Forms/
+            // ФормаАнализа`, `СхемаДедлока`.
+            view_scaling_mode: match option(19) {
+                Some("1") => Some("Normal"),
+                Some("2") => Some("Large"),
+                _ => None,
+            },
             // Slot 14 is the group ruler switch: 218 of the 222 native
             // `SpreadSheetDocumentField` option tuples hold `1` and carry no
             // `<ShowGroups>`, and the 4 that hold `0` are exactly the 4 the
@@ -9833,5 +9860,42 @@ mod table_tail_property_tests {
         fields[FormTableSlot::RowInputMode.index()] = "1";
         let schema = FormTableSchema::from_raw_layout("55", "Table", &fields).unwrap();
         assert_eq!(schema.row_input_mode(&fields), Some("EndOfWindow"));
+    }
+}
+
+#[cfg(test)]
+mod track_bar_extent_tests {
+    use super::*;
+
+    /// Evidence: `DataProcessors/СопоставлениеНоменклатурыБЭД/Forms/Форма`
+    /// `ТочностьПоискаРегулирование` of 1C:Документооборот 3.0.17, whose option
+    /// tuple is `{2,1,1,1,0,30,100,1,0,10,5,1,{3,4,{0}},0,20,0,1,0}` and whose
+    /// native item writes `<MaxWidth>20</MaxWidth>`.
+    #[test]
+    fn a_track_bar_reads_its_max_width_from_member_14() {
+        let options = [
+            "2",
+            "1",
+            "1",
+            "1",
+            "0",
+            "30",
+            "100",
+            "1",
+            "0",
+            "10",
+            "5",
+            "1",
+            "{3,4,{0}}",
+            "0",
+            "20",
+            "0",
+            "1",
+            "0",
+        ];
+        let schema =
+            FormSpecialFieldSchema::from_raw_layout("37", 59, Some("10"), 0, &options, Some("2"))
+                .unwrap();
+        assert_eq!(schema.max_width(&options).as_deref(), Some("20"));
     }
 }

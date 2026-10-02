@@ -91,7 +91,7 @@ def compare(old, new, rules, context):
     if render(old) == render(new):
         return
     if not (isinstance(old, list) and isinstance(new, list)):
-        rules[('leaf', context, old if len(old) < 40 else old[:40], new if len(new) < 40 else new[:40])] += 1
+        rules[('leaf', context, render(old)[:40], render(new)[:40])] += 1
         return
     key = (tag(old), len(old), tag(new), len(new), context)
     if len(old) == len(new):

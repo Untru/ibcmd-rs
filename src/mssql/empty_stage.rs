@@ -144,17 +144,23 @@ impl EmptyStageContext {
             None => source_xml_version_from_bytes(&configuration)?
                 .ok_or_else(|| anyhow!("Configuration.xml declares no source version"))?,
         };
-        let facts = configuration_facts(&configuration)?;
-        // Body layouts follow CompatibilityMode, not the XML dialect: a 2.21
-        // tree of an 8.3-compatible configuration stores 8.3 bodies, the
-        // layout the registry's `FormLayout::stored` gives it.
+        let mut facts = configuration_facts(&configuration)?;
+        // Body layouts follow the configuration, not the XML dialect: a 2.21
+        // tree of an 8.3-compatible configuration stores 8.3 bodies (the
+        // layout the registry's `FormLayout::stored` gives it) unless its
+        // forms show it is stored the 8.5 way
+        // (`metadata_model::common::tree_stores_layout_8_5_1`); the
+        // Configuration tuple takes the same layout.
         let platform = crate::platform::of_xml_dialect(&version);
-        crate::module_blob::XML_2_21_TREE_IN_LAYOUT_8_3.store(
-            platform.xml_version() == crate::cli::InfobaseConfigSourceVersion::V2_21
-                && platform.form_layout().stored(facts.compatibility)
-                    == crate::platform::FormLayout::V8_3,
-            Ordering::Relaxed,
-        );
+        let xml_2_21 = platform.xml_version() == crate::cli::InfobaseConfigSourceVersion::V2_21;
+        let layout_8_5_1 = xml_2_21
+            && platform.form_layout() >= crate::platform::FormLayout::V8_5_1
+            && crate::metadata_model::common::tree_stores_layout_8_5_1(root);
+        crate::module_blob::XML_2_21_TREE_IN_LAYOUT_8_3
+            .store(xml_2_21 && !layout_8_5_1, Ordering::Relaxed);
+        if layout_8_5_1 {
+            facts.shape = crate::metadata_model::root::ConfigurationShape::V76;
+        }
         let descriptors = DescriptorContext::with_files(root, &version, files)?;
         let module_group = module_group_of(&configuration);
         Ok(Self {
@@ -1849,7 +1855,11 @@ pub(super) fn stage_source_objects_base_free(
 /// copied from or checked against Config. Attributes are 0 (what every
 /// staged body row the target lacks already gets on the default path); a row
 /// over the platform's part size is stored in parts, as its own import does.
-fn build_base_free_bulk_stage_apply_sql(database: &str, table: &str, staged_rows: usize) -> String {
+pub(super) fn build_base_free_bulk_stage_apply_sql(
+    database: &str,
+    table: &str,
+    staged_rows: usize,
+) -> String {
     let stage = format!("tempdb.dbo.{}", quote_ident(table));
     format!(
         "SET NOCOUNT ON;\n\

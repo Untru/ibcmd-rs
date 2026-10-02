@@ -1,8 +1,10 @@
-//! `infobase config export` and `infobase config import` against a Microsoft
-//! SQL Server infobase, without the platform: the export reads the Config
-//! table and writes the XML tree (`mssql_dump`), the import stages the tree
-//! into ConfigSave (`mssql::stage_source_objects`), where the platform's own
-//! `config apply` finds it, as it finds what its own `config import` wrote.
+//! `infobase config export`, `import` and `save` against a Microsoft SQL
+//! Server infobase, without the platform: the export reads the Config table
+//! and writes the XML tree (`mssql_dump`), the import stages the tree into
+//! ConfigSave (`mssql::stage_source_objects`), where the platform's own
+//! `config apply` finds it, as it finds what its own `config import` wrote,
+//! and the save writes the rows themselves as a `.cf`
+//! (`mssql_dump::config_save`).
 //!
 //! The drop-in command line (`crate::dropin`) and the research round trip
 //! (`crate::infobase_oracle`, `platform-oracle` builds only) call these.
@@ -20,8 +22,9 @@ use walkdir::WalkDir;
 use crate::adapters::mssql_legacy::MssqlLegacyAdapter;
 use crate::cli::{
     InfobaseConfigExportArgs, InfobaseConfigFormat, InfobaseConfigImportArgs,
-    InfobaseConfigSourceVersion, InfobaseImportStageMode, InfobaseImportVerify,
-    MssqlDumpConfigArgs, MssqlDumpExtensionArgs, MssqlExtensionImage, MssqlStageSourceObjectsArgs,
+    InfobaseConfigSaveArgs, InfobaseConfigSourceVersion, InfobaseImportStageMode,
+    InfobaseImportVerify, MssqlDumpConfigArgs, MssqlDumpExtensionArgs, MssqlExtensionImage,
+    MssqlStageSourceObjectsArgs,
 };
 use crate::legacy_version::LegacyVersionAxes;
 use crate::platform::PlatformSpec;
@@ -50,6 +53,9 @@ pub struct InfobaseConfigExportReport {
     pub module_text_rows: usize,
     pub source_asset_rows: usize,
     pub dump_timings: crate::mssql_dump::MssqlDumpTimingReport,
+    /// What `--base` and `--sync` did (absent without them).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub incremental: Option<crate::mssql_dump::incremental::IncrementalExportSummary>,
 }
 
 #[derive(Debug, Serialize)]
@@ -71,6 +77,10 @@ pub struct InfobaseConfigImportReport {
     pub stage_mode: &'static str,
     /// Why that mode: asked for, or what the target's Config holds.
     pub stage_mode_reason: String,
+    /// `import files`: the files whose rows were staged (relative to
+    /// `source_dir`); absent for the whole tree.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub files: Vec<String>,
     /// Rows in the target's Config before the import (-1: not read).
     pub target_config_rows: i64,
     pub staged_rows_before: i64,
@@ -114,6 +124,8 @@ pub(crate) enum PlatformNeed<'a> {
         sqlcmd: Option<&'a Path>,
         output_dir: &'a Path,
         overwrite: bool,
+        /// `--base`/`--sync`: the directory may hold an earlier export.
+        incremental: bool,
     },
     /// An import of `source_dir`: the settings, then the tree's own
     /// `Configuration.xml`; a platform named for the database must be the
@@ -185,6 +197,7 @@ impl InfobaseConfigExportArgs {
                 sqlcmd: self.sqlcmd.as_deref(),
                 output_dir: &self.output_dir,
                 overwrite: self.overwrite,
+                incremental: self.base.is_some() || self.sync,
             },
         }
     }
@@ -211,10 +224,93 @@ impl InfobaseConfigImportArgs {
     }
 }
 
+/// What `infobase config save` did.
+#[derive(Debug, Serialize)]
+pub struct InfobaseConfigSaveReport {
+    pub operation: &'static str,
+    pub backend: &'static str,
+    pub dbms: String,
+    pub db_server: String,
+    pub db_name: String,
+    pub db_user: Option<String>,
+    pub password_source: Option<String>,
+    pub native_config: Option<PathBuf>,
+    pub save: crate::mssql_dump::config_save::ConfigSaveReport,
+}
+
+impl InfobaseConfigSaveArgs {
+    fn connection(&self) -> ConnectionRequest<'_> {
+        ConnectionRequest {
+            settings: self.settings.as_deref(),
+            native_config: self.native_config.as_deref(),
+            format: None,
+            platform: None,
+            source_version: None,
+            dbms: self.dbms.as_deref(),
+            db_server: self.db_server.as_deref(),
+            db_name: self.db_name.as_deref(),
+            db_user: self.db_user.as_deref(),
+            db_pwd: self.db_pwd.as_deref(),
+            db_pwd_env: &self.db_pwd_env,
+            // A .cf holds the stored rows: no XML format is read or written.
+            need: PlatformNeed::Given,
+        }
+    }
+}
+
+/// `infobase config save`: the configuration of the connection's database
+/// written as a `.cf` from its rows (`mssql_dump::config_save`).
+pub fn save_config(args: &InfobaseConfigSaveArgs) -> Result<InfobaseConfigSaveReport> {
+    use crate::mssql_dump::config_save::{ConfigSaveRequest, SavedConfiguration, save_config};
+
+    let config = resolve_connection(args.connection())?;
+    ensure_mssql(&config.dbms)?;
+    let output = if args.output.is_absolute() {
+        args.output.clone()
+    } else {
+        env::current_dir()?.join(&args.output)
+    };
+    let sql = crate::sql::SqlExec::from_options(crate::sql::SqlOptions {
+        sqlcmd: args.sqlcmd.as_deref(),
+        bcp: None,
+        server: &config.db_server,
+        user: config.db_user.as_deref(),
+        password: config.db_pwd.as_deref(),
+        password_env: &args.db_pwd_env,
+        trust_server_certificate: true,
+    })?;
+    let save = save_config(&ConfigSaveRequest {
+        sql: &sql,
+        database: &config.db_name,
+        rows_dir: None,
+        configuration: if args.database_configuration {
+            SavedConfiguration::Database
+        } else {
+            SavedConfiguration::Main
+        },
+        output: &output,
+        overwrite: args.overwrite,
+    })?;
+    Ok(InfobaseConfigSaveReport {
+        operation: "infobase config save",
+        backend: "mssql-config-rows",
+        dbms: config.dbms,
+        db_server: config.db_server,
+        db_name: config.db_name,
+        db_user: config.db_user,
+        password_source: config.password_source,
+        native_config: config.native_config,
+        save,
+    })
+}
+
 pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigExportReport> {
     let config = resolve_connection(args.connection())?;
     ensure_mssql(&config.dbms)?;
     if let Some(extension) = args.extension.as_deref() {
+        if args.base.is_some() || args.sync {
+            bail!("--base and --sync export the configuration; an extension is exported in full");
+        }
         return export_extension_report(
             &config,
             args.sqlcmd.as_deref(),
@@ -231,9 +327,15 @@ pub fn export_config(args: &InfobaseConfigExportArgs) -> Result<InfobaseConfigEx
         args.overwrite,
         args.count_files,
         Vec::new(),
+        args.base.as_deref(),
+        args.sync,
     )
 }
 
+/// The export of the configuration into `output_dir_arg`. With `base` or
+/// `sync` (`--base`, `--sync`, `mssql_dump::incremental`) the directory may
+/// hold an earlier export, which the export updates instead of refusing it.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn export_config_report(
     config: &ConnectionConfig,
     sqlcmd: Option<&Path>,
@@ -242,11 +344,17 @@ pub(crate) fn export_config_report(
     overwrite: bool,
     count_exported_files: bool,
     file_names: Vec<String>,
+    base: Option<&Path>,
+    sync: bool,
 ) -> Result<InfobaseConfigExportReport> {
     let source_version = config.legacy_source_version()?;
     let output_dir = absolute_path(output_dir_arg)?;
-    prepare_output_dir(&output_dir, overwrite)?;
-    let dump_args = dump_args(
+    if base.is_some() || sync {
+        crate::mssql_dump::incremental::prepare_output_dir(&output_dir)?;
+    } else {
+        prepare_output_dir(&output_dir, overwrite)?;
+    }
+    let mut dump_args = dump_args(
         config,
         sqlcmd,
         db_pwd_env,
@@ -254,6 +362,8 @@ pub(crate) fn export_config_report(
         file_names,
         source_version,
     );
+    dump_args.base = base.map(Path::to_path_buf);
+    dump_args.sync = sync;
     let dump = crate::mssql_dump::dump_config(&dump_args)?;
 
     let exported_files = if count_exported_files {
@@ -281,6 +391,7 @@ pub(crate) fn export_config_report(
         module_text_rows: dump.total_module_text_rows,
         source_asset_rows: dump.total_source_asset_rows,
         dump_timings: dump.timings,
+        incremental: dump.incremental,
     })
 }
 
@@ -345,6 +456,7 @@ pub(crate) fn export_extension_report(
         module_text_rows: 0,
         source_asset_rows: 0,
         dump_timings: Default::default(),
+        incremental: None,
     })
 }
 
@@ -405,6 +517,7 @@ fn dump_args(
         main_configuration: true,
         file_names,
         file_name_lists: Vec::new(),
+        objects: Vec::new(),
         inflate: false,
         extract_module_text: true,
         extract_metadata_xml: true,
@@ -416,6 +529,8 @@ fn dump_args(
         write_manifest: false,
         platform: None,
         source_version,
+        base: None,
+        sync: false,
     }
 }
 
@@ -431,6 +546,20 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
         );
     }
     let (base_free, reason, target_config_rows) = match args.stage_mode {
+        // A partial import patches the rows of the objects it names; a
+        // sparse directory has no Configuration.xml to compare the target by.
+        _ if !args.files.is_empty() => {
+            if matches!(args.stage_mode, InfobaseImportStageMode::BaseFree) {
+                bail!(
+                    "частичная загрузка файлов не собирает конфигурацию с нуля: --base-free не применим"
+                );
+            }
+            (
+                false,
+                format!("a partial import of {} files", args.files.len()),
+                -1,
+            )
+        }
         InfobaseImportStageMode::BaseFree => (true, "asked for (--base-free)".to_string(), -1),
         InfobaseImportStageMode::Patch => (false, "asked for".to_string(), -1),
         InfobaseImportStageMode::Auto => {
@@ -476,6 +605,7 @@ pub fn import_config(args: &InfobaseConfigImportArgs) -> Result<InfobaseConfigIm
         source_dir: stage_args.source_root,
         stage_mode: if base_free { "base-free" } else { "patch" },
         stage_mode_reason: reason,
+        files: args.files.clone(),
         target_config_rows,
         staged_rows_before: report.before.row_count,
         staged_rows_after: report.after.row_count,
@@ -517,6 +647,7 @@ fn build_import_stage_args(
             None
         },
         path_prefix: args.path_prefix.clone(),
+        files: args.files.clone(),
         script_output: args.script_output.clone(),
         script_only: false,
         bulk: false,
@@ -659,6 +790,7 @@ fn settle_platform(
             sqlcmd,
             output_dir,
             overwrite,
+            incremental,
         } => {
             if config.xml_version_given {
                 return Ok(());
@@ -668,8 +800,10 @@ fn settle_platform(
                 let probe = || {
                     // The probe reads the database: a directory that holds
                     // files is refused first, as the export always did
-                    // before reading it.
-                    prepare_output_dir(&absolute_path(output_dir)?, overwrite)?;
+                    // before reading it (`--base`/`--sync` update one).
+                    if !incremental {
+                        prepare_output_dir(&absolute_path(output_dir)?, overwrite)?;
+                    }
                     crate::mssql_dump::model_export::configuration_compatibility_8_5_or_later(
                         &dump_args(
                             known,
@@ -1137,6 +1271,7 @@ mod tests {
             allow_non_lab: true,
             batch_size: Some(250),
             path_prefix: vec!["Catalogs/Валюты".to_string()],
+            files: Vec::new(),
             script_output: Some(PathBuf::from(r"C:\temp\stage.sql")),
             stage_mode: InfobaseImportStageMode::Auto,
             verify: InfobaseImportVerify::Auto,
@@ -1212,6 +1347,8 @@ mod tests {
             overwrite: false,
             count_files: false,
             output_dir: PathBuf::from("out"),
+            base: None,
+            sync: false,
         }
     }
 

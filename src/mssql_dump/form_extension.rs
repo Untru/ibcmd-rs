@@ -12,6 +12,12 @@
 //!
 //! The adopted form's body ends `…,{0,0}x4,1,<base form body>,0` where a
 //! form body ends `…,{0,0}x4,0,0`; the base form body is a whole form body.
+//!
+//! Both are facts the form writer spells on its own pass ([`FormAdoption`]):
+//! the call type travels with every event and command of the form's model
+//! ([`FormAdoption::mark`]), and the base form, written as a document of its
+//! own by the same writer ([`form_adoption`]), closes the adopted form's
+//! document as `<BaseForm>`.
 
 use std::collections::BTreeMap;
 
@@ -158,52 +164,85 @@ pub(super) fn form_event_call_types(text: &str) -> EventCallTypes {
     found
 }
 
-/// `xml` with `callType` on every `<Event>` whose handler the map knows.
-pub(super) fn with_event_call_types(xml: &str, call_types: &EventCallTypes) -> String {
-    let mut out = String::with_capacity(xml.len() + 64);
-    let mut rest = xml;
-    while let Some(at) = rest.find("<Event name=\"") {
-        out.push_str(&rest[..at]);
-        rest = &rest[at..];
-        let Some(open_end) = rest.find('>') else {
-            break;
-        };
-        let Some(close) = rest.find("</Event>") else {
-            break;
-        };
-        let open = &rest[..open_end];
-        let handler = unescape_xml_text(&rest[open_end + 1..close]);
-        let name_start = "<Event name=\"".len();
-        let event = open[name_start..]
-            .find('"')
-            .map(|end| unescape_xml_text(&open[name_start..name_start + end]))
-            .unwrap_or_default();
-        match call_types.get(&event, &handler) {
-            Some(call_type) if !open.contains("callType=") => {
-                out.push_str(open);
-                out.push_str(&format!(" callType=\"{call_type}\""));
-            }
-            _ => out.push_str(open),
+/// What the writer spells for an adopted form beyond its body, read once by
+/// [`form_adoption`] and handed to the writer of the form.
+#[derive(Debug)]
+pub(super) struct FormAdoption {
+    /// The call type of every event handler of the form.
+    call_types: EventCallTypes,
+    /// The call type of every command handler: `Before` on the adopted form
+    /// (the six commands of an extension's common form in the БСП 8.3.27
+    /// ServiceDesk all say so; where the command record keeps a code for an
+    /// interceptor that would say otherwise is not on record), none on its
+    /// base form, whose commands are not on record either way.
+    command_call_type: Option<&'static str>,
+    /// The base form the extension adopted, written.
+    pub(super) base_form: Option<FormBaseForm>,
+}
+
+impl FormAdoption {
+    /// Hands every event handler of the form's model its call type, and every
+    /// command handler the form's: the writer then spells `callType` where
+    /// the model says so.
+    pub(super) fn mark(
+        &self,
+        events: &mut [FormBodyEvent],
+        auto_command_bar: Option<&mut FormAutoCommandBar>,
+        child_items: &mut [FormChildItem],
+        commands: &mut [FormCommand],
+    ) {
+        self.mark_events(events);
+        if let Some(command_bar) = auto_command_bar {
+            self.mark_items(&mut command_bar.child_items);
         }
-        rest = &rest[open_end..];
+        self.mark_items(child_items);
+        for command in commands {
+            command.call_type = self.command_call_type;
+        }
     }
-    out.push_str(rest);
-    out
+
+    fn mark_events(&self, events: &mut [FormBodyEvent]) {
+        for event in events {
+            event.call_type = self.call_types.get(&event.name, &event.handler);
+        }
+    }
+
+    /// Every item's own events and its tooltip's, down the item tree (context
+    /// menus, command bars and additions are items of it).
+    fn mark_items(&self, items: &mut [FormChildItem]) {
+        for item in items {
+            self.mark_events(&mut item.events);
+            if let Some(tooltip) = item.extended_tooltip.as_mut() {
+                self.mark_events(&mut tooltip.events);
+            }
+            self.mark_items(&mut item.child_items);
+        }
+    }
 }
 
-/// `xml` with `callType="Before"` on every command handler. The commands of
-/// an adopted form on record (six of an extension's common form in the БСП
-/// 8.3.27 ServiceDesk) all say `Before`; where the command record keeps a code
-/// for an interceptor that would say otherwise is not on record.
-pub(super) fn with_action_call_types(xml: &str) -> String {
-    xml.replace("<Action>", "<Action callType=\"Before\">")
+/// The base form an adopted form carries, written as a document of its own:
+/// what `<BaseForm version="…">` encloses, one level deeper.
+#[derive(Debug)]
+pub(super) struct FormBaseForm {
+    /// The dialect of the document, `2.20` or `2.21`.
+    pub(super) version: &'static str,
+    /// The children of the document's root as written: CRLF lines at the
+    /// root's indentation.
+    pub(super) children: String,
 }
 
-fn unescape_xml_text(text: &str) -> String {
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&amp;", "&")
+impl FormBaseForm {
+    /// The written document `xml` of the base form, in the dialect
+    /// `source_version`.
+    fn from_document(source_version: InfobaseConfigSourceVersion, xml: &str) -> Result<Self> {
+        let document = super::form::xml_2_21_writer::XmlEdits::new(xml)
+            .context("the adopted form's base form document")?;
+        let root = document.root()?;
+        Ok(Self {
+            version: source_version.as_str(),
+            children: document.inner_lines(root).to_owned(),
+        })
+    }
 }
 
 /// The trailing section of an adopted form that holds its base form record.
@@ -222,23 +261,21 @@ pub(super) fn adopted_base_form(body: &ParsedFormBodyBlob) -> Option<ParsedFormB
     crate::module_blob::parse_form_body_plain(base).ok()
 }
 
-/// The adopted form's XML with its call types and `<BaseForm>`; any other
-/// form unchanged. `object_refs` is passed for dialect 2.21, whose base form
-/// goes through the same 8.5 pass as the form itself (8.5.1.1529 writes
-/// `WindowOpeningMode`/`Group` inside `<BaseForm>` too; fixture
-/// `v85_extension/adopted_form_events`).
-pub(super) fn with_adopted_form_parts(
-    xml: String,
+/// The adoption facts of the form `body`; `None` for a form without a base
+/// form record. The base form is written by the same writer as the form, in
+/// the same dialect: `object_refs` is passed for dialect 2.21, whose base
+/// form goes through the same 8.5 pass as the form itself, by its own facts
+/// (8.5.1.1529 writes `WindowOpeningMode`/`Group` inside `<BaseForm>` too;
+/// fixture `v85_extension/adopted_form_events`).
+pub(super) fn form_adoption(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
     source_version: InfobaseConfigSourceVersion,
     object_refs: &BTreeMap<String, String>,
-) -> Result<String> {
+) -> Result<Option<FormAdoption>> {
     let Some(base) = adopted_base_form(body) else {
-        return Ok(xml);
+        return Ok(None);
     };
-    let xml = with_event_call_types(&xml, &form_event_call_types(&body.layout));
-    let xml = with_action_call_types(&xml);
     let v85 = source_version == InfobaseConfigSourceVersion::V2_21;
     let (base, facts) = if v85 && super::form::layout_8_5_1::is_form_body_8_5_1(&base) {
         let (converted, facts) = super::form::layout_8_5_1::down_convert_form_body_8_5_1(&base)
@@ -247,7 +284,19 @@ pub(super) fn with_adopted_form_parts(
     } else {
         (base, None)
     };
-    let base_xml = match extract_form_body_xml_from_body_detailed_timed(&base, context, None) {
+    // The base form's own handlers are interceptors too (fixture
+    // `adopted/form_events`: every event of the base form says `Before`).
+    let base_adoption = FormAdoption {
+        call_types: form_event_call_types(&base.layout),
+        command_call_type: None,
+        base_form: None,
+    };
+    let base_xml = match extract_form_body_xml_from_body_detailed_timed(
+        &base,
+        context,
+        Some(&base_adoption),
+        None,
+    ) {
         Some(DetailedFormBodyExtraction::Emitted { xml, .. }) => xml,
         _ => anyhow::bail!("the adopted form's base form is not readable"),
     };
@@ -258,37 +307,12 @@ pub(super) fn with_adopted_form_parts(
         }
         (true, None) => super::form::xml_2_21_writer::apply_xml_2_21_upgrade_defaults(base_xml)?,
     };
-    let base_xml = with_event_call_types(&base_xml, &form_event_call_types(&base.layout));
-    let inner = base_form_inner(&base_xml).context("base form XML has no <Form> root")?;
-    let close = xml.rfind("</Form>").context("form XML has no </Form>")?;
-    let mut out = String::with_capacity(xml.len() + inner.len() + 64);
-    out.push_str(&xml[..close]);
-    if inner.is_empty() {
-        out.push_str(&format!(
-            "\t<BaseForm version=\"{}\"/>\r\n",
-            source_version.as_str()
-        ));
-    } else {
-        out.push_str(&format!(
-            "\t<BaseForm version=\"{}\">\r\n",
-            source_version.as_str()
-        ));
-        for line in inner.split_inclusive("\r\n") {
-            out.push('\t');
-            out.push_str(line);
-        }
-        out.push_str("\t</BaseForm>\r\n");
-    }
-    out.push_str(&xml[close..]);
-    Ok(out)
-}
-
-/// The lines between `<Form …>` and `</Form>`.
-fn base_form_inner(xml: &str) -> Option<&str> {
-    let root = xml.find("<Form ")?;
-    let open_end = root + xml[root..].find(">\r\n")? + 3;
-    let close = xml.rfind("</Form>")?;
-    xml.get(open_end..close)
+    Ok(Some(FormAdoption {
+        call_types: form_event_call_types(&body.layout),
+        // `Before`.
+        command_call_type: Some(CALL_TYPES[0]),
+        base_form: Some(FormBaseForm::from_document(source_version, &base_xml)?),
+    }))
 }
 
 #[cfg(test)]
@@ -330,23 +354,84 @@ mod tests {
         assert!(parse_form_event_block("{1,x,\"h\",1,0,y,0,1}").is_none());
     }
 
+    fn event(name: &str, handler: &str) -> FormBodyEvent {
+        FormBodyEvent {
+            name: name.to_owned(),
+            handler: handler.to_owned(),
+            call_type: None,
+        }
+    }
+
     #[test]
-    fn command_handlers_are_called_before() {
-        assert_eq!(
-            with_action_call_types("<Command><Action>Действие</Action></Command>"),
-            "<Command><Action callType=\"Before\">Действие</Action></Command>"
+    fn marks_the_call_type_of_a_known_handler_down_the_item_tree() {
+        let adoption = FormAdoption {
+            call_types: EventCallTypes::handler("Перед", "Before"),
+            command_call_type: Some("Before"),
+            base_form: None,
+        };
+        let mut events = vec![event("OnOpen", "Перед"), event("x", "y")];
+        let mut item = FormChildItem::default();
+        item.events.push(event("OnChange", "Перед"));
+        let mut nested = FormChildItem::default();
+        nested.extended_tooltip = Some(FormExtendedTooltip {
+            events: vec![event("Click", "Перед")],
+            ..FormExtendedTooltip::default()
+        });
+        item.child_items.push(nested);
+        let mut items = vec![item];
+        adoption.mark(&mut events, None, &mut items, &mut []);
+        assert_eq!(events[0].call_type, Some("Before"));
+        assert_eq!(events[1].call_type, None);
+        assert_eq!(items[0].events[0].call_type, Some("Before"));
+        let tooltip = items[0].child_items[0].extended_tooltip.as_ref().unwrap();
+        assert_eq!(tooltip.events[0].call_type, Some("Before"));
+    }
+
+    #[test]
+    fn the_base_form_is_the_children_of_its_root() {
+        let document = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
+                        <Form xmlns=\"x\" version=\"2.20\">\r\n\
+                        \t<Attributes/>\r\n\
+                        </Form>";
+        let base =
+            FormBaseForm::from_document(InfobaseConfigSourceVersion::V2_20, document).unwrap();
+        assert_eq!(base.version, "2.20");
+        assert_eq!(base.children, "\t<Attributes/>\r\n");
+        let empty =
+            FormBaseForm::from_document(InfobaseConfigSourceVersion::V2_21, "<Form>\r\n</Form>")
+                .unwrap();
+        assert_eq!((empty.version, empty.children.as_str()), ("2.21", ""));
+        assert!(
+            FormBaseForm::from_document(InfobaseConfigSourceVersion::V2_20, "<Other/>").is_err()
         );
     }
 
     #[test]
-    fn writes_the_call_type_of_a_known_handler() {
-        let map = EventCallTypes::handler("Перед", "Before");
+    fn the_base_form_closes_the_document_one_level_deeper() {
+        let base = FormBaseForm {
+            version: "2.20",
+            children: "\t<Events>\r\n\
+                       \t\t<Event name=\"OnOpen\" callType=\"Before\">П</Event>\r\n\
+                       \t</Events>\r\n"
+                .to_owned(),
+        };
         assert_eq!(
-            with_event_call_types(
-                "<Event name=\"OnOpen\">Перед</Event><Event name=\"x\">y</Event>",
-                &map
-            ),
-            "<Event name=\"OnOpen\" callType=\"Before\">Перед</Event><Event name=\"x\">y</Event>"
+            format_form_body_close_xml(Some(&base)),
+            "\t<BaseForm version=\"2.20\">\r\n\
+             \t\t<Events>\r\n\
+             \t\t\t<Event name=\"OnOpen\" callType=\"Before\">П</Event>\r\n\
+             \t\t</Events>\r\n\
+             \t</BaseForm>\r\n\
+             </Form>"
         );
+        let empty = FormBaseForm {
+            version: "2.21",
+            children: String::new(),
+        };
+        assert_eq!(
+            format_form_body_close_xml(Some(&empty)),
+            "\t<BaseForm version=\"2.21\"/>\r\n</Form>"
+        );
+        assert_eq!(format_form_body_close_xml(None), "</Form>");
     }
 }

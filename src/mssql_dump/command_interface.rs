@@ -762,6 +762,8 @@ pub(super) fn parse_client_application_interface_text(
 fn client_application_panel_def_spr(panel_def_fields: &[&str]) -> Option<&'static str> {
     match panel_def_fields.get(1)?.trim() {
         "2" => match panel_def_fields.get(2)?.trim() {
+            // Монитор `Ext/ClientApplicationInterface`: `{<panel>,2,0}`.
+            "0" => Some("Picture"),
             "4" => Some("PictureOnLeftAndText"),
             _ => None,
         },
@@ -1128,11 +1130,19 @@ pub(super) fn push_client_application_interface_area_xml(
     tag: &str,
     nodes: &[ClientApplicationInterfaceNode],
 ) {
-    xml.push_str(&format!("\t<{tag}>\r\n"));
-    for node in nodes {
-        push_client_application_interface_node_xml(xml, node, 2);
+    // Every entry of the area's own list is an area element of its own: DMIL
+    // 3.0.2.7 stores two panels in its top area's list and 8.3.27.2214 writes
+    // two `<top>` elements, one panel each; an area whose list holds one entry
+    // (every other configuration of the stand) writes one element.
+    if nodes.is_empty() {
+        xml.push_str(&format!("\t<{tag}>\r\n\t</{tag}>\r\n"));
+        return;
     }
-    xml.push_str(&format!("\t</{tag}>\r\n"));
+    for node in nodes {
+        xml.push_str(&format!("\t<{tag}>\r\n"));
+        push_client_application_interface_node_xml(xml, node, 2);
+        xml.push_str(&format!("\t</{tag}>\r\n"));
+    }
 }
 
 fn push_client_application_interface_node_xml(

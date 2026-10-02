@@ -219,8 +219,13 @@ fn relative(root: &Path, path: &Path) -> String {
                     .to_string()
             };
             let (root, path) = (verbatim(root), verbatim(path));
+            // A `\\?\` path is a Windows spelling: its separators are
+            // backslashes wherever this runs.
             match path.strip_prefix(&root) {
-                Some(rest) => std::path::PathBuf::from(rest.trim_start_matches(['\\', '/'])),
+                Some(rest) => rest
+                    .split(['\\', '/'])
+                    .filter(|part| !part.is_empty())
+                    .collect(),
                 None => std::path::PathBuf::from(path),
             }
         });

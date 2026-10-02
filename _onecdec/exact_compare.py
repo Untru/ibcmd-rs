@@ -55,6 +55,21 @@ def export(label, out):
     return r.returncode
 
 
+def groups(differ, nat, ours):
+    """The differing files grouped by their first differing line pair."""
+    import difflib, re
+    counts, example = {}, {}
+    for p in differ:
+        a = open(nat[p], 'rb').read().decode('utf-8', 'replace').splitlines()
+        b = open(ours[p], 'rb').read().decode('utf-8', 'replace').splitlines()
+        lines = [l for l in difflib.unified_diff(a, b, lineterm='', n=0) if l[:1] in '+-' and l[:3] not in ('---', '+++')]
+        key = ' | '.join(re.sub(r'>[^<]*<', '>…<', l.strip())[:90] for l in lines[:2])
+        counts[key] = counts.get(key, 0) + 1
+        example.setdefault(key, p)
+    for key, n in sorted(counts.items(), key=lambda kv: -kv[1])[:40]:
+        print('  x%-4d %s   e.g. %s' % (n, key, example[key]))
+
+
 def main():
     label = [a for a in sys.argv[1:] if not a.startswith('--') and sys.argv[sys.argv.index(a) - 1] not in
              ('--native', '--out', '--baseline')][0]
@@ -73,6 +88,15 @@ def main():
     identical = total - len(differ) - len(missing)
     print('%s exit=%s identical %d/%d (%.3f%%) differ %d missing %d extra %d' % (
         label, code, identical, total, 100.0 * identical / max(1, total), len(differ), len(missing), len(extra)))
+    if '--groups' in sys.argv:
+        groups(differ, nat, ours)
+        by_dir = {}
+        for p in missing:
+            key = '/'.join(p.split('/')[:1]) + ' ' + p.rsplit('/', 1)[-1]
+            by_dir[key] = by_dir.get(key, 0) + 1
+        for key, n in sorted(by_dir.items(), key=lambda kv: -kv[1])[:15]:
+            print('  missing x%d %s' % (n, key))
+        return
     for kind, paths in (('differ', differ), ('missing', missing), ('extra', extra)):
         for p in paths[:60]:
             note = ''

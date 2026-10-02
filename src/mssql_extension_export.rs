@@ -376,9 +376,12 @@ fn validate_extension_directory_name(name: &str) -> Result<()> {
         || (stem.len() == 4
             && (stem.starts_with("COM") || stem.starts_with("LPT"))
             && matches!(stem.as_bytes()[3], b'1'..=b'9'));
+    // A separator of either platform: the tree is read on Windows too, where
+    // `a\b` is two folders.
     if name.is_empty()
         || name == "."
         || name == ".."
+        || name.contains(['/', '\\'])
         || trimmed != name
         || reserved
         || !one_normal_component

@@ -121,6 +121,7 @@ fn an_entry_without_a_server_matches_every_server() {
         name: "bsp_*".to_string(),
         platform: crate::platform::parse("8.5.1").unwrap(),
         line: 1,
+        rows_dir: None,
     };
     let any = binding(None);
     assert!(any.matches(target(Some("sql01"), "bsp_1").unwrap()));
@@ -277,6 +278,40 @@ fn the_export_probe_runs_only_when_nothing_else_decides() {
     .unwrap_err();
     assert!(
         format!("{error:#}").contains("compatibility mode: no rows"),
+        "{error:#}"
+    );
+}
+
+#[test]
+fn a_database_entry_may_name_a_rows_folder_relative_to_its_file() {
+    let scratch = Scratch::new("rows-dir");
+    scratch.write(
+        "cwd/ibcmd-rs.toml",
+        r#"[[database]]
+name = "demo"
+platform = "8.3.27"
+rows-dir = "rows/demo"
+
+[[database]]
+name = "prod"
+platform = "8.3.27"
+"#,
+    );
+    let settings = Layers::new(&scratch).load().unwrap();
+    let databases = settings.files()[0].databases();
+    assert_eq!(
+        databases[0].rows_dir.as_deref(),
+        Some(scratch.path().join("cwd").join("rows/demo").as_path())
+    );
+    assert_eq!(databases[1].rows_dir, None);
+
+    scratch.write(
+        "cwd/ibcmd-rs.toml",
+        "[[database]]\nname = \"demo\"\nplatform = \"8.3.27\"\nrows-dir = \" \"\n",
+    );
+    let error = Layers::new(&scratch).load().unwrap_err();
+    assert!(
+        format!("{error:#}").contains(":4: [[database]] rows-dir is empty"),
         "{error:#}"
     );
 }

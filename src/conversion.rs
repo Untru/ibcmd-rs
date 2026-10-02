@@ -475,6 +475,23 @@ fn decode_xml_tree(
         }
         let document = XmlReader::from_slice(source.bytes())
             .map_err(|error| (source.path().to_string(), error.to_string()))?;
+        // A configuration's own `Ext/` documents (`ClientApplicationInterface`,
+        // `HomePageWorkArea`, ...) are classified with the metadata by their
+        // folder but are no metadata object: every export of a real
+        // configuration writes them, the first with no version to detect a
+        // dialect by. They pass through as they are; a cross-profile route
+        // still refuses them (`validate_decoded_xml`).
+        if !matches!(
+            document.root().name().local(),
+            "MetaDataObject" | "Configuration" | "DefinedType"
+        ) {
+            decoded.push(DecodedXmlEntry::Passthrough {
+                path: source.path().clone(),
+                kind: source.kind(),
+                bytes: source.bytes().to_vec(),
+            });
+            continue;
+        }
         validate_dialect(&document, dialects, &profile.id)
             .map_err(|message| (source.path().to_string(), message))?;
         let family =
@@ -808,41 +825,54 @@ fn convert_xml_to_cf(
             Some(display_path(&args.input)),
         )
     })?;
-    let dialects = DialectRegistry::from_profiles(profiles).map_err(|error| {
-        failure(
-            &mut report,
-            PHASE_DECODE,
-            "conversion.xml-dialect-registry-failed",
-            error.to_string(),
-            None,
-        )
-    })?;
-    let codecs = bundled_metadata_registry();
-    let decoded =
-        decode_xml_tree(&tree, source_profile, &dialects, &codecs).map_err(|(path, message)| {
+    // The base-free compiler reads every file of the tree itself and refuses
+    // the tree on any row it cannot compile; the canonical decode below
+    // knows the metadata families of the bootstrap compiler only (a common
+    // form, `Ext/ClientApplicationInterface.xml` and the like stop it).
+    let base_free = uses_base_free_compiler(target_profile);
+    if !base_free {
+        let dialects = DialectRegistry::from_profiles(profiles).map_err(|error| {
             failure(
                 &mut report,
                 PHASE_DECODE,
-                "conversion.xml-decode-failed",
-                message,
-                Some(path),
+                "conversion.xml-dialect-registry-failed",
+                error.to_string(),
+                None,
             )
         })?;
+        let codecs = bundled_metadata_registry();
+        let decoded = decode_xml_tree(&tree, source_profile, &dialects, &codecs).map_err(
+            |(path, message)| {
+                failure(
+                    &mut report,
+                    PHASE_DECODE,
+                    "conversion.xml-decode-failed",
+                    message,
+                    Some(path),
+                )
+            },
+        )?;
+        report.mark(PHASE_DECODE, ConversionPhaseStatus::Completed);
+        validate_decoded_xml(&decoded, false).map_err(|(path, message)| {
+            failure(
+                &mut report,
+                PHASE_VALIDATE,
+                "conversion.xml-validation-failed",
+                message,
+                path,
+            )
+        })?;
+    }
     report.mark(PHASE_DECODE, ConversionPhaseStatus::Completed);
-    validate_decoded_xml(&decoded, false).map_err(|(path, message)| {
-        failure(
-            &mut report,
-            PHASE_VALIDATE,
-            "conversion.xml-validation-failed",
-            message,
-            path,
-        )
-    })?;
     report.mark(PHASE_VALIDATE, ConversionPhaseStatus::Completed);
     report.plan = Some(direct_plan(
         source_profile,
         target_profile,
-        "adapter:xml-to-cf",
+        if base_free {
+            "adapter:xml-to-cf-base-free"
+        } else {
+            "adapter:xml-to-cf"
+        },
     ));
     report.mark(PHASE_PLAN, ConversionPhaseStatus::Completed);
     report.mark(PHASE_MIGRATE, ConversionPhaseStatus::Completed);
@@ -853,29 +883,69 @@ fn convert_xml_to_cf(
         .expect("XML endpoint was validated")
         .value
         .clone();
-    let compilation =
-        compile_bootstrap_source_tree(&tree, dialect, target_profile).map_err(|error| {
+    let (patch, source_entries, revision, storage_profile) = if base_free {
+        // A platform profile without the bootstrap compiler's layouts (8.5)
+        // is written by the base-free stage an empty infobase is loaded from,
+        // as `cf bootstrap --base-free` does: every row of the tree, compiled
+        // without a base. Always Format15, as there (`cf bootstrap
+        // --base-free`, `docs/evidence/cf-config-save.md`).
+        let selector = legacy_xml_selector(source_profile).ok_or_else(|| {
             failure(
                 &mut report,
                 PHASE_PREFLIGHT,
-                "conversion.cf-bootstrap-compile-failed",
-                error.to_string(),
+                "conversion.xml-source-adapter-missing",
+                format!(
+                    "the base-free compiler has no reader for profile `{}`",
+                    source_profile.id
+                ),
                 None,
             )
         })?;
-    let source_entries = compilation.source_files();
-    let target_entries = compilation.patch().len();
-    let revision = cli_revision(args.target_revision);
-    let mut cf_profile = BootstrapCfProfile::new(
-        revision,
-        args.target_storage_version,
-        compilation.storage_profile().clone(),
-    )
-    .with_reserved(args.target_reserved);
+        let storage_profile = target_profile
+            .storage_profile
+            .as_ref()
+            .expect("CF endpoint was validated")
+            .value
+            .clone();
+        let (patch, _) = crate::mssql::base_free_cf::base_free_patch(&args.input, selector)
+            .map_err(|error| {
+                failure(
+                    &mut report,
+                    PHASE_PREFLIGHT,
+                    "conversion.cf-base-free-compile-failed",
+                    format!("{error:#}"),
+                    None,
+                )
+            })?;
+        let source_entries = tree.entries().len();
+        (patch, source_entries, Revision::Format15, storage_profile)
+    } else {
+        let compilation =
+            compile_bootstrap_source_tree(&tree, dialect, target_profile).map_err(|error| {
+                failure(
+                    &mut report,
+                    PHASE_PREFLIGHT,
+                    "conversion.cf-bootstrap-compile-failed",
+                    error.to_string(),
+                    None,
+                )
+            })?;
+        let source_entries = compilation.source_files();
+        let storage_profile = compilation.storage_profile().clone();
+        (
+            compilation.into_patch(),
+            source_entries,
+            cli_revision(args.target_revision),
+            storage_profile,
+        )
+    };
+    let target_entries = patch.len();
+    let mut cf_profile =
+        BootstrapCfProfile::new(revision, args.target_storage_version, storage_profile)
+            .with_reserved(args.target_reserved);
     if let Some(page_size) = args.target_page_size {
         cf_profile = cf_profile.with_page_size(page_size);
     }
-    let patch = compilation.into_patch();
     let artifact =
         assemble_bootstrap_artifact(patch.clone(), cf_profile.clone(), ResourceLimits::default())
             .map_err(|error| {
@@ -1382,6 +1452,15 @@ fn metadata_family(document: &XmlDocument) -> std::result::Result<FamilyId, Stri
         return Err("MetaDataObject contains more than one metadata element".to_owned());
     }
     FamilyId::parse(family.name().local()).map_err(|error| error.to_string())
+}
+
+/// Whether XML for `target` is compiled by the base-free stage: the bootstrap
+/// compiler needs its layout constants (`profiles/platform/8.3.27.1989.json`),
+/// which no 8.5 profile carries; the base-free stage wrote the rows
+/// 8.5.1.1150 loaded (`openspec/changes/complete-native-source-load-parity/
+/// evidence/empty-database-load-20260928.md`).
+fn uses_base_free_compiler(target: &EffectiveProfile) -> bool {
+    !target.constants.contains_key("bootstrap.root.layout")
 }
 
 fn legacy_xml_selector(profile: &EffectiveProfile) -> Option<InfobaseConfigSourceVersion> {

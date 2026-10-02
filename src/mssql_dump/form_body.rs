@@ -343,12 +343,54 @@ pub(super) fn extract_form_body_xml_from_body(
     )
 }
 
+/// Numbers the items a form stores with id `0`.
+///
+/// A Gantt chart's nested `Table` keeps `id="0"` in the platform's dump, but
+/// the service items under it -- its context menu, command bar, tooltip and
+/// the three additions with their own menus and tooltips -- are stored with
+/// `0` too and published with fresh ids, one after another in document order,
+/// counting on from the highest id the form's items carry.
+/// Документооборот 3.0 `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта`:
+/// items reach `474`, and the twelve service items read `475`..`486`.
+/// Attributes and commands number their own ids and are left alone.
+fn renumber_form_zero_item_ids(xml: String) -> String {
+    const ZERO: &str = " id=\"0\"";
+    let items_end = xml.find("\n\t<Attributes>").unwrap_or(xml.len());
+    if !xml[..items_end].contains(ZERO) {
+        return xml;
+    }
+    let mut max_id = 0u64;
+    for (at, _) in xml[..items_end].match_indices(" id=\"") {
+        let digits = &xml[at + 5..];
+        let end = digits.find('"').unwrap_or(0);
+        if let Ok(id) = digits[..end].parse::<u64>() {
+            max_id = max_id.max(id);
+        }
+    }
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = &xml[..items_end];
+    while let Some(at) = rest.find(ZERO) {
+        let tag_start = rest[..at].rfind('<').unwrap_or(0);
+        out.push_str(&rest[..at]);
+        if rest[tag_start..].starts_with("<Table ") {
+            out.push_str(ZERO);
+        } else {
+            max_id += 1;
+            out.push_str(&format!(" id=\"{max_id}\""));
+        }
+        rest = &rest[at + ZERO.len()..];
+    }
+    out.push_str(rest);
+    out.push_str(&xml[items_end..]);
+    out
+}
+
 pub(super) fn extract_form_body_xml_from_body_timed(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
     timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<String> {
-    match extract_form_body_xml_from_body_detailed_timed(body, context, timings)? {
+    match extract_form_body_xml_from_body_detailed_timed(body, context, None, timings)? {
         DetailedFormBodyExtraction::Emitted { xml, .. } => Some(xml),
         DetailedFormBodyExtraction::OpaqueNotEmitted { .. }
         | DetailedFormBodyExtraction::Rejected { .. } => None,
@@ -383,19 +425,22 @@ pub(super) enum DetailedFormBodyExtraction {
     },
 }
 
+/// `adoption` is what the writer spells for an adopted form beyond its body:
+/// the call types of its handlers, and its base form after its own tree
+/// (`form_extension::form_adoption`), for every source of forms.
 pub(super) fn extract_form_body_xml_from_body_detailed_timed(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
+    adoption: Option<&super::form_extension::FormAdoption>,
     timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<DetailedFormBodyExtraction> {
-    // The base form an adopted form carries is written after its own tree by
-    // `form_extension::with_adopted_form_parts`, for every source of forms.
-    extract_form_body_xml_from_body_detailed_single(body, context, timings)
+    extract_form_body_xml_from_body_detailed_single(body, context, adoption, timings)
 }
 
 fn extract_form_body_xml_from_body_detailed_single(
     body: &ParsedFormBodyBlob,
     context: &FormParseContext<'_>,
+    adoption: Option<&super::form_extension::FormAdoption>,
     mut timings: Option<&mut MssqlDumpTimingReport>,
 ) -> Option<DetailedFormBodyExtraction> {
     // Every reader below splits the values it meets, each once per value that
@@ -471,7 +516,7 @@ fn extract_form_body_xml_from_body_detailed_single(
     });
 
     let started = Instant::now();
-    let events = extract_form_body_events(
+    let mut events = extract_form_body_events(
         &form_fields,
         form_root_write_extension(&attributes).as_deref(),
     );
@@ -527,7 +572,7 @@ fn extract_form_body_xml_from_body_detailed_single(
     let child_item_indexes_cpu_ms = elapsed_ms(started);
 
     let started = Instant::now();
-    let commands = extract_form_body_commands(
+    let mut commands = extract_form_body_commands(
         &body.trailing,
         context.object_refs,
         &child_item_indexes.item_name_by_id,
@@ -635,6 +680,12 @@ fn extract_form_body_xml_from_body_detailed_single(
         .owner_scoped_bindings
         .attribute_ids_without_declared_owner =
         form_attribute_ids_without_declared_owner(&attributes, context.metadata_field_declarations);
+    child_item_indexes
+        .owner_scoped_bindings
+        .undeclared_root_standard_attributes = form_attribute_undeclared_standard_attributes(
+        &attributes,
+        context.metadata_field_declarations,
+    );
     apply_form_attribute_save_field_bindings(
         &mut attributes,
         &attribute_save_field_bindings,
@@ -724,6 +775,11 @@ fn extract_form_body_xml_from_body_detailed_single(
         withhold_form_button_commands_the_table_lacks(&mut child_items, &ownership);
         if let Some(command_bar) = auto_command_bar.as_mut() {
             withhold_form_button_commands_the_table_lacks(&mut command_bar.child_items, &ownership);
+        }
+        let excluded = &properties.command_set_excluded_commands;
+        withhold_form_button_commands_the_form_excludes(&mut child_items, excluded);
+        if let Some(command_bar) = auto_command_bar.as_mut() {
+            withhold_form_button_commands_the_form_excludes(&mut command_bar.child_items, excluded);
         }
     }
     if let Some(timings) = timings.as_deref_mut() {
@@ -817,8 +873,16 @@ fn extract_form_body_xml_from_body_detailed_single(
     ) {
         without_usual_group_behavior(&mut child_items);
     }
+    if let Some(adoption) = adoption {
+        adoption.mark(
+            &mut events,
+            auto_command_bar.as_mut(),
+            &mut child_items,
+            &mut commands,
+        );
+    }
     let started = Instant::now();
-    let xml = match format_form_body_xml_with_dcs_profiles(
+    let xml = match format_form_body_open_xml_with_dcs_profiles(
         &properties,
         auto_command_bar.as_ref(),
         &events,
@@ -845,11 +909,19 @@ fn extract_form_body_xml_from_body_detailed_single(
     } else {
         with_no_main_table_default_picture_unmarked(xml, &attributes)
     };
-    let xml = if context.dcs_target_profile.as_str() == "xml-2.20" {
+    let xml = with_excluded_help_command_unresolved(xml, &properties.command_set_excluded_commands);
+    let xml = renumber_form_zero_item_ids(xml);
+    let mut xml = if context.dcs_target_profile.as_str() == "xml-2.20" {
         with_v85_only_events_by_identifier(xml)
     } else {
         xml
     };
+    // The passes above read the form's own tree. The base form of an adopted
+    // form is a document of its own, written and passed before
+    // (`form_extension::form_adoption`): it closes the document untouched.
+    xml.push_str(&format_form_body_close_xml(
+        adoption.and_then(|adoption| adoption.base_form.as_ref()),
+    ));
     if let Some(timings) = timings.as_deref_mut() {
         timings.source_asset_form_format_cpu_ms += elapsed_ms(started);
     }
@@ -1006,15 +1078,77 @@ pub(super) fn with_no_main_table_default_picture_unmarked(
         let Some(settings) = attribute.settings.as_ref() else {
             continue;
         };
-        if settings.main_table.is_some() {
+        // A list with no main table, or an Enum list under the platform's
+        // own query, whose default picture the old modes never mark.
+        let enum_own_query = !settings.manual_query
+            && settings
+                .main_table
+                .as_deref()
+                .is_some_and(|table| table.starts_with("Enum."));
+        if settings.main_table.is_some() && !enum_own_query {
             continue;
         }
         let marked = format!(">~{}.DefaultPicture<", attribute.name);
         if xml.contains(&marked) {
             xml = xml.replace(&marked, &format!(">{}.DefaultPicture<", attribute.name));
+            // The unmarked field sorts where its new spelling does (ERP WE
+            // 2.5 `Documents/ПриходныйОрдерНаТовары/Forms/ВыборРаспоряжения`:
+            // `Список.DefaultPicture` right after the last `~` field).
+            xml = with_use_always_blocks_sorted(xml);
         }
     }
     xml
+}
+
+/// Every `<UseAlways>` block with its `<Field>` lines in the order the
+/// attribute's own list is sorted in.
+fn with_use_always_blocks_sorted(xml: String) -> String {
+    const OPEN: &str = "<UseAlways>\r\n";
+    const CLOSE: &str = "</UseAlways>";
+    let mut out = String::with_capacity(xml.len());
+    let mut rest = xml.as_str();
+    while let Some(at) = rest.find(OPEN) {
+        let body_start = at + OPEN.len();
+        let Some(body_len) = rest[body_start..].find(CLOSE) else {
+            break;
+        };
+        let body = &rest[body_start..body_start + body_len];
+        let line_end = body.rfind("\r\n").map_or(0, |index| index + 2);
+        let (lines, closing_indent) = body.split_at(line_end);
+        let mut fields = lines.split_inclusive("\r\n").collect::<Vec<_>>();
+        fields.sort_by_key(|line| {
+            line.trim()
+                .strip_prefix("<Field>")
+                .and_then(|field| field.strip_suffix("</Field>"))
+                .unwrap_or_default()
+                .to_string()
+        });
+        out.push_str(&rest[..body_start]);
+        for field in fields {
+            out.push_str(field);
+        }
+        out.push_str(closing_indent);
+        rest = &rest[body_start + body_len..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// The form with its Help buttons' command spelled as the raw id when the
+/// form excludes `Help`: the button no longer resolves to the standard command
+/// and 8.3.27.2214 writes `0:<id>` (nine forms of 1C:Документооборот 3.0 and
+/// SSL that exclude Help and keep a Help button; none resolves it).
+pub(super) fn with_excluded_help_command_unresolved(
+    xml: String,
+    excluded_commands: &[&str],
+) -> String {
+    if !excluded_commands.contains(&"Help") {
+        return xml;
+    }
+    xml.replace(
+        "<CommandName>Form.StandardCommand.Help</CommandName>",
+        "<CommandName>0:39bb0fe9-771d-4dd5-8a6e-2d16984523af</CommandName>",
+    )
 }
 
 const ROOT_DCS_SCHEMA_NAMESPACE: &str =
@@ -1260,6 +1394,10 @@ pub(super) const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a
 pub(super) struct FormBodyEvent {
     pub(super) name: String,
     pub(super) handler: String,
+    /// The call type of the handler on an adopted form (`Before`, `After` or
+    /// `Override`), `None` where the writer spells no `callType`
+    /// (`form_extension::FormAdoption::mark`).
+    pub(super) call_type: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1316,6 +1454,7 @@ pub(super) struct FormAttributeMetadataOwner {
     exact_single_type_reference: Option<String>,
     has_dynamic_list_settings: bool,
     main_table: Option<String>,
+    manual_query: bool,
     /// The attribute's own `<AdditionalColumns>` groups, so a bound chain that
     /// reaches one of their tables can name a column by its declared id
     /// instead of falling back to the item's own name.
@@ -1585,6 +1724,9 @@ pub(super) struct FormCommand {
     pub(super) functional_options: Vec<String>,
     pub(super) modifies_saved_data: Option<bool>,
     pub(super) current_row_use: Option<FormCommandCurrentRowProperties>,
+    /// The call type of the handler on an adopted form, `None` where the
+    /// writer spells no `callType` (`form_extension::FormAdoption::mark`).
+    pub(super) call_type: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -1647,6 +1789,11 @@ pub(super) struct FormExtendedTooltip {
     pub(super) horizontal_align: Option<&'static str>,
     pub(super) vertical_align: Option<&'static str>,
     pub(super) events: Vec<FormBodyEvent>,
+    /// `Visible`/`Enabled` of the tooltip itself: members 9 and 20 of its
+    /// record read `0` on exactly the 9 native tooltips (1C:Документооборот
+    /// `DataProcessors/ПлюсСервис`) that write both `false`, `1` on the rest.
+    pub(super) hidden: bool,
+    pub(super) disabled: bool,
 }
 
 impl FormExtendedTooltip {
@@ -1679,6 +1826,8 @@ impl FormExtendedTooltip {
             || self.horizontal_align.is_some()
             || self.vertical_align.is_some()
             || !self.events.is_empty()
+            || self.hidden
+            || self.disabled
     }
 }
 
@@ -1688,7 +1837,7 @@ pub(super) enum FormChildItemDataPathProvenance {
     InferredFallback,
 }
 
-#[derive(Debug, Clone, Eq, PartialEq)]
+#[derive(Debug, Clone, Default, Eq, PartialEq)]
 pub(super) struct FormChildItem {
     pub(super) tag: &'static str,
     pub(super) id: String,
@@ -3023,10 +3172,18 @@ pub(super) fn extract_form_report_attribute_ref(
     }
     let id_fields = split_1c_braced_fields(ref_fields.get(1)?.trim(), 0)?;
     let attribute_id = id_fields.first()?.trim();
-    attributes
-        .iter()
-        .find(|attribute| attribute.id == attribute_id)
-        .map(|attribute| attribute.name.clone())
+    // An attribute the form no longer has is written as its bare id (ERP WE
+    // 2.5 `Reports/КонтрольКорректностиЗаполненияОбъектовЭксплуатации/Forms/
+    // ФормаОтчета`: `<DetailsData>4</DetailsData>`,
+    // `<VariantAppearance>2</VariantAppearance>`).
+    Some(
+        attributes
+            .iter()
+            .find(|attribute| attribute.id == attribute_id)
+            .map(|attribute| attribute.name.clone())
+            .unwrap_or_else(|| attribute_id.to_string()),
+    )
+    .filter(|value| !value.is_empty())
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
@@ -3307,7 +3464,9 @@ pub(super) fn extract_form_settings_storage(
         fields.len(),
     )?;
     let uuid = parse_non_zero_uuid(fields.get(schema.slot())?.trim())?;
-    reference_index.get(&uuid).cloned()
+    // A storage the configuration no longer has is written as its bare uuid
+    // (Монитор `DataProcessors/НастройкаМониторинг/Forms/Форма`).
+    Some(reference_index.get(&uuid).cloned().unwrap_or(uuid))
 }
 
 pub(super) fn extract_form_custom_settings_folder(
@@ -3433,7 +3592,10 @@ pub(super) fn extract_form_mobile_device_command_bar_content(
         } else if let Some(name) = item_name_by_id.get(&id) {
             items.push(name.clone());
         } else {
-            return Vec::new();
+            // An item the form no longer has is written physically (ERP WE
+            // 2.5 `DataProcessors/РаботаСФайлами/Forms/ФормаОтчета`: item `1`
+            // as `1:<item type uuid>`).
+            items.push(format!("{id}:{FORM_ITEM_TYPE_UUID}"));
         }
     }
     items
@@ -3823,7 +3985,14 @@ fn form_root_event_extension_owns(identifier: &str, write_extension: Option<&str
             identifier,
             "9cc34712-da5f-4faa-a653-343d2085fbe8" | "bf0ac0e1-bcbb-4dfe-8fc4-0b1923b461a6"
         ),
-        Some(_) => true,
+        // The document pair is the document's alone: ERP WE 2.5
+        // `Catalogs/ПравилаРаспределенияРасходов/Forms/ФормаНастроекНаПартии`
+        // carries both pairs against the same handlers, and the platform names
+        // the catalog's own pair and writes `8a5894c9-…`/`8f42e083-…` out.
+        Some(_) => !matches!(
+            identifier,
+            "8a5894c9-d2ff-4c1d-b433-89cc352bbfbc" | "8f42e083-be92-4102-b1f0-fa58452c1a63"
+        ),
     }
 }
 
@@ -3870,6 +4039,7 @@ pub(super) fn collect_form_body_events(
                     events.push(FormBodyEvent {
                         name,
                         handler: binding.handler,
+                        call_type: None,
                     });
                 }
             }
@@ -3934,6 +4104,7 @@ pub(super) fn parse_form_body_event_pair(
     Some(FormBodyEvent {
         name: event,
         handler: handler.to_string(),
+        call_type: None,
     })
 }
 
@@ -4638,6 +4809,7 @@ fn parse_form_attribute_with_dcs_type_index(
         matches!(fields.get(12).map(|value| value.trim()), Some("1")).then_some("ShowError");
     let save_fields = parse_form_attribute_save_fields(
         fields.get(9).copied(),
+        id,
         &name,
         exact_single_type_uuid.as_deref(),
     );
@@ -4911,6 +5083,7 @@ fn default_form_list_settings_filter() -> DcsFilter {
 
 pub(super) fn parse_form_attribute_save_fields(
     field: Option<&str>,
+    attribute_id: &str,
     attribute_name: &str,
     value_type_uuid: Option<&str>,
 ) -> Vec<String> {
@@ -4926,6 +5099,14 @@ pub(super) fn parse_form_attribute_save_fields(
                     value_type_uuid.and_then(|uuid| form_value_type_property_name(uuid, path))
                 {
                     parsed.push(format!("{attribute_name}.{property}"));
+                } else if value_type_uuid.is_none() {
+                    // A walk into a value whose type names no such member is
+                    // written physically, attribute id then the indexes: ERP
+                    // WE 2.5 `Documents/ВыработкаСотрудников/Forms/
+                    // ФормаСпискаДокументов` saves `{1,{0}}` on the string
+                    // attribute `15` and the platform writes `15/0`.
+                    let members = path.iter().map(i64::to_string).collect::<Vec<_>>();
+                    parsed.push(format!("{attribute_id}/{}", members.join("/")));
                 }
             }
             FormAttributeSaveEntry::Binding(_) => {}
@@ -6475,6 +6656,7 @@ impl<'s> FormDynamicListFieldFacts<'s> {
                 &self.field_names_with_settings,
                 &self.secondary_names,
                 main_table,
+                settings.is_some_and(|settings| settings.manual_query),
                 self.universe.is_some(),
                 |item_id, field_name, secondary| self.resolves(item_id, field_name, secondary),
             ) else {
@@ -7059,12 +7241,15 @@ fn form_dynamic_list_use_always_field_name(
     field_name_by_item_id: &BTreeMap<String, String>,
     secondary_name_by_item_id: &BTreeMap<String, String>,
     main_table: Option<&str>,
+    manual_query: bool,
     has_universe: bool,
     resolves: impl Fn(&str, &str, Option<&str>) -> bool,
 ) -> Option<String> {
     let has_main_table = main_table.is_some();
     match item_id {
-        "10000000" if form_dynamic_list_default_picture_is_out_of_table(main_table) => {
+        "10000000"
+            if form_dynamic_list_default_picture_is_out_of_table(main_table, manual_query) =>
+        {
             Some(format!("~{}.DefaultPicture", attribute_name))
         }
         "10000000" => Some(format!("{}.DefaultPicture", attribute_name)),
@@ -7262,6 +7447,40 @@ fn form_metadata_owner_declares_direct_member(
     )
 }
 
+/// The upper-cased column names a query selects inside nested tables --
+/// `<alias>.<section>.(<column>, ...)` groups of its selection list.
+fn form_dynamic_list_query_nested_group_columns(query_text: &str) -> BTreeSet<String> {
+    let chars = query_text.chars().collect::<Vec<_>>();
+    let mut names = BTreeSet::new();
+    let mut index = 0;
+    while index + 1 < chars.len() {
+        if chars[index] == '.' && chars[index + 1] == '(' {
+            let mut depth = 1;
+            let mut end = index + 2;
+            while end < chars.len() && depth > 0 {
+                match chars[end] {
+                    '(' => depth += 1,
+                    ')' => depth -= 1,
+                    _ => {}
+                }
+                end += 1;
+            }
+            let group = chars[index + 2..end.saturating_sub(1).max(index + 2)]
+                .iter()
+                .collect::<String>();
+            for token in group.split(|c: char| !(c.is_alphanumeric() || c == '_')) {
+                if !token.is_empty() {
+                    names.insert(token.to_uppercase());
+                }
+            }
+            index = end;
+        } else {
+            index += 1;
+        }
+    }
+    names
+}
+
 /// The names a dynamic list can resolve against its data source, or `None` when
 /// the universe cannot be built — in which case no `~` marker is ever written,
 /// which is the pre-existing behavior.
@@ -7300,6 +7519,7 @@ pub(super) fn form_dynamic_list_use_always_universe(
 ) -> Option<BTreeSet<String>> {
     let settings = settings?;
     let mut universe;
+    let mut undeclared_selected = BTreeSet::<String>::new();
     if settings.manual_query {
         let query_text = settings.query_text.as_deref()?;
         if form_dynamic_list_query_names_undeclared_metadata(query_text, declarations)
@@ -7308,6 +7528,21 @@ pub(super) fn form_dynamic_list_use_always_universe(
             universe = BTreeSet::new();
         } else {
             let selection = parse_form_dynamic_list_query_selection(query_text)?;
+            // `Представление` selected at the top level of a query that also
+            // selects a column of that name inside a nested table
+            // (`Адреса.(Ссылка, НомерСтроки, Адрес, Представление)`) names two
+            // fields; the platform resolves it to the nested one and writes the
+            // top-level path `~` (`Catalogs/СпискиАдресовЭлектроннойПочты/Forms/
+            // ФормаСпискаПоУчетнымЗаписям` in dm, DO, z34, DocMngHolding).
+            let nested = form_dynamic_list_query_nested_group_columns(query_text);
+            for result in selection.paths.values() {
+                let upper = result.to_uppercase();
+                if matches!(upper.as_str(), "ПРЕДСТАВЛЕНИЕ" | "PRESENTATION")
+                    && nested.contains(&upper)
+                {
+                    undeclared_selected.insert(result.clone());
+                }
+            }
             if form_dynamic_list_query_source_is_undeclared(&selection, declarations)
                 || form_dynamic_list_query_selects_undeclared_field(&selection, declarations)
             {
@@ -7394,6 +7629,14 @@ pub(super) fn form_dynamic_list_use_always_universe(
                     .map(str::to_string),
             ),
         }
+    }
+    // A standard attribute the query selects by a plain path but its main table
+    // does not declare gets no field: the platform writes the list's data path
+    // onto it marked `~` (`СпискиАдресовЭлектроннойПочты.Представление`, a
+    // catalog with no standard presentation -- in every 1C:Документооборот
+    // configuration that carries the form).
+    for name in &undeclared_selected {
+        universe.remove(name);
     }
     if let Some(server_state_xml) = &settings.server_state_xml {
         universe.extend(form_dynamic_list_calculated_field_data_paths(
@@ -8147,7 +8390,9 @@ fn form_dynamic_list_main_table_auto_fields(
         form_dynamic_list_declared_std_attribute_pairs(pairs, &base_table, declarations)
             .map(|(ru, _)| (*ru).to_string())
             .collect();
-    if FORM_DYNAMIC_LIST_REGISTER_KINDS.contains(&kind) {
+    if FORM_DYNAMIC_LIST_REGISTER_KINDS.contains(&kind)
+        && !declarations.is_some_and(MetadataFieldDeclarationIndex::register_dimensions_withheld)
+    {
         candidates.extend(form_dynamic_list_main_table_children(
             &base_table,
             object_refs,
@@ -8160,6 +8405,21 @@ fn form_dynamic_list_main_table_auto_fields(
             .then(|| alias.clone())
             .flatten()
     });
+    // A query that selects the main table's reference under another name
+    // gives up the key the automatic fields hang on: ERP WE 2.5
+    // `Catalogs/ВидыНоменклатуры/Forms/ФормаСпискаДляНастройкиЦенообразования`
+    // selects `ВидыНоменклатуры.Ссылка КАК ВидНоменклатуры`, and the platform
+    // writes `~Список.Наименование` for the standard attribute it does not
+    // select.
+    if let Some(alias) = &main_table_alias
+        && selection
+            .paths
+            .get(&(alias.clone(), "Ссылка".to_string()))
+            .is_some_and(|selected_as| selected_as != "Ссылка")
+        && !selection.aliases.contains("Ссылка")
+    {
+        return Some(BTreeSet::new());
+    }
     let mut fields = BTreeSet::new();
     for name in candidates {
         if let Some(alias) = &main_table_alias
@@ -8719,6 +8979,22 @@ pub(super) fn parse_form_dynamic_list_query_selection(
     };
     for item in split_1c_query_items(&selection_tokens) {
         match form_query_selection_item_alias(&item) {
+            // A tabular-section star `<alias>.<section>.*` selects the section
+            // as one nested-table field, not every field of the source: ERP WE
+            // 2.5 `Documents/ПроизводствоБезЗаказа/Forms/ФормаСписка` selects
+            // ten such stars and the platform still writes
+            // `~Список.НалогообложениеНДС` for a document attribute the query
+            // does not select.
+            Some(alias)
+                if alias == "*"
+                    && item.len() == 5
+                    && item[1] == "."
+                    && item[3] == "."
+                    && is_1c_query_ident(&item[0])
+                    && is_1c_query_ident(&item[2]) =>
+            {
+                selection.aliases.insert(item[2].clone());
+            }
             Some(alias) if alias == "*" => {
                 let qualifier = (item.len() == 3 && item[1] == "." && is_1c_query_ident(&item[0]))
                     .then(|| item[0].clone());
@@ -10197,10 +10473,16 @@ fn parse_form_command_with_items(
         _ => return None,
     };
     let current_row_use = schema.current_row_use();
-    let associated_table_element_id = schema
-        .associated_table_element_id()
-        .and_then(|id| item_name_by_id.get(id))
-        .cloned();
+    // An id no item of the form carries is written raw, `<id>:<item class>`,
+    // exactly as the user settings group reference is (1C:Документооборот
+    // `Catalogs/МЧД003/Forms/ЧерновикПередоверияМЧД`: three commands name item
+    // 506, which the form does not have). Zero stays the absent reference.
+    let associated_table_element_id = schema.associated_table_element_id().and_then(|id| {
+        item_name_by_id.get(id).cloned().or_else(|| {
+            (id.trim() != "0" && id.trim().parse::<i64>().is_ok())
+                .then(|| format!("{}:{FORM_ITEM_TYPE_UUID}", id.trim()))
+        })
+    });
     let current_row_use = (current_row_use.is_some() || associated_table_element_id.is_some())
         .then_some(FormCommandCurrentRowProperties {
             value: current_row_use,
@@ -10238,6 +10520,7 @@ fn parse_form_command_with_items(
             .and_then(|field| parse_form_rights_setting(field, object_refs))
             .flatten(),
         action,
+        call_type: None,
         representation: parse_form_command_representation(fields.get(9).copied()),
         functional_options: fields
             .get(12)
@@ -10633,6 +10916,38 @@ fn form_attribute_ids_without_declared_owner(
         .collect()
 }
 
+fn form_attribute_undeclared_standard_attributes(
+    attributes: &[FormAttribute],
+    declarations: Option<&MetadataFieldDeclarationIndex>,
+) -> BTreeSet<(String, &'static str)> {
+    let Some(declarations) = declarations else {
+        return BTreeSet::new();
+    };
+    let mut undeclared = BTreeSet::new();
+    for attribute in attributes {
+        let [ConstantValueType::Reference { reference }] = attribute.value_types.as_slice() else {
+            continue;
+        };
+        let Some(owner) = form_generated_owner_type_from_type_reference(reference) else {
+            continue;
+        };
+        if owner.family() != GeneratedMetadataOwnerFamily::Catalog {
+            continue;
+        }
+        let Some(table) = declarations.table(&owner.owner_reference()) else {
+            continue;
+        };
+        // `Parent` under a non-hierarchical catalogue too: Монитор
+        // `Catalogs/ПолучателиУведомлений/Forms/ФормаЭлемента` writes `1/-4`.
+        for name in ["Code", "Description", "Parent"] {
+            if !table.declares(name) {
+                undeclared.insert((attribute.id.clone(), name));
+            }
+        }
+    }
+    undeclared
+}
+
 pub(super) fn form_attribute_metadata_owners_by_id(
     attributes: &[FormAttribute],
 ) -> BTreeMap<String, FormAttributeMetadataOwner> {
@@ -10672,6 +10987,10 @@ pub(super) fn form_attribute_metadata_owner(
         exact_single_type_reference,
         has_dynamic_list_settings: attribute.settings.is_some(),
         main_table,
+        manual_query: attribute
+            .settings
+            .as_ref()
+            .is_some_and(|settings| settings.manual_query),
         additional_columns: attribute.additional_columns.clone(),
     }
 }
@@ -11030,6 +11349,13 @@ pub(super) struct FormOwnerScopedBindingIndexes {
     /// physically. Read from the very declaration index the root command set
     /// reads `Parent` and `IsFolder` from.
     attribute_ids_without_declared_owner: BTreeSet<String>,
+    /// `(attribute id, standard attribute)` pairs whose catalogue does not
+    /// declare that standard attribute at all -- `Code` under `<CodeLength>0`,
+    /// `Description` under `<DescriptionLength>0`. A chain that names one is
+    /// written physically, `<attribute id>/<marker>` (Монитор
+    /// `Catalogs/Индексы/Forms/ФормаЭлемента`: `<DataPath>1/-2</DataPath>` on a
+    /// catalogue with no code).
+    undeclared_root_standard_attributes: BTreeSet<(String, &'static str)>,
     /// The same fact keyed the way a *form item* addresses it: the table item
     /// id paired with the column id its terminals carry. A data path written
     /// `Items.<table>.CurrentData.<column>` is spelled from the item side and
@@ -11140,7 +11466,10 @@ fn collect_form_attribute_data_path_columns(
         // left unmarked rather than guessed, exactly as the row-picture reader
         // leaves it.
         if let Some(settings) = attribute.settings.as_ref()
-            && form_dynamic_list_default_picture_is_out_of_table(settings.main_table.as_deref())
+            && form_dynamic_list_default_picture_is_out_of_table(
+                settings.main_table.as_deref(),
+                settings.manual_query,
+            )
         {
             owner_scoped_bindings
                 .unresolvable_columns
@@ -12637,7 +12966,7 @@ fn parse_form_child_item_with_metadata_owners(
     field: &str,
     main_data_path: Option<&str>,
     parent_data_path: Option<&str>,
-    _parent_tag: Option<&str>,
+    parent_tag: Option<&str>,
     attribute_names_by_id: &BTreeMap<String, String>,
     attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
     table_name_by_id: &BTreeMap<String, String>,
@@ -12715,7 +13044,19 @@ fn parse_form_child_item_with_metadata_owners(
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
-    if id == "0" {
+    // A Gantt chart's own nested table may carry id `0`: 1C:Документооборот
+    // 3.0 `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта` (three trees) has
+    // `<Table name="Table" id="0">` in the platform's dump. Anywhere else
+    // `0` is the absent item.
+    // Its service items store `0` as well and the platform numbers them on
+    // dump (`renumber_form_zero_item_ids`).
+    if id == "0"
+        && !(parent_tag == Some("GanttChartField") && wrapper == "55")
+        && !matches!(
+            parent_tag,
+            Some("Table" | "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition")
+        )
+    {
         return None;
     }
     let tag = form_child_item_tag(wrapper, fields)?;
@@ -12990,7 +13331,19 @@ fn parse_form_child_item_with_metadata_owners(
         owner_scoped_bindings,
         object_refs,
     );
-    let data_path_resolution = data_paths.primary;
+    let mut data_path_resolution = data_paths.primary;
+    if let Some(resolved) = data_path_resolution.as_mut()
+        && let Some(binding) = form_child_item_binding_fields(tag, &fields).first()
+        && let Some(physical) = form_item_unnamed_binding_physical_path(
+            binding,
+            &resolved.data_path,
+            attribute_metadata_owners_by_id,
+            owner_scoped_bindings,
+            object_refs,
+        )
+    {
+        resolved.data_path = physical;
+    }
     let footer_data_path = data_paths.footer;
     let multiple_value_data_path = data_paths.multiple_value;
     let multiple_value_picture_data_path = data_paths.multiple_value_picture;
@@ -14231,6 +14584,7 @@ fn parse_form_child_item_with_metadata_owners(
                         | "CheckBoxField"
                         | "RadioButtonField"
                         | "TextDocumentField"
+                        | "FormattedDocumentField"
                 ) && form_input_field_layout_is_extended(&fields)
                     && input_field_top_level_offset > 0)
                     .then(|| {
@@ -14397,6 +14751,17 @@ fn parse_form_child_item_with_metadata_owners(
                 {
                     parse_form_input_field_horizontal_align(&fields)
                         .map(FormChildItemAlignment::Horizontal)
+                } else if tag == "TextDocumentField" && form_input_field_layout_is_extended(&fields)
+                {
+                    // Member 23 reads `0` on exactly the `TextDocumentField`s
+                    // 1C:Конвертация данных writes `<HorizontalAlign>Left` on
+                    // (4 of 19 in `Catalogs/Конвертации/Forms/ФормаЭлемента`)
+                    // and `3` on the rest.
+                    (fields
+                        .get(23 + form_input_field_top_level_offset(&fields))
+                        .map(|field| field.trim())
+                        == Some("0"))
+                    .then_some(FormChildItemAlignment::Horizontal("Left"))
                 } else if let Some((schema, _)) = check_box_field_layout.as_ref() {
                     schema
                         .horizontal_align(&fields)
@@ -14679,7 +15044,16 @@ fn parse_form_child_item_with_metadata_owners(
             fields
                 .get(FORM_TABLE_TITLE_TEXT_COLOR_SLOT)
                 .and_then(|field| parse_form_control_color(field, object_refs))
-        } else if field_schema_and_options.is_some() {
+        } else if field_schema_and_options.is_some()
+            // The special fields keep it in the shared field slot beside the
+            // title font they already read there (Монитор `Catalogs/ДанныеСУБД/
+            // Forms/ФормаАнализа`, ChartField `СУБД_Диаграмма`: `style:AccentColor`).
+            || (wrapper == "37"
+                && matches!(
+                    tag,
+                    "ProgressBarField" | "TrackBarField" | "ChartField" | "GanttChartField"
+                ))
+        {
             fields
                 .get(FieldSlot::TitleTextColor.index(input_field_top_level_offset))
                 .and_then(|field| parse_form_control_color(field, object_refs))
@@ -14747,7 +15121,9 @@ fn parse_form_child_item_with_metadata_owners(
                 .as_ref()
                 .map(|options| options.format.clone())
                 .unwrap_or_default()
-        } else if tag == "Page" && page_schema.is_some() {
+        } else if tag == "Page" && (page_schema.is_some() || page_properties.is_some()) {
+            // The short revision keeps `Format` at option member 5 too (ERP
+            // WE 2.5 `Catalogs/ВидыТехнологическихОпераций/Forms/ФормаЭлемента`).
             show_title_options
                 .as_deref()
                 .and_then(|options| options.get(5))
@@ -15173,6 +15549,8 @@ fn parse_form_child_item_with_metadata_owners(
                 .and_then(|options| options.horizontal_stretch)
         } else if tag == "Page" {
             page_properties.and_then(|properties| properties.horizontal_stretch())
+        } else if tag == "ViewStatusAddition" {
+            parse_form_view_status_addition_horizontal_stretch(&fields)
         } else if let Some(value) = special_field_layout
             .as_ref()
             .and_then(|(schema, options)| schema.horizontal_stretch(options))
@@ -15612,7 +15990,7 @@ fn parse_form_child_item_with_metadata_owners(
                     // writes in `<AdditionSource><Item>`. The wider item index is
                     // consulted only under that owner, so no addition that the
                     // table index already answers changes hands.
-                    (_parent_tag == Some("PDFDocumentField"))
+                    (parent_tag == Some("PDFDocumentField"))
                         .then(|| parse_form_search_addition_source_item(field, item_name_by_id))
                         .flatten()
                 })
@@ -16586,7 +16964,10 @@ pub(super) fn form_control_system_color_name(code: i32) -> Option<&'static str> 
 /// Window-palette entries of colour space `1`, from the native form dumps.
 fn form_control_window_color_name(code: i32) -> Option<&'static str> {
     match code {
-        4 => Some("win:MenuBar"),       // 12
+        4 => Some("win:MenuBar"), // 12
+        // 1C:Документооборот `CommonForms/РедактированиеТабличногоДокумента`
+        // `ИмяОбласти` holds `{3,1,{5}}` and writes `win:WindowBackground`.
+        5 => Some("win:WindowBackground"),
         17 => Some("win:DisabledText"), // 2
         18 => Some("win:ButtonText"),   // 10
         // Read off the platform's own element the same way the other three
@@ -16652,14 +17033,19 @@ fn form_control_web_color_name(code: i32) -> Option<&'static str> {
         57 => Some("web:IndianRed"),      // 1
         70 => Some("web:LightGreen"),     // 15
         75 => Some("web:LightSkyBlue"),   // 1
+        // Монитор `DataProcessors/НастройкаМониторинг/Forms/Форма`.
+        81 => Some("web:LimeGreen"),
         91 => Some("web:MediumSeaGreen"), // 6
-        100 => Some("web:NavajoWhite"),   // 2
-        106 => Some("web:OrangeRed"),     // 2
-        109 => Some("web:PaleGreen"),     // 5
-        115 => Some("web:Pink"),          // 4
-        122 => Some("web:SaddleBrown"),   // 20
-        132 => Some("web:Snow"),          // 2
-        143 => Some("web:White"),         // 12
+        // 1C:Документооборот `Documents/Отсутствие/Forms/ФормаДокумента`
+        // `ЗаместителиТекст` holds `{3,2,{125}}` and writes `web:Seagreen`.
+        125 => Some("web:Seagreen"),
+        100 => Some("web:NavajoWhite"), // 2
+        106 => Some("web:OrangeRed"),   // 2
+        109 => Some("web:PaleGreen"),   // 5
+        115 => Some("web:Pink"),        // 4
+        122 => Some("web:SaddleBrown"), // 20
+        132 => Some("web:Snow"),        // 2
+        143 => Some("web:White"),       // 12
         // Three codes the same join names that neither this table nor the
         // shared style palette behind it answers. Re-run over the dumped item
         // layouts of all seven stand corpora that carry forms, item by item
@@ -18609,10 +18995,20 @@ fn parse_form_choice_parameter_design_time_reference(
     if type_uuid.is_nil() || value_uuid.is_nil() {
         return None;
     }
-    // The type must be one this export can name on its own; only then is the
-    // unresolved half exactly the value.
-    unique_metadata_type_reference(type_index, type_index_collisions, type_id.trim())
-        .and_then(parse_generated_metadata_reference_owner)?;
+    // A type this export names ambiguously (a collision) is refused: the
+    // platform does name it, so the pair would be a guess. A type the
+    // configuration does not carry at all is written as the pair too --
+    // ISL 2.8.1.13 `Catalogs/ШаблоныСообщений/Forms/ФормаЭлемента`
+    // `Отбор.Вид` names a type no object of the configuration has and the
+    // platform writes `09ca57b0-….a89ee622-…`.
+    let type_key = type_id.trim();
+    if type_index_collisions.contains(type_key) {
+        return None;
+    }
+    if type_index.contains_key(type_key) {
+        unique_metadata_type_reference(type_index, type_index_collisions, type_key)
+            .and_then(parse_generated_metadata_reference_owner)?;
+    }
     Some(format!("{type_uuid}.{value_uuid}"))
 }
 
@@ -18822,6 +19218,81 @@ pub(super) fn parse_form_input_field_type_link(
 /// Those 31 are the whole of what this fallback answers for.
 ///
 /// A chain with no segment at all has nothing to spell and keeps the refusal.
+/// The physical spelling of an item's bound chain when the name the chain
+/// resolved to is one the configuration does not have.
+///
+/// Two shapes on Монитор `Catalogs/Индексы/Forms/ФормаЭлемента`: `{2,{1},{-2}}`
+/// names the catalogue's `Code` under `<CodeLength>0`, and
+/// `{3,{1},{0,86344377-…},{-2}}` a tabular section the configuration no
+/// longer declares. The platform writes `1/-2` and
+/// `1/0:86344377-…/-2`; the names this reader found for both come from the
+/// form's own remembered binding, not from the metadata.
+fn form_item_unnamed_binding_physical_path(
+    binding: &str,
+    resolved: &str,
+    attribute_metadata_owners_by_id: &BTreeMap<String, FormAttributeMetadataOwner>,
+    owner_scoped_bindings: &FormOwnerScopedBindingIndexes,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(binding.trim(), 0)?;
+    let count = fields.first()?.trim().parse::<usize>().ok()?;
+    let segments = fields.get(1..)?;
+    if count != segments.len() || count < 2 {
+        return None;
+    }
+    let root = split_1c_braced_fields(segments.first()?.trim(), 0)?;
+    let [attribute_id] = root.as_slice() else {
+        return None;
+    };
+    // Only a chain rooted at a metadata object's own value walks metadata
+    // members; a platform type (a settings composer, a value table) names
+    // its members by uuids no configuration declares.
+    let metadata_root = attribute_metadata_owners_by_id
+        .get(attribute_id.trim())
+        .and_then(|owner| owner.exact_single_type_reference.as_deref())
+        .and_then(form_generated_owner_type_from_type_reference)
+        .is_some_and(|owner| {
+            owner.role() == GeneratedMetadataOwnerRole::Object
+                && !matches!(
+                    owner.family(),
+                    GeneratedMetadataOwnerFamily::Report
+                        | GeneratedMetadataOwnerFamily::DataProcessor
+                )
+        });
+    if !metadata_root {
+        return None;
+    }
+    let mut unnamed = false;
+    // The object's own member: what follows it may be a value table's index
+    // or a platform member, named by uuids no configuration declares.
+    for segment in &segments[1..2] {
+        let members = split_1c_braced_fields(segment.trim(), 0)?;
+        if let [kind, uuid] = members.as_slice()
+            && kind.trim() == "0"
+            && let Some(uuid) = parse_non_zero_uuid(uuid.trim())
+            && !object_refs.contains_key(&uuid)
+        {
+            unnamed = true;
+        }
+    }
+    if segments.len() == 2 {
+        let terminal = split_1c_braced_fields(segments.get(1)?.trim(), 0)?;
+        if let [marker] = terminal.as_slice()
+            && marker.trim().starts_with('-')
+            && let Some((_, name)) = resolved.rsplit_once('.')
+            && owner_scoped_bindings
+                .undeclared_root_standard_attributes
+                .iter()
+                .any(|(id, undeclared)| id == attribute_id.trim() && *undeclared == name)
+        {
+            unnamed = true;
+        }
+    }
+    unnamed
+        .then(|| form_physical_chain_spelling(segments))
+        .flatten()
+}
+
 fn form_physical_chain_spelling(segments: &[&str]) -> Option<String> {
     if segments.is_empty() {
         return None;
@@ -19088,7 +19559,22 @@ pub(super) fn parse_form_view_status_addition_horizontal_location(
     fields: &[&str],
 ) -> Option<&'static str> {
     let options = split_1c_braced_fields(fields.get(13)?.trim(), 0)?;
-    (options.get(11).map(|field| field.trim()) == Some("0")).then_some("Left")
+    // Member 11: `0` is `Left` (527 additions), `1` is `Center` (both
+    // `ViewStatusAddition`s of a `PDFDocumentField` in 1C:Документооборот
+    // 3.0.14 and 3.0.17, which also write `<HorizontalStretch>false`).
+    match options.get(11).map(|field| field.trim())? {
+        "0" => Some("Left"),
+        "1" => Some("Center"),
+        _ => None,
+    }
+}
+
+/// `<HorizontalStretch>false</HorizontalStretch>` of a `ViewStatusAddition`:
+/// member 2 of the option tuple reads `0` on exactly the two additions that
+/// write it, and `2` on the 527 that write only a `Left` location.
+pub(super) fn parse_form_view_status_addition_horizontal_stretch(fields: &[&str]) -> Option<bool> {
+    let options = split_1c_braced_fields(fields.get(13)?.trim(), 0)?;
+    (options.get(2).map(|field| field.trim()) == Some("0")).then_some(false)
 }
 
 /// A `ViewStatusAddition` keeps its width cap in member 13 of the same option
@@ -19501,6 +19987,9 @@ fn parse_form_input_field_auto_show_clear_button_mode(
         .input_field_option(options, InputFieldSlot::AutoShowClearButtonMode)?
         .trim()
     {
+        // 1C:Документооборот `DocumentJournals/ЭлектроннаяПочта/Forms/
+        // МК_ФормаСписка` `ОтборПрочтено` holds `1` and writes `Always`.
+        "1" => Some("Always"),
         "2" => Some("FilledOnly"),
         _ => None,
     }
@@ -20652,9 +21141,16 @@ pub(super) fn form_command_source_name(
     match item_id {
         "0" => Some("Form".to_string()),
         "-1" => Some("FormCommandPanelGlobalCommands".to_string()),
-        _ => item_name_by_id
-            .get(item_id)
-            .map(|name| format!("Item.{name}")),
+        // A source naming no item of the form is written physically: ERP WE
+        // 2.5 `Documents/ОтгрузкаТоваровСХранения/Forms/ФормаВыбораРаспоряжения`
+        // keeps a button group sourced from item `1`, which the form no
+        // longer has, and the platform writes `1:<item type uuid>`.
+        _ => Some(
+            item_name_by_id
+                .get(item_id)
+                .map(|name| format!("Item.{name}"))
+                .unwrap_or_else(|| format!("{item_id}:{FORM_ITEM_TYPE_UUID}")),
+        ),
     }
 }
 
@@ -21742,23 +22238,55 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
     }
 }
 
-fn parse_form_special_field_layout<'a>(
+pub(super) fn parse_form_special_field_layout<'a>(
     wrapper: &str,
     fields: &'a [&'a str],
 ) -> Option<(FormSpecialFieldSchema, Vec<&'a str>)> {
     let top_level_offset = form_input_field_top_level_offset(fields);
-    let options = fields
+    let mut options = fields
         .get(FormSpecialFieldSchema::OPTIONS_SLOT + top_level_offset)
         .and_then(|field| split_1c_braced_fields(field.trim(), 0))?;
+    // The Gantt chart's oldest option revision `1` is the first eleven
+    // members of revision `3` under its own leading member; the five members
+    // revision `3` adds hold what the platform publishes nothing for on every
+    // revision-`3` bag of the stand (`0,0,0,2,2`). ERP 2.5 carries it on all
+    // eight of its Gantt fields (e.g. `Reports/ДиаграммаПроизводстваЗаказа`).
+    //
+    // Revision `2` is the first twelve members of `3` the same way:
+    // Документооборот 3.0 `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта`
+    // declares `2` with `Width` 80 in member 1 and the platform publishes
+    // `<Width>80</Width>`, exactly as revision `3` reads it.
+    if fields.get(5 + top_level_offset).map(|field| field.trim()) == Some("12") {
+        const REVISION_3_TAIL: [&str; 5] = ["0", "0", "0", "2", "2"];
+        let revision = options.first().map(|field| field.trim());
+        let short = match (revision, options.len()) {
+            (Some("1"), 11) => Some(0),
+            (Some("2"), 12) => Some(1),
+            _ => None,
+        };
+        if let Some(skip) = short {
+            options[0] = "3";
+            options.extend(REVISION_3_TAIL.iter().skip(skip).copied());
+        }
+    }
     let schema = FormSpecialFieldSchema::from_raw_layout(
         wrapper,
         fields.len(),
         fields.get(5 + top_level_offset).map(|field| field.trim()),
         top_level_offset,
         &options,
+        // An older revision that stops short of the count declares no
+        // trailing member.
         fields
             .get(FormSpecialFieldSchema::NESTED_ITEM_COUNT_SLOT + top_level_offset)
-            .map(|field| field.trim()),
+            .map(|field| field.trim())
+            .map(|field| {
+                if field == FORM_ITEM_ABSENT_MEMBER {
+                    "0"
+                } else {
+                    field
+                }
+            }),
     )?;
     Some((schema, options))
 }
@@ -21994,6 +22522,12 @@ pub(super) fn parse_form_field_tooltip_representation(
 ) -> Option<&'static str> {
     let slot = if let Some(schema) = table_schema {
         schema.tooltip_representation_slot(fields)?
+    } else if tag == "GanttChartField" && wrapper == "37" {
+        // The Gantt chart keeps the shared field slot 50, which a reverse
+        // offset cannot reach once its nested table trails the record. Монитор
+        // `Catalogs/Блокировки/Forms/ФормаЭлемента` stores `2` there and the
+        // platform writes `Balloon`.
+        50 + form_input_field_top_level_offset(fields)
     } else {
         form_tooltip_representation_schema(
             wrapper,
@@ -22110,10 +22644,13 @@ fn form_child_item_extended_tooltip_identity(fields: &[&str]) -> Option<(String,
         }
         let identity = split_1c_braced_fields(nested.get(1)?.trim(), 0)?;
         let id = identity.first()?.trim();
-        if id == "0" {
+        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
+        // `0` is the absent tooltip, except for the service tooltip of a Gantt
+        // chart's nested table and its additions, which the platform numbers
+        // on dump (`renumber_form_zero_item_ids`).
+        if id == "0" && name != "ExtendedTooltip" {
             return None;
         }
-        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
         is_form_extended_tooltip_name(&name).then(|| (id.to_string(), name))
     })
 }
@@ -22164,14 +22701,21 @@ pub(super) fn parse_form_child_item_extended_tooltip(
         }
         let identity = split_1c_braced_fields(nested.get(1)?.trim(), 0)?;
         let id = identity.first()?.trim();
-        if id == "0" {
+        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
+        // `0` is the absent tooltip, except for the service tooltip of a Gantt
+        // chart's nested table and its additions, which the platform numbers
+        // on dump (`renumber_form_zero_item_ids`).
+        if id == "0" && name != "ExtendedTooltip" {
             return None;
         }
-        let name = nested.get(6).and_then(|value| parse_1c_string(value))?;
         if !is_form_extended_tooltip_name(&name) {
             return None;
         }
         let mut tooltip = FormExtendedTooltip::new(name, id.to_string());
+        if nested.first().map(|value| value.trim()) == Some("12") && nested.len() == 34 {
+            tooltip.hidden = nested.get(9).map(|value| value.trim()) == Some("0");
+            tooltip.disabled = nested.get(20).map(|value| value.trim()) == Some("0");
+        }
         tooltip.display_importance = FormChildItemDisplayImportanceSchema::from_raw_layout(
             nested.first()?.trim(),
             nested.len(),
@@ -22686,7 +23230,9 @@ fn parse_form_owned_picture(
         FormPictureValueKind::Reference => {
             let reference_fields = split_1c_braced_fields(value.get(2)?.trim(), 0)?;
             let exact_reference = match reference_fields.as_slice() {
-                [code] => code.trim().parse::<i32>().is_ok_and(|code| code < 0),
+                // `{0}` names nothing and is published as `<xr:Ref>0</xr:Ref>`
+                // (ERP WE 2.5 `НастройкаШаблоновПроводок` header pictures).
+                [code] => code.trim().parse::<i32>().is_ok_and(|code| code <= 0),
                 [kind, uuid] => kind.trim() == "0" && parse_non_zero_uuid(uuid.trim()).is_some(),
                 _ => false,
             };
@@ -22964,12 +23510,14 @@ fn parse_form_schema_backed_event_record(
             events.push(FormBodyEvent {
                 name: name.to_string(),
                 handler: handler.to_string(),
+                call_type: None,
             });
         }
         for extra in extra_handlers {
             events.push(FormBodyEvent {
                 name: name.to_string(),
                 handler: extra,
+                call_type: None,
             });
         }
     }
@@ -23203,6 +23751,7 @@ pub(super) fn parse_form_child_item_event_pair(
     Some(FormBodyEvent {
         name: event,
         handler: handler.to_string(),
+        call_type: None,
     })
 }
 
@@ -24120,8 +24669,45 @@ fn resolve_form_owner_scoped_button_data_path(
                     FormOwnerScopedDataPath::Resolved(data_path) => Some(data_path),
                     FormOwnerScopedDataPath::Unknown | FormOwnerScopedDataPath::Ambiguous => None,
                 }
+            })
+            // A table item's current row, addressed by the metadata attribute
+            // the column shows: ERP WE 2.5 `Documents/ЗаказНаПроизводство2_2/
+            // Forms/ФормаДокумента`, Button `ПродукцияСпецификацииДеревоСпецификаций`
+            // carries `{2,{155,<item>},{0,<attribute uuid>}}` against table
+            // `Продукция`, and the platform writes
+            // `Items.Продукция.CurrentData.Спецификация`.
+            .or_else(|| {
+                resolve_form_item_metadata_column_data_path(field, table_name_by_id, object_refs)
             }),
     )
+}
+
+fn resolve_form_item_metadata_column_data_path(
+    field: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<String> {
+    let fields = split_1c_braced_fields(field.trim(), 0)?;
+    let [kind, owner, terminal] = fields.as_slice() else {
+        return None;
+    };
+    if kind.trim() != "2" {
+        return None;
+    }
+    let owner = split_1c_braced_fields(owner.trim(), 0)?;
+    let terminal = split_1c_braced_fields(terminal.trim(), 0)?;
+    let ([item_id, item_type], [terminal_kind, uuid]) = (owner.as_slice(), terminal.as_slice())
+    else {
+        return None;
+    };
+    if item_type.trim() != FORM_ITEM_TYPE_UUID || terminal_kind.trim() != "0" {
+        return None;
+    }
+    let table = table_name_by_id.get(item_id.trim())?;
+    let reference = object_refs.get(&parse_non_zero_uuid(uuid.trim())?)?;
+    let (_, attribute) = reference.rsplit_once(".Attribute.")?;
+    (!attribute.is_empty() && !attribute.contains('.'))
+        .then(|| format!("Items.{table}.CurrentData.{attribute}"))
 }
 
 /// The standard member a button's two-segment bound slot `{2,{attribute},{-n}}`
@@ -25189,7 +25775,20 @@ fn walk_form_bound_chain_members(
             [marker] if marker.trim().starts_with('-') => {
                 let name = match (previous_type, previous_metadata_reference) {
                     (Some(reference), _) => {
-                        form_standard_attribute_name_for_type_reference(reference, marker.trim())?
+                        let name = form_standard_attribute_name_for_type_reference(
+                            reference,
+                            marker.trim(),
+                        )?;
+                        // A catalogue's `Owner` reaches its one owner's own
+                        // reference, so a further standard member of the
+                        // owner can still be named (`….Owner.Owner`).
+                        if name == "Owner" {
+                            reached_type = owner_scoped_bindings
+                                .metadata_field_types
+                                .get(&format!("owner-of:{reference}"))
+                                .map(String::as_str);
+                        }
+                        name
                     }
                     (None, Some(reference)) => {
                         form_tabular_section_standard_attribute_name(reference, marker.trim())?
@@ -25199,7 +25798,17 @@ fn walk_form_bound_chain_members(
                     // -- the same fact the two-segment button route read
                     // through a table of its own until this walker reached it.
                     (None, None) if index == 0 => {
-                        form_standard_attribute_name_for_type_reference(root_type?, marker.trim())?
+                        let name = form_standard_attribute_name_for_type_reference(
+                            root_type?,
+                            marker.trim(),
+                        )?;
+                        if owner_scoped_bindings
+                            .undeclared_root_standard_attributes
+                            .contains(&(attribute_id.to_string(), name))
+                        {
+                            return None;
+                        }
+                        name
                     }
                     (None, None) => return None,
                 };
@@ -26009,6 +26618,13 @@ fn resolve_form_dynamic_list_member_data_path(
     let attribute = attribute_metadata_owners_by_id.get(attribute_id.trim())?;
     if !attribute.has_dynamic_list_settings {
         return None;
+    }
+    // `-3` is the list's grouping pseudo field, the same `Group` the
+    // `<UseAlways>` list spells for it; a field bound to it carries it bare
+    // (ERP WE 2.5 `InformationRegisters/ТоварныеОграничения/Forms/ФормаСписка`,
+    // `<DataPath>Список.Group</DataPath>`).
+    if marker.trim() == "-3" && rest.is_empty() {
+        return Some(format!("{}.Group", attribute.name));
     }
     let (name, collection) = match marker.trim() {
         "-1" => ("Order", FormSettingsComposerType::Order),
@@ -26915,6 +27531,10 @@ pub(super) fn parse_form_title_data_path(
         ("Page", 20) => ("18", 20, 4),
         ("Page", 18) => ("17", 18, 4),
         ("UsualGroup", 29) => ("29", 29, 5),
+        // The older `{28,…}` group bag of 28 members keeps the binding in the
+        // same member: ERP WE 2.5.8 (compatibility 8.3.17), all 50 groups
+        // whose native element carries a `TitleDataPath`.
+        ("UsualGroup", 28) => ("28", 28, 5),
         _ => return None,
     };
     if options.len() != options_len
@@ -27104,17 +27724,27 @@ pub(super) fn form_dynamic_list_default_picture_is_out_of_main_table(
     attribute: &FormAttributeMetadataOwner,
 ) -> bool {
     attribute.has_dynamic_list_settings
-        && form_dynamic_list_default_picture_is_out_of_table(attribute.main_table.as_deref())
+        && form_dynamic_list_default_picture_is_out_of_table(
+            attribute.main_table.as_deref(),
+            attribute.manual_query,
+        )
 }
 
 /// The same test against the main table a dynamic list declares, for the
 /// readers that hold the table itself rather than a metadata-owner record.
-pub(super) fn form_dynamic_list_default_picture_is_out_of_table(main_table: Option<&str>) -> bool {
+pub(super) fn form_dynamic_list_default_picture_is_out_of_table(
+    main_table: Option<&str>,
+    _manual_query: bool,
+) -> bool {
+    // An `Enum` list is marked like any other (compatibility 8.3.21 and
+    // 8.3.24: 1C:Документооборот's `Enums/СтатусыПриглашений` list forms);
+    // under 8.3.17 the platform writes it unmarked when its query is its own,
+    // which `with_no_main_table_default_picture_unmarked` restores.
     match main_table {
         None => true,
         Some(main_table) => main_table
             .split_once('.')
-            .is_some_and(|(family, _)| matches!(family, "Enum" | "FilterCriterion")),
+            .is_some_and(|(family, _)| family == "FilterCriterion" || family == "Enum"),
     }
 }
 
@@ -28820,6 +29450,37 @@ pub(super) fn form_table_owns_button_standard_command(
     true
 }
 
+/// Put back the raw sentinel on every `<Button>` that names a form standard
+/// command the form's own command set excludes: Монитор
+/// `Catalogs/Кластеры/Forms/ФормаВыбора` excludes `Change` and the platform
+/// writes its button's command as `0:6886601d-…`, the way it already writes an
+/// excluded `Help`.
+fn withhold_form_button_commands_the_form_excludes(items: &mut [FormChildItem], excluded: &[&str]) {
+    if excluded.is_empty() {
+        return;
+    }
+    for item in items.iter_mut() {
+        if item.tag == "Button"
+            && let Some(command) = item
+                .command_name
+                .as_deref()
+                .and_then(|name| name.strip_prefix("Form.StandardCommand."))
+            && excluded.contains(&command)
+            && let Some(record) = item.command_record.as_deref()
+            && let Some(fields) = split_1c_braced_fields(record, 0)
+            && let (Some(kind), Some(uuid)) = (
+                fields.first().map(|field| field.trim()),
+                fields
+                    .get(1)
+                    .and_then(|field| parse_non_zero_uuid(field.trim())),
+            )
+        {
+            item.command_name = Some(form_command_record_sentinel(kind, &uuid));
+        }
+        withhold_form_button_commands_the_form_excludes(&mut item.child_items, excluded);
+    }
+}
+
 /// Put back the raw sentinel on every `<Button>` that names a standard command
 /// its owner table does not have.
 fn withhold_form_button_commands_the_table_lacks(
@@ -30522,7 +31183,7 @@ pub(super) fn format_form_body_xml(
     let source_profile =
         ProfileId::parse("provider:mssql-legacy").expect("static MSSQL provider profile is valid");
     let target_profile = ProfileId::parse("xml-2.20").expect("static XML profile is valid");
-    format_form_body_xml_with_dcs_profiles(
+    let mut xml = format_form_body_open_xml_with_dcs_profiles(
         properties,
         auto_command_bar,
         events,
@@ -30534,11 +31195,55 @@ pub(super) fn format_form_body_xml(
         command_interface,
         &source_profile,
         &target_profile,
-    )
+    )?;
+    xml.push_str(&format_form_body_close_xml(None));
+    Ok(xml)
 }
 
+/// ` callType="…"` of an adopted form's handler, nothing for any other
+/// handler (fixture `adopted/form_events`: after `name` on every `<Event>` of
+/// the adopted form and of its base form; `form_extension::FormAdoption`).
+fn format_form_call_type_attribute(call_type: Option<&str>) -> String {
+    call_type.map_or_else(String::new, |call_type| {
+        format!(" callType=\"{}\"", escape_xml_text(call_type))
+    })
+}
+
+/// The closing of the form's document: the base form of an adopted form and
+/// the root's closing tag. `<BaseForm version="…">` holds the base form's own
+/// document one level deeper, after every section of the form's own tree
+/// (fixture `adopted/form_events`; `v85_extension/adopted_form_events` for
+/// `2.21`); a base form without children is an empty element.
+pub(super) fn format_form_body_close_xml(
+    base_form: Option<&super::form_extension::FormBaseForm>,
+) -> String {
+    let mut xml = String::new();
+    if let Some(base_form) = base_form {
+        if base_form.children.is_empty() {
+            xml.push_str(&format!(
+                "\t<BaseForm version=\"{}\"/>\r\n",
+                escape_xml_text(base_form.version)
+            ));
+        } else {
+            xml.push_str(&format!(
+                "\t<BaseForm version=\"{}\">\r\n",
+                escape_xml_text(base_form.version)
+            ));
+            for line in base_form.children.split_inclusive("\r\n") {
+                xml.push('\t');
+                xml.push_str(line);
+            }
+            xml.push_str("\t</BaseForm>\r\n");
+        }
+    }
+    xml.push_str("</Form>");
+    xml
+}
+
+/// The form's document from its declaration through the last child of its
+/// own tree, without the closing [`format_form_body_close_xml`] writes.
 #[allow(clippy::too_many_arguments)]
-fn format_form_body_xml_with_dcs_profiles(
+fn format_form_body_open_xml_with_dcs_profiles(
     properties: &FormBodyProperties,
     auto_command_bar: Option<&FormAutoCommandBar>,
     events: &[FormBodyEvent],
@@ -30933,8 +31638,9 @@ fn format_form_body_xml_with_dcs_profiles(
         xml.push_str("\t<Events>\r\n");
         for event in events {
             xml.push_str(&format!(
-                "\t\t<Event name=\"{}\">{}</Event>\r\n",
+                "\t\t<Event name=\"{}\"{}>{}</Event>\r\n",
                 escape_xml_text(&event.name),
+                format_form_call_type_attribute(event.call_type),
                 escape_xml_text(&event.handler)
             ));
         }
@@ -31008,7 +31714,8 @@ fn format_form_body_xml_with_dcs_profiles(
             }
             if !command.action.is_empty() {
                 xml.push_str(&format!(
-                    "\t\t\t<Action>{}</Action>\r\n",
+                    "\t\t\t<Action{}>{}</Action>\r\n",
+                    format_form_call_type_attribute(command.call_type),
                     escape_xml_text(&command.action)
                 ));
             }
@@ -31067,7 +31774,6 @@ fn format_form_body_xml_with_dcs_profiles(
     if let Some(command_interface) = command_interface {
         xml.push_str(&format_form_command_interface_xml(command_interface));
     }
-    xml.push_str("</Form>");
     Ok(xml)
 }
 
@@ -32167,11 +32873,17 @@ pub(super) fn format_form_child_item_xml(
     // 11 `SearchStringAddition` and 13 `SearchControlAddition` that carry it,
     // ahead of `AdditionSource` (9/11/13), `HorizontalLocation` (2) and
     // `AutoMaxWidth` (1), and nothing precedes it.
-    if matches!(
+    // An addition that is also hidden writes `Visible` first, then `Enabled`
+    // (1C:Документооборот `DataProcessors/ПлюсСервис/Forms/
+    // ФормаКомандыРасширения`: all three additions of its table).
+    let is_list_addition = matches!(
         item.tag,
         "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition"
-    ) && item.enabled == Some(false)
-    {
+    );
+    if is_list_addition && item.visible == Some(false) {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
+    if is_list_addition && item.enabled == Some(false) {
         xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
     }
     // A `Pages` group opens with `ReadOnly`: on all 7 native groups that carry
@@ -32212,13 +32924,6 @@ pub(super) fn format_form_child_item_xml(
     // that carries the element -- the only one of the 13 942 in UT 11.5.27.75
     // -- writes `Visible`, `AdditionSource`, `Title`, `ContextMenu`,
     // `ExtendedTooltip` in that order.
-    if matches!(
-        item.tag,
-        "SearchStringAddition" | "SearchControlAddition" | "ViewStatusAddition"
-    ) && item.visible == Some(false)
-    {
-        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
-    }
     if item.tag.ends_with("Addition") {
         // The block is written for the source it names, and the platform never
         // writes one that names none: over all eight native stand trees every
@@ -32283,7 +32988,12 @@ pub(super) fn format_form_child_item_xml(
             escape_xml_text(representation)
         ));
     }
+    // A `ViewStatusAddition` that lowers its stretch writes the location
+    // behind it (native: AutoMaxWidth, HorizontalStretch, HorizontalLocation).
+    let location_after_stretch =
+        item.tag == "ViewStatusAddition" && item.horizontal_stretch.is_some();
     if item.tag != "CommandBar"
+        && !location_after_stretch
         && let Some(horizontal_location) = item.horizontal_location
     {
         xml.push_str(&format!(
@@ -32632,6 +33342,8 @@ pub(super) fn format_form_child_item_xml(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            // Монитор `Catalogs/Блокировки`: `ToolTip` behind `TitleLocation`.
+            | "GanttChartField"
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
@@ -33264,6 +33976,14 @@ pub(super) fn format_form_child_item_xml(
             "{tab}\t<HorizontalStretch>{}</HorizontalStretch>\r\n",
             if horizontal_stretch { "true" } else { "false" }
         ));
+        if item.tag == "ViewStatusAddition"
+            && let Some(horizontal_location) = item.horizontal_location
+        {
+            xml.push_str(&format!(
+                "{tab}\t<HorizontalLocation>{}</HorizontalLocation>\r\n",
+                escape_xml_text(horizontal_location)
+            ));
+        }
     }
     if !matches!(item.tag, "Table" | "InputField")
         && let Some(choice_folders_and_items) = item.choice_folders_and_items
@@ -33600,15 +34320,18 @@ pub(super) fn format_form_child_item_xml(
     // `AutoMarkIncomplete` (7) and `EditFormat` (5) and precedes `AvailableTypes`
     // (8), `BorderColor` (6), `ChoiceList` (5), `TextEdit` (4), `MinValue` (2),
     // `MaxValue` (1), `InputHint` (1) and `ChoiceHistoryOnInput` (1).
-    if item.type_domain_enabled == Some(false) {
-        xml.push_str(&format!(
-            "{tab}\t<TypeDomainEnabled>false</TypeDomainEnabled>\r\n"
-        ));
-    }
+    // `IncompleteChoiceMode` leads it: ERP WE 2.5 `CommonForms/
+    // ФормаНастройки1ССчитывателиМагнитныхКарт` carries both, the mode first,
+    // in the order of their option slots (33, 35).
     if let Some(incomplete_choice_mode) = item.incomplete_choice_mode {
         xml.push_str(&format!(
             "{tab}\t<IncompleteChoiceMode>{}</IncompleteChoiceMode>\r\n",
             escape_xml_text(incomplete_choice_mode)
+        ));
+    }
+    if item.type_domain_enabled == Some(false) {
+        xml.push_str(&format!(
+            "{tab}\t<TypeDomainEnabled>false</TypeDomainEnabled>\r\n"
         ));
     }
     if item.text_edit == Some(false) {
@@ -34619,6 +35342,7 @@ pub(super) fn format_form_child_item_xml(
             | "ProgressBarField"
             | "TrackBarField"
             | "ChartField"
+            | "GanttChartField"
             | "ColumnGroup"
             | "TextDocumentField"
             | "FormattedDocumentField"
@@ -34951,8 +35675,9 @@ pub(super) fn format_form_child_item_xml(
         xml.push_str(&format!("{tab}\t<Events>\r\n"));
         for event in &item.events {
             xml.push_str(&format!(
-                "{tab}\t\t<Event name=\"{}\">{}</Event>\r\n",
+                "{tab}\t\t<Event name=\"{}\"{}>{}</Event>\r\n",
                 escape_xml_text(&event.name),
+                format_form_call_type_attribute(event.call_type),
                 escape_xml_text(&event.handler)
             ));
         }
@@ -35022,8 +35747,9 @@ pub(super) fn format_form_child_item_xml(
             xml.push_str(&format!("{tab}\t<Events>\r\n"));
             for event in &item.events {
                 xml.push_str(&format!(
-                    "{tab}\t\t<Event name=\"{}\">{}</Event>\r\n",
+                    "{tab}\t\t<Event name=\"{}\"{}>{}</Event>\r\n",
                     escape_xml_text(&event.name),
+                    format_form_call_type_attribute(event.call_type),
                     escape_xml_text(&event.handler)
                 ));
             }
@@ -35904,6 +36630,12 @@ pub(super) fn format_form_extended_tooltip_xml(
         escape_xml_text(&tooltip.name),
         escape_xml_text(&tooltip.id)
     );
+    if tooltip.hidden {
+        xml.push_str(&format!("{tab}\t<Visible>false</Visible>\r\n"));
+    }
+    if tooltip.disabled {
+        xml.push_str(&format!("{tab}\t<Enabled>false</Enabled>\r\n"));
+    }
     for property in FORM_EXTENDED_TOOLTIP_XML_ORDER {
         xml.push_str(&format_form_extended_tooltip_property_xml(
             tooltip,
@@ -36090,8 +36822,9 @@ fn format_form_extended_tooltip_events_xml(events: &[FormBodyEvent], indent: usi
     let mut xml = format!("{tab}<Events>\r\n");
     for event in events {
         xml.push_str(&format!(
-            "{tab}\t<Event name=\"{}\">{}</Event>\r\n",
+            "{tab}\t<Event name=\"{}\"{}>{}</Event>\r\n",
             escape_xml_text(&event.name),
+            format_form_call_type_attribute(event.call_type),
             escape_xml_text(&event.handler)
         ));
     }
@@ -37691,10 +38424,13 @@ fn form_planner_border_xml(name: &str, field: &str, indent: usize) -> Option<Str
         || fields.get(1)?.trim() != "0"
         || form_chart_compact(fields.get(2)?) != "{0}"
         || fields.get(5)?.trim() != "0"
-        || !fields
+        // An all-zero style id is the same border (1C:Документооборот's
+        // planner forms; 8.3.27.2214 writes `ControlBorderType` for both).
+        || !(fields
             .get(6)?
             .trim()
             .eq_ignore_ascii_case(FORM_CHART_BORDER_UUID)
+            || fields.get(6)?.trim() == "00000000-0000-0000-0000-000000000000")
     {
         return None;
     }
@@ -37994,6 +38730,22 @@ pub(super) fn parse_and_render_form_flowchart_settings_for_test(text: &str) -> O
     }];
     let object_refs = BTreeMap::new();
     parse_form_flowchart_settings_xml(text, &value_types, &object_refs, 3)
+}
+
+/// The planner counterpart of `render_form_chart_settings_value`.
+pub(crate) fn render_form_planner_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_PLANNER_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_planner_settings_xml(field, &value_types, &BTreeMap::new(), 3)
+}
+
+/// The graphical-scheme counterpart of `render_form_chart_settings_value`.
+pub(crate) fn render_form_flowchart_settings_value(field: &str) -> Option<String> {
+    let value_types = [ConstantValueType::Reference {
+        reference: FORM_FLOWCHART_TYPE_REFERENCE.to_string(),
+    }];
+    parse_form_flowchart_settings_xml(field, &value_types, &BTreeMap::new(), 3)
 }
 
 /// The QName a graphical-scheme-typed attribute's `<v8:Type>` spells, and the
@@ -38359,6 +39111,9 @@ fn form_gantt_chart_series_like_xml(
 /// stay unguessed.
 fn form_gantt_time_measure(code: &str) -> Option<&'static str> {
     match code.trim() {
+        // Монитор `Catalogs/Блокировки/Forms/ФормаЭлемента`: `5` on the level
+        // and on `noneVariantMeasure`, both published `Second`.
+        "5" => Some("Second"),
         "10" => Some("Minute"),
         "20" => Some("Hour"),
         "30" => Some("Day"),
@@ -38493,6 +39248,22 @@ fn format_form_gantt_chart_settings_xml(
     // `<d4p1:textPlacement>Auto</d4p1:textPlacement>` -- what the eighteen
     // revision-`19` records publish when their member 31 stores `0`. Members
     // 0..=30 line up slot for slot in both revisions.
+    // Revision `17` stops four members short of `18`: ERP 2.5 carries it on
+    // all eight of its Gantt attributes (e.g. `Reports/
+    // ДиаграммаПроизводстваЗаказа/Forms/ФормаОтчета`), members 0..=26 line
+    // up with `18` slot for slot, and the platform publishes for the missing
+    // 27..=30 exactly what the `18`/`19` records publish for their fixed
+    // `{0,0,0}`, `0`, `0`, `1` -- `showPointsText` and `showData` `Auto`.
+    let padded;
+    let wrapper = if wrapper.first()?.trim() == "17" && wrapper.len() == 27 {
+        let mut members = wrapper.to_vec();
+        members[0] = "18";
+        members.extend(["{0,0,0}", "0", "0", "1"]);
+        padded = members;
+        padded.as_slice()
+    } else {
+        wrapper
+    };
     let member_count = match wrapper.first()?.trim() {
         "18" => 31usize,
         "19" => 33,
@@ -38518,7 +39289,7 @@ fn format_form_gantt_chart_settings_xml(
         || form_chart_compact(wrapper.get(23)?) != "{3,{0,{1,0,0},0},{0,0}}"
         || wrapper.get(24)?.trim() != "0"
         || form_chart_compact(wrapper.get(27)?) != "{0,0,0}"
-        || wrapper.get(30)?.trim() != "1"
+        || !matches!(wrapper.get(30)?.trim(), "0" | "1")
     {
         return None;
     }
@@ -38888,6 +39659,9 @@ fn form_chart_line_xml(name: &str, field: &str, indent: usize) -> Option<String>
         return None;
     }
     let style = match fields.get(3)?.trim() {
+        // Монитор `Catalogs/Блокировки/Forms/ФормаЭлемента`: a time-scale
+        // level line stored `0` and published `None`.
+        "0" => "None",
         "1" => "Solid",
         "2" => "Dotted",
         _ => return None,
@@ -39507,9 +40281,7 @@ fn format_form_chart_settings_body_xml(
     // reads at `axes_position + 20`. `point_count` is zero on every
     // form-chart record of the stand, so the list has no point prefix here.
     let color_palette = form_chart_palette_name(t.get(tidx(179))?)?;
-    if form_chart_palette_name(t.get(tidx(180))?)?.is_some() {
-        return None;
-    }
+    let reference_bands_palette = form_chart_palette_name(t.get(tidx(180))?)?;
     let legend_start = tidx(147);
     let mut point_colors = Vec::with_capacity(point_count);
     for offset in 0..point_count {
@@ -39580,6 +40352,8 @@ fn format_form_chart_settings_body_xml(
             t.get(2)?,
             &[
                 ("0", "Line"),
+                // Монитор `Catalogs/Запросы/Forms/ФормаАнализа`.
+                ("2", "Area"),
                 ("6", "Column3D"),
                 ("12", "Pie"),
                 ("38", "Gauge"),
@@ -40253,6 +41027,15 @@ fn format_form_chart_settings_body_xml(
             "{child_tab}<d4p1:colorPaletteDescription>\r\n\
 {child_tab}\t<d4p1:colorPalette>{name}</d4p1:colorPalette>\r\n\
 {child_tab}</d4p1:colorPaletteDescription>\r\n"
+        ));
+    }
+    // The reference-bands palette follows it, same shape (1C:Документооборот
+    // `Catalogs/УзлыКОД/Forms/ТрафикПоУзлам`, both `Palette32`).
+    if let Some(name) = reference_bands_palette {
+        xml.push_str(&format!(
+            "{child_tab}<d4p1:referenceBandsColorPaletteDescription>\r\n\
+{child_tab}\t<d4p1:colorPalette>{name}</d4p1:colorPalette>\r\n\
+{child_tab}</d4p1:referenceBandsColorPaletteDescription>\r\n"
         ));
     }
     Some(xml)

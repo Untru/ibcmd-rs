@@ -949,7 +949,7 @@ const SCHEMA_NAMESPACE_DECLARATION: &str =
 /// items saved by an older platform (see [`form`]), and the call types of an
 /// adopted form that has no base form record. The base form of the others and
 /// their call types are written with the form itself
-/// (`form_extension::with_adopted_form_parts`).
+/// (`form_extension::form_adoption`).
 fn adjust_form_files(
     output_dir: &Path,
     entry: &StorageExportEntryReport,

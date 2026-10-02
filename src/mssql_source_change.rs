@@ -154,7 +154,7 @@ impl HeldSourceRoot {
 
     pub fn capture_current(&self) -> Result<SourceInventory, SourceChangeError> {
         let current_root = canonical_directory(&self.requested_root)?;
-        if !paths_equal_windows(&current_root, &self.canonical_root) {
+        if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
         capture_inventory(&current_root, self.limits, &BTreeSet::new())
@@ -169,7 +169,7 @@ impl HeldSourceRoot {
         let selected = resolve_selected_path(&self.canonical_root, selected_path)?;
         let retention = candidate_retention_paths(&selected);
         let current_root = canonical_directory(&self.requested_root)?;
-        if !paths_equal_windows(&current_root, &self.canonical_root) {
+        if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
         let current = capture_inventory(&current_root, self.limits, &retention)?;
@@ -991,6 +991,10 @@ fn validate_windows_component(component: &str) -> Result<(), SourceChangeError> 
     Ok(())
 }
 
+/// The one case-insensitive key every path comparison of this module uses.
+/// NTFS folds case for every script, not only ASCII: `Справочники` and
+/// `СПРАВОЧНИКИ` name one folder, so an ASCII-only fold would call the held
+/// root changed or a Cyrillic file outside it (Untru/ibcmd-rs#409, F-14).
 fn windows_path_key(path: &str) -> String {
     path.chars().flat_map(char::to_lowercase).collect()
 }
@@ -999,9 +1003,23 @@ fn paths_equal_text_windows(left: &str, right: &str) -> bool {
     windows_path_key(left) == windows_path_key(right)
 }
 
+#[cfg(any(windows, test))]
 fn paths_equal_windows(left: &Path, right: &Path) -> bool {
-    left.to_string_lossy()
-        .eq_ignore_ascii_case(&right.to_string_lossy())
+    paths_equal_text_windows(&left.to_string_lossy(), &right.to_string_lossy())
+}
+
+// Physical roots follow the host's path rules, independently of the Windows
+// names used to match metadata in an inventory. Case folding on Unix could
+// accept an ancestor link redirected to a different, case-distinct directory.
+fn held_root_paths_equal(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        paths_equal_windows(left, right)
+    }
+    #[cfg(not(windows))]
+    {
+        left == right
+    }
 }
 
 fn path_is_within_windows(candidate: &Path, root: &Path) -> bool {
@@ -1009,9 +1027,10 @@ fn path_is_within_windows(candidate: &Path, root: &Path) -> bool {
     let root = root.components().collect::<Vec<_>>();
     candidate.len() >= root.len()
         && candidate.iter().zip(root.iter()).all(|(left, right)| {
-            left.as_os_str()
-                .to_string_lossy()
-                .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+            paths_equal_text_windows(
+                &left.as_os_str().to_string_lossy(),
+                &right.as_os_str().to_string_lossy(),
+            )
         })
 }
 
@@ -1125,6 +1144,62 @@ impl Error for SourceChangeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn held_root_refuses_case_distinct_ancestor_link_retargeting() {
+        use std::os::unix::fs::symlink;
+
+        let root =
+            std::env::temp_dir().join(format!("ibcmd-rs-held-root-{}", uuid::Uuid::new_v4()));
+        let first = root.join("Выгрузка");
+        let second = root.join("ВЫГРУЗКА");
+        fs::create_dir_all(first.join("sources")).unwrap();
+        fs::create_dir_all(second.join("sources")).unwrap();
+        fs::write(first.join("sources/Module.bsl"), b"first").unwrap();
+        fs::write(second.join("sources/Module.bsl"), b"second").unwrap();
+        let link = root.join("selected");
+        symlink(&first, &link).unwrap();
+        let held =
+            HeldSourceRoot::open(&link.join("sources"), SourceInventoryLimits::default()).unwrap();
+        fs::remove_file(&link).unwrap();
+        symlink(&second, &link).unwrap();
+        assert!(matches!(
+            held.capture_current(),
+            Err(SourceChangeError::HeldRootChanged)
+        ));
+        assert!(matches!(
+            held.classify_current(
+                Path::new("Module.bsl"),
+                ActivationTarget::Main,
+                ActivationMode::Online
+            ),
+            Err(SourceChangeError::HeldRootChanged)
+        ));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn every_path_comparison_folds_cyrillic_case() {
+        assert!(paths_equal_text_windows(
+            "Справочники/Банки",
+            "СПРАВОЧНИКИ/банки"
+        ));
+        assert!(paths_equal_windows(
+            Path::new("Справочники"),
+            Path::new("СПРАВОЧНИКИ")
+        ));
+        assert!(path_is_within_windows(
+            &Path::new("Выгрузка")
+                .join("CommonModules")
+                .join("Общий.xml"),
+            Path::new("ВЫГРУЗКА"),
+        ));
+        assert!(!path_is_within_windows(
+            &Path::new("Выгрузка2").join("Общий.xml"),
+            Path::new("Выгрузка"),
+        ));
+    }
 
     fn file(path: &str, value: &str) -> SourceFileDigest {
         SourceFileDigest::for_bytes(path, value.as_bytes()).unwrap()

@@ -348,6 +348,11 @@ pub fn activate_staged_extension(
     args: &MssqlActivateStagedExtensionArgs,
 ) -> Result<MssqlExtensionActivationReport> {
     args.platform_profile.require_extension_write_supported()?;
+    // An argument check costs nothing; the verification costs two rac calls
+    // and a SQL probe (#409 F-6).
+    if !args.allow_non_lab {
+        bail!("direct extension writes require explicit --allow-non-lab");
+    }
     let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
@@ -366,6 +371,16 @@ pub fn activate_staged_extension(
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
+    activate_staged_extension_verified(args, profile_verification)
+}
+
+/// [`activate_staged_extension`] for a caller that has verified the platform
+/// profile of this same target already (`apply_source_change`, #409 F-6).
+pub(crate) fn activate_staged_extension_verified(
+    args: &MssqlActivateStagedExtensionArgs,
+    profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+) -> Result<MssqlExtensionActivationReport> {
+    args.platform_profile.require_extension_write_supported()?;
     if !args.allow_non_lab {
         bail!("direct extension writes require explicit --allow-non-lab");
     }

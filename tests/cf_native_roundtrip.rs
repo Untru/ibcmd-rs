@@ -1,5 +1,5 @@
 //! Reverse-direction gate against real platform evidence:
-//! native XML tree -> `cf bootstrap` -> CF -> `cf export` -> XML tree.
+//! native XML tree -> `cf bootstrap --base-free` -> CF -> `cf export` -> XML tree.
 //!
 //! The forward direction (`cf export` of a retained native CF) is already
 //! byte-exact against 1C 8.3.27.2214 captures.  This file measures the reverse
@@ -19,10 +19,10 @@
 //! regresses, this test says so before it starts measuring the reverse
 //! direction, instead of quietly comparing our own output against itself.
 //!
-//! # Why this test is `#[ignore]`d
+//! # What is compared
 //!
-//! See the attribute comment on [`native_tree_rebuilds_into_an_identical_tree`]
-//! for the exact remaining blockers and the condition for re-enabling it.
+//! Every file, byte for byte, except the `configVersion` values of
+//! `ConfigDumpInfo.xml`: see [`native_tree_rebuilds_into_an_identical_tree`].
 
 use std::{
     collections::BTreeMap,
@@ -236,6 +236,32 @@ const CORPORA: &[Corpus] = &[
 
 const SOURCE_VERSION: &str = "2.20";
 const TARGET_PROFILE: &str = "platform-8.3.27.1989";
+
+/// The export manifest, compared with its `configVersion` values blanked.
+/// A version is the generation a load assigns to a row, fresh on every load:
+/// two native loads of one tree export trees that differ only in these values
+/// (`docs/apply/native-infobase-create.md`, case 3: 12 197 files identical,
+/// `ConfigDumpInfo.xml` different in its 9 835 `configVersion` values only),
+/// and so do two `cf bootstrap --base-free` runs over one tree.
+const CONFIG_DUMP_INFO: &str = "ConfigDumpInfo.xml";
+
+/// `bytes` with the value of every `configVersion="…"` attribute removed.
+fn blank_config_versions(bytes: &[u8]) -> Vec<u8> {
+    const NAME: &[u8] = b"configVersion=\"";
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut rest = bytes;
+    while let Some(at) = rest.windows(NAME.len()).position(|window| window == NAME) {
+        let value = &rest[at + NAME.len()..];
+        out.extend_from_slice(&rest[..at + NAME.len()]);
+        let Some(end) = value.iter().position(|byte| *byte == b'"') else {
+            out.extend_from_slice(value);
+            return out;
+        };
+        rest = &value[end..];
+    }
+    out.extend_from_slice(rest);
+    out
+}
 
 // -------------------------------------------------------------------------
 // Path normalization
@@ -643,6 +669,7 @@ fn measure(corpus: &Corpus, report: &mut String) -> bool {
             SOURCE_VERSION,
             "--target-profile",
             TARGET_PROFILE,
+            "--base-free",
         ],
         &["cf", "bootstrap"],
     );
@@ -695,6 +722,13 @@ fn measure(corpus: &Corpus, report: &mut String) -> bool {
         match rebuilt.get(path) {
             None => missing.push(path.clone()),
             Some(actual_bytes) if actual_bytes == expected_bytes => matched += 1,
+            Some(actual_bytes)
+                if path == CONFIG_DUMP_INFO
+                    && blank_config_versions(actual_bytes)
+                        == blank_config_versions(expected_bytes) =>
+            {
+                matched += 1
+            }
             Some(actual_bytes) => differing.push(format!(
                 "{path} (expected {} bytes / {}, got {} bytes / {})",
                 expected_bytes.len(),
@@ -731,28 +765,15 @@ fn measure(corpus: &Corpus, report: &mut String) -> bool {
     differing.is_empty() && missing.is_empty() && extra.is_empty()
 }
 
-/// Reverse-direction gate over all three retained corpora.
+/// Reverse-direction gate over all three retained corpora, through the
+/// base-free stage (`cf bootstrap --base-free`, Untru/ibcmd-rs#351): every
+/// file of the rebuilt tree equals the platform's, `ConfigDumpInfo.xml` up to
+/// its `configVersion` values ([`CONFIG_DUMP_INFO`]).
 ///
-/// `#[ignore]`d because the reverse direction is known-incomplete on today's
-/// `master`, and the two remaining causes are owned by other work in flight.
-/// Measured on this commit, with the export-manifest classification in
-/// `src/compiler/bootstrap.rs` in place:
-///
-/// * T1 and T3 stop in `compile_bootstrap_source_tree`'s Configuration
-///   projection — `invalid_configuration`: "Configuration property
-///   `UsePurposes` has no base-free projection".  That projection covers 16 of
-///   the 55 properties a native `Configuration.xml` carries
-///   (`src/compiler/bootstrap.rs`, `project_configuration`).
-/// * T2 stops earlier, in the metadata decoder — `invalid_metadata_envelope` on
-///   `Catalogs/CorpusList.xml`: "business object unevidenced complex property is
-///   not empty", raised by `crates/ibcmd-xml/src/metadata/business_objects.rs`
-///   for a non-empty `<StandardAttributes>`.
-///
-/// Remove `#[ignore]` once both are closed; the assertion below is written
-/// against the platform's own bytes and was never relaxed to fit the current
-/// behavior, so it will report the real remaining delta the moment it runs.
+/// The default bootstrap compiler is not gated here: its Configuration
+/// projection covers 16 of the 55 properties a native `Configuration.xml`
+/// carries (`src/compiler/bootstrap.rs`, `project_configuration`).
 #[test]
-#[ignore = "reverse direction blocked: Configuration base-free property projection (T1/T3) and non-empty StandardAttributes decoding (T2)"]
 fn native_tree_rebuilds_into_an_identical_tree() {
     let mut report = String::from("native XML tree -> CF -> native XML tree");
     let mut clean = true;

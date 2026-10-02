@@ -150,10 +150,13 @@ pub fn root_row(facts: &ConfigurationFacts) -> Vec<u8> {
 /// stored row; a compatibility other than 8.5.1 has no stored row at all and
 /// is refused rather than guessed.
 pub fn version_row(facts: &ConfigurationFacts) -> Result<Vec<u8>> {
-    let format = match facts.shape {
-        ConfigurationShape::V67 | ConfigurationShape::V68 => 216,
-        ConfigurationShape::V76 if facts.compatibility == 80501 => 217,
-        ConfigurationShape::V76 => bail!(
+    // The format follows the compatibility, not the tuple: the configuration
+    // 8.5.1.1529 saved in the `{76,...}` tuple at compatibility 8.3.27 stores
+    // `{216,0,{80327,0}}` (`home_page/one_column_v85/input.cf`).
+    let format = match facts.compatibility {
+        compatibility if compatibility < 80500 => 216,
+        80501 => 217,
+        _ => bail!(
             "no stored `version` row of compatibility {} is measured (only 8.5.1, БСП 8.5): its format number and feature list are unknown",
             facts.compatibility
         ),
@@ -406,7 +409,13 @@ const SHARE_REQUEST_TYPE_CLASS_ID: &str = "f251d17e-94e0-4f9b-974e-d642cf9cb6e4"
 fn configuration(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
     let properties = object.properties()?;
     let compatibility = compatibility_of(properties)?;
-    let shape = ConfigurationShape::for_compatibility(compatibility);
+    // An 8.3-compatible configuration that platform 8.5 stores in its own
+    // layout keeps the 8.5 tuple (`common::tree_stores_layout_8_5_1`).
+    let shape = if super::common::stores_layout_8_5_1(context) {
+        ConfigurationShape::V76
+    } else {
+        ConfigurationShape::for_compatibility(compatibility)
+    };
     let contained = contained_objects(object.element)?;
     let children = child_objects(object, context)?;
 
@@ -706,9 +715,9 @@ fn properties_tuple(
             ("ClientApplicationTheme", &["Auto"][..]),
             (
                 "ClientApplicationWindowsOpenVariant",
-                &["OpenDataInTabs"][..],
+                &["OpenDataInTabs", "OpenDataInDialogs"][..],
             ),
-            ("Version85InterfaceMigrationMode", &["Use"][..]),
+            ("Version85InterfaceMigrationMode", &["Use", "DontUse"][..]),
         ] {
             require_default(p, name, expected)?;
         }
@@ -849,8 +858,9 @@ fn properties_tuple(
             fields.push(localized(p.child("Caption")));
             fields.push(localized(p.child("ShortCaption")));
             fields.push(Brace::num(0));
-            fields.push(Brace::num(0));
-            fields.push(Brace::num(0));
+            let (dialogs, dont_use) = v76_window_and_migration(p)?;
+            fields.push(Brace::num(dialogs));
+            fields.push(Brace::num(dont_use));
             // 69 .. 76: the eight auxiliary forms (all empty, checked above).
             for _ in 0..8 {
                 fields.push(nil());
@@ -858,6 +868,29 @@ fn properties_tuple(
         }
     }
     Ok(Brace::List(fields))
+}
+
+/// Fields 67 and 68 of the 8.5 tuple: `0,0` for `OpenDataInTabs` with the
+/// 8.5 interface migration (БСП 3.2.1.356 under 8.5.1.1150), `1,1` for
+/// `OpenDataInDialogs` with `DontUse` -- what 8.5.1.1529 stored for a tree
+/// that names neither property, and what 8.5 prints for a configuration
+/// without them (`mssql_dump::refs::configuration_properties_8_5_1`). Which
+/// field holds which is not known, so only these two pairs are written.
+fn v76_window_and_migration(p: &Element) -> Result<(i64, i64)> {
+    let text = |name: &str, default: &'static str| match text_of(p, name) {
+        "" => default,
+        text => text,
+    };
+    match (
+        text("ClientApplicationWindowsOpenVariant", "OpenDataInTabs"),
+        text("Version85InterfaceMigrationMode", "Use"),
+    ) {
+        ("OpenDataInTabs", "Use") => Ok((0, 0)),
+        ("OpenDataInDialogs", "DontUse") => Ok((1, 1)),
+        (window, migration) => bail!(
+            "Configuration <ClientApplicationWindowsOpenVariant> {window:?} with <Version85InterfaceMigrationMode> {migration:?}: no 8.5 tuple on record stores them"
+        ),
+    }
 }
 
 /// `<InterfaceCompatibilityMode>`: the 8.3 code (field 38) and, for 8.5,
@@ -870,8 +903,11 @@ fn interface_compatibility(p: &Element, shape: ConfigurationShape) -> Result<(Br
     if shape == ConfigurationShape::V76 {
         return match text {
             "Version8_5EnableTaxi" => Ok((Brace::num(3), Brace::num(6))),
+            // `home_page/one_column_v85/input.cf` (8.5.1.1529, compatibility
+            // 8.3.27): field 62 repeats the 8.3 code.
+            "TaxiEnableVersion8_2" => Ok((Brace::num(2), Brace::num(2))),
             other => bail!(
-                "Configuration <InterfaceCompatibilityMode> {other:?}: the one 8.5 corpus shows only Version8_5EnableTaxi"
+                "Configuration <InterfaceCompatibilityMode> {other:?}: the 8.5 tuples on record show only Version8_5EnableTaxi and TaxiEnableVersion8_2"
             ),
         };
     }
@@ -1271,9 +1307,20 @@ mod tests {
         );
         let unmeasured = ConfigurationFacts {
             compatibility: 80502,
-            ..facts_8_5_1
+            ..facts_8_5_1.clone()
         };
         assert!(version_row(&unmeasured).is_err());
+        // The 8.5 tuple at compatibility 8.3.27 keeps the 8.3 format, as
+        // 8.5.1.1529 saved `home_page/one_column_v85/input.cf`.
+        let tuple_8_5_at_8_3_27 = ConfigurationFacts {
+            compatibility: 80327,
+            features: Vec::new(),
+            ..facts_8_5_1
+        };
+        assert_eq!(
+            version_row(&tuple_8_5_at_8_3_27).unwrap(),
+            "\u{feff}{\r\n{216,0,\r\n{80327,0}\r\n}\r\n}".as_bytes()
+        );
         let mut counter = 0;
         let versions = versions_row(&["b".to_string(), "a.0".to_string()], || {
             counter += 1;

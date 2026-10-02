@@ -26,15 +26,23 @@ pub enum Commands {
     Convert(ConvertArgs),
     /// Inspect, verify, export, or overlay CF without an installed 1C platform.
     Cf(CfArgs),
-    /// Drop-in `ibcmd infobase`: `config export`, `config import` and
-    /// `config apply` in the platform ibcmd's syntax, against Microsoft SQL
-    /// Server; other commands are refused. `infobase --help` prints its help
-    /// (in Russian).
+    /// Drop-in `ibcmd infobase`: `config export`, `config import`,
+    /// `config apply` and `config save` in the platform ibcmd's syntax,
+    /// against Microsoft SQL Server; other commands are refused.
+    /// `infobase --help` prints its help (in Russian).
     #[command(disable_help_flag = true)]
     Infobase(NativeModeArgs),
     /// The platform ibcmd's other modes, refused with a clear message.
     #[command(hide = true, disable_help_flag = true)]
     Server(NativeModeArgs),
+    /// Serve a code editor (VS Code and its kin): JSON-RPC 2.0 over stdin and
+    /// stdout in Content-Length frames, as a language server; one process per
+    /// editor window. Not the platform's `ibcmd server`.
+    Serve(ServeArgs),
+    /// What `serve --stdio` does with the objects of a configuration, from
+    /// the command line: its tree, the comparison with a source folder, one
+    /// file as the export writes it, the export of selected objects.
+    Objects(crate::commands::objects::ObjectsArgs),
     #[command(hide = true, disable_help_flag = true)]
     Eventlog(NativeModeArgs),
     #[command(hide = true, disable_help_flag = true)]
@@ -140,6 +148,13 @@ pub enum Commands {
     DumpSources(DumpSourcesArgs),
     /// Dump Config/ConfigSave storage rows directly from SQL Server.
     MssqlDumpConfig(MssqlDumpConfigArgs),
+    /// Write the configuration of a database (or of a folder of its Config
+    /// rows) as a .cf straight from the rows, as `infobase config save`.
+    MssqlSaveConfig(MssqlSaveConfigArgs),
+    /// Turn a .cf into the rows a `config load` stages in ConfigSave and
+    /// write the bulk stage scripts for them (--script-only; nothing is
+    /// written to a database).
+    MssqlLoadConfig(MssqlLoadConfigArgs),
     /// List configuration extensions directly from the SQL Server registry.
     MssqlExtensionList(MssqlExtensionListArgs),
     /// Export one or all configuration extensions directly from SQL Server CAS.
@@ -648,6 +663,11 @@ pub struct CfBootstrapArgs {
     /// Native CF reserved header word.
     #[arg(long, default_value_t = 0)]
     pub reserved: u32,
+    /// Compile the tree with the base-free stage an empty infobase is loaded
+    /// from (every row of the tree, no base) instead of the bootstrap
+    /// compiler.
+    #[arg(long)]
+    pub base_free: bool,
 }
 
 /// Raw arguments of one of the platform ibcmd's modes (`infobase`, `server`,
@@ -742,6 +762,12 @@ pub struct InfobaseConfigExportArgs {
     pub count_files: bool,
     /// Output directory for hierarchical XML sources.
     pub output_dir: PathBuf,
+    /// `--base`: the ConfigDumpInfo.xml of an earlier export; only what
+    /// changed since is written (`mssql_dump::incremental`).
+    pub base: Option<PathBuf>,
+    /// `--sync`: the output directory is brought in line with the
+    /// configuration, what a fresh export would not hold is removed.
+    pub sync: bool,
 }
 
 /// `infobase config import`: what the drop-in command line (`crate::dropin`)
@@ -792,6 +818,9 @@ pub struct InfobaseConfigImportArgs {
     pub batch_size: Option<usize>,
     /// Optional source path prefix to import. Can be repeated.
     pub path_prefix: Vec<String>,
+    /// `import files`: only the rows these files compile to (paths relative
+    /// to `source_dir`); empty for the whole tree.
+    pub files: Vec<String>,
     /// Optional path for the generated SQL scripts (and the bulk rows file).
     pub script_output: Option<PathBuf>,
     /// Patch the target's rows, compile every row, or decide by the target.
@@ -800,6 +829,34 @@ pub struct InfobaseConfigImportArgs {
     pub verify: InfobaseImportVerify,
     /// Root directory with hierarchical XML sources.
     pub source_dir: PathBuf,
+}
+
+/// `infobase config save [--db] <file>`: what the drop-in command line
+/// (`crate::dropin`) asks for.
+#[derive(Debug, Clone)]
+pub struct InfobaseConfigSaveArgs {
+    /// Optional JSON settings file (vRunner DB keys and ibcmd-rs keys).
+    pub settings: Option<PathBuf>,
+    /// The platform ibcmd's configuration file (`--config`/`-c`), kept for
+    /// the settings layer.
+    pub native_config: Option<PathBuf>,
+    /// DBMS type. Only MSSQLServer is served.
+    pub dbms: Option<String>,
+    pub db_server: Option<String>,
+    pub db_name: Option<String>,
+    pub db_user: Option<String>,
+    pub db_pwd: Option<String>,
+    /// Environment variable containing the database password.
+    pub db_pwd_env: String,
+    /// sqlcmd.exe (and bcp.exe beside it) to run instead of the built-in SQL
+    /// Server client (`--sqlcmd`).
+    pub sqlcmd: Option<PathBuf>,
+    /// `--db`: the database configuration (Config) instead of the main one.
+    pub database_configuration: bool,
+    /// Replace an existing file.
+    pub overwrite: bool,
+    /// The .cf to write.
+    pub output: PathBuf,
 }
 
 /// Research commands under `infobase config` that run the installed
@@ -1580,6 +1637,75 @@ pub struct DumpSourcesArgs {
     pub normalize_taxi_old: bool,
 }
 
+/// `mssql-save-config`: the configuration as a .cf, from SQL Server or from
+/// a folder of stored Config rows (`--rows-dir`).
+#[derive(Debug, Args)]
+pub struct MssqlSaveConfigArgs {
+    /// Run this sqlcmd.exe (and bcp.exe) instead of the built-in SQL Server
+    /// client.
+    #[arg(long)]
+    pub sqlcmd: Option<PathBuf>,
+    /// The bcp.exe of the --sqlcmd path (default: the one beside sqlcmd).
+    #[arg(long)]
+    pub bcp_executable: Option<PathBuf>,
+    /// SQL Server name.
+    #[arg(long, default_value = "localhost")]
+    pub server: String,
+    /// SQL Server login. Uses Windows (integrated) authentication when omitted.
+    #[arg(long)]
+    pub sql_user: Option<String>,
+    /// SQL Server password. Prefer --sql-pwd-env for shell history.
+    #[arg(long)]
+    pub sql_pwd: Option<String>,
+    /// Environment variable containing the SQL Server password.
+    #[arg(long, default_value = "IBCMD_DB_PSW")]
+    pub sql_pwd_env: String,
+    /// SQL Server database name (not needed with --rows-dir).
+    #[arg(long, default_value = "")]
+    pub database: String,
+    /// Read the Config table from a folder of `<FileName>__part<N>.bin`
+    /// files (the stored BinaryData, raw deflate) instead of SQL Server; no
+    /// server or database is contacted.
+    #[arg(long)]
+    pub rows_dir: Option<PathBuf>,
+    /// Save the database configuration (the Config table alone), as
+    /// `config save --db`. Without it the main configuration is saved: a
+    /// completed stage in ConfigSave over Config, as `config export` reads it.
+    #[arg(long)]
+    pub db: bool,
+    /// Replace an existing file (only once the new one is complete).
+    #[arg(long)]
+    pub overwrite: bool,
+    /// The .cf to write.
+    pub output: PathBuf,
+}
+
+/// `mssql-load-config`: the offline half of `infobase config load`.
+#[derive(Debug, Args)]
+pub struct MssqlLoadConfigArgs {
+    /// SQL Server database name the scripts are written for.
+    #[arg(long)]
+    pub database: String,
+    /// Only write the bulk rows file and the SQL scripts. Required: this
+    /// version does not run them.
+    #[arg(long)]
+    pub script_only: bool,
+    /// Where to write the scripts (a file name: the rows file and the two
+    /// scripts are written beside it, as `mssql-stage-source-objects` does).
+    #[arg(long)]
+    pub script_output: Option<PathBuf>,
+    /// The .cf to load.
+    pub input: PathBuf,
+}
+
+#[derive(Debug, Args)]
+pub struct ServeArgs {
+    /// Talk to the editor over stdin and stdout (the only transport: no
+    /// network, no port).
+    #[arg(long, required = true)]
+    pub stdio: bool,
+}
+
 #[derive(Debug, Args)]
 pub struct MssqlDumpConfigArgs {
     /// Run this sqlcmd.exe (and bcp.exe) instead of the built-in SQL Server
@@ -1642,6 +1768,16 @@ pub struct MssqlDumpConfigArgs {
     /// Read selected Config/ConfigSave FileName values from a text file. Can be repeated.
     #[arg(long = "file-name-list")]
     pub file_name_lists: Vec<PathBuf>,
+    /// Dump only the rows of this metadata object, by full name
+    /// (`Catalog.Банки`, `Catalog.Банки.Form.ФормаЭлемента`, `Configuration`):
+    /// its own rows and those of the objects it owns (forms, templates,
+    /// recalculations, nested subsystems). Can be repeated; adds to --file-name.
+    #[arg(
+        long = "object",
+        value_name = "FULL_NAME",
+        conflicts_with = "include_config_save"
+    )]
+    pub objects: Vec<String>,
     /// Try to inflate raw deflate blobs and write readable *.txt files.
     #[arg(long)]
     pub inflate: bool,
@@ -1655,21 +1791,21 @@ pub struct MssqlDumpConfigArgs {
     #[arg(
         long,
         requires = "extract_metadata_xml",
-        conflicts_with_all = ["file_names", "file_name_lists"]
+        conflicts_with_all = ["file_names", "file_name_lists", "objects"]
     )]
     pub require_complete_root_metadata: bool,
     /// Fail when a reconstructed source asset omits an opaque property.
     #[arg(
         long,
         requires_all = ["extract_metadata_xml", "no_binary_rows"],
-        conflicts_with_all = ["file_names", "file_name_lists"]
+        conflicts_with_all = ["file_names", "file_name_lists", "objects"]
     )]
     pub require_complete_source_assets: bool,
     /// Continue a full diagnostic export after form writer rejections that have structured source-asset diagnostics.
     #[arg(
         long,
         requires_all = ["extract_metadata_xml", "no_binary_rows"],
-        conflicts_with_all = ["file_names", "file_name_lists"]
+        conflicts_with_all = ["file_names", "file_name_lists", "objects"]
     )]
     pub collect_all_source_asset_diagnostics: bool,
     /// Platform the XML is for: a release (8.3.27, 8.5.1) or an exact build
@@ -1693,6 +1829,45 @@ pub struct MssqlDumpConfigArgs {
     /// Write manifest.json with row-level dump details.
     #[arg(long, default_value_t = true, hide = true)]
     pub write_manifest: bool,
+    /// Export only what changed since the export whose ConfigDumpInfo.xml
+    /// this is (`--base` of the platform's `config export`): a row the file
+    /// lists with the same configVersion is not converted and none of its
+    /// files is written (every row is, when an object or a part was renamed);
+    /// ConfigDumpInfo.xml is written for the whole configuration. The output
+    /// directory may hold an earlier export.
+    #[arg(
+        long,
+        value_name = "FILE",
+        conflicts_with_all = [
+            "overwrite",
+            "file_names",
+            "file_name_lists",
+            "include_config_save",
+            "require_complete_root_metadata",
+            "require_complete_source_assets",
+            "collect_all_source_asset_diagnostics",
+        ]
+    )]
+    pub base: Option<PathBuf>,
+    /// Bring the output directory in line with the configuration (`--sync`
+    /// of the platform's `config export`): after the export, remove the files
+    /// a fresh full export would not hold (objects removed or renamed, files a
+    /// changed object no longer has). Only Configuration.xml,
+    /// ConfigDumpInfo.xml, Ext/ and the collection folders are touched, never
+    /// a dot directory.
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "overwrite",
+            "file_names",
+            "file_name_lists",
+            "include_config_save",
+            "require_complete_root_metadata",
+            "require_complete_source_assets",
+            "collect_all_source_asset_diagnostics",
+        ]
+    )]
+    pub sync: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
@@ -2834,7 +3009,7 @@ pub struct MssqlStageSourceCommonModuleObjectsArgs {
     pub script_output: Option<PathBuf>,
 }
 
-#[derive(Debug, Args)]
+#[derive(Debug, Clone, Args)]
 pub struct MssqlStageSourceObjectsArgs {
     /// SQL Server name.
     #[arg(long, default_value = "localhost")]
@@ -2882,6 +3057,17 @@ pub struct MssqlStageSourceObjectsArgs {
     /// Optional source path prefix to stage. Can be repeated.
     #[arg(long)]
     pub path_prefix: Vec<String>,
+    /// Stage only the rows these files of the tree compile to (a path
+    /// relative to --source-root; repeated): the partial import of
+    /// `infobase config import files`. Each file's object is prepared from
+    /// the target's rows, its other rows stay the target's, and --verify
+    /// compares the listed files.
+    #[arg(
+        long = "file",
+        value_name = "PATH",
+        conflicts_with_all = ["path_prefix", "base_free"]
+    )]
+    pub files: Vec<String>,
     /// Optional path for generated SQL script. Defaults to C:\temp\ibcmd-rs.
     #[arg(long)]
     pub script_output: Option<PathBuf>,

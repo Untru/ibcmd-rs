@@ -269,26 +269,112 @@ fn child_objects<'a>(
 
 /// Whether descriptors take the layout 8.5.1 introduced (form record 14,
 /// `{4,...}` colours, `{8,...}` fonts): the tree's platform stores that
-/// layout (the registry's `form_layout()`) and its configuration's
-/// `CompatibilityMode` is 8.5 or later.
-///
-/// Both 8.5 corpora agree with it and with nothing simpler: the BSP 8.5
-/// clone (`Version8_5_1`) stores every form and style item the 8.5 way, the
-/// ERP УХ 8.5 clone (`Version8_3_27`, the same configuration as the 8.3.27
-/// corpus) stores all 13 053 of them the 8.3.27 way, while both trees spell
-/// the objects identically.
+/// layout (the registry's `form_layout()`) and the tree is stored in it
+/// ([`tree_stores_layout_8_5_1`]).
 pub fn stores_layout_8_5_1(context: &DescriptorContext) -> bool {
-    if context.platform().form_layout() < crate::platform::FormLayout::V8_5_1 {
-        return false;
-    }
+    context.platform().form_layout() >= crate::platform::FormLayout::V8_5_1
+        && tree_stores_layout_8_5_1(&context.root)
+}
+
+/// Whether platform 8.5 stores the configuration of the XML 2.21 tree at
+/// `root` in the 8.5.1 layout (forms, styles, the `{76,...}` Configuration
+/// tuple) rather than the 8.3.27 one: its `CompatibilityMode` is 8.5 or
+/// later, or one of its managed forms can only be held by the 8.5.1 layout
+/// ([`form_needs_layout_8_5_1`]).
+///
+/// The layout is the configuration's, not the XML dialect's, and not its
+/// compatibility alone. The BSP 8.5 clone (`Version8_5_1`) stores every form
+/// and style item the 8.5 way; the ERP УХ 8.5 clone (`Version8_3_27`, a
+/// database carried over from 8.3.27) stores all 13 053 of them the 8.3.27
+/// way, while both trees spell the descriptors identically; and the
+/// configuration 8.5.1.1529 built from XML at `Version8_3_27` and saved
+/// (`home_page/one_column_v85/input.cf`, `_onecdec/make_home_page_fixtures.py`)
+/// stores its forms (`{59,...}` bodies, `{14,...}` descriptors) and its
+/// Configuration tuple (`{76,...}`) the 8.5 way. Every 2.21 form of a
+/// configuration stored the 8.3.27 way names its window opening mode and
+/// group, which the forms of the third one do not; a tree with no form at
+/// all and an 8.3 compatibility mode keeps the 8.3.27 layout, as before.
+pub fn tree_stores_layout_8_5_1(root: &std::path::Path) -> bool {
     static CACHE: OnceLock<Mutex<HashMap<PathBuf, bool>>> = OnceLock::new();
     let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut cache = cache
+    if let Some(known) = cache
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    *cache
-        .entry(context.root.clone())
-        .or_insert_with(|| compatibility_at_least_8_5(&context.root))
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .get(root)
+    {
+        return *known;
+    }
+    let stores = compatibility_at_least_8_5(root) || any_form_needs_layout_8_5_1(root);
+    cache
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .insert(root.to_path_buf(), stores);
+    stores
+}
+
+/// Whether some managed form of the tree (`.../Ext/Form.xml`) is one only
+/// the 8.5.1 layout holds ([`form_needs_layout_8_5_1`]); stops at the first.
+fn any_form_needs_layout_8_5_1(root: &std::path::Path) -> bool {
+    use std::io::Read;
+    walkdir::WalkDir::new(root)
+        .into_iter()
+        .filter_map(Result::ok)
+        .filter(|entry| {
+            entry.file_type().is_file()
+                && entry.file_name() == "Form.xml"
+                && entry
+                    .path()
+                    .parent()
+                    .and_then(|parent| parent.file_name())
+                    .is_some_and(|name| name == "Ext")
+        })
+        .any(|entry| {
+            // The root's leading elements come first (`xml_2_21_order`):
+            // the head of the file is enough.
+            let mut head = Vec::with_capacity(FORM_HEAD_BYTES);
+            std::fs::File::open(entry.path())
+                .and_then(|file| file.take(FORM_HEAD_BYTES as u64).read_to_end(&mut head))
+                .is_ok()
+                && form_needs_layout_8_5_1(&String::from_utf8_lossy(&head))
+        })
+}
+
+/// How much of a `Form.xml` [`form_needs_layout_8_5_1`] reads.
+const FORM_HEAD_BYTES: usize = 64 * 1024;
+
+/// Whether the head of a 2.21 `Form.xml` describes a form only the 8.5.1
+/// layout holds: its root names no `WindowOpeningMode` or no `Group`. The
+/// 8.3.27 root record has no unset state for either, and platform 8.5 prints
+/// a form stored that way with both (`DontBlock`, `Vertical` when 8.3.27
+/// leaves them out; `mssql_dump::form::xml_2_21_writer::upgrade_form_root`,
+/// fitted on ERP УХ 8.5), so a 2.21 form without one was stored the 8.5 way,
+/// where both may be unset. A head that does not reach the root's first
+/// nested element (`AutoCommandBar`, `ChildItems`, ...) decides nothing.
+fn form_needs_layout_8_5_1(head: &str) -> bool {
+    let Some(form) = head.find("<Form ") else {
+        return false;
+    };
+    let open_end = head[form..].find('>').map_or(head.len(), |end| form + end);
+    if !head[form..open_end].contains("version=\"2.21\"") {
+        return false;
+    }
+    let Some(leading_end) = [
+        "\n\t<AutoCommandBar",
+        "\n\t<Events>",
+        "\n\t<ChildItems>",
+        "\n\t<Attributes>",
+        "\n\t<Commands>",
+        "\n\t<Parameters>",
+        "\n\t<CommandInterface>",
+        "\n</Form>",
+    ]
+    .iter()
+    .filter_map(|marker| head[open_end..].find(marker))
+    .min() else {
+        return false;
+    };
+    let leading = &head[open_end..open_end + leading_end];
+    !leading.contains("\n\t<WindowOpeningMode>") || !leading.contains("\n\t<Group>")
 }
 
 /// `CompatibilityMode` of the tree's `Configuration.xml` is `Version8_5_x`
@@ -441,6 +527,10 @@ fn picture_source(reference: &str, context: &DescriptorContext) -> Result<Pictur
     // `0:<uuid>`: a common picture that no longer exists, spelled by uuid.
     if let Some(uuid) = reference.strip_prefix("0:") {
         return Ok(PictureSource::Uuid(uuid.to_ascii_lowercase()));
+    }
+    // `0`: a reference naming nothing, stored `{0}` behind the present flag.
+    if reference == "0" {
+        return Ok(PictureSource::Code(0));
     }
     bail!("unsupported picture reference {reference}")
 }
@@ -1914,6 +2004,32 @@ mod tests {
     use crate::metadata_model::xml::parse_element_tree;
 
     const NIL: &str = "00000000-0000-0000-0000-000000000000";
+
+    #[test]
+    fn a_2_21_form_without_its_opening_mode_or_group_needs_the_8_5_layout() {
+        let form = |leading: &str| {
+            format!(
+                "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" version=\"2.21\">\r\n{leading}\t<AutoCommandBar name=\"ФормаКоманднаяПанель\" id=\"-1\"/>\r\n\t<ChildItems>\r\n\t\t<Group>x</Group>\r\n\t</ChildItems>\r\n</Form>"
+            )
+        };
+        // How 8.5 prints a form stored the 8.3.27 way (ERP УХ 8.5).
+        let both =
+            "\t<WindowOpeningMode>DontBlock</WindowOpeningMode>\r\n\t<Group>Vertical</Group>\r\n";
+        assert!(!form_needs_layout_8_5_1(&form(both)));
+        // `home_page/one_column_v85`: neither (a nested `<Group>` does not count).
+        assert!(form_needs_layout_8_5_1(&form("")));
+        assert!(form_needs_layout_8_5_1(&form(
+            "\t<WindowOpeningMode>LockOwner</WindowOpeningMode>\r\n"
+        )));
+        // 2.20 is read by 8.3.27, and a head that ends inside the root's
+        // leading elements decides nothing.
+        assert!(!form_needs_layout_8_5_1(
+            &form("").replace("version=\"2.21\"", "version=\"2.20\"")
+        ));
+        let whole = form("");
+        let cut = whole.find("\t<AutoCommandBar").unwrap();
+        assert!(!form_needs_layout_8_5_1(&whole[..cut]));
+    }
 
     #[test]
     fn writes_a_common_module_as_bsp_stores_it() {

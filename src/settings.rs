@@ -268,6 +268,11 @@ pub struct DatabaseBinding {
     pub platform: PlatformSpec,
     /// The line of the entry's `platform`.
     pub line: usize,
+    /// `rows-dir`: the Config table of this infobase is read from a folder of
+    /// stored rows (`mssql-dump-config --rows-dir`) instead of SQL Server; a
+    /// relative path is the settings file's folder's. Only the editor server
+    /// (`serve --stdio`) reads it.
+    pub rows_dir: Option<PathBuf>,
 }
 
 impl DatabaseBinding {

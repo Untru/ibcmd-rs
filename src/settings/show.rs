@@ -42,6 +42,9 @@ pub struct BindingReport {
     pub platform: PlatformSpec,
     /// Whether it is the entry that names the database shown.
     pub matches: bool,
+    /// `rows-dir`: a folder of stored rows read instead of SQL Server.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rows_dir: Option<PathBuf>,
 }
 
 /// What `settings show` prints.
@@ -129,6 +132,7 @@ pub fn settings_report(
                 name: binding.name.clone(),
                 platform: binding.platform,
                 matches: false,
+                rows_dir: binding.rows_dir.clone(),
             })
         })
         .map(|mut binding| {

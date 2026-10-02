@@ -137,13 +137,14 @@ fn storage_attribute_value(
         )));
     }
     if value.starts_with("CommonPicture.") {
-        // No page of either corpus names a common picture the tree lacks, so
-        // nothing says what the platform stores for one: refused.
+        // A common picture the tree lacks is stored as written: the
+        // Библиотека стандартных подсистем release's own help of
+        // `CommonForms/ФормаНастроекОтчета` holds `src="CommonPicture.<name>"`
+        // verbatim for the one picture the library does not have, beside
+        // `../../mdpicture/id<uuid>/…` for those it has.
         let uuid = match help_reference(source, value, "help picture")? {
             HelpReference::Resolved(uuid) => uuid,
-            HelpReference::Absent => {
-                return Err(anyhow!("help picture `{value}` is not in the source tree"));
-            }
+            HelpReference::Absent => return Ok(None),
         };
         names.insert(uuid.clone(), value.to_string());
         return Ok(Some(format!(

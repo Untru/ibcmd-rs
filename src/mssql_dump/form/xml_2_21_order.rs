@@ -381,6 +381,12 @@ pub(in crate::mssql_dump) fn child_order(parent: &str) -> Option<&'static [&'sta
             "Commands",
             "Parameters",
             "CommandInterface",
+            // Not in the generated order (the native corpora hold no adopted
+            // form): the base form of an adopted form closes the root, after
+            // every section of the form's own tree (fixtures
+            // `adopted/form_events` and `v85_extension/adopted_form_events`:
+            // after `Attributes`; `form_extension::form_adoption`).
+            "BaseForm",
         ],
         "Format" => &["item"],
         "FormattedDocumentField" => &[

@@ -1,8 +1,9 @@
 //! Fail-closed 1C worker-process handoff for development live activation.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::io::Read as _;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -84,8 +85,16 @@ pub fn switch_dedicated_worker(
             format!("--process={old_process}"),
             options.ras_endpoint.clone(),
         ])
+        // The command's report is one JSON document on stdout: rac's own
+        // output is captured, not inherited (#409 F-11), and shown only when
+        // the turn-off fails.
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .with_context(|| format!("failed to start {}", options.rac.display()))?;
+    let stdout = drain(turn_off.stdout.take());
+    let stderr = drain(turn_off.stderr.take());
 
     let deadline = Instant::now() + options.timeout;
     while Instant::now() < deadline {
@@ -95,8 +104,10 @@ pub fn switch_dedicated_worker(
             && !status.success()
         {
             bail!(
-                "rac process turn-off failed with status {:?}",
-                status.code()
+                "rac process turn-off failed with status {:?}: stdout={} stderr={}",
+                status.code(),
+                joined(stdout),
+                joined(stderr)
             );
         }
         let current = list_connections(options)?;
@@ -125,6 +136,29 @@ pub fn switch_dedicated_worker(
         target,
         options.timeout.as_millis()
     )
+}
+
+/// Reads a child's pipe to its end on its own thread, so a child that
+/// writes more than a pipe holds never blocks; keeps the first
+/// `MAX_RAC_OUTPUT_BYTES`.
+fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8>> {
+    thread::spawn(move || {
+        let mut kept = Vec::new();
+        if let Some(mut pipe) = pipe {
+            let _ = pipe
+                .by_ref()
+                .take(MAX_RAC_OUTPUT_BYTES as u64)
+                .read_to_end(&mut kept);
+            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
+        }
+        kept
+    })
+}
+
+fn joined(output: thread::JoinHandle<Vec<u8>>) -> String {
+    String::from_utf8_lossy(&output.join().unwrap_or_default())
+        .trim()
+        .to_owned()
 }
 
 fn validate_process_is_dedicated(
@@ -211,6 +245,18 @@ fn parse_rac_blocks(text: &str) -> Vec<BTreeMap<String, String>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rac_output_is_captured_to_its_end_and_bounded() {
+        let small = drain(Some(std::io::Cursor::new(
+            b" process turned off \n".to_vec(),
+        )));
+        assert_eq!(joined(small), "process turned off");
+        let large = vec![b'x'; MAX_RAC_OUTPUT_BYTES + 10];
+        let kept = drain(Some(std::io::Cursor::new(large))).join().unwrap();
+        assert_eq!(kept.len(), MAX_RAC_OUTPUT_BYTES);
+        assert_eq!(joined(drain(None::<std::io::Empty>)), "");
+    }
 
     #[test]
     fn parses_rac_connection_blocks_without_localized_values() {

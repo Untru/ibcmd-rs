@@ -237,6 +237,110 @@ fn xml_cf_xml_roundtrip_is_offline_and_atomic() {
     );
 }
 
+/// Platform 8.5 (Untru/ibcmd-rs#354): the configuration 8.5.1.1529 saved
+/// (`external/home_page/one_column_v85/input.cf`, compatibility 8.3.27) read
+/// as XML 2.21, with a common module of the platform's own 2.21 spelling
+/// (`external/v85_extension/test_extension`, dumped by 8.5.1.1529) added,
+/// converted to a CF for 8.5.1.1150 and back: the same tree.
+#[test]
+fn xml_221_cf_851_xml_roundtrip_is_offline() {
+    let temp = TempDirectory::new("xml-221-cf-851");
+    let external = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/external");
+    let input = temp.path().join("input");
+    let exported = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+        .args(["cf", "export"])
+        .arg(external.join("home_page/one_column_v85/input.cf"))
+        .arg(&input)
+        .args(["--platform", "8.5.1.1150"])
+        .env("PATH", "")
+        .output()
+        .unwrap();
+    assert!(exported.status.success());
+    fs::remove_file(input.join("ConfigDumpInfo.xml")).unwrap();
+    let module = "ТестРасширение_Модуль";
+    let module_source = external.join("v85_extension/test_extension/CommonModules");
+    fs::create_dir_all(input.join(format!("CommonModules/{module}/Ext"))).unwrap();
+    for file in [format!("{module}.xml"), format!("{module}/Ext/Module.bsl")] {
+        fs::copy(
+            module_source.join(&file),
+            input.join("CommonModules").join(&file),
+        )
+        .unwrap();
+    }
+    let configuration = input.join("Configuration.xml");
+    let text = fs::read_to_string(&configuration).unwrap();
+    let language = "\t\t\t<Language>Русский</Language>\r\n";
+    assert!(text.contains(language));
+    fs::write(
+        &configuration,
+        text.replace(
+            language,
+            &format!("{language}\t\t\t<CommonModule>{module}</CommonModule>\r\n"),
+        ),
+    )
+    .unwrap();
+
+    let cf = temp.path().join("configuration.cf");
+    let to_cf = convert(&[
+        input.to_str().unwrap(),
+        cf.to_str().unwrap(),
+        "--source-format",
+        "xml",
+        "--target-format",
+        "cf",
+        "--source-profile",
+        "xml-2.21",
+        "--target-profile",
+        "platform-8.5.1.1150",
+    ]);
+    assert!(
+        to_cf.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&to_cf.stdout),
+        String::from_utf8_lossy(&to_cf.stderr)
+    );
+    let to_cf_report: Value = serde_json::from_slice(&to_cf.stdout).unwrap();
+    assert_eq!(to_cf_report["output_published"], true);
+    // The base-free stage's writer: Format15, as `cf bootstrap --base-free`.
+    assert_eq!(to_cf_report["publication"]["cf_revision"], "format15");
+    assert_eq!(
+        to_cf_report["plan"]["steps"][0],
+        "adapter:xml-to-cf-base-free"
+    );
+
+    let restored = temp.path().join("restored");
+    let to_xml = convert(&[
+        cf.to_str().unwrap(),
+        restored.to_str().unwrap(),
+        "--source-format",
+        "cf",
+        "--target-format",
+        "xml",
+        "--source-profile",
+        "platform-8.5.1.1150",
+        "--target-profile",
+        "xml-2.21",
+    ]);
+    assert!(
+        to_xml.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&to_xml.stdout),
+        String::from_utf8_lossy(&to_xml.stderr)
+    );
+    let mut expected = relative_files(&input);
+    expected.push("ConfigDumpInfo.xml".to_owned());
+    expected.sort();
+    assert_eq!(relative_files(&restored), expected);
+    for file in relative_files(&input) {
+        assert!(
+            fs::read(input.join(&file)).unwrap() == fs::read(restored.join(&file)).unwrap(),
+            "{file}"
+        );
+    }
+    let dump_info = fs::read_to_string(restored.join("ConfigDumpInfo.xml")).unwrap();
+    assert!(dump_info.contains(&format!("name=\"CommonModule.{module}\"")));
+}
+
 #[test]
 fn format_and_profile_coordinates_are_not_inferred() {
     let temp = TempDirectory::new("profile-format");

@@ -233,14 +233,18 @@ pub(super) fn write_extension_config_dump_info(
     )
 }
 
-fn write_config_dump_info_entries(
-    output: &OutputWriter,
-    output_dir: &Path,
-    source_version: InfobaseConfigSourceVersion,
-    versions: Vec<ConfigVersionEntry>,
-    partial_inventory_policy: ConfigDumpInfoPartialInventoryPolicy,
-    inventory: ConfigDumpInfoInventory<'_>,
-) -> Result<bool> {
+/// Every name `ConfigDumpInfo.xml` takes from the configuration's own
+/// references rather than from a written file: the objects, forms, templates,
+/// subsystems and defined types by id, and the configuration's own parts
+/// (module groups, command interfaces). A row id it lacks is named by its
+/// owner's reference and its role ([`config_dump_top_name`]).
+///
+/// The incremental export (`super::incremental`) reads the same names before
+/// any row is converted, to tell an entry whose name moved (an owner renamed)
+/// from one that stayed.
+pub(super) fn canonical_reference_names(
+    inventory: &ConfigDumpInfoInventory<'_>,
+) -> Result<BTreeMap<String, String>> {
     let mut canonical_refs = inventory.object_refs.clone();
     for (id, form_ref) in inventory.form_refs {
         let name = form_source_reference_name(form_ref)
@@ -287,6 +291,43 @@ fn write_config_dump_info_entries(
         inventory.metadata_texts,
         inventory.object_refs,
     );
+    Ok(canonical_refs)
+}
+
+/// The parts of the rows (the nested `<Metadata>` of ConfigDumpInfo.xml:
+/// attributes, tabular sections, commands, ...), id -> name, as
+/// [`write_config_dump_info`] lists them under the rows `version_ids`.
+/// `None` when a part cannot be named (the export of a partly recognized
+/// image skips ConfigDumpInfo.xml then).
+///
+/// The incremental export (`super::incremental`) compares them with the
+/// base's: a part renamed is named in other objects' files whose rows keep
+/// their version.
+pub(super) fn child_reference_names(
+    inventory: &ConfigDumpInfoInventory<'_>,
+    canonical_refs: &BTreeMap<String, String>,
+    version_ids: &BTreeSet<&str>,
+) -> Result<Option<BTreeMap<String, String>>> {
+    Ok(build_config_dump_children(
+        inventory.metadata_texts,
+        inventory.object_refs,
+        canonical_refs,
+        version_ids,
+        inventory.configuration_module_groups,
+        ConfigDumpInfoPartialInventoryPolicy::Skip,
+    )?
+    .map(|children| children.into_values().flatten().collect()))
+}
+
+fn write_config_dump_info_entries(
+    output: &OutputWriter,
+    output_dir: &Path,
+    source_version: InfobaseConfigSourceVersion,
+    versions: Vec<ConfigVersionEntry>,
+    partial_inventory_policy: ConfigDumpInfoPartialInventoryPolicy,
+    inventory: ConfigDumpInfoInventory<'_>,
+) -> Result<bool> {
+    let canonical_refs = canonical_reference_names(&inventory)?;
 
     let version_ids = versions
         .iter()
@@ -416,6 +457,24 @@ pub fn stored_config_versions(entries: &[(String, Vec<u8>)]) -> Option<BTreeMap<
         without_unstored_nil_versions(parse_versions_blob(blob, origin).ok()?, &file_names);
     Some(
         versions
+            .into_iter()
+            .map(|entry| (entry.id, entry.version))
+            .collect(),
+    )
+}
+
+/// Row id -> the `configVersion` ConfigDumpInfo.xml gives it, for every entry
+/// of a `Config` table's `versions` row (the ones beyond its stated count
+/// included: they are rows of the configuration all the same, see
+/// [`VersionsBlobOrigin`]). Nil versions of rows not stored are left out, as
+/// [`write_config_dump_info`] leaves them out.
+pub(super) fn current_config_versions(
+    blob: &[u8],
+    origin: VersionsBlobOrigin,
+    file_names: &BTreeSet<String>,
+) -> Result<BTreeMap<String, String>> {
+    Ok(
+        without_unstored_nil_versions(parse_versions_blob(blob, origin)?, file_names)
             .into_iter()
             .map(|entry| (entry.id, entry.version))
             .collect(),

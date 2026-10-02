@@ -27,11 +27,12 @@ struct FileDocument {
 
 /// One `[[database]]` entry.
 #[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 struct DatabaseDocument {
     server: Option<Spanned<String>>,
     name: Spanned<String>,
     platform: Spanned<String>,
+    rows_dir: Option<Spanned<String>>,
 }
 
 fn read_text(path: &Path, what: &str) -> Result<String> {
@@ -143,11 +144,25 @@ pub(super) fn read_settings_file(path: &Path, layer: SettingsLayer) -> Result<Se
                 entry.platform.get_ref()
             )
         })?;
+        let rows_dir = match entry.rows_dir {
+            Some(dir) if dir.get_ref().trim().is_empty() => {
+                bail!("{}: [[database]] rows-dir is empty", at(dir.span()))
+            }
+            Some(dir) => {
+                let dir = Path::new(dir.get_ref().trim());
+                Some(match path.parent() {
+                    Some(folder) if dir.is_relative() => folder.join(dir),
+                    _ => dir.to_path_buf(),
+                })
+            }
+            None => None,
+        };
         databases.push(DatabaseBinding {
             server,
             name: name.to_string(),
             platform,
             line,
+            rows_dir,
         });
     }
     Ok(SettingsFile {

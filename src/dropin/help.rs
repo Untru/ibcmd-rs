@@ -115,10 +115,27 @@ pub fn infobase_help(program: &str) -> String {
 
                 --force
                     Принимается для совместимости. Каталог выгрузки, как и у
-                    ibcmd, должен быть пустым или отсутствовать
+                    ibcmd, должен быть пустым или отсутствовать (кроме
+                    выгрузки с --base или --sync)
 
                 --ignore-unresolved-refs
                     Принимается для совместимости
+
+                --base=<path> | -b <path>
+                    Файл ConfigDumpInfo.xml предыдущей выгрузки. Выгружаются
+                    только объекты, версия (configVersion) которых отличается
+                    от указанной в файле, и ConfigDumpInfo.xml всей
+                    конфигурации; файлы остальных объектов не записываются.
+                    Если объект или его реквизит переименован, выгружается вся
+                    конфигурация. Каталог может содержать предыдущую выгрузку
+
+                --sync
+                    Синхронизировать каталог с конфигурацией: после выгрузки
+                    удалить файлы, которых нет в полной выгрузке (удаленных и
+                    переименованных объектов). Затрагиваются только
+                    Configuration.xml, ConfigDumpInfo.xml, Ext и каталоги
+                    объектов метаданных, каталоги с точкой (.git) - никогда.
+                    Вместе с --base - инкрементальное обновление выгрузки
 
                 <path>
                     путь к каталогу файлов конфигурации
@@ -131,6 +148,37 @@ pub fn infobase_help(program: &str) -> String {
 
                 <path>
                     путь к каталогу с файлами конфигурации
+
+                Дополнительные команды:
+                    files
+                        Импорт выбранных файлов конфигурации из XML: в
+                        ConfigSave записываются только строки, которые
+                        собираются из перечисленных файлов (описание объекта,
+                        модуль, форма, макет, справка...), и root, version,
+                        versions; остальные строки остаются как в
+                        конфигурации базы. Объект каждого файла должен быть
+                        в базе, а файл его описания (Catalogs/X.xml для
+                        Catalogs/X/Ext/ObjectModule.bsl) - в каталоге.
+                        Удаление файлов и объектов, новые объекты и
+                        Configuration.xml не загружаются: код возврата 1
+
+                        --base-dir=<path>
+                            Каталог, относительно которого указаны файлы.
+                            Файл вне его не загружается
+
+                        --partial
+                            Каталог содержит только часть файлов
+                            конфигурации. Без него каталог должен быть полной
+                            выгрузкой (с Configuration.xml)
+
+                        --no-check
+                            Не проверять перед записью, что выгрузка
+                            загруженных строк совпадает с перечисленными
+                            файлами (по умолчанию проверяется)
+
+                        <file> ...
+                            файлы конфигурации для загрузки, относительно
+                            --base-dir
 
             apply
                 Обновление конфигурации базы данных: переносит конфигурацию,
@@ -166,6 +214,20 @@ pub fn infobase_help(program: &str) -> String {
 
                 --session-terminate-message=<message>
                     Принимается и не используется
+
+            save
+                Выгрузка конфигурации в файл .cf: строки конфигурации
+                записываются в файл как есть, без XML. Без --db - основная
+                конфигурация (загруженная командой import и еще не
+                примененная, если она есть, иначе конфигурация базы данных),
+                с --db - конфигурация базы данных (таблица Config).
+                Существующий файл заменяется, когда новый записан и проверен
+
+                --db
+                    Выгрузить конфигурацию базы данных
+
+                <path>
+                    путь к файлу конфигурации
 
 Параметры ibcmd-rs (у ibcmd их нет):
 
@@ -223,9 +285,10 @@ pub fn infobase_help(program: &str) -> String {
 Не поддерживаются в этой версии ibcmd-rs (планируются в следующих):
 
 {unsupported}
-        параметры export --base, --file, --sync, --archive
+        параметры export --file, --archive; --base и --sync с --extension
         параметры import --out, --extension
         параметры apply --extension, --dynamic=force, --sqlcmd
+        параметр save --extension
         общие параметры --pid, --remote
         режимы {modes}
 
@@ -253,7 +316,7 @@ pub fn overview(program: &str) -> String {
 
 Поддерживаемые режимы:
 
-{infobase:<23}{summary}: config export, config import, config apply
+{infobase:<23}{summary}: config export, config import, config import files, config apply, config save
 
 Не поддерживаются в этой версии ibcmd-rs (планируются в следующих):
 
@@ -282,16 +345,25 @@ mod tests {
             "ibcmd infobase create",
             "ibcmd infobase config check",
             "ibcmd infobase config export info",
-            "ibcmd infobase config import files",
+            "ibcmd infobase config import all-extensions",
             "ibcmd infobase config support",
             "ibcmd infobase config extension",
         ] {
             assert!(help.contains(command), "{command}");
         }
+        // import files is served (#363): described, not listed as refused
+        assert!(!help.contains("ibcmd infobase config import files"));
+        for word in ["--base-dir=<path>", "--partial", "--no-check", "<file> ..."] {
+            assert!(help.contains(word), "{word}");
+        }
         // children of a refused command are covered by it
         assert!(!help.contains("config support disable"));
         // apply is served: described with its words, not listed as refused
         assert!(!help.contains("ibcmd infobase config apply"));
+        // so is save; load is not
+        assert!(!help.contains("ibcmd infobase config save"));
+        assert!(help.contains("ibcmd infobase config load"));
+        assert!(help.contains("путь к файлу конфигурации"));
         for word in [
             "--dynamic=<auto|disable|prompt|force>",
             "--session-terminate=<disable|prompt|force>",

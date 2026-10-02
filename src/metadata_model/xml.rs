@@ -139,6 +139,16 @@ fn element_from_start(start: &BytesStart<'_>) -> Result<Element> {
 
 /// Parses a whole document into its root element.
 pub fn parse_element_tree(xml: &[u8]) -> Result<Element> {
+    parse_element_tree_with(xml, true)
+}
+
+/// [`parse_element_tree`] keeping a text's line breaks as the file has them
+/// (CR LF stays CR LF): where the platform dumps a CR the string holds.
+pub fn parse_element_tree_raw_line_breaks(xml: &[u8]) -> Result<Element> {
+    parse_element_tree_with(xml, false)
+}
+
+fn parse_element_tree_with(xml: &[u8], normalize_line_breaks: bool) -> Result<Element> {
     let xml = xml.strip_prefix(b"\xef\xbb\xbf").unwrap_or(xml);
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
@@ -163,7 +173,11 @@ pub fn parse_element_tree(xml: &[u8]) -> Result<Element> {
             }
             Ok(Event::Text(text)) => {
                 if let Some(current) = stack.last_mut() {
-                    let value = text.xml_content().context("bad XML text")?;
+                    let value = if normalize_line_breaks {
+                        text.xml_content().context("bad XML text")?
+                    } else {
+                        text.decode().context("bad XML text")?
+                    };
                     let value = quick_xml::escape::unescape(value.as_ref())
                         .context("bad XML text escape")?;
                     current.text.push_str(&value);

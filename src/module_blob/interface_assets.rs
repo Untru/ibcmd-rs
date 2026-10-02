@@ -968,27 +968,42 @@ fn client_application_interface_model(root: &Node) -> Result<ClientApplicationIn
     };
     // The exporter writes the areas it reads -- top, left, bottom -- in
     // that order and nothing else.
-    if let Some(area) = children.optional("top") {
-        model.top = client_application_area(area)?;
+    // Each entry of an area's list is an area element of its own (DMIL
+    // 3.0.2.7 writes two `<top>`), so the elements are read in a run.
+    while let Some(area) = children.optional("top") {
+        model.top.extend(client_application_area(area)?);
     }
-    if let Some(area) = children.optional("left") {
-        model.left = client_application_area(area)?;
+    while let Some(area) = children.optional("left") {
+        model.left.extend(client_application_area(area)?);
     }
-    if let Some(area) = children.optional("bottom") {
-        model.bottom = client_application_area(area)?;
+    while let Some(area) = children.optional("bottom") {
+        model.bottom.extend(client_application_area(area)?);
     }
     while let Some(panel_def) = children.optional("panelDef") {
         panel_def.only_attributes(&["id"])?;
-        ensure!(
-            panel_def.elements()?.is_empty(),
-            "a <panelDef> with elements is not something the writer has evidence for"
-        );
+        let representation = match &panel_def.elements()?[..] {
+            [] => None,
+            [spr] if spr.name == "spr" => Some(match spr.leaf()?.trim() {
+                "Picture" => "0",
+                "PictureOnLeftAndText" => "4",
+                other => {
+                    bail!("<panelDef> <spr> `{other}` is not something the writer has evidence for")
+                }
+            }),
+            _ => bail!("a <panelDef> with elements is not something the writer has evidence for"),
+        };
         let id = panel_def.required_attribute("id")?;
         let uuid =
             parse_raw_uuid(id).ok_or_else(|| anyhow!("<panelDef> id `{id}` is not a uuid"))?;
+        let standard = client_application_panel_def_is_standard(id);
+        ensure!(
+            representation.is_none() || standard,
+            "an <spr> on a non-standard <panelDef> is not something the writer has evidence for"
+        );
         model.panel_defs.push(ClientApplicationPanelDef {
             id: uuid,
-            standard: client_application_panel_def_is_standard(id),
+            standard,
+            representation,
         });
     }
     children.finish()?;

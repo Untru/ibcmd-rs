@@ -31,7 +31,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use quick_xml::Reader;
 use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
@@ -435,6 +435,7 @@ struct Document<'a> {
     named_items: Vec<&'a Node>,
     print_settings: Option<&'a Node>,
     print_area: Option<&'a Node>,
+    repeat_rows: Option<&'a Node>,
     group_colors: [Option<&'a Node>; 4],
     lines: Vec<&'a Node>,
     fonts: Vec<&'a Node>,
@@ -478,6 +479,7 @@ impl<'a> Document<'a> {
                 "namedItem" => document.named_items.push(child),
                 "printSettings" => document.print_settings = Some(child),
                 "printArea" => document.print_area = Some(child),
+                "repeatRows" => document.repeat_rows = Some(child),
                 "groupsBackColor" => document.group_colors[0] = Some(child),
                 "groupsColor" => document.group_colors[1] = Some(child),
                 "headersBackColor" => document.group_colors[2] = Some(child),
@@ -1672,9 +1674,13 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
         Ok(out.text)
     }
 
-    /// The ten scalars behind the print area: the repeated rows (none on
-    /// either corpus), two zeros and the group/header colour slots.
+    /// The ten scalars behind the print area: the repeated rows, two zeros
+    /// and the group/header colour slots.
     fn scalars(&mut self) -> Result<String> {
+        let repeat_rows = match self.document.repeat_rows {
+            None => "0,0,0,0".to_string(),
+            Some(area) => repeat_rows_slots(area)?,
+        };
         let defaults = [
             "style:FormBackColor",
             "style:FormTextColor",
@@ -1689,7 +1695,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             };
             slots.push(slot.to_string());
         }
-        Ok(format!("0,0,0,0,0,0,{}", slots.join(",")))
+        Ok(format!("{repeat_rows},0,0,{}", slots.join(",")))
     }
 
     // -- formats -----------------------------------------------------------
@@ -2562,6 +2568,39 @@ fn group_records(groups: &[&Node], tag: &str) -> Result<GroupRecords> {
     Ok(GroupRecords { records, levels })
 }
 
+/// `<repeatRows>`, the first four of the ten scalars behind the print area:
+/// `<beginRow>,<endRow>,<beginColumn>,<endColumn>` -- the inverse of the
+/// exporter's `parse_moxel_repeat_rows`, which publishes the element only for
+/// a `Rows` band with a non-zero row pair and zero columns (the seven
+/// documents of Документооборот КОРП 3.0.21.3 that carry one, `6/9` to
+/// `19/21`, every one with `<beginColumn>0</beginColumn>` and
+/// `<endColumn>0</endColumn>`). A band outside that shape would not come back
+/// from the row the writer stored, so it is refused.
+fn repeat_rows_slots(area: &Node) -> Result<String> {
+    area.only_children(
+        &["type", "beginRow", "endRow", "beginColumn", "endColumn"],
+        &area.name,
+    )?;
+    let kind = required_text(area, "type", &area.name)?;
+    ensure!(
+        kind == "Rows",
+        "<repeatRows> of type {kind} has no stored form: the platform keeps a Rows band"
+    );
+    let begin_row = required_i64(area, "beginRow", &area.name)?;
+    let end_row = required_i64(area, "endRow", &area.name)?;
+    let begin_column = required_i64(area, "beginColumn", &area.name)?;
+    let end_column = required_i64(area, "endColumn", &area.name)?;
+    ensure!(
+        begin_column == 0 && end_column == 0,
+        "<repeatRows> names columns {begin_column}..{end_column}, which no stored band carries"
+    );
+    ensure!(
+        begin_row != 0 || end_row != 0,
+        "<repeatRows> names no row, which the platform would not write back"
+    );
+    Ok(format!("{begin_row},{end_row},0,0"))
+}
+
 fn area_record(area: &Node) -> Result<String> {
     area.only_children(
         &[
@@ -3110,6 +3149,41 @@ mod tests {
         let body = write_native_moxel_body(xml.as_bytes(), None).unwrap();
         assert_eq!(body, crlf(REPORT_BODY));
         assert_eq!(read_back(&body), xml);
+    }
+
+    /// Документооборот КОРП `ПФ_MXL_ИтоговаяЗапись` keeps its repeating band
+    /// in the first four scalars behind the print area; the exporter reads
+    /// the row back to the same element.
+    #[test]
+    fn repeat_rows_fill_the_first_four_scalars_behind_the_print_area() {
+        let xml = r#"<document xmlns="http://v8.1c.ru/8.2/data/spreadsheet" xmlns:style="http://v8.1c.ru/8.1/data/ui/style">
+	<columns><size>1</size></columns>
+	<rowsItem><index>0</index><row><c><c><f>1</f></c></c></row></rowsItem>
+	<repeatRows>
+		<type>Rows</type>
+		<beginRow>6</beginRow>
+		<endRow>9</endRow>
+		<beginColumn>0</beginColumn>
+		<endColumn>0</endColumn>
+	</repeatRows>
+	<format><width>72</width></format>
+</document>"#;
+        let body = write_native_moxel_body(xml.as_bytes(), None)
+            .unwrap()
+            .replace("\r\n", "");
+        assert!(
+            body.contains("{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000},6,9,0,0,0,0,"),
+            "{body}"
+        );
+        let exported = read_back(&body);
+        assert!(exported.contains("<repeatRows>\r\n\t\t<type>Rows</type>\r\n\t\t<beginRow>6</beginRow>\r\n\t\t<endRow>9</endRow>\r\n\t\t<beginColumn>0</beginColumn>\r\n\t\t<endColumn>0</endColumn>\r\n\t</repeatRows>"), "{exported}");
+
+        let columns = xml.replace(
+            "<beginColumn>0</beginColumn>",
+            "<beginColumn>1</beginColumn>",
+        );
+        let error = write_native_moxel_body(columns.as_bytes(), None).unwrap_err();
+        assert!(error.to_string().contains("names columns"), "{error:#}");
     }
 
     #[test]

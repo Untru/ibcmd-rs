@@ -34,8 +34,8 @@ use crate::metadata_model::export::values::{
 use crate::metadata_model::export::{
     Build, ExportContext, GeneratedTypeName, ObjectNames, atom, el, item, leaf, list, number, short,
 };
-use crate::metadata_model::objects::export::STANDARD_PICTURES;
 use crate::metadata_model::objects::parts::Compat;
+use crate::metadata_model::standard_pictures::standard_picture_name;
 use crate::metadata_model::xml::Element;
 
 /// Rows up to compatibility 8.3.24 keep the older child wrappers (see
@@ -367,10 +367,7 @@ fn picture(node: &Brace, context: &ExportContext) -> Result<Element> {
         }
         [_, uuid] => {
             let uuid = atom(uuid)?;
-            match STANDARD_PICTURES
-                .iter()
-                .find_map(|(id, name)| (*id == uuid).then_some(*name))
-            {
+            match standard_picture_name(uuid) {
                 Some(name) => name.to_string(),
                 None => context
                     .names

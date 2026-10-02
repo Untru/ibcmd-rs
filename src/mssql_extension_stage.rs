@@ -512,7 +512,7 @@ pub fn build_configcassave_stage_sql(
         let file_name = format!("{}__{}", prefix, row.logical_name);
         writeln!(
             sql,
-            "INSERT INTO dbo.ConfigCASSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo) VALUES (N'{}', SYSUTCDATETIME(), SYSUTCDATETIME(), {}, {}, 0x{}, {});",
+            "INSERT INTO dbo.ConfigCASSave (FileName, Creation, Modified, Attributes, DataSize, BinaryData, PartNo) VALUES (N'{}', DATEADD(year,2000,SYSUTCDATETIME()), DATEADD(year,2000,SYSUTCDATETIME()), {}, {}, 0x{}, {});",
             quote_string(&file_name),
             row.attributes,
             row.binary_data.len(),

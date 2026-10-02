@@ -200,7 +200,17 @@ pub fn assemble_bootstrap_artifact(
         .map_err(BootstrapError::Storage)?;
         entries.push(entry);
     }
-    let image = StorageImage::new(entries).map_err(BootstrapError::Storage)?;
+    // The image holds packed and unpacked payloads of every entry; its
+    // budget follows what it holds (an ERP-sized tree passes the 512 MiB
+    // floor) instead of refusing a tree the patch already accepted.
+    let retained: usize = entries
+        .iter()
+        .map(|entry| {
+            entry.payloads().packed().bytes().len() + entry.payloads().unpacked().bytes().len()
+        })
+        .sum();
+    let image = StorageImage::with_retained_byte_limit(entries, retained.saturating_mul(2))
+        .map_err(BootstrapError::Storage)?;
     Ok(BootstrapArtifact { profile, image })
 }
 

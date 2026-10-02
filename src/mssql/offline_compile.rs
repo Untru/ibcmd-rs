@@ -579,6 +579,62 @@ mod tests {
         assert!(bare.contains("{\"N\",60}"), "{bare}");
     }
 
+    /// The form head every round trip below opens with, and the extraction
+    /// the exporter reads a written body back with.
+    const FORM_HEAD: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:cfg=\"http://v8.1c.ru/8.1/data/enterprise/current-config\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\t<AutoCommandBar name=\"ФормаКоманднаяПанель\" id=\"-1\"/>\r\n";
+
+    fn written_and_read_back(items: &str) -> String {
+        let xml = format!(
+            "{FORM_HEAD}\t<ChildItems>\r\n{items}\t</ChildItems>\r\n\t<Attributes/>\r\n</Form>"
+        );
+        let packed =
+            crate::module_blob::pack_native_form_body_blob(xml.as_bytes(), None, None, None)
+                .unwrap_or_else(|error| panic!("{error:#}"));
+        crate::mssql_dump::extract_form_body_xml(&packed.blob, &std::collections::BTreeMap::new())
+            .expect("the written body reads back")
+    }
+
+    /// Монитор `Catalogs/Запросы/Forms/ФормаАнализа`: a tooltip with nothing
+    /// but its `DisplayImportance` keeps it through the writer and the
+    /// exporter's reading of the record.
+    #[test]
+    fn an_empty_tooltip_keeps_its_display_importance_through_the_round_trip() {
+        let items = "\t\t<LabelField name=\"Надпись\" id=\"1\">\r\n\t\t\t<ContextMenu name=\"НадписьКонтекстноеМеню\" id=\"2\"/>\r\n\t\t\t<ExtendedTooltip name=\"НадписьРасширеннаяПодсказка\" id=\"3\" DisplayImportance=\"VeryHigh\"/>\r\n\t\t</LabelField>\r\n";
+        let read_back = written_and_read_back(items);
+        assert!(
+            read_back.contains("<ExtendedTooltip name=\"НадписьРасширеннаяПодсказка\" id=\"3\" DisplayImportance=\"VeryHigh\"/>"),
+            "{read_back}"
+        );
+    }
+
+    /// Документооборот's scheme fields exclude the scheme's own commands and
+    /// turn `<AutoMaxWidth>` off; both reach the record and come back.
+    #[test]
+    fn a_graphical_schema_field_keeps_its_commands_and_auto_max_width() {
+        let items = "\t\t<GraphicalSchemaField name=\"Схема\" id=\"1\">\r\n\t\t\t<TitleLocation>None</TitleLocation>\r\n\t\t\t<CommandSet>\r\n\t\t\t\t<ExcludedCommand>AlignLeft</ExcludedCommand>\r\n\t\t\t\t<ExcludedCommand>InsertItemStart</ExcludedCommand>\r\n\t\t\t\t<ExcludedCommand>Print</ExcludedCommand>\r\n\t\t\t</CommandSet>\r\n\t\t\t<AutoMaxWidth>false</AutoMaxWidth>\r\n\t\t\t<ContextMenu name=\"СхемаКонтекстноеМеню\" id=\"2\"/>\r\n\t\t\t<ExtendedTooltip name=\"СхемаРасширеннаяПодсказка\" id=\"3\"/>\r\n\t\t</GraphicalSchemaField>\r\n";
+        let read_back = written_and_read_back(items);
+        assert!(
+            read_back.contains("<CommandSet>\r\n\t\t\t\t<ExcludedCommand>AlignLeft</ExcludedCommand>\r\n\t\t\t\t<ExcludedCommand>InsertItemStart</ExcludedCommand>\r\n\t\t\t\t<ExcludedCommand>Print</ExcludedCommand>\r\n\t\t\t</CommandSet>"),
+            "{read_back}"
+        );
+        assert!(
+            read_back.contains("<AutoMaxWidth>false</AutoMaxWidth>"),
+            "{read_back}"
+        );
+    }
+
+    /// Документооборот 3.0 `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта`:
+    /// the table a Gantt chart field nests keeps `id="0"`, and its three
+    /// additions spell no `<AdditionSource>`; they serve that table, and
+    /// come back the same way.
+    #[test]
+    fn gantt_table_additions_without_a_source_serve_their_table() {
+        let items = "\t\t<GanttChartField name=\"Диаграмма\" id=\"1\">\r\n\t\t\t<ContextMenu name=\"ДиаграммаКонтекстноеМеню\" id=\"2\"/>\r\n\t\t\t<ExtendedTooltip name=\"ДиаграммаРасширеннаяПодсказка\" id=\"3\"/>\r\n\t\t\t<Table name=\"Table\" id=\"0\">\r\n\t\t\t\t<ContextMenu name=\"TableКонтекстноеМеню\" id=\"4\"/>\r\n\t\t\t\t<AutoCommandBar name=\"TableКоманднаяПанель\" id=\"5\"/>\r\n\t\t\t\t<ExtendedTooltip name=\"TableРасширеннаяПодсказка\" id=\"6\"/>\r\n\t\t\t\t<SearchStringAddition name=\"TableСтрокаПоиска\" id=\"7\">\r\n\t\t\t\t\t<ContextMenu name=\"TableСтрокаПоискаКонтекстноеМеню\" id=\"8\"/>\r\n\t\t\t\t\t<ExtendedTooltip name=\"TableСтрокаПоискаРасширеннаяПодсказка\" id=\"9\"/>\r\n\t\t\t\t</SearchStringAddition>\r\n\t\t\t\t<ViewStatusAddition name=\"TableСостояниеПросмотра\" id=\"10\">\r\n\t\t\t\t\t<ContextMenu name=\"TableСостояниеПросмотраКонтекстноеМеню\" id=\"11\"/>\r\n\t\t\t\t\t<ExtendedTooltip name=\"TableСостояниеПросмотраРасширеннаяПодсказка\" id=\"12\"/>\r\n\t\t\t\t</ViewStatusAddition>\r\n\t\t\t\t<SearchControlAddition name=\"TableУправлениеПоиском\" id=\"13\">\r\n\t\t\t\t\t<ContextMenu name=\"TableУправлениеПоискомКонтекстноеМеню\" id=\"14\"/>\r\n\t\t\t\t\t<ExtendedTooltip name=\"TableУправлениеПоискомРасширеннаяПодсказка\" id=\"15\"/>\r\n\t\t\t\t</SearchControlAddition>\r\n\t\t\t</Table>\r\n\t\t</GanttChartField>\r\n";
+        let read_back = written_and_read_back(items);
+        assert!(read_back.contains(items), "{read_back}");
+        assert!(!read_back.contains("<AdditionSource>"), "{read_back}");
+    }
+
     /// An interceptor with no handler compiles under a stand-in and is stored
     /// as the platform stores it: an empty first handler, then a second empty
     /// one (a real extension: `9cc34712…,0,2,"",0`).

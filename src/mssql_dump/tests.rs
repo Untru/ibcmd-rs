@@ -880,6 +880,7 @@ fn dump_timing_summary_extracts_batch_followup_fields() {
             source_asset_form_properties_cpu_ms: 10,
             ..MssqlDumpTimingReport::default()
         },
+        incremental: None,
     };
     let json = serde_json::to_string(&report).unwrap();
 
@@ -8282,6 +8283,7 @@ fn parses_platform_before_load_user_settings_event_identifier() {
         Some(FormBodyEvent {
             name: "BeforeLoadUserSettingsAtServer".to_string(),
             handler: "HandlerA".to_string(),
+            call_type: None,
         })
     );
 }
@@ -8299,6 +8301,7 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         Some(FormBodyEvent {
             name: "OnUpdateUserSettingSetAtServer".to_string(),
             handler: "RootHandler".to_string(),
+            call_type: None,
         })
     );
     assert_eq!(
@@ -8306,6 +8309,7 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         Some(FormBodyEvent {
             name: EVENT_ID.to_string(),
             handler: "RootHandler".to_string(),
+            call_type: None,
         })
     );
     let table_raw = format!(r#"{{1,{EVENT_ID},"TableHandler"}}"#);
@@ -8316,6 +8320,7 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         vec![FormBodyEvent {
             name: "OnUpdateUserSettingSetAtServer".to_string(),
             handler: "TableHandler".to_string(),
+            call_type: None,
         }]
     );
     assert_eq!(
@@ -8323,6 +8328,7 @@ fn parses_platform_update_user_settings_event_for_root_and_table_records() {
         vec![FormBodyEvent {
             name: "OnUpdateUserSettingSetAtServer".to_string(),
             handler: "TableHandler".to_string(),
+            call_type: None,
         }]
     );
     assert!(parse_form_body_event_pair(EVENT_ID, r#"""#, Some("ReportObject")).is_none());
@@ -13681,9 +13687,75 @@ fn extracts_form_body_xml_uses_type_index_for_parameters_without_breaking_object
 }
 
 #[test]
+fn formatter_spells_the_call_type_the_model_carries() {
+    // An adopted form's handlers carry their call type in the model
+    // (`form_extension::FormAdoption::mark`): every command handler `Before`
+    // (six commands of an extension's common form in the БСП 8.3.27
+    // ServiceDesk), every event handler its interceptor's (fixture
+    // `adopted/form_events`); a handler without one is written as before.
+    let command = FormCommand {
+        use_rights: None,
+        call_type: Some("Before"),
+        id: "1".to_string(),
+        reference_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
+        name: "Команда".to_string(),
+        title: Vec::new(),
+        tooltip: Vec::new(),
+        picture_ref: None,
+        picture_load_transparent: false,
+        picture_transparent_pixel: None,
+        shortcut: None,
+        action: "КомандаВыполнить".to_string(),
+        representation: None,
+        functional_options: Vec::new(),
+        modifies_saved_data: None,
+        current_row_use: None,
+    };
+    let events = [
+        FormBodyEvent {
+            name: "BeforeClose".to_string(),
+            handler: "Расш_ПередЗакрытиемВместо".to_string(),
+            call_type: Some("Override"),
+        },
+        FormBodyEvent {
+            name: "OnOpen".to_string(),
+            handler: "ПриОткрытии".to_string(),
+            call_type: None,
+        },
+    ];
+    let form_xml = format_form_body_xml(
+        &FormBodyProperties::default(),
+        None,
+        &events,
+        &[],
+        &[],
+        &FormAttributesSection::default(),
+        &[],
+        &[command],
+        &None,
+    )
+    .unwrap();
+    assert!(
+        form_xml.contains(
+            "\t<Events>\r\n\
+             \t\t<Event name=\"BeforeClose\" callType=\"Override\">Расш_ПередЗакрытиемВместо</Event>\r\n\
+             \t\t<Event name=\"OnOpen\">ПриОткрытии</Event>\r\n\
+             \t</Events>\r\n"
+        ),
+        "{form_xml}"
+    );
+    assert!(
+        form_xml.contains("\t\t\t<Action callType=\"Before\">КомандаВыполнить</Action>\r\n"),
+        "{form_xml}"
+    );
+    assert!(form_xml.ends_with("\t</Commands>\r\n</Form>"), "{form_xml}");
+}
+
+#[test]
 fn formatter_emits_form_command_children_in_native_order() {
     let commands = [FormCommand {
         use_rights: None,
+        call_type: None,
         id: "1".to_string(),
         reference_uuid: "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa".to_string(),
         name: "ЗаписатьИЗакрыть".to_string(),
@@ -15289,14 +15361,17 @@ fn extracts_input_field_input_hint_from_extended_options_bag36() {
             FormBodyEvent {
                 name: "OnChange".to_string(),
                 handler: "ОтборСрокВыполненияПриИзменении".to_string(),
+                call_type: None,
             },
             FormBodyEvent {
                 name: "Clearing".to_string(),
                 handler: "ОтборСрокВыполненияОчистка".to_string(),
+                call_type: None,
             },
             FormBodyEvent {
                 name: "ChoiceProcessing".to_string(),
                 handler: "ОтборСрокВыполненияОбработкаВыбора".to_string(),
+                call_type: None,
             },
         ]
     );
@@ -15855,6 +15930,7 @@ fn keeps_nested_auto_command_bar_controls_and_table_order() {
     table.events.push(FormBodyEvent {
         name: "Selection".to_string(),
         handler: "RowsSelection".to_string(),
+        call_type: None,
     });
 
     let xml = format_form_child_items_xml(&[table], 1);
@@ -21379,10 +21455,12 @@ fn parses_multiple_form_child_item_events_from_single_record() {
             FormBodyEvent {
                 name: "OnChange".to_string(),
                 handler: "Changed".to_string(),
+                call_type: None,
             },
             FormBodyEvent {
                 name: "ChoiceProcessing".to_string(),
                 handler: "Picked".to_string(),
+                call_type: None,
             },
         ]
     );
@@ -21403,10 +21481,12 @@ fn collects_nested_form_child_item_events_from_extended_options() {
                 FormBodyEvent {
                     name: "OnChange".to_string(),
                     handler: "Changed".to_string(),
+                    call_type: None,
                 },
                 FormBodyEvent {
                     name: "ChoiceProcessing".to_string(),
                     handler: "Picked".to_string(),
+                    call_type: None,
                 },
             ]
         );
@@ -21427,10 +21507,12 @@ fn parses_uuid_clearing_and_choice_processing_events() {
             FormBodyEvent {
                 name: "Clearing".to_string(),
                 handler: "ClearHandler".to_string(),
+                call_type: None,
             },
             FormBodyEvent {
                 name: "ChoiceProcessing".to_string(),
                 handler: "ChoiceHandler".to_string(),
+                call_type: None,
             },
         ]
     );
@@ -21449,6 +21531,7 @@ fn parses_uuid_before_row_change_event() {
         vec![FormBodyEvent {
             name: "BeforeRowChange".to_string(),
             handler: "BeforeChangeHandler".to_string(),
+            call_type: None,
         }]
     );
 }
@@ -22080,6 +22163,7 @@ fn extracts_table_service_child_items_from_layout_fields() {
     let command_uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
     let commands = vec![FormCommand {
         use_rights: None,
+        call_type: None,
         id: "15".to_string(),
         reference_uuid: command_uuid.to_string(),
         name: "Run".to_string(),
@@ -25301,16 +25385,22 @@ fn writes_an_unnamed_choice_parameter_reference_as_its_identifier_pair() {
         )
         .is_none()
     );
-    // So is a type this configuration does not carry at all.
-    assert!(
-        parse_form_input_field_choice_parameters(
-            &collection,
-            &BTreeMap::new(),
-            &BTreeSet::new(),
-            &object_refs,
-        )
-        .is_none()
-    );
+    // A type this configuration does not carry at all is written as the pair
+    // as well: ISL 2.8.1.13 `Catalogs/ШаблоныСообщений/Forms/ФормаЭлемента`
+    // `Отбор.Вид` names a type no object of the configuration has, and
+    // 8.3.27.2214 writes `<type>.<value>`.
+    let parameters = parse_form_input_field_choice_parameters(
+        &collection,
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+        &object_refs,
+    )
+    .unwrap();
+    assert!(matches!(
+        parameters.items()[0].value(),
+        ibcmd_schema::FormChoiceParameterValue::FixedArray(values)
+            if values.iter().any(|value| value.value_ref() == format!("{enum_type}.{unnamed_value}"))
+    ));
 }
 
 #[test]
@@ -26667,7 +26757,8 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
         None,
     );
 
-    let extraction = extract_form_body_xml_from_body_detailed_timed(&body, &context, None).unwrap();
+    let extraction =
+        extract_form_body_xml_from_body_detailed_timed(&body, &context, None, None).unwrap();
     let DetailedFormBodyExtraction::Rejected { diagnostics, error } = extraction else {
         panic!("malformed mirrored links must reject detailed extraction");
     };
@@ -27631,7 +27722,15 @@ fn omits_popup_item_source_without_an_exact_owner_or_type() {
     let nonzero_global =
         format!(r#"{{7,{{0}},{{68,{FORM_GLOBAL_COMMAND_SOURCE_TYPE_UUID}}},2,1,0,0,{{0}},{{0}}}}"#);
 
-    for source in [&unknown_owner, wrong_type, &nonzero_global] {
+    // An item source naming no item of the form is written physically, as
+    // the platform does (ERP WE 2.5 `ФормаВыбораРаспоряжения`).
+    let mut fields = vec!["0"; 21];
+    fields[20] = &unknown_owner;
+    assert_eq!(
+        parse_form_popup_command_source_with_items(&fields, &BTreeMap::new()),
+        Some(format!("68:{FORM_ITEM_TYPE_UUID}"))
+    );
+    for source in [wrong_type, &nonzero_global] {
         let mut fields = vec!["0"; 21];
         fields[20] = source;
         assert_eq!(
@@ -40893,6 +40992,29 @@ fn exchange_plan_content_drops_unresolved_metadata_id() {
     .expect("an unresolvable content slot is dropped, not fatal");
 
     assert!(items.is_empty());
+}
+
+/// Evidence: exchange plans stored by an older platform (1C:Документооборот
+/// r6 and DO, 21 plans) keep their content as marker `1`, the same
+/// `<count>,(<id>,<auto record>)*` run without the trailing member; re-saved
+/// by 8.3.27 an empty one comes back `{1,0}` -> `{2,0,0}`.
+#[test]
+fn exchange_plan_content_reads_the_older_marker() {
+    let constant_uuid = "ff76e85a-6d29-41d3-a83e-f4a34139c6b2";
+    let object_refs = BTreeMap::from([(
+        constant_uuid.to_string(),
+        "Constant.UseInternalBarcodes".to_string(),
+    )]);
+    let content = deflate_for_test(format!("{{1,1,{constant_uuid},1}}").as_bytes());
+    let items = parse_exchange_plan_content_blob(
+        &content,
+        &object_refs,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].metadata, "Constant.UseInternalBarcodes");
 }
 
 #[test]
@@ -71451,15 +71573,25 @@ fn walks_a_chain_segment_through_a_common_attribute_reference() {
 /// The remaining 1 526, across nine other main-table families, carry none.
 #[test]
 fn marks_a_default_picture_the_declared_main_table_cannot_hold() {
-    let owner_for = |main_table: Option<&str>, dynamic_list: bool| {
+    let owner_with = |main_table: Option<&str>, dynamic_list: bool, manual_query: bool| {
         let mut attribute = data_path_form_attribute("1", "Список", None);
         if dynamic_list {
             let mut settings = data_path_dynamic_list_settings(Vec::new());
             settings.main_table = main_table.map(ToOwned::to_owned);
+            settings.manual_query = manual_query;
             attribute.settings = Some(settings);
         }
         form_attribute_metadata_owner(&attribute)
     };
+    let owner_for =
+        |main_table: Option<&str>, dynamic_list: bool| owner_with(main_table, dynamic_list, true);
+    // An Enum list under the platform's own query is marked like any other
+    // (1C:Документооборот's `Enums/СтатусыПриглашений` list forms under
+    // compatibility 8.3.21 and 8.3.24); under 8.3.17 the platform writes them
+    // unmarked, which `with_no_main_table_default_picture_unmarked` restores.
+    assert!(form_dynamic_list_default_picture_is_out_of_main_table(
+        &owner_with(Some("Enum.СтатусыПриглашений"), true, false)
+    ));
 
     for (main_table, expected) in [
         (None, true),
@@ -79566,3 +79698,138 @@ fn a_characteristic_without_a_source_reads_and_prints_empty() {
 
 // Tests of the onecdec fork, kept apart from the upstream file.
 mod onecdec;
+
+/// Evidence: 1C:Документооборот's `Catalogs/ЗаписиРабочегоКалендаря` forms
+/// store the planner's and its item's border with an all-zero style id where
+/// the fixture's seeds store `48312c09-…`; 8.3.27.2214 writes both as
+/// `ControlBorderType`. The whole `<Settings>` block used to go unwritten.
+#[test]
+fn a_planner_border_with_a_zero_style_id_is_a_control_border() {
+    let raw = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-planner-settings/raw/bits-a.txt"
+    )
+    .replace(
+        "48312c09-257f-4b29-b280-284dd89efc1e",
+        "00000000-0000-0000-0000-000000000000",
+    );
+    let rendered = parse_and_render_form_planner_settings_for_test(raw.trim()).unwrap();
+    assert_eq!(
+        rendered
+            .matches(r#"<v8ui:style xsi:type="v8ui:ControlBorderType">"#)
+            .count(),
+        2
+    );
+}
+
+/// An Enum list under the platform's own query is unmarked under the old
+/// compatibility modes, exactly as a list with no main table is.
+#[test]
+fn old_compatibility_unmarks_the_default_picture_of_an_enum_list() {
+    let mut attribute = data_path_form_attribute("1", "Список", None);
+    let mut settings = data_path_dynamic_list_settings(Vec::new());
+    settings.main_table = Some("Enum.СтатусыПриглашений".to_owned());
+    settings.manual_query = false;
+    attribute.settings = Some(settings);
+    let xml = "<RowPictureDataPath>~Список.DefaultPicture</RowPictureDataPath>".to_owned();
+    assert_eq!(
+        with_no_main_table_default_picture_unmarked(xml, &[attribute]),
+        "<RowPictureDataPath>Список.DefaultPicture</RowPictureDataPath>"
+    );
+}
+
+#[test]
+fn a_form_that_excludes_help_writes_its_help_button_as_the_raw_id() {
+    let xml = "<CommandName>Form.StandardCommand.Help</CommandName>".to_owned();
+    assert_eq!(
+        with_excluded_help_command_unresolved(xml.clone(), &["Help"]),
+        "<CommandName>0:39bb0fe9-771d-4dd5-8a6e-2d16984523af</CommandName>"
+    );
+    assert_eq!(
+        with_excluded_help_command_unresolved(xml.clone(), &["Refresh"]),
+        xml
+    );
+}
+
+/// Evidence: `ТекущийДокументPDFСостояниеПросмотра` of 1C:Документооборот
+/// (`DataProcessors/ИнтерфейсДокументовЭДО/Forms/ТекущиеДелаПоЭДО`), whose
+/// option tuple `{1,0,0,...,1,{0,1,0},0,0,0}` the platform writes as
+/// `HorizontalStretch` false and `HorizontalLocation` Center.
+#[test]
+fn a_view_status_addition_reads_center_and_a_lowered_stretch() {
+    let tuple = "{1,0,0,{3,4,{0}},{3,4,{0}},{3,4,{0}},{3,4,{0}},{3,4,{0}},{7,3,0,1,100},{7,3,0,1,100},{3,0,{0},0,1,0,48312c09-257f-4b29-b280-284dd89efc1e},1,{0,1,0},0,0,0}";
+    let mut fields = vec!["0"; 13];
+    fields.push(tuple);
+    assert_eq!(
+        parse_form_view_status_addition_horizontal_location(&fields),
+        Some("Center")
+    );
+    assert_eq!(
+        parse_form_view_status_addition_horizontal_stretch(&fields),
+        Some(false)
+    );
+    let left = tuple.replacen("{1,0,0,", "{1,0,2,", 1).replacen(
+        "48312c09-257f-4b29-b280-284dd89efc1e},1,",
+        "48312c09-257f-4b29-b280-284dd89efc1e},0,",
+        1,
+    );
+    let mut fields = vec!["0"; 13];
+    fields.push(&left);
+    assert_eq!(
+        parse_form_view_status_addition_horizontal_location(&fields),
+        Some("Left")
+    );
+    assert_eq!(
+        parse_form_view_status_addition_horizontal_stretch(&fields),
+        None
+    );
+}
+
+/// Evidence: 1C:Интеграция ISL 2.8.1.13 (root `{63,...}`, compatibility 8.3.21)
+/// stores its mobile table as `{0,30,{0,1},...,{25,1},...,{32,0},{33,0},0}` --
+/// version `0`, the first 30 ids, a closing `0` -- and the platform prints the
+/// 38 functionalities with only `Biometrics` and `OSBackup` (ids 0 and 25) used.
+#[test]
+fn a_version_0_mobile_table_reads_like_version_1() {
+    let ids: Vec<u32> = (0..=27).chain([32, 33]).collect();
+    let pairs = ids
+        .iter()
+        .map(|id| format!("{{{id},{}}}", u8::from(*id == 0 || *id == 25)))
+        .collect::<Vec<_>>()
+        .join(",");
+    let raw = format!("{{0,30,{pairs},0}}");
+    let (uuid, text) = flat_configuration_mobile_text(67, 60, &raw);
+    let (functionalities, messages) =
+        parse_configuration_used_mobile_application_functionalities(&text, &uuid, "2.20").unwrap();
+    assert!(messages.is_empty());
+    assert_eq!(functionalities.len(), 38);
+    let used = functionalities
+        .iter()
+        .filter(|entry| entry.use_functionality)
+        .map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    assert_eq!(used, ["Biometrics", "OSBackup"]);
+}
+
+/// Evidence: 1C:Документооборот `Catalogs/УзлыКОД/Forms/ТрафикПоУзлам`,
+/// whose chart names `Palette32` for its reference bands as well; 8.3.27.2214
+/// writes a `referenceBandsColorPaletteDescription` block after the colour
+/// palette one.
+#[test]
+fn a_chart_writes_its_reference_bands_palette() {
+    let raw = include_str!(
+        "../../tests/fixtures/native-evidence/8.3.27.2214/form-chart-series-count/raw/zero-series.txt"
+    )
+    .trim()
+    .to_owned();
+    let palette_14 = "{0,14,{3,4,{0}},{3,4,{0}},0,0}";
+    let palette_32 = "{0,1,{3,4,{0}},{3,4,{0}},0,0}";
+    let compact = raw.replace(['\r', '\n'], "");
+    let pair = format!("{palette_14},{palette_14}");
+    assert!(compact.contains(&pair));
+    let edited = compact.replacen(&pair, &format!("{palette_32},{palette_32}"), 1);
+    let xml = parse_and_render_form_chart_settings_for_test(&edited).unwrap();
+    assert!(
+        xml.contains("<d4p1:referenceBandsColorPaletteDescription>"),
+        "{xml}"
+    );
+}

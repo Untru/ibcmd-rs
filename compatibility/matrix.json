@@ -3,6 +3,12 @@
   "generated_from": "repository_evidence",
   "evidence": [
     {
+      "id": "doc-cf-platform-85",
+      "kind": "document",
+      "path": "docs/evidence/cf-platform-8.5.md",
+      "state": "context"
+    },
+    {
       "id": "doc-migration-220-221",
       "kind": "document",
       "path": "docs/evidence/migration-xcf-2.20-to-2.21.md",
@@ -21,10 +27,31 @@
       "state": "context"
     },
     {
+      "id": "test-cf-851-bootstrap-roundtrip",
+      "kind": "cargo_test",
+      "path": "tests/cf_platform_8_5.rs",
+      "case": "xml_2_21_bootstraps_into_the_cf_8_5_saved",
+      "state": "green"
+    },
+    {
+      "id": "test-cf-851-export",
+      "kind": "cargo_test",
+      "path": "tests/cf_platform_8_5.rs",
+      "case": "cf_saved_by_8_5_exports_in_xml_2_21",
+      "state": "green"
+    },
+    {
       "id": "test-cf-repack-roundtrip",
       "kind": "cargo_test",
       "path": "tests/cf_roundtrip.rs",
       "case": "both_revisions_repack_semantically_and_deterministically",
+      "state": "green"
+    },
+    {
+      "id": "test-convert-xml-221-cf-851",
+      "kind": "cargo_test",
+      "path": "tests/conversion_cli.rs",
+      "case": "xml_221_cf_851_xml_roundtrip_is_offline",
       "state": "green"
     },
     {
@@ -108,6 +135,60 @@
         "test-convert-xml-cf-xml"
       ],
       "detail": "The clean-room configuration root exports to XCF 2.20 while regenerated structural CF entries remain explicit."
+    },
+    {
+      "id": "convert-cf-851-to-xml-221-common-form",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "platform-8.5.1.1150",
+      "target_profile": "xml-2.21",
+      "family": "CommonForm",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-cf-platform-85",
+        "test-cf-851-bootstrap-roundtrip",
+        "test-cf-851-export"
+      ],
+      "detail": "The 8.5.1.1529-saved configuration's common forms ({59,...} bodies) export to XCF 2.21 and rebuild into byte-identical records."
+    },
+    {
+      "id": "convert-cf-851-to-xml-221-common-module",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "platform-8.5.1.1150",
+      "target_profile": "xml-2.21",
+      "family": "CommonModule",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-cf-platform-85",
+        "test-convert-xml-221-cf-851"
+      ],
+      "detail": "A common module in 8.5.1.1529's own XCF 2.21 spelling exports back from a platform-8.5.1.1150 CF file for file."
+    },
+    {
+      "id": "convert-cf-851-to-xml-221-configuration-root",
+      "operation": "convert",
+      "source_artifact": "cf_archive",
+      "target_artifact": "xml_source_tree",
+      "source_profile": "platform-8.5.1.1150",
+      "target_profile": "xml-2.21",
+      "family": "ConfigurationRoot",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-cf-platform-85",
+        "test-cf-851-bootstrap-roundtrip",
+        "test-cf-851-export",
+        "test-convert-xml-221-cf-851"
+      ],
+      "detail": "The {76,...} Configuration tuple of an 8.5.1.1529 save at compatibility 8.3.27 exports to XCF 2.21; the home page equals the platform's file."
     },
     {
       "id": "convert-xml-217-to-xml-220-catalog",
@@ -196,6 +277,23 @@
       "detail": "The exact upgrade edge preserves the Constant semantic digest under the XCF 2.21 adapter."
     },
     {
+      "id": "convert-xml-221-to-cf-851-common-form",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "cf_archive",
+      "source_profile": "xml-2.21",
+      "target_profile": "platform-8.5.1.1150",
+      "family": "CommonForm",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-cf-platform-85",
+        "test-cf-851-bootstrap-roundtrip"
+      ],
+      "detail": "The base-free stage writes common forms in the 8.5.1 layout, byte-identical to the records 8.5.1.1529 saved."
+    },
+    {
       "id": "convert-xml-221-to-cf-851-common-module",
       "operation": "convert",
       "source_artifact": "xml_source_tree",
@@ -203,13 +301,32 @@
       "source_profile": "xml-2.21",
       "target_profile": "platform-8.5.1.1150",
       "family": "CommonModule",
-      "support": "unsupported",
-      "status": "experimental",
-      "preservation": "none",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
       "evidence": [
-        "doc-offline-conversion"
+        "doc-cf-platform-85",
+        "test-convert-xml-221-cf-851"
       ],
-      "detail": "The platform profile exists, but no storage layout and bootstrap fixture evidence is registered for this target."
+      "detail": "The base-free stage compiles a common module into a Format15 CF for 8.5.1.1150 that exports back file for file; the platform's own load is not run offline."
+    },
+    {
+      "id": "convert-xml-221-to-cf-851-configuration-root",
+      "operation": "convert",
+      "source_artifact": "xml_source_tree",
+      "target_artifact": "cf_archive",
+      "source_profile": "xml-2.21",
+      "target_profile": "platform-8.5.1.1150",
+      "family": "ConfigurationRoot",
+      "support": "supported",
+      "status": "verified",
+      "preservation": "semantic",
+      "evidence": [
+        "doc-cf-platform-85",
+        "test-cf-851-bootstrap-roundtrip",
+        "test-convert-xml-221-cf-851"
+      ],
+      "detail": "Root, version (features as the platform lists them) and the {76,...} Configuration tuple match the platform's save but for the save-time footer and fresh versions uuids."
     },
     {
       "id": "convert-xml-221-to-xml-220-catalog",

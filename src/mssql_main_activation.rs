@@ -126,6 +126,17 @@ pub struct MainActivationDryRunReport {
     /// Who carries the promotion out (`config_apply`: the report of that run is `config_apply` of the command's report).
     #[serde(default)]
     pub executor: MainActivationExecutor,
+    /// The `Config` rows the promotion's script writes, under the names it
+    /// writes them: an online run's `_dynupdate_` aliases, the ordinary names
+    /// otherwise (#409 F-13). Empty when the own apply carries it out: that
+    /// run names its own rows.
+    #[serde(default)]
+    pub published_config_rows: Vec<String>,
+    /// What the promotion's script does to the two `DynamicallyUpdated`
+    /// markers: `Config.DynamicallyUpdated: written|deleted` (#409 F-13);
+    /// empty as `published_config_rows` is.
+    #[serde(default)]
+    pub dynamic_markers: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,19 +244,12 @@ impl MainActivationPlan {
             old_generation: self.old_generation.hyphenated().to_string(),
             new_generation: self.new_generation.hyphenated().to_string(),
             changed_targets: self.changed_targets.clone(),
+            // Every mode replaces Config rows from ConfigSave and writes or
+            // deletes the Params marker; a no-op only empties ConfigSave.
             touched_tables: if self.no_op {
                 vec!["ConfigSave"]
             } else {
-                match self.mode {
-                    MainActivationMode::Exclusive
-                    | MainActivationMode::Live
-                    | MainActivationMode::Worker => {
-                        vec!["Config", "ConfigSave", "Params"]
-                    }
-                    MainActivationMode::Online => {
-                        vec!["Config", "ConfigSave", "Params"]
-                    }
-                }
+                vec!["Config", "ConfigSave", "Params"]
             }
             .into_iter()
             .map(str::to_owned)
@@ -267,6 +271,34 @@ impl MainActivationPlan {
             recovery_token: hex(&Sha256::digest(recovery_json)),
             own_ras_processes: self.own_ras_processes.clone(),
             executor: self.executor,
+            published_config_rows: if self.no_op
+                || self.executor == MainActivationExecutor::ConfigApply
+            {
+                Vec::new()
+            } else {
+                let generation = self.new_generation.hyphenated().to_string();
+                self.staged_rows
+                    .iter()
+                    .map(|row| published_file_name(self.mode, &row.file_name, &generation))
+                    .collect()
+            },
+            dynamic_markers: if self.no_op || self.executor == MainActivationExecutor::ConfigApply {
+                Vec::new()
+            } else if self.mode == MainActivationMode::Online {
+                vec![
+                    "Config.DynamicallyUpdated: written".to_owned(),
+                    "Params.DynamicallyUpdated: written".to_owned(),
+                ]
+            } else {
+                [
+                    ("Config", self.config_marker.is_some()),
+                    ("Params", self.params_marker.is_some()),
+                ]
+                .into_iter()
+                .filter(|(_, present)| *present)
+                .map(|(table, _)| format!("{table}.DynamicallyUpdated: deleted"))
+                .collect()
+            },
         }
     }
 }
@@ -718,15 +750,14 @@ fn render_ordinary_transition(
 }
 
 fn render_online_transition(sql: &mut String, plan: &MainActivationPlan) {
-    let generation = plan.new_generation.hyphenated();
+    let generation = plan.new_generation.hyphenated().to_string();
     for row in &plan.staged_rows {
         let source = quote_string(&row.file_name);
-        let destination = match row.file_name.as_str() {
-            "root" | "version" => row.file_name.clone(),
-            "versions" => format!("versions_dynupdate_{generation}"),
-            _ => dynamic_alias(&row.file_name, &generation.to_string()),
-        };
-        let destination = quote_string(&destination);
+        let destination = quote_string(&published_file_name(
+            MainActivationMode::Online,
+            &row.file_name,
+            &generation,
+        ));
         if matches!(row.file_name.as_str(), "root" | "version") {
             writeln!(
                 sql,
@@ -826,7 +857,7 @@ fn online_history_refusal(mode: MainActivationMode, evidence: &str) -> String {
 
 fn render_marker_upsert(sql: &mut String, table: &str, payload: &[u8], code: u32) {
     let data = hex(payload);
-    writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.{table} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0) UPDATE dbo.{table} SET Modified=SYSUTCDATETIME(),DataSize={},BinaryData=0x{} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 ELSE INSERT dbo.{table} (FileName,Creation,Modified,Attributes,DataSize,BinaryData,PartNo) VALUES (N'DynamicallyUpdated',SYSUTCDATETIME(),SYSUTCDATETIME(),0,{},0x{},0);", payload.len(), data, payload.len(), data).unwrap();
+    writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.{table} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0) UPDATE dbo.{table} SET Modified=DATEADD(year,2000,SYSUTCDATETIME()),DataSize={},BinaryData=0x{} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 ELSE INSERT dbo.{table} (FileName,Creation,Modified,Attributes,DataSize,BinaryData,PartNo) VALUES (N'DynamicallyUpdated',DATEADD(year,2000,SYSUTCDATETIME()),DATEADD(year,2000,SYSUTCDATETIME()),0,{},0x{},0);", payload.len(), data, payload.len(), data).unwrap();
     writeln!(
         sql,
         "IF @@ROWCOUNT <> 1 THROW {code}, '{table}.DynamicallyUpdated upsert failed', 1;"
@@ -855,13 +886,7 @@ fn render_postconditions(sql: &mut String, plan: &MainActivationPlan) {
         .iter()
         .cloned()
         .map(|mut row| {
-            if plan.mode == MainActivationMode::Online {
-                row.file_name = match row.file_name.as_str() {
-                    "root" | "version" => row.file_name,
-                    "versions" => format!("versions_dynupdate_{generation}"),
-                    _ => dynamic_alias(&row.file_name, &generation),
-                };
-            }
+            row.file_name = published_file_name(plan.mode, &row.file_name, &generation);
             row
         })
         .collect::<Vec<_>>();
@@ -1206,6 +1231,20 @@ fn marker_fields(blob: &[u8]) -> Result<Vec<&str>, MainActivationError> {
         .and_then(|value| value.strip_suffix('}'))
         .ok_or_else(|| MainActivationError::Versions("dynamic marker is not braced".to_owned()))?;
     Ok(inner.split(',').map(str::trim).collect())
+}
+
+/// The `Config` name a staged row is published under: an online run keeps
+/// `root` and `version`, writes `versions` and every body under its
+/// `_dynupdate_<generation>` alias; the other modes write the ordinary name.
+fn published_file_name(mode: MainActivationMode, file_name: &str, generation: &str) -> String {
+    if mode != MainActivationMode::Online {
+        return file_name.to_owned();
+    }
+    match file_name {
+        "root" | "version" => file_name.to_owned(),
+        "versions" => format!("versions_dynupdate_{generation}"),
+        _ => dynamic_alias(file_name, generation),
+    }
 }
 
 fn dynamic_alias(name: &str, generation: &str) -> String {
@@ -1943,6 +1982,66 @@ mod tests {
         assert_eq!(report.recovery_token.len(), 64);
         assert_eq!(plan.recovery().overwritten_config_rows.len(), 5);
         assert_eq!(report.touched_tables, ["Config", "ConfigSave", "Params"]);
+    }
+
+    #[test]
+    fn markers_carry_the_platform_year_offset() {
+        // Native rows store their times 2000 years ahead (`4026-…`), as every
+        // other row this crate writes does (#409 F-7).
+        let script =
+            render_main_activation_sql("lab", &fixture(MainActivationMode::Online), None).unwrap();
+        let marker_lines = script
+            .sql
+            .lines()
+            .filter(|line| line.contains("N'DynamicallyUpdated',"))
+            .collect::<Vec<_>>();
+        assert_eq!(marker_lines.len(), 2);
+        for line in marker_lines {
+            assert_eq!(
+                line.matches("SYSUTCDATETIME()").count(),
+                line.matches("DATEADD(year,2000,SYSUTCDATETIME())").count(),
+                "{line}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_report_names_the_rows_and_markers_each_mode_writes() {
+        let online = fixture(MainActivationMode::Online).dry_run_report();
+        let generation = &online.new_generation;
+        assert!(online.published_config_rows.contains(&"root".to_owned()));
+        assert!(
+            online
+                .published_config_rows
+                .contains(&format!("versions_dynupdate_{generation}"))
+        );
+        assert!(
+            online
+                .published_config_rows
+                .iter()
+                .filter(|name| !matches!(name.as_str(), "root" | "version"))
+                .all(|name| name.contains(&format!("_dynupdate_{generation}")))
+        );
+        assert_eq!(
+            online.dynamic_markers,
+            [
+                "Config.DynamicallyUpdated: written",
+                "Params.DynamicallyUpdated: written"
+            ]
+        );
+
+        let exclusive = fixture(MainActivationMode::Exclusive).dry_run_report();
+        assert!(
+            exclusive
+                .published_config_rows
+                .contains(&"versions".to_owned())
+        );
+        assert!(
+            exclusive
+                .published_config_rows
+                .iter()
+                .all(|name| !name.contains("_dynupdate_"))
+        );
     }
 
     #[test]

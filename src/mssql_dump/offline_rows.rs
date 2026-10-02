@@ -924,6 +924,7 @@ mod tests {
             main_configuration: false,
             file_names: Vec::new(),
             file_name_lists: Vec::new(),
+            objects: Vec::new(),
             inflate: false,
             extract_module_text: false,
             extract_metadata_xml: false,
@@ -935,6 +936,8 @@ mod tests {
             no_binary_rows: true,
             write_binary_rows: false,
             write_manifest: false,
+            base: None,
+            sync: false,
         });
         let after = crate::mssql_dump::qualified_storage_table("f2_export", "Config");
         std::fs::remove_dir_all(&dir).unwrap();

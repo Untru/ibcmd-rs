@@ -310,6 +310,26 @@ pub(crate) fn names(row: &Brace) -> Result<ObjectNames> {
     })
 }
 
+/// Fields 67 and 68 of an 8.5 `{76,...}` tuple: `0,0` where БСП 3.2.1.356
+/// (8.5.1.1150) keeps `OpenDataInTabs` and `Use`, `1,1` in the configuration
+/// 8.5.1.1529 saved from an XML 2.20 tree, which names neither property
+/// (`home_page/one_column_v85/input.cf`, `_onecdec/make_home_page_fixtures.py`):
+/// the values 8.5 gives a configuration without them, which it prints for a
+/// `{68,...}` tuple as `OpenDataInDialogs` and `DontUse` (ERP УХ under
+/// 8.5.1.1150). Which of the two fields holds which property is not known;
+/// any other pair is refused. `true` for the second pair.
+fn v76_defaults_of_8_3(tuple: &[Brace]) -> Result<bool> {
+    let pair = (
+        serialize(item(tuple, 67)?).replace("\r\n", ""),
+        serialize(item(tuple, 68)?).replace("\r\n", ""),
+    );
+    match (pair.0.as_str(), pair.1.as_str()) {
+        ("0", "0") => Ok(false),
+        ("1", "1") => Ok(true),
+        (a, b) => bail!("Configuration fields 67, 68 hold {a}, {b}; no known configuration does"),
+    }
+}
+
 /// A field the compiler writes as a constant: checked, not decoded.
 fn expect(tuple: &[Brace], index: usize, expected: &str) -> Result<()> {
     let found = serialize(item(tuple, index)?).replace("\r\n", "");
@@ -461,16 +481,11 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
         ConfigurationShape::V67 => {}
         ConfigurationShape::V68 => expect(t, 60, "1")?,
         ConfigurationShape::V76 => {
-            for (index, expected) in [
-                (60, "1"),
-                (61, "0"),
-                (63, "0"),
-                (66, "0"),
-                (67, "0"),
-                (68, "0"),
-            ] {
+            for (index, expected) in [(60, "1"), (61, "0"), (63, "0"), (66, "0")] {
                 expect(t, index, expected)?;
             }
+            // 67 and 68 are read below (`v76_defaults_of_8_3`).
+            v76_defaults_of_8_3(t)?;
             for index in 69..77 {
                 expect(t, index, nil)?;
             }
@@ -685,6 +700,10 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     let interface_compatibility = match shape {
         ConfigurationShape::V76 => match (atom(item(t, 38)?)?, atom(item(t, 62)?)?) {
             ("3", "6") => "Version8_5EnableTaxi",
+            // A configuration 8.5.1.1529 saved from an XML 2.20 tree at
+            // compatibility 8.3.27 (`home_page/one_column_v85/input.cf`):
+            // field 38 keeps the 8.3 code and 62 repeats it.
+            ("2", "2") => "TaxiEnableVersion8_2",
             (a, b) => bail!("interface compatibility {a}/{b} has no known name"),
         },
         _ => code(
@@ -798,9 +817,9 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     push(el("MobileApplicationURLs"));
     push(share_types);
     // A tuple older than 8.5 read by 8.5 gets the defaults 8.5 gives such a
-    // configuration (ERP УХ); the 8.5 tuple keeps the one set its corpus
-    // shows (БСП), checked above.
-    let tuple_8_5_1 = shape == ConfigurationShape::V76;
+    // configuration (ERP УХ); the 8.5 tuple stores either БСП's set or those
+    // same defaults (`v76_defaults_of_8_3`), checked above.
+    let tuple_8_5_1 = shape == ConfigurationShape::V76 && !v76_defaults_of_8_3(t)?;
     if xml_2_21 {
         push(leaf(
             "MainClientApplicationWindowInterfaceVariant",
@@ -821,7 +840,7 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     }
     push(el("DefaultInterface"));
     if xml_2_21 {
-        if tuple_8_5_1 {
+        if shape == ConfigurationShape::V76 {
             push(localized_element("Caption", item(t, 64)?)?);
             push(localized_element("ShortCaption", item(t, 65)?)?);
         } else {

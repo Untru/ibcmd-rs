@@ -666,7 +666,7 @@ fn extract_failure(
     }
 }
 
-fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
+fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
     let profiles = load_profile_registry(
         BUNDLED_PROFILES,
         args.profile_dir.as_deref(),
@@ -679,6 +679,15 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
             format!("failed to load target profiles: {source:#}"),
         )
     })?;
+    if args.base_free
+        && args.target_profile == DEFAULT_BOOTSTRAP_TARGET_PROFILE
+        && let Some(platform) = args.platform
+        && let Some(profile) = platform_target_profile(&profiles, platform)
+    {
+        // `--platform 8.5.1.1150` names the platform the file is for; the
+        // report names its profile instead of the 8.3.27 default.
+        args.target_profile = profile;
+    }
     let profile_id = ProfileId::parse(&args.target_profile).map_err(|source| {
         bootstrap_failure(
             &args,
@@ -693,6 +702,20 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
             format!("target profile `{profile_id}` was not found"),
         )
     })?;
+    if args.base_free {
+        let Some(storage_profile) = target
+            .storage_profile
+            .as_ref()
+            .map(|coordinate| coordinate.value.clone())
+        else {
+            return Err(bootstrap_failure(
+                &args,
+                "invalid_target_profile",
+                format!("target profile `{profile_id}` names no storage profile"),
+            ));
+        };
+        return bootstrap_base_free(args, storage_profile);
+    }
     let tree = ibcmd_xml::source_tree::read_source_tree(&args.source_dir).map_err(|source| {
         bootstrap_failure(
             &args,
@@ -757,6 +780,95 @@ fn bootstrap(args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
         metadata_files,
         asset_files,
         non_source_files,
+        storage_entries,
+        publication: Some(CfBootstrapPublicationReport {
+            bytes_written: publication.write.bytes_written,
+            entries_written: publication.write.entries_written,
+            entries_validated: publication.validation.entries_validated,
+        }),
+        errors: Vec::new(),
+    }))
+}
+
+/// `cf bootstrap --target-profile`'s default (`crate::cli::CfBootstrapArgs`).
+const DEFAULT_BOOTSTRAP_TARGET_PROFILE: &str = "platform-8.3.27.1989";
+
+/// The platform profile with a storage profile that `--platform` names: the
+/// exact build's when it has one, otherwise the oldest build of the release
+/// that has one (`8.5.1` and `8.5.1.1529` → `platform-8.5.1.1150`, as
+/// `--platform 8.5.1` stands for 8.5.1.1150 elsewhere).
+fn platform_target_profile(
+    profiles: &ibcmd_core::profile::ProfileRegistry,
+    platform: crate::platform::PlatformSpec,
+) -> Option<String> {
+    let release = platform.release().map(|part| part.to_string()).join(".");
+    let builds = profiles
+        .profiles()
+        .values()
+        .filter(|profile| profile.storage_profile.is_some())
+        .filter_map(|profile| {
+            let build = profile.platform_build.as_ref()?.value.to_string();
+            let number = build
+                .strip_prefix(&format!("{release}."))?
+                .parse::<u32>()
+                .ok()?;
+            Some((number, build, profile.id.to_string()))
+        })
+        .collect::<Vec<_>>();
+    builds
+        .iter()
+        .find(|(_, build, _)| build == platform.display())
+        .or_else(|| builds.iter().min())
+        .map(|(_, _, id)| id.clone())
+}
+
+/// `cf bootstrap --base-free`: the tree's rows from the base-free stage, as
+/// they are, in a new container (Untru/ibcmd-rs#351).
+fn bootstrap_base_free(
+    args: CfBootstrapArgs,
+    storage_profile: StorageProfileId,
+) -> Result<CfCommandReport, CfCommandError> {
+    let (patch, retained) =
+        crate::mssql::base_free_cf::base_free_patch(&args.source_dir, args.source_version)
+            .map_err(|source| {
+                bootstrap_failure(&args, "base_free_compile_failed", format!("{source:#}"))
+            })?;
+    let storage_entries = patch.len();
+    let limits = limits_for_len(retained)
+        .map_err(|message| bootstrap_failure(&args, "source_tree_invalid", message))?;
+    // Always the unpaged format15: 8.3.27.2214 refuses the bootstrap
+    // writer's paged format16 (`/LoadCfg`: stream format error) and loads the
+    // format15 one, dumping back the tree it was built from.
+    let revision = Revision::Format15;
+    let mut cf_profile = BootstrapCfProfile::new(revision, args.storage_version, storage_profile)
+        .with_reserved(args.reserved);
+    if let Some(page_size) = args.page_size {
+        cf_profile = cf_profile.with_page_size(page_size);
+    }
+    let publication = publish_bootstrap_patch_new(patch, cf_profile, &args.output, limits)
+        .map_err(|source| {
+            bootstrap_failure(
+                &args,
+                "bootstrap_publish_failed",
+                format!("failed to publish bootstrap CF: {source}"),
+            )
+        })?;
+    Ok(CfCommandReport::Bootstrap(CfBootstrapReport {
+        schema_version: REPORT_SCHEMA_VERSION,
+        command: "bootstrap",
+        ok: true,
+        source_dir: display_path(&args.source_dir),
+        output: display_path(&args.output),
+        source_version: args.source_version.as_str(),
+        target_profile: args.target_profile,
+        revision: revision_name(revision),
+        storage_version: args.storage_version,
+        page_size: args.page_size,
+        reserved: args.reserved,
+        source_files: 0,
+        metadata_files: 0,
+        asset_files: 0,
+        non_source_files: 0,
         storage_entries,
         publication: Some(CfBootstrapPublicationReport {
             bytes_written: publication.write.bytes_written,
@@ -2289,6 +2401,7 @@ mod tests {
             storage_version: 5,
             page_size: None,
             reserved: 0,
+            base_free: false,
         };
         let report = bootstrap_report(
             run(CfArgs {

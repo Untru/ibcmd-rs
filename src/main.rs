@@ -75,6 +75,8 @@ fn run() -> Result<()> {
         Commands::Infobase(args) => std::process::exit(ibcmd_rs::dropin::run_infobase(&args.args)),
         Commands::Help(args) => std::process::exit(ibcmd_rs::dropin::run_help(&args.args)),
         Commands::Server(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("server")),
+        Commands::Serve(_) => std::process::exit(ibcmd_rs::server::run_stdio()),
+        Commands::Objects(args) => ibcmd_rs::commands::objects::run(args)?,
         Commands::Eventlog(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("eventlog")),
         Commands::Config(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("config")),
         Commands::Extension(_) => std::process::exit(ibcmd_rs::dropin::run_other_mode("extension")),
@@ -593,6 +595,14 @@ fn run() -> Result<()> {
         Commands::MssqlDumpConfig(mut args) => {
             ibcmd_rs::settings::commands::prepare_dump_config(&mut args, subcommand)?;
             let report = ibcmd_rs::mssql_dump::dump_config(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlSaveConfig(args) => {
+            let report = ibcmd_rs::mssql_dump::config_save::save_config_command(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
+        Commands::MssqlLoadConfig(args) => {
+            let report = ibcmd_rs::mssql::cf_load_stage::load_config_command(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
         Commands::MssqlExtensionList(args) => {

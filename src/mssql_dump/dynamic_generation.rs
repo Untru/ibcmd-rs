@@ -116,7 +116,6 @@ impl StorageGenerationOverlay {
     }
 
     /// The names of the staged rows this overlay publishes.
-    #[cfg(test)]
     pub(super) fn staged_names(&self) -> Option<&BTreeSet<String>> {
         self.staged.as_ref().map(|staged| &staged.names)
     }

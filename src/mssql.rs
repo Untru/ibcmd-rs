@@ -91,8 +91,11 @@ use crate::source_audit::{
 use crate::source_listing;
 use crate::sql::{ScriptVariables, SqlBackend, SqlExec, SqlOptions, SqlParam, SqlTools};
 
+pub mod base_free_cf;
+pub mod cf_load_stage;
 mod delta_stage;
 mod empty_stage;
+pub mod files_stage;
 mod offline_compile;
 mod override_stage;
 mod patch_refusal;
@@ -957,6 +960,11 @@ pub fn activate_staged_main(
     if args.interrupt_sessions && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
         bail!("--interrupt-sessions is only valid for live activation");
     }
+    // An argument check costs nothing; the verification costs two rac calls
+    // and a SQL probe (#409 F-6).
+    if !args.allow_non_lab {
+        bail!("--allow-non-lab acknowledgement is required");
+    }
     let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
@@ -975,6 +983,20 @@ pub fn activate_staged_main(
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
+    activate_staged_main_verified(args, profile_verification)
+}
+
+/// [`activate_staged_main`] for a caller that has verified the platform
+/// profile of this same target already (`apply_source_change`), so the two
+/// rac calls and the SQL probe run once per command (#409 F-6).
+pub(crate) fn activate_staged_main_verified(
+    args: &MssqlActivateStagedMainArgs,
+    profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+) -> Result<MssqlActivateStagedMainReport> {
+    args.platform_profile.require_main_write_supported()?;
+    if args.interrupt_sessions && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
+        bail!("--interrupt-sessions is only valid for live activation");
+    }
     if !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required");
     }
@@ -1351,19 +1373,64 @@ fn safe_file_stem(value: &str) -> String {
         .collect()
 }
 
+/// Writes an artifact that must not change once written: identical bytes
+/// already there are accepted, different ones refused. The bytes go to a
+/// temporary file first, are flushed, and only then appear under `path`
+/// (a hard link, which fails rather than replace a file written meanwhile),
+/// so a crash never leaves a truncated artifact that every repeat would
+/// refuse (#409 F-8).
 fn write_new_or_identical(path: &Path, bytes: &[u8]) -> Result<()> {
+    use std::io::Write as _;
+
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
     }
-    match fs::read(path) {
-        Ok(existing) if existing == bytes => Ok(()),
-        Ok(_) => bail!("refusing to overwrite existing artifact {}", path.display()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))
+    let existing_matches = |path: &Path| -> Result<bool> {
+        match fs::read(path) {
+            Ok(existing) if existing == bytes => Ok(true),
+            Ok(_) => bail!("refusing to overwrite existing artifact {}", path.display()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
         }
-        Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
+    };
+    if existing_matches(path)? {
+        return Ok(());
     }
+    let name = path
+        .file_name()
+        .ok_or_else(|| anyhow!("artifact path {} has no file name", path.display()))?;
+    let mut temporary_name = std::ffi::OsString::from(".");
+    temporary_name.push(name);
+    temporary_name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
+    let temporary = path.with_file_name(temporary_name);
+    let written = (|| -> std::io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        file.write_all(bytes)?;
+        file.sync_all()
+    })();
+    if let Err(error) = written {
+        let _ = fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("failed to write {}", temporary.display()));
+    }
+    let published = match fs::hard_link(&temporary, path) {
+        Ok(()) => Ok(()),
+        Err(error) => match existing_matches(path) {
+            Ok(true) => Ok(()),
+            // A replacing rename would lose a concurrently published recovery
+            // artifact. Refuse when atomic, non-replacing publication is not
+            // available, including file systems that do not support hard links.
+            Ok(false) => Err(error).with_context(|| {
+                format!("failed to publish {} without replacing it", path.display())
+            }),
+            Err(error) => Err(error),
+        },
+    };
+    let _ = fs::remove_file(&temporary);
+    published
 }
 
 pub fn write_activation_diff(report: &MssqlActivationDiffReport, output: &Path) -> Result<()> {
@@ -3572,9 +3639,48 @@ pub fn import_target_state(
 pub fn stage_source_objects(
     args: &MssqlStageSourceObjectsArgs,
 ) -> Result<StageSourceObjectsReport> {
+    if !args.files.is_empty() {
+        return stage_source_files(args);
+    }
     if args.base_free {
         return empty_stage::stage_source_objects_base_free(args);
     }
+    stage_source_objects_patch(args, None)
+}
+
+/// `--file` (`infobase config import files`, #363): the objects the listed
+/// files belong to, prepared as `--path-prefix` prepares them, and of their
+/// rows the ones the files compile to (`files_stage`).
+fn stage_source_files(args: &MssqlStageSourceObjectsArgs) -> Result<StageSourceObjectsReport> {
+    if args.base_free {
+        bail!(
+            "a partial import of files patches the target's rows: --file and --base-free do not go together"
+        );
+    }
+    if !args.path_prefix.is_empty() {
+        bail!("--file selects the objects itself: it does not go with --path-prefix");
+    }
+    let selection = files_stage::select(&args.source_root, &args.files)?;
+    let mut scoped = args.clone();
+    scoped.path_prefix = selection.owners().to_vec();
+    scoped.files = selection.files().to_vec();
+    // A sparse directory has no Configuration.xml to name its XML version:
+    // the guard then exports in the version the listed objects declare.
+    if scoped.source_version.is_none()
+        && crate::metadata_model::export::tree_version(&scoped.source_root).is_none()
+        && let Some(owner) = selection.owners().first()
+        && let Some(version) = source_xml_version(&scoped.source_root.join(owner))?
+    {
+        scoped.source_version =
+            <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&version, true).ok();
+    }
+    stage_source_objects_patch(&scoped, Some(&selection))
+}
+
+fn stage_source_objects_patch(
+    args: &MssqlStageSourceObjectsArgs,
+    selection: Option<&files_stage::FilesSelection>,
+) -> Result<StageSourceObjectsReport> {
     require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
     if !args.replace_config_save {
         return Err(anyhow!(
@@ -3583,8 +3689,14 @@ pub fn stage_source_objects(
     }
     stage_timing::reset_from_env();
 
+    // A partial import of files also scans the files themselves: the guard
+    // compares them, and nothing else, with the staged state.
+    let scan_prefixes = match selection {
+        Some(selection) => selection.scan_prefixes(),
+        None => args.path_prefix.clone(),
+    };
     let manifest = timed_stage_step("scan the tree", || {
-        scan_sources_with_prefixes(&args.source_root, &args.path_prefix)
+        scan_sources_with_prefixes(&args.source_root, &scan_prefixes)
     })?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
@@ -3637,6 +3749,9 @@ pub fn stage_source_objects(
     } else {
         override_stage::Plan::default()
     };
+    if let Some(selection) = selection {
+        selection.refuse_added(&plan.added)?;
+    }
     let leave_to_the_build =
         |xml: &PathBuf| plan.is_added(&source_relative_path(&args.source_root, xml));
     let metadata_xmls = metadata_xmls
@@ -3674,7 +3789,8 @@ pub fn stage_source_objects(
     // they come from stay the target's (`delta_stage`).
     let mut delta = None;
     let mut all_rows_because = None;
-    if overriding {
+    // The files of a partial import say themselves which rows change.
+    if overriding && selection.is_none() {
         let aliases = BASE_ROW_ALIASES
             .get()
             .filter(|(aliased_database, _)| aliased_database == &args.database)
@@ -3845,6 +3961,13 @@ pub fn stage_source_objects(
         let mut compiled_files = built.compiled_files;
         compiled_files.truncate(60);
         metadata_objects.extend(built.objects);
+        if let Some(selection) = selection {
+            selection.trim(
+                &args.source_root,
+                &mut metadata_objects,
+                &mut common_modules,
+            )?;
+        }
         let metadata_object_count = metadata_objects.len();
         let common_module_count = common_modules.len();
         ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
@@ -10057,11 +10180,15 @@ fn qualified_table(database: &str, table: &str) -> String {
     format!("{}.dbo.{}", quote_ident(database), quote_ident(table))
 }
 
+/// `file_name` in the folder of `source`, a file path on the database
+/// server: SQL Server on Windows spells it with `\\`, on Linux with `/`,
+/// whatever the platform this client runs on, so the folder is cut at the last
+/// separator of either kind and the separator kept.
 fn sibling_path(source: &str, file_name: &str) -> Result<String> {
-    let parent = Path::new(source)
-        .parent()
+    let cut = source
+        .rfind(['\\', '/'])
         .ok_or_else(|| anyhow!("cannot find parent path for {source}"))?;
-    Ok(parent.join(file_name).to_string_lossy().to_string())
+    Ok(format!("{}{file_name}", &source[..=cut]))
 }
 
 fn quote_ident(value: &str) -> String {
@@ -11733,30 +11860,107 @@ mod tests {
     }
 
     #[test]
+    fn recovery_artifacts_are_written_once_and_whole() {
+        let root = std::env::temp_dir().join(format!("ibcmd-rs-artifact-{}", uuid::Uuid::new_v4()));
+        let path = root.join("nested").join("recovery.json");
+        super::write_new_or_identical(&path, b"{\"rows\":1}").unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"rows\":1}");
+        super::write_new_or_identical(&path, b"{\"rows\":1}").unwrap();
+        let error = super::write_new_or_identical(&path, b"{\"rows\":2}").unwrap_err();
+        assert!(error.to_string().contains("refusing to overwrite"));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{\"rows\":1}");
+        let left = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect::<Vec<_>>();
+        assert_eq!(left, [std::ffi::OsString::from("recovery.json")]);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn concurrent_recovery_writers_preserve_the_winners_bytes() {
+        for _ in 0..4 {
+            let root = std::env::temp_dir()
+                .join(format!("ibcmd-rs-artifact-race-{}", uuid::Uuid::new_v4()));
+            std::fs::create_dir_all(&root).unwrap();
+            let path = root.join("recovery.json");
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+            let handles = (0..8_u8)
+                .map(|writer| {
+                    let path = path.clone();
+                    let barrier = barrier.clone();
+                    std::thread::spawn(move || {
+                        let bytes = vec![writer; 512 * 1024];
+                        barrier.wait();
+                        (writer, super::write_new_or_identical(&path, &bytes).is_ok())
+                    })
+                })
+                .collect::<Vec<_>>();
+            let winners = handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .filter(|(_, succeeded)| *succeeded)
+                .map(|(writer, _)| writer)
+                .collect::<Vec<_>>();
+            assert_eq!(
+                winners.len(),
+                1,
+                "only one distinct artifact may be published"
+            );
+            assert!(
+                std::fs::read(&path).unwrap() == vec![winners[0]; 512 * 1024],
+                "the published bytes must belong to the successful writer"
+            );
+            assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+            std::fs::remove_dir_all(root).unwrap();
+        }
+    }
+
+    /// A path written the Windows way (`Catalogs\Products.xml`), in the
+    /// separators of the platform the test runs on: the inference functions
+    /// join components, so the expectation has to be components too.
+    fn native_path(windows_spelling: &str) -> std::path::PathBuf {
+        windows_spelling
+            .replace('\\', std::path::MAIN_SEPARATOR_STR)
+            .into()
+    }
+
+    #[test]
     fn infers_common_module_text_path_from_xml_path() {
         assert_eq!(
-            infer_common_module_text_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml".as_ref()),
-            std::path::PathBuf::from(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
+            infer_common_module_text_path(
+                native_path(r"CommonModules\РаботаСБанкамиВызовСервера.xml").as_path()
+            ),
+            native_path(r"CommonModules\РаботаСБанкамиВызовСервера\Ext\Module.bsl")
         );
     }
 
     #[test]
     fn infers_raw_deflated_metadata_body_paths() {
         assert_eq!(
-            super::infer_common_picture_body_path(r"CommonPictures\Address.xml".as_ref()),
-            std::path::PathBuf::from(r"CommonPictures\Address\Ext\Picture.xml")
+            super::infer_common_picture_body_path(
+                native_path(r"CommonPictures\Address.xml").as_path()
+            ),
+            native_path(r"CommonPictures\Address\Ext\Picture.xml")
         );
         assert_eq!(
-            super::infer_object_help_body_path(r"Catalogs\Products.xml".as_ref(), "Catalog"),
-            std::path::PathBuf::from(r"Catalogs\Products\Ext\Help.xml")
+            super::infer_object_help_body_path(
+                native_path(r"Catalogs\Products.xml").as_path(),
+                "Catalog"
+            ),
+            native_path(r"Catalogs\Products\Ext\Help.xml")
         );
         assert_eq!(
-            super::infer_xdto_package_body_path(r"XDTOPackages\Exchange.xml".as_ref()),
-            std::path::PathBuf::from(r"XDTOPackages\Exchange\Ext\Package.bin")
+            super::infer_xdto_package_body_path(
+                native_path(r"XDTOPackages\Exchange.xml").as_path()
+            ),
+            native_path(r"XDTOPackages\Exchange\Ext\Package.bin")
         );
         assert_eq!(
-            super::infer_ws_reference_definition_path(r"WSReferences\UpdateFiles.xml".as_ref()),
-            std::path::PathBuf::from(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
+            super::infer_ws_reference_definition_path(
+                native_path(r"WSReferences\UpdateFiles.xml").as_path()
+            ),
+            native_path(r"WSReferences\UpdateFiles\Ext\WSDefinition.xml")
         );
     }
 
@@ -11907,102 +12111,115 @@ mod tests {
         );
         assert_eq!(super::additional_indexes_body_suffix("Catalog"), None);
         assert_eq!(
-            super::infer_additional_indexes_body_path(r"Documents\Order.xml".as_ref()),
-            std::path::PathBuf::from(r"Documents\Order\Ext\AdditionalIndexes.xml")
+            super::infer_additional_indexes_body_path(
+                native_path(r"Documents\Order.xml").as_path()
+            ),
+            native_path(r"Documents\Order\Ext\AdditionalIndexes.xml")
         );
     }
 
     #[test]
     fn infers_object_module_body_paths() {
         assert_eq!(
-            super::infer_object_module_body_path(r"Catalogs\Products.xml".as_ref(), "Catalog", "0"),
-            std::path::PathBuf::from(r"Catalogs\Products\Ext\ObjectModule.bsl")
+            super::infer_object_module_body_path(
+                native_path(r"Catalogs\Products.xml").as_path(),
+                "Catalog",
+                "0"
+            ),
+            native_path(r"Catalogs\Products\Ext\ObjectModule.bsl")
         );
         assert_eq!(
             super::infer_object_module_body_path(
-                r"InformationRegisters\Prices.xml".as_ref(),
+                native_path(r"InformationRegisters\Prices.xml").as_path(),
                 "InformationRegister",
                 "1"
             ),
-            std::path::PathBuf::from(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
+            native_path(r"InformationRegisters\Prices\Ext\RecordSetModule.bsl")
         );
         assert_eq!(
             super::infer_object_module_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "Configuration",
                 "6"
             ),
-            std::path::PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
+            native_path(r"Ext\ManagedApplicationModule.bsl")
         );
     }
 
     #[test]
     fn infers_configuration_ext_body_paths() {
         assert_eq!(
-            super::infer_configuration_ext_body_path(r"Configuration.xml".as_ref(), "Splash.xml"),
-            std::path::PathBuf::from(r"Ext\Splash.xml")
+            super::infer_configuration_ext_body_path(
+                native_path(r"Configuration.xml").as_path(),
+                "Splash.xml"
+            ),
+            native_path(r"Ext\Splash.xml")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "ParentConfigurations.bin"
             ),
-            std::path::PathBuf::from(r"Ext\ParentConfigurations.bin")
+            native_path(r"Ext\ParentConfigurations.bin")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "MobileClientSignature.bin"
             ),
-            std::path::PathBuf::from(r"Ext\MobileClientSignature.bin")
+            native_path(r"Ext\MobileClientSignature.bin")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "CommandInterface.xml"
             ),
-            std::path::PathBuf::from(r"Ext\CommandInterface.xml")
+            native_path(r"Ext\CommandInterface.xml")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "HomePageWorkArea.xml"
             ),
-            std::path::PathBuf::from(r"Ext\HomePageWorkArea.xml")
+            native_path(r"Ext\HomePageWorkArea.xml")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "ClientApplicationInterface.xml"
             ),
-            std::path::PathBuf::from(r"Ext\ClientApplicationInterface.xml")
+            native_path(r"Ext\ClientApplicationInterface.xml")
         );
         assert_eq!(
             super::infer_configuration_ext_body_path(
-                r"Configuration.xml".as_ref(),
+                native_path(r"Configuration.xml").as_path(),
                 "StandaloneConfigurationContent.bin"
             ),
-            std::path::PathBuf::from(r"Ext\StandaloneConfigurationContent.bin")
+            native_path(r"Ext\StandaloneConfigurationContent.bin")
         );
     }
 
     #[test]
     fn infers_form_body_paths() {
         assert_eq!(
-            super::infer_form_body_path(r"Catalogs\Products\Forms\ItemForm.xml".as_ref()),
-            std::path::PathBuf::from(r"Catalogs\Products\Forms\ItemForm\Ext\Form.xml")
+            super::infer_form_body_path(
+                native_path(r"Catalogs\Products\Forms\ItemForm.xml").as_path()
+            ),
+            native_path(r"Catalogs\Products\Forms\ItemForm\Ext\Form.xml")
         );
         assert_eq!(
-            super::infer_form_module_body_path(r"CommonForms\SharedForm.xml".as_ref()),
-            std::path::PathBuf::from(r"CommonForms\SharedForm\Ext\Form\Module.bsl")
+            super::infer_form_module_body_path(
+                native_path(r"CommonForms\SharedForm.xml").as_path()
+            ),
+            native_path(r"CommonForms\SharedForm\Ext\Form\Module.bsl")
         );
     }
 
     #[test]
     fn infers_role_rights_body_path() {
         assert_eq!(
-            super::infer_role_rights_body_path(r"Roles\Editor.xml".as_ref()),
-            std::path::PathBuf::from(r"Roles\Editor\Ext\Rights.xml")
+            super::infer_role_rights_body_path(native_path(r"Roles\Editor.xml").as_path()),
+            native_path(r"Roles\Editor\Ext\Rights.xml")
         );
     }
 
@@ -12444,12 +12661,12 @@ mod tests {
 
     #[test]
     fn filters_source_paths_by_prefix() {
-        let root = PathBuf::from(r"C:\sources");
+        let root = native_path(r"C:\sources");
         let paths = vec![
-            PathBuf::from(r"C:\sources\Catalogs\Products.xml"),
-            PathBuf::from(r"C:\sources\Catalogs\Products\Forms\ItemForm.xml"),
-            PathBuf::from(r"C:\sources\Catalogs\Services.xml"),
-            PathBuf::from(r"C:\sources\CommonModules\Utils.xml"),
+            native_path(r"C:\sources\Catalogs\Products.xml"),
+            native_path(r"C:\sources\Catalogs\Products\Forms\ItemForm.xml"),
+            native_path(r"C:\sources\Catalogs\Services.xml"),
+            native_path(r"C:\sources\CommonModules\Utils.xml"),
         ];
 
         let filtered = filter_source_paths_by_prefix(
@@ -16256,8 +16473,11 @@ mod tests {
     #[test]
     fn infers_command_interface_body_path_and_suffix() {
         assert_eq!(
-            super::infer_command_interface_body_path(r"Subsystems\Admin.xml".as_ref(), "Subsystem"),
-            std::path::PathBuf::from(r"Subsystems\Admin\Ext\CommandInterface.xml")
+            super::infer_command_interface_body_path(
+                native_path(r"Subsystems\Admin.xml").as_path(),
+                "Subsystem"
+            ),
+            native_path(r"Subsystems\Admin\Ext\CommandInterface.xml")
         );
         assert_eq!(
             super::command_interface_body_suffix("CommonCommand"),
@@ -16270,16 +16490,18 @@ mod tests {
     #[test]
     fn infers_exchange_plan_content_body_path() {
         assert_eq!(
-            super::infer_exchange_plan_content_body_path(r"ExchangePlans\Sync.xml".as_ref()),
-            std::path::PathBuf::from(r"ExchangePlans\Sync\Ext\Content.xml")
+            super::infer_exchange_plan_content_body_path(
+                native_path(r"ExchangePlans\Sync.xml").as_path()
+            ),
+            native_path(r"ExchangePlans\Sync\Ext\Content.xml")
         );
     }
 
     #[test]
     fn infers_predefined_data_body_path_and_suffix() {
         assert_eq!(
-            super::infer_predefined_data_body_path(r"Catalogs\Products.xml".as_ref()),
-            std::path::PathBuf::from(r"Catalogs\Products\Ext\Predefined.xml")
+            super::infer_predefined_data_body_path(native_path(r"Catalogs\Products.xml").as_path()),
+            native_path(r"Catalogs\Products\Ext\Predefined.xml")
         );
         assert_eq!(super::predefined_data_body_suffix("Catalog"), Some("1c"));
         assert_eq!(
@@ -16293,9 +16515,9 @@ mod tests {
     fn infers_business_process_flowchart_body_path() {
         assert_eq!(
             super::infer_business_process_flowchart_body_path(
-                r"BusinessProcesses\Approval.xml".as_ref()
+                native_path(r"BusinessProcesses\Approval.xml").as_path()
             ),
-            std::path::PathBuf::from(r"BusinessProcesses\Approval\Ext\Flowchart.xml")
+            native_path(r"BusinessProcesses\Approval\Ext\Flowchart.xml")
         );
     }
 
@@ -16380,60 +16602,62 @@ mod tests {
     fn infers_raw_deflated_template_body_paths() {
         assert_eq!(
             super::infer_raw_deflated_template_body_path(
-                r"CommonTemplates\SharedText.xml".as_ref(),
+                native_path(r"CommonTemplates\SharedText.xml").as_path(),
                 "TextDocument"
             ),
-            Some(std::path::PathBuf::from(
-                r"CommonTemplates\SharedText\Ext\Template.txt"
-            ))
+            Some(native_path(r"CommonTemplates\SharedText\Ext\Template.txt"))
         );
         assert_eq!(
             super::infer_raw_deflated_template_body_path(
-                r"DataProcessors\ImportData\Templates\Schema.xml".as_ref(),
+                native_path(r"DataProcessors\ImportData\Templates\Schema.xml").as_path(),
                 "DataCompositionSchema"
             ),
-            Some(std::path::PathBuf::from(
+            Some(native_path(
                 r"DataProcessors\ImportData\Templates\Schema\Ext\Template.xml"
             ))
         );
         assert_eq!(
             super::infer_raw_deflated_template_body_path(
-                r"CommonTemplates\ReportAppearance.xml".as_ref(),
+                native_path(r"CommonTemplates\ReportAppearance.xml").as_path(),
                 "DataCompositionAppearanceTemplate"
             ),
-            Some(std::path::PathBuf::from(
+            Some(native_path(
                 r"CommonTemplates\ReportAppearance\Ext\Template.xml"
             ))
         );
         assert_eq!(
             super::infer_raw_deflated_template_body_path(
-                r"DataProcessors\Routes\Templates\RouteSchema.xml".as_ref(),
+                native_path(r"DataProcessors\Routes\Templates\RouteSchema.xml").as_path(),
                 "GraphicalSchema"
             ),
-            Some(std::path::PathBuf::from(
+            Some(native_path(
                 r"DataProcessors\Routes\Templates\RouteSchema\Ext\Template.xml"
             ))
         );
         assert_eq!(
             super::infer_raw_deflated_template_body_path(
-                r"CommonTemplates\Table.xml".as_ref(),
+                native_path(r"CommonTemplates\Table.xml").as_path(),
                 "SpreadsheetDocument"
             ),
             None
         );
         assert_eq!(
-            super::infer_spreadsheet_template_body_path(r"CommonTemplates\Table.xml".as_ref()),
-            std::path::PathBuf::from(r"CommonTemplates\Table\Ext\Template.xml")
+            super::infer_spreadsheet_template_body_path(
+                native_path(r"CommonTemplates\Table.xml").as_path()
+            ),
+            native_path(r"CommonTemplates\Table\Ext\Template.xml")
         );
         assert_eq!(
-            super::infer_binary_template_body_path(r"CommonTemplates\Archive.xml".as_ref()),
-            std::path::PathBuf::from(r"CommonTemplates\Archive\Ext\Template.bin")
+            super::infer_binary_template_body_path(
+                native_path(r"CommonTemplates\Archive.xml").as_path()
+            ),
+            native_path(r"CommonTemplates\Archive\Ext\Template.bin")
         );
         assert_eq!(
             super::infer_html_template_body_path(
-                r"Catalogs\Products\Templates\Description.xml".as_ref()
+                native_path(r"Catalogs\Products\Templates\Description.xml").as_path()
             ),
-            std::path::PathBuf::from(r"Catalogs\Products\Templates\Description\Ext\Template.xml")
+            native_path(r"Catalogs\Products\Templates\Description\Ext\Template.xml")
         );
     }
 
@@ -16461,6 +16685,11 @@ mod tests {
         let path = super::sibling_path(r"C:\temp\source\db.mdf", "target.mdf").unwrap();
 
         assert_eq!(path, r"C:\temp\source\target.mdf");
+        assert_eq!(
+            super::sibling_path("/var/opt/mssql/data/db.mdf", "target.mdf").unwrap(),
+            "/var/opt/mssql/data/target.mdf"
+        );
+        assert!(super::sibling_path("db.mdf", "target.mdf").is_err());
     }
 
     #[test]

@@ -104,7 +104,7 @@ const TERMINAL_ELEMENTS: [&str; 5] = [
 
 /// Reference-family protocol identifiers: the `TypeId` storage writes for a
 /// `<v8:TypeSet>` naming a whole family rather than one configuration type.
-const REFERENCE_FAMILIES: [(&str, &str); 11] = [
+const REFERENCE_FAMILIES: [(&str, &str); 12] = [
     ("ExchangePlanRef", "0a52f9de-73ea-4507-81e8-66217bead73a"),
     (
         "BusinessProcessRoutePointRef",
@@ -125,6 +125,12 @@ const REFERENCE_FAMILIES: [(&str, &str); 11] = [
     ("ChartOfAccountsRef", "ac606d60-0209-4159-8e4c-794bc091ce38"),
     ("CatalogRef", "e61ef7b8-f3e1-4f4b-8ac7-676e90524997"),
     ("AnyIBRef", "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
+    // The same type set as a configuration under an older compatibility mode
+    // spells it; stored by the same id (Библиотека стандартных подсистем:
+    // `DataProcessors/ЗаменаИОбъединениеЭлементов/Templates/
+    // ОсновнаяСхемаКомпоновкиДанных` holds `<TypeId>280f5f0e-…</TypeId>` where
+    // the platform's dump of it writes `dNp1:AnyRef`).
+    ("AnyRef", "280f5f0e-9c8a-49cc-bf6d-4d296cc17a63"),
 ];
 
 /// Resolves a configuration generated type by name to its storage `TypeId`.

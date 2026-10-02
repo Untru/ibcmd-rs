@@ -699,6 +699,9 @@ struct FormXmlTablePeriod {
 struct FormXmlExtendedTooltip {
     id: String,
     name: String,
+    /// The `DisplayImportance` attribute, the one thing an otherwise empty
+    /// tooltip element can still carry.
+    display_importance: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -1069,6 +1072,7 @@ struct FlowchartXmlItem {
     events: BTreeMap<String, Option<String>>,
 }
 
+mod form_root_42;
 mod help_pages;
 mod interface_assets;
 
@@ -1623,6 +1627,10 @@ impl MetadataSourceContext {
     /// `<Owner>.Form.<name>` of an object, read from the form's own holder XML.
     fn resolve_form_uuid(&self, reference: &str) -> Result<String> {
         let reference = reference.trim();
+        // A form the configuration no longer has is spelled by its bare uuid.
+        if is_uuid_text(reference) {
+            return Ok(reference.to_ascii_lowercase());
+        }
         let path = if let Some(name) = reference.strip_prefix("CommonForm.") {
             self.source_root
                 .join("CommonForms")
@@ -3676,6 +3684,17 @@ fn native_mobile_device_command_bar_content(
             .or_else(|| tooltips.get(name).cloned());
         match found {
             Some(id) => ids.push(id),
+            // `<id>:<item class>`: an item the form no longer has.
+            None if name.split_once(':').is_some_and(|(id, class)| {
+                class == "02023637-7868-4a5f-8576-835a76e0c9ba" && id.parse::<u64>().is_ok()
+            }) =>
+            {
+                ids.push(
+                    name.split_once(':')
+                        .map(|(id, _)| id.to_string())
+                        .unwrap_or_default(),
+                );
+            }
             None => {
                 return Err(anyhow!(
                     "<MobileDeviceCommandBarContent> names {name}, which is not a form item"
@@ -4131,6 +4150,7 @@ fn format_native_child_item(
                     main_attribute_class,
                     source,
                     items_root,
+                    None,
                 )?);
             }
             if records.len() != 1 {
@@ -4493,6 +4513,7 @@ fn format_native_child_item(
             main_attribute_class,
             source,
             items_root,
+            None,
         )?;
         let kind_uuid =
             native::child_kind_uuid(5).ok_or_else(|| anyhow!("no kind uuid for <{}>", item.tag))?;
@@ -4808,6 +4829,7 @@ fn format_native_table_record(
             main_attribute_class,
             source,
             items_root,
+            nested_in_gantt_chart.then_some(item.id.as_str()),
         )?);
     }
 
@@ -5060,20 +5082,28 @@ fn native_root_property_bag(
         "cfg:ReportObject" => {
             let scalar = |name: &str| properties.root_scalars.get(name).map(|value| value.trim());
             let attribute_ref = |name: &str| -> Result<String> {
-                let attribute = properties
+                // A bare number is the id of an attribute the form no longer
+                // has, as the exporter writes it.
+                let attribute_id = match properties
                     .attributes
                     .iter()
                     .find(|attribute| attribute.name == name)
-                    .ok_or_else(|| {
-                        anyhow!("the report names {name}, which is not a form attribute")
-                    })?;
+                {
+                    Some(attribute) => attribute.id.clone(),
+                    None if name.parse::<u64>().is_ok() => name.to_string(),
+                    None => {
+                        return Err(anyhow!(
+                            "the report names {name}, which is not a form attribute"
+                        ));
+                    }
+                };
                 // `{1,{<id>},""}`: all 218 stored report references of both
                 // corpora end with the empty string, and native ibcmd refuses
                 // a body without it («Ошибка формата потока») although our
                 // exporter reads both.
                 Ok(format!(
                     "{{\"#\",11cfd3e0-86f8-4480-aaa5-dc6a6ccac689,{{1,{{{}}},\"\"}}}}",
-                    attribute.id
+                    attribute_id
                 ))
             };
             let enumerated =
@@ -5089,17 +5119,22 @@ fn native_root_property_bag(
                 };
             // A value typed `xs:decimal` instead of an attribute name is
             // stored as the number itself (1 form: `3` and `0`).
-            let report_value = |name: &str| -> Result<String> {
-                if !name.is_empty() && name.bytes().all(|byte| byte.is_ascii_digit()) {
+            let report_value = |property: &str, name: &str| -> Result<String> {
+                if !name.is_empty()
+                    && name.bytes().all(|byte| byte.is_ascii_digit())
+                    && !properties
+                        .root_scalars
+                        .contains_key(&format!("{property}#attribute-id"))
+                {
                     return Ok(format!("{{\"N\",{name}}}"));
                 }
                 attribute_ref(name)
             };
             if let Some(name) = scalar("ReportResult") {
-                bag.push(("5", report_value(name)?));
+                bag.push(("5", report_value("ReportResult", name)?));
             }
             if let Some(name) = scalar("DetailsData") {
-                bag.push(("6", report_value(name)?));
+                bag.push(("6", report_value("DetailsData", name)?));
             }
             if let Some(value) = enumerated(
                 "ReportFormType",
@@ -5172,6 +5207,10 @@ fn native_root_property_bag(
         | "cfg:CalculationRegisterRecordSet"
         | "cfg:ConstantsSet"
         | "xs:string" => {}
+        // A platform type the XML names only by its id (Монитор: six forms
+        // whose main attribute is a `<v8:TypeId>`) keeps no keyed property
+        // either; the round trip through 8.3.27.2214 reproduces their bodies.
+        other if other.starts_with("#type-id:") => {}
         other => {
             return Err(anyhow!(
                 "a form whose main attribute is {other} has no measured property bag"
@@ -5192,6 +5231,7 @@ fn native_table_addition(
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
     items_root: Option<&Path>,
+    served_table_id: Option<&str>,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
 
@@ -5240,6 +5280,15 @@ fn native_table_addition(
             .ok_or_else(|| anyhow!("an addition with no extended tooltip is not measured"))?;
     // Member 19 names the item the addition serves, which is not always the
     // table it sits in: 392 of the corpus's additions live elsewhere.
+    //
+    // The three additions of the table a Gantt chart field nests spell no
+    // `<AdditionSource>` at all: that table keeps `id="0"` in the platform's
+    // own dump, and the exporter names an addition's source only through a
+    // table it can index by id (`parse_form_search_addition_source_item`), so
+    // nothing is written for it. The platform numbers the nested table's
+    // service items on dump (`renumber_form_zero_item_ids`); the table itself
+    // stays `0`, and an addition with no source serves the table it sits in
+    // -- Документооборот 3.0 `Catalogs/ПроектныеЗадачи/Forms/ФормаПланаПроекта`.
     let source_item = match item.addition_source_item.as_deref() {
         Some(name) => match items.get(name) {
             Some(target) => target.id.clone(),
@@ -5249,11 +5298,14 @@ fn native_table_addition(
                 ));
             }
         },
-        None => {
-            return Err(anyhow!(
-                "an addition with no <AdditionSource> is not measured"
-            ));
-        }
+        None => match served_table_id {
+            Some(table_id) => table_id.to_string(),
+            None => {
+                return Err(anyhow!(
+                    "an addition with no <AdditionSource> is not measured"
+                ));
+            }
+        },
     };
 
     let auto_max_width = item.auto_max_width.unwrap_or(true);
@@ -5308,7 +5360,14 @@ fn native_table_addition(
         group_horizontal_align: item.scalars.get("GroupHorizontalAlign").map(String::as_str),
         display_importance: item.display_importance.as_deref(),
     })
-    .ok_or_else(|| anyhow!("an addition names a spelling the writer cannot place"))
+    .ok_or_else(|| {
+        anyhow!(
+            "an addition names a spelling the writer cannot place: {} (tooltip representation {:?}, group horizontal align {:?})",
+            item.name,
+            item.tooltip_representation,
+            item.scalars.get("GroupHorizontalAlign")
+        )
+    })
 }
 
 /// The keyed property bag of a `{55,…}` table record.
@@ -5777,6 +5836,14 @@ fn native_command_source(
             Ok("{0,2ef6d6fa-847a-485e-8684-d37a3ab5efb8}".to_string())
         }
         _ => {
+            // `<id>:<item class>`: an item the form no longer has, written
+            // physically by the exporter.
+            if let Some((id, class)) = source.split_once(':')
+                && class == FORM_COMMANDS
+                && id.parse::<u64>().is_ok()
+            {
+                return Ok(format!("{{{id},{FORM_COMMANDS}}}"));
+            }
             let name = source.strip_prefix("Item.").ok_or_else(|| {
                 anyhow!("a container names the command source {source}, which is not measured")
             })?;
@@ -6442,14 +6509,18 @@ fn native_field_payload(
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
         }
         "GraphicalSchemaField" => {
+            // The exporter reads the kind's own tuple for its extent,
+            // `<Output>`, `<Edit>` and `<AutoMaxWidth>` only
+            // (`FORM_DOCUMENT_FIELD_GEOMETRY`): the other geometry flags and
+            // the border colour have no slot it reads, so a form that spells
+            // one would not come back and is refused. The excluded commands
+            // are the shared member 48, as on every field.
             if item.max_width.is_some()
                 || item.max_height.is_some()
-                || item.auto_max_width.is_some()
                 || item.auto_max_height.is_some()
                 || item.horizontal_stretch.is_some()
                 || item.vertical_stretch.is_some()
                 || item.scalars.contains_key("BorderColor")
-                || !item.excluded_commands.is_empty()
             {
                 return Err(anyhow!(
                     "a <GraphicalSchemaField> names a property whose slot is not measured"
@@ -6460,6 +6531,7 @@ fn native_field_payload(
                 item.height.as_deref().unwrap_or("10"),
                 item.scalars.get("Output").map(|value| value.trim()),
                 native_scalar_flag(item, "Edit", true),
+                item.auto_max_width.unwrap_or(true),
                 &events,
             )
             .ok_or_else(|| {
@@ -6497,9 +6569,10 @@ fn native_field_payload(
                     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
                 })
             };
+            // Option member 6 is `AutoMaxWidth` (Монитор `Catalogs/Блокировки`).
             if item.max_width.is_some()
                 || item.max_height.is_some()
-                || item.auto_max_width.is_some()
+                || item.auto_max_width == Some(true)
                 || item.auto_max_height.is_some()
                 || !count(item.width.as_deref())
                 || !count(item.height.as_deref())
@@ -6517,6 +6590,7 @@ fn native_field_payload(
                 item.height.as_deref().unwrap_or("10"),
                 item.horizontal_stretch.unwrap_or(true),
                 item.vertical_stretch.unwrap_or(true),
+                item.auto_max_width.unwrap_or(true),
                 &events,
             ))
         }
@@ -7631,6 +7705,17 @@ fn native_picture_of(
             picture.transparent_y.as_deref(),
         ));
     }
+    // `0` is a reference naming nothing, stored `{4,1,{0},…}` (ERP WE 2.5
+    // `CommonForms/ФормаНастроекОтчета`, the exporter's reading of it).
+    if reference == "0" {
+        let load_transparent = picture.load_transparent.as_deref().map(str::trim) == Some("true");
+        return Ok(format!(
+            "{{4,1,{{0}},\"\",{x},{y},{transparent},0,\"\"}}",
+            x = picture.transparent_x.as_deref().unwrap_or("-1"),
+            y = picture.transparent_y.as_deref().unwrap_or("-1"),
+            transparent = u8::from(load_transparent),
+        ));
+    }
     if !reference.starts_with("CommonPicture.") {
         return Err(anyhow!(
             "<{holder}> names a <Picture> reference the writer cannot place: {reference}"
@@ -7748,9 +7833,16 @@ fn native_item_extended_tooltip(
         return Ok(None);
     };
     let Some(tip) = item.extended_tooltip_item.as_deref() else {
+        let display_importance = native::native_display_importance(
+            tooltip.display_importance.as_deref(),
+        )
+        .ok_or_else(|| {
+            anyhow!("an extended tooltip names a DisplayImportance the writer has not measured")
+        })?;
         return Ok(Some(native::format_extended_tooltip(
             &tooltip.id,
             &tooltip.name,
+            display_importance,
         )));
     };
     let text_color = native_scalar_color(tip, "TextColor", source)?;
@@ -8006,6 +8098,46 @@ fn native_embedded_spreadsheet(form_text: &str, attribute: &str) -> Result<Strin
 /// a single `Chart` type, `Some(true)` for a single `GanttChart` type, under
 /// whatever prefix the file binds the chart namespace to (`d5p1` in every
 /// export); the codec itself checks the `<Settings>` element's namespace.
+/// Whether the attribute is a graphical scheme (`d5p1:FlowchartContextType`).
+fn native_embedded_flowchart(attribute: &FormXmlAttribute) -> bool {
+    matches!(
+        attribute.types.as_slice(),
+        [single] if single.trim().rsplit_once(':').map(|(_, local)| local) == Some("FlowchartContextType")
+    )
+}
+
+/// Whether the attribute is a planner (`pl:Planner`), whose `<Settings>` the
+/// planner codec writes into member 14 as the chart and flowchart codecs do.
+fn native_embedded_planner(attribute: &FormXmlAttribute) -> bool {
+    matches!(
+        attribute.types.as_slice(),
+        [single] if single.trim().rsplit_once(':').map(|(_, local)| local) == Some("Planner")
+    )
+}
+
+/// The attribute's own `<Settings>` element, cut out of the form text and
+/// handed to `encode`.
+fn native_embedded_settings(
+    form_text: &str,
+    attribute: &str,
+    encode: impl Fn(&str) -> Result<String>,
+) -> Result<String> {
+    let missing = || anyhow!("the attribute {attribute} spells no <Settings> the writer can find");
+    let head = format!("<Attribute name=\"{attribute}\"");
+    let start = form_text.find(&head).ok_or_else(missing)?;
+    let end = form_text[start..]
+        .find("</Attribute>")
+        .ok_or_else(missing)?
+        + start;
+    let block = &form_text[start..end];
+    let open = block.find("<Settings ").ok_or_else(missing)?;
+    let close = block.rfind("</Settings>").ok_or_else(missing)? + "</Settings>".len();
+    if close <= open {
+        return Err(missing());
+    }
+    encode(&block[open..close])
+}
+
 fn native_embedded_chart_kind(attribute: &FormXmlAttribute) -> Option<bool> {
     let [single] = attribute.types.as_slice() else {
         return None;
@@ -8306,7 +8438,8 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument");
         // A chart's `<Settings>` is written by the chart codec, which refuses
         // on its own what it cannot place (rt-embedded.md §1.2).
-        let embedded_chart = native_embedded_chart_kind(attribute).is_some();
+        let embedded_chart =
+            native_embedded_chart_kind(attribute).is_some() || native_embedded_flowchart(attribute);
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
             && !embedded_spreadsheet
@@ -8472,7 +8605,12 @@ fn format_native_form_body(
             // A form can be the storage too -- `Report.X.Form.Y`, which
             // stores that form's own uuid (3 of 3).
             Some(
-                if reference.contains(".Form.") || reference.trim().starts_with("CommonForm.") {
+                // A storage the configuration no longer has is its bare uuid.
+                if is_uuid_text(reference.trim()) {
+                    reference.trim().to_ascii_lowercase()
+                } else if reference.contains(".Form.")
+                    || reference.trim().starts_with("CommonForm.")
+                {
                     source.resolve_form_uuid(reference)?
                 } else {
                     source.resolve_metadata_reference_uuid(reference)?
@@ -8863,12 +9001,32 @@ fn format_native_form_body(
             let text = form_text
                 .ok_or_else(|| anyhow!("an embedded spreadsheet needs the Form.xml text"))?;
             Some(native_embedded_spreadsheet(text, &attribute.name)?)
+        } else if attribute.settings.is_some() && native_embedded_flowchart(attribute) {
+            let text = form_text
+                .ok_or_else(|| anyhow!("an embedded graphical scheme needs the Form.xml text"))?;
+            Some(native_embedded_settings(
+                text,
+                &attribute.name,
+                |settings| {
+                    crate::compiler::bodies::form_chart::format_form_embedded_flowchart(settings)
+                },
+            )?)
         } else if attribute.settings.is_some()
             && let Some(gantt) = native_embedded_chart_kind(attribute)
         {
             let text =
                 form_text.ok_or_else(|| anyhow!("an embedded chart needs the Form.xml text"))?;
             Some(native_embedded_chart(text, &attribute.name, gantt)?)
+        } else if attribute.settings.is_some() && native_embedded_planner(attribute) {
+            let text =
+                form_text.ok_or_else(|| anyhow!("an embedded planner needs the Form.xml text"))?;
+            Some(native_embedded_settings(
+                text,
+                &attribute.name,
+                |settings| {
+                    crate::compiler::bodies::form_planner::format_form_embedded_planner(settings)
+                },
+            )?)
         } else {
             None
         };
@@ -8969,6 +9127,16 @@ fn format_native_form_body(
                             .filter(|tip| tip.name == name)
                             .map(|tip| tip.id.clone())
                     })
+                })
+                .or_else(|| {
+                    // `<id>:<item class>`: an element the form no longer
+                    // has, written physically by the exporter.
+                    name.split_once(':')
+                        .filter(|(id, class)| {
+                            *class == "02023637-7868-4a5f-8576-835a76e0c9ba"
+                                && id.parse::<u64>().is_ok()
+                        })
+                        .map(|(id, _)| id.to_string())
                 })
                 .ok_or_else(|| {
                     anyhow!("a command is associated with {name}, which the writer cannot place")
@@ -9831,6 +9999,22 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
     // `text_value` so the arms that expect a named element are untouched.
     let mut child_text = String::new();
     let mut properties = FormXmlBodyProperties::default();
+    // A report reference spelled as a bare number with no `xsi:type` is the id
+    // of an attribute the form no longer has; with `xs:decimal` it is a number.
+    for name in ["ReportResult", "DetailsData"] {
+        let open = format!("\n\t<{name}>");
+        if let Some(text) = std::str::from_utf8(xml).ok()
+            && let Some(at) = text.find(&open)
+            && let Some(end) = text[at + open.len()..].find('<')
+            && text[at + open.len()..at + open.len() + end]
+                .bytes()
+                .all(|byte| byte.is_ascii_digit())
+        {
+            properties
+                .root_scalars
+                .insert(format!("{name}#attribute-id"), String::new());
+        }
+    }
     properties.attributes_conditional_appearance = attributes_conditional_appearance;
     properties.attributes_conditional_appearance_source = attributes_conditional_appearance_source;
     properties.dcs_error = dcs_error;
@@ -15195,7 +15379,12 @@ fn parse_form_extended_tooltip_xml(
     let Some(id) = xml_attribute_value(event, "id")? else {
         return Ok(None);
     };
-    Ok(Some(FormXmlExtendedTooltip { id, name }))
+    let display_importance = xml_attribute_value(event, "DisplayImportance")?;
+    Ok(Some(FormXmlExtendedTooltip {
+        id,
+        name,
+        display_importance,
+    }))
 }
 
 fn parse_nested_command_uuid_from_xml(xml: &[u8], command_name: &str) -> Result<String> {
@@ -25361,6 +25550,9 @@ pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
 }
 
 pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
+    // An older platform's root-`42` form is read as 8.3.27 re-saves it.
+    let upgraded = form_root_42::upgrade_root_42_body(plain);
+    let plain = upgraded.as_deref().unwrap_or(plain);
     let container = FormBodyContainer::parse(&plain)?;
     let layout = plain[container.layout_range.clone()].trim().to_string();
     let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
@@ -30603,7 +30795,9 @@ fn builtin_v8_type_id(type_name: &str) -> Option<&'static str> {
         "cfg:ReportObject" => Some("1dd6fdb9-553d-40d4-b2d1-c7fc31f497bb"),
         "cfg:ChartOfAccountsRef" => Some("ac606d60-0209-4159-8e4c-794bc091ce38"),
         "cfg:BusinessProcessRef" => Some("214fa4d8-6ba4-4748-a5e1-6332b5887780"),
-        _ => None,
+        // Every other platform type the metadata descriptors already name
+        // (`cfg:BusinessProcessRoutePointRef` and the rest of that table).
+        other => crate::metadata_model::types::builtin_type_id(other),
     }
 }
 
@@ -44428,6 +44622,34 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             super::common_command_group_uuid("FormNavigationPanelSeeAlso").as_deref(),
             Some("8ab1540c-0bfa-4fa6-a1e1-5d5069efc7d8")
         );
+    }
+
+    /// The writer's own value table spells the same identifier for every
+    /// name as the crate's one standard picture table
+    /// (`metadata_model::standard_pictures`), so the two cannot drift apart
+    /// the way the exporters' two copies did (Untru/ibcmd-rs#413).
+    #[test]
+    fn std_picture_values_agree_with_the_one_standard_picture_table() {
+        for (name, value) in super::STD_PICTURE_VALUES {
+            // The seventeen pictures stored by a bare code, not a uuid, are
+            // the descriptor compiler's `STANDARD_PICTURE_CODES`.
+            if let Some(code) = value
+                .strip_prefix("{-")
+                .and_then(|rest| rest.strip_suffix('}'))
+            {
+                let expected = crate::metadata_model::registers::parts::STANDARD_PICTURE_CODES
+                    .iter()
+                    .find_map(|(candidate, code)| (*candidate == *name).then_some(*code))
+                    .unwrap_or_else(|| panic!("StdPicture.{name} has no measured code"));
+                assert_eq!(expected, -code.parse::<i64>().unwrap(), "StdPicture.{name}");
+                continue;
+            }
+            let uuid = crate::metadata_model::standard_pictures::standard_picture_uuid(&format!(
+                "StdPicture.{name}"
+            ))
+            .unwrap_or_else(|| panic!("StdPicture.{name} is not in the standard picture table"));
+            assert_eq!(*value, format!("{{0,{uuid}}}"), "StdPicture.{name}");
+        }
     }
 
     #[test]

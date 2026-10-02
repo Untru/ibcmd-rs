@@ -42,7 +42,10 @@ The current verified surface is deliberately narrow:
   cohort;
 - clean-room XCF 2.20 to platform 8.3.27.1989 CF bootstrap and reverse export
   for `ConfigurationRoot` and `CommonModule`;
-- same-profile 8.3.27.1989 CF repack.
+- same-profile 8.3.27.1989 CF repack;
+- XCF 2.21 to platform 8.5.1.1150 CF through the base-free stage and back, for
+  `ConfigurationRoot`, `CommonModule` and `CommonForm`
+  (`docs/evidence/cf-platform-8.5.md`, `tests/cf_platform_8_5.rs`).
 
 Known but unevidenced routes are explicit `experimental`/`unsupported`
 records. A syntactically valid but unknown profile returns
@@ -57,5 +60,6 @@ cargo test --locked --test compatibility_matrix
 cargo test --locked --test conversion_cli `
   --test migration_2_20_to_2_21 `
   --test migration_2_21_to_2_20 `
-  --test cf_roundtrip
+  --test cf_roundtrip `
+  --test cf_platform_8_5
 ```

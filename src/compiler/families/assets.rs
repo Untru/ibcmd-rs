@@ -96,6 +96,7 @@ pub enum SourceAssetRole {
     Rights,
     Aggregates,
     Predefined,
+    Flowchart,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -396,6 +397,20 @@ const ROUTES: &[SourceAssetRoute] = &[
         ".8",
         "Ext/ManagerModule.bsl",
         Module
+    ),
+    // A business process's flowchart: the `<uuid>.7` row the export writes as
+    // `Ext/Flowchart.xml` (`source_assets`, `SourceAssetKind::
+    // BusinessProcessFlowchart`) and the base-free stage compiles from it
+    // (`metadata_model::bodies_rows::body_row_suffix`). Without a route the
+    // apply gate reported the row of `BusinessProcess.Задание` (БСП 8.3.27)
+    // as a body "the source-asset registry does not name"
+    // (Untru/ibcmd-rs#415). Its codec lives outside this registry.
+    route!(
+        "BusinessProcess",
+        Flowchart,
+        ".7",
+        "Ext/Flowchart.xml",
+        Deferred
     ),
     route!(
         "ChartOfAccounts",
@@ -1544,6 +1559,12 @@ mod tests {
                 .suffix(),
             ".0"
         );
+        // The business process flowchart row is named (Untru/ibcmd-rs#415).
+        let flowchart = SourceAssetRegistry
+            .route_by_suffix("BusinessProcess", "7")
+            .unwrap();
+        assert_eq!(flowchart.role(), SourceAssetRole::Flowchart);
+        assert_eq!(flowchart.relative_path(), "Ext/Flowchart.xml");
         assert_eq!(
             SourceAssetRegistry
                 .route_by_suffix("CommonCommand", "2")
@@ -1554,12 +1575,15 @@ mod tests {
         assert_eq!(
             SourceAssetRegistry
                 .source_path(
-                    Path::new(r"CommonPictures\Logo.xml"),
+                    &Path::new("CommonPictures").join("Logo.xml"),
                     "CommonPicture",
                     SourceAssetRole::Picture,
                 )
                 .unwrap(),
-            PathBuf::from(r"CommonPictures\Logo\Ext\Picture.xml")
+            Path::new("CommonPictures")
+                .join("Logo")
+                .join("Ext")
+                .join("Picture.xml")
         );
         for (family, suffix) in [
             ("Catalog", ".1c"),
@@ -1608,7 +1632,7 @@ mod tests {
             SourceAssetRegistry
                 .source_path_by_suffix(Path::new("Configuration.xml"), "Configuration", "6")
                 .unwrap(),
-            PathBuf::from(r"Ext\ManagedApplicationModule.bsl")
+            Path::new("Ext").join("ManagedApplicationModule.bsl")
         );
         assert_eq!(
             SourceAssetRegistry

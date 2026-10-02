@@ -14,6 +14,13 @@ use anyhow::{Result, anyhow, bail};
 
 use super::layout_8_5_1::{FormFactsV8_5_1, FormItemFactsV8_5_1, Node};
 
+/// The base form of an adopted form: a document of its own, written and passed
+/// by its own facts before the form's writer encloses it
+/// (`form_extension::form_adoption`), so no rule of the form's own pass reaches
+/// what is under it. Its items number the same ids as the form's (fixture
+/// `v85_extension/adopted_form_events`).
+const BASE_FORM: &str = "BaseForm";
+
 /// One element of a written `Form.xml`, located by byte offsets. The writer
 /// puts every element on its own line, indented with tabs.
 #[derive(Debug, Clone)]
@@ -190,6 +197,42 @@ impl<'a> XmlEdits<'a> {
     fn indent_of(&self, element: usize) -> &'a str {
         let element = &self.elements[element];
         &self.xml[element.line_start..element.open_start]
+    }
+
+    /// The root element, `<Form>`.
+    pub(in crate::mssql_dump) fn root(&self) -> Result<usize> {
+        self.elements
+            .iter()
+            .position(|element| element.parent.is_none() && element.tag == "Form")
+            .ok_or_else(|| anyhow!("written form XML has no <Form> root"))
+    }
+
+    /// The lines between the opening and closing tags of `element`: its
+    /// children as written, nothing for an element written on one line.
+    pub(in crate::mssql_dump) fn inner_lines(&self, element: usize) -> &'a str {
+        let element = &self.elements[element];
+        if element.self_closing {
+            return "";
+        }
+        let start = element
+            .children
+            .first()
+            .map_or(element.close_line_start, |child| {
+                self.elements[*child].line_start
+            });
+        &self.xml[start..element.close_line_start]
+    }
+
+    /// Whether an ancestor of `element` is a `tag` element.
+    pub(in crate::mssql_dump) fn within(&self, element: usize, tag: &str) -> bool {
+        let mut parent = self.elements[element].parent;
+        while let Some(ancestor) = parent {
+            if self.elements[ancestor].tag == tag {
+                return true;
+            }
+            parent = self.elements[ancestor].parent;
+        }
+        false
     }
 
     pub(in crate::mssql_dump) fn direct_children(&self, parent: usize, tag: &str) -> Vec<usize> {
@@ -1073,8 +1116,9 @@ fn apply_choice_value_pictures(
         .elements
         .iter()
         .enumerate()
-        .filter(|(_, element)| {
+        .filter(|(index, element)| {
             element.tag == "xr:Value"
+                && !edits.within(*index, BASE_FORM)
                 && edits.xml[element.open_start..element.line_end]
                     .split('>')
                     .next()
@@ -1310,6 +1354,9 @@ fn add_simple(edits: &mut XmlEdits<'_>, parent: usize, tag: &str, value: &str) -
 pub(in crate::mssql_dump) fn apply_xml_2_21_upgrade_defaults(xml: String) -> Result<String> {
     let mut edits = XmlEdits::new(&xml)?;
     for index in 0..edits.elements.len() {
+        if edits.within(index, BASE_FORM) {
+            continue;
+        }
         let tag = edits.elements[index].tag.clone();
         let is_root = edits.elements[index].parent.is_none();
         let is_item = edits.elements[index].id.is_some();
@@ -1511,11 +1558,7 @@ pub(in crate::mssql_dump) fn apply_form_facts_8_5_1(
 ) -> Result<(String, Vec<super::super::FormItemAsset>)> {
     let mut assets = Vec::new();
     let mut edits = XmlEdits::new(&xml)?;
-    let root = edits
-        .elements
-        .iter()
-        .position(|element| element.parent.is_none() && element.tag == "Form")
-        .ok_or_else(|| anyhow!("written form XML has no <Form> root"))?;
+    let root = edits.root()?;
     apply_rules(
         &mut edits,
         root,
@@ -1543,6 +1586,9 @@ pub(in crate::mssql_dump) fn apply_form_facts_8_5_1(
         let Some(id) = element.id.clone() else {
             continue;
         };
+        if edits.within(index, BASE_FORM) {
+            continue;
+        }
         let mut section = None;
         let mut parent = element.parent;
         while let Some(ancestor) = parent {
