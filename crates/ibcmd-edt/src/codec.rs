@@ -443,7 +443,7 @@ fn project_controls(config: &Configuration, runtime: &str) -> Result<Vec<SourceE
             .collect::<String>()
     );
     let eclipse = format!(
-        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<projectDescription>\r\n  <name>{project_name}</name>\r\n  <comment></comment>\r\n  <projects></projects>\r\n  <buildSpec>\r\n    <buildCommand><name>org.eclipse.xtext.ui.shared.xtextBuilder</name><arguments></arguments></buildCommand>\r\n    <buildCommand><name>com.e1c.langtool.builder.translationBuilder</name><arguments></arguments></buildCommand>\r\n  </buildSpec>\r\n  <natures>\r\n    <nature>org.eclipse.xtext.ui.shared.xtextNature</nature>\r\n    <nature>com._1c.g5.v8.dt.core.V8ConfigurationNature</nature>\r\n    <nature>com.e1c.langtool.TranslatingNature</nature>\r\n  </natures>\r\n</projectDescription>\r\n"
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<projectDescription>\r\n  <name>{project_name}</name>\r\n  <comment></comment>\r\n  <projects></projects>\r\n  <buildSpec>\r\n    <buildCommand><name>org.eclipse.xtext.ui.shared.xtextBuilder</name><arguments></arguments></buildCommand>\r\n  </buildSpec>\r\n  <natures>\r\n    <nature>com._1c.g5.v8.dt.core.V8ConfigurationNature</nature>\r\n    <nature>org.eclipse.xtext.ui.shared.xtextNature</nature>\r\n  </natures>\r\n</projectDescription>\r\n"
     );
     entries.push(
         SourceEntry::from_bytes(

@@ -121,7 +121,11 @@ pub(crate) fn read_edt(root: &Element) -> Result<FormBody, FormError> {
 
     // autoCommandBar.
     if let Some(acb) = root.child("autoCommandBar").filter(|c| c.prefix.is_empty()) {
-        body.auto_command_bar = Some(read_edt_auto_command_bar(acb)?);
+        let mut panel = read_edt_auto_command_bar(acb)?;
+        // An explicit EDT source name is emitted by the SDK unchanged. Native
+        // empty-name spelling remains owned by the existing Designer facet.
+        panel.designer_named = panel.name == FORM_COMMAND_BAR_NAME;
+        body.auto_command_bar = Some(panel);
     }
     // handlers (форм-события).
     for h in root

@@ -58,6 +58,18 @@ pub(crate) use mxl::*;
 
 /// Прочитать байты тела формы в [`FormBody`] (byte-exact-обратимо).
 pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormError> {
+    // EDT bodies have no version attribute. The standalone API uses the same
+    // SSL default as its writer; whole-project callers retain their explicit
+    // source version. Native bodies still derive their version from the root.
+    if dialect == FormDialect::Edt && morph1c_core::version::current_source_version().is_none() {
+        return morph1c_core::version::with_source_version(Some(morph1c_core::version::SSL), || {
+            read_form_current(dialect, bytes)
+        });
+    }
+    read_form_current(dialect, bytes)
+}
+
+fn read_form_current(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormError> {
     let descriptor = parse(bytes)?;
     let env = descriptor.bytes_env;
     let want = match dialect {
@@ -99,6 +111,7 @@ pub fn read_form(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, FormErr
         }
     }?;
     // Both readers have already rejected every unclaimed node/attribute.
+    body.source_xml221_default_presence = super::wire_order::capture_xml221_default_presence(dialect, &root)?;
     body.source_wire_order = Some(super::wire_order::capture(dialect, &root, &body)?);
     Ok(body)
 }

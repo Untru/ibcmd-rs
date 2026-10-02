@@ -135,7 +135,7 @@ pub const F_MAIN_WINDOW_INTERFACE_VARIANT: FieldId = FieldId(47);
 pub const F_CLIENT_APPLICATION_THEME: FieldId = FieldId(48);
 /// `mainClientApplicationWindowMode` — Designer-only enum. Default Normal.
 pub const F_MAIN_WINDOW_MODE: FieldId = FieldId(49);
-/// `clientApplicationWindowsOpenVariant` — enum (EDT+Designer). Default "" (нейтрал).
+/// `clientApplicationWindowsOpenVariant` enum (EDT+Designer). Default OpenDataInTabs.
 pub const F_WINDOWS_OPEN_VARIANT: FieldId = FieldId(50);
 /// `mainSectionPicture` — EDT-only пустой picture. x_ignore. Default "".
 pub const F_MAIN_SECTION_PICTURE: FieldId = FieldId(51);
@@ -361,7 +361,7 @@ fn build_fields() -> Vec<FieldSpec> {
         denum(F_MAIN_WINDOW_MODE, "mainClientApplicationWindowMode", "Normal"),
         denum(F_CLIENT_APPLICATION_THEME, "clientApplicationTheme", "Auto"),
         denum(F_MAIN_WINDOW_INTERFACE_VARIANT, "mainClientApplicationWindowInterfaceVariant", "NavigationLeft"),
-        neutral_enum(F_WINDOWS_OPEN_VARIANT, "clientApplicationWindowsOpenVariant"),
+        denum(F_WINDOWS_OPEN_VARIANT, "clientApplicationWindowsOpenVariant", "OpenDataInTabs"),
         // mainSectionPicture: EDT-only пустой узел `<mainSectionPicture/>`, present РОВНО
         // при наличии картинки (см. `picture_absent`); Designer не несёт → x_ignore.
         FieldSpec::with_default(F_MAIN_SECTION_PICTURE, "mainSectionPicture", ValueKind::List, picture_absent())

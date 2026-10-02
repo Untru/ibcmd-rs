@@ -61,6 +61,20 @@ const REPORT: &[&str] = &[
 fn error(reason: impl Into<String>) -> FormError {
     FormError::Frame(format!("root event ownership: {}", reason.into()))
 }
+// SDK root EventHandlerContainer can retain a symbolic Event proxy whose
+// name is a UUID. Keep that identity verbatim; it is not a named extension
+// event even when its bytes match a registered extension event's UUID.
+fn root_event_name(name: &str) -> bool {
+    ROOT.contains(&name) || symbolic_event_guid(name)
+}
+fn symbolic_event_guid(name: &str) -> bool {
+    let bytes = name.as_bytes();
+    bytes.len() == 36 && bytes.iter().enumerate().all(|(index, byte)| {
+        if matches!(index, 8 | 13 | 18 | 23) { *byte == b'-' }
+        else { byte.is_ascii_hexdigit() }
+    })
+}
+
 fn extension_allows(kind: Option<&str>, name: &str) -> bool {
     // SDK EventHandlerXmlPartReader excludes base Form event names from ExtInfo,
     // even when a runtime extension repeats that name (ActivationProcessing).
@@ -256,7 +270,7 @@ pub(crate) fn partition_native(body: &mut FormBody) -> Result<(), FormError> {
         if !seen.insert(event.name.clone()) {
             return Err(error(format!("duplicate event {}", event.name)));
         }
-        if ROOT.contains(&event.name.as_str()) {
+        if root_event_name(&event.name) {
             root.push(event);
         } else if extension_allows(kind.as_deref(), &event.name) {
             extension.push(event);
@@ -283,7 +297,7 @@ pub(crate) fn partition_native(body: &mut FormBody) -> Result<(), FormError> {
 pub(crate) fn validate_owned(body: &FormBody) -> Result<(), FormError> {
     let mut seen = HashSet::new();
     for event in &body.events {
-        if !ROOT.contains(&event.name.as_str()) {
+        if !root_event_name(&event.name) {
             return Err(error(format!(
                 "event {} does not belong to Form",
                 event.name

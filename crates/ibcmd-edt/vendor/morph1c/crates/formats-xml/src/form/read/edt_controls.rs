@@ -1184,9 +1184,17 @@ pub(crate) fn read_edt_extended_tooltip(el: &Element) -> Result<DecoratorRef, Fo
     }
     if let Some(ha) = ext.child("horizontalAlign").filter(|c| c.prefix.is_empty()) {
         ha.claim_with_text();
+        body.edt_horizontal_align_auto_explicit = ha.text == "Auto";
         body.ext_info.push((
             ld::F_EXT_HORIZONTAL_ALIGN,
             PropertyValue::Enum(Token::new(ha.text.clone())),
+        ));
+    } else {
+        // LabelDecorationExtInfo's EEnum starts with Auto. EDT omits Auto;
+        // the native SDK omits Left, so absence must become a typed value.
+        body.ext_info.push((
+            ld::F_EXT_HORIZONTAL_ALIGN,
+            PropertyValue::Enum(Token::new("Auto")),
         ));
     }
     // verticalAlign (опц., Enum; LabelDecorationExtInfo, ПОСЛЕ horizontalAlign). Witness —

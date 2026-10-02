@@ -253,6 +253,7 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     if target == morph1c_core::version::FormatVersion::new(2, 20) {
         project_xml220_checkbox_type(&mut root, &body.designer_checkbox_auto_presence);
     }
+    super::super::wire_order::apply_xml221_default_presence(FormDialect::Designer, body, &mut root)?;
     super::super::wire_order::bind_column_type_depth(&mut root);
     super::designer_dcs::bind_dcs_type_qname_depth(&mut root, true);
     Ok(root)

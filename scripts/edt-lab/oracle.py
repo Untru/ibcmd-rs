@@ -398,12 +398,50 @@ WARM_REGISTRATION_IDENTITIES = {
 }
 
 
+# Exact installed-EDT INFO context records observed in independently captured
+# validation phases. Only the positively bound project basename varies.
+WARM_PROJECT_CONTEXT_TEMPLATES = (
+    ("com._1c.g5.v8.dt.core", "!MESSAGE Project context is being started: ", " (CLEAN_IMPORT)"),
+    ("com._1c.g5.v8.dt.core", "!MESSAGE Project context is being started: ", " (EXISTING_DATA_IMPORT)"),
+    ("com._1c.g5.v8.dt.core", "!MESSAGE Project context is being stopped: ",
+     " (IDE_SHUTDOWN)-(com._1c.g5.v8.dt.core.platform.workspace-project)"),
+    ("com._1c.g5.v8.dt.core", "!MESSAGE Project context is started: ", ""),
+    ("com._1c.g5.v8.dt.core", "!MESSAGE Project context is stopped: ", ""),
+    *[("com._1c.g5.v8.dt.lifecycle", f"!MESSAGE Starting phase {phase} of context ProjectContext: ", "")
+      for phase in ("CHECKING", "INITIALIZATION", "LINKING", "POST_RESOURCE_LOADING",
+                    "RESOURCE_LOADING", "STORAGE_INITIALIZATION")],
+)
+
+
+def bound_warm_project_basename(command: dict) -> str | None:
+    """Require the complete successful validate command shape before using its name."""
+    argv = command.get("argv")
+    if not isinstance(argv, list) or len(argv) != 15 or any(not isinstance(arg, str) for arg in argv) \
+            or type(command.get("exit_code")) is not int or command["exit_code"] != 0 \
+            or command.get("timeout") or command.get("timeout_or_log_limit"):
+        return None
+    if [argv[index] for index in (1, 3, 5, 6, 7, 9, 10, 11, 13)] != \
+            ["-data", "-timeout", "-nl", "en_US", "-vmargs", "-command", "validate", "--file", "--project-list"] \
+            or not re.fullmatch(r"[1-9][0-9]*", argv[4]) or not re.fullmatch(r"-Xmx[1-9][0-9]*g", argv[8]):
+        return None
+    cwd = command.get("cwd")
+    if not isinstance(cwd, str) or not Path(cwd).is_absolute():
+        return None
+    project = Path(argv[-1])
+    if not all(Path(argv[index]).is_absolute() for index in (0, 2, 12, 14)) \
+            or any(Path(argv[index]).parent != Path(cwd) for index in (2, 12, 14)):
+        return None
+    name = project.name
+    return name if name and name not in (".", "..") and not any(ord(char) < 32 or char in "/\\" for char in name) else None
+
+
 def warm_workspace_multiset(log: Path, command_path: Path) -> tuple[Counter, list[dict]]:
     """ALL entries; only proven JVM identities and verified command context vary."""
     raw = log.read_bytes()
     validate_warm_workspace_records(raw)
     command = json.loads(command_path.read_text(encoding="utf-8"))
     argv = command["argv"]
+    project_name = bound_warm_project_basename(command)
     result, lexical = Counter(), []
     for block in re.split(r"(?m)(?=^!(?:ENTRY|SESSION)(?:\s|$))", raw.decode("utf-8")):
         match = re.match(r"!ENTRY (\S+) ([01248]) (\S+) [^\r\n]+\r?\n", block)
@@ -411,6 +449,7 @@ def warm_workspace_multiset(log: Path, command_path: Path) -> tuple[Counter, lis
             continue
         body = block[match.end():].rstrip("\r\n")
         current = body
+        kind = "known_registration_jvm_identity"
         if (match[2], match[3]) == ("2", "0"):
             for plugin, interface, implementation in WARM_REGISTRATION_IDENTITIES:
                 fixed = f"!MESSAGE The external {interface} is registered: {implementation}@"
@@ -423,11 +462,18 @@ def warm_workspace_multiset(log: Path, command_path: Path) -> tuple[Counter, lis
             fixed_command = f'validate --file "{argv[-3]}" --project-list "{argv[-1]}"'
             if body in ("!MESSAGE Command to run:\n" + fixed_command, "!MESSAGE Command to run:\r\n" + fixed_command):
                 current = "!MESSAGE Command to run:\n<BOUND VALIDATE PASS COMMAND>"
+                kind = "verified_pass_command"
+        if (match[2], match[3]) == ("1", "0") and project_name is not None:
+            for plugin, prefix, suffix in WARM_PROJECT_CONTEXT_TEMPLATES:
+                if match[1] == plugin and body == prefix + project_name + suffix:
+                    current = prefix + "<BOUND PROJECT CONTEXT>" + suffix
+                    kind = "verified_project_context"
+                    break
         result[(match[1], match[2], match[3], current)] += 1
         if body != current:
             lexical.append({"plugin": match[1], "severity": match[2], "code": match[3],
                 "raw_message_and_stack": body, "comparison_message_and_stack": current,
-                "kind": "verified_pass_command" if current.endswith("<BOUND VALIDATE PASS COMMAND>") else "known_registration_jvm_identity",
+                "kind": kind,
                 "command_sha256": digest(command_path),
                 "raw_body_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest()})
     return result, lexical
@@ -598,12 +644,103 @@ def warm_validate(args, run: Path, project: Path, workspace: Path, prefix: str, 
     return evidence
 
 
+# Explicitly reviewed historical harnesses only. Never execute arbitrary capture code.
+WARM_LEGACY_HARNESS_SHA256 = frozenset({
+    "e74311f5c501b907db7fa7386896b3efc376ba586db1226267cc381c32d97985",
+    "55b6243112faec31ced67cf1465b0bec3af7fccc33995bc94fb18bfd47e7cf70",
+})
+
+
+def bind_legacy_warm_capture(args, capture: Path, original: Path) -> dict | None:
+    invocation = json.loads((capture / "invocation.json").read_text(encoding="utf-8")) \
+        if (capture / "invocation.json").is_file() else {}
+    known_sha = invocation.get("harness_sha256")
+    if known_sha not in WARM_LEGACY_HARNESS_SHA256:
+        return None
+    source = capture / "harness-source.py"
+    no_links(source)
+    code = source.read_bytes()
+    if hashlib.sha256(code).hexdigest() != known_sha:
+        raise OracleError("Pinned historical harness source changed; code not executed")
+    from types import ModuleType
+    module_name = "edt_verified_historical_" + known_sha
+    old = ModuleType(module_name)
+    old.__file__ = str(source)
+    exec(compile(code, str(source), "exec"), old.__dict__)
+    if digest(source) != known_sha:
+        raise OracleError("Historical harness changed during verified import")
+    # Share the exact current fair-operation state, so old code measurements
+    # consume separate tickets and cannot reuse or overwrite receipt numbers.
+    if known_sha == "e74311f5c501b907db7fa7386896b3efc376ba586db1226267cc381c32d97985":
+        # This reviewed kernel predates FIFO. Preserve its exact snapshot
+        # implementation and only put each complete scan in a fair ticket.
+        old_snapshot = old.snapshot
+
+        def historical_snapshot(root, max_files=500000, max_total=32 * 1024**3,
+                                max_file=1024**3):
+            with fair_file_operation("legacy-snapshot", root=str(root),
+                    historical_harness_sha256=known_sha, max_files=max_files,
+                    max_total_bytes=max_total, max_file_bytes=max_file) as receipt:
+                result = old_snapshot(root, max_files, max_total, max_file)
+                receipt.update(tree_sha256=result["tree_sha256"],
+                               file_count=result["file_count"], total_bytes=result["total_bytes"])
+                return result
+
+        old.snapshot = historical_snapshot
+        binding = old.bind_diagnostic_capture(capture, args, project_snapshot=snapshot(original))
+    else:
+        token = old._FIFO_FILES.set(_FIFO_FILES.get())
+        try:
+            original_snapshot = snapshot(original)
+            binding = old.bind_diagnostic_capture(capture, args, project_snapshot=original_snapshot)
+        finally:
+            old._FIFO_FILES.reset(token)
+    final_source_sha = digest(source)
+    if final_source_sha != known_sha:
+        raise OracleError("Historical harness changed during complete capture binding")
+    return {"harness_sha256": known_sha, "source_sha256": final_source_sha,
+            "binding": binding}
+
+
+def derive_warm_context_binding(args, capture: Path, legacy: dict, current: dict) -> None:
+    recorded = legacy["binding"]["warm_validation"]
+    stripped = {**current, "records": []}
+    additions = []
+    for record in current["records"]:
+        contexts = [row for row in record["workspace_lexical_context"]
+                    if row.get("kind") == "verified_project_context"]
+        stripped["records"].append({**record, "workspace_lexical_context": [row for row in
+            record["workspace_lexical_context"] if row.get("kind") != "verified_project_context"]})
+        additions.append({"label": record["label"], "project_context_lexical_records": contexts})
+    if stripped != recorded:
+        raise OracleError("Current interpretation differs beyond the closed project context ledger")
+    state = _FIFO_FILES.get()
+    target = state["run"] if state else getattr(args, "run", None)
+    if target is None or Path(target) == capture or Path(target).is_relative_to(capture):
+        raise OracleError("Historical derivation requires a separate new acceptance evidence directory")
+    target = Path(target)
+    no_links(target)
+    receipt = {"kind": "closed_project_context_interpretation_v1", "capture": str(capture),
+               "original_harness_sha256": legacy["harness_sha256"],
+               "original_full_binding": legacy["binding"],
+               "original_warm_summary_sha256": digest(capture / "validation-warm.json"),
+               "current_harness_sha256": digest(Path(__file__)),
+               "phase_context_interpretation": additions, "current_evidence": current,
+               "note": "Original raw logs, summaries, tool/source/phase hashes and counts retained; only eleven command-bound INFO templates are reinterpreted."}
+    serial = sum(1 for _ in target.glob("warm-context-derived-*.json")) + 1
+    write_json(target / f"warm-context-derived-{serial:06d}.json", receipt)
+
+
 def bind_warm_validation(args, run: Path, project: Path, workspace: Path,
                          prefix: str, stem: str, original: Path | None = None) -> dict:
+    legacy = bind_legacy_warm_capture(args, run, original) if \
+        original is not None and prefix == "edt-validate" and stem == "validation" else None
     evidence = warm_validation_evidence(args, run, project, workspace, prefix, stem,
                                         args.warm_validation_passes, original)
     recorded = json.loads((run / f"{stem}-warm.json").read_text(encoding="utf-8"))
-    if evidence != recorded or not evidence["final_consecutive_all_diagnostics_stable"] \
+    if legacy:
+        derive_warm_context_binding(args, run, legacy, evidence)
+    if (not legacy and evidence != recorded) or not evidence["final_consecutive_all_diagnostics_stable"] \
             or not evidence["final_consecutive_all_workspace_records_stable"] \
             or not evidence["final_consecutive_stream_records_stable"] \
             or digest(run / f"{stem}.tsv") != evidence["records"][-1]["tsv_sha256"]:

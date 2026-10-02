@@ -284,6 +284,23 @@ impl FieldProj {
         &self,
         version: Option<morph1c_core::version::FormatVersion>,
     ) -> Policy {
+        if version == Some(morph1c_core::version::FormatVersion::new(2, 21)) {
+            // Original EDT Ecore defaults and native 8.5 serializer projection.
+            // The final scoped writer retains explicit source-default presence.
+            let fill = match self.edt {
+                "horizontalLines" | "verticalLines" => Some(("false", "true")),
+                "buttonImportance" => Some(("Main", "Normal")),
+                _ => None,
+            };
+            if let Some((edt_fill, des_fill)) = fill {
+                return Policy::Keep(Keep {
+                    edt_fill,
+                    edt_omit: None,
+                    des_fill,
+                    des_omit: DesOmit::Never,
+                });
+            }
+        }
         if version == Some(morph1c_core::version::FormatVersion::new(2, 20)) {
             self.xml220_policy.unwrap_or(self.policy)
         } else {

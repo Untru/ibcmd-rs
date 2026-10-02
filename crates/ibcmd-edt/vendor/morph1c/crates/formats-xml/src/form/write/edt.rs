@@ -188,6 +188,7 @@ pub(crate) fn edt_root(body: &FormBody) -> Result<OutElement, FormError> {
             .push(("xmlns:settings".to_string(), SETTINGS_NS_URI.to_string()));
     }
 
+    super::super::wire_order::apply_xml221_default_presence(FormDialect::Edt, body, &mut root)?;
     Ok(root)
 }
 

@@ -58,6 +58,14 @@ pub(crate) use tooltip::*;
 
 /// Записать тело формы в байты заданного формата (byte-exact).
 pub fn write_form(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, FormError> {
+    // The default envelope is SSL: policies and scalar emission must use that
+    // same target even when callers do not supply an explicit version scope.
+    let target = morph1c_core::version::current_roundtrip_target()
+        .unwrap_or(morph1c_core::version::SSL);
+    morph1c_core::version::with_roundtrip_target(target, || write_form_current(dialect, body))
+}
+
+fn write_form_current(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, FormError> {
     match dialect {
         FormDialect::Edt => super::picture_defaults::with_common_picture_defaults(
             &body.common_picture_transparency,

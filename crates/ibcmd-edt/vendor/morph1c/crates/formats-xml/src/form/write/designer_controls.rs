@@ -22,7 +22,34 @@ pub(crate) fn designer_table_control(
             el = el.attr(entry.des, v);
         }
     }
+    // XML 2.21 native materialization places this scalar after FileDragMode.
+    // The EDT feature provider keeps the older order; same-native source order
+    // is restored later by the names-only wire facet.
+    let native_picture_order = tag == "PictureDecoration"
+        && morph1c_core::version::current_roundtrip_target()
+            == Some(morph1c_core::version::FormatVersion::new(2, 21));
+    // The 8.5 native serializer materializes this Table scalar before ViewMode.
+    // All semantic values remain current; native-origin wire order is replayed
+    // separately after typed emission.
+    let native_table_order = tag == "Table"
+        && morph1c_core::version::current_roundtrip_target()
+            == Some(morph1c_core::version::FormatVersion::new(2, 21));
     for slot in order {
+        if native_table_order {
+            if matches!(slot, DesSlot::TableShowCommandBar) {
+                continue;
+            }
+            if matches!(slot, DesSlot::F(id) if *id == tb::F_VIEW_MODE) {
+                if let Some(value) = &item.show_command_bar {
+                    el.push(OutElement::leaf("", "ShowCommandBar", value.clone()));
+                }
+            }
+        }
+        if native_picture_order
+            && matches!(slot, DesSlot::F(id) if *id == ld::F_EXT_PICTURE_COLOR)
+        {
+            continue;
+        }
         match slot {
             DesSlot::F(id)
                 if tag == "Button"
@@ -161,6 +188,13 @@ pub(crate) fn designer_table_control(
                         emit_field_designer(&mut el, entry, &dx.fields)?;
                     }
                 }
+            }
+        }
+        if native_picture_order
+            && matches!(slot, DesSlot::F(id) if *id == ld::F_EXT_FILE_DRAG_MODE)
+        {
+            if let Some(entry) = ext.iter().find(|e| e.id == ld::F_EXT_PICTURE_COLOR) {
+                emit_field_designer(&mut el, entry, &item.ext_info)?;
             }
         }
     }

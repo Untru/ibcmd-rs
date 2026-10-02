@@ -184,6 +184,12 @@ fn slots(s: &Scope, d: FormDialect) -> BTreeSet<&'static str> {
             _ => {}
         }
     }
+    // This is a typed Table glue slot (FormItem.show_command_bar), not a
+    // property-bag entry. Preserve its native source position among the known
+    // table/dynamic-list fields while continuing to emit the current value.
+    if s.kind == "Table" && d == FormDialect::Designer {
+        out.insert("ShowCommandBar");
+    }
     if tables::addition_kind(&s.kind).is_some() && d == FormDialect::Designer {
         out.extend([
             "Visible",
@@ -629,4 +635,134 @@ pub(super) fn bind_column_type_depth(root: &mut OutElement) {
         path.pop();
     }
     walk(root, &mut Vec::new());
+}
+
+
+fn xml221_presence_slots(key: &str, d: FormDialect) -> &[&str] {
+    let leaf = key.rsplit('/').next().unwrap_or("");
+    if leaf.starts_with("Table:") && !leaf.ends_with(":ext") {
+        if d == FormDialect::Designer {
+            &["HorizontalLines", "VerticalLines"]
+        } else {
+            &["horizontalLines", "verticalLines"]
+        }
+    } else if leaf.starts_with("Button:") && !leaf.ends_with(":ext") {
+        if d == FormDialect::Designer {
+            &["ButtonImportance"]
+        } else {
+            &["buttonImportance"]
+        }
+    } else {
+        &[]
+    }
+}
+
+/// Only after complete typed claiming: retain slot names, never source values.
+pub(super) fn capture_xml221_default_presence(
+    d: FormDialect,
+    root: &Element,
+) -> Result<Option<FormWireOrder>, FormError> {
+    let version = root.attr("version").map(|a| a.value.clone()).or_else(|| {
+        morph1c_core::version::current_source_version().map(|v| v.to_string())
+    });
+    if version.as_deref() != Some("2.21") {
+        return Ok(None);
+    }
+    let mut scopes = BTreeMap::new();
+    read_orders(d, root, &root_scope(), true, &mut scopes)?;
+    scopes.retain(|key, tags| {
+        let allowed = xml221_presence_slots(key, d);
+        tags.retain(|tag| allowed.contains(&tag.as_str()));
+        !tags.is_empty()
+    });
+    Ok(Some(FormWireOrder {
+        designer: d == FormDialect::Designer,
+        version,
+        scopes,
+    }))
+}
+
+/// Ecore Main/false and native Normal/true are different per-format defaults.
+/// Emitted nodes contain CURRENT typed values. A matching lexical slot may keep
+/// an explicitly present default, but cannot replay a source value after edits.
+pub(super) fn apply_xml221_default_presence(
+    d: FormDialect,
+    body: &FormBody,
+    root: &mut OutElement,
+) -> Result<(), FormError> {
+    if morph1c_core::version::current_roundtrip_target()
+        != Some(morph1c_core::version::FormatVersion::new(2, 21))
+    {
+        return Ok(());
+    }
+    let facet = body.source_xml221_default_presence.as_ref().filter(|f| {
+        f.designer == (d == FormDialect::Designer) && f.version.as_deref() == Some("2.21")
+    });
+    if let Some(f) = facet {
+        for (key, tags) in &f.scopes {
+            let allowed = xml221_presence_slots(key, d);
+            let mut seen = BTreeSet::new();
+            let valid_scope = key.strip_prefix("root/").is_some_and(|path| {
+                path.split('/').all(|part| {
+                    let part = part.strip_suffix(":ext").unwrap_or(part);
+                    part.rsplit_once(':').is_some_and(|(kind, id)| {
+                        id.parse::<i64>().is_ok()
+                            && (matches!(kind, "Button" | "Table" | "ExtendedTooltip" | "ContextMenu" | "AutoCommandBar")
+                                || tables::field_kind(kind).is_some()
+                                || tables::group_kind(kind).is_some()
+                                || tables::decoration_kind(kind).is_some()
+                                || tables::addition_kind(kind).is_some())
+                    })
+                })
+            });
+            if !valid_scope
+                || tags.iter().any(|tag| !allowed.contains(&tag.as_str()) || !seen.insert(tag))
+            {
+                return Err(FormError::Frame("unknown or duplicate XML 2.21 default-presence slot".into()));
+            }
+        }
+    }
+    fn walk(
+        d: FormDialect,
+        el: &mut OutElement,
+        parent: &Scope,
+        is_root: bool,
+        facet: Option<&FormWireOrder>,
+    ) -> Result<(), FormError> {
+        let scope = out_scope(d, el, parent, is_root)?;
+        let next = scope.as_ref().unwrap_or(parent);
+        if let Some(s) = &scope {
+            let allowed = xml221_presence_slots(&s.key, d);
+            let present = facet.and_then(|f| f.scopes.get(&s.key));
+            el.children.retain(|node| {
+                if !node.prefix.is_empty() || !allowed.contains(&node.local.as_str()) {
+                    return true;
+                }
+                let default = match (d, s.kind.as_str(), node.local.as_str()) {
+                    (FormDialect::Designer, "Table", "HorizontalLines" | "VerticalLines") => "true",
+                    (FormDialect::Edt, "Table", "horizontalLines" | "verticalLines") => "false",
+                    (FormDialect::Designer, "Button", "ButtonImportance") => "Normal",
+                    (FormDialect::Edt, "Button", "buttonImportance") => "Main",
+                    _ => return true,
+                };
+                node.text.as_deref() != Some(default)
+                    || present.is_some_and(|tags| tags.contains(&node.local))
+            });
+        }
+        for c in &mut el.children {
+            // This is the same closed control/container traversal as ordering;
+            // an identically named node inside a DCS value is never projected.
+            if c.prefix.is_empty()
+                && (matches!(c.local.as_str(), "items" | "columns" | "ChildItems" | "extInfo"
+                    | "ExtendedTooltip" | "extendedTooltip" | "ContextMenu" | "contextMenu"
+                    | "AutoCommandBar" | "autoCommandBar" | "Table" | "autoTable"
+                    | "searchStringAddition" | "viewStatusAddition" | "searchControlAddition")
+                    || (d == FormDialect::Designer && kind(d, &c.local, None, None).is_some()))
+            {
+                walk(d, c, next, false, facet)?;
+            }
+        }
+        Ok(())
+    }
+    walk(d, root, &root_scope(), true, facet)
 }

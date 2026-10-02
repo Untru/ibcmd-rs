@@ -75,6 +75,9 @@ pub struct FormBody {
     /// The adapter populates this facet after the entire typed descriptor is claimed.
     #[serde(skip)]
     pub source_wire_order: Option<FormWireOrder>,
+    /// Closed source slot presence only; current default values remain typed and semantic.
+    #[serde(skip)]
+    pub source_xml221_default_presence: Option<FormWireOrder>,
     /// Native XML 2.20 lexical presence of Auto CheckBoxType. This source-only
     /// spelling facet does not change the independently typed CheckBoxType value.
     /// It is excluded from semantic serialization; edited nondefault values win.
@@ -427,6 +430,7 @@ impl FormBody {
             picture_semantics: None,
             picture_resource_selection: None,
             source_wire_order: None,
+            source_xml221_default_presence: None,
             designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
             common_picture_transparency: std::collections::BTreeMap::new(),
             designer_path_spelling: false,

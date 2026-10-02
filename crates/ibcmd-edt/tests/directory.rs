@@ -21,6 +21,27 @@ fn source() -> SourceTree {
     read_xml_source(fixture(), ReaderLimits::default()).unwrap()
 }
 #[test]
+fn generated_project_uses_installed_edt_configuration_builders_and_natures() {
+    let tree = xml_to_edt(&source(), &options()).unwrap().tree;
+    let descriptor = tree
+        .entries()
+        .iter()
+        .find(|entry| entry.path().as_str() == ".project")
+        .unwrap();
+    let text = std::str::from_utf8(descriptor.bytes()).unwrap();
+    assert_eq!(text.matches("<buildCommand>").count(), 1);
+    assert_eq!(text.matches("<nature>").count(), 2);
+    let configuration = text
+        .find("com._1c.g5.v8.dt.core.V8ConfigurationNature")
+        .unwrap();
+    let xtext = text
+        .find("org.eclipse.xtext.ui.shared.xtextNature")
+        .unwrap();
+    assert!(configuration < xtext);
+    assert!(text.contains("org.eclipse.xtext.ui.shared.xtextBuilder"));
+    assert!(!text.contains("com.e1c.langtool"));
+}
+#[test]
 fn disk_and_memory_both_routes_have_identical_outputs_models_and_accounting() {
     let root = tempfile::tempdir().unwrap();
     let memory = xml_to_edt(&source(), &options()).unwrap();

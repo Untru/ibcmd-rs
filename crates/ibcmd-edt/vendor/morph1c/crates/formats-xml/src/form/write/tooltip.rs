@@ -109,11 +109,13 @@ pub(crate) fn push_tooltip_body(el: &mut OutElement, body: &TooltipBody) -> Resu
         .iter()
         .find(|(k, _)| *k == ld::F_EXT_HORIZONTAL_ALIGN)
     {
-        ext.push(OutElement::leaf(
-            "",
-            "horizontalAlign",
-            tok.as_str().to_string(),
-        ));
+        if tok.as_str() != "Auto" || body.edt_horizontal_align_auto_explicit {
+            ext.push(OutElement::leaf(
+                "",
+                "horizontalAlign",
+                tok.as_str().to_string(),
+            ));
+        }
     }
     // verticalAlign — ПОСЛЕ horizontalAlign в extInfo (LabelDecorationExtInfo);
     // titleHeight/backColor/borderColor — за ним (метамодель #4/#5/#6; ERP-волна) — см. ниже.

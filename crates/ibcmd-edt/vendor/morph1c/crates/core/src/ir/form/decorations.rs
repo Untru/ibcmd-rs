@@ -96,6 +96,9 @@ pub enum DecoratorBody {
 /// Тело расширенной подсказки (вложенный `LabelDecoration`-стаб) — ДАННЫЕ для R И для X.
 #[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
 pub struct TooltipBody {
+    /// Explicit EDT Auto spelling; current alignment remains semantic data.
+    #[serde(skip)]
+    pub edt_horizontal_align_auto_explicit: bool,
     /// Общие свойства вложенной надписи (`title`/`maxWidth`/`autoMaxWidth`/`autoMaxHeight`/
     /// `horizontalStretch`) по каноническому [`FieldId`], в КАНОНИЧЕСКОМ порядке (общий обоим
     /// форматам). Пер-форматные дефолты (`autoMax*`) реконсилированы на read ⇒ X-сравнимо.

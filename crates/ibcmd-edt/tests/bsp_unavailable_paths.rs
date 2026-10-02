@@ -35,7 +35,7 @@ fn final_query_batch_aliases_are_bounded_and_source_version_specific() {
     assert!(text.contains("<Field>~List.Missing</Field>"));
     assert!(text.contains("<Field>List.Selected</Field>"));
     assert!(
-        !String::from_utf8(native(&form, FormatVersion::new(2, 21)))
+        String::from_utf8(native(&form, FormatVersion::new(2, 21)))
             .unwrap()
             .contains("~List.Missing")
     );

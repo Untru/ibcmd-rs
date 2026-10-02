@@ -1,4 +1,4 @@
-//! Native SDK unavailable-path spelling for EDT XML 2.20 projections.
+//! Native SDK unavailable-path spelling for EDT XML 2.20/2.21 projections.
 //! Query selection grammar is adapted from ibcmd's existing
 //! src/mssql_dump/form_body.rs; query bytes and canonical paths are unchanged.
 use super::FormError;
@@ -48,7 +48,8 @@ pub(crate) fn with_availability<T>(
         }
     }
     let mut map = BTreeMap::new();
-    if !body.designer_path_spelling && current_roundtrip_target() == Some(FormatVersion::new(2, 20))
+    if !body.designer_path_spelling
+        && matches!(current_roundtrip_target(), Some(FormatVersion { major: 2, minor: 20 | 21 }))
     {
         for attr in &body.data_attributes {
             if let Some(list) = &attr.dynamic_list {

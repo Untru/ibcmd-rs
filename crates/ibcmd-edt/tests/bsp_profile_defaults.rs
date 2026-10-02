@@ -84,7 +84,7 @@ fn xml220_defaults_are_profile_bound_and_nondefaults_remain_typed() {
             .contains("<TextSize>Enlarged</TextSize>")
     );
     assert!(
-        std::str::from_utf8(&modern)
+        !std::str::from_utf8(&modern)
             .unwrap()
             .contains("<HorizontalLines>true</HorizontalLines>")
     );
