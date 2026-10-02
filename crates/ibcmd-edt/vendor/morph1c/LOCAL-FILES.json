@@ -46,9 +46,9 @@
     "Root ParentConfigurations resources retain the complete SDK sibling directory as safe relative identities and current opaque bytes, with a unique current root binary attachment and fingerprint-visible ordered resources",
     "Command interfaces preserve ordered subsystem visibility, common visibility and ordered role values through typed native and EDT readers/writers without discarding unknown structure",
     "Low-level form readers and writers use the effective emitted or parsed format profile for typed defaults and same-source presence even when no caller version context is supplied",
-    "SDK Form Event reference proxies with a UUID-shaped symbolic name retain the exact current name, handler and order at the root; malformed names, misplaced extension events and duplicate owners remain errors",
     "XML 2.21 form defaults retain current legacy table-line booleans and Main/Normal/Supplementary button importance with a closed names-only source-presence facet; profile-specific native scalar ordering preserves current edited values and same-origin spelling",
-    "Installed metadata window defaults, EDT explicit root command-panel names, current tooltip alignment and native unavailable-path projection are preserved through typed fields without excluding configuration files or replaying stale source values"
+    "Installed metadata window defaults, EDT explicit root command-panel names, current tooltip alignment and native unavailable-path projection are preserved through typed fields without excluding configuration files or replaying stale source values",
+    "SDK root Event symbolic references retain any current nonempty scalar identity, handler and order without an artificial UUID grammar; known extension-only events retain owner checks, and only exact native Form Events Event name attributes are excluded from filesystem-name validation"
   ],
   "files": [
     {
@@ -1617,7 +1617,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/event_owners.rs",
-      "sha256": "9dc01e68fbe3e66e1a6922f7a2b87e6a6d6406b421902e73e2f9cf6f726a7d1a"
+      "sha256": "3242147d6b20ba8665b6610995577c61d18ea86abe55374c9646810b9ede0811"
     },
     {
       "path": "crates/formats-xml/src/form/fields/common.rs",
@@ -2668,5 +2668,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "bab64027e915f283635cd65bfd04e813b2e8e5a7"
+  "local_source_snapshot": "f7706bf82708bd3c8df73ec7ab67c4ca17213eea"
 }
