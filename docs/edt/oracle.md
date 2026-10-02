@@ -48,6 +48,23 @@ tree. A copied XML directory without this native command chain is rejected.
 Comparing only the pre-EDT original XML would mix
 EDT's own materialization of defaults/order with converter errors.
 
+The default native-reference mode remains `standard`. An explicit
+`--native-reference-mode affinity1` binds only the reviewed UH 8.5 experiment:
+fresh database creation, exact tool and helper hashes, every command and FIFO
+receipt, complete matching input inventories, current export inventory, and
+the native child's actual exit code and sampled affinity masks. Launcher exit
+zero alone is insufficient. The original capture stays `CAPTURED_NOT_ACCEPTED`;
+the opt-in binding does not establish the cause of earlier failures or replace
+converter acceptance.
+
+Use `--fifo-snapshots` for full UH runs. Every complete inventory, project copy
+and removal of the disposable provenance directory gets its own fair FIFO
+ticket and receipt. The receipt contains counts and hashes, without file bodies.
+A file operation attempted inside an already acquired heavy ticket fails before
+requesting a recursive lock. Context is reset after success and failure. These
+flags are laboratory options; the separately pinned BSP warm harness stays
+unchanged.
+
 `accept` checks those captured inputs again and uses the exact candidate binary
 for three route-specific checks:
 
