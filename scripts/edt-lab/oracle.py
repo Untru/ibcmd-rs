@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import calendar
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor
 import contextlib
+from contextvars import ContextVar
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -51,8 +54,62 @@ def no_link_entry(path: Path) -> None:
         raise OracleError(f"Symlink/reparse point refused: {path}")
 
 
+_FIFO_FILES = ContextVar("edt_oracle_fifo_files", default=None)
+
+
+@contextlib.contextmanager
+def fifo_snapshot_scope(args, run: Path):
+    """Opt-in fair tickets for each complete snapshot/copy/removal operation."""
+    if not getattr(args, "fifo_snapshots", False):
+        yield
+        return
+    if _FIFO_FILES.get() is not None:
+        raise OracleError("Nested FIFO file-operation scope refused")
+    token = _FIFO_FILES.set({"args": args, "run": run, "serial": 0, "held": False})
+    try:
+        yield
+    finally:
+        _FIFO_FILES.reset(token)
+
+
+@contextlib.contextmanager
+def fair_file_operation(kind: str, **details):
+    state = _FIFO_FILES.get()
+    receipt = {"operation": kind, **details}
+    if state is None:
+        yield receipt
+        return
+    if state["held"]:
+        raise OracleError("Full file operation inside an acquired heavy ticket refused")
+    state["serial"] += 1
+    label = f"fifo-file-{state['serial']:06d}-{kind}"
+    started = time.monotonic()
+    receipt.update(label=label, status="FAIL", queued_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()))
+    try:
+        with heavy_lock(state["args"], state["run"], label):
+            receipt["acquired_utc"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            yield receipt
+            receipt["status"] = "CAPTURED"
+    except BaseException as error:
+        receipt.update(status="FAIL", error_type=type(error).__name__)
+        raise
+    finally:
+        receipt["wall_seconds_including_queue"] = round(time.monotonic() - started, 3)
+        write_json(state["run"] / f"{label}.json", receipt)
+
+
 def snapshot(root: Path, max_files=500000, max_total=32 * 1024**3,
              max_file=1024**3) -> dict:
+    with fair_file_operation("snapshot", root=str(root), max_files=max_files,
+                             max_total_bytes=max_total, max_file_bytes=max_file) as receipt:
+        result = _snapshot_impl(root, max_files, max_total, max_file)
+        receipt.update(tree_sha256=result["tree_sha256"], file_count=result["file_count"],
+                       total_bytes=result["total_bytes"])
+        return result
+
+
+def _snapshot_impl(root: Path, max_files=500000, max_total=32 * 1024**3,
+                   max_file=1024**3) -> dict:
     no_links(root)
     if not root.is_dir():
         raise OracleError(f"Missing input tree: {root}")
@@ -148,13 +205,22 @@ def run_command(run: Path, label: str, argv: list[str], timeout: int,
 def heavy_lock(args, run: Path, label: str):
     if not args.lock_script:
         raise OracleError("Heavy lab commands require the shared FIFO lock script")
+    state = _FIFO_FILES.get()
+    if state is not None and state["held"]:
+        raise OracleError("Nested heavy ticket inside FIFO file scope refused")
     argv = ["pwsh", "-NoProfile", "-File", str(args.lock_script)]
     run_command(run, f"{label}-lock-acquire", argv + ["acquire", args.lock_track,
                 "-TimeoutMin", str(max(1, args.timeout // 60))], args.timeout + 60)
+    if state is not None:
+        state["held"] = True
     try:
         yield
     finally:
-        run_command(run, f"{label}-lock-release", argv + ["release", args.lock_track], 60)
+        try:
+            run_command(run, f"{label}-lock-release", argv + ["release", args.lock_track], 60)
+        finally:
+            if state is not None:
+                state["held"] = False
 
 
 def run_conversion(args, run: Path, label: str, argv: list[str]) -> bytes:
@@ -835,7 +901,8 @@ def validate_project(args, run: Path) -> None:
     write_json(run / "authentic-project-before.json", before)
     check_edt_version(args, run)
     disposable = run / "project-copy"
-    shutil.copytree(project, disposable, symlinks=False)
+    with fair_file_operation("copy-project", source=str(project), target=str(disposable)):
+        shutil.copytree(project, disposable, symlinks=False)
     output = run / "validation.tsv"
     warm = None
     if getattr(args, "warm_validation_passes", 0):
@@ -965,9 +1032,198 @@ def validate_raw_report(path: Path) -> dict:
                 "different_rows": sum(row["agreement"] != "all_equal" for row in configuration)}}
 
 
+AFFINITY1_CAPTURE_PINS = {
+    "harness-source.py": ("harness_sha256", "4f25467815b42d4e2621cdf209e6c4a05325a59b4096cccddf4c87d44a3ff869"),
+    "oracle.py": ("oracle_sha256", "e74311f5c501b907db7fa7386896b3efc376ba586db1226267cc381c32d97985"),
+    "restore-clone-source.ps1": ("restore_sha256", "dd04bcc443e67134263d16a8c005f90c7188f205fe1388c0af5047873049a478"),
+    "heavy-lock-source.ps1": ("lock_sha256", "a4e35ef94eaed6b5636e1f0f441d15f1b143efab3720fcb0dac8651dfeb8a7a3"),
+}
+
+
+def validate_affinity1_native_reference(reference: Path, baseline: dict,
+                                        native_build: str, current_reference: dict) -> dict:
+    """Bind the reviewed lab experiment; never change its NOT_ACCEPTED outcome.
+
+    This mode proves a completed fresh native load/export and observed process
+    affinity. Sampling cannot prove internal scheduling or the cause of earlier
+    failures. It does not alter the converter or the standard native capture.
+    """
+    capture = reference.parent
+    no_links(capture)
+    def evidence(name):
+        path = capture / name
+        no_links(path)
+        value = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(value, dict):
+            raise OracleError(f"Affinity native evidence must be an object: {name}")
+        return value
+    result, invocation = evidence("result.json"), evidence("invocation.json")
+    database = "ibcmd_rs_04_edt07_uha85_affinity_r1"
+    track = "edt-uha85-affinity"
+    flags = ("all_native_commands_rc0_and_observed_affinity1", "input_unchanged",
+             "native_unchanged", "helpers_unchanged", "frozen_helpers_unchanged")
+    if result.get("status") != "CAPTURED_NOT_ACCEPTED" or any(result.get(k) is not True for k in flags) \
+            or result.get("database") != database or invocation.get("database") != database \
+            or invocation.get("scope") != "EXPERIMENT_ONLY_NOT_ACCEPTANCE" \
+            or invocation.get("track") != track or result.get("initial_affinity_hex") != "1" \
+            or invocation.get("initial_affinity_hex") != "1" or invocation.get("timeout") != 21600 \
+            or invocation.get("start_documentation") != "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start":
+        raise OracleError("Affinity native experiment did not complete with its reviewed scope")
+    if native_build != "8.5.1.1150" or invocation.get("native_build") != native_build:
+        raise OracleError("Affinity native exact build mismatch")
+    if reference != capture / "native-xml" or evidence("native-reference.json") != current_reference \
+            or Path(current_reference["root"]) != reference \
+            or evidence("input-before.json") != baseline or evidence("input-after.json") != baseline \
+            or Path(invocation["input"]) != Path(baseline["root"]):
+        raise OracleError("Affinity native source/output full inventories disagree")
+    pins = {}
+    for name, (key, expected) in AFFINITY1_CAPTURE_PINS.items():
+        no_links(capture / name)
+        if invocation.get(key) != expected or digest(capture / name) != expected:
+            raise OracleError(f"Unreviewed/changed affinity capture helper: {name}")
+        pins[name] = expected
+    native, restore, lock = (Path(invocation[k]) for k in ("native", "restore_script", "lock_script"))
+    for path, key in ((native, "native_sha256"), (restore, "restore_sha256"), (lock, "lock_sha256")):
+        no_links(path)
+        if not path.is_absolute() or ".." in path.parts or digest(path) != invocation[key]:
+            raise OracleError("Affinity native tool/helper identity changed")
+    if native.name.casefold() != "ibcmd.exe" \
+            or (capture / "native-version.stdout").read_bytes().decode("utf-8").strip() != native_build:
+        raise OracleError("Affinity native executable/version mismatch")
+    prior_path = Path(invocation["baseline_invocation"])
+    no_links(prior_path)
+    if digest(prior_path) != invocation["baseline_invocation_sha256"]:
+        raise OracleError("Independent affinity input binding changed")
+    prior = json.loads(prior_path.read_text(encoding="utf-8"))
+    if Path(prior["input"]) != Path(baseline["root"]) or Path(prior["ibcmd"]) != native \
+            or prior["native_build"] != native_build \
+            or json.loads((prior_path.parent / "input-before.json").read_text(encoding="utf-8")) != baseline:
+        raise OracleError("Affinity capture differs from the independent genuine input binding")
+    common = ["--dbms=MSSQLServer", "--db-server=localhost", f"--db-name={database}",
+              f"--data={capture / 'ibdata'}"]
+    argv_by_label = {
+        "native-version": [str(native), "--version"],
+        "fresh-database": ["pwsh", "-NoProfile", "-File", str(capture / "restore-clone-source.ps1"),
+            "-Corpus", "empty", "-Name", database, "-Track", track, "-Purpose",
+            "UH85 initial CPU affinity1 research, fresh DB only, not acceptance"],
+        "native-create": [str(native), "infobase", "create", *common, "--locale=ru_RU"],
+        "native-import": [str(native), "infobase", "config", "import", *common, baseline["root"]],
+        "native-export": [str(native), "infobase", "config", "export", *common, "--threads=4", str(reference)],
+    }
+    commands, intervals = {}, {}
+    def command(label, expected, affinity=False):
+        record = evidence(f"{label}.command.json")
+        if record.get("argv") != expected or record.get("cwd") != str(capture) \
+                or type(record.get("exit_code")) is not int or record["exit_code"] != 0 \
+                or type(record.get("launcher_exit_code")) is not int or record["launcher_exit_code"] != 0 \
+                or record.get("timeout") or record.get("timeout_or_log_limit") \
+                or record.get("timeout_seconds") != 21600 \
+                or type(record.get("launcher_pid")) is not int or record["launcher_pid"] <= 0 \
+                or record.get("creationflags") != "CREATE_NO_WINDOW" or record.get("stdin") != "DEVNULL" \
+                or record.get("initial_affinity_hex") != ("1" if affinity else None):
+            raise OracleError(f"Affinity native required command scope/outcome mismatch: {label}")
+        for stream in ("stdout", "stderr"):
+            path = capture / f"{label}.{stream}"
+            no_links(path)
+            if digest(path) != record.get(f"{stream}_sha256"):
+                raise OracleError(f"Affinity native raw stream changed: {label}.{stream}")
+        duration = record.get("duration_seconds")
+        if type(duration) not in (float, int) or not math.isfinite(duration) or not 0 < duration <= 21630:
+            raise OracleError("Affinity native command duration invalid")
+        start = calendar.timegm(time.strptime(record["started_utc"], "%Y-%m-%dT%H:%M:%SZ"))
+        if affinity:
+            # The launcher can return zero when ibcmd fails. Its held child
+            # handle exit and mask observations are both mandatory evidence.
+            observation = record.get("affinity_observation", {})
+            if not isinstance(observation, dict):
+                raise OracleError("Malformed affinity child observation")
+            children = observation.get("observed_children", [])
+            if not isinstance(children, list) or any(not isinstance(row, dict) or not isinstance(row.get("image"), str) for row in children):
+                raise OracleError("Malformed affinity observed children")
+            matches = [row for row in children if Path(row["image"]) == native]
+            if observation.get("one_expected_native_child") is not True \
+                    or observation.get("mask_one_observed") is not True \
+                    or observation.get("expected_image") != str(native.resolve()).casefold() \
+                    or type(observation.get("observed_native_exit_code")) is not int \
+                    or observation["observed_native_exit_code"] != 0 or len(matches) != 1:
+                raise OracleError("Affinity native authoritative child proof missing")
+            child = matches[0]
+            if type(child.get("pid")) is not int or child["pid"] <= 0 \
+                    or type(record.get("launcher_pid")) is not int or record["launcher_pid"] <= 0 \
+                    or type(child.get("parent_pid")) is not int \
+                    or child.get("parent_pid") != record["launcher_pid"] or child["pid"] == record["launcher_pid"] \
+                    or type(child.get("observed_exit_code")) is not int or child["observed_exit_code"] != 0 \
+                    or child.get("observed_process_masks") != [1] \
+                    or type(child["observed_process_masks"][0]) is not int \
+                    or type(child.get("samples")) is not int or child["samples"] < 1 \
+                    or not child.get("observed_system_masks") \
+                    or any(type(mask) is not int or mask < 1 or not mask & 1 for mask in child["observed_system_masks"]):
+                raise OracleError("Affinity native child identity/exit/mask mismatch")
+            first, last = (child.get(k) for k in ("first_sample_unix", "last_sample_unix"))
+            if any(type(value) not in (float, int) or not math.isfinite(value) for value in (first, last)) \
+                    or not start - 2 <= first <= last <= start + duration + 2:
+                raise OracleError("Affinity native sampling interval is outside the command")
+            launch = record.get("launch")
+            suffix = ' /d /v:off /s /c "start "" /b /wait /affinity 1 ' + ' '.join('"' + arg + '"' for arg in expected) + '"'
+            if any(re.search(r'["%!^&|<>\r\n\x00]', arg) for arg in expected) \
+                    or not isinstance(launch, str) or not launch.endswith(suffix) \
+                    or not re.fullmatch(r'"[A-Za-z]:\\(?:[^"\\]+\\)*System32\\cmd\.exe"',
+                                        launch[:-len(suffix)], re.IGNORECASE):
+                raise OracleError("Affinity native documented hidden start launcher mismatch")
+        elif record.get("launch") != expected or "affinity_observation" in record:
+            raise OracleError("Unexpected affinity launcher for direct command")
+        commands[label] = digest(capture / f"{label}.command.json")
+        intervals[label] = (start, start + duration)
+        return record
+    for label, expected in argv_by_label.items():
+        command(label, expected, label in ("native-create", "native-import", "native-export"))
+    # Snapshots and each operation acquire/release separately; no combined lock
+    # or command to an existing/unrelated database is accepted by this mode.
+    labels = ["input-before", *argv_by_label, "native-reference", "input-after"]
+    for label in labels:
+        names = ["heavy", "native"] if label in argv_by_label else ["heavy"]
+        for name in names:
+            prefix = ["pwsh", "-NoProfile", "-File", str(lock)]
+            command(f"{label}-{name}-acquire", [*prefix, "acquire", track, "-Name", name, "-TimeoutMin", "360"])
+            command(f"{label}-{name}-release", [*prefix, "release", track, "-Name", name])
+        if label not in argv_by_label:
+            record = evidence(f"{label}.command.json")
+            argv = record["argv"]
+            tree = reference if label == "native-reference" else Path(baseline["root"])
+            if not argv or Path(argv[0]).name.casefold() != "python.exe":
+                raise OracleError("Affinity snapshot interpreter mismatch")
+            command(label, [argv[0], str(capture / "harness-source.py"), "--snapshot", str(tree),
+                            "--snapshot-output", str(capture / f"{label}.json")])
+        operation_start, operation_end = intervals[label]
+        for name in names:
+            acquired = intervals[f"{label}-{name}-acquire"]
+            released = intervals[f"{label}-{name}-release"]
+            # Recorded starts have one-second precision, durations and samples
+            # retain fractions. Permit only that timestamp quantization.
+            if acquired[1] > operation_start + 2 or operation_end > released[0] + 2:
+                raise OracleError("Affinity native operation is outside its FIFO ownership interval")
+        if len(names) == 2 and (intervals[f"{label}-heavy-acquire"][1] > intervals[f"{label}-native-acquire"][0] + 2 \
+                or intervals[f"{label}-native-release"][1] > intervals[f"{label}-heavy-release"][0] + 2):
+            raise OracleError("Affinity native lock nesting differs from reviewed helper")
+    if any(intervals[f"{left}-heavy-release"][1] > intervals[f"{right}-heavy-acquire"][0] + 2
+           for left, right in zip(labels, labels[1:])):
+        raise OracleError("Affinity native operations are not separately ordered")
+    return {"mode": "affinity1", "capture": str(capture), "database": database, "native_build": native_build,
+        "capture_status": result["status"], "result_sha256": digest(capture / "result.json"),
+        "reviewed_helpers_sha256": pins, "command_evidence_sha256": commands,
+        "source_edt_xml_tree_sha256": baseline["tree_sha256"],
+        "native_reference_tree_sha256": current_reference["tree_sha256"],
+        "activation_probe": {"status": "NOT_REQUESTED"},
+        "scope": "Fresh genuine-input native import/export, documented initial affinity1 and sampled child masks; no causality or unsampled scheduling proof; converter acceptance remains separate"}
+
+
 def validate_native_reference(reference: Path, baseline: dict, native_build: str,
-                              current_reference: dict) -> dict:
+                              current_reference: dict, mode: str = "standard") -> dict:
     """Bind the native branch to the completed fresh-DB capture, not a copied tree."""
+    if mode == "affinity1":
+        return validate_affinity1_native_reference(reference, baseline, native_build, current_reference)
+    if mode != "standard":
+        raise OracleError("Unknown native reference mode")
     capture = reference.parent
     no_links(capture)
     def evidence(name):
@@ -1111,7 +1367,8 @@ def accept(args, run: Path) -> None:
     require_xml(reference)
     reference_before = snapshot(reference)
     reference_binding = validate_native_reference(reference, baseline_before,
-                                                 args.native_tool_version, reference_before)
+                                                 args.native_tool_version, reference_before,
+                                                 getattr(args, "native_reference_mode", "standard"))
     write_json(run / "native-reference-binding.json", reference_binding)
     write_json(run / "native-post-edt-reference.json", reference_before)
     write_json(run / "native-before.json", native_before)
@@ -1162,14 +1419,16 @@ def accept(args, run: Path) -> None:
     write_json(run / "unchanged-return-exact-comparison.json", unchanged_return)
     stripped = run / "generated-edt-without-provenance"
     # Validate and copy the complete project. Only the disposable copy is edited.
-    shutil.copytree(generated, stripped, symlinks=False)
+    with fair_file_operation("copy-project", source=str(generated), target=str(stripped)):
+        shutil.copytree(generated, stripped, symlinks=False)
     provenance = stripped / ".ibcmd-provenance"
     if not provenance.is_dir():
         raise OracleError("Generated EDT provenance missing: the stripping control is unproven")
     no_links(provenance)
     if provenance.resolve().parent != stripped.resolve():
         raise OracleError("Unsafe provenance removal target")
-    shutil.rmtree(provenance)
+    with fair_file_operation("remove-owned-provenance", target=str(provenance)):
+        shutil.rmtree(provenance)
     stripped_before = snapshot(stripped)
     write_json(run / "stripped-project-before.json", stripped_before)
     if any(row["path"].split("/")[0] == ".ibcmd-provenance" for row in stripped_before["files"]):
@@ -1202,6 +1461,10 @@ def accept(args, run: Path) -> None:
         raise OracleError("An immutable input changed during acceptance")
     if digest(args.ours_exe) != ours_hash:
         raise OracleError("Candidate executable changed during acceptance")
+    if getattr(args, "native_reference_mode", "standard") == "affinity1" \
+            and validate_native_reference(reference, baseline_before, args.native_tool_version,
+                                          reference_before, mode="affinity1") != reference_binding:
+        raise OracleError("Experimental native reference evidence changed during acceptance")
     if bind_diagnostic_capture(validation_capture, args, project_snapshot=project_before) != validation_binding \
             or bind_diagnostic_capture(ambient_control, args, control=True) != control_binding:
         raise OracleError("Diagnostic capture evidence changed during acceptance")
@@ -1279,6 +1542,10 @@ def parser():
     result.add_argument("--prepared", type=Path)
     result.add_argument("--ours-exe", type=Path)
     result.add_argument("--reference", type=Path, help="Independent native export after loading authentic EDT project/export")
+    result.add_argument("--native-reference-mode", choices=("standard", "affinity1"), default="standard",
+                        help="Explicit reviewed lab capture mode; affinity1 binds experimental provenance and sampled affinity, not causality")
+    result.add_argument("--fifo-snapshots", action="store_true",
+                        help="Opt-in separate fair heavy tickets for every full snapshot, project copy and owned provenance removal")
     result.add_argument("--validation-capture", type=Path, help="Completed structured validation of this authentic prepared EDT project")
     result.add_argument("--ambient-control", type=Path, help="Completed zero-source-error empty installed-EDT diagnostic control")
     result.add_argument("--heap-gib", type=int, default=8)
@@ -1303,6 +1570,8 @@ def main() -> int:
         if args.warm_validation_passes < 0 or args.warm_validation_passes == 1 \
                 or args.warm_validation_passes and args.mode not in ("validate", "accept"):
             raise OracleError("Warm passes require validate/accept and either 0 or >=2")
+        if args.native_reference_mode != "standard" and args.mode != "accept":
+            raise OracleError("Experimental native-reference mode requires accept")
         expected = {"2.20": "8.3.27", "2.21": "8.5.1"}[args.source_version]
         if expected != args.runtime:
             raise OracleError("Explicit XML profile and runtime disagree")
@@ -1313,14 +1582,15 @@ def main() -> int:
         write_json(args.run / "invocation.json", {
             **{key: str(value) if isinstance(value, Path) else value for key, value in vars(args).items()},
             "harness_sha256": hashlib.sha256(harness_source).hexdigest()})
-        if args.mode == "prepare":
-            prepare(args, args.run)
-        elif args.mode == "validate":
-            validate_project(args, args.run)
-        elif args.mode == "control":
-            empty_project_control(args, args.run)
-        else:
-            accept(args, args.run)
+        with fifo_snapshot_scope(args, args.run):
+            if args.mode == "prepare":
+                prepare(args, args.run)
+            elif args.mode == "validate":
+                validate_project(args, args.run)
+            elif args.mode == "control":
+                empty_project_control(args, args.run)
+            else:
+                accept(args, args.run)
         status = json.loads((args.run / "prepared.json").read_text(encoding="utf-8"))["status"] \
             if args.mode == "prepare" else "CAPTURED" if args.mode in ("validate", "control") else "PASS"
         print(f"{status}: {args.run}", flush=True)

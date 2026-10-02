@@ -1,9 +1,12 @@
 """Negative controls for lab evidence; these do not count as installed-EDT acceptance."""
 import importlib.util
+import calendar
 import json
+import shutil
 from pathlib import Path
 import sys
 import tempfile
+import time
 from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
@@ -814,6 +817,244 @@ class EvidenceControls(unittest.TestCase):
                     path.write_text(json.dumps(data))
                 with self.assertRaises(oracle.OracleError):
                     oracle.validate_native_reference(*values)
+
+    def affinity_capture_fixture(self, root):
+        """Synthetic structure only: no native, shell, DB, or EDT process runs.
+
+        Tests explicitly replace reviewed helper pins with dummy fixture hashes.
+        Production has no override for those pins.
+        """
+        capture = root / "capture"
+        capture.mkdir()
+        baseline = {"root": str(root / "authentic-edt-xml"), "tree_sha256": "source",
+                    "file_count": 1, "files": [{"path": "Configuration.xml", "sha256": "source"}]}
+        reference = capture / "native-xml"
+        current = {"root": str(reference), "tree_sha256": "reference", "file_count": 2,
+            "files": [{"path": "Configuration.xml", "sha256": "native"}, {"path": "ConfigDumpInfo.xml", "sha256": "cdi"}]}
+        native, restore, lock = (root / name for name in ("ibcmd.exe", "restore-clone.ps1", "heavy-lock.ps1"))
+        native.write_bytes(b"dummy native; never executed")
+        restore.write_bytes(b"dummy fresh restore; never executed")
+        lock.write_bytes(b"dummy FIFO; never executed")
+        pins = {}
+        for name, (key, _) in oracle.AFFINITY1_CAPTURE_PINS.items():
+            source = restore if name.startswith("restore-") else lock if name.startswith("heavy-") else None
+            (capture / name).write_bytes(source.read_bytes() if source else name.encode())
+            pins[name] = (key, oracle.digest(capture / name))
+        database, track, build = "ibcmd_rs_04_edt07_uha85_affinity_r1", "edt-uha85-affinity", "8.5.1.1150"
+        prior = root / "prior"
+        prior.mkdir()
+        oracle.write_json(prior / "invocation.json", {"input": baseline["root"], "ibcmd": str(native), "native_build": build})
+        oracle.write_json(prior / "input-before.json", baseline)
+        invocation = {"scope": "EXPERIMENT_ONLY_NOT_ACCEPTANCE", "database": database,
+            "track": track, "input": baseline["root"], "native": str(native), "native_build": build,
+            "native_sha256": oracle.digest(native), "restore_script": str(restore), "lock_script": str(lock),
+            "baseline_invocation": str(prior / "invocation.json"), "baseline_invocation_sha256": oracle.digest(prior / "invocation.json"),
+            "timeout": 21600, "initial_affinity_hex": "1",
+            "start_documentation": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/start",
+            **{key: value for key, value in pins.values()}}
+        result = {"status": "CAPTURED_NOT_ACCEPTED", "database": database, "initial_affinity_hex": "1",
+            **{key: True for key in ("all_native_commands_rc0_and_observed_affinity1", "input_unchanged",
+                "native_unchanged", "helpers_unchanged", "frozen_helpers_unchanged")}}
+        for name, data in (("invocation.json", invocation), ("result.json", result),
+                ("input-before.json", baseline), ("input-after.json", baseline), ("native-reference.json", current)):
+            oracle.write_json(capture / name, data)
+        common = ["--dbms=MSSQLServer", "--db-server=localhost", f"--db-name={database}", f"--data={capture / 'ibdata'}"]
+        operations = {
+            "native-version": [str(native), "--version"],
+            "fresh-database": ["pwsh", "-NoProfile", "-File", str(capture / "restore-clone-source.ps1"), "-Corpus", "empty",
+                "-Name", database, "-Track", track, "-Purpose", "UH85 initial CPU affinity1 research, fresh DB only, not acceptance"],
+            "native-create": [str(native), "infobase", "create", *common, "--locale=ru_RU"],
+            "native-import": [str(native), "infobase", "config", "import", *common, baseline["root"]],
+            "native-export": [str(native), "infobase", "config", "export", *common, "--threads=4", str(reference)],
+        }
+        base = calendar.timegm(time.strptime("2026-10-01T12:00:00Z", "%Y-%m-%dT%H:%M:%SZ"))
+        def record(label, argv, moment, affinity=False):
+            (capture / f"{label}.stdout").write_bytes(build.encode() if label == "native-version" else b"")
+            (capture / f"{label}.stderr").write_bytes(b"")
+            data = {"argv": argv, "cwd": str(capture), "exit_code": 0, "launcher_exit_code": 0,
+                "launcher_pid": 12, "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(moment)),
+                "duration_seconds": 1, "timeout_seconds": 21600, "creationflags": "CREATE_NO_WINDOW", "stdin": "DEVNULL",
+                "initial_affinity_hex": "1" if affinity else None, "launch": argv,
+                **{f"{stream}_sha256": oracle.digest(capture / f"{label}.{stream}") for stream in ("stdout", "stderr")}}
+            if affinity:
+                data["launch"] = '"C:\\WINDOWS\\System32\\cmd.exe" /d /v:off /s /c "start "" /b /wait /affinity 1 ' + ' '.join('"' + arg + '"' for arg in argv) + '"'
+                data["affinity_observation"] = {"expected_image": str(native.resolve()).casefold(),
+                    "one_expected_native_child": True, "mask_one_observed": True, "observed_native_exit_code": 0,
+                    "observed_children": [{"pid": 24, "parent_pid": 12, "image": str(native),
+                        "samples": 5, "first_sample_unix": moment + .2, "last_sample_unix": moment + .7,
+                        "observed_exit_code": 0, "observed_process_masks": [1], "observed_system_masks": [3]}]}
+            oracle.write_json(capture / f"{label}.command.json", data)
+        for index, label in enumerate(["input-before", *operations, "native-reference", "input-after"]):
+            moment = base + index * 20
+            names = ["heavy", "native"] if label in operations else ["heavy"]
+            prefix = ["pwsh", "-NoProfile", "-File", str(lock)]
+            for offset, name in enumerate(names):
+                record(f"{label}-{name}-acquire", [*prefix, "acquire", track, "-Name", name, "-TimeoutMin", "360"], moment + offset * 2)
+            if label in operations:
+                argv = operations[label]
+            else:
+                tree = reference if label == "native-reference" else Path(baseline["root"])
+                argv = [str(root / "python.exe"), str(capture / "harness-source.py"), "--snapshot", str(tree),
+                    "--snapshot-output", str(capture / f"{label}.json")]
+            record(label, argv, moment + 4, label in ("native-create", "native-import", "native-export"))
+            for offset, name in enumerate(reversed(names)):
+                record(f"{label}-{name}-release", [*prefix, "release", track, "-Name", name], moment + 6 + offset * 2)
+        return (reference, baseline, build, current), pins
+
+    def test_affinity_mode_is_opt_in_and_preserves_experimental_status(self):
+        with tempfile.TemporaryDirectory() as folder:
+            values, pins = self.affinity_capture_fixture(Path(folder))
+            with patch.object(oracle, "AFFINITY1_CAPTURE_PINS", pins):
+                result = oracle.validate_native_reference(*values, mode="affinity1")
+            self.assertEqual(result["mode"], "affinity1")
+            self.assertEqual(result["capture_status"], "CAPTURED_NOT_ACCEPTED")
+            self.assertIn("no causality", result["scope"])
+            self.assertEqual(json.loads((values[0].parent / "result.json").read_text())["status"], "CAPTURED_NOT_ACCEPTED")
+            with self.assertRaises(oracle.OracleError):
+                oracle.validate_native_reference(*values)
+            with self.assertRaises(oracle.OracleError):
+                oracle.validate_native_reference(*values, mode="unknown")
+
+    def test_affinity_capture_mutations_fail_closed(self):
+        mutations = ("status", "unchanged", "helper", "tool", "input", "output", "prior", "version",
+            "command", "extra-argument", "snapshot", "raw-stream", "child-exit", "child-parent", "child-parent-bool", "child-duplicate",
+            "mask", "mask-bool", "samples", "sampling-interval", "launch", "fifo-owner", "fifo-time", "bool-exit", "malformed-observation")
+        for mutation in mutations:
+            with self.subTest(mutation=mutation), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                values, pins = self.affinity_capture_fixture(root)
+                capture = values[0].parent
+                name, data = "native-import.command.json", None
+                if mutation in ("helper", "tool", "raw-stream", "version"):
+                    target = {"helper": capture / "oracle.py", "tool": root / "ibcmd.exe",
+                        "raw-stream": capture / "native-import.stderr", "version": capture / "native-version.stdout"}[mutation]
+                    target.write_bytes(b"changed")
+                else:
+                    name = {"status": "result.json", "unchanged": "result.json", "input": "input-after.json",
+                        "output": "native-reference.json", "prior": "invocation.json", "snapshot": "input-after.command.json",
+                        "fifo-owner": "native-import-heavy-acquire.command.json", "fifo-time": "native-import-heavy-acquire.command.json"}.get(mutation, name)
+                    data = json.loads((capture / name).read_text())
+                    if mutation == "status": data["status"] = "PASS"
+                    elif mutation == "unchanged": data["input_unchanged"] = False
+                    elif mutation in ("input", "output"): data["files"] = []
+                    elif mutation == "prior": data["baseline_invocation_sha256"] = "different"
+                    elif mutation == "command": data["argv"] = [arg.replace("ibcmd_rs_04_edt07_uha85_affinity_r1", "other_db") for arg in data["argv"]]
+                    elif mutation == "extra-argument": data["argv"].append("--no-check")
+                    elif mutation == "snapshot": data["argv"][3] = str(root / "other-source")
+                    elif mutation == "launch": data["launch"] = data["launch"].replace("/affinity 1", "/affinity 2")
+                    elif mutation == "fifo-owner": data["argv"][5] = "other-owner"
+                    elif mutation == "fifo-time": data["duration_seconds"] = 100
+                    elif mutation == "bool-exit": data["exit_code"] = False
+                    elif mutation == "malformed-observation": data["affinity_observation"] = None
+                    else:
+                        observation = data["affinity_observation"]
+                        child = observation["observed_children"][0]
+                        if mutation == "child-exit": child["observed_exit_code"] = 7
+                        elif mutation == "child-parent": child["parent_pid"] = 999
+                        elif mutation == "child-parent-bool": data["launcher_pid"], child["parent_pid"] = 1, True
+                        elif mutation == "child-duplicate": observation["observed_children"].append(dict(child))
+                        elif mutation == "mask": child["observed_process_masks"] = [1, 3]
+                        elif mutation == "mask-bool": child["observed_process_masks"] = [True]
+                        elif mutation == "samples": child["samples"] = 0
+                        elif mutation == "sampling-interval": child["last_sample_unix"] += 100
+                    (capture / name).write_text(json.dumps(data), encoding="utf-8")
+                with patch.object(oracle, "AFFINITY1_CAPTURE_PINS", pins), self.assertRaises(oracle.OracleError):
+                    oracle.validate_native_reference(*values, mode="affinity1")
+
+    def fifo_fixture(self, root):
+        run, source = root / "run", root / "source"
+        run.mkdir(); source.mkdir()
+        (source / "asset.bin").write_bytes(b"private body must not enter receipts")
+        args = SimpleNamespace(fifo_snapshots=True, lock_script=root / "fake-lock.ps1",
+                               lock_track="edt-synthetic-fifo", timeout=60)
+        return args, run, source
+
+    def test_fifo_snapshots_are_distinct_and_default_manifest_is_unchanged(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args, run, source = self.fifo_fixture(Path(folder))
+            with patch.object(oracle, "run_command", return_value=b"") as commands:
+                expected = oracle.snapshot(source)
+                self.assertEqual(commands.call_count, 0)
+                with oracle.fifo_snapshot_scope(args, run):
+                    self.assertEqual(oracle.snapshot(source), expected)
+                    self.assertEqual(oracle.snapshot(source), expected)
+                self.assertEqual(commands.call_count, 4)
+                labels = [call.args[1] for call in commands.call_args_list]
+                self.assertEqual(len(set(labels)), 4)
+                self.assertTrue(labels[0].endswith("-acquire")); self.assertTrue(labels[1].endswith("-release"))
+                self.assertTrue(labels[2].endswith("-acquire")); self.assertTrue(labels[3].endswith("-release"))
+                self.assertEqual(oracle.snapshot(source), expected)
+                self.assertEqual(commands.call_count, 4)
+            receipts = sorted(run.glob("fifo-file-*.json"))
+            self.assertEqual(len(receipts), 2)
+            for path in receipts:
+                receipt = json.loads(path.read_text())
+                self.assertEqual(receipt["status"], "CAPTURED")
+                self.assertEqual(receipt["tree_sha256"], expected["tree_sha256"])
+                self.assertNotIn("private body", path.read_text())
+            self.assertIsNone(oracle._FIFO_FILES.get())
+
+    def test_fifo_snapshot_inside_heavy_ticket_fails_before_recursive_acquire(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args, run, source = self.fifo_fixture(Path(folder))
+            with patch.object(oracle, "run_command", return_value=b"") as commands:
+                with oracle.fifo_snapshot_scope(args, run):
+                    with oracle.heavy_lock(args, run, "product"):
+                        with self.assertRaises(oracle.OracleError):
+                            oracle.snapshot(source)
+                        self.assertEqual(commands.call_count, 1)
+                    self.assertEqual(commands.call_count, 2)
+                    oracle.snapshot(source)
+                self.assertEqual(commands.call_count, 4)
+            self.assertIsNone(oracle._FIFO_FILES.get())
+
+    def test_fifo_snapshot_exception_releases_and_resets_context(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args, run, source = self.fifo_fixture(Path(folder))
+            empty = Path(folder) / "empty"; empty.mkdir()
+            with patch.object(oracle, "run_command", return_value=b"") as commands:
+                with self.assertRaises(oracle.OracleError), oracle.fifo_snapshot_scope(args, run):
+                    oracle.snapshot(empty)
+                self.assertEqual(commands.call_count, 2)
+                self.assertIsNone(oracle._FIFO_FILES.get())
+                oracle.snapshot(source)
+                self.assertEqual(commands.call_count, 2)
+            receipt = json.loads(next(run.glob("fifo-file-*.json")).read_text())
+            self.assertEqual(receipt["status"], "FAIL")
+            self.assertEqual(receipt["error_type"], "OracleError")
+
+    def test_fifo_copy_and_owned_removal_use_separate_tickets(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args, run, source = self.fifo_fixture(Path(folder))
+            provenance = source / ".ibcmd-provenance"; provenance.mkdir()
+            (provenance / "manifest.json").write_bytes(b"private original data")
+            target = run / "copy"
+            with patch.object(oracle, "run_command", return_value=b"") as commands:
+                with oracle.fifo_snapshot_scope(args, run):
+                    with oracle.fair_file_operation("copy-project", source=str(source), target=str(target)):
+                        shutil.copytree(source, target)
+                    with oracle.fair_file_operation("remove-owned-provenance", target=str(target / ".ibcmd-provenance")):
+                        shutil.rmtree(target / ".ibcmd-provenance")
+                self.assertEqual(commands.call_count, 4)
+            self.assertTrue(provenance.exists())
+            self.assertEqual((target / "asset.bin").read_bytes(), (source / "asset.bin").read_bytes())
+            receipts = [json.loads(path.read_text()) for path in run.glob("fifo-file-*.json")]
+            self.assertEqual({r["operation"] for r in receipts}, {"copy-project", "remove-owned-provenance"})
+            self.assertTrue(all(r["status"] == "CAPTURED" for r in receipts))
+
+    def test_fifo_release_failure_never_leaves_captured_receipt_or_context(self):
+        with tempfile.TemporaryDirectory() as folder:
+            args, run, source = self.fifo_fixture(Path(folder))
+            def fail_release(_run, label, *_args, **_kwargs):
+                if label.endswith("-release"):
+                    raise oracle.OracleError("synthetic release failure")
+                return b""
+            with patch.object(oracle, "run_command", side_effect=fail_release):
+                with self.assertRaises(oracle.OracleError), oracle.fifo_snapshot_scope(args, run):
+                    oracle.snapshot(source)
+            self.assertIsNone(oracle._FIFO_FILES.get())
+            receipt = json.loads(next(run.glob("fifo-file-*.json")).read_text())
+            self.assertEqual(receipt["status"], "FAIL")
 
 
 if __name__ == "__main__":
