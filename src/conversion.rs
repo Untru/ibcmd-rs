@@ -1322,8 +1322,35 @@ fn validate_dialect(
     dialects: &DialectRegistry,
     profile: &ProfileId,
 ) -> std::result::Result<(), String> {
+    validate_dialect_with_policy(
+        document,
+        dialects,
+        profile,
+        ibcmd_core::source_policy::SourceOperationPolicy::Bounded,
+    )
+}
+
+fn validate_source_dialect(
+    document: &XmlDocument,
+    dialects: &DialectRegistry,
+    profile: &ProfileId,
+) -> std::result::Result<(), String> {
+    validate_dialect_with_policy(
+        document,
+        dialects,
+        profile,
+        ibcmd_core::source_policy::SourceOperationPolicy::source_operation(),
+    )
+}
+
+fn validate_dialect_with_policy(
+    document: &XmlDocument,
+    dialects: &DialectRegistry,
+    profile: &ProfileId,
+    operation: ibcmd_core::source_policy::SourceOperationPolicy,
+) -> std::result::Result<(), String> {
     let detection = dialects
-        .detect(document)
+        .detect_with_policy(document, operation)
         .map_err(|error| format!("XML dialect detection failed: {error}"))?;
     let matches = match detection {
         DialectDetection::Exact { candidate, .. } => candidate.profile_id() == profile,

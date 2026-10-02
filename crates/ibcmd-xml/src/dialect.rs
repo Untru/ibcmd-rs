@@ -7,6 +7,7 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::profile::{
     EffectiveProfile, ProfileRegistry, ProfileSourceKind, parse_profile_source, resolve_profiles,
 };
+use ibcmd_core::source_policy::SourceOperationPolicy;
 use ibcmd_core::version::XmlDialect;
 
 use crate::{AttributeKind, XmlDocument, XmlElement, XmlNode};
@@ -436,6 +437,7 @@ pub enum DialectError {
         profile: ProfileId,
     },
     EvidenceLimit,
+    ResourceExhausted,
     DuplicateVersion,
     DuplicateNamespace {
         element: String,
@@ -517,6 +519,9 @@ impl Display for DialectError {
                 write!(f, "profile `{profile}` declares too many evidence matchers")
             }
             Self::EvidenceLimit => f.write_str("XML dialect evidence exceeds bounds"),
+            Self::ResourceExhausted => {
+                f.write_str("XML dialect evidence cannot allocate or represent required resources")
+            }
             Self::DuplicateVersion => f.write_str("duplicate root version evidence"),
             Self::DuplicateNamespace { element, prefix } => write!(
                 f,
@@ -581,7 +586,17 @@ impl DialectRegistry {
         self.descriptors.get(d)
     }
     pub fn detect(&self, doc: &XmlDocument) -> Result<DialectDetection, DialectError> {
-        let evidence = extract(doc, self, MAX_NODES)?;
+        self.detect_with_policy(doc, SourceOperationPolicy::Bounded)
+    }
+    /// Detects a complete parsed source using an explicit operation policy.
+    /// Source removes only resource ceilings; namespace and matcher semantics
+    /// are identical to the bounded default. The XML reader validates EOF.
+    pub fn detect_with_policy(
+        &self,
+        doc: &XmlDocument,
+        policy: SourceOperationPolicy,
+    ) -> Result<DialectDetection, DialectError> {
+        let evidence = extract_with_policy(doc, self, MAX_NODES, policy)?;
         if let Some(version) = evidence.version() {
             let axis = XmlDialect::parse(version)
                 .map_err(|_| DialectError::InvalidVersion(version.into()))?;
@@ -1015,13 +1030,24 @@ struct Matchers {
     namespaces: BTreeMap<DialectFeature, BTreeSet<String>>,
     elements: BTreeMap<DialectFeature, BTreeSet<(String, Option<String>)>>,
 }
+#[cfg(test)]
 fn extract(
     doc: &XmlDocument,
     registry: &DialectRegistry,
     node_limit: usize,
 ) -> Result<DialectEvidence, DialectError> {
+    extract_with_policy(doc, registry, node_limit, SourceOperationPolicy::Bounded)
+}
+fn extract_with_policy(
+    doc: &XmlDocument,
+    registry: &DialectRegistry,
+    node_limit: usize,
+    policy: SourceOperationPolicy,
+) -> Result<DialectEvidence, DialectError> {
     let root = doc.root();
-    validate_qname_bounds(root.name())?;
+    if policy == SourceOperationPolicy::Bounded {
+        validate_qname_bounds(root.name())?;
+    }
     let mut version = None;
     for attribute in root.attributes() {
         if matches!(attribute.kind(),AttributeKind::Ordinary(name) if name.prefix().is_none()&&name.local()=="version")
@@ -1029,14 +1055,15 @@ fn extract(
             if version.is_some() {
                 return Err(DialectError::DuplicateVersion);
             }
-            if attribute.value().len() > MAX_FIELD_BYTES {
+            if policy == SourceOperationPolicy::Bounded && attribute.value().len() > MAX_FIELD_BYTES
+            {
                 return Err(DialectError::EvidenceLimit);
             }
             version = Some(attribute.value().to_owned());
         }
     }
     let base = BTreeMap::from([(Some("xml".to_owned()), XML_NAMESPACE.to_owned())]);
-    let (root_scope, root_declarations) = scope(root, &base)?;
+    let (root_scope, root_declarations) = scope_with_policy(root, &base, policy)?;
     let root_namespace = effective_namespace(root, &root_scope);
     let recognized = registry
         .descriptors
@@ -1072,17 +1099,27 @@ fn extract(
         namespaces: vec![],
         features: BTreeSet::new(),
     };
-    let mut visited = 0;
-    walk(
-        root,
-        &root_scope,
-        &root_declarations,
-        &matchers,
-        0,
-        node_limit,
-        &mut visited,
-        &mut evidence,
-    )?;
+    if policy == SourceOperationPolicy::Source {
+        walk_source(
+            root,
+            root_scope,
+            &root_declarations,
+            &matchers,
+            &mut evidence,
+        )?;
+    } else {
+        let mut visited = 0;
+        walk(
+            root,
+            &root_scope,
+            &root_declarations,
+            &matchers,
+            0,
+            node_limit,
+            &mut visited,
+            &mut evidence,
+        )?;
+    }
     evidence
         .namespaces
         .sort_by(|a, b| a.prefix.cmp(&b.prefix).then(a.uri.cmp(&b.uri)));
@@ -1104,30 +1141,52 @@ fn scope(
     element: &XmlElement,
     parent: &NamespaceScope,
 ) -> Result<(NamespaceScope, Vec<NamespaceEvidence>), DialectError> {
-    validate_qname_bounds(element.name())?;
+    scope_with_policy(element, parent, SourceOperationPolicy::Bounded)
+}
+fn scope_with_policy(
+    element: &XmlElement,
+    parent: &NamespaceScope,
+    policy: SourceOperationPolicy,
+) -> Result<(NamespaceScope, Vec<NamespaceEvidence>), DialectError> {
+    let mut result = parent.clone();
+    let (declarations, _) = bind_scope(element, &mut result, policy)?;
+    Ok((result, declarations))
+}
+type NamespaceUndo = Vec<(Option<String>, Option<String>)>;
+fn bind_scope(
+    element: &XmlElement,
+    result: &mut NamespaceScope,
+    policy: SourceOperationPolicy,
+) -> Result<(Vec<NamespaceEvidence>, NamespaceUndo), DialectError> {
+    let bounded = policy == SourceOperationPolicy::Bounded;
+    if bounded {
+        validate_qname_bounds(element.name())?;
+    }
     for attribute in element.attributes() {
         match attribute.kind() {
-            AttributeKind::Ordinary(name) => validate_qname_bounds(name)?,
+            AttributeKind::Ordinary(name) if bounded => validate_qname_bounds(name)?,
+            AttributeKind::Ordinary(_) => {}
             AttributeKind::Namespace(prefix) => {
-                if prefix
-                    .as_deref()
-                    .is_some_and(|prefix| prefix.len() > MAX_FIELD_BYTES)
-                    || attribute.value().len() > MAX_FIELD_BYTES
+                if bounded
+                    && (prefix
+                        .as_deref()
+                        .is_some_and(|prefix| prefix.len() > MAX_FIELD_BYTES)
+                        || attribute.value().len() > MAX_FIELD_BYTES)
                 {
                     return Err(DialectError::EvidenceLimit);
                 }
             }
         }
     }
-    if parent.len() > MAX_EVIDENCE {
+    if bounded && result.len() > MAX_EVIDENCE {
         return Err(DialectError::EvidenceLimit);
     }
-    let mut result = parent.clone();
+    let mut undo = Vec::new();
     let mut seen = BTreeSet::new();
     let mut declarations = vec![];
     for a in element.attributes() {
         if let AttributeKind::Namespace(prefix) = a.kind() {
-            if declarations.len() >= MAX_EVIDENCE {
+            if bounded && declarations.len() >= MAX_EVIDENCE {
                 return Err(DialectError::EvidenceLimit);
             }
             if !seen.insert(prefix.clone()) {
@@ -1159,24 +1218,40 @@ fn scope(
                     uri: a.value().into(),
                 });
             }
+            undo.try_reserve(1)
+                .map_err(|_| DialectError::ResourceExhausted)?;
+            undo.push((prefix.clone(), result.get(prefix).cloned()));
             if a.value().is_empty() {
                 result.remove(prefix);
             } else {
-                if !result.contains_key(prefix) && result.len() >= MAX_EVIDENCE {
-                    return Err(DialectError::EvidenceLimit);
+                if !result.contains_key(prefix) {
+                    result
+                        .len()
+                        .checked_add(1)
+                        .ok_or(DialectError::ResourceExhausted)?;
+                    if bounded && result.len() >= MAX_EVIDENCE {
+                        return Err(DialectError::EvidenceLimit);
+                    }
                 }
                 result.insert(prefix.clone(), a.value().into());
             }
+            declarations
+                .try_reserve(1)
+                .map_err(|_| DialectError::ResourceExhausted)?;
             declarations.push(NamespaceEvidence {
                 prefix: prefix.clone(),
                 uri: a.value().into(),
             });
         }
     }
-    validate_bound_names(element, &result)?;
-    Ok((result, declarations))
+    validate_bound_names(element, result, policy)?;
+    Ok((declarations, undo))
 }
-fn validate_bound_names(element: &XmlElement, scope: &NamespaceScope) -> Result<(), DialectError> {
+fn validate_bound_names(
+    element: &XmlElement,
+    scope: &NamespaceScope,
+    policy: SourceOperationPolicy,
+) -> Result<(), DialectError> {
     if let Some(prefix) = element.name().prefix() {
         if prefix == "xmlns" {
             return Err(DialectError::InvalidNamespace {
@@ -1195,7 +1270,9 @@ fn validate_bound_names(element: &XmlElement, scope: &NamespaceScope) -> Result<
     for attribute in element.attributes() {
         if let AttributeKind::Ordinary(name) = attribute.kind() {
             if name.raw() == "xmlns" || name.prefix() == Some("xmlns") {
-                if attribute.value().len() > MAX_FIELD_BYTES {
+                if policy == SourceOperationPolicy::Bounded
+                    && attribute.value().len() > MAX_FIELD_BYTES
+                {
                     return Err(DialectError::EvidenceLimit);
                 }
                 return Err(DialectError::InvalidNamespace {
@@ -1272,6 +1349,99 @@ fn walk(
     }
     Ok(())
 }
+/// Source DFS keeps only the current namespace map and one undo list per
+/// open element. It neither recurses nor copies ancestor scopes per child.
+fn walk_source(
+    root: &XmlElement,
+    mut current_scope: NamespaceScope,
+    root_declarations: &[NamespaceEvidence],
+    matchers: &Matchers,
+    evidence: &mut DialectEvidence,
+) -> Result<(), DialectError> {
+    struct Frame<'a> {
+        children: std::slice::Iter<'a, XmlNode>,
+        undo: NamespaceUndo,
+    }
+    let mut visited = 1usize;
+    record_source_element(root, &current_scope, root_declarations, matchers, evidence)?;
+    let mut stack = Vec::new();
+    stack
+        .try_reserve(1)
+        .map_err(|_| DialectError::ResourceExhausted)?;
+    stack.push(Frame {
+        children: root.children().iter(),
+        undo: Vec::new(),
+    });
+    while let Some(frame) = stack.last_mut() {
+        let child = frame.children.find_map(|node| match node {
+            XmlNode::Element(element) => Some(element),
+            _ => None,
+        });
+        if let Some(child) = child {
+            visited = visited
+                .checked_add(1)
+                .ok_or(DialectError::ResourceExhausted)?;
+            let (declarations, undo) =
+                bind_scope(child, &mut current_scope, SourceOperationPolicy::Source)?;
+            record_source_element(child, &current_scope, &declarations, matchers, evidence)?;
+            stack
+                .len()
+                .checked_add(1)
+                .ok_or(DialectError::ResourceExhausted)?;
+            stack
+                .try_reserve(1)
+                .map_err(|_| DialectError::ResourceExhausted)?;
+            stack.push(Frame {
+                children: child.children().iter(),
+                undo,
+            });
+        } else {
+            let frame = stack.pop().expect("existing frame");
+            for (prefix, prior) in frame.undo.into_iter().rev() {
+                if let Some(prior) = prior {
+                    current_scope.insert(prefix, prior);
+                } else {
+                    current_scope.remove(&prefix);
+                }
+            }
+        }
+    }
+    Ok(())
+}
+fn record_source_element(
+    element: &XmlElement,
+    current_scope: &NamespaceScope,
+    declarations: &[NamespaceEvidence],
+    matchers: &Matchers,
+    evidence: &mut DialectEvidence,
+) -> Result<(), DialectError> {
+    evidence
+        .namespaces
+        .len()
+        .checked_add(declarations.len())
+        .ok_or(DialectError::ResourceExhausted)?;
+    evidence
+        .namespaces
+        .try_reserve(declarations.len())
+        .map_err(|_| DialectError::ResourceExhausted)?;
+    for declaration in declarations {
+        evidence.namespaces.push(declaration.clone());
+        for (feature, uris) in &matchers.namespaces {
+            if uris.contains(&declaration.uri) {
+                record_feature_with_limit(evidence, feature, usize::MAX)?;
+            }
+        }
+    }
+    let effective = effective_namespace(element, current_scope);
+    if element.name().prefix().is_none() || effective.is_some() {
+        for (feature, elements) in &matchers.elements {
+            if elements.contains(&(element.name().local().into(), effective.clone())) {
+                record_feature_with_limit(evidence, feature, usize::MAX)?;
+            }
+        }
+    }
+    Ok(())
+}
 fn record_feature(
     evidence: &mut DialectEvidence,
     feature: &DialectFeature,
@@ -1286,6 +1456,11 @@ fn record_feature_with_limit(
     if !evidence.features.contains(feature) && evidence.features.len() >= maximum {
         return Err(DialectError::EvidenceLimit);
     }
+    evidence
+        .features
+        .len()
+        .checked_add(1)
+        .ok_or(DialectError::ResourceExhausted)?;
     evidence.features.insert(feature.clone());
     Ok(())
 }
@@ -1899,5 +2074,219 @@ mod tests {
             bundled_dialect_registry().unwrap().detect(&doc),
             Err(DialectError::EvidenceLimit)
         ));
+    }
+    #[test]
+    fn source_detection_visits_beyond_bounded_nodes_and_full_tail() {
+        let registry = bundled_dialect_registry().unwrap();
+        let head = format!("<MetaDataObject xmlns='{MD_CLASSES}'>");
+        let body = "<Child/>".repeat(MAX_NODES + 1);
+        let xml = format!("{head}{body}<UseInInterfaceCompatibilityMode/></MetaDataObject>");
+        let doc = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect(&doc),
+            Err(DialectError::EvidenceLimit)
+        ));
+        let result = registry
+            .detect_with_policy(&doc, SourceOperationPolicy::Source)
+            .unwrap();
+        assert!(
+            matches!(&result, DialectDetection::Exact { candidate, .. } if candidate.dialect().to_string() == "2.21")
+        );
+        assert!(
+            result
+                .evidence()
+                .features()
+                .contains(&DialectFeature::use_in_interface_compatibility_mode())
+        );
+        let unbound = format!("{head}{body}<late:Child/></MetaDataObject>");
+        let doc = XmlReader::from_slice(unbound.as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect_with_policy(&doc, SourceOperationPolicy::Source),
+            Err(DialectError::UnboundPrefix { .. })
+        ));
+        for tail in ["<", "<another/>", "trailing", "<!--"] {
+            assert!(XmlReader::from_slice(format!("{xml}{tail}").as_bytes()).is_err());
+        }
+    }
+    #[test]
+    fn source_detection_has_iterative_namespace_scope_and_deep_tail_validation() {
+        let registry = bundled_dialect_registry().unwrap();
+        let depth = 2048;
+        let nested = format!(
+            "{}<p:Child/>{}",
+            "<Child xmlns:p='urn:child'>".repeat(depth),
+            "</Child>".repeat(depth)
+        );
+        let xml = format!(
+            "<MetaDataObject xmlns='{MD_CLASSES}' version='2.20'>{nested}<Child/></MetaDataObject>"
+        );
+        let doc = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect(&doc),
+            Err(DialectError::EvidenceLimit)
+        ));
+        assert!(
+            matches!(registry.detect_with_policy(&doc, SourceOperationPolicy::Source).unwrap(), DialectDetection::Exact { candidate, .. } if candidate.dialect().to_string() == "2.20")
+        );
+        // The deepest binding must not leak into a following sibling.
+        let xml = xml.replace("<Child/></MetaDataObject>", "<p:Child/></MetaDataObject>");
+        let doc = XmlReader::from_slice(xml.as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect_with_policy(&doc, SourceOperationPolicy::Source),
+            Err(DialectError::UnboundPrefix { .. })
+        ));
+        // Default-namespace undeclaration/rebinding restores the parent's root matcher.
+        let doc = XmlReader::from_slice(format!("<MetaDataObject xmlns='{MD_CLASSES}'><Child xmlns=''><UseInInterfaceCompatibilityMode/></Child><UseInInterfaceCompatibilityMode/></MetaDataObject>").as_bytes()).unwrap();
+        let source = registry
+            .detect_with_policy(&doc, SourceOperationPolicy::Source)
+            .unwrap();
+        assert_eq!(source, registry.detect(&doc).unwrap());
+        assert!(
+            matches!(source, DialectDetection::Exact { candidate, .. } if candidate.dialect().to_string() == "2.21")
+        );
+    }
+    #[test]
+    fn source_detection_retains_unbounded_namespace_evidence_and_legal_names() {
+        let registry = bundled_dialect_registry().unwrap();
+        let declarations = (0..=MAX_EVIDENCE)
+            .map(|i| format!(" xmlns:p{i}='urn:{i}'"))
+            .collect::<String>();
+        let repeated = "<Child xmlns:q='urn:repeated'/>".repeat(MAX_EVIDENCE + 1);
+        let doc = XmlReader::from_slice(format!("<MetaDataObject xmlns='{MD_CLASSES}' version='2.20'{declarations}>{repeated}</MetaDataObject>").as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect(&doc),
+            Err(DialectError::EvidenceLimit)
+        ));
+        let result = registry
+            .detect_with_policy(&doc, SourceOperationPolicy::Source)
+            .unwrap();
+        assert_eq!(
+            result.evidence().namespaces().len(),
+            2 * (MAX_EVIDENCE + 1) + 1
+        );
+        assert_eq!(
+            result
+                .evidence()
+                .namespaces()
+                .iter()
+                .filter(|n| n.uri() == "urn:repeated")
+                .count(),
+            MAX_EVIDENCE + 1
+        );
+        let prefix = "p".repeat(MAX_FIELD_BYTES + 1);
+        let uri = format!("urn:{}", "x".repeat(MAX_FIELD_BYTES + 1));
+        let doc = XmlReader::from_slice(format!("<{prefix}:MetaDataObject xmlns:{prefix}='{MD_CLASSES}' xmlns:q='{uri}' version='2.21'><{prefix}:Child {prefix}:attribute='x'/></{prefix}:MetaDataObject>").as_bytes()).unwrap();
+        assert!(matches!(
+            registry.detect(&doc),
+            Err(DialectError::EvidenceLimit)
+        ));
+        assert!(
+            matches!(registry.detect_with_policy(&doc, SourceOperationPolicy::Source).unwrap(), DialectDetection::Exact { candidate, .. } if candidate.dialect().to_string() == "2.21")
+        );
+    }
+    #[test]
+    fn source_detection_keeps_namespace_version_and_matching_errors() {
+        let registry = bundled_dialect_registry().unwrap();
+        for xml in [
+            format!("<MetaDataObject xmlns='{MD_CLASSES}' xmlns:xml='urn:wrong' version='2.20'/>"),
+            format!(
+                "<MetaDataObject xmlns='{MD_CLASSES}' xmlns:p='{XML_NAMESPACE}' version='2.20'/>"
+            ),
+            format!(
+                "<MetaDataObject xmlns='{MD_CLASSES}' xmlns:p='{XMLNS_NAMESPACE}' version='2.20'/>"
+            ),
+            format!("<MetaDataObject xmlns='{MD_CLASSES}'><Child xmlns:p=''/></MetaDataObject>"),
+            format!(
+                "<MetaDataObject xmlns='{MD_CLASSES}'><Child p:attribute='x'/></MetaDataObject>"
+            ),
+            format!("<MetaDataObject xmlns='{MD_CLASSES}' version='wrong'/>"),
+        ] {
+            let doc = XmlReader::from_slice(xml.as_bytes()).unwrap();
+            let bounded = registry.detect(&doc).unwrap_err().to_string();
+            assert_eq!(
+                registry
+                    .detect_with_policy(&doc, SourceOperationPolicy::Source)
+                    .unwrap_err()
+                    .to_string(),
+                bounded
+            );
+        }
+        for xml in [
+            format!("<MetaDataObject xmlns='{MD_CLASSES}'/>"),
+            format!(
+                "<MetaDataObject xmlns='{MD_CLASSES}' version='2.20'><UseInInterfaceCompatibilityMode/></MetaDataObject>"
+            ),
+            format!("<MetaDataObject xmlns='{MD_CLASSES}' version='99.0'/>"),
+            "<Unknown xmlns='urn:unknown' version='2.20'/>".into(),
+        ] {
+            let doc = XmlReader::from_slice(xml.as_bytes()).unwrap();
+            assert_eq!(
+                registry
+                    .detect_with_policy(&doc, SourceOperationPolicy::Source)
+                    .unwrap(),
+                registry.detect(&doc).unwrap()
+            );
+        }
+        for attributes in [
+            vec![
+                Attribute::ordinary(QName::new("version").unwrap(), "2.20"),
+                Attribute::ordinary(QName::new("version").unwrap(), "2.21"),
+            ],
+            vec![
+                Attribute::namespace(None, MD_CLASSES),
+                Attribute::namespace(None, MD_CLASSES),
+            ],
+        ] {
+            let doc = XmlDocument::new(XmlElement::with_parts(
+                QName::new("MetaDataObject").unwrap(),
+                attributes,
+                vec![],
+            ));
+            let error = registry
+                .detect_with_policy(&doc, SourceOperationPolicy::Source)
+                .unwrap_err();
+            assert!(matches!(
+                error,
+                DialectError::DuplicateVersion | DialectError::DuplicateNamespace { .. }
+            ));
+        }
+    }
+    #[test]
+    fn source_detection_retains_features_across_bounded_descriptors() {
+        let profile = |id: &str, axis: &str| {
+            let fingerprints = (0..200)
+                .map(|i| format!("\"xcf.namespace.{id}{i}\":\"urn:{id}:{i}\""))
+                .collect::<Vec<_>>()
+                .join(",");
+            let constants = (0..200)
+                .map(|i| format!("\"xcf.feature.{id}{i}\":\"supported\""))
+                .collect::<Vec<_>>()
+                .join(",");
+            format!(
+                r#"{{"schema_version":1,"id":"{id}","status":"experimental","xml_dialect":"{axis}","fingerprints":{{"xcf.version":"{axis}",{fingerprints}}},"constants":{{{constants}}}}}"#
+            )
+        };
+        let a = profile("a", "10.0");
+        let b = profile("b", "10.1");
+        let registry = external(&[("a", a.as_str()), ("b", b.as_str())]).unwrap();
+        let declarations = ["a", "b"]
+            .into_iter()
+            .flat_map(|id| (0..200).map(move |i| format!(" xmlns:{id}{i}='urn:{id}:{i}'")))
+            .collect::<String>();
+        let doc = XmlReader::from_slice(
+            format!("<MetaDataObject xmlns='{MD_CLASSES}'{declarations}/>").as_bytes(),
+        )
+        .unwrap();
+        assert!(matches!(
+            registry.detect(&doc),
+            Err(DialectError::EvidenceLimit)
+        ));
+        let source = registry
+            .detect_with_policy(&doc, SourceOperationPolicy::Source)
+            .unwrap();
+        assert_eq!(source.evidence().features().len(), 400);
+        assert!(
+            matches!(source, DialectDetection::Ambiguous { candidates, .. } if candidates.len() == 2)
+        );
     }
 }

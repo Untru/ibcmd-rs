@@ -117,7 +117,7 @@ pub(super) fn convert(
             let validation = XmlReader::from_slice(bytes)
                 .map_err(|error| format!("{path}: {error}"))
                 .and_then(|document| {
-                    validate_dialect(&document, &dialects, &source.id)
+                    validate_source_dialect(&document, &dialects, &source.id)
                         .map_err(|message| format!("{path}: {message}"))
                 });
             if validation.is_err() {

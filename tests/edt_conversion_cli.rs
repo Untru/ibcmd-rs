@@ -108,6 +108,114 @@ fn edt_conversion_is_offline_preflighted_and_exact_on_unchanged_return() {
 }
 
 #[test]
+fn edt_source_profile_detection_does_not_hide_unknown_namespace_cells() {
+    for (label, namespaces) in [
+        (
+            "many-namespaces",
+            (0..384)
+                .map(|index| format!(" xmlns:source{index}=\"urn:ibcmd:source:{index}\""))
+                .collect::<String>(),
+        ),
+        (
+            "long-prefix",
+            format!(" xmlns:{}=\"urn:ibcmd:source\"", "p".repeat(1_025)),
+        ),
+    ] {
+        let temp = Temp::new(label);
+        let source = temp.0.join("source");
+        let fixture = read_xml_source(fixture(), ReaderLimits::default()).unwrap();
+        for entry in fixture.entries() {
+            let path = source.join(entry.path().as_str());
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, entry.bytes()).unwrap();
+        }
+        let descriptor = source.join("Configuration.xml");
+        let original = fs::read_to_string(&descriptor).unwrap();
+        assert!(original.contains("<MetaDataObject "));
+        fs::write(
+            &descriptor,
+            original.replacen(
+                "<MetaDataObject ",
+                &format!("<MetaDataObject{namespaces} "),
+                1,
+            ),
+        )
+        .unwrap();
+        let project = temp.0.join("project");
+        let rejected = run(&source, &project, "xml", "edt", &["--dry-run"]);
+        assert!(!rejected.status.success());
+        let report: Value = serde_json::from_slice(&rejected.stderr).unwrap();
+        assert_eq!(report["phases"][0]["status"], "completed");
+        assert_eq!(
+            report["errors"][0]["code"],
+            "conversion.edt-encode-preflight-failed"
+        );
+        assert!(
+            report["errors"][0]["message"]
+                .as_str()
+                .unwrap()
+                .contains("source cell(s) not covered")
+        );
+        assert_eq!(report["output_published"], false);
+        assert!(!project.exists());
+    }
+}
+
+#[test]
+fn edt_directory_conversion_accepts_a_standard_descriptor_above_65536_elements() {
+    let temp = Temp::new("large-enum");
+    let source = temp.0.join("source");
+    let fixture = read_xml_source(fixture(), ReaderLimits::default()).unwrap();
+    for entry in fixture.entries() {
+        let path = source.join(entry.path().as_str());
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, entry.bytes()).unwrap();
+    }
+    let configuration = source.join("Configuration.xml");
+    let original = fs::read_to_string(&configuration).unwrap();
+    fs::write(
+        &configuration,
+        original.replacen(
+            "</ChildObjects>",
+            "<Enum>LargeValues</Enum></ChildObjects>",
+            1,
+        ),
+    )
+    .unwrap();
+    let root_start = original.find("<MetaDataObject ").unwrap();
+    let root_end = root_start + original[root_start..].find('>').unwrap() + 1;
+    let mut descriptor = String::from("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n");
+    descriptor.push_str(&original[root_start..root_end]);
+    descriptor.push_str("<Enum uuid=\"40000000-0000-4000-8000-000000000000\"><Properties><Name>LargeValues</Name><Synonym/><Comment/></Properties><ChildObjects>");
+    for index in 0..11_000 {
+        descriptor.push_str(&format!("<EnumValue uuid=\"50000000-0000-4000-8000-{index:012x}\"><Properties><Name>Value{index}</Name><Synonym/><Comment/></Properties></EnumValue>"));
+    }
+    descriptor.push_str("</ChildObjects></Enum></MetaDataObject>");
+    assert!(11_000 * 6 > 65_536);
+    fs::create_dir(source.join("Enums")).unwrap();
+    fs::write(source.join("Enums/LargeValues.xml"), descriptor).unwrap();
+    let project = temp.0.join("project");
+    let preview = success(run(&source, &project, "xml", "edt", &["--dry-run"]));
+    assert_eq!(preview["output_published"], false);
+    assert!(!project.exists());
+    success(run(&source, &project, "xml", "edt", &[]));
+    let returned = temp.0.join("returned");
+    success(run(&project, &returned, "edt", "xml", &[]));
+    for path in fixture
+        .entries()
+        .iter()
+        .map(|entry| entry.path().as_str())
+        .chain(["Enums/LargeValues.xml"])
+    {
+        assert_eq!(
+            fs::read(source.join(path)).unwrap(),
+            fs::read(returned.join(path)).unwrap(),
+            "{path}"
+        );
+    }
+}
+
+#[test]
 fn edt_input_and_output_report_paths_cannot_mutate_artifacts() {
     let temp = Temp::new("report-paths");
     let project = temp.0.join("project");
