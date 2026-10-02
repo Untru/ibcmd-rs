@@ -114,16 +114,17 @@ pub struct RightsObject {
     pub rights: Vec<Right>,
 }
 
-/// Одно право (`<right>`): имя + булево значение + опциональное ограничение по условию.
+/// Одно право (`<right>`): имя, булево значение и ограничения в исходном порядке.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Right {
     /// `<name>` права — свободный идентификатор (`Read`/`Update`/`View`/…).
     pub name: String,
     /// `<value>` — строго bool (`true`/`false`).
     pub value: bool,
-    /// `<restrictionByCondition>` — ограничение доступа по условию (34 роли из 107), либо
-    /// `None`. Несёт опциональное `<field>` + текст `<condition>` (BSL/SQL, verbatim).
-    pub restriction: Option<RightRestriction>,
+    /// Все `<restrictionByCondition>` в исходном порядке, включая повторяющиеся
+    /// поля/условия. Каждое несёт опциональное `<field>` и текст `<condition>`.
+    #[serde(default)]
+    pub restrictions: Vec<RightRestriction>,
 }
 
 /// `<restrictionByCondition>` внутри `<right>`: опциональное поле + текст условия.

@@ -384,7 +384,7 @@ fn read_object(c: &mut Cursor) -> Result<RightsObject, RightsError> {
     Ok(RightsObject { name, rights })
 }
 
-/// Прочитать один `<right>` блок: `<name>` + `<value>` + опц. `<restrictionByCondition>`.
+/// Прочитать один `<right>` блок со всеми ограничениями в исходном порядке.
 fn read_right(c: &mut Cursor) -> Result<Right, RightsError> {
     c.expect(b"\t\t<right>\r\n", "<right>")?;
     c.expect(b"\t\t\t<name>", "<right><name>")?;
@@ -393,18 +393,16 @@ fn read_right(c: &mut Cursor) -> Result<Right, RightsError> {
     let value_text = c.take_text_until(b"</value>\r\n", "right value")?;
     let value = parse_bool(value_text, "right value")?;
 
-    // Опц. <restrictionByCondition> ДО </right> (34 роли из 107).
-    let restriction = if c.peek(b"\t\t\t<restrictionByCondition>\r\n") {
-        Some(read_restriction(c)?)
-    } else {
-        None
-    };
+    let mut restrictions = Vec::new();
+    while c.peek(b"\t\t\t<restrictionByCondition>\r\n") {
+        restrictions.push(read_restriction(c)?);
+    }
 
     c.expect(b"\t\t</right>\r\n", "</right>")?;
     Ok(Right {
         name,
         value,
-        restriction,
+        restrictions,
     })
 }
 
@@ -511,7 +509,7 @@ pub fn write(table: &RightsTable, fmt: SidecarFormat) -> Result<Vec<u8>, RightsE
             out.extend_from_slice(b"</name>\r\n\t\t\t<value>");
             out.extend_from_slice(bool_str(right.value).as_bytes());
             out.extend_from_slice(b"</value>\r\n");
-            if let Some(r) = &right.restriction {
+            for r in &right.restrictions {
                 out.extend_from_slice(b"\t\t\t<restrictionByCondition>\r\n");
                 if let Some(field) = &r.field {
                     out.extend_from_slice(b"\t\t\t\t<field>");
@@ -632,7 +630,7 @@ mod tests {
         let table = read(&src, SidecarFormat::EdtRights).unwrap();
         assert_eq!(table.objects.len(), 1);
         let right = &table.objects[0].rights[0];
-        let restr = right.restriction.as_ref().expect("has restriction");
+        let restr = right.restrictions.first().expect("has restriction");
         assert_eq!(restr.field.as_deref(), Some("Ссылка"));
         assert!(restr.condition.contains("&amp;X"));
         assert!(

@@ -165,7 +165,7 @@ mod tests {
                 rights: vec![Right {
                     name: "Read".into(),
                     value: true,
-                    restriction: None,
+                    restrictions: Vec::new(),
                 }],
             }],
             restriction_templates: Vec::new(),
