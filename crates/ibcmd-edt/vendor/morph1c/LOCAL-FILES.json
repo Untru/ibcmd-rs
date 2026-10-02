@@ -62,7 +62,11 @@
     "NumberValue accepts exactly the original Java17 BMP Character.digit(char,10) decimal domain and signed32 exponent/effective scale; current digits are normalized to ASCII without retaining glyphs or replaying former numbers",
     "Source-derived JDK17 binary64 formatting is a separately licensed ibcmd-number-format Rust component outside the Apache-selected morph1c snapshot; the release archive includes its complete source, Cargo.toml, original LICENSE and NOTICE and the SBOM records GPL-2.0-only WITH Classpath-exception-2.0",
     "Role rights preserve the complete ordered restrictionByCondition list on every right, including repeated fields and absent or explicit-empty fields; cross-format emission retains current condition text, field presence and append/delete/order edits without a one-restriction quota",
-    "Designer Role rights accept witnessed SDK LF/no-BOM and platform CRLF/BOM framing; source-only framing and ordered condition newline bits are excluded from semantic data, bound to all current rights values and validated in full before restoring original leaf spelling, while edits emit current values and explicit output version stays authoritative"
+    "Designer Role rights accept witnessed SDK LF/no-BOM and platform CRLF/BOM framing; source-only framing and ordered condition newline bits are excluded from semantic data, bound to all current rights values and validated in full before restoring original leaf spelling, while edits emit current values and explicit output version stays authoritative",
+    "Additional indexes use a format-neutral optional ordered typed attachment with UUID, current name/table and complete indexed/additional field sequences; strict native and EDT readers consume every source cell, resolve actual namespace scopes and reject unsupported versions while emission uses the explicit target version",
+    "Additional-index ownership is validated against the current metadata owner or its declared tabular section; absent and explicit-empty attachments remain distinct and current edits never replay former index values",
+    "Witnessed UH Bot.Module and Sequence.RecordSetModule use the existing complete text/protected-module codec and both established sidecar layouts",
+    "ConditionalAppearance sidecar accounting compares complete strictly decoded current ordered typed items and its source envelope flavor, accepting only known XML lexical differences and retaining unknown-node, namespace and stale-provenance refusal"
   ],
   "files": [
     {
@@ -92,6 +96,10 @@
     {
       "path": "crates/core/src/engine.rs",
       "sha256": "b2219af5dc7de657253a1a41400834b8e3618965d8a13f158bff126b2693e726"
+    },
+    {
+      "path": "crates/core/src/ir/additional_indexes.rs",
+      "sha256": "11ef1a1b171390eeea1b655dd08d9e731841f5b15fcc10b02337b25112710d12"
     },
     {
       "path": "crates/core/src/ir/form/body.rs",
@@ -127,11 +135,11 @@
     },
     {
       "path": "crates/core/src/ir/mod.rs",
-      "sha256": "9c0af17452545c4263f0899abcb935fd088f0e8bd1da09ec6002515da84dc03c"
+      "sha256": "9a0cb2dbd0b2939fc097d3123188b66195eec213f931ff87b0d34ee0b899d8a1"
     },
     {
       "path": "crates/core/src/ir/semantic_view.rs",
-      "sha256": "6f9d9776102af7af9a664c3add66cc72926fb98a48df6fdc7a6c7bef5ec09980"
+      "sha256": "df61072bb7816f8d26f61c73a6532e69d8b9c45bd1a0388e7f40f9ec916aaf21"
     },
     {
       "path": "crates/core/src/ir/source_extensions.rs",
@@ -1494,6 +1502,10 @@
       "sha256": "00fc47c617e6101afc0b4f7b0cfd7c10242ae4a462ab6165d088af923099bdfb"
     },
     {
+      "path": "crates/formats-xml/src/additional_indexes.rs",
+      "sha256": "74695e7554c93437f25c8ccd67f425c10472eabb1ed3c5085e941dd09dbfdda8"
+    },
+    {
       "path": "crates/formats-xml/src/characteristics.rs",
       "sha256": "dc058129c9da239f7e797c1ae60d8e62ba7d96b327936fc8393cb762d5042865"
     },
@@ -1907,7 +1919,7 @@
     },
     {
       "path": "crates/formats-xml/src/lib.rs",
-      "sha256": "04968f312331e77135cb95c6f71041a504d5e2f160ace80d86fc6176ae18ce0f"
+      "sha256": "5af36806f5a1c68998efe2d4c3771dfcc95a06e2bf89033685b58eefd7279d1d"
     },
     {
       "path": "crates/formats-xml/src/link_by_type.rs",
@@ -2546,6 +2558,10 @@
       "sha256": "6666dc54c089d34bfd09cd8ad5a8fe023ff8751e5bb97bd23430a240a313671e"
     },
     {
+      "path": "crates/pipeline/src/additional_indexes_read.rs",
+      "sha256": "10083a39a3bab8f703b99b27564e4b950f4f353b64bdbeb94f3b0dfbe14904ae"
+    },
+    {
       "path": "crates/pipeline/src/blob_template_read.rs",
       "sha256": "3296da2f53a8419d470e708896e7d3dd7c8a3f018e24d032ec30a8cd276f7f11"
     },
@@ -2563,7 +2579,7 @@
     },
     {
       "path": "crates/pipeline/src/convert.rs",
-      "sha256": "d60b67dd70dfbb20935c0f67ef45ff726ea9d0354f622224ae28637b14ff3842"
+      "sha256": "d6252a4341c8a14d3c8a9a359f03f18a041da4be2d266251e0061ee45835e77b"
     },
     {
       "path": "crates/pipeline/src/dcs_read.rs",
@@ -2627,7 +2643,7 @@
     },
     {
       "path": "crates/pipeline/src/lib.rs",
-      "sha256": "77cac42f0073f780a7bc00599d63ad47969b91781f4628c33f87f083c223be32"
+      "sha256": "ef98506b5c6d6f061dc57ed78a4c3ca7aeecbee794188781ec6f936d0bbeb1cd"
     },
     {
       "path": "crates/pipeline/src/metadata_picture_semantics.rs",
@@ -2635,7 +2651,7 @@
     },
     {
       "path": "crates/pipeline/src/module_read.rs",
-      "sha256": "2881e7a0c3944008a24847280ec54d7d10bd444428a4100205704659b823889d"
+      "sha256": "5f35f22679e382b680f4156366e74bc680409f0186c283aae21e6aaca5583e18"
     },
     {
       "path": "crates/pipeline/src/mxl_read.rs",
@@ -2738,5 +2754,5 @@
       "sha256": "13406bc3bca6b65ab8d7f1b9348fac8a0fa9581da42bc6822004a60b098fe123"
     }
   ],
-  "local_source_snapshot": "617372a0d423f302f7f0b665cd43e05549a4d804"
+  "local_source_snapshot": "1cfdaac165bfd94b81377f2ea11b26e2f92a5ea5"
 }
