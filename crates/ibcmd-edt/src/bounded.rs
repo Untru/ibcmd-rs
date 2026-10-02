@@ -19,21 +19,22 @@ enum PreflightPolicy {
     DiskSource,
 }
 pub(crate) fn validate_xml_reader<R: BufRead + Seek>(path: &str, input: R) -> Result<(), EdtError> {
-    validate_xml_with_policy(path, input, PreflightPolicy::Legacy)
+    validate_xml_with_policy(path, input, PreflightPolicy::Legacy).map(|_| ())
 }
+/// Return the root only after the complete source-role scan succeeds.
 pub(crate) fn validate_xml_source_reader<R: BufRead + Seek>(
     path: &str,
     input: R,
-) -> Result<(), EdtError> {
+) -> Result<ibcmd_xml::QName, EdtError> {
     validate_xml_with_policy(path, input, PreflightPolicy::DiskSource)
 }
 fn validate_xml_with_policy<R: BufRead + Seek>(
     path: &str,
     mut input: R,
     policy: PreflightPolicy,
-) -> Result<(), EdtError> {
+) -> Result<ibcmd_xml::QName, EdtError> {
     let origin = input.stream_position().map_err(EdtError::source)?;
-    ibcmd_xml::XmlReader::inspect_reader(&mut input).map_err(EdtError::source)?;
+    let root = ibcmd_xml::XmlReader::inspect_reader(&mut input).map_err(EdtError::source)?;
     input
         .seek(std::io::SeekFrom::Start(origin))
         .map_err(EdtError::source)?;
@@ -332,7 +333,7 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
         }
         buffer.clear();
     }
-    Ok(())
+    Ok(root)
 }
 
 pub(crate) fn component(value: &str) -> Result<(), EdtError> {
@@ -556,6 +557,26 @@ fn reparse(_: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn inspected_root_is_returned_only_after_all_source_role_guards() {
+        let xml = b"<Form xmlns='http://v8.1c.ru/8.3/xcf/logform'><ChildItems><InputField name='Safe'/></ChildItems></Form>";
+        let root =
+            super::validate_xml_source_reader("Ext/Form.xml", std::io::Cursor::new(xml)).unwrap();
+        assert_eq!(root.local(), "Form");
+        let legacy: Result<(), crate::EdtError> =
+            super::validate_xml_reader("Ext/Form.xml", std::io::Cursor::new(xml));
+        legacy.unwrap();
+        let invalid = String::from_utf8(xml.to_vec())
+            .unwrap()
+            .replace("Safe", "../bad");
+        let error = super::validate_xml_source_reader(
+            "Ext/Form.xml",
+            std::io::Cursor::new(invalid.as_bytes()),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("single path component"));
+    }
+
     #[test]
     fn root_event_symbolic_identity_is_not_a_path_only_in_exact_native_scope() {
         let valid = "<Form xmlns='http://v8.1c.ru/8.3/xcf/logform'><Events><Event name='urn:future/../Событие'>Handler</Event></Events></Form>";

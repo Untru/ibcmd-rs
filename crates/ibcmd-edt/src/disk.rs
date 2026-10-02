@@ -7,7 +7,7 @@ use std::{
     borrow::Cow,
     collections::BTreeMap,
     fs::{self, File},
-    io::{Read, Write},
+    io::{BufRead, Read, Seek, SeekFrom, Write},
     path::{Path, PathBuf},
 };
 
@@ -28,13 +28,13 @@ pub(crate) struct Inventory {
 }
 impl Inventory {
     pub fn scan(root: &Path) -> Result<Self, EdtError> {
-        Self::walk(root, None)
+        Self::walk(root, None, None)
     }
     pub fn snapshot(root: &Path, target: &Path) -> Result<Self, EdtError> {
         fs::create_dir(target).map_err(EdtError::source)?;
-        Self::walk(root, Some(target))
+        Self::walk(root, Some(target), None)
     }
-    fn walk(root: &Path, target: Option<&Path>) -> Result<Self, EdtError> {
+    fn walk(root: &Path, target: Option<&Path>, trusted: Option<&Self>) -> Result<Self, EdtError> {
         ordinary(root, true)?;
         let mut pending = vec![root.to_path_buf()];
         let mut folded = BTreeMap::<String, String>::new();
@@ -104,8 +104,20 @@ impl Inventory {
                     .checked_add(byte_len)
                     .ok_or_else(|| EdtError::new("source byte accounting overflow"))?;
                 let inspect_path = target.unwrap_or(root).join(&relative);
-                let (kind, descriptor, uuid) = inspect(&relative, &inspect_path)
-                    .map_err(|error| EdtError::new(format!("{relative}: {error}")))?;
+                let (kind, descriptor, uuid) = if let Some(previous) = trusted {
+                    let entry = previous.entry(&relative).map(|i| &previous.entries[i]);
+                    let entry = entry
+                        .filter(|e| e.digest == digest && e.byte_len == byte_len)
+                        .ok_or_else(|| {
+                            EdtError::new(format!("{relative}: staged inventory changed"))
+                        })?;
+                    // These facts were bound to every inspection pass at initial scan.
+                    // Reuse them only after hashing the complete current file again.
+                    (entry.kind, entry.metadata, entry.uuid)
+                } else {
+                    inspect(&relative, &inspect_path, byte_len, digest)
+                        .map_err(|error| EdtError::new(format!("{relative}: {error}")))?
+                };
                 if let Some(uuid) = uuid
                     && let Some(previous) = identities.insert(uuid, relative.clone())
                 {
@@ -131,7 +143,7 @@ impl Inventory {
         })
     }
     pub fn verify(&self) -> Result<(), EdtError> {
-        let current = Self::scan(&self.root)?;
+        let current = Self::walk(&self.root, None, Some(self))?;
         if current.entries != self.entries || current.bytes != self.bytes {
             return Err(EdtError::new("staged inventory changed"));
         }
@@ -265,9 +277,127 @@ fn reparse(_: &fs::Metadata) -> bool {
     false
 }
 
+// A successful inspection may seek over the BOM or stop after a UUID. Every
+// pass is nevertheless hashed from raw offset zero through EOF. Seeking first
+// drains and checks the previous pass, then hashes any skipped prefix in the new
+// pass. Facts from bytes B can never be cached under transfer's digest of A.
+struct FingerprintReader<R> {
+    input: R,
+    expected_len: u64,
+    expected_digest: Sha256Digest,
+    position: u64,
+    hash: Sha256,
+    verified: bool,
+    overflow: bool,
+}
+impl<R: BufRead + Seek> FingerprintReader<R> {
+    fn new(
+        mut input: R,
+        expected_len: u64,
+        expected_digest: Sha256Digest,
+    ) -> std::io::Result<Self> {
+        input.seek(SeekFrom::Start(0))?;
+        Ok(Self {
+            input,
+            expected_len,
+            expected_digest,
+            position: 0,
+            hash: Sha256::new(),
+            verified: false,
+            overflow: false,
+        })
+    }
+    fn check(&mut self) -> std::io::Result<()> {
+        if self.overflow
+            || self.position != self.expected_len
+            || &self.hash.clone().finalize()[..] != self.expected_digest.as_bytes()
+        {
+            return Err(std::io::Error::other(
+                "XML inspection bytes differ from inventory fingerprint",
+            ));
+        }
+        self.verified = true;
+        Ok(())
+    }
+    fn finish(&mut self) -> std::io::Result<()> {
+        let mut buffer = [0; 64 * 1024];
+        while self.read(&mut buffer)? != 0 {}
+        self.check()
+    }
+}
+impl<R: BufRead + Seek> Read for FingerprintReader<R> {
+    fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+        if output.is_empty() {
+            return Ok(0);
+        }
+        let bytes = self.fill_buf()?;
+        let count = bytes.len().min(output.len());
+        output[..count].copy_from_slice(&bytes[..count]);
+        self.consume(count);
+        Ok(count)
+    }
+}
+impl<R: BufRead + Seek> BufRead for FingerprintReader<R> {
+    fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+        if self.overflow {
+            return Err(std::io::Error::other("XML fingerprint length overflow"));
+        }
+        if self.input.fill_buf()?.is_empty() && !self.verified {
+            self.check()?;
+        }
+        self.input.fill_buf()
+    }
+    fn consume(&mut self, amount: usize) {
+        let Ok(bytes) = self.input.fill_buf() else {
+            self.overflow = true;
+            return;
+        };
+        let amount = amount.min(bytes.len());
+        self.hash.update(&bytes[..amount]);
+        match self.position.checked_add(amount as u64) {
+            Some(position) => self.position = position,
+            None => self.overflow = true,
+        }
+        self.verified = false;
+        self.input.consume(amount);
+    }
+}
+impl<R: BufRead + Seek> Seek for FingerprintReader<R> {
+    fn seek(&mut self, seek: SeekFrom) -> std::io::Result<u64> {
+        let target = match seek {
+            SeekFrom::Start(value) => value,
+            SeekFrom::Current(delta) => self
+                .position
+                .checked_add_signed(delta)
+                .ok_or_else(|| std::io::Error::other("invalid XML inspection seek"))?,
+            SeekFrom::End(delta) => self
+                .expected_len
+                .checked_add_signed(delta)
+                .ok_or_else(|| std::io::Error::other("invalid XML inspection seek"))?,
+        };
+        if target == self.position {
+            return Ok(target);
+        }
+        self.finish()?;
+        self.input.seek(SeekFrom::Start(0))?;
+        self.position = 0;
+        self.hash = Sha256::new();
+        self.verified = false;
+        self.overflow = false;
+        let mut prefix = [0; 8192];
+        while self.position < target {
+            let count = (target - self.position).min(prefix.len() as u64) as usize;
+            self.read_exact(&mut prefix[..count])?;
+        }
+        Ok(self.position)
+    }
+}
+
 fn inspect(
     path: &str,
     physical: &Path,
+    byte_len: u64,
+    digest: Sha256Digest,
 ) -> Result<(SourceKind, bool, Option<ObjectUuid>), EdtError> {
     // Declared XML documents are validated completely. A prefix such as
     // <?xml inside BinaryData/TextDocument/image/module bytes is data; only
@@ -278,15 +408,15 @@ fn inspect(
     let mut descriptor = false;
     let mut uuid = None;
     if structured {
-        crate::bounded::validate_xml_source_reader(
-            path,
+        let mut input = FingerprintReader::new(
             std::io::BufReader::new(File::open(physical).map_err(EdtError::source)?),
-        )?;
+            byte_len,
+            digest,
+        )
+        .map_err(EdtError::source)?;
+        let root = crate::bounded::validate_xml_source_reader(path, &mut input)?;
+        input.finish().map_err(EdtError::source)?;
         if ext == "xml" {
-            let root = ibcmd_xml::XmlReader::inspect_reader(std::io::BufReader::new(
-                File::open(physical).map_err(EdtError::source)?,
-            ))
-            .map_err(EdtError::source)?;
             descriptor = root.local() == "MetaDataObject";
             if kind == SourceKind::OtherXml
                 && matches!(
@@ -300,11 +430,12 @@ fn inspect(
                 kind,
                 SourceKind::ConfigurationRoot | SourceKind::MetadataXml
             ) {
-                uuid = ibcmd_xml::source_tree::inspect_source_uuid(
-                    path,
-                    std::io::BufReader::new(File::open(physical).map_err(EdtError::source)?),
-                )
-                .map_err(EdtError::source)?;
+                input.seek(SeekFrom::Start(0)).map_err(EdtError::source)?;
+                uuid = ibcmd_xml::source_tree::inspect_source_uuid(path, &mut input)
+                    .map_err(EdtError::source)?;
+                // UUID inspection may return at the root start tag. Bind its
+                // unconsumed suffix too, rather than accepting a partial hash.
+                input.finish().map_err(EdtError::source)?;
             }
         }
     }
@@ -793,6 +924,155 @@ mod tests {
                 .contains("duplicate")
         );
     }
+    #[test]
+    fn verified_xml_rejects_equal_length_edits_uuid_changes_and_roster_changes() {
+        const XML: &[u8] = b"<MetaDataObject><Catalog uuid='11111111-1111-1111-1111-111111111111'/></MetaDataObject>";
+        for action in 0..5 {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("owner.xml");
+            fs::write(&path, XML).unwrap();
+            let inventory = Inventory::scan(root.path()).unwrap();
+            inventory.verify().unwrap();
+            match action {
+                0 => {
+                    let mut changed = XML.to_vec();
+                    let index = changed.iter().position(|c| *c == b'1').unwrap();
+                    changed[index] = b'2';
+                    fs::write(&path, changed).unwrap();
+                }
+                1 => {
+                    let mut changed = XML.to_vec();
+                    changed[0] = b'!';
+                    fs::write(&path, changed).unwrap();
+                }
+                2 => fs::rename(&path, root.path().join("renamed.xml")).unwrap(),
+                3 => fs::write(root.path().join("extra.xml"), b"<extra/>").unwrap(),
+                _ => fs::remove_file(&path).unwrap(),
+            }
+            assert!(inventory.verify().is_err(), "action {action}");
+        }
+    }
+
+    #[test]
+    fn copies_keep_fresh_hashes_and_copied_tampering_is_rejected() {
+        let owner = tempfile::tempdir().unwrap();
+        let source = owner.path().join("source");
+        fs::create_dir(&source).unwrap();
+        fs::write(source.join("body.xml"), b"<body>A</body>").unwrap();
+        let inventory = Inventory::scan(&source).unwrap();
+        let copied = inventory.copy_to(&owner.path().join("copy")).unwrap();
+        assert_eq!(inventory.entries, copied.entries);
+        copied.verify().unwrap();
+        fs::write(copied.root.join("body.xml"), b"<body>B</body>").unwrap();
+        assert!(copied.verify().is_err());
+        fs::write(source.join("body.xml"), b"<body>B</body>").unwrap();
+        assert!(
+            inventory
+                .copy_to(&owner.path().join("changed-copy"))
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn initial_inspection_cannot_bind_other_bytes_then_accept_restored_source() {
+        let owner = tempfile::tempdir().unwrap();
+        let path = owner.path().join("body.xml");
+        let a = b"<body>A</body>";
+        let b = b"<body>B</body>";
+        let (length, digest) = transfer(&mut &a[..], None).unwrap();
+        fs::write(&path, b).unwrap();
+        assert!(inspect("body.xml", &path, length, digest).is_err());
+        fs::write(&path, a).unwrap();
+        let inventory = Inventory::scan(owner.path()).unwrap();
+        inventory.verify().unwrap();
+    }
+
+    #[test]
+    fn fingerprint_binds_bom_seeks_and_partial_uuid_tail_with_tiny_buffers() {
+        for bom in [false, true] {
+            let xml = format!(
+                "{}<MetaDataObject uuid='11111111-1111-1111-1111-111111111111'><tail>Кириллица</tail></MetaDataObject>",
+                if bom { "\u{feff}" } else { "" }
+            );
+            let (length, digest) = transfer(&mut xml.as_bytes(), None).unwrap();
+            let input = std::io::BufReader::with_capacity(3, std::io::Cursor::new(xml.as_bytes()));
+            let mut input = FingerprintReader::new(input, length, digest).unwrap();
+            let root = crate::bounded::validate_xml_source_reader("owner.xml", &mut input).unwrap();
+            assert_eq!(root.local(), "MetaDataObject");
+            input.finish().unwrap();
+            input.seek(SeekFrom::Start(0)).unwrap();
+            let uuid =
+                ibcmd_xml::source_tree::inspect_source_uuid("owner.xml", &mut input).unwrap();
+            assert!(uuid.is_some());
+            assert!(input.position < length, "UUID returns before tail");
+            input.finish().unwrap();
+            assert_eq!(input.position, length);
+        }
+    }
+
+    #[test]
+    fn partial_inspection_must_hash_the_unconsumed_tail() {
+        let bytes =
+            b"<root uuid='11111111-1111-1111-1111-111111111111'><tail>A</tail></root>".to_vec();
+        let (length, digest) = transfer(&mut &bytes[..], None).unwrap();
+        let input = std::io::Cursor::new(bytes);
+        let mut input = FingerprintReader::new(input, length, digest).unwrap();
+        let uuid = ibcmd_xml::source_tree::inspect_source_uuid("owner.xml", &mut input).unwrap();
+        assert!(uuid.is_some());
+        assert!(input.position < length);
+        let bytes = input.input.get_mut();
+        let index = bytes.iter().position(|byte| *byte == b'A').unwrap();
+        bytes[index] = b'B';
+        assert!(input.finish().is_err());
+    }
+
+    #[test]
+    fn changed_pass_is_rejected_before_aba_seek_can_restore_original() {
+        struct ReplacingReader {
+            input: std::io::Cursor<Vec<u8>>,
+            replacements: std::collections::VecDeque<Vec<u8>>,
+        }
+        impl Read for ReplacingReader {
+            fn read(&mut self, output: &mut [u8]) -> std::io::Result<usize> {
+                self.input.read(output)
+            }
+        }
+        impl BufRead for ReplacingReader {
+            fn fill_buf(&mut self) -> std::io::Result<&[u8]> {
+                self.input.fill_buf()
+            }
+            fn consume(&mut self, count: usize) {
+                self.input.consume(count);
+            }
+        }
+        impl Seek for ReplacingReader {
+            fn seek(&mut self, position: SeekFrom) -> std::io::Result<u64> {
+                if matches!(position, SeekFrom::Start(0))
+                    && let Some(bytes) = self.replacements.pop_front()
+                {
+                    self.input = std::io::Cursor::new(bytes);
+                }
+                self.input.seek(position)
+            }
+        }
+        let a = b"<body>A</body>".to_vec();
+        let b = b"<body>B</body>".to_vec();
+        let (length, digest) = transfer(&mut &a[..], None).unwrap();
+        let raw = ReplacingReader {
+            input: std::io::Cursor::new(a.clone()),
+            replacements: [a.clone(), b, a].into(),
+        };
+        let mut guarded = FingerprintReader::new(raw, length, digest).unwrap();
+        guarded.finish().unwrap();
+        guarded.seek(SeekFrom::Start(0)).unwrap();
+        // B can have valid XML and the same length, but its completed pass may
+        // not be followed by a seek back to A and accepted as A's facts.
+        assert!(guarded.seek(SeekFrom::Start(0)).is_ok()); // no movement at offset zero
+        assert!(guarded.finish().is_err());
+        assert!(guarded.seek(SeekFrom::Start(0)).is_err());
+        assert_eq!(guarded.input.replacements.len(), 1);
+    }
+
     #[test]
     #[ignore = "actual >256MiB streaming disk IO; F lab only, queue shared heavy FIFO"]
     fn streamed_opaque_above_historical_file_limit_is_not_retained() {
