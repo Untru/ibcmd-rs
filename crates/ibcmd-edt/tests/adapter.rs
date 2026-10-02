@@ -321,7 +321,10 @@ fn literal_backslash_filename_is_rejected_before_path_normalization() {
     let directory = tempfile::tempdir().unwrap();
     std::fs::write(directory.path().join(r"bad\name.bsl"), b"module").unwrap();
     let error = read_xml_source(directory.path(), ReaderLimits::default()).unwrap_err();
-    assert!(error.to_string().contains("non-portable project filename"));
+    assert_eq!(
+        error.to_string(),
+        "edt: project filename contains a path separator"
+    );
 }
 
 fn aggregate_fixture() -> SourceTree {
