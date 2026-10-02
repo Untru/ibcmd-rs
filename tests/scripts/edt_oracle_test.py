@@ -152,6 +152,70 @@ class EvidenceControls(unittest.TestCase):
                 self.assertTrue((run / "edt-validate-pass-002.project-after.json").is_file())
                 self.assertFalse((run / "validation.tsv").exists())
 
+    def test_warm_phase_snapshots_are_measured_once_and_evidence_rescans_independently(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            measure = oracle.snapshot
+            with patch.object(oracle, "snapshot", wraps=measure) as scans:
+                run, args, project, original, evidence, _ = self.warm_fixture(root)
+                # Per tree: initial baseline, six phase measurements, independent
+                # evidence rescan. Nothing is reused across SDK calls or phases.
+                self.assertEqual(scans.call_count, 16)
+                for tree in (project, original):
+                    self.assertEqual(sum(call.args[0] == tree for call in scans.call_args_list), 8)
+                self.assertEqual(evidence, oracle.bind_warm_validation(args, run, project,
+                    run / "validation-workspace", "edt-validate", "validation", original))
+                self.assertEqual(scans.call_count, 18)
+
+    def test_warm_before_and_after_phase_mutations_fail_and_save_the_measured_manifest(self):
+        for target in ("copy", "original"):
+            for phase in ("before", "after"):
+                for index in range(3):
+                    with self.subTest(target=target, phase=phase, pass_index=index), tempfile.TemporaryDirectory() as folder:
+                        root = Path(folder)
+                        project, original = root / "run/project-copy", root / "original"
+                        changed = project if target == "copy" else original
+                        expected_scan = 2 + 2 * index + (phase == "after")
+                        count = 0
+                        measure = oracle.snapshot
+                        def scan(tree, *args, **kwargs):
+                            nonlocal count
+                            if tree == changed:
+                                count += 1
+                                if count == expected_scan:
+                                    (tree / "source.mdo").write_bytes(b"phase-local source mutation")
+                            return measure(tree, *args, **kwargs)
+                        with patch.object(oracle, "snapshot", side_effect=scan), self.assertRaisesRegex(
+                                oracle.OracleError, "changed between|modified"):
+                            self.warm_fixture(root)
+                        label = f"edt-validate-pass-{index + 1:03d}"
+                        suffix = "project" if target == "copy" else "immutable"
+                        manifest = json.loads((root / f"run/{label}.{suffix}-{phase}.json").read_text(encoding="utf-8"))
+                        self.assertEqual(manifest, measure(changed))
+                        commands = [path for path in (root / "run").glob("edt-validate-pass-*.command.json")
+                                    if "-lock-" not in path.name]
+                        self.assertEqual(len(commands), index + (phase == "after"))
+                        self.assertFalse((root / "run/validation.tsv").exists())
+
+    def test_warm_evidence_rescan_detects_mutation_after_all_sdk_passes(self):
+        for target in ("copy", "original"):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as folder:
+                root = Path(folder)
+                changed = root / ("run/project-copy" if target == "copy" else "original")
+                count = 0
+                measure = oracle.snapshot
+                def scan(tree, *args, **kwargs):
+                    nonlocal count
+                    if tree == changed:
+                        count += 1
+                        if count == 8:
+                            (tree / "source.mdo").write_bytes(b"late evidence rescan mutation")
+                    return measure(tree, *args, **kwargs)
+                with patch.object(oracle, "snapshot", side_effect=scan), self.assertRaises(oracle.OracleError):
+                    self.warm_fixture(root)
+                self.assertEqual(len(list((root / "run").glob("validation-pass-*.tsv"))), 3)
+                self.assertFalse((root / "run/validation.tsv").exists())
+
     def test_warm_unstable_final_all_counters_fail_with_every_attempt_retained(self):
         row = b"2026-10-01T11:18:24+0300\tMinor\tWarning\tproject\tvalidator\tmodule\tline 1\tWarning\n"
         with tempfile.TemporaryDirectory() as folder:

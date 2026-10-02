@@ -560,20 +560,24 @@ def warm_validate(args, run: Path, project: Path, workspace: Path, prefix: str, 
     for index in range(1, passes + 1):
         label = f"{prefix}-pass-{index:03d}"
         tsv = run / f"{stem}-pass-{index:03d}.tsv"
-        write_json(run / f"{label}.project-before.json", snapshot(project))
+        current_project = snapshot(project)
+        write_json(run / f"{label}.project-before.json", current_project)
         if original:
-            write_json(run / f"{label}.immutable-before.json", snapshot(original))
-            if snapshot(original) != original_before:
+            current_original = snapshot(original)
+            write_json(run / f"{label}.immutable-before.json", current_original)
+            if current_original != original_before:
                 raise OracleError("Immutable source changed between warm passes")
-        if snapshot(project) != before:
+        if current_project != before:
             raise OracleError("Warm validation source changed between passes")
         edt(args, run, label, workspace, ["validate", "--file", str(tsv), "--project-list", str(project)])
-        write_json(run / f"{label}.project-after.json", snapshot(project))
+        current_project = snapshot(project)
+        write_json(run / f"{label}.project-after.json", current_project)
         if original:
-            write_json(run / f"{label}.immutable-after.json", snapshot(original))
-            if snapshot(original) != original_before:
+            current_original = snapshot(original)
+            write_json(run / f"{label}.immutable-after.json", current_original)
+            if current_original != original_before:
                 raise OracleError("Warm validation modified immutable authentic source")
-        if snapshot(project) != before:
+        if current_project != before:
             raise OracleError("Warm validation modified its immutable source copy")
         if not tsv.is_file():
             raise OracleError("Warm validation did not produce requested TSV")
