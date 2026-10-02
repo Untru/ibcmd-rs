@@ -1,6 +1,6 @@
 use crate::EdtError;
 use ibcmd_xml::source_tree::{ReaderLimits, SourceEntry, SourcePath, SourceTree};
-use quick_xml::{Reader, events::Event};
+use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use std::fs;
 use std::io::{BufRead, Read, Seek};
 use std::path::Path;
@@ -37,11 +37,12 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
     input
         .seek(std::io::SeekFrom::Start(origin))
         .map_err(EdtError::source)?;
-    let mut reader = Reader::from_reader(input);
+    let mut reader = NsReader::from_reader(input);
     let mut buffer = Vec::new();
     reader.config_mut().check_end_names = true;
     let mut depth = 0usize;
     let mut names = Vec::new();
+    let mut native_form_namespaces = Vec::new();
     let mut form_body = false;
     let mut dump_info = false;
     let mut streamed_mxl = false;
@@ -63,9 +64,11 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
     let mut graph_item: Option<(usize, String, bool)> = None;
     loop {
         let before = reader.buffer_position();
-        let event = reader
-            .read_event_into(&mut buffer)
+        let (namespace, event) = reader
+            .read_resolved_event_into(&mut buffer)
             .map_err(|e| EdtError::new(format!("{path}: {e}")))?;
+        let native_form_namespace = matches!(namespace,
+            ResolveResult::Bound(uri) if uri.as_ref() == b"http://v8.1c.ru/8.3/xcf/logform");
         // A streaming scan is bounded by its input, not by the number of cells
         // or XML events. Every non-EOF event must consume source bytes, so a
         // large valid asset cannot hit an arbitrary event-count ceiling.
@@ -199,6 +202,18 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                         && (metadata_names || form_body || dump_path)
                         && matches!(a.key.as_ref(), b"name" | b"Name" | b"lang")
                     {
+                        if form_body
+                            && native_form_namespace
+                            && native_form_namespaces.iter().all(|&native| native)
+                            && names.as_slice() == ["Form", "Events"]
+                            && local == "Event"
+                            && a.key.as_ref() == b"name"
+                        {
+                            // Root Event.name is an open typed symbolic reference,
+                            // never a filename. Full XML inspection and the form
+                            // codec's empty/duplicate/owner checks remain mandatory.
+                            continue;
+                        }
                         let value = a
                             .decode_and_unescape_value(reader.decoder())
                             .map_err(EdtError::source)?;
@@ -226,6 +241,7 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                         return Err(EdtError::new(format!("{path}: XML depth budget exceeded")));
                     }
                     names.push(local);
+                    native_form_namespaces.push(native_form_namespace);
                 }
             }
             Event::Text(e) => {
@@ -295,6 +311,7 @@ fn validate_xml_with_policy<R: BufRead + Seek>(
                     .checked_sub(1)
                     .ok_or_else(|| EdtError::new(format!("{path}: unmatched XML end")))?;
                 names.pop();
+                native_form_namespaces.pop();
             }
             Event::CData(_) if dcs_template => {
                 // The complete XML reader already validated this lexical text.
@@ -539,6 +556,60 @@ fn reparse(_: &fs::Metadata) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn root_event_symbolic_identity_is_not_a_path_only_in_exact_native_scope() {
+        let valid = "<Form xmlns='http://v8.1c.ru/8.3/xcf/logform'><Events><Event name='urn:future/../Событие'>Handler</Event></Events></Form>";
+        for document in [
+            valid.to_owned(),
+            valid
+                .replace(
+                    "<Events>",
+                    "<f:Events xmlns:f='http://v8.1c.ru/8.3/xcf/logform'>",
+                )
+                .replace("</Events>", "</f:Events>"),
+        ] {
+            validate_xml("Ext/Form.xml", document.as_bytes()).unwrap();
+            validate_xml_source_reader("Ext/Form.xml", std::io::Cursor::new(document.as_bytes()))
+                .unwrap();
+        }
+        for invalid in [
+            valid.replace("logform", "wrong"),
+            valid.replace("<Event name=", "<Event xmlns='urn:wrong' name="),
+            valid.replace("<Events>", "<Events xmlns='urn:wrong'>"),
+            valid.replace("Events", "Items"),
+            valid
+                .replace("<Events>", "<Items><Events>")
+                .replace("</Events>", "</Events></Items>"),
+            valid.replace("name=", "Name="),
+        ] {
+            assert!(validate_xml("Ext/Form.xml", invalid.as_bytes()).is_err());
+            assert!(
+                validate_xml_source_reader(
+                    "Ext/Form.xml",
+                    std::io::Cursor::new(invalid.as_bytes())
+                )
+                .is_err()
+            );
+        }
+        // Control identities still derive file/path names, even in this namespace.
+        assert!(
+            validate_xml(
+                "Ext/Form.xml",
+                valid
+                    .replace("Events", "ChildItems")
+                    .replace("Event", "Button")
+                    .as_bytes()
+            )
+            .is_err()
+        );
+        assert!(
+            validate_xml(
+                "Ext/Form.xml",
+                valid.replace("Handler", "&unknown;").as_bytes()
+            )
+            .is_err()
+        );
+    }
     use super::*;
     #[test]
     fn source_operation_declared_xml_has_no_generic_shape_ceiling_and_keeps_all_guards() {

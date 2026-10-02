@@ -112,11 +112,12 @@ fn source_order_facet_replays_names_only_and_edits_invalidate_replay() {
 }
 
 #[test]
-fn duplicate_unknown_and_wrong_owner_bindings_fail_closed() {
+fn duplicate_empty_unknown_extension_and_wrong_owner_bindings_fail_closed() {
     let body = fixture();
     let bytes = String::from_utf8(write_form(FormDialect::Edt, &body).unwrap()).unwrap();
     for (from, to) in [
-        ("OnOpen", "UnknownEvent"),
+        ("OnOpen", ""),
+        ("AfterWrite", "UnknownEvent"),
         ("AfterWrite", "OnOpen"),
         ("OnCreateAtServer", "OnOpen"),
     ] {

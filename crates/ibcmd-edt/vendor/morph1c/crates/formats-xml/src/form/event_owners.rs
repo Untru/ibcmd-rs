@@ -61,18 +61,16 @@ const REPORT: &[&str] = &[
 fn error(reason: impl Into<String>) -> FormError {
     FormError::Frame(format!("root event ownership: {}", reason.into()))
 }
-// SDK root EventHandlerContainer can retain a symbolic Event proxy whose
-// name is a UUID. Keep that identity verbatim; it is not a named extension
-// event even when its bytes match a registered extension event's UUID.
+// SDK root EventHandlerContainer can retain an unresolved symbolic Event
+// reference. Its name is an open nonempty string, not a UUID grammar. Preserve
+// the typed identity verbatim; recognized extension-only names retain their
+// declared ownership even when this root container allows unresolved proxies.
 fn root_event_name(name: &str) -> bool {
-    ROOT.contains(&name) || symbolic_event_guid(name)
-}
-fn symbolic_event_guid(name: &str) -> bool {
-    let bytes = name.as_bytes();
-    bytes.len() == 36 && bytes.iter().enumerate().all(|(index, byte)| {
-        if matches!(index, 8 | 13 | 18 | 23) { *byte == b'-' }
-        else { byte.is_ascii_hexdigit() }
-    })
+    ROOT.contains(&name)
+        || (!name.is_empty()
+            && !WRITE.contains(&name)
+            && !REPORT.contains(&name)
+            && !matches!(name, "ValueChoice" | "BeforeStart" | "BeforeExecute"))
 }
 
 fn extension_allows(kind: Option<&str>, name: &str) -> bool {

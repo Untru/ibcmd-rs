@@ -68,14 +68,14 @@ fn symbolic_root_guid_is_current_ordered_identity_not_a_named_extension_event() 
 }
 
 #[test]
-fn unknown_text_malformed_guid_duplicate_and_wrong_owner_fail_closed() {
+fn empty_duplicate_and_known_wrong_owner_fail_closed() {
     for name in [
-        "UnknownEvent",
+        "",
         "BeforeWrite",
-        "9cc34712-da5f-4faa-a653-343d2085fbe",
-        "9cc34712xda5f-4faa-a653-343d2085fbe8",
-        "9cc34712-da5f-4faa-a653-343d2085fbeg",
-        "{9cc34712-da5f-4faa-a653-343d2085fbe8}",
+        "AfterComposeResult",
+        "ValueChoice",
+        "BeforeStart",
+        "BeforeExecute",
     ] {
         let mut value = body();
         value.events[1].name = name.into();
@@ -118,6 +118,70 @@ fn unknown_text_malformed_guid_duplicate_and_wrong_owner_fail_closed() {
             ))
             .is_err()
         );
+        // Opening a scalar reference never admits an unclaimed XML subtree.
+        let mut unknown = String::from_utf8(write(&body(), dialect, 20)).unwrap();
+        let closing = unknown.rfind("</").unwrap();
+        unknown.insert_str(closing, "<FutureEventContainer/>");
+        assert!(read_form(dialect, unknown.as_bytes()).is_err());
+    }
+}
+
+#[test]
+fn open_symbolic_root_references_preserve_current_identity_handlers_and_order() {
+    // SDK EventHandler.event is an Event EReference. The importer creates an
+    // unresolved proxy from the raw name; these exercise format semantics,
+    // without claiming native acceptance of fabricated future event names.
+    let identities = [
+        "UnknownEvent".to_owned(),
+        "urn:future/../Событие".to_owned(),
+        "СобытиеНеизвестногоРасширения".to_owned(),
+        "ДлиннаяСимволическаяСсылка".repeat(512),
+        "9cc34712-da5f-4faa-a653-343d2085fbe".to_owned(),
+        "9cc34712xda5f-4faa-a653-343d2085fbe8".to_owned(),
+        "{9cc34712-da5f-4faa-a653-343d2085fbe8}".to_owned(),
+        " ".to_owned(),
+    ];
+    for minor in [20, 21] {
+        for name in &identities {
+            let mut source = body();
+            source.events[1].name = name.clone();
+            for dialect in [FormDialect::Edt, FormDialect::Designer] {
+                let mut current = read(&write(&source, dialect, minor), dialect, minor);
+                assert_eq!(current.events, source.events);
+                assert!(current.root_ext_info.is_none());
+                let before = digest(&current);
+                current.events[1].name.push_str("Текущая");
+                current.events[1].handler = "CurrentProxyHandler".into();
+                current.events.reverse();
+                assert_ne!(digest(&current), before);
+                for target in [FormDialect::Edt, FormDialect::Designer] {
+                    let returned = read(&write(&current, target, minor), target, minor);
+                    assert_eq!(returned.events, current.events);
+                    assert!(returned.root_ext_info.is_none());
+                }
+                current.events.remove(0);
+                assert_eq!(
+                    read(&write(&current, dialect, minor), dialect, minor).events,
+                    current.events
+                );
+                let mut extension = body();
+                extension.events.pop();
+                extension.root_ext_info = Some(FormRootExtInfo {
+                    kind: "form:CatalogFormExtInfo".into(),
+                    events: vec![FormEvent {
+                        name: name.clone(),
+                        handler: "ProxyHandler".into(),
+                    }],
+                    user_settings_group: None,
+                });
+                assert!(
+                    with_roundtrip_target(FormatVersion::new(2, minor), || write_form(
+                        dialect, &extension
+                    ))
+                    .is_err()
+                );
+            }
+        }
     }
 }
 
@@ -176,6 +240,23 @@ fn genuine_both_runtime_root_guids_keep_exact_source_and_current_handlers() {
 
 #[test]
 fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_semantics() {
+    public_symbolic_roundtrip(GUID, 20);
+}
+
+#[test]
+fn public_open_symbolic_identity_survives_strip_and_rehashed_current_edits() {
+    for minor in [20, 21] {
+        for name in [
+            "СимволическаяСсылка".to_owned(),
+            "urn:future/../Событие".to_owned(),
+            "БудущийПрокси".repeat(512),
+        ] {
+            public_symbolic_roundtrip(&name, minor);
+        }
+    }
+}
+
+fn public_symbolic_roundtrip(name: &str, minor: u16) {
     use ibcmd_edt::{
         ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
     };
@@ -202,7 +283,11 @@ fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_seman
         .push((field, PropertyValue::Enum(Token::new("Managed"))));
     object.form_bodies.push(NamedFormBody {
         name: "GuidRoot".into(),
-        body: body(),
+        body: {
+            let mut value = body();
+            value.events[1].name = name.into();
+            value
+        },
         ordinary_body: None,
         module: None,
         help: vec![],
@@ -210,7 +295,7 @@ fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_seman
     });
     configuration.objects.push(object);
     let directory = tempfile::tempdir().unwrap();
-    with_roundtrip_target(FormatVersion::new(2, 20), || {
+    with_roundtrip_target(FormatVersion::new(2, minor), || {
         write_config(Format::Designer, &configuration, directory.path())
     })
     .unwrap();
@@ -224,8 +309,8 @@ fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_seman
     std::fs::write(path, root).unwrap();
     let options = ConversionOptions {
         edt_version: "2025.2.3".into(),
-        xml_dialect: "2.20".into(),
-        runtime_version: Some("8.3.27".into()),
+        xml_dialect: format!("2.{minor}"),
+        runtime_version: Some(if minor == 20 { "8.3.27" } else { "8.5.1" }.into()),
     };
     let original = read_xml_source(directory.path(), ReaderLimits::default()).unwrap();
     let generated = xml_to_edt(&original, &options).unwrap().tree;
@@ -241,9 +326,12 @@ fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_seman
         .iter()
         .find(|entry| entry.path().as_str() == form_path)
         .unwrap();
-    let mut current = read(entry.bytes(), FormDialect::Edt, 20);
+    let mut current = read(entry.bytes(), FormDialect::Edt, minor);
     current.events[1].handler = "CurrentHandler".into();
-    let edited = write(&current, FormDialect::Edt, 20);
+    current.events[1].name.push_str("Текущая");
+    current.events.reverse();
+    current.events.remove(1);
+    let edited = write(&current, FormDialect::Edt, minor);
     let mut manifest: serde_json::Value = serde_json::from_slice(
         generated
             .entries()
@@ -283,7 +371,7 @@ fn public_exact_return_stripped_guid_and_rehashed_handler_edit_use_current_seman
         .iter()
         .find(|entry| entry.path().as_str() == "CommonForms/GuidRoot/Ext/Form.xml")
         .unwrap();
-    let decoded = read(native.bytes(), FormDialect::Designer, 20);
+    let decoded = read(native.bytes(), FormDialect::Designer, minor);
     assert_eq!(decoded.events, current.events);
     assert!(decoded.root_ext_info.is_none());
 }
