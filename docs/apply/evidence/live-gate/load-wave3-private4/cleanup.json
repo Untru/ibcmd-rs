@@ -1,0 +1,8 @@
+{
+  "resources_may_need_exact_owned_cleanup": false,
+  "guarded_stop_clean": true,
+  "registration_state": "unregistered",
+  "no_purge": true,
+  "worker_lease_held_or_unconfirmed": false,
+  "database_default60_cleanup_pending": true
+}

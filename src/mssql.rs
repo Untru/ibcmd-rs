@@ -15,6 +15,7 @@ use quick_xml::Reader;
 use quick_xml::events::{BytesStart, Event};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
+use sha2::Digest;
 
 use crate::adapters::mssql_legacy::LEGACY_MSSQL_STORAGE_PROFILE_ID;
 use crate::cli::{
@@ -357,7 +358,12 @@ pub struct MssqlActivateStagedMainReport {
     pub recovery: PathBuf,
     pub tail_log_output: Option<PathBuf>,
     pub live_recovery_command: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_continuation: Option<crate::mssql_live_continue::LiveContinueReport>,
     pub worker_switch: Option<crate::mssql_worker_switch::WorkerSwitchReport>,
+    /// Internally created lifetime only; absent on generic endpoint commands.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub managed_worker: Option<serde_json::Value>,
     /// What the live gate found before the promotion (#409 F-9, F-10): the log backup chain, the tail directory, the sessions whose
     /// work the switch interrupts. Only for the `live` mode on the built-in SQL client.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -954,9 +960,23 @@ pub fn diff_activation_snapshots(
 pub fn activate_staged_main(
     args: &MssqlActivateStagedMainArgs,
 ) -> Result<MssqlActivateStagedMainReport> {
+    if args.live_compact_recovery && !args.live_checkpoint {
+        bail!("--live-compact-recovery requires --live-checkpoint");
+    }
+    if args.live_checkpoint && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
+        bail!("--live-checkpoint requires --mode live");
+    }
+
     // The declared policy is checked before any external process starts, so an
     // unsupported build never reaches rac, sqlcmd, or the source tree.
     args.platform_profile.require_main_write_supported()?;
+    if args.live_checkpoint
+        && args.platform_profile
+            != crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_3_27_2214
+    {
+        bail!("live continuation checkpoint is measured on platform-8.3.27.2214 only");
+    }
+
     if args.interrupt_sessions && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
         bail!("--interrupt-sessions is only valid for live activation");
     }
@@ -993,6 +1013,42 @@ pub(crate) fn activate_staged_main_verified(
     args: &MssqlActivateStagedMainArgs,
     profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
 ) -> Result<MssqlActivateStagedMainReport> {
+    activate_staged_main_verified_inner(args, profile_verification, None)
+}
+
+/// No user JSON/endpoint can call this path with a lifetime capability. Only
+/// the product creator retains the original session and its exclusive journal.
+pub(crate) fn activate_staged_main_managed(
+    args: &MssqlActivateStagedMainArgs,
+    session: &mut crate::mssql_managed_worker::NativeManagedWorker,
+) -> Result<MssqlActivateStagedMainReport> {
+    session.require_activation_target(args)?;
+    let profile = session.verify_target_profile(
+        args.platform_profile,
+        crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
+            sqlcmd: args.sqlcmd.as_deref(),
+            rac: &args.rac,
+            ras_endpoint: &args.ras_endpoint,
+            server: &args.server,
+            database: &args.database,
+            cluster_id: args.cluster_id,
+            infobase_id: args.infobase_id,
+            infobase_user: args.infobase_user.as_deref(),
+            infobase_pwd: args.infobase_pwd.as_deref(),
+            sql_user: args.sql_user.as_deref(),
+            sql_pwd: args.sql_pwd.as_deref(),
+            sql_pwd_env: &args.sql_pwd_env,
+            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+        },
+    )?;
+    activate_staged_main_verified_inner(args, profile, Some(session))
+}
+
+fn activate_staged_main_verified_inner(
+    args: &MssqlActivateStagedMainArgs,
+    profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+    mut managed: Option<&mut crate::mssql_managed_worker::NativeManagedWorker>,
+) -> Result<MssqlActivateStagedMainReport> {
     args.platform_profile.require_main_write_supported()?;
     if args.interrupt_sessions && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
         bail!("--interrupt-sessions is only valid for live activation");
@@ -1006,50 +1062,29 @@ pub(crate) fn activate_staged_main_verified(
         &args.sql_pwd_env,
     );
     let user = args.sql_user.as_deref();
-    let sql = stage_sql(
+    let sql = stage_sql_with_certificate_policy(
         args.sqlcmd.as_deref(),
         args.bcp_executable.as_deref(),
         &args.server,
         user,
         password.as_deref(),
         &args.sql_pwd_env,
+        args.sqlcmd_trust_cert,
     )?;
-    let empty = BTreeSet::new();
-    let staged =
-        crate::mssql_dump::fetch_main_activation_rows(&sql, &args.database, "ConfigSave", &empty)?;
-    if staged.is_empty() {
+    if args.live_checkpoint {
+        crate::mssql_live_continue::preflight_backend(&sql, &args.database)?;
+    }
+    let inputs = read_activation_inputs(&sql, &args.database)?;
+    if inputs.staged.is_empty() {
         bail!("ConfigSave is empty; there is no staged main-configuration change");
     }
-    let selected = staged
-        .iter()
-        .map(|row| row.file_name.clone())
-        .collect::<BTreeSet<_>>();
-    let active =
-        crate::mssql_dump::fetch_main_activation_rows(&sql, &args.database, "Config", &selected)?;
-    let marker_name = BTreeSet::from(["DynamicallyUpdated".to_owned()]);
-    let config_marker = exactly_one_optional_marker(
-        "Config",
-        crate::mssql_dump::fetch_main_activation_rows(
-            &sql,
-            &args.database,
-            "Config",
-            &marker_name,
-        )?,
-    )?;
-    let params_marker = exactly_one_optional_marker(
-        "Params",
-        crate::mssql_dump::fetch_main_activation_rows(
-            &sql,
-            &args.database,
-            "Params",
-            &marker_name,
-        )?,
-    )?;
-    let allowed_targets = staged
-        .iter()
-        .filter(|row| !matches!(row.file_name.as_str(), "root" | "version" | "versions"))
-        .map(|row| row.file_name.clone())
-        .collect::<Vec<_>>();
+    let allowed_targets = allowed_activation_targets(&inputs.staged);
+    let ActivationInputs {
+        staged,
+        active,
+        config_marker,
+        params_marker,
+    } = inputs;
     let mode = match args.mode {
         MssqlMainActivationModeArg::Exclusive => MainActivationMode::Exclusive,
         MssqlMainActivationModeArg::Online => MainActivationMode::Online,
@@ -1075,6 +1110,17 @@ pub(crate) fn activate_staged_main_verified(
         args.allow_non_lab,
     )
     .map_err(anyhow::Error::new)?;
+    if let Some(session) = managed.as_deref_mut() {
+        if !args.dry_run && !plan.is_no_op() {
+            session.require_activation_target(args)?;
+        }
+    } else {
+        crate::mssql_worker_switch::preflight_worker_execution(
+            mode,
+            args.dry_run,
+            plan.is_no_op(),
+        )?;
+    }
     // The tool's own RAS verification made the cluster open idle SQL sessions on
     // this database; the session gate of an exclusive activation must not count
     // them (#409 F-3), and an infobase that has clients is refused before any
@@ -1127,25 +1173,37 @@ pub(crate) fn activate_staged_main_verified(
         )?,
         _ => None,
     };
-    let rendered = render_main_activation_sql_with(
+    let renderer = if args.live_checkpoint {
+        crate::mssql_main_activation::render_main_activation_checkpoint
+    } else {
+        render_main_activation_sql_with
+    };
+    let mut rendered = renderer(
         &args.database,
         &plan,
         tail_log_output,
         args.interrupt_sessions,
     )
     .map_err(anyhow::Error::new)?;
-    let worker_options =
-        if matches!(args.mode, MssqlMainActivationModeArg::Worker) && !plan.is_no_op() {
-            Some(crate::mssql_worker_switch::WorkerSwitchOptions {
-                rac: args.rac.clone(),
-                ras_endpoint: args.ras_endpoint.clone(),
-                cluster_id: profile_verification.verified_cluster_id,
-                infobase_id: profile_verification.verified_infobase_id,
-                timeout: Duration::from_secs(10),
-            })
-        } else {
-            None
-        };
+    crate::mssql_main_activation::protect_live_script(
+        &args.database,
+        args.live_checkpoint,
+        &mut rendered,
+    );
+    let worker_options = if matches!(args.mode, MssqlMainActivationModeArg::Worker)
+        && !plan.is_no_op()
+        && managed.is_none()
+    {
+        Some(crate::mssql_worker_switch::WorkerSwitchOptions {
+            rac: args.rac.clone(),
+            ras_endpoint: args.ras_endpoint.clone(),
+            cluster_id: profile_verification.verified_cluster_id,
+            infobase_id: profile_verification.verified_infobase_id,
+            timeout: Duration::from_secs(10),
+        })
+    } else {
+        None
+    };
 
     let artifact_root = std::env::temp_dir().join("ibcmd-rs");
     fs::create_dir_all(&artifact_root)
@@ -1165,17 +1223,109 @@ pub(crate) fn activate_staged_main_verified(
             token
         ))
     });
-    write_new_or_identical(&script, rendered.sql.as_bytes())?;
-    let recovery_json = serde_json::to_vec_pretty(&rendered.recovery)?;
-    write_new_or_identical(&recovery, &recovery_json)?;
+    crate::mssql_recovery_artifact::write(
+        &recovery,
+        &args.database,
+        mode,
+        &rendered.recovery,
+        &rendered.report.recovery_token,
+    )?;
 
+    let live_artifact_path = recovery.with_extension("live.json");
+    let live_artifact = if args.live_checkpoint && !plan.is_no_op() {
+        let SqlBackend::Client(client) = sql.backend() else {
+            bail!("live phase splitting requires the built-in SQL client; --sqlcmd is refused");
+        };
+        let identity = crate::mssql_live_continue::identity(client, &args.database)?;
+        let artifact = crate::mssql_live_continue::LiveArtifact {
+            format: 1,
+            sql_engine_version: crate::mssql_live_continue::LIVE_SQL_VERSION.to_owned(),
+            verified_platform_profile: profile_verification.verified_platform_profile.clone(),
+            storage_schema_sha256: profile_verification.storage_schema_sha256.clone(),
+            operation: uuid::Uuid::from_slice(
+                &sha2::Sha256::digest(rendered.report.recovery_token.as_bytes())[..16],
+            )?
+            .to_string(),
+            identity,
+            tail: tail_log_output.unwrap().to_owned(),
+            recovery_token: rendered.report.recovery_token.clone(),
+            cluster_id: profile_verification.verified_cluster_id.to_string(),
+            infobase_id: profile_verification.verified_infobase_id.to_string(),
+            recovery: rendered.recovery.clone(),
+        };
+        artifact.validate()?;
+        if args.live_compact_recovery {
+            crate::mssql_live_artifact::write(&live_artifact_path, &artifact)?;
+        } else {
+            let artifact_bytes = crate::mssql_live_continue::serialize_artifact(&artifact)?;
+            write_new_or_identical(&live_artifact_path, &artifact_bytes)?;
+        }
+        let resource = format!(
+            "ibcmd-rs:live:{}",
+            uuid::Uuid::parse_str(&artifact.identity.database_guid)?
+        );
+        rendered.sql = format!(
+            "USE [master]; IF CONVERT(nvarchar(128),SERVERPROPERTY('ProductVersion'))<>N'17.0.1135.8' THROW 57261,'live continuation is measured on SQL Server 17.0.1135.8 only',1; DECLARE @LivePhaseLock int; EXEC @LivePhaseLock=sys.sp_getapplock @Resource=N'{resource}',@LockMode='Exclusive',@LockOwner='Session',@LockTimeout=0; IF @LivePhaseLock<0 THROW 57260,'live switch is already running',1; BEGIN TRY\n{}\nUSE [master]; EXEC sys.sp_releaseapplock @Resource=N'{resource}',@LockOwner='Session'; END TRY BEGIN CATCH USE [master]; EXEC sys.sp_releaseapplock @Resource=N'{resource}',@LockOwner='Session'; THROW; END CATCH;",
+            rendered.sql
+        );
+        let pending = crate::mssql_live_continue::pending_operation_query(&args.database);
+        let guarded = format!(
+            "IF NOT EXISTS(SELECT 1 FROM sys.databases d JOIN sys.database_recovery_status r ON r.database_id=d.database_id WHERE d.name=N'{}' AND d.state_desc=N'ONLINE' AND d.user_access_desc=N'MULTI_USER' AND r.database_guid='{}' AND r.family_guid='{}' AND r.recovery_fork_guid='{}') THROW 57262,'live phase 1 database identity changed',1; IF EXISTS({pending}) THROW 57269,'an earlier live cycle 1 is unfinished; continue it before another activation',1;",
+            args.database.replace('\'', "''"),
+            artifact.identity.database_guid,
+            artifact.identity.family_guid,
+            artifact.identity.recovery_fork
+        );
+        rendered.sql = rendered
+            .sql
+            .replacen("BEGIN TRY\n", &format!("BEGIN TRY\n{guarded}\n"), 1);
+        // The retained script is the one actually run, including the operation lock.
+
+        Some(artifact)
+    } else {
+        None
+    };
+    write_new_or_identical(&script, rendered.sql.as_bytes())?;
+    let mut live_continuation = None;
     let mut worker_switch = None;
+    let mut managed_worker = None;
     if !args.dry_run {
         let worker_plan = worker_options
             .as_ref()
             .map(crate::mssql_worker_switch::prepare_dedicated_worker)
             .transpose()?;
-        run_sql_file(&sql, &script)?;
+        if let Some(session) = managed.as_deref_mut().filter(|_| !plan.is_no_op()) {
+            // SQL stage was already physically captured by the activation plan.
+            // This dispatch journals publication uncertainty and preserves a
+            // confirmed COMMIT even when worker handoff cannot be proved.
+            managed_worker = Some(serde_json::to_value(
+                session.publish_and_handoff(|| Ok(()), || run_sql_file(&sql, &script))?,
+            )?);
+        } else {
+            run_sql_file(&sql, &script).with_context(|| if live_artifact.is_some() { format!("promotion/cycle 1 may have committed; retained recovery {} and live continuation {} must be inspected before retry",recovery.display(),live_artifact_path.display()) } else {format!("activation outcome must be inspected using retained recovery {} before retry",recovery.display())})?;
+        }
+        if let Some(artifact) = &live_artifact {
+            let SqlBackend::Client(client) = sql.backend() else {
+                unreachable!()
+            };
+            live_continuation = Some(
+                match crate::mssql_live_continue::finish(
+                    client,
+                    artifact,
+                    &live_artifact_path,
+                    &args.rac,
+                    &args.ras_endpoint,
+                    args.infobase_user.as_deref(),
+                    args.infobase_pwd.as_deref(),
+                    args.interrupt_sessions,
+                ) {
+                    Ok(report) => report,
+                    Err(error) => {
+                        crate::mssql_live_continue::unresolved(&live_artifact_path, &error)
+                    }
+                },
+            );
+        }
         if let (Some(options), Some(plan)) = (worker_options.as_ref(), worker_plan.as_ref()) {
             worker_switch = Some(crate::mssql_worker_switch::switch_dedicated_worker(
                 options, plan,
@@ -1211,10 +1361,74 @@ pub(crate) fn activate_staged_main_verified(
         } else {
             None
         },
+        live_continuation,
         worker_switch,
+        managed_worker,
         config_apply: None,
         live_gate,
     })
+}
+
+pub(crate) fn activate_staged_main_managed_verified(
+    args: &MssqlActivateStagedMainArgs,
+    profile: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+    session: &mut crate::mssql_managed_worker::NativeManagedWorker,
+) -> Result<MssqlActivateStagedMainReport> {
+    session.require_activation_target(args)?;
+    activate_staged_main_verified_inner(args, profile, Some(session))
+}
+
+/// What a main activation plans from, as stored: the exact `ConfigSave` image, the `Config` rows of the
+/// same names and the `DynamicallyUpdated` markers of `Config` and `Params`.
+pub(crate) struct ActivationInputs {
+    pub staged: Vec<MainStorageRow>,
+    pub active: Vec<MainStorageRow>,
+    pub config_marker: Option<MainStorageRow>,
+    pub params_marker: Option<MainStorageRow>,
+}
+
+/// Reads the [`ActivationInputs`] of `database` (`staged` is empty when nothing is staged).
+pub(crate) fn read_activation_inputs(sql: &SqlExec, database: &str) -> Result<ActivationInputs> {
+    let empty = BTreeSet::new();
+    let staged =
+        crate::mssql_dump::fetch_main_activation_rows(sql, database, "ConfigSave", &empty)?;
+    if staged.is_empty() {
+        return Ok(ActivationInputs {
+            staged,
+            active: Vec::new(),
+            config_marker: None,
+            params_marker: None,
+        });
+    }
+    let selected = staged
+        .iter()
+        .map(|row| row.file_name.clone())
+        .collect::<BTreeSet<_>>();
+    let active = crate::mssql_dump::fetch_main_activation_rows(sql, database, "Config", &selected)?;
+    let marker_name = BTreeSet::from(["DynamicallyUpdated".to_owned()]);
+    let config_marker = exactly_one_optional_marker(
+        "Config",
+        crate::mssql_dump::fetch_main_activation_rows(sql, database, "Config", &marker_name)?,
+    )?;
+    let params_marker = exactly_one_optional_marker(
+        "Params",
+        crate::mssql_dump::fetch_main_activation_rows(sql, database, "Params", &marker_name)?,
+    )?;
+    Ok(ActivationInputs {
+        staged,
+        active,
+        config_marker,
+        params_marker,
+    })
+}
+
+/// The staged names an activation may change: every row but the three service rows.
+pub(crate) fn allowed_activation_targets(staged: &[MainStorageRow]) -> Vec<String> {
+    staged
+        .iter()
+        .filter(|row| !matches!(row.file_name.as_str(), "root" | "version" | "versions"))
+        .map(|row| row.file_name.clone())
+        .collect()
 }
 
 /// The exclusive promotion of the staged ConfigSave, carried out by the own apply (#408 step 2, F-4 of #344).
@@ -1252,8 +1466,13 @@ fn activate_by_config_apply(
     });
     // The snapshot of the rows the stage replaces, as before: written ahead of the run, so it is there when the
     // run stops half way (the apply's own artifact, under `config_apply.recovery_dir`, is written by the apply).
-    let recovery_json = serde_json::to_vec_pretty(plan.recovery())?;
-    write_new_or_identical(&recovery, &recovery_json)?;
+    crate::mssql_recovery_artifact::write(
+        &recovery,
+        &args.database,
+        plan.mode(),
+        plan.recovery(),
+        &report.recovery_token,
+    )?;
 
     let options = config_apply_options(
         &args.database,
@@ -1275,7 +1494,9 @@ fn activate_by_config_apply(
         recovery,
         tail_log_output: None,
         live_recovery_command: None,
+        live_continuation: None,
         worker_switch: None,
+        managed_worker: None,
         config_apply: Some(applied),
         live_gate: None,
     })
@@ -1380,57 +1601,8 @@ fn safe_file_stem(value: &str) -> String {
 /// so a crash never leaves a truncated artifact that every repeat would
 /// refuse (#409 F-8).
 fn write_new_or_identical(path: &Path, bytes: &[u8]) -> Result<()> {
-    use std::io::Write as _;
-
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)
-            .with_context(|| format!("failed to create {}", parent.display()))?;
-    }
-    let existing_matches = |path: &Path| -> Result<bool> {
-        match fs::read(path) {
-            Ok(existing) if existing == bytes => Ok(true),
-            Ok(_) => bail!("refusing to overwrite existing artifact {}", path.display()),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
-            Err(error) => Err(error).with_context(|| format!("failed to read {}", path.display())),
-        }
-    };
-    if existing_matches(path)? {
-        return Ok(());
-    }
-    let name = path
-        .file_name()
-        .ok_or_else(|| anyhow!("artifact path {} has no file name", path.display()))?;
-    let mut temporary_name = std::ffi::OsString::from(".");
-    temporary_name.push(name);
-    temporary_name.push(format!(".{}.tmp", uuid::Uuid::new_v4()));
-    let temporary = path.with_file_name(temporary_name);
-    let written = (|| -> std::io::Result<()> {
-        let mut file = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&temporary)?;
-        file.write_all(bytes)?;
-        file.sync_all()
-    })();
-    if let Err(error) = written {
-        let _ = fs::remove_file(&temporary);
-        return Err(error).with_context(|| format!("failed to write {}", temporary.display()));
-    }
-    let published = match fs::hard_link(&temporary, path) {
-        Ok(()) => Ok(()),
-        Err(error) => match existing_matches(path) {
-            Ok(true) => Ok(()),
-            // A replacing rename would lose a concurrently published recovery
-            // artifact. Refuse when atomic, non-replacing publication is not
-            // available, including file systems that do not support hard links.
-            Ok(false) => Err(error).with_context(|| {
-                format!("failed to publish {} without replacing it", path.display())
-            }),
-            Err(error) => Err(error),
-        },
-    };
-    let _ = fs::remove_file(&temporary);
-    published
+    crate::mssql_artifact::write_new_or_identical(path, bytes)
+        .with_context(|| format!("failed to publish artifact {}", path.display()))
 }
 
 pub fn write_activation_diff(report: &MssqlActivationDiffReport, output: &Path) -> Result<()> {
@@ -1459,6 +1631,14 @@ pub fn write_compare_report(report: &MssqlCompareReport, output: &Path) -> Resul
 pub fn audit_source_parity(
     args: &MssqlAuditSourceParityArgs,
 ) -> Result<MssqlSourceParityAuditReport> {
+    audit_source_parity_with_sql(args, None)
+}
+
+/// Source apply supplies the same explicit connection policy as its preflights.
+pub(crate) fn audit_source_parity_with_sql(
+    args: &MssqlAuditSourceParityArgs,
+    sql_override: Option<SqlExec>,
+) -> Result<MssqlSourceParityAuditReport> {
     let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
     let source_coverage = audit_source_load_coverage_from_manifest(&manifest)?;
     let metadata_xmls = filter_source_paths_by_prefix(
@@ -1483,7 +1663,12 @@ pub fn audit_source_parity(
     }
     let bootstrap_readiness =
         source_bootstrap_readiness_report(&args.source_root, &metadata_xmls, &common_module_xmls)?;
-    let sql = SqlExec::from_options(SqlOptions::integrated(&args.server, args.sqlcmd.as_deref()))?;
+    let sql = match sql_override {
+        Some(sql) => sql,
+        None => {
+            SqlExec::from_options(SqlOptions::integrated(&args.server, args.sqlcmd.as_deref()))?
+        }
+    };
 
     install_always_used_constants_source(&sql, &args.database, Some(&args.source_root));
     let source = MetadataSourceContext::new(args.source_root.clone());
@@ -3639,19 +3824,30 @@ pub fn import_target_state(
 pub fn stage_source_objects(
     args: &MssqlStageSourceObjectsArgs,
 ) -> Result<StageSourceObjectsReport> {
+    stage_source_objects_with_sql(args, None)
+}
+
+/// Reuse source apply's SQL handle for every preparation read and stage write.
+pub(crate) fn stage_source_objects_with_sql(
+    args: &MssqlStageSourceObjectsArgs,
+    sql_override: Option<SqlExec>,
+) -> Result<StageSourceObjectsReport> {
     if !args.files.is_empty() {
-        return stage_source_files(args);
+        return stage_source_files(args, sql_override);
     }
     if args.base_free {
         return empty_stage::stage_source_objects_base_free(args);
     }
-    stage_source_objects_patch(args, None)
+    stage_source_objects_patch(args, None, sql_override)
 }
 
 /// `--file` (`infobase config import files`, #363): the objects the listed
 /// files belong to, prepared as `--path-prefix` prepares them, and of their
 /// rows the ones the files compile to (`files_stage`).
-fn stage_source_files(args: &MssqlStageSourceObjectsArgs) -> Result<StageSourceObjectsReport> {
+fn stage_source_files(
+    args: &MssqlStageSourceObjectsArgs,
+    sql_override: Option<SqlExec>,
+) -> Result<StageSourceObjectsReport> {
     if args.base_free {
         bail!(
             "a partial import of files patches the target's rows: --file and --base-free do not go together"
@@ -3674,12 +3870,13 @@ fn stage_source_files(args: &MssqlStageSourceObjectsArgs) -> Result<StageSourceO
         scoped.source_version =
             <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&version, true).ok();
     }
-    stage_source_objects_patch(&scoped, Some(&selection))
+    stage_source_objects_patch(&scoped, Some(&selection), sql_override)
 }
 
 fn stage_source_objects_patch(
     args: &MssqlStageSourceObjectsArgs,
     selection: Option<&files_stage::FilesSelection>,
+    sql_override: Option<SqlExec>,
 ) -> Result<StageSourceObjectsReport> {
     require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
     if !args.replace_config_save {
@@ -3727,6 +3924,8 @@ fn stage_source_objects_patch(
     let sql = if offline {
         OFFLINE_STAGE.store(true, std::sync::atomic::Ordering::Relaxed);
         SqlExec::detached("an offline --script-only stage reaches no database")
+    } else if let Some(sql) = sql_override {
+        sql
     } else {
         stage_sql(
             args.sqlcmd.as_deref(),
@@ -4955,8 +5154,20 @@ fn prepare_metadata_object_stage(
     )?;
     let required = required_base_key(&dependency, "metadata XML")?;
     let base_metadata_blob = fetch_config_blob(sql, database, required.as_str())?;
-    let packed_metadata =
+    let template = matches!(properties.kind.as_str(), "Template" | "CommonTemplate");
+    if template {
+        crate::compiler::bodies::mxl_native::inflate_template_patch(&base_metadata_blob)?;
+    }
+    let mut packed_metadata =
         pack_simple_metadata_blob_from_xml_with_source(&base_metadata_blob, &xml, source)?;
+    if template {
+        packed_metadata.blob =
+            crate::compiler::bodies::mxl_native::preserve_identical_template_blob(
+                &base_metadata_blob,
+                &packed_metadata.blob,
+            )?;
+        packed_metadata.output_sha256 = hex_sha256(&packed_metadata.blob);
+    }
     if packed_metadata.properties.uuid != object_id {
         return Err(anyhow!(
             "XML metadata uuid {} changed while packing {}",
@@ -5493,8 +5704,8 @@ fn prepare_raw_template_body_row(
 }
 
 fn prepare_spreadsheet_template_body_row(
-    _sql: &SqlExec,
-    _database: &str,
+    sql: &SqlExec,
+    database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     source: Option<&MetadataSourceContext>,
@@ -5527,6 +5738,12 @@ fn prepare_spreadsheet_template_body_row(
         )
     })?;
     let packed = spreadsheet_template_for_platform(&xml, packed)?;
+    let packed = if base_free(sql) {
+        packed
+    } else {
+        let base = fetch_config_blob(sql, database, &body_id)?;
+        crate::compiler::bodies::mxl_native::preserve_spreadsheet_language(&base, &packed)?
+    };
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
         path: body_path,
@@ -6357,7 +6574,7 @@ fn prepare_form_body_row(
     // (`cf load`): the form, its interceptors' call types, the base form.
     if CF_LOAD_COMPILE.load(std::sync::atomic::Ordering::Relaxed)
         && !BASE_FREE_STAGE.load(std::sync::atomic::Ordering::Relaxed)
-        && form_xml.windows(10).any(|window| window == b"<BaseForm ")
+        && offline_compile::requires_adoption_adapter(&form_xml, &fs::read(xml_path)?)?
     {
         let base_body = fetch_config_blob(sql, database, &body_id)?;
         let items_root = form_path.with_file_name("Form").join("Items");
@@ -8297,6 +8514,18 @@ fn stage_sql(
     password: Option<&str>,
     password_env: &str,
 ) -> Result<SqlExec> {
+    stage_sql_with_certificate_policy(sqlcmd, bcp, server, user, password, password_env, true)
+}
+
+fn stage_sql_with_certificate_policy(
+    sqlcmd: Option<&Path>,
+    bcp: Option<&Path>,
+    server: &str,
+    user: Option<&str>,
+    password: Option<&str>,
+    password_env: &str,
+    trust_server_certificate: bool,
+) -> Result<SqlExec> {
     SqlExec::from_options(SqlOptions {
         sqlcmd,
         bcp,
@@ -8304,7 +8533,7 @@ fn stage_sql(
         user,
         password,
         password_env,
-        trust_server_certificate: true,
+        trust_server_certificate,
     })
 }
 
@@ -8518,8 +8747,10 @@ fn sqlcmd_command(sql: &SqlExec, tools: &SqlTools, statement: &str) -> Command {
             command.arg("-E");
         }
     }
+    if sql.trust_server_certificate() {
+        command.arg("-C");
+    }
     command
-        .arg("-C")
         .arg("-f")
         .arg("65001")
         .arg("-b")
@@ -8553,8 +8784,10 @@ fn sqlcmd_file_command(sql: &SqlExec, tools: &SqlTools, script: &Path) -> Comman
     // so the ceiling rises from 256 MiB to about 1 GiB on the wire -- room for
     // a staged batch holding one 61 MB add-in template alone (~250 MB as
     // UTF-16 hex text).
+    if sql.trust_server_certificate() {
+        command.arg("-C");
+    }
     command
-        .arg("-C")
         .arg("-a")
         .arg("32767")
         .arg("-f")
@@ -9153,7 +9386,7 @@ fn build_stage_source_objects_sql(
         expected_total_rows = expected_total_rows,
     ));
 
-    sql
+    crate::mssql_live_continue::guard_pending_live(database, &sql)
 }
 
 /// One staged row on the bulk path: its Config file name, whether the target
@@ -9321,7 +9554,7 @@ fn build_bulk_stage_apply_sql(
     expected_total_rows: usize,
 ) -> String {
     let stage = format!("tempdb.dbo.{}", quote_ident(table));
-    format!(
+    let sql = format!(
         "SET NOCOUNT ON;\n\
          SET XACT_ABORT ON;\n\
          USE {db};\n\
@@ -9348,7 +9581,8 @@ fn build_bulk_stage_apply_sql(
          COMMIT;\n\
          DROP TABLE {stage};\n",
         db = quote_ident(database),
-    )
+    );
+    crate::mssql_live_continue::guard_pending_live(database, &sql)
 }
 
 fn bulk_stage_paths(base: Option<&PathBuf>, database: &str) -> (PathBuf, PathBuf, PathBuf) {
@@ -10237,6 +10471,8 @@ mod tests {
     #[test]
     fn runtime_profile_verification_fails_before_main_stage_read() {
         let args = MssqlActivateStagedMainArgs {
+            live_checkpoint: false,
+            live_compact_recovery: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
             sqlcmd_trust_cert: false,
             sqlcmd: Some(PathBuf::from("must-not-run-sqlcmd")),
@@ -10793,7 +11029,7 @@ mod tests {
         assert!(!only_descriptor.metadata_blob.is_empty());
         assert!(only_descriptor.body_rows.is_empty());
 
-        // Only a module differs: the bodies of that Ext folder are staged, the descriptor is not.
+        // Only an independent module differs: unchanged sibling bodies and descriptor stay.
         let mut delta =
             delta_stage::Delta::for_test(&["catalogs/x/ext/objectmodule.bsl"], &[], &[]);
         let mut only_module = object();
@@ -10805,7 +11041,7 @@ mod tests {
                 .iter()
                 .map(|body| body.body_id.as_str())
                 .collect::<Vec<_>>(),
-            ["u1.0", "u1.2"]
+            ["u1.0"]
         );
         // The rows a stage writes leave the emptied descriptor out.
         let additions = StageAdditions::default();
@@ -10819,11 +11055,11 @@ mod tests {
         );
         assert_eq!(
             rows.iter().map(|row| row.file_name).collect::<Vec<_>>(),
-            ["u1.0", "u1.2", "versions"]
+            ["u1.0", "versions"]
         );
         assert_eq!(
             source_stage_change_ids(std::slice::from_ref(&staged), &[]),
-            ["u1.0", "u1.2"]
+            ["u1.0"]
         );
 
         // Nothing differs: nothing is left.
@@ -11335,10 +11571,12 @@ mod tests {
         assert!(sql.contains("ISNULL(c.Attributes, 0)"));
         assert!(sql.contains("s.Kind = 1 AND NOT EXISTS"));
         assert!(sql.contains("FROM dbo.ConfigSave) <> 12"));
-        assert!(
-            sql.trim_end()
-                .ends_with("DROP TABLE tempdb.dbo.[ibcmd_rs_stage_Db_1];")
-        );
+        let drop = sql
+            .find("DROP TABLE tempdb.dbo.[ibcmd_rs_stage_Db_1];")
+            .unwrap();
+        assert!(sql.find("COMMIT;").unwrap() < drop);
+        assert!(drop < sql.find("sp_releaseapplock").unwrap());
+        assert!(sql.find("THROW 57269").unwrap() < sql.find("DELETE FROM dbo.ConfigSave").unwrap());
     }
 
     #[test]
@@ -11867,7 +12105,11 @@ mod tests {
         assert_eq!(std::fs::read(&path).unwrap(), b"{\"rows\":1}");
         super::write_new_or_identical(&path, b"{\"rows\":1}").unwrap();
         let error = super::write_new_or_identical(&path, b"{\"rows\":2}").unwrap_err();
-        assert!(error.to_string().contains("refusing to overwrite"));
+        assert!(
+            error
+                .chain()
+                .any(|cause| cause.to_string().contains("refusing to overwrite"))
+        );
         assert_eq!(std::fs::read(&path).unwrap(), b"{\"rows\":1}");
         let left = std::fs::read_dir(path.parent().unwrap())
             .unwrap()
@@ -15191,7 +15433,7 @@ mod tests {
     }
 
     #[test]
-    fn prepares_spreadsheet_template_without_fetching_base_blob() {
+    fn prepares_base_free_spreadsheet_template_without_fetching_base_blob() {
         let root = std::env::temp_dir().join(format!(
             "ibcmd-rs-spreadsheet-template-no-fetch-{}",
             uuid::Uuid::new_v4().hyphenated()
@@ -15212,7 +15454,7 @@ mod tests {
         );
 
         let rows = super::prepare_spreadsheet_template_body_row(
-            &test_sql(),
+            &crate::sql::SqlExec::detached(super::BASE_FREE_MISSING_ROW),
             "missing-database",
             &template_xml,
             &properties,
@@ -17262,6 +17504,39 @@ mod tests {
         assert!(args.contains(&"-E".to_string()));
         assert!(!args.contains(&"-U".to_string()));
         assert!(!args.contains(&"-P".to_string()));
+    }
+
+    #[test]
+    fn activation_certificate_policy_reaches_clients_and_both_sqlcmd_builders() {
+        for trust in [false, true] {
+            for executable in [None, Some(Path::new("must-not-run-sqlcmd.exe"))] {
+                let sql = super::stage_sql_with_certificate_policy(
+                    executable,
+                    None,
+                    "must-not-connect",
+                    None,
+                    None,
+                    "MUST_NOT_READ",
+                    trust,
+                )
+                .unwrap();
+                assert_eq!(sql.trust_server_certificate(), trust);
+                if let Some(tools) = sql.tools() {
+                    for command in [
+                        super::sqlcmd_command(&sql, tools, "SELECT 1"),
+                        super::sqlcmd_file_command(&sql, tools, Path::new("must-not-read.sql")),
+                    ] {
+                        assert_eq!(command.get_args().any(|arg| arg == "-C"), trust);
+                    }
+                }
+            }
+        }
+        // Other staging commands retain their explicit legacy trust policy.
+        assert!(
+            super::stage_sql(None, None, "must-not-connect", None, None, "MUST_NOT_READ")
+                .unwrap()
+                .trust_server_certificate()
+        );
     }
 
     #[test]

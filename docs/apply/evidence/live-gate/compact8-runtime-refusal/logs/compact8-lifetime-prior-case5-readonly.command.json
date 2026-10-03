@@ -1,0 +1,13 @@
+{
+  "arguments": [
+    "-NoProfile",
+    "-File",
+    "F:/ibcmd/lab/05/wave3/load/compact8-runtime-v1/compact8_prior_archive.ps1",
+    "-Validate",
+    "-WorkerContext",
+    "eyJvcGVyYXRpb24iOiIxNjNhNDlkNmRjZWM0M2EwYmE3NzUwYWRlMDFjZGMxZiIsImxlYXNlIjoiZEhKaFkyczliRzloWkRndFpqaGlaRGRrTURZMVlUSmpJSE5wYm1ObFBUSXdNall0TVRBdE1ESlVNVEU2TXpNNk1Ea05DZz09IiwicHJvb2ZfbGVhZiI6ImxvY2stYWZhOGQ5YTMxNTRmNDk1OWIzYTI0ZWVmOTBjNGU4ZGIuanNvbiIsInByb29mX3NoYTI1NiI6IkUzNTM0RDRFNEU3NjBFOTI2NTVCOUIyMjBCOUFFNkI0RDNBODlEQThCNjI0MkJBQjRDRUQwNzM3MTk3NkJGM0YiLCJwYXJlbnRfcGlkIjoxMTIxODAsInBhcmVudF9wYXJlbnQiOjM0NDUyLCJwYXJlbnRfYm9ybiI6IjIwMjYtMTAtMDJUMDg6MzI6MDcuMTA1OTQ1MFoiLCJwYXJlbnRfZXhlIjoiQzpcXFByb2dyYW0gRmlsZXNcXFBvd2VyU2hlbGxcXDdcXHB3c2guZXhlIiwicGFyZW50X2NvbW1hbmRfc2hhMjU2IjoiRkQ2MDYwM0ZGMTEzQTEwMUQ4MEYzQzU4MDM1MThDODcxNjE5NUQyQTJBNEM2OTI0ODg1MjVCRUZCMTY4OTVBMiJ9"
+  ],
+  "started_utc": "2026-10-02T08:33:33.0351145Z",
+  "deadline_seconds": 120,
+  "executable": "pwsh"
+}

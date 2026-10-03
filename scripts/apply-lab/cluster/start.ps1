@@ -11,6 +11,10 @@ param(
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 . "$PSScriptRoot\lib.ps1"
+if ($script:PrivateContext) {
+    & "$PSScriptRoot\private-start.ps1" -Track $Track -TimeoutSec $TimeoutSec
+    exit 0
+}
 
 foreach ($exe in @($script:Ragent, $script:RasExe, $script:Rac)) {
     if (-not (Test-Path -LiteralPath $exe)) { Say "refused: $exe is not installed"; exit 2 }

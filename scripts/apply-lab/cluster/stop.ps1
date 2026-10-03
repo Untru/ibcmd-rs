@@ -10,6 +10,10 @@ param([switch]$Purge)
 $ErrorActionPreference = 'Stop'
 [Console]::OutputEncoding = [Text.Encoding]::UTF8
 . "$PSScriptRoot\lib.ps1"
+if ($script:PrivateContext) {
+    & "$PSScriptRoot\private-stop.ps1" -Purge:$Purge
+    exit 0
+}
 
 $state = Read-State
 $before = @(Get-ClusterProcesses)

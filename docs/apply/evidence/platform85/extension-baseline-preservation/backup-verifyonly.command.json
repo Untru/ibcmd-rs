@@ -1,0 +1,14 @@
+{
+  "started_utc": "2026-10-01T22:23:48.0289929Z",
+  "executable": "sqlcmd",
+  "deadline_seconds": 60,
+  "arguments": [
+    "-S",
+    "localhost",
+    "-E",
+    "-C",
+    "-b",
+    "-Q",
+    "RESTORE VERIFYONLY FROM DISK=N'F:\\ibcmd\\lab\\05\\wave3\\platform85\\baselines\\extension-settled-A-20261002.bak' WITH CHECKSUM;"
+  ]
+}

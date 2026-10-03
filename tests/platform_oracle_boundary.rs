@@ -70,7 +70,8 @@ fn released_infobase_mode_refuses_rather_than_runs_the_platform() {
     }
     // What only the platform does is refused by name, with no PATH to find
     // it on and nothing launched. `config apply` itself is served by
-    // ibcmd-rs (without the platform) since 0.4; its dynamic update is not.
+    // ibcmd-rs (without the platform) since 0.4, and its dynamic update since 0.5 (#347); its
+    // extensions are not.
     for args in [
         &[
             "infobase",
@@ -86,7 +87,7 @@ fn released_infobase_mode_refuses_rather_than_runs_the_platform() {
             "--dbms=MSSQLServer",
             "--db-server=localhost",
             "--db-name=ibcmd_rs_boundary",
-            "--dynamic=force",
+            "--extension=E",
         ][..],
     ] {
         let output = run(args);

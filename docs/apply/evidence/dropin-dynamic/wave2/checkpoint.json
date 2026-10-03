@@ -1,0 +1,142 @@
+{
+  "base": "13d9c6dd08806d38ffc4386883b53db6f2e985a4",
+  "date": "2026-10-01",
+  "laboratory": "F:\\ibcmd\\lab\\05\\wave2\\dynamic",
+  "scope": "BSP 8.3.27.2214 bounded storage publication: two consecutive own delta imports/explicit force over measured pending history",
+  "actual_write_cli": {
+    "path": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\bin\\ibcmd-rs-overlay-final.exe",
+    "sha256": "14f4bfc52f23fabae6eb85a151e94b1142781f898d488f909ff4e93c2b4bf47b"
+  },
+  "actual_write_driver": {
+    "path": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\bin\\dynamic-wave2-final.exe",
+    "sha256": "3ca587ff1a5f363f0ac73286e519624f78569a1a30157f27536e88db6f8cdbd0",
+    "shipped": false,
+    "source": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\tools\\dynamic-wave2-lab.rs"
+  },
+  "final_cli": {
+    "path": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\bin\\ibcmd-rs-shipped-recovery-preimage-cycle1-v2.exe",
+    "sha256": "52102f91f785e31056d06b7e5d736fd9b4df586e58a91888cdbc95e460d22318",
+    "differences_after_db_matrix": [
+      "help/search cache not_written report",
+      "always truncate recovery append recipe including zero additions",
+      "dynamic-only staged Attributes=0 and full header/digest locked precondition",
+      "immutable bound siVersions raw bytes and complete RowMeta passed from collection into recovery; no siVersions reread"
+    ]
+  },
+  "tests": {
+    "quick_gates": {
+      "fmt": "PASS",
+      "guard": "PASS",
+      "clippy": "PASS",
+      "root_lib_passed": 3665,
+      "root_lib_failed": 0,
+      "root_lib_ignored": 10,
+      "path": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\gates-recovery-preimage-cycle1-v2"
+    },
+    "iter_build": "PASS",
+    "focused_recovery_preimage": {
+      "passed": 2,
+      "failed": 0,
+      "transient_storage_cases": [
+        "A",
+        "different bytes B",
+        "missing",
+        "multipart",
+        "Attributes drift",
+        "Creation drift",
+        "Modified drift"
+      ],
+      "invalid_preimage_cases": [
+        "digest",
+        "data size",
+        "byte length",
+        "part",
+        "Attributes",
+        "missing/duplicate coverage",
+        "wrong rewrite name/size/digest"
+      ],
+      "log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\targeted-recovery-preimage-cycle1-v2.log"
+    }
+  },
+  "native_and_own_source_proof": {
+    "files_per_export": 12198,
+    "allowed_normalization": "ConfigDumpInfo.xml configVersion attribute values only",
+    "own_raw_identical_files": 12197,
+    "own_normalized_equal_files": 1,
+    "both_edits_retained": true
+  },
+  "own_committed_appended_entries": [
+    6,
+    12
+  ],
+  "previous_aliases_preserved_raw": true,
+  "all_32_si_aliases_equal_ordinary_raw": true,
+  "repeat_force_no_third_generation": true,
+  "repeat_helper_no_duplicate_entries": true,
+  "full_storage_equal": false,
+  "classified_unimplemented_files": [
+    "userDocs_ru.bin",
+    "userPostings_ru.bin",
+    "userVocabulary_ru.bin"
+  ],
+  "other_boundaries": [
+    "two measured licensing .ui payloads are preserved, not reproduced",
+    "active/warm/high-load acceptance open",
+    "8.5 unsupported",
+    "unknown inventory/structural removal fail closed",
+    "current direct exclusive refuses collected Params aliases; native exclusive settlement required",
+    "manual stopped-database recovery only; uncertain COMMIT inspected before retry/undo",
+    "native registration message numbers measured NULL only"
+  ],
+  "raw_snapshots": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\snapshots",
+  "raw_logs": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs",
+  "raw_recovery": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\recovery",
+  "cleanup": {
+    "native": "DROPPED by shared guarded tool",
+    "own": "SKIPPED as written 25 minutes before guarded check; default 60-minute minimum preserved",
+    "log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\guarded-cleanup-final.log"
+  },
+  "committed_log_copy_changes": "Only final blank lines removed; raw lab originals unchanged",
+  "issue_347_complete": false,
+  "independent_review": {
+    "result": "PASS",
+    "reviewed_head": "cce4ef91f30448e5b2173e497e5cb0da02448a68",
+    "cycle": 2,
+    "reports": [
+      "F:/ibcmd/lab/05/wave2/coordinator/review-dynamic-root-cce4ef91.md",
+      "F:/ibcmd/lab/05/wave2/coordinator/review-dynamic-cce4ef91.md",
+      "F:/ibcmd/lab/05/wave2/coordinator/review-dynamic-shared-cce4ef91.md"
+    ],
+    "scope": "Measured source/storage publication only; whole issue 347 remains open"
+  },
+  "previous_final_cli": {
+    "path": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\bin\\ibcmd-rs-shipped-stage-header-final-v2.exe",
+    "sha256": "1ecfc9ccb64b3d375e1290f4d0c79d48ba0cc675309d2ac7eb327035e2dd3291",
+    "differences_after_db_matrix": [
+      "help/search cache not_written report",
+      "always truncate recovery append recipe including zero additions",
+      "dynamic-only staged Attributes=0 and full header/digest locked precondition"
+    ]
+  },
+  "historical_focused_regressions": {
+    "source_checkpoint": "9e89f731b4df99c899b8de0114c4d7124612ef70",
+    "stage_header": {
+      "passed": 133,
+      "failed": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\targeted-stage-header-final-v2.log"
+    },
+    "recovery_reuse": {
+      "passed": 1,
+      "failed": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\targeted-recovery-reuse.log"
+    }
+  },
+  "repair_cycle1": {
+    "reviewed_head": "9e89f731b4df99c899b8de0114c4d7124612ef70",
+    "source_only_patch_git_blob": "148ada6c5adf834997025288da91bc500d3066ad",
+    "native_matrix_rerun": false,
+    "legacy_capture_changed": false,
+    "initial_failed_test_scaffold_log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\targeted-recovery-preimage-cycle1.log",
+    "iter_build_log": "F:\\ibcmd\\lab\\05\\wave2\\dynamic\\logs\\build-shipped-recovery-preimage-cycle1-v2.log"
+  }
+}

@@ -1,0 +1,5 @@
+PASS actual worker acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual heavy acquire grants then unknown; flags set before dispatch, finally worker/native retained; heavy independent
+PASS actual finally case6 writer-completion=false without sticky receipt retains worker, unregister/stop/release0
+PASS actual successful release with newly uncertain receipt retains unconfirmed lease flag before clearing
+PASS pure actual acquire/finally AST mocks; realStarts=realSignals=SQLcalls=registryWrites=0

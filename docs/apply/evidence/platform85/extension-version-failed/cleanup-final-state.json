@@ -1,0 +1,9 @@
+{
+  "registered_or_unconfirmed": false,
+  "worker_held_or_unconfirmed": false,
+  "receipt_root": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-v2-child-receipts",
+  "guarded_stop_clean": true,
+  "no_DB_drop": true,
+  "no_import_retry": true,
+  "no_purge": true
+}

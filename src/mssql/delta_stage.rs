@@ -369,6 +369,19 @@ impl Delta {
         path: &Path,
         pending: &dyn Fn(&str) -> Pending,
     ) -> Fate {
+        self.body_fate_in_scope(root, body_id, path, None, pending)
+    }
+
+    /// A module-only object edit does not rebuild unchanged sibling bodies. All other
+    /// routes retain the existing Ext grouping, including combined form/help assets.
+    fn body_fate_in_scope(
+        &self,
+        root: &Path,
+        body_id: &str,
+        path: &Path,
+        module_only_ext: Option<&str>,
+        pending: &dyn Fn(&str) -> Pending,
+    ) -> Fate {
         if !path.starts_with(root) {
             return Fate::Staged;
         }
@@ -376,10 +389,53 @@ impl Delta {
         let Some(ext) = ext_folder(&file) else {
             return Fate::Staged;
         };
-        if self.differing_set.contains(&file) || self.differs_under(ext) {
+        if self.differing_set.contains(&file)
+            || (module_only_ext != Some(ext) && self.differs_under(ext))
+        {
             return Fate::Staged;
         }
         self.pending_fate(&body_id.to_lowercase(), body_id, pending)
+    }
+
+    /// Only two independent module files may differ, with an unchanged descriptor.
+    /// An override, built/widened owner or any other asset change keeps the old route.
+    fn module_only_ext(
+        &self,
+        root: &Path,
+        object: &PreparedMetadataObjectStage,
+        built: &HashSet<String>,
+    ) -> Option<String> {
+        if !object.xml.starts_with(root) {
+            return None;
+        }
+        let unit = relative(root, &object.xml);
+        let id = object.object_id.to_lowercase();
+        if self.differing_set.contains(&unit)
+            || self.forced_units.contains(&unit)
+            || self.forced_ids.contains(&id)
+            || built.contains(&id)
+            || self.widened_units.contains(&unit)
+            || self.aliased_rows.contains(&id)
+        {
+            return None;
+        }
+        let folder = unit.strip_suffix(".xml")?;
+        let prefix = format!("{folder}/");
+        let ext = format!("{folder}/ext");
+        let object_module = format!("{ext}/objectmodule.bsl");
+        let manager_module = format!("{ext}/managermodule.bsl");
+        let mut found = false;
+        for file in self
+            .differing
+            .iter()
+            .filter(|file| file.starts_with(&prefix))
+        {
+            if file != &object_module && file != &manager_module {
+                return None;
+            }
+            found = true;
+        }
+        found.then_some(ext)
     }
 
     /// A row the tree does not change: the target's own, unless an online update of the target
@@ -409,6 +465,7 @@ impl Delta {
             return true;
         }
         let before = usize::from(!object.metadata_blob.is_empty()) + object.body_rows.len();
+        let module_only_ext = self.module_only_ext(root, object, built);
         match self.descriptor_fate(root, &object.xml, &object.object_id, built, pending) {
             Fate::Stays => {
                 object.metadata_blob = Vec::new();
@@ -424,7 +481,13 @@ impl Delta {
         }
         let bodies = std::mem::take(&mut object.body_rows);
         for mut body in bodies {
-            match self.body_fate(root, &body.body_id, &body.path, pending) {
+            match self.body_fate_in_scope(
+                root,
+                &body.body_id,
+                &body.path,
+                module_only_ext.as_deref(),
+                pending,
+            ) {
                 Fate::Stays => {}
                 Fate::Staged => object.body_rows.push(body),
                 Fate::Verbatim(bytes) => {
@@ -552,6 +615,133 @@ mod tests {
 
     fn stays(fate: Fate) -> bool {
         matches!(fate, Fate::Stays)
+    }
+
+    fn module_object() -> PreparedMetadataObjectStage {
+        let root = Path::new("R");
+        PreparedMetadataObjectStage {
+            object_id: "owner".into(),
+            kind: "Catalog".into(),
+            xml: root.join("Catalogs/X.xml"),
+            properties: crate::module_blob::SimpleMetadataXmlProperties {
+                kind: "Catalog".into(),
+                uuid: "owner".into(),
+                name: "X".into(),
+                synonyms: Vec::new(),
+                comment: String::new(),
+            },
+            metadata_plain_bytes: 1,
+            metadata_blob: vec![99],
+            metadata_blob_sha256: "descriptor".into(),
+            body_rows: [
+                "ObjectModule.bsl",
+                "ManagerModule.bsl",
+                "Help/ru.html",
+                "RecordSetModule.bsl",
+            ]
+            .iter()
+            .enumerate()
+            .map(|(i, file)| super::super::PreparedMetadataBodyStage {
+                body_id: format!("owner.{i}"),
+                path: root.join(format!("Catalogs/X/Ext/{file}")),
+                blob: vec![i as u8],
+                blob_sha256: format!("body-{i}"),
+            })
+            .collect(),
+        }
+    }
+
+    #[test]
+    fn module_only_edit_keeps_unchanged_siblings_byte_exact() {
+        for file in ["objectmodule.bsl", "managermodule.bsl"] {
+            let mut delta = delta(&[&format!("catalogs/x/ext/{file}")], &[], &[]);
+            let mut object = module_object();
+            assert!(delta.trim_object(Path::new("R"), &mut object, &HashSet::new(), &no_update));
+            assert!(object.metadata_blob.is_empty());
+            assert_eq!(object.body_rows.len(), 1);
+            assert_eq!(
+                object.body_rows[0]
+                    .path
+                    .file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .to_lowercase(),
+                file
+            );
+            assert_eq!(delta.stats.rows_left_out, 4);
+        }
+    }
+
+    #[test]
+    fn module_only_edit_preserves_pending_sibling_preimages() {
+        let mut delta = delta(
+            &["catalogs/x/ext/objectmodule.bsl"],
+            &[],
+            &["owner.1", "owner.2", "owner.3"],
+        );
+        let mut object = module_object();
+        let pending = |id: &str| match id {
+            "owner.1" => Pending::Replaces(vec![44, 55]),
+            "owner.2" => Pending::Same,
+            _ => Pending::No,
+        };
+        assert!(delta.trim_object(Path::new("R"), &mut object, &HashSet::new(), &pending));
+        assert_eq!(
+            object
+                .body_rows
+                .iter()
+                .map(|body| body.body_id.as_str())
+                .collect::<Vec<_>>(),
+            ["owner.0", "owner.1", "owner.3"]
+        );
+        assert_eq!(object.body_rows[1].blob, [44, 55]);
+        assert_eq!(object.body_rows[1].blob_sha256, hex_sha256(&[44, 55]));
+    }
+
+    #[test]
+    fn mixed_or_forced_module_edits_keep_ext_grouping() {
+        for extra in [
+            "catalogs/x.xml",
+            "catalogs/x/ext/help/ru.html",
+            "catalogs/x/ext/predefined.xml",
+            "catalogs/x/forms/f/ext/form/module.bsl",
+            "catalogs/x/templates/t/ext/template.txt",
+        ] {
+            let mut delta = delta(&["catalogs/x/ext/objectmodule.bsl", extra], &[], &[]);
+            let mut object = module_object();
+            assert!(delta.trim_object(Path::new("R"), &mut object, &HashSet::new(), &no_update));
+            assert_eq!(object.body_rows.len(), 4, "{extra}");
+        }
+        for route in [
+            "forced-unit",
+            "forced-id",
+            "built",
+            "widened",
+            "pending-descriptor",
+        ] {
+            let mut delta = delta(&["catalogs/x/ext/objectmodule.bsl"], &[], &[]);
+            let mut built = HashSet::new();
+            match route {
+                "forced-unit" => {
+                    delta.forced_units.insert("catalogs/x.xml".into());
+                }
+                "forced-id" => {
+                    delta.forced_ids.insert("owner".into());
+                }
+                "built" => {
+                    built.insert("owner".into());
+                }
+                "widened" => {
+                    delta.widened_units.insert("catalogs/x.xml".into());
+                }
+                _ => {
+                    delta.aliased_rows.insert("owner".into());
+                }
+            }
+            let mut object = module_object();
+            assert!(delta.trim_object(Path::new("R"), &mut object, &built, &no_update));
+            assert_eq!(object.body_rows.len(), 4, "{route}");
+        }
     }
 
     #[test]

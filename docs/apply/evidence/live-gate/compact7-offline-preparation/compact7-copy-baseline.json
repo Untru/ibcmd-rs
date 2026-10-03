@@ -1,0 +1,200 @@
+{
+  "scope": "OFFLINE only; no archive replay; new7 context and tags; old6 preserved",
+  "baseline_manifest": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+  "copies": [
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\lib.ps1",
+      "baseline_sha256": "8D02DCD0C3B9E3E45611ED460EAFE8D8B870D6C8221C9D09A7DC531B64B6A059",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\lib.ps1",
+      "copy_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-lib.ps1",
+      "baseline_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-lib.ps1",
+      "copy_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-register.ps1",
+      "baseline_sha256": "F673EDB24965F7DDDA01AA53D619D6F970BC53499415B63379F9A2EC9F671081",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-register.ps1",
+      "copy_sha256": "DF4CF95A237E9AFFFC43702E97DE7B11CAFE80AAA518956D441ECE53D7E454AE"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-start.ps1",
+      "baseline_sha256": "4D5C8BA38AE77ED95A9102AE1C1BCFA1F21C73C8DB18280280037905040AF726",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-start.ps1",
+      "copy_sha256": "171AFA8D03B964B828D2C06276FE31A54871C4B281A243842AA10BEFE8BC6502"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-stop.ps1",
+      "baseline_sha256": "CF73BA4AEA75E53D1F4B269B3209C5F2C4D647D0D95B80A74D6F343B74044592",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\private-stop.ps1",
+      "copy_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\start.ps1",
+      "baseline_sha256": "A2326082C236A051AB5715835542E92FE6509952AD0021B080DB55E098791DCB",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\start.ps1",
+      "copy_sha256": "2EA22CF472161AFE067040406C76E99F134AD1AA8AC7BCB2A319FCBD4261C9E8"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\stop.ps1",
+      "baseline_sha256": "9F06D5976366C5FFD809ECCA46B599D3DBCCF5340B72828BB0E3A1CECB51287D",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\cluster\\stop.ps1",
+      "copy_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\obs.ps1",
+      "baseline_sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\obs.ps1",
+      "copy_sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\process.ps1",
+      "baseline_sha256": "68CE228D591E7EB1B3A56BC9C28AFA872C064BFEA3A18141C3430C4F75013AD7",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\process.ps1",
+      "copy_sha256": "FE606A689D3597D89D6EEB99ABEC3C0D39888BC9C9575196647E83B581A3F5F9"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\test_process.ps1",
+      "baseline_sha256": "1ADB76DEA00396E37F52C2D7E03EE9E3B5BB785B7310018F4B9E18137B782678",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_process.ps1",
+      "copy_sha256": "1ADB76DEA00396E37F52C2D7E03EE9E3B5BB785B7310018F4B9E18137B782678"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\test_receipt_context.ps1",
+      "baseline_sha256": "8B6A27C19BCD933186F91DE616CD8CFD55D5B794365E23220CD204883866877E",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_receipt_context.ps1",
+      "copy_sha256": "7154C8D08C07D67C5C934217AE8AAB59CCB2CAED3EDD5E5B5C18767456B1F5CB"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\workload_lab.ps1",
+      "baseline_sha256": "7793D8C5756260836B18158754D5F793071EF9D72D1BBC1BAC94EC9C7EA7C52A",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\workload_lab.ps1",
+      "copy_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_activate.ps1",
+      "baseline_sha256": "F7E3EC25E784EF108B2331B9476A875D565462931B0B624515D9DD37713C1DA9",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_activate.ps1",
+      "copy_sha256": "FFDEDE6289542BE4AA69151DD4D68743963D38D58316DEC782BF596291B28FB0"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_checkpoint_v2.ps1",
+      "baseline_sha256": "3F952FF71F84F61C70AA149948F3349EB35F06B263B67CD5A4669431022460B4",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_checkpoint_v2.ps1",
+      "copy_sha256": "60984C93565D1B243DABC018124055001292943F4D55A2AC67DBF5089A3F7845"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_lifetime_v2.ps1",
+      "baseline_sha256": "3495B1EA7E9280FA60E93528A0E725358A07FA808D7763F366AE5971F589A8B5",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_lifetime_v2.ps1",
+      "copy_sha256": "AF9CD36263987775A74F979B5A9D75A4A0207DEA61E1C0246962A9DBB373FD7F"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_native.ps1",
+      "baseline_sha256": "28214ADEAD206A09EFCD68BACB79D36DF6B1415E51BDF7C8279A4C1B22610D83",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_native.ps1",
+      "copy_sha256": "44BE89A12A47F1752C47292BE138403D627C6A92213BD7A6DB25F908B7E43138"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_receipts.ps1",
+      "baseline_sha256": "34DAFB2C55EDB1FB30C76D3913F7288CFBD156C5251D114218CB53EF0CD5DC73",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_receipts.ps1",
+      "copy_sha256": "B4632BD6FE1A3B68F459EFCFFE8CA6C2BE0B63B7D10D946A912362BE648DDC61"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_snapshot.ps1",
+      "baseline_sha256": "699D4F71B44AA83DF1091C5BF4F5CA2F6328DD5794EB34ABDEAD529B580F1171",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_snapshot.ps1",
+      "copy_sha256": "6BCA0D8C974F6AAFCF7558C6DBAC95164FC4B779906A8041E8378252D1151C31"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_invalid_control_v2.ps1",
+      "baseline_sha256": "76DDA4BA087C0976AEA4D798D63212CE219F80AABC86B26AC221AAF13D11CFB1",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_invalid_control_v2.ps1",
+      "copy_sha256": "8976CD49CCE5EC4569AD9418C0E9B586D07A81F455084EA1BE5EDE0170986603"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_receipts.ps1",
+      "baseline_sha256": "F54211618F56340FBF7753BA6384E769C408D3C377E1DF844776EB07930CE1AA",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_receipts.ps1",
+      "copy_sha256": "3B6ECEC00C0D3F7F6E27BD7CAA75AFD65C822B4B93353D7E1306D2B33977D4E4"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_safety_v2.ps1",
+      "baseline_sha256": "B38AA70009087F0324C15292F34BE51E2343E0C4583CBF57247DCB2A77F80152",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_safety_v2.ps1",
+      "copy_sha256": "DAED2069EB20CCD4479840E5EB5494FD27FB32624990752D25F73D8C704A4465"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\read_compact6_recovery.py",
+      "baseline_sha256": "A26A2D40E286AC711B4502BF5CD53D9CA7521EC953A9D5BC23225D42DD4128AE",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\read_compact7_recovery.py",
+      "copy_sha256": "E91FCE0D9CC04DF50A10A29B3DA3E064604A421CAE9B36BF0835011DF9620E4D"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_recovery.py",
+      "baseline_sha256": "F303CFD6B3E099FFB59F451372C090E305905A5E7A6D4AC36AA2548666AC16B1",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_recovery.py",
+      "copy_sha256": "026AE039062891EF48F98D6AD957B2B0AF5FB8B24BDE0D95E26351B8D163C91D"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\make_compact6_negatives.py",
+      "baseline_sha256": "05B65DD39E2925E6577DF73F46ADD8FB406338842B239A5B33258D5C3CE2781E",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\make_compact7_negatives.py",
+      "copy_sha256": "D6888DDAD9A2A4F04DD6E8FB7F76FE7068A66BA59C5D3AA644DE98244DF4B601"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-6\\CommonModules\\ОбсужденияСлужебныйКлиентСервер\\Ext\\Module.bsl",
+      "baseline_sha256": "21840E1A0D20F0834EB1FF51C3045658AE3ED831130C4384495C6A89795B495A",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-7\\CommonModules\\ОбсужденияСлужебныйКлиентСервер\\Ext\\Module.bsl",
+      "copy_sha256": "FD1D3C74AC40391367DA4A5CF525603725E629C7EF422281ABE3B6DE834EB083"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-6\\CommonModules\\ОбсужденияСлужебныйКлиентСервер.xml",
+      "baseline_sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\src\\f5-7\\CommonModules\\ОбсужденияСлужебныйКлиентСервер.xml",
+      "copy_sha256": "6D6C10E3205D82194C8682B98B987E42460E3E00420547A9E804A6240CAB3A3A"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_acquire_v2.ps1",
+      "baseline_sha256": "BF24C9651B46CEB82F73C521C851D7501D1CE91D5BCD0F959B40B2760B0D0097",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_acquire_v2.ps1",
+      "copy_sha256": "0BA7DDA6E2006843324ACA2EFC36E13E50668C947659A0400B0C0C4AC2810C31"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6_closure_v2.ps1",
+      "baseline_sha256": "2E47F7C6EED01C8E8AA89A9AF63BA210C3A829FC41F159214D10767C819C85AD",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7_closure_v2.ps1",
+      "copy_sha256": "315423F08D17258B6FE721EB7844AB0D04676AFFC510F5868D44506937F387E4"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_closure_v2.ps1",
+      "baseline_sha256": "E01C4B334CFDF4F971B12565F1E8418A8237C4AACC1D87ECD0A885DE789E86E6",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_closure_v2.ps1",
+      "copy_sha256": "203F2D85FFADF91AAB93B9C6FCC5EAB891E81F3222CF1DBF0B317323E9F84272"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_uuid.py",
+      "baseline_sha256": "AC052FC76AC35A478D4B667D4192C23AB65EFC1AE8EC5B822EC33744134FDFFD",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_uuid.py",
+      "copy_sha256": "5EAE4F709CE980695D30A93A33A1F6966ADB33782EE708F215A9432DF921ADE4"
+    },
+    {
+      "baseline": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact6_header_v2.ps1",
+      "baseline_sha256": "FBF483D85FCBFEC9D5B875E0A04F1A49956D991112EC757B379FCBCE03AA4AF7",
+      "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_header_v2.ps1",
+      "copy_sha256": "890635024A988125C440B25B8BCCB0E30B1345610B1F44B47D2E0E733B3E4D12"
+    }
+  ],
+  "new7_deltas": [
+    "distinct7 names/DB/source tag/receipts/TEMP",
+    "existing archivedCase5 validation only; destructive archive invocation removed",
+    "exact new7 acquisition/release lease binding",
+    "CloseCohort uncertainty refusal",
+    "bounded Git controller source HEAD/clean entry/postqueue/postcheckpoint checks"
+  ],
+  "new7_changes": "Local process copy adds compact7_locks wrapper and exact receipt mapping. Shared old6/root40 are untouched. Known successful acquisition captures exact lease; known nonzero/unknown retains potential; cross-child immutable resource receipts block cleanup/worker release."
+}

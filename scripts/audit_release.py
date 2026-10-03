@@ -15,8 +15,8 @@ import zipfile
 
 
 # Commands that locate or run an installed platform: never in a release.
-# `infobase` is released: `config export|import` read and write SQL Server
-# directly and every other native command is refused by name, never run.
+# `infobase` is released: `config export|import|apply` use SQL Server
+# directly; unsupported platform operations are refused by name, never run.
 ORACLE_COMMANDS = {"probe", "profile-run", "dump-sources"}
 # `infobase config` research commands that run the platform's own ibcmd.
 ORACLE_INFOBASE_COMMANDS = ("roundtrip", "sweep")
@@ -91,8 +91,8 @@ def audit_binary(binary: pathlib.Path) -> None:
 
 
 def audit_infobase_mode(binary: pathlib.Path, environment: dict) -> None:
-    """The released `infobase` mode serves `config export|import` and refuses
-    every other native command by name (exit code 1) without launching
+    """The released `infobase` mode serves `config export|import|apply` and refuses
+    unsupported platform operations by name (exit code 1) without launching
     anything: run here with an empty PATH, where no platform could be found."""
 
     def run(*args: str) -> subprocess.CompletedProcess:
@@ -116,11 +116,11 @@ def audit_infobase_mode(binary: pathlib.Path, environment: dict) -> None:
         if refused.returncode != 2 or "Указана неполная команда" not in refused.stdout:
             raise SystemExit(f"release `infobase config {command}` is not refused as unknown")
     # What only the platform does is refused by name with exit code 1.
-    # `config apply` itself is served without the platform since 0.4; its
-    # dynamic update is not.
+    # `config apply` is served without the platform since 0.4, including
+    # explicit dynamic force since 0.5. Extension apply remains unsupported.
     for args in (
         ("create", "--dbms=MSSQLServer", "--db-name=audit"),
-        ("config", "apply", "--dbms=MSSQLServer", "--db-name=audit", "--dynamic=force"),
+        ("config", "apply", "--dbms=MSSQLServer", "--db-name=audit", "--extension=E"),
     ):
         refused = run(*args)
         if refused.returncode != 1 or "не поддерживается в этой версии ibcmd-rs" not in refused.stderr:

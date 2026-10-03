@@ -1,0 +1,14 @@
+{
+  "archive_files": 597,
+  "sha256": "72D05BACA921E350773C05CDD5F1616A18FE0961282FB81CC3950EAAB0B1E450",
+  "raw_files": 613,
+  "archive_bytes": 871096480,
+  "runtime": "not reached; no DB/cluster/clients/native phase1/phase2",
+  "file": "F:/ibcmd/lab/05/wave3/load/compact6-runtime-resource-proof.json",
+  "originals_verified": {
+    "compact5_raw": 285,
+    "compact6_V2": 54,
+    "compact5_V4": 45,
+    "compact6_V1": 52
+  }
+}

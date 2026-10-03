@@ -31863,7 +31863,7 @@ fn scan_balanced_braces(text: &str, start: usize) -> Result<usize> {
     Err(anyhow!("unterminated 1C braced expression at byte {start}"))
 }
 
-fn scan_braced_fields(text: &str, start: usize) -> Result<Vec<Range<usize>>> {
+pub(crate) fn scan_braced_fields(text: &str, start: usize) -> Result<Vec<Range<usize>>> {
     let bytes = text.as_bytes();
     if bytes.get(start) != Some(&b'{') {
         return Err(anyhow!("expected 1C braced expression at byte {start}"));

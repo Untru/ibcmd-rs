@@ -1,0 +1,123 @@
+{
+  "format": 1,
+  "scope": "Consumed ONE compact8 actual lifetime: pre-restore archive-node refusal; no runtime acceptance or retry",
+  "controller_head": "fc5c9e445cffc028aff686a93bcd499959996bdb",
+  "writer_source": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "writer_sha256": "44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38",
+  "runtime_manifest_sha256": "E1CBFE6576104C9B641DAD6D3A3B3908679F670FEB9FA348C4A7E69B50BEC9AD",
+  "original_tool_session": 60074,
+  "original_controller_pid": 112180,
+  "controller_known_exit": 1,
+  "observer_known_exit": 0,
+  "worker_release_exit": 0,
+  "failure": "Prior archive tree budget2048; actual5485 nodes/4888dirs/597files",
+  "database": "ibcmd_rs_05_load_w3_compact8_20261002",
+  "database_absent": true,
+  "restore_dispatched": false,
+  "cluster_started": false,
+  "registered": false,
+  "heavy_acquire_dispatched": false,
+  "native_write_dispatched": false,
+  "phase1_executed": false,
+  "cycle2_executed": false,
+  "unknown_receipts_absent": true,
+  "own_fifo_holds": {
+    "native": false,
+    "heavy": false,
+    "worker": false
+  },
+  "conservative_original_cleanup_template_preserved": true,
+  "old_temp_preserved": true,
+  "raw": [
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\census-compact8-prior-archive-v1.py",
+      "bytes": 3302,
+      "sha256": "3C7E1F4989B4F03315A665053D6F011B1525BE760C4BBFAC8D5F36C690B4ABA7"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\launch-compact8-original.ps1",
+      "bytes": 3531,
+      "sha256": "1D5D52361DDC3AE5312C6402CC825E6E25B29AAD680D39DCCBC0E2A0D93745DC"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\reconcile-compact8-terminal-v1.ps1",
+      "bytes": 3387,
+      "sha256": "FC349D02B0BB1986182F3F3E82FA1209E3D73B41CB3D6CD7B6ACE2CD417D7754"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-controller-launch-original.json",
+      "bytes": 1612,
+      "sha256": "893478810EBC699D55FE2F028D1FCE69C171624461ED7B91275BF887F200D24D"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-controller-original-outcome.json",
+      "bytes": 231,
+      "sha256": "A6A49026EF434A970BA8317E6E559D6163596C4FA59B67C746F548B90D80A0F5"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-controller-original.stderr.txt",
+      "bytes": 313,
+      "sha256": "C8B89723FA6DFA5409106CC05BCD899D94BCF9DB8EC7A98F3EEC787C44A10ACE"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-controller-original.stdout.txt",
+      "bytes": 108,
+      "sha256": "E5C2175E195276784AC3573653680813D61A31E2302E364E48ECC1C9D1B099A0"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-lock-proofs\\lock-11982f317d534fac9dfc286db9beba66.json",
+      "bytes": 256,
+      "sha256": "3C4119E13551F1CE6D1F3CC15FA199FE87D0A7D1CCA1A5C2D6197783AF555D1A"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-lock-proofs\\lock-afa8d9a3154f4959b3a24eef90c4e8db.json",
+      "bytes": 256,
+      "sha256": "E3534D4E4E760E92655B9B220B9AE6B4D3A89DA8B6242BAB4CED07371976BF3F"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-prior-archive-census-v1.json",
+      "bytes": 1491071,
+      "sha256": "8E1B6EBF466878BE2C69420C24E0A3A904BF7C86FBF5E8B536A4B2FC4B055D1B"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-terminal-reconciliation-v1.json",
+      "bytes": 1139,
+      "sha256": "B2CB3D0B8EF3476EBFE13A683013C05C1AF0F9AE48636242370F4C1B6EE184BE"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-cleanup-status.json",
+      "bytes": 243,
+      "sha256": "51822373CCA1FFEBFECB3C42A2F39610AE6B455E72710722C748E29AE47998ED"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-prior-case5-readonly.command.json",
+      "bytes": 972,
+      "sha256": "5D5209817D7513DD90AD2A026C49305CAA2163CE6BBBE1EEFFDF538FC82D6F5E"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-prior-case5-readonly.error.txt",
+      "bytes": 321,
+      "sha256": "4536DFC7871640C772981A21DA5E1E9AA9205816A89D44A1F03B625BF001CADE"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-prior-case5-readonly.json",
+      "bytes": 414,
+      "sha256": "6203A334635FABF23CA22D437BA854BCCC09D91F2F5D3A81803509399C8DA7F8"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-worker-acquire.command.json",
+      "bytes": 313,
+      "sha256": "BA5F0C4C12946E36E200F403F8FAB0DB98F6EC9FD91A36EC64E6D4F1DB4F1B28"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-worker-acquire.json",
+      "bytes": 146,
+      "sha256": "40C2C2BE14A68290EFF11C24A5AF8CCDDE406E9DC56A1835E65434893990DA00"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\compact8-lifetime-worker-release.json",
+      "bytes": 98,
+      "sha256": "6012ECC8991D0C34B6A9A90681D2D6DE29C0E6DACEAF3FB02E85C5D4DA8E0112"
+    }
+  ]
+}

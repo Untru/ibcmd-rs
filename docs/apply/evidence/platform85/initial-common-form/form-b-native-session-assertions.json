@@ -1,0 +1,32 @@
+{
+  "concurrent_old_new_overlap_ms": 206717,
+  "observations": {
+    "form-native-old": {
+      "sid": "1",
+      "client_marker": "P85_FORM_A",
+      "server_marker": "P85_FORM_A",
+      "samples": 298,
+      "first_tick": 63926469994073,
+      "last_tick": 63926470295964,
+      "sha256": "7cef07dc4a5e43df9b6bc3d781eae80ad5050dae67e652d7864143a7165d6bde",
+      "identity": {
+        "born": "2026-10-01T16:45:57.9224680Z",
+        "command": "\"C:\\Program Files\\1cv8\\8.5.1.1150\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:6541\\ibcmd_rs_05_p85_w3_native_form_20261001\" /N\"Администратор (обычное приложение)\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\observer\\IbcmdRsObserver.epf\" /C\"form-native-old;poll;F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\form-native-old.client-out.txt\" -NoTruncate"
+      }
+    },
+    "form-native-new": {
+      "sid": "4",
+      "client_marker": "P85_FORM_B",
+      "server_marker": "P85_FORM_B",
+      "samples": 205,
+      "first_tick": 63926470089247,
+      "last_tick": 63926470296497,
+      "sha256": "00c78f69a24dd3782f82c89bf1f29409d58b2d997aea485eec0647e5903ed172",
+      "identity": {
+        "command": "\"C:\\Program Files\\1cv8\\8.5.1.1150\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:6541\\ibcmd_rs_05_p85_w3_native_form_20261001\" /N\"Администратор (обычное приложение)\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\observer\\IbcmdRsObserver.epf\" /C\"form-native-new;poll;F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\platform85\\obs\\form-native-new.client-out.txt\" -NoTruncate",
+        "born": "2026-10-01T16:48:01.6505730Z"
+      }
+    }
+  },
+  "scope": "old retained form object stays A/A; new-session form object reads B/B; no same-session refresh or visible form draft preservation assertion"
+}

@@ -1,0 +1,6 @@
+{
+  "ExitCode": 1,
+  "Stdout": "",
+  "Stderr": "Exception: F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-runtime-v1\\compact8_prior_archive.ps1:27\r\nLine |\r\n  27 |  : Pop();$nodes++;if($nodes -gt 2048){throw 'Prior archive tree budget'}\r\n     |                                       ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n     | Prior archive tree budget\r\n",
+  "ended_utc": "2026-10-02T08:34:31.1576027Z"
+}

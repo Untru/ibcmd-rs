@@ -1,0 +1,14 @@
+[
+  {
+    "file": "src/mssql_dump/extension/form.rs",
+    "category": "name-special-case",
+    "fingerprint": "8f09d7a7ae00ada60132b56238013bc1a31ae5c4d2e5a3a0c8e07608937443cc",
+    "count": 1
+  },
+  {
+    "file": "src/mssql_dump/extension/form.rs",
+    "category": "name-special-case",
+    "fingerprint": "fb9cecf1c96674265ab12da49d4f0c4d7967184f1181960516fe5a890bfba136",
+    "count": 1
+  }
+]

@@ -59,7 +59,7 @@ pub fn tail_directory(tail: &str) -> Result<String, MainActivationError> {
 
 /// The condition of "some session of the database is doing work": an open transaction or a request in progress. The session that
 /// asks (`@@SPID`) is never counted.
-fn active_work_condition(database_literal: &str) -> String {
+pub(crate) fn active_work_condition(database_literal: &str) -> String {
     format!(
         "s.is_user_process=1 AND s.session_id<>@@SPID AND s.database_id=DB_ID(N'{database_literal}') AND (s.open_transaction_count>0 OR EXISTS (SELECT 1 FROM sys.dm_exec_requests q WHERE q.session_id=s.session_id))"
     )

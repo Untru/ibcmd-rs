@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "database": "ibcmd_rs_05_ext_wave1_ownafter20261001",
+  "claimed_platform_profile": "platform-8.3.27.2214",
+  "verified_platform_profile": "platform-8.3.27.2214",
+  "storage_schema_sha256": "49ab07a8ddb8c87ae1bdc47b1b5342dc2341dbf99cc777ede57ad8ec539bc0a3",
+  "all_extensions": false,
+  "activation_required": true,
+  "dry_run": false,
+  "executed": true,
+  "extensions": [
+    {
+      "name": "ServiceDesk",
+      "input_dir": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\after",
+      "staged_rows": 431,
+      "staged_bytes": 570891,
+      "proposed_cas_root": "112873d59921a305c9eef2b6f95057d9b3d57d93",
+      "compiled_targets": 1,
+      "retained_base_targets": 0,
+      "selection": "tree",
+      "changed_files": [
+        "CommonForms/СвязанныеДокументы/Ext/Form.xml"
+      ],
+      "compiled_objects": [
+        "CommonForms/СвязанныеДокументы"
+      ]
+    }
+  ]
+}

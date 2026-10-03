@@ -1,0 +1,38 @@
+{
+  "scope": "READONLY terminal reconciliation; no retry/guard edit/archive move/delete",
+  "original_known_exit": 1,
+  "database": "ibcmd_rs_05_load_w3_compact8_20261002",
+  "database_absent": true,
+  "database_readonly_result": {
+    "ExitCode": 0,
+    "Stdout": "DB_ABSENT \r\n",
+    "Stderr": ""
+  },
+  "private_active_state_absent": true,
+  "registration_binding_absent": true,
+  "original_controller_pid_absent": true,
+  "unknown_receipts_absent": true,
+  "own_fifo_holds": {
+    "native": false,
+    "heavy": false,
+    "worker": false
+  },
+  "archive_root": "F:/ibcmd/lab/05/wave3/load/evidence/compact6-case5-prior",
+  "archive_metadata_census": {
+    "total_nodes": 5485,
+    "metadata_only": true,
+    "file_bytes": 871096480,
+    "directories_including_root": 4888,
+    "ordinary_files": 597,
+    "original_limit": 2048,
+    "no_reparse": true
+  },
+  "restore_dispatched": false,
+  "cluster_started": false,
+  "registered": false,
+  "heavy_acquire_dispatched": false,
+  "native_write_dispatched": false,
+  "phase1_executed": false,
+  "cycle2_executed": false,
+  "old_temp_preserved": true
+}

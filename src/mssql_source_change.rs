@@ -1005,7 +1005,9 @@ fn paths_equal_text_windows(left: &str, right: &str) -> bool {
 
 #[cfg(any(windows, test))]
 fn paths_equal_windows(left: &Path, right: &Path) -> bool {
-    paths_equal_text_windows(&left.to_string_lossy(), &right.to_string_lossy())
+    left.to_str()
+        .zip(right.to_str())
+        .is_some_and(|(left, right)| paths_equal_text_windows(left, right))
 }
 
 // Physical roots follow the host's path rules, independently of the Windows
@@ -1027,10 +1029,10 @@ fn path_is_within_windows(candidate: &Path, root: &Path) -> bool {
     let root = root.components().collect::<Vec<_>>();
     candidate.len() >= root.len()
         && candidate.iter().zip(root.iter()).all(|(left, right)| {
-            paths_equal_text_windows(
-                &left.as_os_str().to_string_lossy(),
-                &right.as_os_str().to_string_lossy(),
-            )
+            left.as_os_str()
+                .to_str()
+                .zip(right.as_os_str().to_str())
+                .is_some_and(|(left, right)| paths_equal_text_windows(left, right))
         })
 }
 
@@ -1777,6 +1779,34 @@ mod tests {
         ));
         drop(held);
         fs::remove_dir_all(base).unwrap();
+    }
+
+    #[test]
+    fn canonical_paths_and_inventory_use_the_same_unicode_case_key() {
+        let root = Path::new("/Лаборатория/Проект");
+        assert!(paths_equal_windows(root, Path::new("/лаборатория/проект")));
+        assert!(path_is_within_windows(
+            Path::new("/лаборатория/ПРОЕКТ/CommonModules/Модуль/Ext/Module.bsl"),
+            root
+        ));
+        assert!(!path_is_within_windows(
+            Path::new("/лаборатория/Проект2/Module.bsl"),
+            root
+        ));
+        assert!(!paths_equal_windows(
+            root,
+            Path::new("/лаборатория/ДругойПроект")
+        ));
+        let inventory = SourceInventory::from_files(vec![
+            SourceFileDigest::for_bytes("CommonModules/Модуль/Ext/Module.bsl", b"source").unwrap(),
+        ])
+        .unwrap();
+        assert!(
+            inventory
+                .file("commonmodules/модуль/ext/module.bsl")
+                .unwrap()
+                .is_some()
+        );
     }
 
     #[test]

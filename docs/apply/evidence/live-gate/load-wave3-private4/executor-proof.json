@@ -1,0 +1,11 @@
+{
+  "manifest_sha256": "C08CE467855194AFD87096F927C9934C898AE3005673BED5E86E8B79AF5A4373",
+  "script_head": "8babc8b9ab49d88b722a9768e6903b49f8505e56",
+  "executor_pid": 88244,
+  "scope": "one fresh controlled matching426 legacyLIVE1/standalone2 lifetime",
+  "started_utc": "2026-10-01T19:51:43.2484464Z",
+  "binary_source": "426c61731c73f242142d4d13a7b948ac83d97d66",
+  "free_F_bytes": 669494943744,
+  "all20_frozen_hashes_exact": true,
+  "binary_sha256": "D3EC1869F3CC3BFD5250EC246153685F8632F2E15C69B0398263E0B716F8AED5"
+}

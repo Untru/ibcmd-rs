@@ -1,0 +1,75 @@
+{
+  "format": 1,
+  "scope": "OFFLINE ONLY: narrow read-only original process exclusion repair; not a full runtime/PREEXEC closure",
+  "runtime_executed": false,
+  "runtime_authorized": false,
+  "controller_source_parent": "ce787483a52713215fedef57f99c71b044e30f09",
+  "database": "ibcmd_rs_05_load_w3_compact8_20261002",
+  "missing_runtime_authority": [
+    "current combined source/binary provenance from root full16 build",
+    "full successor controller/case paths/executable/PATH closure",
+    "root and peer complete PREEXEC review and scheduling"
+  ],
+  "original100_manifest_sha256": "781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A",
+  "identity_pure_cases": 27,
+  "actual_archive_mock_pass_lines": 17,
+  "mutations": {
+    "acquires": 0,
+    "signals": 0,
+    "moves": 0,
+    "deletes": 0,
+    "db_writes": 0
+  },
+  "files": [
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\archive-pure.txt",
+      "bytes": 1186,
+      "sha256": "58092CCB22062F62CB18BAEB6B38CB9A348C0DCC008710B4C7206BB28C736890"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\archive_identity.ps1",
+      "bytes": 4504,
+      "sha256": "C981FDF2DE81B296F5CBD9A45FC57BDEA5D47B229780C27F21F5078C1859E7DC"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\case5-stopped-state.json",
+      "bytes": 3468,
+      "sha256": "5B09714CAF28B294D13D2BF85A0BC0A5344D870E508E3931C984EF17FFF4943A"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\compact8_prior_archive.ps1",
+      "bytes": 8111,
+      "sha256": "3E4FA4B4E285DA5CB2864FE2D1FDE277C92602E034E37A7AC613E0F4091742EB"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\identity-provenance.json",
+      "bytes": 1327,
+      "sha256": "4A1CCC7BD2687DBECFDAAE946FEFFE8F50298FC54E732B0FD0D5742C7B2B1592"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\identity-pure.txt",
+      "bytes": 70,
+      "sha256": "AA144A8A89B20B9A85A837A15CEAD262E512FDC3DAFAB865C5EC627BB9E30FCE"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\preserved-validation.txt",
+      "bytes": 119,
+      "sha256": "7EDE49F7DFEBB718F9F126C39B810E949A41BA1A13E584EC58C62BFC5DDAFC40"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\test_archive_identity.ps1",
+      "bytes": 3647,
+      "sha256": "73C1F6BF3C95B0D5BD1BDB6DDEA8EF77A9626FD4334D9F77A987B58F171B6DFA"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\test_prior_archive.ps1",
+      "bytes": 6558,
+      "sha256": "83DC54D58B65399DCE1CEB7861AA616607136584102AC383A309C6423104718D"
+    },
+    {
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact8-preparation\\validate_preparation.ps1",
+      "bytes": 1817,
+      "sha256": "10ECE7AC6D73FA7071E19D47FCA55AE31E68B9390D1E1D7F76063D5180CCD6A3"
+    }
+  ]
+}

@@ -1,0 +1,110 @@
+{
+  "owner": "a627e390-8fad-4a95-afe6-674f54813188",
+  "kind": "CommonForm",
+  "stage_rows": 5,
+  "unchanged_descriptor_version": true,
+  "root": {
+    "same_canonical_uuid": true,
+    "tag": 2,
+    "payload_bytes": 128,
+    "identical_prefix": 112,
+    "only_final16_restamp": true
+  },
+  "registrations": {
+    "columns": [
+      "_NodeTRef",
+      "_NodeRRef",
+      "_MessageNo",
+      "_MDObjID",
+      "_IDRRef"
+    ],
+    "rows": [
+      [
+        {
+          "binary_hex": "000003dd"
+        },
+        {
+          "binary_hex": "0190a8667f21fde411e728f60896c4fa"
+        },
+        null,
+        {
+          "binary_hex": "90e327a6ad8f954aafe6674f54813188"
+        },
+        {
+          "binary_hex": "85900242ac11000211f11d8d233263d6"
+        }
+      ],
+      [
+        {
+          "binary_hex": "000003dd"
+        },
+        {
+          "binary_hex": "0190a8667f21fde411e728f60896c503"
+        },
+        null,
+        {
+          "binary_hex": "90e327a6ad8f954aafe6674f54813188"
+        },
+        {
+          "binary_hex": "85900242ac11000211f11d8d233464db"
+        }
+      ],
+      [
+        {
+          "binary_hex": "000003dd"
+        },
+        {
+          "binary_hex": "8792107b44a2802511e919964197a943"
+        },
+        null,
+        {
+          "binary_hex": "90e327a6ad8f954aafe6674f54813188"
+        },
+        {
+          "binary_hex": "85900242ac11000211f11d8d239a1602"
+        }
+      ]
+    ]
+  },
+  "file_lists": {
+    "columns": [
+      "_ConfigChngR_IDRRef",
+      "_KeyField",
+      "_FileName"
+    ],
+    "rows": [
+      [
+        {
+          "binary_hex": "85900242ac11000211f11d8d233263d6"
+        },
+        {
+          "binary_hex": "00000000"
+        },
+        "a627e390-8fad-4a95-afe6-674f54813188.0"
+      ],
+      [
+        {
+          "binary_hex": "85900242ac11000211f11d8d233464db"
+        },
+        {
+          "binary_hex": "00000000"
+        },
+        "a627e390-8fad-4a95-afe6-674f54813188.0"
+      ],
+      [
+        {
+          "binary_hex": "85900242ac11000211f11d8d239a1602"
+        },
+        {
+          "binary_hex": "00000000"
+        },
+        "a627e390-8fad-4a95-afe6-674f54813188.0"
+      ]
+    ]
+  },
+  "body": {
+    "compression": "complete raw deflate",
+    "plain_bytes": 8024,
+    "prefix_hex": "efbbbf7b342c0d0a7b35392c302c312c"
+  }
+}

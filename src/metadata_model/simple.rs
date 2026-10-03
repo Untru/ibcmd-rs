@@ -427,12 +427,19 @@ fn owned_object_uuids(
     Ok(out)
 }
 
+const TEMPLATES: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
+const SETTINGS_STORAGE_FORMS: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
+
+/// Canonical collection classes already used by the SettingsStorage encoder.
+pub(crate) fn owned_body_classes(kind: &str) -> Option<Vec<(&'static str, &'static str)>> {
+    (kind == "SettingsStorage")
+        .then(|| vec![(SETTINGS_STORAGE_FORMS, "Form"), (TEMPLATES, "Template")])
+}
+
 /// `{1,{2,{0,<md base>},<Manager ids>,<DefaultLoadForm>,<DefaultSaveForm>,
 /// <AuxiliaryLoadForm>,<AuxiliarySaveForm>},2,{3daea016-...,<templates>},
 /// {b8533c0c-...,<forms>}}`
 fn settings_storage(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
-    const TEMPLATES: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
-    const FORMS: &str = "b8533c0c-2342-4db3-91a2-c2b08cbf6b23";
     let properties = object.properties()?;
     let (manager_type, manager_value) = generated_ids(object.element, "Manager")?;
     let form = |name: &str| -> Result<Brace> {
@@ -455,7 +462,10 @@ fn settings_storage(object: &ObjectXml<'_>, context: &DescriptorContext) -> Resu
         ],
         Brace::num(2),
         collection(TEMPLATES, owned_object_uuids(object, "Template", context)?),
-        collection(FORMS, owned_object_uuids(object, "Form", context)?),
+        collection(
+            SETTINGS_STORAGE_FORMS,
+            owned_object_uuids(object, "Form", context)?
+        ),
     ])
 }
 

@@ -227,10 +227,14 @@ test per family (`business_object.rs`). The tests fail on the previous layouts.
   (upstream fixtures `adopted/form_events`, `form_events_shared`). The command
   handlers (`<Action>`) of an adopted form are written `Before`: all six on
   record say so, and where a command record keeps an interceptor code is not on
-  record. An adopted form that carries no base form record (the common form
-  `СвязанныеДокументы` of the БСП 8.3.27 ServiceDesk) gets `Before` on all its
-  events and commands from the export's own pass (`extension::form`), for lack
-  of a second sample.
+  record. For an adopted form without a base form record, the export reads
+  each event's actual code from the stored event block. Native Before, After
+  and Override samples of `СвязанныеДокументы` in БСП 8.3.27 ServiceDesk
+  prove the reader and compiler. Unknown or malformed codes fail the form
+  export and remove its projected outputs. Commands retain the observed
+  `Before` behavior; no-base After/Override commands are refused on load.
+  [Wave1 evidence](evidence/form-interceptors-20261001.md) records the native
+  and our staged/applied twins and the remaining Version-edit limitation.
 * **`Usual` group behavior.** An explicit `<Behavior>Usual</Behavior>` follows
   the compatibility mode of the configuration the extension EXTENDS, not the
   extension's own: `VAExtension` (mode 8.3.14) extends a configuration in 8.3.27
@@ -379,8 +383,9 @@ and for a `--path-prefix` selection that holds more than module bodies:
 Activation publishes rows and restructures nothing, so a change that would
 change what a database table holds is refused before any compile, by file and
 with the reason: the descriptor of an object of a family that may own a table
-(catalogs, documents, registers, ...), the root descriptor unless only the
-`<ChildObjects>` lines of table-less families changed, an asset of the root, a
+(catalogs, documents, registers, ...), the root descriptor unless only its
+existing numeric dotted `Version` text or the `<ChildObjects>` lines of
+table-less families changed, an asset of the root, a
 body file added or removed (except the module of a form), an object added or
 removed outside the table-less families (common forms, modules, pictures and
 templates, roles). Bodies (module, form and its module, template, picture,
@@ -408,6 +413,16 @@ the main-configuration corpora never have it, and the compiler refused it).
 
 Only platform 8.3.27.2214 writes extensions (8.5 is declared unsupported for
 extension writes).
+
+The root Version adapter preserves the existing component count and every
+other descriptor byte. For the evidenced native layout 68 (60 properties),
+it replaces only properties member 15 in the active root row; the generic
+root header compiler is bypassed for that row. Unknown layouts, other root
+property edits and Version combined with child-list edits are refused.
+Version may accompany a supported body edit. The measured ServiceDesk
+increments `1.7.0.0` to `1.7.0.1`, then `1.7.0.2` with an After handler,
+passed our load, native activation and complete native source export; see
+[the Version proof](evidence/extension-version-20261001.md).
 
 ### Measured against the platform, 2026-09-30
 
@@ -514,8 +529,9 @@ These are read off a single native sample; the evidence is in the lab folder
 * the `dcssch` boundary: 8.3.14 writes none, 8.3.21 and 8.3.24 write it, 8.3.15 is
   assumed;
 * `EnableDrag` of a planner field is option slot 6 (the only planner on record);
-* `callType="Before"` on the events and commands of an adopted form without a
-  base form record (one form on record);
+* `callType="Before"` on commands of an adopted form without a base form
+  record (one form on record); its events now have three native call-type
+  samples, as recorded above;
 * the completion of old items is proved on 8 forms of one extension (ids, order,
   the dynamic list defaults); other kinds of items (pages, groups) that an older
   platform completed may exist;
@@ -532,8 +548,12 @@ These are read off a single native sample; the evidence is in the lab folder
 * the load of an 8.5 extension (the 8.5 form loader has the planner bag entry
   and the empty-source characteristic compiles, but no 8.5 extension was loaded);
 * the whole-tree load on the 8.5 clone (extension writes are declared
-  unsupported for 8.5), of interceptors of an adopted form and of a binary
-  template (`Template.bin`): the compiler has them, no case ran;
+  unsupported for 8.5) and of a binary template (`Template.bin`): no case ran;
+* adopted-form interceptor writes beyond the measured 8.3.27 no-base common
+  form handler edits, including no-base After/Override command actions;
+* root Version edits outside the measured numeric dotted format/layout, other
+  root property edits, and Version combined with child-list edits; the narrow
+  Version adapter above does not fully close #348;
 * a structural change of an extension (a new attribute, an object with a table,
   a body added to an object that has none) is the platform's own load: the
   load refuses it by file and the activation restructures nothing;

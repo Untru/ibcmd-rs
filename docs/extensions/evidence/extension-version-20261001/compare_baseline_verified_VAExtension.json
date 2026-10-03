@@ -1,0 +1,24 @@
+{
+  "left": "F:\\ibcmd\\lab\\05\\wave2\\extensions\\baseline_verified\\VAExtension",
+  "right": "F:\\ibcmd\\lab\\05\\ext\\native\\8327\\VAExtension",
+  "ignored": [
+    "ConfigDumpInfo.xml"
+  ],
+  "left_files": 83,
+  "right_files": 83,
+  "equal": 83,
+  "changed": [],
+  "left_only": [],
+  "right_only": [],
+  "config_dump_info": {
+    "exact": true,
+    "equal_after_blanking_only_configVersion": true,
+    "left_configVersion_count": 69,
+    "right_configVersion_count": 69,
+    "different_configVersion_values": 0
+  },
+  "left_version": "1.29",
+  "left_configuration_sha256": "72f439bfb21b1362035ddc72ab4a97c5fec38741700c756e83a60c6e772f5b68",
+  "right_version": "1.29",
+  "right_configuration_sha256": "72f439bfb21b1362035ddc72ab4a97c5fec38741700c756e83a60c6e772f5b68"
+}

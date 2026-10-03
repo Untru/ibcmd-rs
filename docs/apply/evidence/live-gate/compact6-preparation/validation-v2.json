@@ -1,0 +1,21 @@
+{
+  "scope": "compact6 V2 PREPARATION only; no real runtime actions",
+  "manifest_sha256": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+  "files": 35,
+  "dependencies": 19,
+  "previous_v1_manifest_sha256": "B6F7B923EDEC3936FFF248BC3C24A1631289EF51E05960937E39675B2E6CED85",
+  "v1_originals_preserved": 52,
+  "case5_controller_originals_preserved": 45,
+  "case5_raw_originals_preserved": 285,
+  "actual_Header_red": "Original V1 function accepts foreign canonical database_guid",
+  "actual_Header_green": "V2 refuses foreign lineage per row at indices30/31/33; mixedcase matching positives",
+  "rust_changed": false,
+  "format_check": "PASS",
+  "policy_guard": "PASS",
+  "validation_logs": [
+    {
+      "file": "compact6-header-lineage-v2.txt",
+      "sha256": "5990CE0BBDD14187F429B490E6A4E947E5FA8ED9B1C03B7DEF877E7ADE737941"
+    }
+  ]
+}

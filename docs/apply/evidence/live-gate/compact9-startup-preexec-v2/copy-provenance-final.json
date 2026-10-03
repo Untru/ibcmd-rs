@@ -1,0 +1,383 @@
+{
+  "scope": "Fresh9 V2: original139 route copies plus diagnostic293 seam and caller120 only; existing guarded measured5485 archive/nonce/protocol/current audited release unchanged. Original139 and all prior proofs unchanged.",
+  "copies": [
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\archive_identity.ps1",
+      "source_sha256": "CAC5B96511ED9239FF64FBCDED396CE4D153C183711E3C4F8106EEB72B2B144D",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_identity.ps1",
+      "creation_sha256": "8737F4D21C9A0EEDE249D4EA02EC086310E9BE05E96D786F083C7F5768BED39D",
+      "sha256": "8737F4D21C9A0EEDE249D4EA02EC086310E9BE05E96D786F083C7F5768BED39D"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\archive_tree.ps1",
+      "source_sha256": "66771947F30810F11E30A5E8BAA3C1ECA9DC42B0D0E2F357677D0CF53EB1DEC3",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_tree.ps1",
+      "creation_sha256": "2223C062E71C2EC2D219BF0EF599EEC3DE96FA055662A717D77166DEC81FD6DD",
+      "sha256": "2223C062E71C2EC2D219BF0EF599EEC3DE96FA055662A717D77166DEC81FD6DD"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\archive_worker.ps1",
+      "source_sha256": "15F0B5E776D75D2F01BBD63C1F3757E015DBD01F022AADD493052DFF950A0263",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\archive_worker.ps1",
+      "creation_sha256": "95E170181E4A161E3E9C990B5AA9DAA42A63B8EC80B0B0C2982AA47E9E128B3B",
+      "sha256": "95E170181E4A161E3E9C990B5AA9DAA42A63B8EC80B0B0C2982AA47E9E128B3B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_activate.ps1",
+      "source_sha256": "D1CB9D20818F5FCB15983C77F1ABE95AB522D780B094B9403B10F8436FCD6B04",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_activate.ps1",
+      "creation_sha256": "DA42AE6BBD95173DF643C0E199C0B4E1E874BD8B675477783ADDED7392CAB186",
+      "sha256": "DA42AE6BBD95173DF643C0E199C0B4E1E874BD8B675477783ADDED7392CAB186"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_checkpoint_v2.ps1",
+      "source_sha256": "32CF29B218C18E358F89E83103ECA6E371FF2C97C6EEB2C8DBF259ACF3F100CA",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_checkpoint_v2.ps1",
+      "creation_sha256": "F5BF8D91030B743F8EE26D57B3CB345984B4B9D22588E3A517249319C411B059",
+      "sha256": "F5BF8D91030B743F8EE26D57B3CB345984B4B9D22588E3A517249319C411B059"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_lifetime_v2.ps1",
+      "source_sha256": "63FFC3225278059AA9F1213CCBB421FA2AE14958F91C4129D42F9281BA0A6FD5",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_lifetime_v2.ps1",
+      "creation_sha256": "359759339698772C777F7C28E0D3E43EEE46609F1F3D3A371E260F8F2414E65B",
+      "sha256": "359759339698772C777F7C28E0D3E43EEE46609F1F3D3A371E260F8F2414E65B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_locks.ps1",
+      "source_sha256": "F4C5DBAC5D1A11CE1C0347F630765F3B3D878E57A6EACDBD6646A990232EBC1D",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_locks.ps1",
+      "creation_sha256": "F4C5DBAC5D1A11CE1C0347F630765F3B3D878E57A6EACDBD6646A990232EBC1D",
+      "sha256": "F4C5DBAC5D1A11CE1C0347F630765F3B3D878E57A6EACDBD6646A990232EBC1D"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_native.ps1",
+      "source_sha256": "AEB0C380E9A2C8C5B0EF05E98EA068E747AC4B7221620455ECCD475E394309CB",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_native.ps1",
+      "creation_sha256": "B16684EEDD0F1EE6EC8CEE7159B849D84CF73607C2172F2F49FE6094164DF6C0",
+      "sha256": "B16684EEDD0F1EE6EC8CEE7159B849D84CF73607C2172F2F49FE6094164DF6C0"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_prior_archive.ps1",
+      "source_sha256": "D8357403F87E3F4922A5D38324B9227BAF373C12D603A96124C439AD4E8005D1",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_prior_archive.ps1",
+      "creation_sha256": "D8357403F87E3F4922A5D38324B9227BAF373C12D603A96124C439AD4E8005D1",
+      "sha256": "D8357403F87E3F4922A5D38324B9227BAF373C12D603A96124C439AD4E8005D1"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_receipts.ps1",
+      "source_sha256": "196477E321A07E5CC7F7B5DADAE48BF5727DF3F3F0823C31A1432CD8928BDC9B",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_receipts.ps1",
+      "creation_sha256": "196477E321A07E5CC7F7B5DADAE48BF5727DF3F3F0823C31A1432CD8928BDC9B",
+      "sha256": "196477E321A07E5CC7F7B5DADAE48BF5727DF3F3F0823C31A1432CD8928BDC9B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9_snapshot.ps1",
+      "source_sha256": "AE5BB375F3B863DE71628150645126D05D5BC12205B1107B398916C98CE32B24",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9_snapshot.ps1",
+      "creation_sha256": "58C0FCF8400DBC87A4C99C62BF81063C099E320AB5405FEEF59B8E580ED9B06D",
+      "sha256": "58C0FCF8400DBC87A4C99C62BF81063C099E320AB5405FEEF59B8E580ED9B06D"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\lib.ps1",
+      "source_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\lib.ps1",
+      "creation_sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594",
+      "sha256": "10DF1D64E54E55A3EDC3CB5E508F7EE97BD08A3F48CD2CC16A77917C55971594"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\private-lib.ps1",
+      "source_sha256": "B0EB1797F32821A10B37E82CF03D7081F028FFAF45B552D3571D934C4F8226F5",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-lib.ps1",
+      "creation_sha256": "C450509EE3C22F48FBA11A9B6AAF0DD525AFBAFE66A8E9C88B6A7C710EE40149",
+      "sha256": "C450509EE3C22F48FBA11A9B6AAF0DD525AFBAFE66A8E9C88B6A7C710EE40149"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\private-register.ps1",
+      "source_sha256": "18F2FF4EEF3924C31B4E9BA80B0F58B2C0635AAC1800C18EC417F27ED5583C75",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-register.ps1",
+      "creation_sha256": "18F2FF4EEF3924C31B4E9BA80B0F58B2C0635AAC1800C18EC417F27ED5583C75",
+      "sha256": "18F2FF4EEF3924C31B4E9BA80B0F58B2C0635AAC1800C18EC417F27ED5583C75"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\private-start.ps1",
+      "source_sha256": "A34CE89E839E8DD6B576FB3B704482682B83C67CC25CA7C2E90CAC8FA64E3CE4",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-start.ps1",
+      "creation_sha256": "4C15796B726CC19A2D7E716D01C724BB8E870CCB9F025AC895B86FC17586FB4E",
+      "sha256": "4C15796B726CC19A2D7E716D01C724BB8E870CCB9F025AC895B86FC17586FB4E"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\private-stop.ps1",
+      "source_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\private-stop.ps1",
+      "creation_sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F",
+      "sha256": "E5FEF4282CCCE9EE867687C1A5AF7B46E13EA52D16FA842E014B009A4D5FAE0F"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\start.ps1",
+      "source_sha256": "70E41406DBBCC7C36759AE73CE4E556540036DA979203CEF09678244553093B2",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\start.ps1",
+      "creation_sha256": "70E41406DBBCC7C36759AE73CE4E556540036DA979203CEF09678244553093B2",
+      "sha256": "70E41406DBBCC7C36759AE73CE4E556540036DA979203CEF09678244553093B2"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\cluster\\stop.ps1",
+      "source_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\cluster\\stop.ps1",
+      "creation_sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C",
+      "sha256": "1F2600DA60E6DE94F852FCAD75FE1FB4F3BD44C5669811F850CA8523C473730C"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\live\\obs.ps1",
+      "source_sha256": "E95756990EF56A43F6772BD83D20A0F61B0F794D8D5593693BCDDFFB752DE6F9",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\obs.ps1",
+      "creation_sha256": "5FE59F242C51D4593FE83ECC57409AD80C845A8D44D31C87C2CDDA9E5DF12A55",
+      "sha256": "5FE59F242C51D4593FE83ECC57409AD80C845A8D44D31C87C2CDDA9E5DF12A55"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\live\\process.ps1",
+      "source_sha256": "0A99F317865CDD544BAB2A4BFEAC0D26E62D65B288EDEF647FC498347DF4B9EC",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\process.ps1",
+      "creation_sha256": "893ED2691C8FF2867CB97FC3703480DE9D6AF7E4DC8781913C34FBE67F8DBFD5",
+      "sha256": "893ED2691C8FF2867CB97FC3703480DE9D6AF7E4DC8781913C34FBE67F8DBFD5"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\live\\test_process.ps1",
+      "source_sha256": "7FEC361F2300C1FE81342D6E5E7F2021299CC67073B143790F5CC570D0AFA75F",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\test_process.ps1",
+      "creation_sha256": "7FEC361F2300C1FE81342D6E5E7F2021299CC67073B143790F5CC570D0AFA75F",
+      "sha256": "7FEC361F2300C1FE81342D6E5E7F2021299CC67073B143790F5CC570D0AFA75F"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\compact9-tools\\live\\workload_lab.ps1",
+      "source_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\compact9-tools\\live\\workload_lab.ps1",
+      "creation_sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71",
+      "sha256": "BBFC13DBD330470B0C11BB11C7037C46BD1052D7542FBFBA5E561F1966D7AA71"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\freeze_preparation.ps1",
+      "source_sha256": "E8379D0636E61DB8E222ED3520B920F7D2C4875CFABB169CB86BEC6800179A89",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\freeze_preparation.ps1",
+      "creation_sha256": "3BA40724C0D21F37D1AA03058618B83DC8FD383DCA255351EA8ED1BA4F6785D9",
+      "sha256": "438DC4E04106E8F43B9B7666B453BF8DA2709E7E845C7752095D37E5AA647C38"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\make_compact9_negatives.py",
+      "source_sha256": "14D2F37E235578F17490264ADDFD378C6DDD78F6C09022B01E2CD9A98DE37090",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\make_compact9_negatives.py",
+      "creation_sha256": "14D2F37E235578F17490264ADDFD378C6DDD78F6C09022B01E2CD9A98DE37090",
+      "sha256": "14D2F37E235578F17490264ADDFD378C6DDD78F6C09022B01E2CD9A98DE37090"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\parser-final-v1.log",
+      "source_sha256": "DC162E84F9092B1F14BFE076370AF94082D698EA241F456DF113A1F669EE6107",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\parser-final-v1.log",
+      "creation_sha256": "DC162E84F9092B1F14BFE076370AF94082D698EA241F456DF113A1F669EE6107",
+      "sha256": "DC162E84F9092B1F14BFE076370AF94082D698EA241F456DF113A1F669EE6107"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\pure-preparation-final-v1.log",
+      "source_sha256": "E84CFCB9D1AA4F15805C0C3F7D1376F61F29F6FDD7EB51FF0EDBDFC600EDB187",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\pure-preparation-final-v1.log",
+      "creation_sha256": "E84CFCB9D1AA4F15805C0C3F7D1376F61F29F6FDD7EB51FF0EDBDFC600EDB187",
+      "sha256": "E84CFCB9D1AA4F15805C0C3F7D1376F61F29F6FDD7EB51FF0EDBDFC600EDB187"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\pure-preparation-final-v2.log",
+      "source_sha256": "8751A0457AE3D3963F31A60F8ECD8A65718FFE550B7C088FF8AD85706C7A74B9",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\pure-preparation-final-v2.log",
+      "creation_sha256": "8751A0457AE3D3963F31A60F8ECD8A65718FFE550B7C088FF8AD85706C7A74B9",
+      "sha256": "8751A0457AE3D3963F31A60F8ECD8A65718FFE550B7C088FF8AD85706C7A74B9"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\read_compact9_recovery.py",
+      "source_sha256": "A5BA2786DC9E4A943D627A757ABE1770112F7C14BE3655062D3F5F1AAB7A182A",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\read_compact9_recovery.py",
+      "creation_sha256": "A5BA2786DC9E4A943D627A757ABE1770112F7C14BE3655062D3F5F1AAB7A182A",
+      "sha256": "A5BA2786DC9E4A943D627A757ABE1770112F7C14BE3655062D3F5F1AAB7A182A"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\reader-uuid-final-v1.log",
+      "source_sha256": "06F48641F973BDEA8522D04E8862F4E4B4922F2CF161A7426CB2A0401985BDAE",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\reader-uuid-final-v1.log",
+      "creation_sha256": "06F48641F973BDEA8522D04E8862F4E4B4922F2CF161A7426CB2A0401985BDAE",
+      "sha256": "06F48641F973BDEA8522D04E8862F4E4B4922F2CF161A7426CB2A0401985BDAE"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\run_pure_preparation.ps1",
+      "source_sha256": "61329F8DE7ADCD1A8F350C2DC68F658E469F60891A26FFFB89A1F39807860227",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\run_pure_preparation.ps1",
+      "creation_sha256": "3E566D11A3E4D09BDC373396C0C0F5159315CA8AF596798A9B78D0AEDEF42996",
+      "sha256": "3E566D11A3E4D09BDC373396C0C0F5159315CA8AF596798A9B78D0AEDEF42996"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\runtime_child.ps1",
+      "source_sha256": "2B79816FAF143532645B0DA87559F7F08697B56B25F5D40D450A446477817F64",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime_child.ps1",
+      "creation_sha256": "A2462368A65721ECF63CDBA61496E0C26F2770CDD8662DBC604520B2BF5DA467",
+      "sha256": "A2462368A65721ECF63CDBA61496E0C26F2770CDD8662DBC604520B2BF5DA467"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\runtime_closure.ps1",
+      "source_sha256": "3A38D1DCDEE377D14EF794146ABCAB9A8A53EA810E551CF41E4F60E53432A971",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime_closure.ps1",
+      "creation_sha256": "097B250D3B6A1BDF248CF3F460BCEA41ADCF42B3E0AF005C457986A71FF63191",
+      "sha256": "097B250D3B6A1BDF248CF3F460BCEA41ADCF42B3E0AF005C457986A71FF63191"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\runtime-closure-pures-final-v1.log",
+      "source_sha256": "10B1BB2EA72FF14F482194004CCCCEF603D57902AD7A40CA0E88B7028A90BA30",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\runtime-closure-pures-final-v1.log",
+      "creation_sha256": "10B1BB2EA72FF14F482194004CCCCEF603D57902AD7A40CA0E88B7028A90BA30",
+      "sha256": "10B1BB2EA72FF14F482194004CCCCEF603D57902AD7A40CA0E88B7028A90BA30"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\source-copy-provenance.json",
+      "source_sha256": "23C3394DACBF30D4A8C74217B0D05AC4C4B8D2EB47D16989C0B959C42CB3B418",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\source-copy-provenance.json",
+      "creation_sha256": "23C3394DACBF30D4A8C74217B0D05AC4C4B8D2EB47D16989C0B959C42CB3B418",
+      "sha256": "23C3394DACBF30D4A8C74217B0D05AC4C4B8D2EB47D16989C0B959C42CB3B418"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\stdin-child-final-v1.log",
+      "source_sha256": "07986B78043E336F1EE44C99521EA3220EEF0AC331F17F6BE2673B52B66FD9FB",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\stdin-child-final-v1.log",
+      "creation_sha256": "07986B78043E336F1EE44C99521EA3220EEF0AC331F17F6BE2673B52B66FD9FB",
+      "sha256": "07986B78043E336F1EE44C99521EA3220EEF0AC331F17F6BE2673B52B66FD9FB"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_archive_context.ps1",
+      "source_sha256": "F9F78BB9043A41E4B6AA64589C58CE9D8E691E99448AEAF1D33DD84BF1829569",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_context.ps1",
+      "creation_sha256": "61938B38CAD2569BCB4C2736F173EFCDF960B660D27915BD1D37DB7C41E3F5AB",
+      "sha256": "61938B38CAD2569BCB4C2736F173EFCDF960B660D27915BD1D37DB7C41E3F5AB"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_archive_identity.ps1",
+      "source_sha256": "E90DE9B0B86D94D3C11A5E62DD71B80001A4BBAD99445B2AB151B40F34B2331B",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_identity.ps1",
+      "creation_sha256": "E90DE9B0B86D94D3C11A5E62DD71B80001A4BBAD99445B2AB151B40F34B2331B",
+      "sha256": "E90DE9B0B86D94D3C11A5E62DD71B80001A4BBAD99445B2AB151B40F34B2331B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_archive_tree.ps1",
+      "source_sha256": "53DC3A0B797408CFEF33E1F5C9CAFDCE98F3A8894495BE2441DDCA0F42BBB00C",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_tree.ps1",
+      "creation_sha256": "1DE305ECFF93E6945E043EBAD9BF4378F1C206B24C257B16E987BF098CC26A9F",
+      "sha256": "1DE305ECFF93E6945E043EBAD9BF4378F1C206B24C257B16E987BF098CC26A9F"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_archive_worker.ps1",
+      "source_sha256": "F431A9FAD24685DFE9E4C362EEAB44204E20D55FC593F3FAB7EE6D679C979930",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_archive_worker.ps1",
+      "creation_sha256": "571D5A4886B5313FA0A9C51CBC8176AAB12AB8943B1EA7162DC11CE5364177AE",
+      "sha256": "571D5A4886B5313FA0A9C51CBC8176AAB12AB8943B1EA7162DC11CE5364177AE"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_acquire_v2.ps1",
+      "source_sha256": "51247A9F37C141B7746A4C38D4336B4DFC4DF06D19288841B490824FB333A109",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_acquire_v2.ps1",
+      "creation_sha256": "58AE506C33DB4267EC2FF44D428A1F676DA35BAD981F6BF7720C48B2C77D22F8",
+      "sha256": "58AE506C33DB4267EC2FF44D428A1F676DA35BAD981F6BF7720C48B2C77D22F8"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_close.ps1",
+      "source_sha256": "CEC604A3D85AA32B6515FFF6E9C683DC11B0233CBFA2565FB4133A875175BEB9",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_close.ps1",
+      "creation_sha256": "C5C73CD9822358AE6FBEFF705FB61441F009EFCAFB82C20DC8A20EF2CDDE18BC",
+      "sha256": "C5C73CD9822358AE6FBEFF705FB61441F009EFCAFB82C20DC8A20EF2CDDE18BC"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_header_v2.ps1",
+      "source_sha256": "E3AE3F086C6443766E90011CF6B9F3244FC36F1ACFE4F3037CD97EE0008E44ED",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_header_v2.ps1",
+      "creation_sha256": "5738A8ABC02BF8ADE8E789223DF02A93A1732497950412B7CE7064FA1ED55201",
+      "sha256": "5738A8ABC02BF8ADE8E789223DF02A93A1732497950412B7CE7064FA1ED55201"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_invalid_control_v2.ps1",
+      "source_sha256": "BA28553B7D12535FFF9C2BD135842EC2C7CFDC329529B62B1FACBAE80742BA6B",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_invalid_control_v2.ps1",
+      "creation_sha256": "464D952DD813409F5393F47AAFE7CE5EB9B4F5314E106C2A9B86783D7468A4DD",
+      "sha256": "464D952DD813409F5393F47AAFE7CE5EB9B4F5314E106C2A9B86783D7468A4DD"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_locks.ps1",
+      "source_sha256": "3BB3805C5323A3BF5952EA5A2E6C7EA9F68BEBB5D726F5E51F0E398F1B48440A",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_locks.ps1",
+      "creation_sha256": "1D0A4F841B3EAC288A040DA52C105F9AABFF2E3D0BFDB9F15A8C2E5596B5A14C",
+      "sha256": "1D0A4F841B3EAC288A040DA52C105F9AABFF2E3D0BFDB9F15A8C2E5596B5A14C"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_postconditions.ps1",
+      "source_sha256": "66CCD861B7DD6D932DB7DCFE77B14595D4CA5B7611D55AC21736A3BFDCD66B43",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_postconditions.ps1",
+      "creation_sha256": "1584E4AB2F4496319937AE242CC930B7C2A65A1920748D0675BD8EE788F38E8B",
+      "sha256": "1584E4AB2F4496319937AE242CC930B7C2A65A1920748D0675BD8EE788F38E8B"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_receipts.ps1",
+      "source_sha256": "4AA386AEAF6E072D0BC98C68ABA7983383976FBB6B0CD81E61A9AD7BAF3675CA",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_receipts.ps1",
+      "creation_sha256": "8FDB714A7285DC4898FF0C97232D576D9AB17AC7229863D429A7E709635B2017",
+      "sha256": "8FDB714A7285DC4898FF0C97232D576D9AB17AC7229863D429A7E709635B2017"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_compact9_safety_v2.ps1",
+      "source_sha256": "FB6A2FE76421D69C0B954F8073FC2689FC6060EDDAA7484A882D56FA954D3D21",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_compact9_safety_v2.ps1",
+      "creation_sha256": "1001DAF1DA9880E061DD49CD6871F8B8F2B511DCB5E39081790EC2AD394A974F",
+      "sha256": "1001DAF1DA9880E061DD49CD6871F8B8F2B511DCB5E39081790EC2AD394A974F"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_prior_archive.ps1",
+      "source_sha256": "D896BF1CB8E358B481D3361865C66290180036A8CA8119AF322086303082D9D4",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_prior_archive.ps1",
+      "creation_sha256": "D896BF1CB8E358B481D3361865C66290180036A8CA8119AF322086303082D9D4",
+      "sha256": "D896BF1CB8E358B481D3361865C66290180036A8CA8119AF322086303082D9D4"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_private_nonce.ps1",
+      "source_sha256": "A823ACF2E195243490D00412703512A61919287C3D757C2B4B426628A18CA4B4",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_private_nonce.ps1",
+      "creation_sha256": "0CC3D93DD80692A57A680DD01BFFFE7E337AACB8BD291B3B66AC581465D952D3",
+      "sha256": "0CC3D93DD80692A57A680DD01BFFFE7E337AACB8BD291B3B66AC581465D952D3"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_reader_uuid.py",
+      "source_sha256": "C002CCA9C1721BF0AC37E048AB1E38EB9B66AFF52A2EAF57F732AF8F46960291",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_reader_uuid.py",
+      "creation_sha256": "6BD54DB6F6CEE7423C63383FB33F3F0945DC14A50075084E9B11124EC693E8E0",
+      "sha256": "6BD54DB6F6CEE7423C63383FB33F3F0945DC14A50075084E9B11124EC693E8E0"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_runtime_closure.ps1",
+      "source_sha256": "EBA7201E75D8E10D548C50C2B0CEC4137858F068BF5C01E1DD6D6C4D6BB40F11",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_runtime_closure.ps1",
+      "creation_sha256": "DBCE639A6001F4FC054FE91924FC622F06C285DD79BD97EE555BE979AF1F6FE3",
+      "sha256": "DBCE639A6001F4FC054FE91924FC622F06C285DD79BD97EE555BE979AF1F6FE3"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_stdin_child.ps1",
+      "source_sha256": "4FD416EB61E95E38AD52C4B55F59C046341BE0D304B843590EC45787B3924C5C",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_stdin_child.ps1",
+      "creation_sha256": "D0674E3F06FD672D0FD79012D202E72A84CD031110314D49CA0C45F07F5B0942",
+      "sha256": "D0674E3F06FD672D0FD79012D202E72A84CD031110314D49CA0C45F07F5B0942"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\test_stdin_close.ps1",
+      "source_sha256": "E510CCF2DBF797B1CA4F11EE079305185B951AD913A89C993E9AE8E65B55E28C",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\test_stdin_close.ps1",
+      "creation_sha256": "E510CCF2DBF797B1CA4F11EE079305185B951AD913A89C993E9AE8E65B55E28C",
+      "sha256": "E510CCF2DBF797B1CA4F11EE079305185B951AD913A89C993E9AE8E65B55E28C"
+    },
+    {
+      "source": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v1\\tree-preexec-actual-v2.log",
+      "source_sha256": "ADE4DBF58E8541E0106CB4C2E53D6E9D23AC91611B2D0AD283B69C80B43B4398",
+      "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact9-runtime-v2\\tree-preexec-actual-v2.log",
+      "creation_sha256": "ADE4DBF58E8541E0106CB4C2E53D6E9D23AC91611B2D0AD283B69C80B43B4398",
+      "sha256": "ADE4DBF58E8541E0106CB4C2E53D6E9D23AC91611B2D0AD283B69C80B43B4398"
+    }
+  ]
+}

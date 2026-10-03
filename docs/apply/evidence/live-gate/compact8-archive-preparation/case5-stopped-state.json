@@ -1,0 +1,70 @@
+{
+  "format": 1,
+  "track": "load",
+  "platform": "8.3.27.2214",
+  "root": "F:\\ibcmd\\lab\\05\\wave3\\load\\cluster",
+  "fresh": true,
+  "cluster": "d97ba4fe-773c-451b-a210-82ca1dc4f067",
+  "anchors": [
+    {
+      "pid": 88008,
+      "born": "2026-10-01T21:14:41.612467Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ragent.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ragent.exe\" -agent -port 5540 -regport 5541 -range 5560:5591 -d F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\srvinfo",
+      "parent_key": ""
+    },
+    {
+      "pid": 99324,
+      "born": "2026-10-01T21:15:13.035463Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe\" cluster --port=5545 localhost:5540",
+      "parent_key": ""
+    }
+  ],
+  "known": [
+    {
+      "pid": 92468,
+      "born": "2026-10-01T21:15:08.44952Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\dbda.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\dbda.exe\" 0.0.0.0,:: 5560 --http-port 5561 --init-config F:\\ibcmd\\lab\\05\\wave3\\load\\compact5-temp\\v8_A960_2.tmp --data F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\srvinfo\\1Cv8DbDA/6c2c8f63-f71d-4344-a71f-a0ce16a1be41",
+      "parent_key": "88008:639264860816124670"
+    },
+    {
+      "pid": 66908,
+      "born": "2026-10-01T21:15:04.268903Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\rmngr.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\rmngr.exe\" -port 5541 -host DESKTOP-SMI5N4O -range 5560:5591 -d F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\srvinfo\\ -clstid d97ba4fe-773c-451b-a210-82ca1dc4f067",
+      "parent_key": "88008:639264860816124670"
+    },
+    {
+      "pid": 94720,
+      "born": "2026-10-01T21:15:10.636284Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\dbda.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\dbda.exe\" 0.0.0.0,:: 5561 --http-port 5562 --init-config F:\\ibcmd\\lab\\05\\wave3\\load\\compact5-temp\\v8_A960_3.tmp --data F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\srvinfo\\1Cv8DbDA/6c2c8f63-f71d-4344-a71f-a0ce16a1be41",
+      "parent_key": "88008:639264860816124670"
+    },
+    {
+      "pid": 53256,
+      "born": "2026-10-01T21:15:08.453694Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\rphost.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\rphost.exe\" -range 5560:5591 -reghost DESKTOP-SMI5N4O -regport 5541 -pid f098b839-0947-4de0-974e-ee391c53bb9d",
+      "parent_key": "88008:639264860816124670"
+    },
+    {
+      "pid": 99324,
+      "born": "2026-10-01T21:15:13.035463Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ras.exe\" cluster --port=5545 localhost:5540",
+      "parent_key": ""
+    },
+    {
+      "pid": 88008,
+      "born": "2026-10-01T21:14:41.612467Z",
+      "executable": "C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ragent.exe",
+      "command": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\ragent.exe\" -agent -port 5540 -regport 5541 -range 5560:5591 -d F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\srvinfo",
+      "parent_key": ""
+    }
+  ],
+  "worker_lease": "track=load since=2026-10-02T00:13:41",
+  "started": "2026-10-01T21:14:41.3966999Z"
+}

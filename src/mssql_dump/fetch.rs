@@ -392,11 +392,12 @@ pub(super) fn fetch_rows(
         return fetch_config_rows(sql, database, table, selected_file_names);
     };
     let query = build_fetch_rows_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(
+    let stdout = run_sql_capture_tsv_with_policy(
         &tools.sqlcmd,
         sql.server(),
         sql.user(),
         sql.password(),
+        sql.trust_server_certificate(),
         &query,
     )?;
     let chunks = parse_config_chunk_rows(&stdout)
@@ -423,11 +424,12 @@ pub(super) fn fetch_rows_direct_hex(
         return fetch_config_rows(sql, database, table, selected_file_names);
     };
     let query = build_fetch_rows_direct_hex_sql(database, table, selected_file_names);
-    let stdout = run_sql_capture_tsv(
+    let stdout = run_sql_capture_tsv_with_policy(
         &tools.sqlcmd,
         sql.server(),
         sql.user(),
         sql.password(),
+        sql.trust_server_certificate(),
         &query,
     )?;
     parse_config_direct_rows(&stdout)
@@ -720,10 +722,12 @@ fn bcp_queryout_row_parts(
         "-S".to_owned(),
         server.to_owned(),
         "-n".to_owned(),
-        "-u".to_owned(),
         "-a".to_owned(),
         "65535".to_owned(),
     ];
+    if sql.trust_server_certificate() {
+        arguments.push("-u".to_owned());
+    }
     let mut sanitized_arguments = arguments.clone();
     sanitized_arguments[0] = query_marker(query);
     match user {
@@ -844,11 +848,12 @@ pub(super) fn fetch_metadata_rows_hex(
         return fetch_metadata_rows(sql, database, table);
     };
     let query = build_fetch_metadata_rows_sql(database, table);
-    let stdout = run_sql_capture_tsv(
+    let stdout = run_sql_capture_tsv_with_policy(
         &tools.sqlcmd,
         sql.server(),
         sql.user(),
         sql.password(),
+        sql.trust_server_certificate(),
         &query,
     )?;
     let chunks = parse_config_chunk_rows(&stdout)
@@ -1193,11 +1198,12 @@ fn fetch_row_headers_query(sql: &SqlExec, query: &str) -> Result<Vec<ConfigRowHe
                 .collect()
         }),
         SqlBackend::Tools(tools) => {
-            let stdout = run_sql_capture_tsv(
+            let stdout = run_sql_capture_tsv_with_policy(
                 &tools.sqlcmd,
                 sql.server(),
                 sql.user(),
                 sql.password(),
+                sql.trust_server_certificate(),
                 query,
             )?;
             parse_config_row_headers(&stdout)
@@ -1677,13 +1683,504 @@ pub(super) fn run_sql_capture_tsv(
 pub(super) struct ExactStorageRow {
     pub file_name: String,
     pub part_no: i32,
+    pub creation: String,
+    pub modified: String,
     pub attributes: i32,
     pub data_size: i64,
     pub binary: Vec<u8>,
 }
 
-/// Reads only one already-bound storage prefix. The lightweight header pass
-/// proves row shape and resource bounds before any BinaryData is materialized.
+#[cfg(test)]
+mod activation_capture_tests {
+    use super::*;
+    use crate::sql::{Dbms, ScriptVariables, SqlLogin, SqlParam, SqlRow, SqlTarget, SqlValue};
+    use sha2::{Digest, Sha256};
+    use std::collections::VecDeque;
+    use std::sync::{Arc, Mutex};
+
+    struct CaptureClient {
+        replies: Mutex<VecDeque<Vec<SqlRow>>>,
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl SqlClient for CaptureClient {
+        fn dbms(&self) -> Dbms {
+            Dbms::SqlServer
+        }
+        fn max_connections(&self) -> usize {
+            1
+        }
+        fn read_rows(
+            &self,
+            query: &str,
+            _: &[SqlParam<'_>],
+            each: &mut dyn FnMut(SqlRow) -> Result<()>,
+        ) -> Result<()> {
+            self.calls.lock().unwrap().push(query.to_owned());
+            for row in self
+                .replies
+                .lock()
+                .unwrap()
+                .pop_front()
+                .expect("unexpected SQL request")
+            {
+                each(row)?;
+            }
+            Ok(())
+        }
+        fn execute(&self, _: &str, _: &[SqlParam<'_>]) -> Result<u64> {
+            panic!("capture must never write")
+        }
+        fn run_script(&self, _: &str, _: ScriptVariables) -> Result<()> {
+            panic!("capture must never write")
+        }
+        fn query_json(&self, _: &str) -> Result<Option<String>> {
+            panic!("unexpected query")
+        }
+        fn write_rows(&self, _: &str, _: &[&str], _: &[Vec<SqlParam<'_>>]) -> Result<u64> {
+            panic!("capture must never write")
+        }
+    }
+
+    fn header(bytes: &[u8], attributes: i64, modified: &str) -> SqlRow {
+        SqlRow {
+            result_set: 0,
+            values: vec![
+                SqlValue::Text("root".to_owned()),
+                SqlValue::Int(0),
+                SqlValue::Int(attributes),
+                SqlValue::Text("4026-10-01 01:02:03.004".to_owned()),
+                SqlValue::Text(modified.to_owned()),
+                SqlValue::Int(bytes.len() as i64),
+                SqlValue::Int(bytes.len() as i64),
+                SqlValue::Text(crate::mssql_config_apply::model::hex_upper(
+                    &Sha256::digest(bytes),
+                )),
+            ],
+        }
+    }
+
+    fn binary(bytes: &[u8]) -> SqlRow {
+        SqlRow {
+            result_set: 0,
+            values: vec![
+                SqlValue::Text("root".to_owned()),
+                SqlValue::Int(0),
+                SqlValue::Int(bytes.len() as i64),
+                SqlValue::Binary(bytes.to_vec()),
+            ],
+        }
+    }
+
+    fn capture(replies: Vec<Vec<SqlRow>>) -> (SqlExec, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let sql = SqlExec::with_client(
+            SqlTarget {
+                server: "fake".to_owned(),
+                database: None,
+                login: SqlLogin::Integrated,
+                trust_server_certificate: false,
+            },
+            Box::new(CaptureClient {
+                replies: Mutex::new(replies.into()),
+                calls: calls.clone(),
+            }),
+        );
+        (sql, calls)
+    }
+
+    #[test]
+    fn activation_capture_keeps_nonzero_flags_and_exact_platform_dates() {
+        let h = header(b"ABC", 17, "4026-10-01 01:02:04.007");
+        let (sql, calls) = capture(vec![vec![h.clone()], vec![binary(b"ABC")], vec![h]]);
+        let rows =
+            fetch_activation_rows(&sql, "db", "Config", &BTreeSet::from(["root".to_owned()]))
+                .unwrap();
+        assert_eq!(rows[0].attributes, 17);
+        assert_eq!(rows[0].creation, "4026-10-01 01:02:03.004");
+        assert_eq!(rows[0].modified, "4026-10-01 01:02:04.007");
+        assert_eq!(rows[0].binary_data, b"ABC");
+        assert_eq!(calls.lock().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn activation_capture_refuses_binary_aba_and_full_header_drift() {
+        let h = header(b"ABC", 17, "4026-10-01 01:02:04.007");
+        // Even if a second header pass would have returned A, bytes B may not bind to A.
+        let (sql, _) = capture(vec![vec![h.clone()], vec![binary(b"XYZ")], vec![h.clone()]]);
+        assert!(
+            fetch_activation_rows(&sql, "db", "Config", &BTreeSet::new())
+                .unwrap_err()
+                .to_string()
+                .contains("changed during capture")
+        );
+        for after in [
+            header(b"ABC", 18, "4026-10-01 01:02:04.007"),
+            header(b"ABC", 17, "4026-10-01 01:02:04.008"),
+        ] {
+            let (sql, _) = capture(vec![vec![h.clone()], vec![binary(b"ABC")], vec![after]]);
+            assert!(
+                fetch_activation_rows(&sql, "db", "Config", &BTreeSet::new())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("physical headers changed")
+            );
+        }
+    }
+
+    #[test]
+    fn activation_capture_checks_budget_before_binary_materialization() {
+        let (sql, calls) = capture(vec![vec![header(b"ABC", 0, "4026-10-01 01:02:04.007")]]);
+        assert!(
+            fetch_bound_activation_rows(
+                &sql,
+                "db",
+                "Config",
+                "",
+                ActivationCaptureBudget {
+                    rows: 1,
+                    row_bytes: 16,
+                    total_bytes: 2
+                }
+            )
+            .unwrap_err()
+            .to_string()
+            .contains("exceeds 2 bytes")
+        );
+        assert_eq!(calls.lock().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn larger_extension_capture_keeps_existing_budget_and_bounds_sql_batches() {
+        let headers: Vec<_> = (0..70)
+            .map(|n| {
+                let mut row = header(b"ABC", 1, "4026-10-01 01:02:04.007");
+                row.values[0] = SqlValue::Text(format!("cas_{n:03}"));
+                row
+            })
+            .collect();
+        let binaries: Vec<_> = (0..70)
+            .map(|n| {
+                let mut row = binary(b"ABC");
+                row.values[0] = SqlValue::Text(format!("cas_{n:03}"));
+                row
+            })
+            .collect();
+        let (sql, calls) = capture(vec![
+            headers.clone(),
+            binaries[..64].to_vec(),
+            binaries[64..].to_vec(),
+            headers,
+        ]);
+        let rows = fetch_exact_prefix_rows(&sql, "db", "ConfigCAS", "cas_", 100, 512 * 1024 * 1024)
+            .unwrap();
+        assert_eq!(rows.len(), 70);
+        let calls = calls.lock().unwrap();
+        assert_eq!(calls.len(), 4);
+        for query in &calls[1..3] {
+            assert!(query.matches("HASHBYTES('SHA2_256',BinaryData)=0x").count() <= 64);
+            assert!(!query.contains("_dynupdate_"));
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ActivationHeader {
+    name: String,
+    part: i32,
+    attributes: i32,
+    creation: String,
+    modified: String,
+    size: i64,
+    digest: Vec<u8>,
+}
+
+#[derive(Clone, Copy)]
+struct ActivationCaptureBudget {
+    rows: usize,
+    row_bytes: u64,
+    total_bytes: u64,
+}
+
+fn read_activation_headers(
+    sql: &SqlExec,
+    database: &str,
+    table: &str,
+    filter: &str,
+    budget: ActivationCaptureBudget,
+) -> Result<Vec<ActivationHeader>> {
+    let query = format!(
+        "SET NOCOUNT ON; SELECT TOP ({}) FileName AS file_name,PartNo,CONVERT(int,Attributes),CONVERT(varchar(27),Creation,121),CONVERT(varchar(27),Modified,121),CONVERT(bigint,DataSize),CONVERT(bigint,DATALENGTH(BinaryData)),CONVERT(varchar(64),HASHBYTES('SHA2_256',BinaryData),2) FROM {} {filter} ORDER BY FileName,PartNo;",
+        budget
+            .rows
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("activation row budget overflow"))?,
+        qualified_storage_table(database, table),
+    );
+    if offline_rows::active().is_some() {
+        return Err(offline_rows::refuse(&format!(
+            "the activation query {}",
+            query_marker(&query)
+        )));
+    }
+    let fields: Vec<Vec<String>> = match sql.backend() {
+        SqlBackend::Client(client) => journal_client_request(sql, &query, || {
+            client
+                .query_rows(&query, &[])?
+                .into_iter()
+                .map(|mut row| {
+                    Ok(vec![
+                        row.take_text(0)?,
+                        row.i64(1)?.to_string(),
+                        row.i64(2)?.to_string(),
+                        row.take_text(3)?,
+                        row.take_text(4)?,
+                        row.i64(5)?.to_string(),
+                        row.i64(6)?.to_string(),
+                        row.take_text(7)?,
+                    ])
+                })
+                .collect::<Result<Vec<_>>>()
+        })?,
+        SqlBackend::Tools(tools) => {
+            let text = run_sql_capture_tsv_with_policy(
+                &tools.sqlcmd,
+                sql.server(),
+                sql.user(),
+                sql.password(),
+                sql.trust_server_certificate(),
+                &query,
+            )?;
+            text.lines()
+                .filter(|line| !line.trim().is_empty() && !is_sqlcmd_header_or_separator(line))
+                .map(|line| {
+                    line.split('\t')
+                        .map(|field| field.trim_end().to_owned())
+                        .collect()
+                })
+                .collect()
+        }
+    };
+    parse_activation_headers(fields, budget)
+}
+
+fn parse_activation_headers(
+    fields: Vec<Vec<String>>,
+    budget: ActivationCaptureBudget,
+) -> Result<Vec<ActivationHeader>> {
+    if fields.len() > budget.rows {
+        bail!("activation row count exceeds {}", budget.rows);
+    }
+    let mut seen = BTreeSet::new();
+    let mut total = 0_u64;
+    let mut headers = Vec::with_capacity(fields.len());
+    for fields in fields {
+        if fields.len() != 8 {
+            bail!("unexpected activation header shape");
+        }
+        let name = fields[0].clone();
+        let part = fields[1].trim().parse::<i32>()?;
+        let attributes = fields[2].trim().parse::<i32>()?;
+        let size = fields[5].trim().parse::<i64>()?;
+        let length = fields[6].trim().parse::<i64>()?;
+        if name.is_empty() || name.chars().any(char::is_control) || part != 0 {
+            bail!("activation header has an unsupported name/PartNo");
+        }
+        if !seen.insert(name.to_lowercase()) {
+            bail!("duplicate activation row {name}");
+        }
+        if size < 0 || size != length || size as u64 > budget.row_bytes {
+            bail!("activation row {name} has an invalid or oversized binary length");
+        }
+        total = total
+            .checked_add(size as u64)
+            .ok_or_else(|| anyhow!("activation byte budget overflow"))?;
+        if total > budget.total_bytes {
+            bail!("activation data exceeds {} bytes", budget.total_bytes);
+        }
+        if fields[3].is_empty() || fields[4].is_empty() {
+            bail!("activation row timestamps are missing");
+        }
+        let digest = super::decode_hex(fields[7].trim())?;
+        if digest.len() != 32 {
+            bail!("activation header SHA256 is malformed");
+        }
+        headers.push(ActivationHeader {
+            name,
+            part,
+            attributes,
+            creation: fields[3].clone(),
+            modified: fields[4].clone(),
+            size,
+            digest,
+        });
+    }
+    Ok(headers)
+}
+
+fn activation_binary_filter(headers: &[ActivationHeader]) -> String {
+    let predicates = headers.iter().map(|row| format!(
+        "(FileName=N'{}' AND PartNo={} AND Attributes={} AND CONVERT(varchar(27),Creation,121)='{}' AND CONVERT(varchar(27),Modified,121)='{}' AND CONVERT(bigint,DataSize)={} AND DATALENGTH(BinaryData)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{})",
+        quote_string(&row.name), row.part, row.attributes, quote_string(&row.creation),
+        quote_string(&row.modified), row.size, row.size,
+        crate::mssql_config_apply::model::hex_upper(&row.digest)))
+        .collect::<Vec<_>>().join(" OR ");
+    format!("WHERE {predicates}\n")
+}
+
+fn bind_activation_binary(
+    headers: &[ActivationHeader],
+    rows: Vec<BinaryConfigRow>,
+) -> Result<Vec<ExactStorageRow>> {
+    use sha2::{Digest, Sha256};
+    let mut expected = headers
+        .iter()
+        .map(|row| (row.name.clone(), row))
+        .collect::<BTreeMap<_, _>>();
+    let mut output = Vec::with_capacity(headers.len());
+    for row in rows {
+        let header = expected
+            .remove(&row.file_name)
+            .ok_or_else(|| anyhow!("unexpected activation binary row"))?;
+        if row.part_no != header.part
+            || row.data_size != header.size
+            || row.binary.len() as i64 != header.size
+            || Sha256::digest(&row.binary).as_slice() != header.digest
+        {
+            bail!("activation row {} changed during capture", row.file_name);
+        }
+        output.push(ExactStorageRow {
+            file_name: row.file_name,
+            part_no: header.part,
+            creation: header.creation.clone(),
+            modified: header.modified.clone(),
+            attributes: header.attributes,
+            data_size: header.size,
+            binary: row.binary,
+        });
+    }
+    if !expected.is_empty() {
+        bail!("activation BinaryData row set changed during capture");
+    }
+    Ok(output)
+}
+
+fn fetch_bound_activation_rows(
+    sql: &SqlExec,
+    database: &str,
+    table: &str,
+    filter: &str,
+    budget: ActivationCaptureBudget,
+) -> Result<Vec<ExactStorageRow>> {
+    let headers = read_activation_headers(sql, database, table, filter, budget)?;
+    if headers.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut all_rows = Vec::with_capacity(headers.len());
+    // Bound SQL expression size even for larger extension namespace budgets.
+    for chunk in headers.chunks(64) {
+        let selected = chunk
+            .iter()
+            .map(|row| row.name.clone())
+            .collect::<BTreeSet<_>>();
+        let binary_filter = activation_binary_filter(chunk);
+        let rows = match sql.backend() {
+            SqlBackend::Client(_) => {
+                // The server only returns bytes matching the bounded immutable header pass.
+                let query = format!(
+                    "SELECT FileName,PartNo,DataSize,BinaryData FROM {} {binary_filter} ORDER BY FileName,PartNo",
+                    qualified_storage_table(database, table)
+                );
+                assemble_binary_config_rows(fetch_binary_row_parts(sql, database, table, &query)?)?
+            }
+            SqlBackend::Tools(tools) => {
+                let query = build_fetch_rows_sql(database, table, &selected);
+                let original = selected
+                    .iter()
+                    .map(|name| format!("N'{}'", quote_string(name)))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let original = format!("WHERE FileName IN ({original})\n");
+                if query.matches(&original).count() != 1 {
+                    bail!("activation chunk query has no unique bounded filter");
+                }
+                let query = query.replace(&original, &binary_filter);
+                let text = run_sql_capture_tsv_with_policy(
+                    &tools.sqlcmd,
+                    sql.server(),
+                    sql.user(),
+                    sql.password(),
+                    sql.trust_server_certificate(),
+                    &query,
+                )?;
+                assemble_config_rows(parse_config_chunk_rows(&text)?)?
+                    .into_iter()
+                    .map(|row| {
+                        Ok(BinaryConfigRow {
+                            file_name: row.file_name.clone(),
+                            part_no: row.part_no,
+                            data_size: row.data_size,
+                            binary: row.binary_bytes()?.into_owned(),
+                        })
+                    })
+                    .collect::<Result<Vec<_>>>()?
+            }
+        };
+        all_rows.extend(rows);
+    }
+    let output = bind_activation_binary(&headers, all_rows)?;
+    // A->B->A during the binary read cannot substitute B: its digest is bound to A above.
+    if read_activation_headers(sql, database, table, filter, budget)? != headers {
+        bail!("activation full physical headers changed during capture");
+    }
+    Ok(output)
+}
+
+pub(super) fn fetch_activation_rows(
+    sql: &SqlExec,
+    database: &str,
+    table: &str,
+    selected: &BTreeSet<String>,
+) -> Result<Vec<crate::mssql_main_activation::MainStorageRow>> {
+    let filter = if selected.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "WHERE FileName IN ({})",
+            selected
+                .iter()
+                .map(|name| format!("N'{}'", quote_string(name)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+    fetch_bound_activation_rows(
+        sql,
+        database,
+        table,
+        &filter,
+        ActivationCaptureBudget {
+            rows: crate::mssql_main_activation::MAX_ROWS,
+            row_bytes: crate::mssql_main_activation::MAX_ROW_BYTES as u64,
+            total_bytes: crate::mssql_main_activation::MAX_PLAN_BYTES as u64,
+        },
+    )?
+    .into_iter()
+    .map(|row| {
+        Ok(crate::mssql_main_activation::MainStorageRow {
+            file_name: row.file_name,
+            part_no: row.part_no,
+            creation: row.creation,
+            modified: row.modified,
+            attributes: row.attributes,
+            data_size: u64::try_from(row.data_size)?,
+            binary_data: row.binary,
+        })
+    })
+    .collect()
+}
+
+/// Reads a previously bound extension namespace with the same full-header/digest capture.
 pub(super) fn fetch_exact_prefix_rows(
     sql: &SqlExec,
     database: &str,
@@ -1692,146 +2189,29 @@ pub(super) fn fetch_exact_prefix_rows(
     max_rows: usize,
     max_total_bytes: u64,
 ) -> Result<Vec<ExactStorageRow>> {
-    let escaped_pattern = prefix
+    let escaped = prefix
         .replace('~', "~~")
         .replace('%', "~%")
         .replace('_', "~_");
-    let header_sql = format!(
-        "SET NOCOUNT ON; SELECT TOP ({}) FileName AS file_name,PartNo,Attributes,CONVERT(bigint,DataSize),CONVERT(bigint,DATALENGTH(BinaryData)) FROM {} WHERE FileName LIKE N'{}%' ESCAPE N'~' ORDER BY FileName,PartNo;",
-        max_rows.saturating_add(1),
-        qualified_storage_table(database, table),
-        quote_string(&escaped_pattern),
+    let filter = format!(
+        "WHERE FileName LIKE N'{}%' ESCAPE N'~'",
+        quote_string(&escaped)
     );
-    // (file name, PartNo, Attributes, DataSize, DATALENGTH(BinaryData))
-    let header_rows: Vec<(String, i64, i64, i64, i64)> = match sql.backend() {
-        SqlBackend::Client(client) => journal_client_request(sql, &header_sql, || {
-            client
-                .query_rows(&header_sql, &[])?
-                .into_iter()
-                .map(|mut row| {
-                    Ok((
-                        row.take_text(0)?,
-                        row.i64(1)?,
-                        row.i64(2)?,
-                        row.i64(3)?,
-                        row.i64(4)?,
-                    ))
-                })
-                .collect::<Result<Vec<_>>>()
-        })?,
-        SqlBackend::Tools(tools) => {
-            let stdout = run_sql_capture_tsv_with_policy(
-                &tools.sqlcmd,
-                sql.server(),
-                sql.user(),
-                sql.password(),
-                sql.trust_server_certificate(),
-                &header_sql,
-            )?;
-            let mut rows = Vec::new();
-            for (line_index, line) in stdout.lines().enumerate() {
-                let line = line.trim_end();
-                if line.is_empty() || is_sqlcmd_header_or_separator(line) {
-                    continue;
-                }
-                let fields = line.split('\t').collect::<Vec<_>>();
-                if fields.len() != 5 {
-                    bail!("unexpected exact-prefix header line {}", line_index + 1);
-                }
-                rows.push((
-                    fields[0].trim_end().to_owned(),
-                    fields[1].trim().parse::<i64>()?,
-                    fields[2].trim().parse::<i64>()?,
-                    fields[3].trim().parse::<i64>()?,
-                    fields[4].trim().parse::<i64>()?,
-                ));
-            }
-            rows
-        }
-    };
-    let mut headers = BTreeMap::<String, (i32, i32, i64)>::new();
-    let mut total_bytes = 0_u64;
-    for (file_name, part_no, attributes, data_size, binary_size) in header_rows {
-        if !file_name.starts_with(prefix) {
-            bail!("exact-prefix query returned an unrelated FileName");
-        }
-        let part_no = i32::try_from(part_no)?;
-        let attributes = i32::try_from(attributes)?;
-        if part_no != 0 {
-            bail!("{table}.{file_name} uses unsupported PartNo {part_no}");
-        }
-        if data_size < 0 || data_size != binary_size {
-            bail!("{table}.{file_name} has inconsistent DataSize/BinaryData length");
-        }
-        total_bytes = total_bytes
-            .checked_add(data_size as u64)
-            .ok_or_else(|| anyhow!("exact-prefix byte count overflow"))?;
-        if total_bytes > max_total_bytes {
-            bail!("exact-prefix data exceeds {max_total_bytes} bytes");
-        }
-        if headers
-            .insert(file_name.clone(), (part_no, attributes, data_size))
-            .is_some()
-        {
-            bail!("duplicate exact-prefix row {file_name}");
-        }
-        if headers.len() > max_rows {
-            bail!("exact-prefix row count exceeds {max_rows}");
-        }
+    let rows = fetch_bound_activation_rows(
+        sql,
+        database,
+        table,
+        &filter,
+        ActivationCaptureBudget {
+            rows: max_rows,
+            row_bytes: max_total_bytes,
+            total_bytes: max_total_bytes,
+        },
+    )?;
+    if rows.iter().any(|row| !row.file_name.starts_with(prefix)) {
+        bail!("exact-prefix query returned an unrelated row");
     }
-    if headers.is_empty() {
-        return Ok(Vec::new());
-    }
-    let selected = headers.keys().cloned().collect::<BTreeSet<_>>();
-    // (file name, PartNo, DataSize, bytes) of every selected row.
-    let binary_rows: Vec<(String, i32, i64, Vec<u8>)> = match sql.backend() {
-        SqlBackend::Client(_) => {
-            let query = build_fetch_binary_rows_query(database, table, &selected, false);
-            assemble_binary_config_rows(fetch_binary_row_parts(sql, database, table, &query)?)?
-                .into_iter()
-                .map(|row| (row.file_name, row.part_no, row.data_size, row.binary))
-                .collect()
-        }
-        SqlBackend::Tools(tools) => {
-            let binary_sql = build_fetch_rows_sql(database, table, &selected);
-            let binary_stdout = run_sql_capture_tsv_with_policy(
-                &tools.sqlcmd,
-                sql.server(),
-                sql.user(),
-                sql.password(),
-                sql.trust_server_certificate(),
-                &binary_sql,
-            )?;
-            let chunks = parse_config_chunk_rows(&binary_stdout)?;
-            assemble_config_rows(chunks)?
-                .into_iter()
-                .map(|row| {
-                    let binary = row.binary_bytes()?.into_owned();
-                    Ok((row.file_name, row.part_no, row.data_size, binary))
-                })
-                .collect::<Result<Vec<_>>>()?
-        }
-    };
-    if binary_rows.len() != headers.len() {
-        bail!("exact-prefix BinaryData row count changed during snapshot");
-    }
-    let mut output = Vec::with_capacity(binary_rows.len());
-    for (file_name, row_part_no, row_data_size, binary) in binary_rows {
-        let (part_no, attributes, data_size) = headers
-            .remove(&file_name)
-            .ok_or_else(|| anyhow!("exact-prefix BinaryData returned an unexpected row"))?;
-        if row_part_no != part_no || row_data_size != data_size {
-            bail!("exact-prefix row {file_name} changed during snapshot");
-        }
-        output.push(ExactStorageRow {
-            file_name,
-            part_no,
-            attributes,
-            data_size,
-            binary,
-        });
-    }
-    Ok(output)
+    Ok(rows)
 }
 
 pub(super) fn run_sql_capture_tsv_with_policy(
@@ -1973,6 +2353,61 @@ mod tests {
         split_selected_file_names_for_row_headers_query, start_subprocess_call,
     };
     use crate::sql::{SqlExec, SqlOptions};
+
+    #[test]
+    fn tools_export_reads_obey_certificate_policy_in_actual_arguments() {
+        use crate::sql::{SqlLogin, SqlTarget, SqlTools};
+        for trust in [false, true] {
+            let missing = std::env::temp_dir().join(format!(
+                "ibcmd-certificate-tool-missing-{}",
+                uuid::Uuid::new_v4()
+            ));
+            let sql = SqlExec::with_tools(
+                SqlTarget {
+                    server: "must-not-connect".into(),
+                    database: None,
+                    login: SqlLogin::Integrated,
+                    trust_server_certificate: trust,
+                },
+                SqlTools {
+                    sqlcmd: missing.clone(),
+                    bcp: missing,
+                },
+            );
+            let guard =
+                begin_subprocess_journal("<password-source:none>", "fake", "db", None).unwrap();
+            let names = BTreeSet::from(["root".to_owned()]);
+            assert!(super::fetch_rows(&sql, "db", "Config", &names).is_err());
+            assert!(super::fetch_rows_direct_hex(&sql, "db", "Config", &names).is_err());
+            assert!(super::fetch_metadata_rows_hex(&sql, "db", "Config").is_err());
+            assert!(super::fetch_row_headers_query(&sql, "SELECT 1").is_err());
+            assert!(super::fetch_binary_row_parts(&sql, "db", "Config", "SELECT 1").is_err());
+            let calls = super::current_subprocess_calls();
+            assert_eq!(calls.len(), 5);
+            for call in &calls[..4] {
+                assert_eq!(
+                    call.arguments.iter().any(|x| x == "-C"),
+                    trust,
+                    "actual sqlcmd arguments: {:?}",
+                    call.arguments
+                );
+            }
+            assert_eq!(
+                calls[4].arguments.iter().any(|x| x == "-u"),
+                trust,
+                "actual bcp arguments: {:?}",
+                calls[4].arguments
+            );
+            assert!(
+                calls
+                    .iter()
+                    .all(|call| call.status == "failed" && call.exit_code.is_none())
+            );
+            guard
+                .finish_failed(&anyhow::anyhow!("intentional missing tools"))
+                .unwrap();
+        }
+    }
 
     #[test]
     fn subprocess_journal_uses_query_hashes_and_password_source_markers() {

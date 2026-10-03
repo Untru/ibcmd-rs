@@ -118,7 +118,7 @@ impl EventCallTypes {
     }
 
     /// The call type of `handler` bound to the event `event` (its XML name).
-    fn get(&self, event: &str, handler: &str) -> Option<&'static str> {
+    pub(super) fn get(&self, event: &str, handler: &str) -> Option<&'static str> {
         match self.by_event.get(&(event.to_owned(), handler.to_owned())) {
             Some(known) => *known,
             None => self.by_handler.get(handler).copied().flatten(),
@@ -162,6 +162,56 @@ pub(super) fn form_event_call_types(text: &str) -> EventCallTypes {
         }
     }
     found
+}
+
+// Compatibility for the guarded no-BaseForm extension path. The native
+// FormAdoption writer continues to own forms that carry their base record.
+/// `xml` with `callType` on every `<Event>` whose handler the map knows.
+pub(super) fn with_event_call_types(xml: &str, call_types: &EventCallTypes) -> String {
+    let mut out = String::with_capacity(xml.len() + 64);
+    let mut rest = xml;
+    while let Some(at) = rest.find("<Event name=\"") {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        let Some(open_end) = rest.find('>') else {
+            break;
+        };
+        let Some(close) = rest.find("</Event>") else {
+            break;
+        };
+        let open = &rest[..open_end];
+        let handler = unescape_xml_text(&rest[open_end + 1..close]);
+        let name_start = "<Event name=\"".len();
+        let event = open[name_start..]
+            .find('"')
+            .map(|end| unescape_xml_text(&open[name_start..name_start + end]))
+            .unwrap_or_default();
+        match call_types.get(&event, &handler) {
+            Some(call_type) if !open.contains("callType=") => {
+                out.push_str(open);
+                out.push_str(&format!(" callType=\"{call_type}\""));
+            }
+            _ => out.push_str(open),
+        }
+        rest = &rest[open_end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+/// `xml` with `callType="Before"` on every command handler. The commands of
+/// an adopted form on record (six of an extension's common form in the БСП
+/// 8.3.27 ServiceDesk) all say `Before`; where the command record keeps a code
+/// for an interceptor that would say otherwise is not on record.
+pub(super) fn with_action_call_types(xml: &str) -> String {
+    xml.replace("<Action>", "<Action callType=\"Before\">")
+}
+
+fn unescape_xml_text(text: &str) -> String {
+    text.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&amp;", "&")
 }
 
 /// What the writer spells for an adopted form beyond its body, read once by

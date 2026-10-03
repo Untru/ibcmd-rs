@@ -1,0 +1,28 @@
+{
+  "scope": "OFFLINE read-only archival exclusion successor. No signal/stop/move authority; no runtime. Original anchor parent not persisted and not invented.",
+  "source_head": "ce787483a52713215fedef57f99c71b044e30f09",
+  "original_state": {
+    "file": "F:\\ibcmd\\lab\\05\\wave3\\load\\cluster\\stopped-state-20261002001827166.json",
+    "bytes": 3468,
+    "sha256": "5B09714CAF28B294D13D2BF85A0BC0A5344D870E508E3931C984EF17FFF4943A"
+  },
+  "raw_copy": "case5-stopped-state.json",
+  "original_anchor_parent_missing": [
+    88008,
+    99324
+  ],
+  "descendant_parent_binding": "parent_key retains original PID+exact saved birth ticks; parent must exist in the saved union",
+  "cim_precision": "Saved decimal precision interval [ticks, ticks+10^(7-digits)); touching intervals are disjoint. No global tolerance. Current CIM timestamp preserves 7 digits.",
+  "new_scope": {
+    "case": 8,
+    "database": "ibcmd_rs_05_load_w3_compact8_20261002",
+    "runtime": "WITHHELD",
+    "binary": "matching current combined source binary pending root full16 build; historical fbf is not final0.5 acceptance"
+  },
+  "preserve": [
+    "compact7-runtime-frozen-v3.json/781CF/100",
+    "compact7-frozen-files-v2.json/30F33/58",
+    "all old54/52/45/root40/613/285",
+    "empty compact6 and compact7 TEMP"
+  ]
+}

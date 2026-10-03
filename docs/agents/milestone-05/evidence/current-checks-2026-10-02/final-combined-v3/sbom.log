@@ -1,0 +1,21 @@
+Traceback (most recent call last):
+  File "F:\ibcmd\src\ibcmd-rs-05-integration\scripts\generate_sbom.py", line 145, in <module>
+    main()
+    ~~~~^^
+  File "F:\ibcmd\src\ibcmd-rs-05-integration\scripts\generate_sbom.py", line 72, in main
+    metadata = json.loads(subprocess.check_output(command, cwd=root, text=True))
+                          ~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 474, in check_output
+    return run(*popenargs, stdout=PIPE, timeout=timeout, check=True,
+           ~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               **kwargs).stdout
+               ^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 556, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 1004, in __init__
+    errread, errwrite) = self._get_handles(stdin, stdout, stderr)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 1360, in _get_handles
+    p2cread = _winapi.GetStdHandle(_winapi.STD_INPUT_HANDLE)
+OSError: [WinError 6] Неверный дескриптор

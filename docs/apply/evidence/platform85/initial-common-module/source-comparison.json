@@ -1,0 +1,10 @@
+{
+  "summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 0,
+    "unchanged": 12336
+  },
+  "raw_sha256": "0B079773D912AED8A7AEB8F45A4934EB469FF87846AE95FE8BC615A4710DF463",
+  "raw_path": "F:/ibcmd/lab/05/wave3/platform85/logs/own-b-native-source-diff.json"
+}

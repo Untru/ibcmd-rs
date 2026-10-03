@@ -1,0 +1,8 @@
+RED verified original actual Header admits foreign canonical database GUID
+PASS actual Header sets=1 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=1 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=30 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=31 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header sets=2 index=33 foreign canonical UUID refused; matching mixedcase accepted
+PASS actual Header malformed/count/order/foreignDB refused; realStarts=realSignals=SQLcalls=registryWrites=Moves=0

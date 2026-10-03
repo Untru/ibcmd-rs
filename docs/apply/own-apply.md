@@ -366,7 +366,12 @@ The trace track's list of what every native apply writes (`docs/apply/native-app
 sections 3.2 and 7) against what this apply does, with the verdict the evidence supports.
 The verdicts come from applying with the minimal set at once (S2, S3, S4, the probe) and
 opening the result with the platform's own tools; a single omitted group was not dropped
-alone from a full native set, because nothing in the results asks for it:
+alone from a full native set, because nothing in the results asks for it.
+
+Two of the rows below -- the change registrations (with the imaged nodes' rows) and `Files.MobileVersions.dat` -- are also what
+the platform's **dynamic** apply (`--dynamic=force`) writes besides its alias rows: the measurement of #347 found them, and
+the text in the script is the same `sqlgen::render_parity_writes` the dynamic apply runs in its own transaction
+([`dropin-dynamic.md`](dropin-dynamic.md), [evidence](evidence/dropin-dynamic/acceptance.md)).
 
 | Native write | This apply | Verdict and evidence |
 |---|---|---|

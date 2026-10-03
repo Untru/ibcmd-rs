@@ -1,0 +1,40 @@
+{
+  "focused_exact_build": 1,
+  "dependency_head": "0fbc9b770b0319d4c3df552c869afd7b68e47fff",
+  "root_lib": {
+    "ignored": 10,
+    "passed": 3688,
+    "failed": 0
+  },
+  "native_write_provenance": "candidate HEAD6144fc4 + retained private toggle, SHA52137385; NOT rerun final admission CLI",
+  "cli_refusals": [
+    {
+      "exit": -1,
+      "build": "8.5.1.1529",
+      "sha256": "EE68F6378A3F51DA094BD235DB6B1ED26583FED556DCAEB8B6ABBB30E18B1942",
+      "log": "F:/ibcmd/lab/05/wave3/platform85/logs/admission-final-cli-refusal-8.5.1.1529.log"
+    },
+    {
+      "exit": 2,
+      "build": "8.5.1.1151",
+      "sha256": "41F0AA4BB44CB9B256FF8515EC60CB23BC6A9518B8F3940EA2D8E209ABFB1313",
+      "log": "F:/ibcmd/lab/05/wave3/platform85/logs/admission-final-cli-refusal-8.5.1.1151.log"
+    }
+  ],
+  "binary": "F:/ibcmd/lab/05/wave3/platform85/bin/ibcmd-rs-initial85-admission-final.exe",
+  "focused_profile": 12,
+  "base": "6a7cbbf60e70d35c03767e0ad06c1afa4915e6e7",
+  "source_file_sha256": {
+    "src/mssql_main_activation.rs": "74973E64ABFF7D25EEDBC6221317E0324AA70FB4559FEF67259009A301A7A4C4",
+    "src/profile_registry.rs": "C56CE34D6F4D021CCE2A3F92ED115328341116357F38D0F2BC8FC9DD26D28E0D",
+    "profiles/platform/8.5.1.1150.json": "02096E95960479829F74BC78D961FBEF83244B033A386D8182CD3190CB8CF589",
+    "src/mssql_config_apply/dynamic.rs": "DAF6586F8A2ECDFDE8B8DC66876F080C9899D46BE079CB8FB221FA262F4A6E22",
+    "src/dropin/apply.rs": "E36C56F50F2F7D3E0DF6E8CAC4D807E3A86BF519437B205703DAE791E255C9F8",
+    "src/mssql_dump/fetch.rs": "C752A42E566C665D389862C07E69C13166A6F835404C89912104FCFCB7F001A5",
+    "src/mssql_platform_profile.rs": "ACA34A37C22DD21289F31A0740B4F729FE3A356408584C4B69A034D704D46AF9",
+    "src/mssql_dump/mod.rs": "910547C6B2CE515DD5E8C691F7B0C8258DA0B77B5487868B738B21C83E8AD78C"
+  },
+  "binary_sha256": "3E223C871F5D13D488081B8E7726B777FCFE3E40F0EE6688C9E73DA76D03687F",
+  "quick": "gates-initial85-admission-final",
+  "scope": "initial five-row existing CommonModule only; main/extension/LIVE/worker and forms/repeat closed"
+}

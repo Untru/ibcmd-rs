@@ -1,0 +1,32 @@
+{
+  "scope": "ONE actual root-scheduled N1 body-only native oracle observer",
+  "manifest_sha256": "CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E",
+  "controller_sha256": "F9946D271498F61DD0DE4F3949148E6AF75552333CD522A6B69B0676D8D164AA",
+  "preparation_sha256": "B41E46CD7605D4029DBAFC24924E38DBAF1AC0FA77AD70AFCC38F5A56BCB5FD7",
+  "root_review_sha256": "8CF9A5B2BAE2048AEE663EBB3AAA5948D585C43582942E5EA2EB514043619447",
+  "peer_review_sha256": "C2571951821E6A59B3C45D2226F1DB44947F56FDCD8D5E266ECE0A2D433BC746",
+  "source_head": "7260f89668020d318d8a4ce11e54adda84bb0cf2",
+  "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "arguments": [
+    "-NoProfile",
+    "-File",
+    "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\native_marker_n1_body_control_resume_v1.ps1",
+    "-ManifestSha",
+    "CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E",
+    "-Execute"
+  ],
+  "maximum_observer_seconds": 28800,
+  "parent_pid": 84684,
+  "pid": 87976,
+  "birth_utc": "2026-10-02T13:51:22.6922474Z",
+  "execution_state": "known_terminal",
+  "direct_child_exit_proved": true,
+  "both_original_pipes_proved": true,
+  "exit": 1,
+  "signals": 0,
+  "release_attempted": false,
+  "retry_attempted": false,
+  "cim_birth_utc": "2026-10-02T13:51:22.6922470Z",
+  "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\native_marker_n1_body_control_resume_v1.ps1 -ManifestSha CBE31E438972BBCBF990DEE7202260649B59C4B998EC981DA2D9D3D46CFCE39E -Execute",
+  "command_sha256": "99837E72E21E264F2F32C57CEE27D0F9850B7416F115918A236FAED45804EDA9"
+}

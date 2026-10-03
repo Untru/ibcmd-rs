@@ -1,0 +1,76 @@
+{
+  "scope": "TWO unchanged packaging checks only with valid EOF stdin; original V3 failures and rejected V4 preserved; started-child Close fault tested",
+  "source_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "files": [
+    {
+      "bytes": 5966,
+      "sha256": "41C98733A34D2A9E30AD02AE3ED8348C46B357D316BA17975732A3AA1695FA10",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\run-final-packaging-v5.ps1"
+    },
+    {
+      "bytes": 6863,
+      "sha256": "E04B4445F1BAE4E300BBB5A252D648294C78A6588E21F640476D6AED827E70D4",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-packaging-v5-process.ps1"
+    },
+    {
+      "bytes": 10221,
+      "sha256": "3332F76CED461F354B66412152AB55C5D6F35533385D80220D28D87CF0BFA531",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3-frozen.json"
+    },
+    {
+      "bytes": 532,
+      "sha256": "F162E367B4700A4A73344A072C7CB80428B4C227D5B80B701655721C0A025049",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3\\outcome.json"
+    },
+    {
+      "bytes": 377,
+      "sha256": "3EA7645057018BBFFD1C997438285E55535640B886457006A9FF180AD991E32B",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3\\summary.txt"
+    },
+    {
+      "bytes": 1251,
+      "sha256": "36B9C81BBFA05F7FA69A9116A64BCA05390A4BA184A5289D8F7DAFF0CD1CD001",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3\\sbom.log"
+    },
+    {
+      "bytes": 1070,
+      "sha256": "6B51423CC5929A98377E3409C14D465C0EA3D629BFB792B1D1857C1D6BC5B1C4",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-combined-v3\\audit-release.log"
+    },
+    {
+      "bytes": 5074,
+      "sha256": "354671FA1942708728A7924ACF0750EE42B28F0261AB61C0FF320210C2CE624F",
+      "path": "F:\\ibcmd\\src\\ibcmd-rs-05-integration\\scripts\\generate_sbom.py"
+    },
+    {
+      "bytes": 8974,
+      "sha256": "A36AFA0D9D3B8A8B74D5B35AAD77A76B90034E999B62E0D6463795206DCCE3A9",
+      "path": "F:\\ibcmd\\src\\ibcmd-rs-05-integration\\scripts\\audit_release.py"
+    },
+    {
+      "bytes": 2536,
+      "sha256": "BF48356D8AEAF39707544E5D87FABED6A657A401C7A0CCC49F641B124A365598",
+      "path": "F:\\ibcmd\\src\\ibcmd-rs-05-integration\\Cargo.toml"
+    },
+    {
+      "bytes": 42611,
+      "sha256": "73CFCB44A27464A9C5A82C1A9A99D6A6A17325F004961F14C026CB51EBC226A4",
+      "path": "F:\\ibcmd\\src\\ibcmd-rs-05-integration\\Cargo.lock"
+    },
+    {
+      "bytes": 45082112,
+      "sha256": "44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38",
+      "path": "F:\\ibcmd\\src\\ibcmd-rs-05-integration\\target\\release\\ibcmd-rs.exe"
+    },
+    {
+      "bytes": 91819,
+      "sha256": "371AE7C46EB808759834F2B240E01A469ED613469AEC2553870828FD5CDB5372",
+      "path": "C:\\Program Files\\Python313\\Lib\\subprocess.py"
+    },
+    {
+      "bytes": 1467,
+      "sha256": "6D45B7C6E22BF4287FF4A68AD7F9D2898E5B6415557EFFB6FB67BA153E5FEA67",
+      "path": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\test-final-packaging-v5-stdin.ps1"
+    }
+  ]
+}

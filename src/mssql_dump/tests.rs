@@ -38202,7 +38202,7 @@ fn debug_moxel_invoice_1096_raw_format_slots() {
         output_indices
             .iter()
             .enumerate()
-            .filter(|(index, _)| *index + 1 >= 95 && *index + 1 <= 140)
+            .filter(|(index, _)| *index >= 94 && *index < 140)
             .map(|(index, format_index)| (index + 1, *format_index))
             .collect::<Vec<_>>()
     );

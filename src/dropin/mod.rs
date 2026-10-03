@@ -9,7 +9,9 @@
 //!   (`crate::mssql_config_apply`, [`apply`]): it moves the staged
 //!   configuration into the active one, refuses what needs a restructuring
 //!   (`требуется штатный config apply: ...`) and what a connected session
-//!   keeps from an exclusive lock;
+//!   keeps from an exclusive lock; `--dynamic=force` is served by the dynamic
+//!   apply (`crate::mssql_config_apply::dynamic`), which publishes a small
+//!   stage as a generation while sessions stay connected;
 //! - `infobase config save [--db] <file>` writes the configuration's rows as
 //!   a `.cf` (`crate::infobase::save_config`, Untru/ibcmd-rs#352);
 //! - every other native mode, command and option is recognized and refused

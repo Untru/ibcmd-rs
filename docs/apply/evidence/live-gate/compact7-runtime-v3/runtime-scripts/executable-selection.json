@@ -1,0 +1,43 @@
+{
+  "selection_environment": [
+    {
+      "value": ".COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.CPL",
+      "name": "PATHEXT"
+    },
+    {
+      "value": null,
+      "name": "PYTHONHOME"
+    },
+    {
+      "value": null,
+      "name": "PYTHONPATH"
+    },
+    {
+      "value": null,
+      "name": "PYTHONUSERBASE"
+    },
+    {
+      "value": null,
+      "name": "PYTHONNOUSERSITE"
+    }
+  ],
+  "path_sha256": "E0FC1D752521924A29C1B0D32AB9F7E32E24A194B682CEAB1C377404290DF7C4",
+  "commands": [
+    {
+      "path": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+      "name": "pwsh"
+    },
+    {
+      "path": "C:\\Program Files\\Python313\\python.exe",
+      "name": "python"
+    },
+    {
+      "path": "C:\\Program Files\\Microsoft SQL Server\\Client SDK\\ODBC\\180\\Tools\\Binn\\SQLCMD.EXE",
+      "name": "sqlcmd"
+    },
+    {
+      "path": "C:\\Program Files\\Git\\cmd\\git.exe",
+      "name": "git"
+    }
+  ]
+}

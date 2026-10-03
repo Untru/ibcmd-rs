@@ -1,0 +1,115 @@
+{
+  "native_snapshot": "native_first.json",
+  "own_snapshot": "own_first.json",
+  "before_snapshot": "own_before_final.json",
+  "history_mapping": {
+    "06cb0442-0c47-4fad-986a-f08f28287c1b": "06cb0442-0c47-4fad-986a-f08f28287c1b",
+    "2909f9dd-1510-4532-b1fa-94d314b2b11f": "2909f9dd-1510-4532-b1fa-94d314b2b11f"
+  },
+  "full_storage_equal": false,
+  "known_derived_help_search_cache_difference": true,
+  "registration_rows_and_keys_equal": true,
+  "prior_aliases_preserved_raw": true,
+  "raw_si_aliases_equal_ordinary": true,
+  "payload_differences": [
+    [
+      "Params",
+      "789702c6-d272-4008-9e55-db6f10687ae0.ui",
+      [
+        0,
+        24301,
+        "91d76b533f377d418e07ed30291c905bcf3f6e87b3bad5337139c8f3d8e21898"
+      ],
+      [
+        0,
+        24301,
+        "8732478bd93df47469cc9ca6a0842aab77593fdc7db14d646a0421dae09beda5"
+      ]
+    ],
+    [
+      "Params",
+      "97f2c291-1aa3-4d96-8266-82a958c7dfaf.ui",
+      [
+        0,
+        94,
+        "8fbc0711bb2cfd5140e80d362b443c1e3c739d421086b1e14ac651bd2e32dd2c"
+      ],
+      [
+        0,
+        94,
+        "dd001d8357c5e4b23b67aea675d44997072ea0bfeb9d228c8031582c81fbed1d"
+      ]
+    ],
+    [
+      "Params",
+      "siVersions",
+      [
+        0,
+        1273,
+        "a18cde2ae57acea39bffbe1e3e2e80821f9c8e539eb23609c1defcef60f5164a"
+      ],
+      [
+        0,
+        1273,
+        "12564c14f773c62dff4863e6200c40433545408d0791a10fab38ec342a743fc4"
+      ]
+    ],
+    [
+      "Files",
+      "MobileVersions.dat",
+      [
+        0,
+        37009,
+        "0e7daa23dca34d0c8d299ccb68acfd2f52d127e540649b02525ae376676cf309"
+      ],
+      [
+        0,
+        37009,
+        "71ecda02b297a95c03c9b10a907f595c1137c1c11c999e07cfb492e6a67d1285"
+      ]
+    ],
+    [
+      "Files",
+      "userDocs_ru.bin",
+      [
+        0,
+        47456,
+        "af20452e0ac5f8279c823ae9426c238c265a14af6ee38bfa1f3b9aa9b140b9d4"
+      ],
+      [
+        0,
+        47528,
+        "cae1d95a6a2e4b741634a2478fb135c1d712e1de44450c527cf987e72795aa69"
+      ]
+    ],
+    [
+      "Files",
+      "userPostings_ru.bin",
+      [
+        0,
+        536921,
+        "191ff8fc037ec650f4ec0e302964a965455c92f7c3e7f1bbe82a47801669149c"
+      ],
+      [
+        0,
+        537522,
+        "792f02b6495311a8893c658e8097e9933a3ee702ac8360432e4e8d1c14e7a075"
+      ]
+    ],
+    [
+      "Files",
+      "userVocabulary_ru.bin",
+      [
+        0,
+        105654,
+        "0adbf4d7b44a693bb9c2a6751485d1f383263530bf7ce8162bfac36a4e895b4b"
+      ],
+      [
+        0,
+        105710,
+        "fe236c5f5c4bfdf83316087e729cd876c8b7d5c5f343b6103052b111f3b663ad"
+      ]
+    ]
+  ],
+  "scope": "timestamps excluded from snapshot; independently generated version tokens/mobile head and licensing .ui listed explicitly; export/source equality is separate proof"
+}

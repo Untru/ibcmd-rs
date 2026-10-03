@@ -1,0 +1,14 @@
+{
+  "source_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "track": "coordinator-final-v3-bb3da9176ebd44ef8927906ef1b8f6c4",
+  "exit": 1,
+  "acquire_completed": true,
+  "exact_lease_sha256": "5875829FBEE33E164EA9E0DF98210322EA12B43B3F0B75883683232B11CA80B1",
+  "potential_held": false,
+  "released": true,
+  "child_execution_uncertain": false,
+  "gates_passed": false,
+  "failure": "Combined gate step missing, duplicated or failed",
+  "release_failure": null,
+  "finished_utc": "2026-10-02T07:30:28.0730966Z"
+}

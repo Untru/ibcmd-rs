@@ -1,0 +1,9 @@
+{
+  "exact_saved_process_identities_alive": [],
+  "own_worker_lease_absent": true,
+  "stopped_state": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\cluster\\stopped-state-20261002004805224.json",
+  "private_state_absent": true,
+  "checked_utc": "2026-10-01T21:49:41.6607343Z",
+  "no_new_sql_or_signals": true,
+  "observed_worker_owner": ""
+}

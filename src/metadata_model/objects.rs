@@ -57,6 +57,25 @@ pub(crate) fn layout(kind: &str) -> Option<&'static Layout> {
     })
 }
 
+/// Body-owning collection identities from the existing typed layouts.
+/// This reader does not alter encoding or admit a new dynamic body family.
+pub(crate) fn owned_body_classes(kind: &str) -> Option<Vec<(&'static str, &'static str)>> {
+    if let Some(layout) = layout(kind) {
+        return Some(
+            layout
+                .collections
+                .iter()
+                .filter_map(|(class, role)| match role {
+                    Coll::Forms => Some((*class, "Form")),
+                    Coll::Templates => Some((*class, "Template")),
+                    _ => None,
+                })
+                .collect(),
+        );
+    }
+    super::registers::owned_body_classes(kind).or_else(|| super::simple::owned_body_classes(kind))
+}
+
 // Collection class uuids (the platform's, not the configuration's).
 pub(crate) const TEMPLATES: &str = "3daea016-69b7-4ed4-9453-127911372fe6";
 pub(crate) const TS_ATTRIBUTES: &str = "888744e1-b616-11d4-9436-004095e12fc7";

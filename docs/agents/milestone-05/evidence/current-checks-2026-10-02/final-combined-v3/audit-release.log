@@ -1,0 +1,22 @@
+Traceback (most recent call last):
+  File "F:\ibcmd\src\ibcmd-rs-05-integration\scripts\audit_release.py", line 209, in <module>
+    main()
+    ~~~~^^
+  File "F:\ibcmd\src\ibcmd-rs-05-integration\scripts\audit_release.py", line 198, in main
+    audit_binary(binary)
+    ~~~~~~~~~~~~^^^^^^^^
+  File "F:\ibcmd\src\ibcmd-rs-05-integration\scripts\audit_release.py", line 66, in audit_binary
+    result = subprocess.run(
+        [str(binary), "--help"],
+    ...<3 lines>...
+        text=True,
+    )
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 556, in run
+    with Popen(*popenargs, **kwargs) as process:
+         ~~~~~^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 1004, in __init__
+    errread, errwrite) = self._get_handles(stdin, stdout, stderr)
+                         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Program Files\Python313\Lib\subprocess.py", line 1360, in _get_handles
+    p2cread = _winapi.GetStdHandle(_winapi.STD_INPUT_HANDLE)
+OSError: [WinError 6] Неверный дескриптор
