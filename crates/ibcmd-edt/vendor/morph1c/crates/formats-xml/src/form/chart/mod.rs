@@ -294,3 +294,4 @@ pub(crate) fn native_enum_binding(
 pub use semantic::normalize_big_decimal;
 
 pub(super) use semantic::{native_design_default, suppressed_design_fields};
+pub(super) use semantic::project_native_double_fields;

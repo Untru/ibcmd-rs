@@ -131,6 +131,12 @@ pub fn attach_form_body(
     descriptor_path: &Path,
     obj: &mut MetadataObject,
 ) -> Result<(), ConvertError> {
+    attach_form_body_with_semantics(format, kind, descriptor_path, obj, None)
+}
+pub(crate) fn attach_form_body_with_semantics(
+    format: Format, kind: &str, descriptor_path: &Path, obj: &mut MetadataObject,
+    annotation: Option<&formats_xml::form::NativeDataPathAnnotation>,
+) -> Result<(), ConvertError> {
     if format == Format::Cf {
         return Ok(()); // cf: container — no file-per-object sidecar to attach.
     }
@@ -286,6 +292,21 @@ pub fn attach_form_body(
                     kind: kind.into(), object: name.clone(), reason: error.to_string(),
                 })?;
             }
+        }
+
+        // Restore CURRENT rich path identities before Chart/Picture resources:
+        // their AdditionalColumns bindings use the current table path identity.
+        let uuid=declared_form_uuid(obj,&name)?;
+        let profile=morph1c_core::version::current_source_version().unwrap_or(morph1c_core::version::SSL);
+        let path_resource=if format==Format::Designer {
+            annotation.map(|a|a.form_resource(uuid)).transpose().map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?.flatten()
+        } else {
+            let resource=body_path.parent().expect("form parent").join(formats_xml::form::DATA_PATH_SEMANTICS_RESOURCE);
+            if resource.exists(){Some(read_regular_source(&resource).map_err(|e|ConvertError::Io{path:resource.display().to_string(),reason:e.to_string()})?)}else{None}
+        };
+        if let Some(bytes)=path_resource {
+            formats_xml::form::apply_data_path_semantics_resource(&mut body,uuid,dialect,profile,&bytes)
+                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
         }
 
         if format == Format::Designer {
@@ -1108,6 +1129,64 @@ pub(crate) fn form_module_path(format: Format, descriptor_path: &Path) -> Option
         }
         Format::Cf => None,
     }
+}
+
+/// CURRENT declared managed form identities using the same registered native
+/// layout as whole-config writing. No authored paths or body values are cached.
+#[doc(hidden)]
+pub fn native_form_bodies(
+    cfg: &morph1c_core::ir::Configuration,
+) -> Result<Vec<(String, morph1c_core::ir::Uuid, &FormBody)>, ConvertError> {
+    let format = Format::Designer;
+    let reg = crate::FormatRegistry::for_format(format)?;
+    let mut result = Vec::new();
+    let mut paths = std::collections::BTreeSet::new();
+    let mut uuids = std::collections::BTreeSet::new();
+    for obj in &cfg.objects {
+        if obj.form_bodies.is_empty() {
+            continue;
+        }
+        let kind = obj.kind.as_str();
+        let fk = reg
+            .get(kind)
+            .ok_or_else(|| ConvertError::NoWriter { kind: kind.into() })?;
+        let descriptor = if matches!(
+            fk.layout,
+            formats_xml::registry::CorpusLayout::Nested { .. }
+        ) {
+            crate::layout::nested_output_path(&reg, fk, Path::new(""), obj)?
+        } else {
+            crate::layout::output_path(&reg, fk, Path::new(""), &obj.name)
+                .ok_or_else(|| ConvertError::NoWriter { kind: kind.into() })?
+        };
+        for form in &obj.form_bodies {
+            if form.ordinary_body.is_some() {
+                continue;
+            }
+            let anchor = form_anchor_path(format, kind, &descriptor, &form.name)
+                .ok_or_else(|| ConvertError::NoWriter { kind: kind.into() })?;
+            let (body_path, _) = form_body_path(format, &anchor)
+                .ok_or_else(|| ConvertError::NoWriter { kind: kind.into() })?;
+            let path = body_path
+                .to_str()
+                .ok_or_else(|| ConvertError::Write {
+                    kind: kind.into(),
+                    object: obj.name.clone(),
+                    reason: "non-Unicode form path".into(),
+                })?
+                .replace('\\', "/");
+            let uuid = declared_form_uuid(obj, &form.name)?;
+            if !paths.insert(path.clone()) || !uuids.insert(uuid) {
+                return Err(ConvertError::Write {
+                    kind: kind.into(),
+                    object: obj.name.clone(),
+                    reason: "duplicate current form path/UUID".into(),
+                });
+            }
+            result.push((path, uuid, &form.body));
+        }
+    }
+    Ok(result)
 }
 
 #[cfg(any())]

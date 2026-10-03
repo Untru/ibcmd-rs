@@ -244,6 +244,51 @@ struct Resource {
     trends: Vec<TrendRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     designs: Vec<DesignRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    numbers: Vec<NumberRecord>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct NumberRecord {
+    attribute: Vec<AttributeEdge>,
+    chart_kind: String,
+    current_native_sha256: String,
+    current: Vec<(Vec<Step>, String)>,
+}
+fn number_paths(
+    chart: &mut ChartSettings,
+) -> Result<Vec<(Vec<Step>, String)>, FormError> {
+    use morph1c_core::ir::form::ChartLayoutSegment;
+    Ok(super::chart::project_native_double_fields(chart)?.into_iter().map(|(path, current)| {
+        (path.into_iter().map(|segment| match segment {
+            ChartLayoutSegment::Field(name) => Step::Field(name),
+            ChartLayoutSegment::Item(index) => Step::Item(index),
+        }).collect(), current)
+    }).collect())
+}
+fn restore_numbers(chart: &mut ChartSettings, row: &NumberRecord) -> Result<(), FormError> {
+    fn set(fields: &mut [(String, ChartValue)], path: &[Step], current: &str) -> Result<(), FormError> {
+        let Some(Step::Field(name)) = path.first() else { return Err(error("invalid numeric field path")); };
+        let value = &mut fields.iter_mut().find(|(n, _)| n == name)
+            .ok_or_else(|| error("orphan current numeric field"))?.1;
+        match &path[1..] {
+            [] => match value {
+                ChartValue::Int(number) => { *number = current.into(); Ok(()) },
+                _ => Err(error("wrong current numeric field kind")),
+            },
+            [Step::Item(index), rest @ ..] => match value {
+                ChartValue::Items(items) => set(items.get_mut(*index)
+                    .ok_or_else(|| error("orphan current numeric item"))?, rest, current),
+                _ => Err(error("wrong current numeric item kind")),
+            },
+            rest => match value {
+                ChartValue::Nested(children) => set(children, rest, current),
+                _ => Err(error("wrong current numeric container")),
+            },
+        }
+    }
+    for (path, current) in &row.current { set(&mut chart.fields, path, current)?; }
+    Ok(())
 }
 /// CURRENT typed collections suppressed by the SDK's explicit design flags.
 /// No previous chart body or projected values are stored in this payload.
@@ -280,7 +325,9 @@ fn project_design(
     Ok(())
 }
 fn design_digest(chart: &ChartSettings, native: bool) -> Result<String, FormError> {
-    let mut fields = chart.fields.clone();
+    let mut chart = chart.clone();
+    super::chart::project_native_double_fields(&mut chart)?;
+    let mut fields = chart.fields;
     if !native {
         project_values(&mut fields, &mut Vec::new(), false);
         fields = trend_transport::projected(&fields)?;
@@ -699,7 +746,7 @@ where
             action,
         )?;
         for (index, group) in attr.additional_columns.iter_mut().enumerate() {
-            let table = group.table_path.clone();
+            let table = group.table_path.primary();
             visit_attributes(
                 &mut group.columns,
                 path,
@@ -775,7 +822,7 @@ where
                 &group.columns,
                 path,
                 &|a| AttributeEdge::AdditionalColumn {
-                    table_path: group.table_path.clone(),
+                    table_path: group.table_path.primary(),
                     group: index,
                     name: a.name.clone(),
                     id: a.id,
@@ -831,6 +878,26 @@ fn collect(body: &FormBody, form_uuid: Uuid) -> Result<Resource, FormError> {
         projected = Some(copy);
     }
     let body = projected.as_ref().unwrap_or(body);
+    let mut numeric_body = body.clone();
+    let mut numbers = Vec::new();
+    visit_attributes(
+        &mut numeric_body.data_attributes,
+        &mut Vec::new(),
+        &|a| AttributeEdge::Attribute { name: a.name.clone(), id: a.id },
+        &mut |attribute, chart| {
+            let current = number_paths(chart)?;
+            if !current.is_empty() {
+                numbers.push(NumberRecord {
+                    attribute: attribute.to_vec(),
+                    chart_kind: chart.kind.clone(),
+                    current_native_sha256: design_digest(chart, false)?,
+                    current,
+                });
+            }
+            Ok(())
+        },
+    )?;
+    let body = &numeric_body;
     let mut records = Vec::new();
     let mut values = Vec::new();
     let mut trends = Vec::new();
@@ -928,6 +995,7 @@ fn collect(body: &FormBody, form_uuid: Uuid) -> Result<Resource, FormError> {
         records,
         values,
         trends,
+        numbers,
         designs,
     })
 }
@@ -938,11 +1006,33 @@ fn decode(bytes: &[u8]) -> Result<Resource, FormError> {
         || (value.records.is_empty()
             && value.values.is_empty()
             && value.trends.is_empty()
-            && value.designs.is_empty())
+            && value.designs.is_empty()
+            && value.numbers.is_empty())
     {
         return Err(error("unknown/empty chart resource schema"));
     }
     let mut seen = HashSet::new();
+    for row in &value.numbers {
+        if row.attribute.is_empty()
+            || !["Chart", "GanttChart"].contains(&row.chart_kind.as_str())
+            || row.current.is_empty()
+            || row.current_native_sha256.len() != 64
+            || !row.current_native_sha256.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            || !seen.insert(format!("number:{}", key(&row.attribute, &[])?))
+        {
+            return Err(error("invalid/duplicate current number binding"));
+        }
+        let mut paths = HashSet::new();
+        for (path, current) in &row.current {
+            if path.is_empty()
+                || !matches!(path.last(), Some(Step::Field(_)))
+                || !paths.insert(serde_json::to_string(path).map_err(|e| error(e.to_string()))?)
+                || ibcmd_number_format::parse_binary64(current).is_none()
+            {
+                return Err(error("invalid/duplicate current number payload"));
+            }
+        }
+    }
     for row in &value.records {
         if row.attribute.is_empty()
             || !["Chart", "GanttChart"].contains(&row.chart_kind.as_str())
@@ -1094,6 +1184,7 @@ pub fn project_chart_semantics(
         && resource.values.is_empty()
         && resource.trends.is_empty()
         && resource.designs.is_empty()
+        && resource.numbers.is_empty()
     {
         return Ok(None);
     }
@@ -1106,6 +1197,7 @@ pub fn project_chart_semantics(
             id: a.id,
         },
         &mut |attribute, chart| {
+            super::chart::project_native_double_fields(chart)?;
             if let Some(row) = resource.designs.iter().find(|r| r.attribute == attribute) {
                 project_design(chart, &row.current)?;
             }
@@ -1130,6 +1222,29 @@ pub fn apply_chart_semantics_resource(
     if resource.form_uuid != form_uuid {
         return Err(error("chart resource differs from declared form UUID"));
     }
+    let mut pending_numbers: HashSet<_> = resource.numbers.iter()
+        .map(|r| key(&r.attribute, &[])).collect::<Result<_, FormError>>()?;
+    inspect_attributes(
+        &body.data_attributes,
+        &mut Vec::new(),
+        &|a| AttributeEdge::Attribute { name: a.name.clone(), id: a.id },
+        &mut |attribute, chart| {
+            let Some(row) = resource.numbers.iter().find(|r| r.attribute == attribute) else { return Ok(()); };
+            if !pending_numbers.remove(&key(attribute, &[])?)
+                || chart.kind != row.chart_kind
+                || design_digest(chart, true)? != row.current_native_sha256
+            {
+                return Err(error("stale current numeric chart binding"));
+            }
+            let mut restored = chart.clone();
+            restore_numbers(&mut restored, row)?;
+            if number_paths(&mut restored)? != row.current || restored.fields != chart.fields {
+                return Err(error("current numeric payload conflicts with native projection"));
+            }
+            Ok(())
+        },
+    )?;
+    if !pending_numbers.is_empty() { return Err(error("orphan current numeric chart binding")); }
     let mut pending_designs: HashSet<_> = resource
         .designs
         .iter()
@@ -1397,6 +1512,9 @@ pub fn apply_chart_semantics_resource(
             if let Some(row) = resource.designs.iter().find(|r| r.attribute == attribute) {
                 restore_design(chart, row)?;
             }
+            if let Some(row) = resource.numbers.iter().find(|r| r.attribute == attribute) {
+                restore_numbers(chart, row)?;
+            }
             Ok(())
         },
     )?;
@@ -1437,6 +1555,7 @@ pub fn chart_semantics_resource_count(body: &FormBody) -> Result<Option<usize>, 
         .checked_add(resource.values.len())
         .and_then(|n| n.checked_add(resource.trends.len()))
         .and_then(|n| n.checked_add(resource.designs.len()))
+        .and_then(|n| n.checked_add(resource.numbers.len()))
         .ok_or_else(|| error("chart reference count overflow"))?;
     Ok((count > 0).then_some(count))
 }

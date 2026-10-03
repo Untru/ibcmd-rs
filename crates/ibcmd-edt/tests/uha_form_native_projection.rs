@@ -726,7 +726,7 @@ fn whole_metadata_projection_resolves_current_wildcards_names_and_register_roles
         "List.Recorder",
         "List.Period",
     ]
-    .map(String::from)
+    .map(morph1c_core::ir::form::DataPathSpec::from_form_text)
     .to_vec();
     let paths = |cfg: &Configuration, body: &FormBody, minor| {
         let context = FormProjectionContext::new(cfg).unwrap();
@@ -1078,8 +1078,10 @@ fn current_metadata_field_roles_follow_sdk_keys_and_hierarchy_kind() {
             let mut body = dynamic_body(&format!(
                 "<mainTable>{kind}.Object</mainTable><customQuery>true</customQuery><autoFillAvailableFields>true</autoFillAvailableFields><queryText>SELECT 1 AS Selected FROM {kind}.Object AS R</queryText>"
             ));
-            body.data_attributes[0].not_default_use_always =
-                fields.iter().map(|f| format!("List.{f}")).collect();
+            body.data_attributes[0].not_default_use_always = fields
+                .iter()
+                .map(|f| morph1c_core::ir::form::DataPathSpec::from_form_text(&format!("List.{f}")))
+                .collect();
             let context = FormProjectionContext::new(&config).unwrap();
             let native = with_roundtrip_target(version, || {
                 write_form_with_context(FormDialect::Designer, &body, &context)
@@ -1132,7 +1134,7 @@ fn current_identifier_lookup_uses_java_simple_case_without_rewriting_paths() {
         );
         body.data_attributes[0].not_default_use_always =
             ["List.σ", "List.ς", "List.s", "List.i", "List.I", "List.ss"]
-                .map(String::from)
+                .map(morph1c_core::ir::form::DataPathSpec::from_form_text)
                 .to_vec();
         let context = FormProjectionContext::new(&config).unwrap();
         let native = with_roundtrip_target(FormatVersion::new(2, minor), || {

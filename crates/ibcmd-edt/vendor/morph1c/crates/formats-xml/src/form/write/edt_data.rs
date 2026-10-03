@@ -73,14 +73,14 @@ pub(crate) fn edt_data_attribute_named(a: &FormDataAttribute, tag: &str) -> Resu
     for p in &a.not_default_use_always {
         let mut s = OutElement::branch("", "notDefaultUseAlwaysAttributes")
             .attr("xsi:type", "form:DataPath");
-        s.push(OutElement::leaf("", "segments", p.clone()));
+        s.push(OutElement::leaf("", "segments", p.primary()));
         el.push(s);
     }
     // settingsSavedData — ПЕРЕД main (SSL: settingsSavedData<main×7, 0 контрпримеров;
     // witness УстановкаОбновлений.Форма «Объект»).
     for p in &a.settings_saved_data {
         let mut s = OutElement::branch("", "settingsSavedData").attr("xsi:type", "form:DataPath");
-        s.push(OutElement::leaf("", "segments", p.clone()));
+        s.push(OutElement::leaf("", "segments", p.primary()));
         el.push(s);
     }
     if a.main {
@@ -100,7 +100,7 @@ pub(crate) fn edt_data_attribute_named(a: &FormDataAttribute, tag: &str) -> Resu
     for ac in &a.additional_columns {
         let mut ace = OutElement::branch("", "additionalColumns");
         let mut tp = OutElement::branch("", "tablePath").attr("xsi:type", "form:DataPath");
-        tp.push(OutElement::leaf("", "segments", ac.table_path.clone()));
+        tp.push(OutElement::leaf("", "segments", ac.table_path.primary()));
         ace.push(tp);
         for col in &ac.columns {
             ace.push(edt_data_attribute_named(col, "columns")?);

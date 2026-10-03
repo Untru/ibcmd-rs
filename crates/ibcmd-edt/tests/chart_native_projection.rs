@@ -28,6 +28,160 @@ fn roundtrip(body: &FormBody) -> (FormBody, Vec<u8>, Vec<u8>) {
     );
     (decoded, native, resource)
 }
+
+#[test]
+fn series_empty_text_follows_current_map_and_actual_inherited_force() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target};
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let mut body = chart(
+                "<isSeriesDesign>true</isSeriesDesign><realExSeriesData><properties><id>20</id></properties></realExSeriesData>",
+            );
+            let (_, native, _) = roundtrip(&body);
+            let text = std::str::from_utf8(&native).unwrap();
+            let series = text
+                .split("<d4p1:realExSeriesData>")
+                .nth(1)
+                .unwrap()
+                .split("</d4p1:realExSeriesData>")
+                .next()
+                .unwrap();
+            assert!(!series.contains("<d4p1:text"));
+
+            let settings = body.data_attributes[0].chart_settings.as_mut().unwrap();
+            let ChartValue::Nested(series) = &mut settings
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "realExSeriesData")
+                .unwrap()
+                .1
+            else {
+                panic!()
+            };
+            series
+                .iter_mut()
+                .find(|(name, _)| name == "text")
+                .unwrap()
+                .1 = ChartValue::Localized(vec![(
+                morph1c_core::ir::Lang::new("en"),
+                "Current title".into(),
+            )]);
+            let (decoded, current, _) = roundtrip(&body);
+            assert!(
+                std::str::from_utf8(&current)
+                    .unwrap()
+                    .contains("Current title")
+            );
+            assert_eq!(
+                decoded.data_attributes[0].chart_settings,
+                body.data_attributes[0].chart_settings
+            );
+
+            let settings = body.data_attributes[0].chart_settings.as_mut().unwrap();
+            let ChartValue::Nested(series) = &mut settings
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "realExSeriesData")
+                .unwrap()
+                .1
+            else {
+                panic!()
+            };
+            series
+                .iter_mut()
+                .find(|(name, _)| name == "text")
+                .unwrap()
+                .1 = ChartValue::Localized(Vec::new());
+            let (_, cleared, _) = roundtrip(&body);
+            assert_eq!(cleared, native);
+            // A native source wrapper remains a source spelling; its current map is empty.
+            let close = text
+                .lines()
+                .find(|line| line.trim() == "</d4p1:realExSeriesData>")
+                .unwrap();
+            let indent = &close[..close.len() - close.trim_start().len()];
+            let with_empty = text.replace(close, &format!("{indent}\t<d4p1:text/>\r\n{close}"));
+            let source = read_form(FormDialect::Designer, with_empty.as_bytes()).unwrap();
+            assert_eq!(
+                write_form(FormDialect::Designer, &source).unwrap(),
+                with_empty.as_bytes()
+            );
+        });
+    }
+}
+
+#[test]
+#[ignore = "fresh F-only native platform materialization fixtures; never configuration acceptance"]
+fn capture_native_chart_materialization_matrix() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target};
+    let root = std::path::PathBuf::from(
+        std::env::var("IBCMD_CHART_NATIVE_MATRIX_CAPTURE").expect("fresh lab path"),
+    );
+    assert!(root.is_absolute() && root.starts_with("F:/ibcmd/lab/07"));
+    std::fs::create_dir(&root).unwrap();
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let profile = root.join(format!("2.{minor}"));
+            std::fs::create_dir(&profile).unwrap();
+            for (name, content) in [
+                ("font-null", "<pointsScale><titleArea/></pointsScale>"),
+                (
+                    "font-auto",
+                    "<pointsScale><titleArea><font xsi:type=\"core:AutoFont\"/></titleArea></pointsScale>",
+                ),
+                (
+                    "font-absolute",
+                    "<pointsScale><titleArea><font xsi:type=\"core:FontDef\"><faceName>Arial</faceName><height>12</height></font></titleArea></pointsScale>",
+                ),
+                (
+                    "border-default",
+                    "<pointsScale><titleArea><border xsi:type=\"core:BorderDef\"><width>1</width></border></titleArea></pointsScale>",
+                ),
+                ("label-area-null", "<pointsScale><titleArea/></pointsScale>"),
+                (
+                    "label-area-native-empty",
+                    "<pointsScale><titleArea/></pointsScale>",
+                ),
+            ] {
+                let mut body = chart(content);
+                if name == "label-area-null" {
+                    let settings = body.data_attributes[0].chart_settings.as_mut().unwrap();
+                    let ChartValue::Nested(scale) = &mut settings
+                        .fields
+                        .iter_mut()
+                        .find(|(n, _)| n == "pointsScale")
+                        .unwrap()
+                        .1
+                    else {
+                        panic!()
+                    };
+                    scale.iter_mut().find(|(n, _)| n == "titleArea").unwrap().1 =
+                        ChartValue::Absent;
+                }
+                let mut native = write_form(FormDialect::Designer, &body).unwrap();
+                if name == "label-area-native-empty" {
+                    let mut text = String::from_utf8(native).unwrap();
+                    let scale_start = text.find("<d4p1:pointsScale>").unwrap();
+                    let start = scale_start + text[scale_start..].find("<d4p1:titleArea>").unwrap();
+                    let end = start
+                        + text[start..].find("</d4p1:titleArea>").unwrap()
+                        + "</d4p1:titleArea>".len();
+                    text.replace_range(start..end, "<d4p1:titleArea/>");
+                    native = text.into_bytes();
+                }
+                let case = profile.join(name);
+                std::fs::create_dir(&case).unwrap();
+                std::fs::write(case.join("Form.xml"), &native).unwrap();
+                std::fs::write(
+                    case.join("current-chart.json"),
+                    serde_json::to_vec_pretty(&body.data_attributes[0].chart_settings).unwrap(),
+                )
+                .unwrap();
+                assert!(read_form(FormDialect::Designer, &native).is_ok());
+            }
+        });
+    }
+}
 #[test]
 fn suppressed_design_collections_keep_current_order_edits_and_binding() {
     let mut body = chart(
@@ -216,7 +370,7 @@ fn native_factory_scales_omit_only_complete_defaults_and_axes_remain_forced() {
     assert!(!text.contains("<d4p1:additionalValuesScale"));
     assert!(text.contains("<d4p1:valuesAxis/>"));
     assert!(text.contains("<d4p1:pointsAxis/>"));
-    assert!(text.contains("<d4p1:text/>"));
+    assert!(!text.contains("<d4p1:text/>"));
     assert_eq!(
         read_form(FormDialect::Designer, &native)
             .unwrap()
@@ -656,11 +810,14 @@ fn platform_funnel_spelling_and_native_source_fraction_presence_use_current_numb
 }
 
 #[test]
-fn native_edouble_uses_java17_digits_without_remembering_previous_numbers() {
+fn native_edouble_uses_sdk_long_projection_and_preserves_current_binary64() {
     for (number, native) in [
-        ("1e23", "9.999999999999999E22"),
+        ("1e23", "9223372036854775807"),
+        ("-1e23", "-9223372036854775808"),
         ("5e-324", "4.9E-324"),
-        ("-0", "-0.0"),
+        ("-0", "0"),
+        ("17", "17"),
+        ("17.25", "17.25"),
         ("Infinity", "Infinity"),
     ] {
         let body = chart(&format!("<userMaxValue>{number}</userMaxValue>"));
@@ -685,6 +842,111 @@ fn native_edouble_uses_java17_digits_without_remembering_previous_numbers() {
 }
 
 #[test]
+fn lossy_edouble_resource_is_current_closed_and_bound_before_mutation() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target};
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let body = chart("<userMinValue>-0.0</userMinValue><userMaxValue>1e23</userMaxValue>");
+            let (_, native, resource) = roundtrip(&body);
+            let payload: serde_json::Value = serde_json::from_slice(&resource).unwrap();
+            assert_eq!(payload["numbers"].as_array().unwrap().len(), 1);
+            assert_eq!(
+                payload["numbers"][0]["current"].as_array().unwrap().len(),
+                2
+            );
+            let mut stale = read_form(FormDialect::Designer, &native).unwrap();
+            stale.data_attributes[0]
+                .chart_settings
+                .as_mut()
+                .unwrap()
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "userMaxValue")
+                .unwrap()
+                .1 = ChartValue::Int("41".into());
+            let before = stale.clone();
+            assert!(apply_chart_semantics_resource(&mut stale, Uuid([1; 16]), &resource).is_err());
+            assert_eq!(stale, before);
+            for bad in [
+                {
+                    let mut p = payload.clone();
+                    let row = p["numbers"][0].clone();
+                    p["numbers"].as_array_mut().unwrap().push(row);
+                    p
+                },
+                {
+                    let mut p = payload.clone();
+                    p["numbers"][0]["unknown"] = serde_json::json!(true);
+                    p
+                },
+                {
+                    let mut p = payload.clone();
+                    p["numbers"][0]["current"][0][0] =
+                        serde_json::json!([{"Field":"unknownCurrentNumber"}]);
+                    p
+                },
+                {
+                    let mut p = payload.clone();
+                    p["numbers"][0]["current"][0][1] = serde_json::json!("17");
+                    p
+                },
+            ] {
+                let mut native_body = read_form(FormDialect::Designer, &native).unwrap();
+                let before = native_body.clone();
+                assert!(
+                    apply_chart_semantics_resource(
+                        &mut native_body,
+                        Uuid([1; 16]),
+                        &serde_json::to_vec(&bad).unwrap()
+                    )
+                    .is_err()
+                );
+                assert_eq!(native_body, before);
+            }
+            let ordinary = chart("<userMaxValue>17.25</userMaxValue>");
+            if let Some((_, ordinary_resource)) =
+                project_chart_semantics(&ordinary, Uuid([1; 16])).unwrap()
+            {
+                let ordinary_payload: serde_json::Value =
+                    serde_json::from_slice(&ordinary_resource).unwrap();
+                assert!(ordinary_payload.get("numbers").is_none());
+            }
+            let (_, output, _) = roundtrip(&ordinary);
+            assert!(
+                std::str::from_utf8(&output)
+                    .unwrap()
+                    .contains("<d4p1:userMaxValue>17.25</")
+            );
+        });
+    }
+}
+
+#[test]
+fn lossy_edouble_and_visible_flags_bind_hidden_design_in_one_atomic_resource() {
+    let body = chart(
+        "<userMinValue>-0</userMinValue><userMaxValue>1e23</userMaxValue><isSeriesDesign>false</isSeriesDesign><realSeriesData><properties><id>11</id><text><key>en</key><value>Current hidden title</value></text></properties></realSeriesData><realDataItems><dataValue xsi:type=\"core:NumberValue\"><value>37.5</value></dataValue><isToolTipFormatted>true</isToolTipFormatted></realDataItems>",
+    );
+    let (_, native, resource) = roundtrip(&body);
+    let payload: serde_json::Value = serde_json::from_slice(&resource).unwrap();
+    for name in ["designs", "numbers", "records"] {
+        assert_eq!(payload[name].as_array().unwrap().len(), 1, "{name}");
+    }
+    let mut changed = read_form(FormDialect::Designer, &native).unwrap();
+    changed.data_attributes[0]
+        .chart_settings
+        .as_mut()
+        .unwrap()
+        .fields
+        .iter_mut()
+        .find(|(name, _)| name == "userMinValue")
+        .unwrap()
+        .1 = ChartValue::Int("7".into());
+    let before = changed.clone();
+    assert!(apply_chart_semantics_resource(&mut changed, Uuid([1; 16]), &resource).is_err());
+    assert_eq!(changed, before);
+}
+
+#[test]
 fn funnel_current_efloat_rounding_is_distinct_from_edouble_and_big_decimal() {
     use morph1c_core::version::{FormatVersion, with_roundtrip_target};
     for minor in [20, 21] {
@@ -706,7 +968,7 @@ fn funnel_current_efloat_rounding_is_distinct_from_edouble_and_big_decimal() {
                 let (_, output, _) = roundtrip(&body);
                 let output = String::from_utf8(output).unwrap();
                 assert!(output.contains(&format!("<d4p1:funnelNeckHeightPercent>{native}</")));
-                assert!(output.contains("<d4p1:userMaxValue>1.6777217E7</"));
+                assert!(output.contains("<d4p1:userMaxValue>16777217</"));
             }
             assert_eq!(
                 chart("<userMaxValue>0.10000000000000001</userMaxValue>").data_attributes[0]
@@ -741,11 +1003,25 @@ fn native_number_layout_never_overrides_current_binary_rounding() {
         .find(|(n, _)| n == "userMaxValue")
         .unwrap()
         .1 = ChartValue::Int("1e23".into());
-    let output = write_form(FormDialect::Designer, &current).unwrap();
+    let (projected, resource) = project_chart_semantics(&current, Uuid([1; 16]))
+        .unwrap()
+        .unwrap();
+    let payload: serde_json::Value = serde_json::from_slice(&resource).unwrap();
+    let numbers = payload["numbers"].as_array().unwrap();
+    assert_eq!(numbers.len(), 1);
+    assert_eq!(numbers[0]["current"].as_array().unwrap().len(), 1);
+    assert!(numbers[0]["current"].to_string().contains("userMaxValue"));
+    assert!(
+        !numbers[0]["current"]
+            .to_string()
+            .contains("funnelNeckHeightPercent")
+    );
+    let output = write_form(FormDialect::Designer, &projected).unwrap();
     let text = std::str::from_utf8(&output).unwrap();
     assert!(text.contains("<d4p1:funnelNeckHeightPercent>1.6777216E7</"));
-    assert!(text.contains("<d4p1:userMaxValue>9.999999999999999E22</"));
-    let decoded = read_form(FormDialect::Designer, &output).unwrap();
+    assert!(text.contains("<d4p1:userMaxValue>9223372036854775807</"));
+    let mut decoded = read_form(FormDialect::Designer, &output).unwrap();
+    apply_chart_semantics_resource(&mut decoded, Uuid([1; 16]), &resource).unwrap();
     let expected = chart(
         "<funnelNeckHeightPercent>16777217</funnelNeckHeightPercent><userMaxValue>1e23</userMaxValue>",
     );
@@ -787,7 +1063,8 @@ fn chart_float_inputs_follow_original_emf_grammar_for_current_values_only() {
                 let (_, native, _) = roundtrip(&body);
                 let text = String::from_utf8(native).unwrap();
                 assert!(text.contains(&format!("<d4p1:funnelNeckHeightPercent>{expected}</")));
-                assert!(text.contains(&format!("<d4p1:userMaxValue>{expected}</")));
+                let double_expected = if expected == "3.0" { "3" } else { expected };
+                assert!(text.contains(&format!("<d4p1:userMaxValue>{double_expected}</")));
             }
             for lexical in ["inf", "NaNf", "InfinityD", "１２.５", "0x1", "1.2.3"] {
                 let source = format!(

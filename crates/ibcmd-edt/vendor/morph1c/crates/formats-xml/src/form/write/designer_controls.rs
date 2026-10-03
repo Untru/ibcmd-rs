@@ -13,6 +13,7 @@ pub(crate) fn designer_table_control(
     ext: &'static [FieldProj],
     order: &'static [DesSlot],
 ) -> Result<OutElement, FormError> {
+    item.validate_additions().map_err(|e| FormError::Frame(e.into()))?;
     let mut el = OutElement::branch("", tag)
         .attr("name", item.name.clone())
         .attr("id", item.id.to_string());
@@ -335,6 +336,7 @@ pub(crate) fn designer_addition(item: &FormItem) -> Result<OutElement, FormError
         }
         el.push(ci);
     }
+    super::native_order::apply(&mut el);
     Ok(el)
 }
 
@@ -608,12 +610,12 @@ pub(crate) fn designer_data_attribute_named(
     // Сигила `~` («поле не входит в состав полей динамического списка») — DESIGNER-ONLY
     // денормализация, снятая на чтении в канон (EDT-написание). Возвращаем её РОВНО тем путям,
     // что её несли (`designer_unavailable_paths`). См. `FormDataAttribute` в ir/form.rs.
-    let sigil = |p: &String| -> String {
-        if super::super::availability::marked(p, a.designer_unavailable_paths.contains(p)) {
-            format!("~{p}")
-        } else {
-            p.clone()
-        }
+    let sigil = |p: &morph1c_core::ir::form::DataPathSpec| -> String {
+        let primary = p.primary();
+        let unresolved = super::super::availability::marked(&primary, a.designer_unavailable_paths.contains(&primary));
+        let mut out = if unresolved { format!("~{primary}") } else { primary };
+        if unresolved { for extra in &p.extra_paths { out.push('~'); out.push_str(extra); } }
+        out
     };
     if !a.not_default_use_always.is_empty() {
         let mut u = OutElement::branch("", "UseAlways");
@@ -674,12 +676,12 @@ pub(crate) fn designer_data_attribute_named(
             if ac.columns.is_empty() {
                 cols.push(
                     OutElement::self_closing("", "AdditionalColumns")
-                        .attr("table", ac.table_path.clone()),
+                        .attr("table", ac.table_path.primary()),
                 );
                 continue;
             }
             let mut ace =
-                OutElement::branch("", "AdditionalColumns").attr("table", ac.table_path.clone());
+                OutElement::branch("", "AdditionalColumns").attr("table", ac.table_path.primary());
             for col in &ac.columns {
                 ace.push(designer_data_attribute_named(col, "Column")?);
             }

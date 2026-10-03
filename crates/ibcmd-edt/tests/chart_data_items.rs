@@ -1,8 +1,9 @@
 use formats_xml::form::{
-    FormDialect, read_chart_sidecar, read_form, write_chart_sidecar, write_form,
+    FormDialect, apply_chart_semantics_resource, project_chart_semantics, read_chart_sidecar,
+    read_form, write_chart_sidecar, write_form,
 };
 use morph1c_core::ir::{
-    FormBody,
+    FormBody, Uuid,
     form::{ChartSettings, ChartValue},
 };
 
@@ -20,14 +21,23 @@ fn body(settings: ChartSettings) -> FormBody {
     body.data_attributes[0].chart_settings = Some(settings);
     body
 }
+fn projected_native(settings: &ChartSettings) -> (Vec<u8>, Vec<u8>) {
+    let current = body(settings.clone());
+    let (projected, resource) = project_chart_semantics(&current, Uuid([7; 16]))
+        .unwrap()
+        .unwrap_or_else(|| (current.clone(), Vec::new()));
+    (
+        write_form(FormDialect::Designer, &projected).unwrap(),
+        resource,
+    )
+}
 fn through_native(settings: &ChartSettings) -> ChartSettings {
-    let output = write_form(FormDialect::Designer, &body(settings.clone())).unwrap();
-    read_form(FormDialect::Designer, &output)
-        .unwrap()
-        .data_attributes[0]
-        .chart_settings
-        .clone()
-        .unwrap()
+    let (output, resource) = projected_native(settings);
+    let mut returned = read_form(FormDialect::Designer, &output).unwrap();
+    if !resource.is_empty() {
+        apply_chart_semantics_resource(&mut returned, Uuid([7; 16]), &resource).unwrap();
+    }
+    returned.data_attributes[0].chart_settings.clone().unwrap()
 }
 fn items(settings: &mut ChartSettings) -> &mut Vec<Vec<(String, ChartValue)>> {
     let ChartValue::Items(items) = &mut settings
@@ -93,9 +103,8 @@ fn native_aliases_use_expanded_types_instead_of_becoming_system_enumerations() {
         "<dataValue xsi:type=\"core:FixedArrayValue\"><values xsi:type=\"core:NumberValue\"><value>2</value></values><values xsi:type=\"core:StringValue\"><value>ordered</value></values></dataValue>",
     ] {
         let settings = chart(&format!("<realDataItems>{content}</realDataItems>"));
-        let native =
-            String::from_utf8(write_form(FormDialect::Designer, &body(settings.clone())).unwrap())
-                .unwrap();
+        let (native, resource) = projected_native(&settings);
+        let native = String::from_utf8(native).unwrap();
         let start = native.find("<d4p1:dataValue").unwrap();
         let end =
             start + native[start..].find("</d4p1:dataValue>").unwrap() + "</d4p1:dataValue>".len();
@@ -120,7 +129,10 @@ fn native_aliases_use_expanded_types_instead_of_becoming_system_enumerations() {
             aliased = aliased.replace(&format!(">{prefix}:"), &format!(">{alias}:"));
         }
         let rewritten = format!("{}{}{}", &native[..start], aliased, &native[end..]);
-        let returned = read_form(FormDialect::Designer, rewritten.as_bytes()).unwrap();
+        let mut returned = read_form(FormDialect::Designer, rewritten.as_bytes()).unwrap();
+        if !resource.is_empty() {
+            apply_chart_semantics_resource(&mut returned, Uuid([7; 16]), &resource).unwrap();
+        }
         assert_eq!(
             returned.data_attributes[0].chart_settings.as_ref().unwrap(),
             &settings
@@ -133,6 +145,57 @@ fn native_aliases_use_expanded_types_instead_of_becoming_system_enumerations() {
             .replace("http://v8.1c.ru/8.1/data/core", "http://wrong.example/core")
             .replace("http://v8.1c.ru/8.1/data/ui", "http://wrong.example/ui");
         assert!(read_form(FormDialect::Designer, wrong.as_bytes()).is_err());
+    }
+}
+
+#[test]
+fn native_factory_series_is_distinct_from_current_absence_and_requires_bound_transport() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target};
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let current = chart("<realDataItems><tooltip>current item</tooltip></realDataItems>");
+            let series = |settings: &ChartSettings| {
+                settings
+                    .fields
+                    .iter()
+                    .find(|(name, _)| name == "realExSeriesData")
+                    .unwrap()
+                    .1
+                    .clone()
+            };
+            assert_eq!(series(&current), ChartValue::Absent);
+            let native = write_form(FormDialect::Designer, &body(current.clone())).unwrap();
+            let bare = read_form(FormDialect::Designer, &native).unwrap();
+            assert!(matches!(
+                series(bare.data_attributes[0].chart_settings.as_ref().unwrap()),
+                ChartValue::Nested(_)
+            ));
+            assert_ne!(
+                bare.data_attributes[0].chart_settings.as_ref().unwrap(),
+                &current
+            );
+
+            let (native, resource) = projected_native(&current);
+            assert!(!resource.is_empty());
+            let mut restored = read_form(FormDialect::Designer, &native).unwrap();
+            apply_chart_semantics_resource(&mut restored, Uuid([7; 16]), &resource).unwrap();
+            assert_eq!(
+                restored.data_attributes[0].chart_settings.as_ref().unwrap(),
+                &current
+            );
+
+            let mut edited = read_form(FormDialect::Designer, &native).unwrap();
+            let settings = edited.data_attributes[0].chart_settings.as_mut().unwrap();
+            settings
+                .fields
+                .iter_mut()
+                .find(|(name, _)| name == "chartType")
+                .unwrap()
+                .1 = ChartValue::Enum("Pie".into());
+            let before = edited.clone();
+            assert!(apply_chart_semantics_resource(&mut edited, Uuid([7; 16]), &resource).is_err());
+            assert_eq!(edited, before);
+        });
     }
 }
 

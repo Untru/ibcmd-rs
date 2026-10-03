@@ -272,3 +272,35 @@ The extension ledger
 reports actual resources and owner records; a bare SDK native projection alone
 cannot preserve all this state. Complete project conversion and matched SDK
 validation remain separate acceptance gates.
+
+## CURRENT form paths and coupled native accounting
+
+AbstractDataPath retains semantic segments and ordered extra paths. Legacy scalar
+paths remain compatible. The EDT form extension carries only values that its
+standard projection cannot represent. Native XML uses one closed typed comment
+in ConfigDumpInfo.xml, with the CURRENT declared metadata roster and no invented
+platform incremental checksums. Unknown transport versions, duplicate or deleted
+owners, stale counterpart values and profile mismatches are errors.
+
+The normal complete configuration reader restores the typed values and verifies
+all global UUID/context bindings before publication. Coupled body accounting
+requires equality of the complete CURRENT configuration and complete restored
+FormBody at its exact registered UUID/path. Errors from structural comparison
+remain errors; unrelated artifacts keep their existing complete comparison.
+A plain source ConfigDumpInfo retains its original bytes through provenance,
+separately from the regenerated CURRENT control. The tests exercise both memory
+and directory conversions, removal of provenance, CURRENT edits and forged data.
+
+Dynamic-list required fields use selected backing definitions independently of
+query aliases. Result batches and UNION operators own separate source namespaces;
+only actual standard definitions in CURRENT metadata receive language twins.
+The SDK public Order property is available independently of query columns.
+Table additions are three distinct singleton features; duplicate assignments
+are errors. Their semantic serialization does not reorder real child lists.
+
+Native chart numeric output follows the original SDK primitive rounding and
+integral long conversion. The existing chart transport preserves genuinely
+lossy CURRENT binary64 values with the full projected counterpart binding.
+Lexical layout does not substitute saved numeric values after an edit.
+These focused corrections do not establish complete installed-EDT, native import
+or large-corpus acceptance; the milestone gates remain separate.

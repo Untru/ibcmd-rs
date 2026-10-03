@@ -52,7 +52,7 @@ pub(crate) fn read_designer_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>
         let command_parameter = item
             .child("Attribute")
             .filter(|c| c.prefix.is_empty())
-            .map(|_| leaf_text(item, "Attribute"))
+            .map(|_| super::super::data_path::current(&super::super::data_path::read_native(&leaf_text(item, "Attribute")?)?))
             .transpose()?;
         // Type — Designer эмитит всегда (101/101: Auto/Added).
         let ty_el = item
@@ -769,7 +769,7 @@ pub(crate) fn read_designer_data_attribute(el: &Element) -> Result<FormDataAttri
         {
             f.claim_with_text();
             expect_no_children(f)?;
-            settings_saved_data.push(strip_field_sigil(&f.text, &mut designer_unavailable_paths));
+            settings_saved_data.push(strip_field_sigil(&f.text, &mut designer_unavailable_paths)?);
         }
         expect_only_children(s, &["Field"])?;
         if settings_saved_data.is_empty() {
@@ -807,7 +807,7 @@ pub(crate) fn read_designer_data_attribute(el: &Element) -> Result<FormDataAttri
             f.claim_with_text();
             expect_no_children(f)?;
             not_default_use_always
-                .push(strip_field_sigil(&f.text, &mut designer_unavailable_paths));
+                .push(strip_field_sigil(&f.text, &mut designer_unavailable_paths)?);
         }
         expect_only_children(u, &["Field"])?;
         if not_default_use_always.is_empty() {
@@ -836,7 +836,7 @@ pub(crate) fn read_designer_data_attribute(el: &Element) -> Result<FormDataAttri
             .filter(|c| c.local == "AdditionalColumns" && c.prefix.is_empty())
         {
             ac.claim();
-            let table_path = attr_value(ac, "table")?;
+            let table_path = super::super::data_path::current(&super::super::data_path::read_native(&attr_value(ac, "table")?)?)?;
             let mut inner = Vec::new();
             for c in ac
                 .children
@@ -960,14 +960,10 @@ pub(crate) fn read_designer_data_attribute(el: &Element) -> Result<FormDataAttri
 /// [`morph1c_core::ir::FormDataAttribute::designer_unavailable_paths`] (write_designer возвращает
 /// сигилу, X зануляет). §1.0: точный предикат платформы («лист не выбирает это поле в своём
 /// запросе») требует разбора текста запроса — несём НАБЛЮДЁННЫЙ бит, а не угаданное правило.
-pub(crate) fn strip_field_sigil(text: &str, marked: &mut Vec<String>) -> String {
-    match text.strip_prefix('~') {
-        Some(bare) => {
-            marked.push(bare.to_string());
-            bare.to_string()
-        }
-        None => text.to_string(),
-    }
+pub(crate) fn strip_field_sigil(text: &str, marked: &mut Vec<String>) -> Result<morph1c_core::ir::form::DataPathSpec, FormError> {
+    let path = super::super::data_path::current(&super::super::data_path::read_native(text)?)?;
+    if text.starts_with('~') { marked.push(path.primary()); }
+    Ok(path)
 }
 
 /// Прочитать Designer `<Settings xsi:type="DynamicList">` (SIMPLE-форма) → [`DynamicListAttrExt`].

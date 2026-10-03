@@ -210,7 +210,7 @@ pub(crate) fn edt_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
         if let Some(path) = &it.command_parameter {
             let mut parameter =
                 OutElement::branch("", "commandParameter").attr("xsi:type", "form:DataPath");
-            parameter.push(OutElement::leaf("", "segments", path.clone()));
+            parameter.push(OutElement::leaf("", "segments", path.primary()));
             rec.push(parameter);
         }
         // group и index НЕЗАВИСИМЫ (census ERP): EDT эмитит `<index>` ВСЕГДА при group (включая 0)

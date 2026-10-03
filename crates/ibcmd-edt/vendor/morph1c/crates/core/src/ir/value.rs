@@ -46,6 +46,8 @@ pub enum PropertyValue {
     /// ТОЛЬКО опаковый платформенный бинарь (макеты MXL / картинки /
     /// скомпилированные модули) — переносится as-is, по ссылке (§1.0, §1.3).
     Blob(BlobRef),
+    /// Ordered CURRENT form path, including alternatives omitted by native/EDT wire projections.
+    DataPath(super::form::DataPathSpec),
 }
 
 impl PropertyValue {
@@ -65,6 +67,7 @@ impl PropertyValue {
             PropertyValue::StyleValue(_) => ValueKind::StyleValue,
             PropertyValue::List(_) => ValueKind::List,
             PropertyValue::Blob(_) => ValueKind::Blob,
+            PropertyValue::DataPath(_) => ValueKind::Ref,
         }
     }
 }

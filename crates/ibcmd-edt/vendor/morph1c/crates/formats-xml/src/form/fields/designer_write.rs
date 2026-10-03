@@ -170,8 +170,8 @@ pub(crate) fn render_designer(
         (Codec::Value, PropertyValue::Value(spec)) => {
             value_codec::encode(ValueDialect::Designer, "", tag, spec).map_err(FormError::Frame)?
         }
-        (Codec::DataPath, PropertyValue::Ref(p)) => {
-            OutElement::leaf("", tag, super::super::availability::rendered_data_path(p))
+        (Codec::DataPath, v @ (PropertyValue::Ref(_) | PropertyValue::DataPath(_))) => {
+            OutElement::leaf("", tag, super::super::data_path::write_native(v)?)
         }
         (Codec::MdObjectRef, PropertyValue::Ref(r)) => {
             OutElement::leaf("", tag, r.clone()).attr("xsi:type", "xr:MDObjectRef")
@@ -380,7 +380,7 @@ pub(crate) fn emit_choice_parameters_designer(items: &[PropertyValue]) -> Result
 pub(crate) fn emit_type_link_designer(v: &PropertyValue) -> Result<OutElement, FormError> {
     let (path, n) = type_link_parts(v)?;
     let mut el = OutElement::branch("", "TypeLink");
-    el.push(OutElement::leaf("xr", "DataPath", path.to_string()));
+    el.push(OutElement::leaf("xr", "DataPath", super::super::data_path::write_native(path)?));
     el.push(OutElement::leaf("xr", "LinkItem", n.to_string()));
     Ok(el)
 }
@@ -393,7 +393,7 @@ fn emit_choice_parameter_links_designer(items: &[PropertyValue]) -> Result<OutEl
         let mut link = OutElement::branch("xr", "Link");
         link.push(OutElement::leaf("xr", "Name", name.to_string()));
         link.push(
-            OutElement::leaf("xr", "DataPath", path.to_string()).attr("xsi:type", "xs:string"),
+            OutElement::leaf("xr", "DataPath", super::super::data_path::write_native(path)?).attr("xsi:type", "xs:string"),
         );
         link.push(OutElement::leaf(
             "xr",

@@ -1056,7 +1056,7 @@ fn chart_attributes(
             f,
         )?;
         for (index, group) in attr.additional_columns.iter_mut().enumerate() {
-            let table = group.table_path.clone();
+            let table = group.table_path.primary();
             chart_attributes(
                 &mut group.columns,
                 path,
@@ -1265,7 +1265,7 @@ fn chart_definitions(
                 f,
             )?;
             for (index, group) in attr.additional_columns.iter_mut().enumerate() {
-                let table = group.table_path.clone();
+                let table = group.table_path.primary();
                 attrs(
                     &mut group.columns,
                     path,
@@ -1385,7 +1385,7 @@ fn native_chart_point_presence(body: &FormBody) -> Result<HashSet<String>, FormE
                 out,
             )?;
             for (index, group) in attr.additional_columns.iter().enumerate() {
-                let table = group.table_path.clone();
+                let table = group.table_path.primary();
                 attrs(
                     &group.columns,
                     path,
@@ -1498,7 +1498,7 @@ fn native_presence_layout(
                 presence,
             )?;
             for (index, group) in attr.additional_columns.iter_mut().enumerate() {
-                let table = group.table_path.clone();
+                let table = group.table_path.primary();
                 changed |= attrs(
                     &mut group.columns,
                     path,

@@ -178,6 +178,15 @@ fn write_form_bodies_current(
             reason: e.to_string(),
         })?;
         write_file(&body_path, &bytes)?;
+        if format==Format::Edt {
+            let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+            if let Some((_,resource))=formats_xml::form::project_data_path_semantics(body,
+                crate::form_read::declared_form_uuid(obj,&form.name)?,dialect,profile,context)
+                .map_err(|e|ConvertError::Write{kind:kind.into(),object:form.name.clone(),reason:e.to_string()})? {
+                write_file(&body_path.parent().expect("form parent").join(formats_xml::form::DATA_PATH_SEMANTICS_RESOURCE),&resource)?;
+            }
+        }
+
         if format == Format::Designer {
             for (path, bytes) in formats_xml::form::choice_picture_assets(&form.body,
                 crate::form_read::declared_form_uuid(obj, &form.name)?).map_err(|e| ConvertError::Write {

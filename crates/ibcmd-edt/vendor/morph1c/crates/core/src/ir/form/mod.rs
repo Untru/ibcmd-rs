@@ -30,6 +30,7 @@ use crate::ir::{FieldId, HelpPage, HelpResource};
 
 mod body;
 mod data_attributes;
+mod data_path;
 mod dcs;
 mod decorations;
 mod event_order;
@@ -38,6 +39,7 @@ mod picture_semantics;
 
 pub use body::*;
 pub use data_attributes::*;
+pub use data_path::*;
 pub use dcs::*;
 pub use decorations::*;
 pub use event_order::*;

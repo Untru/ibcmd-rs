@@ -52,7 +52,7 @@ pub struct FormDataAttribute {
     /// несколькими `<Field>Путь</Field>`. Порядок сохраняется. X-сравним (оба формата несут
     /// один список). Пусто ⇒ регион отсутствует.
     #[serde(default)]
-    pub settings_saved_data: Vec<String>,
+    pub settings_saved_data: Vec<super::DataPathSpec>,
     /// DESIGNER-ONLY: КАНОНИЧЕСКИЕ пути (из [`Self::settings_saved_data`] /
     /// [`Self::not_default_use_always`]), которые Designer пометил сигилой `~` — «поле не входит в
     /// состав полей динамического списка»: `<UseAlways><Field>~Список.Ограничения</Field>`.
@@ -114,7 +114,7 @@ pub struct FormDataAttribute {
     /// <segments>Путь</segments>`; Designer — ОДИН `<UseAlways>` с несколькими `<Field>Путь</Field>`.
     /// Порядок сохраняется. X-сравним (оба формата несут один список). Пусто ⇒ регион отсутствует.
     #[serde(default)]
-    pub not_default_use_always: Vec<String>,
+    pub not_default_use_always: Vec<super::DataPathSpec>,
     /// extInfo ДАННЫХ-реквизита динамического списка (`form:DynamicListExtInfo` EDT ⟺
     /// `<Settings xsi:type="DynamicList">` Designer), если реквизит — динамический список
     /// (тип `DynamicList`). `None` ⇒ обычный реквизит. См. [`DynamicListAttrExt`].
@@ -281,7 +281,7 @@ pub struct MxlLanguageInfo {
 pub struct AdditionalColumns {
     /// Табличный путь группы (EDT `<tablePath><segments>` ⟺ Designer `table=`), напр.
     /// `ТаблицаВопросовРаздела.СоставТабличногоВопроса`. X-сравним.
-    pub table_path: String,
+    pub table_path: super::DataPathSpec,
     /// Колонки группы (EDT вложенные `<columns>` ⟺ Designer `<Column>`), рекурсивно
     /// [`FormDataAttribute`] (колонка = имя+id+title+тип), в исходном порядке. X-сравнимы.
     pub columns: Vec<FormDataAttribute>,

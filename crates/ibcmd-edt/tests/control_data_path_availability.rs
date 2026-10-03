@@ -278,3 +278,200 @@ fn canonical_control_paths_and_semantic_digest_survive_native_and_edt_readback()
         );
     }
 }
+
+#[test]
+fn current_backing_field_identity_controls_required_injection_independently_of_alias() {
+    let mut cfg = Configuration::new();
+    for (index, name) in ["Items", "Other"].into_iter().enumerate() {
+        cfg.objects.push(MetadataObject::new(
+            ObjectKind::new("Catalog"),
+            name,
+            Uuid([index as u8 + 1; 16]),
+        ));
+    }
+    let mut body = body();
+    body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .main_table = Some("Catalog.Items".into());
+    body.items.clear();
+    let requested = [
+        "List.Ref",
+        "List.Ссылка",
+        "List.Custom",
+        "List.Order",
+        "List.Порядок",
+        "List.DeletionMark",
+    ];
+    for (index, path) in requested.into_iter().enumerate() {
+        let mut item = FormItem::new(
+            FormControlKind::new("LabelField"),
+            format!("Field{index}"),
+            index as i64 + 1,
+        );
+        item.properties
+            .push((ff::F_DATA_PATH, PropertyValue::Ref(path.into())));
+        body.items.push(item);
+    }
+    // DynamicListAttributeService removes selected DbViewFieldDef identities
+    // before standard-field injection; AS names never stand in for that set.
+    for minor in [20, 21] {
+        for (sql, expected) in [
+            (
+                "SELECT I.Ref AS Custom FROM Catalog.Items AS I",
+                [
+                    "~List.Ref",
+                    "~List.Ссылка",
+                    "List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            (
+                "SELECT I.Ссылка AS Custom FROM Catalog.Items AS I",
+                [
+                    "~List.Ref",
+                    "~List.Ссылка",
+                    "List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            (
+                "SELECT 0 AS Ссылка FROM Catalog.Items AS I",
+                [
+                    "List.Ref",
+                    "List.Ссылка",
+                    "~List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            (
+                "SELECT O.Ref AS Custom FROM Catalog.Items AS I INNER JOIN Catalog.Other AS O ON TRUE",
+                [
+                    "List.Ref",
+                    "List.Ссылка",
+                    "List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            (
+                "SELECT I.Ref AS Custom FROM Catalog.Items AS I UNION ALL SELECT I.Ref AS Custom FROM Catalog.Other AS I",
+                [
+                    "~List.Ref",
+                    "~List.Ссылка",
+                    "List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            (
+                "SELECT I.Ref AS Custom FROM Catalog.Other AS I UNION ALL SELECT I.Ref AS Custom FROM Catalog.Items AS I",
+                [
+                    "~List.Ref",
+                    "~List.Ссылка",
+                    "List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+            // Only the final result SELECT owns this availability namespace.
+            (
+                "SELECT I.Ref AS Custom INTO Tmp FROM Catalog.Items AS I; SELECT 0 AS Ссылка FROM Catalog.Items AS I",
+                [
+                    "List.Ref",
+                    "List.Ссылка",
+                    "~List.Custom",
+                    "List.Order",
+                    "List.Порядок",
+                    "List.DeletionMark",
+                ],
+            ),
+        ] {
+            query(&mut body, sql);
+            let before = serde_json::to_value(&body).unwrap();
+            let context = FormProjectionContext::new(&cfg).unwrap();
+            let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                write_form_with_context(FormDialect::Designer, &body, &context)
+            })
+            .unwrap();
+            assert_eq!(paths(&bytes), expected, "profile 2.{minor}: {sql}");
+            assert_eq!(
+                serde_json::to_value(&body).unwrap(),
+                before,
+                "projection changed CURRENT data"
+            );
+        }
+    }
+}
+
+#[test]
+fn custom_attributes_do_not_acquire_language_twins_from_other_metadata_families() {
+    let mut cfg = Configuration::new();
+    let mut catalog = MetadataObject::new(ObjectKind::new("Catalog"), "Items", Uuid([1; 16]));
+    catalog.children.push(MetadataObject::new(
+        ObjectKind::new("Catalog.Attribute"),
+        "Date",
+        Uuid([2; 16]),
+    ));
+    cfg.objects.push(catalog);
+    cfg.objects.push(MetadataObject::new(
+        ObjectKind::new("Document"),
+        "Other",
+        Uuid([3; 16]),
+    ));
+    let mut body = body();
+    body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .main_table = Some("Catalog.Items".into());
+    body.items.clear();
+    for (index, path) in ["List.Date", "List.Дата"].into_iter().enumerate() {
+        let mut item = FormItem::new(
+            FormControlKind::new("LabelField"),
+            format!("Field{index}"),
+            index as i64 + 1,
+        );
+        item.properties
+            .push((ff::F_DATA_PATH, PropertyValue::Ref(path.into())));
+        body.items.push(item);
+    }
+    for minor in [20, 21] {
+        for (name, sql, expected) in [
+            (
+                "Date",
+                "SELECT I.Date FROM Catalog.Items AS I",
+                ["List.Date", "~List.Дата"],
+            ),
+            (
+                "Date",
+                "SELECT I.Date FROM Catalog.Items AS I LEFT JOIN Document.Other AS D ON TRUE",
+                ["List.Date", "~List.Дата"],
+            ),
+            (
+                "Дата",
+                "SELECT I.Дата FROM Catalog.Items AS I",
+                ["~List.Date", "List.Дата"],
+            ),
+        ] {
+            cfg.objects[0].children[0].name = name.into();
+            query(&mut body, sql);
+            let context = FormProjectionContext::new(&cfg).unwrap();
+            let native = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                write_form_with_context(FormDialect::Designer, &body, &context)
+            })
+            .unwrap();
+            assert_eq!(paths(&native), expected, "profile 2.{minor}: {sql}");
+        }
+    }
+}

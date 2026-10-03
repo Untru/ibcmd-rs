@@ -132,6 +132,9 @@ fn dependency_sha256(
             attributes.extend(additional.columns.iter().rev());
         }
     }
+    for command in body.form_ci_navigation_panel.iter().chain(&body.form_ci_command_bar) {
+        hash.part(&(&command.command, &command.command_parameter))?;
+    }
     let mut items: Vec<_> = body.items.iter().rev().collect();
     if let Some(bar) = &body.auto_command_bar {
         items.extend(bar.items.iter().rev());
@@ -167,7 +170,7 @@ fn dependency_sha256(
                 .iter()
                 .flat_map(|fields| fields.iter())
                 .filter(|field| {
-                    field.region == region && matches!(field.codec, super::fields::Codec::DataPath)
+                    field.region == region && matches!(field.codec, super::fields::Codec::DataPath | super::fields::Codec::TypeLink | super::fields::Codec::ChoiceParameterLinks)
                 })
                 .map(|field| field.id)
                 .collect();
@@ -250,6 +253,17 @@ fn contains_name(names: &BTreeSet<String>, name: &str) -> bool {
 struct MetadataTable {
     fields: BTreeSet<String>,
     required: BTreeSet<String>,
+    standards: Vec<(&'static str, &'static str)>,
+}
+impl MetadataTable {
+    fn field_identity(&self, field: &str) -> String {
+        for (ru, en) in &self.standards {
+            if super::java_case_fold::equal(field, ru) || super::java_case_fold::equal(field, en) {
+                return super::java_case_fold::fold(en);
+            }
+        }
+        super::java_case_fold::fold(field)
+    }
 }
 fn current_property<'a>(object: &'a MetadataObject, name: &str) -> Option<&'a PropertyValue> {
     let spec = morph1c_core::spec::registry::spec_for(object.kind.as_str())?;
@@ -324,10 +338,12 @@ impl FormProjectionContext<'_> {
             return Some(MetadataTable {
                 fields,
                 required: BTreeSet::new(),
+                standards: vec![("Ссылка", "Ref"), ("НомерСтроки", "LineNumber")],
             });
         }
         let mut fields = BTreeSet::new();
         let mut required = BTreeSet::new();
+        let mut standards = Vec::new();
         let pairs = standard_pairs(kind)?;
         for (ru, en) in pairs {
             let present = match (kind, *en) {
@@ -358,6 +374,7 @@ impl FormProjectionContext<'_> {
             if !present {
                 continue;
             }
+            standards.push((*ru, *en));
             fields.insert((*ru).into());
             fields.insert((*en).into());
             // DynamicListFieldService selects keys, deletion/posted, recorder,
@@ -401,7 +418,7 @@ impl FormProjectionContext<'_> {
                 }
             }
         }
-        Some(MetadataTable { fields, required })
+        Some(MetadataTable { fields, required, standards })
     }
     fn fields(&self, list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormError> {
         if !list.custom_query {
@@ -420,53 +437,44 @@ impl FormProjectionContext<'_> {
         let Some(Selection {
             mut fields,
             aliases,
-        }) = selection_current(query, Some(self))?
+            sources,
+            selected_backing,
+            required_scope,
+            ..
+        }) = selection_current(query, Some(self), list.main_table.as_deref())?
         else {
             return Ok(None);
         };
         // Query aliases are independent names; language twins belong only to
         // CURRENT metadata fields referenced without an explicit alias.
-        for table in query_tables(&tokens(query)?) {
+        for table in sources {
             if let Some(schema) = self.table(&table.1) {
-                for kind in [
-                    "Catalog",
-                    "Document",
-                    "Enum",
-                    "ChartOfCharacteristicTypes",
-                    "ChartOfAccounts",
-                    "ChartOfCalculationTypes",
-                    "ExchangePlan",
-                    "BusinessProcess",
-                    "Task",
-                    "InformationRegister",
-                    "AccumulationRegister",
-                    "AccountingRegister",
-                    "CalculationRegister",
-                    "DocumentJournal",
-                ] {
-                    for (ru, en) in standard_pairs(kind).unwrap_or(&[]) {
-                        if contains_name(&fields, ru)
-                            && !contains_alias(&aliases, ru)
-                            && contains_name(&schema.fields, en)
-                        {
-                            fields.insert((*en).into());
-                        }
-                        if contains_name(&fields, en)
-                            && !contains_alias(&aliases, en)
-                            && contains_name(&schema.fields, ru)
-                        {
-                            fields.insert((*ru).into());
-                        }
+                // Only actual standard definitions in this CURRENT table
+                // own language twins. A Catalog's custom Date field is not
+                // the Document Date/Дата definition.
+                for (ru, en) in &schema.standards {
+                    let identity = (canonical_table(&table.1), schema.field_identity(en));
+                    if !selected_backing.contains(&identity) {
+                        continue;
+                    }
+                    if contains_name(&fields, ru) && !contains_alias(&aliases, ru) {
+                        fields.insert((*en).into());
+                    }
+                    if contains_name(&fields, en) && !contains_alias(&aliases, en) {
+                        fields.insert((*ru).into());
                     }
                 }
-                if list
-                    .main_table
-                    .as_deref()
-                    .is_some_and(|main| canonical_table(main) == canonical_table(&table.1))
-                {
-                    for field in schema.required {
-                        if !contains_alias(&aliases, &field) {
-                            fields.insert(field);
+            }
+        }
+        if let Some(scope) = required_scope {
+            if !scope.has_star {
+                if let Some(schema) = self.table(&scope.main_table) {
+                    // The SDK chooses one matching QuerySchemaOperator, then
+                    // subtracts that operator's selected field definitions.
+                    for field in &schema.required {
+                        let identity = (canonical_table(&scope.main_table), schema.field_identity(field));
+                        if !scope.selected_backing.contains(&identity) {
+                            fields.insert(field.clone());
                         }
                     }
                 }
@@ -559,6 +567,13 @@ fn resolve(path: &str) -> Option<bool> {
         let Some(a) = map.get(&super::java_case_fold::fold(owner)) else {
             return None;
         };
+        // DynamicListPropertyInfoProvider creates this public property before
+        // the query-derived children, even when SELECT has no Order column.
+        if super::java_case_fold::equal(field, "Order")
+            || super::java_case_fold::equal(field, "Порядок")
+        {
+            return Some(false);
+        }
         if field.eq_ignore_ascii_case("DefaultPicture") {
             return Some(a.default_picture_unavailable);
         }
@@ -680,6 +695,7 @@ fn fields(list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormErr
     let Some(Selection {
         mut fields,
         aliases,
+        ..
     }) = selection(query)?
     else {
         return Ok(None);
@@ -818,13 +834,44 @@ fn top_keyword(tokens: &[String], words: &[&str]) -> bool {
 struct Selection {
     fields: BTreeSet<String>,
     aliases: BTreeSet<String>,
+    sources: Vec<(String, String)>,
+    selected_backing: BTreeSet<(String, String)>,
+    has_star: bool,
+    required_scope: Option<RequiredScope>,
+}
+struct RequiredScope {
+    main_table: String,
+    selected_backing: BTreeSet<(String, String)>,
+    has_star: bool,
+}
+fn selected_field_identity(
+    context: &FormProjectionContext<'_>,
+    sources: &[(String, String)],
+    expression: &[&str],
+) -> Option<(String, String)> {
+    let (qualifier, field) = match expression {
+        [field] if ident(field) => (None, *field),
+        [qualifier, ".", field] if ident(qualifier) && ident(field) => (Some(*qualifier), *field),
+        _ => return None,
+    };
+    let mut definitions = sources.iter().filter_map(|(alias, table)| {
+        if qualifier.is_some_and(|name| !super::java_case_fold::equal(name, alias)) {
+            return None;
+        }
+        context.table(table).filter(|schema| contains_name(&schema.fields, field))
+            .map(|schema| (canonical_table(table), schema.field_identity(field)))
+    });
+    let first = definitions.next()?;
+    // Ambiguous unqualified query names do not prove one backing definition.
+    if definitions.next().is_some() { None } else { Some(first) }
 }
 fn selection(query: &str) -> Result<Option<Selection>, FormError> {
-    selection_current(query, None)
+    selection_current(query, None, None)
 }
 fn selection_current(
     query: &str,
     context: Option<&FormProjectionContext<'_>>,
+    main_table: Option<&str>,
 ) -> Result<Option<Selection>, FormError> {
     let tokens = tokens(query)?;
     let mut batches = Vec::new();
@@ -847,6 +894,46 @@ fn selection_current(
     }) else {
         return Ok(None);
     };
+    // UNION operators have separate table-alias namespaces. The output
+    // names belong to the first operator; required injection belongs to the
+    // first operator which references the actual CURRENT main table.
+    let mut operators = Vec::new();
+    let mut start = 0;
+    depth = 0;
+    for (index, token) in batch.iter().enumerate() {
+        match token.as_str() {
+            "(" | "{" => depth += 1,
+            ")" | "}" => depth -= 1,
+            _ => {}
+        }
+        if depth == 0 && keyword(token, &["UNION", "ОБЪЕДИНИТЬ"]) {
+            operators.push(&batch[start..index]);
+            start = index + 1;
+            if batch.get(start).is_some_and(|next| keyword(next, &["ALL", "ВСЕ"])) {
+                start += 1;
+            }
+        }
+    }
+    operators.push(&batch[start..]);
+    let Some(mut selection) = selection_operator(operators[0], context)? else {
+        return Ok(None);
+    };
+    if let Some(main) = main_table {
+        for operator in operators {
+            if query_tables(operator).iter().any(|(_, table)| canonical_table(table) == canonical_table(main)) {
+                let Some(scope) = selection_operator(operator, context)? else { return Ok(None) };
+                selection.required_scope = Some(RequiredScope {
+                    main_table: main.into(),
+                    selected_backing: scope.selected_backing,
+                    has_star: scope.has_star,
+                });
+                break;
+            }
+        }
+    }
+    Ok(Some(selection))
+}
+fn selection_operator(batch: &[String], context: Option<&FormProjectionContext<'_>>) -> Result<Option<Selection>, FormError> {
     let Some(mut i) = batch
         .iter()
         .position(|t| keyword(t, &["ВЫБРАТЬ", "SELECT"]))
@@ -871,7 +958,7 @@ fn selection_current(
     }
     let mut terms = Vec::new();
     let mut term = Vec::new();
-    depth = 0;
+    let mut depth = 0;
     for t in &batch[i..] {
         if depth == 0
             && keyword(
@@ -915,6 +1002,9 @@ fn selection_current(
     }
     let mut fields = BTreeSet::new();
     let mut aliases = BTreeSet::new();
+    let sources = query_tables(batch);
+    let mut selected_backing = BTreeSet::new();
+    let mut has_star = false;
     for term in terms {
         let n = term.len();
         if n == 0 || term.contains(&"{") {
@@ -924,7 +1014,7 @@ fn selection_current(
             let Some(context) = context else {
                 return Ok(None);
             };
-            let sources = query_tables(batch);
+            has_star = true;
             let selected: Vec<_> = sources
                 .iter()
                 .filter(|(alias, _)| n == 1 || super::java_case_fold::equal(alias, term[0]))
@@ -940,7 +1030,14 @@ fn selection_current(
             }
             continue;
         }
-        let name = if n >= 2 && keyword(term[n - 2], &["КАК", "AS"]) && ident(term[n - 1]) {
+        let explicit_alias = n >= 2 && keyword(term[n - 2], &["КАК", "AS"]) && ident(term[n - 1]);
+        let expression = if explicit_alias { &term[..n - 2] } else { &term[..] };
+        if let Some(context) = context {
+            if let Some(identity) = selected_field_identity(context, &sources, expression) {
+                selected_backing.insert(identity);
+            }
+        }
+        let name = if explicit_alias {
             aliases.insert(term[n - 1].to_owned());
             term[n - 1].to_owned()
         } else if n % 2 == 1
@@ -967,7 +1064,7 @@ fn selection_current(
         };
         fields.insert(name);
     }
-    Ok(Some(Selection { fields, aliases }))
+    Ok(Some(Selection { fields, aliases, sources, selected_backing, has_star, required_scope: None }))
 }
 
 fn standard_pairs(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {

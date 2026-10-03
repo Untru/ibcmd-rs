@@ -860,7 +860,6 @@ fn native_forces_localized(t: Tbl, name: &str) -> bool {
         || matches!(
             (t, name),
             (Tbl::GDimPoint | Tbl::GDimSeries, "title") | (Tbl::TsLevel, "format")
-                | (Tbl::SeriesItem, "text")
         )
 }
 
@@ -1117,12 +1116,17 @@ pub(super) fn restore_native_picture_layout(
                     .filter(|c| c.fields.iter().any(|s| s == "nativeDecimal"))
                 {
                     if let Some(ChartValue::Int(number)) = current_value_at(current, path) {
-                        let mut text = canonical_float_text(t, row.name, number)?;
-                        if let Some(zeros) = spelling.fields.iter()
-                            .find_map(|s| s.strip_prefix("fractionZeros:")?.parse::<usize>().ok())
+                        let mut text = native_float_text(t, row.name, number)?;
+                        let integral = designer_decimal(&text);
+                        if !integral.contains(['.', 'e', 'E'])
+                            && !matches!(integral.as_str(), "Infinity" | "-Infinity" | "NaN")
                         {
-                            if !text.contains(['.', 'e', 'E'])
-                                && !matches!(text.as_str(), "Infinity" | "-Infinity" | "NaN")
+                            // Preserve only the source's integral fraction convention.
+                            // The numeric text is always freshly derived from CURRENT
+                            // EFloat/EDouble state, including binary rounding/projection.
+                            text = integral;
+                            if let Some(zeros) = spelling.fields.iter()
+                                .find_map(|s| s.strip_prefix("fractionZeros:")?.parse::<usize>().ok())
                             {
                                 text.push('.');
                                 text.extend(std::iter::repeat_n('0', zeros));
@@ -1205,14 +1209,84 @@ pub(super) fn native_float_text(t: Tbl, name: &str, value: &str) -> Result<Strin
             .map(ibcmd_number_format::format_binary32)
             .ok_or_else(|| frame(format!("chart: invalid current EFloat {name}"))),
         Some("EDouble") => ibcmd_number_format::parse_binary64(value)
-            .map(ibcmd_number_format::format_binary64)
+            .map(|value| {
+                // AxisIntervalWriter uses String.valueOf(double), rather than the
+                // registered ChartDoubleXmlWriter's integral-long projection.
+                if t != Tbl::Interval && value % 1.0 == 0.0 {
+                    (value as i64).to_string()
+                } else {
+                    ibcmd_number_format::format_binary64(value)
+                }
+            })
             .ok_or_else(|| frame(format!("chart: invalid current EDouble {name}"))),
         _ => Ok(designer_decimal(value)),
     }
 }
 
 fn canonical_float_text(t: Tbl, name: &str, value: &str) -> Result<String, FormError> {
-    Ok(designer_decimal(&native_float_text(t, name, value)?))
+    let value = match super::sdk_defaults::numeric_type(t, name) {
+        Some("EFloat") => ibcmd_number_format::parse_binary32(value)
+            .map(ibcmd_number_format::format_binary32),
+        Some("EDouble") => ibcmd_number_format::parse_binary64(value)
+            .map(ibcmd_number_format::format_binary64),
+        _ => return Ok(designer_decimal(value)),
+    }.ok_or_else(|| frame(format!("chart: invalid current floating-point {name}")))?;
+    Ok(designer_decimal(&value))
+}
+
+/// Normalize CURRENT primitive floats before binding the native counterpart;
+/// project only original EDouble attributes selected by ChartDoubleXmlWriter.
+/// The returned paths carry CURRENT lost values, never an old chart or wire image.
+pub(in crate::form) fn project_native_double_fields(
+    chart: &mut ChartSettings,
+) -> Result<Vec<(Vec<ChartLayoutSegment>, String)>, FormError> {
+    fn walk(
+        fields: &mut [(String, ChartValue)],
+        table: Tbl,
+        path: &mut Vec<ChartLayoutSegment>,
+        lost: &mut Vec<(Vec<ChartLayoutSegment>, String)>,
+    ) -> Result<(), FormError> {
+        for (name, value) in fields {
+            let row = row_by_name(table, name)
+                .ok_or_else(|| frame(format!("chart: unknown current numeric path {name}")))?;
+            path.push(ChartLayoutSegment::Field(name.clone()));
+            let numeric_type = super::sdk_defaults::numeric_type(table, name);
+            if matches!(numeric_type, Some("EFloat" | "EDouble"))
+                && matches!(row.shape, Shape::Dec)
+            {
+                let ChartValue::Int(number) = value else {
+                    return Err(frame("chart: wrong current floating-point kind".into()));
+                };
+                let current = canonical_float_text(table, name, number)?;
+                let projected = if table != Tbl::Interval && numeric_type == Some("EDouble") {
+                    canonical_float_text(table, name, &native_float_text(table, name, &current)?)?
+                } else {
+                    current.clone()
+                };
+                if projected != current { lost.push((path.clone(), current)); }
+                *number = projected;
+            }
+            if let Some(child_table) = subtable(row.shape) {
+                match value {
+                    ChartValue::Nested(children) => walk(children, child_table, path, lost)?,
+                    ChartValue::Items(items) => {
+                        for (index, item) in items.iter_mut().enumerate() {
+                            path.push(ChartLayoutSegment::Item(index));
+                            walk(item, child_table, path, lost)?;
+                            path.pop();
+                        }
+                    }
+                    ChartValue::Absent => {}
+                    _ => return Err(frame("chart: wrong current numeric container".into())),
+                }
+            }
+            path.pop();
+        }
+        Ok(())
+    }
+    let mut lost = Vec::new();
+    walk(&mut chart.fields, top_tbl(&chart.kind)?, &mut Vec::new(), &mut lost)?;
+    Ok(lost)
 }
 
 fn native_field_default(t: Tbl, row: &Row) -> Result<Option<ChartValue>, FormError> {

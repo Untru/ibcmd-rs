@@ -1,5 +1,33 @@
 use super::*;
 
+// The SDK declares three independent 0..1 addition features. Their private Vec
+// storage order is not an ordered model list; children within them remain ordered.
+fn singleton_additions(items: &[FormItem]) -> Result<[Option<&FormItem>; 3], &'static str> {
+    let mut slots = [None; 3];
+    for item in items {
+        let index = match item.kind.as_str() {
+            "SearchStringAddition" => 0,
+            "ViewStatusAddition" => 1,
+            "SearchControlAddition" => 2,
+            _ => return Err("unknown singleton addition kind"),
+        };
+        if slots[index].replace(item).is_some() {
+            return Err("duplicate singleton addition kind");
+        }
+    }
+    Ok(slots)
+}
+
+fn serialize_semantic_additions<S: serde::Serializer>(items: &[FormItem], serializer: S) -> Result<S::Ok, S::Error> {
+    use serde::ser::{Error, SerializeSeq};
+    let slots = singleton_additions(items).map_err(S::Error::custom)?;
+    let mut sequence = serializer.serialize_seq(Some(items.len()))?;
+    for item in slots.into_iter().flatten() {
+        sequence.serialize_element(item)?;
+    }
+    sequence.end()
+}
+
 fn deserialize_unique_event_owners<'de, D: serde::Deserializer<'de>>(deserializer: D)
     -> Result<std::collections::BTreeMap<String, FieldEventOwner>, D::Error> {
     struct Unique;
@@ -159,7 +187,7 @@ pub struct FormItem {
     /// `searchControlAddition`) — служебные под-контролы Таблицы. Каждый несёт `source`
     /// (dataPath), `autoMaxWidth` и decorator-стабы. Пусто у всех контролов, кроме `Table`.
     /// X-сравнимы (оба формата несут).
-    #[serde(default)]
+    #[serde(default, serialize_with = "serialize_semantic_additions")]
     pub additions: Vec<FormItem>,
     /// СОБСТВЕННАЯ командная панель контрола (Таблица несёт `<autoCommandBar>`/
     /// `<AutoCommandBar>`), если присутствует. `None` у контролов без панели.
@@ -293,6 +321,10 @@ pub struct FormEvent {
 }
 
 impl FormItem {
+    /// Validate the SDK's independent singleton addition features.
+    pub fn validate_additions(&self) -> Result<(), &'static str> {
+        singleton_additions(&self.additions).map(|_| ())
+    }
     /// Создать пустой узел заданного вида с именем и id.
     pub fn new(kind: FormControlKind, name: impl Into<String>, id: i64) -> Self {
         FormItem {

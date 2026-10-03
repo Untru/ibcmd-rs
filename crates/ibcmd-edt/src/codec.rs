@@ -12,6 +12,7 @@ use ibcmd_xml::source_tree::{
 use morph1c_core::ir::Configuration;
 use morph1c_core::version::FormatVersion;
 use morph1c_pipeline::{ConvertOptions, Format};
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
@@ -349,10 +350,114 @@ fn render(
     bounded::read_tree(dest, large_limits())
 }
 
+/// Complete CURRENT body accounting for selected typed manifest sections. The
+/// caller has read both complete configurations through the normal pipeline;
+/// no isolated XML path is ignored or accepted based on its spelling alone.
+pub(crate) fn data_path_body_closure(
+    source: &Configuration,
+    rebuilt: &Configuration,
+    manifest: &[u8],
+    profile: FormatVersion,
+) -> Result<BTreeSet<String>, EdtError> {
+    let annotation = formats_xml::form::read_native_data_path_annotation(manifest, profile)
+        .map_err(EdtError::source)?
+        .ok_or_else(|| EdtError::new("typed form accounting requires CURRENT annotation"))?;
+    // read_codec already verified all annotation records against the complete
+    // CURRENT configuration before binding native source lexical dependencies.
+    if provenance::semantic_digest(source)? != provenance::semantic_digest(rebuilt)? {
+        return Err(EdtError::new(
+            "CURRENT annotated native configuration did not preserve complete source semantics",
+        ));
+    }
+    let source_forms: BTreeMap<_, _> = morph1c_pipeline::native_form_bodies(source)
+        .map_err(EdtError::source)?
+        .into_iter()
+        .map(|(path, uuid, body)| (uuid, (path, body)))
+        .collect();
+    let mut accounted = BTreeSet::new();
+    for (path, uuid, body) in
+        morph1c_pipeline::native_form_bodies(rebuilt).map_err(EdtError::source)?
+    {
+        if annotation
+            .form_resource(uuid)
+            .map_err(EdtError::source)?
+            .is_none()
+        {
+            continue;
+        }
+        let Some((source_path, source_body)) = source_forms.get(&uuid) else {
+            return Err(EdtError::new(
+                "CURRENT annotation has no matching source form UUID",
+            ));
+        };
+        if source_path != &path || form_body_digest(source_body)? != form_body_digest(body)? {
+            return Err(EdtError::new(
+                "CURRENT restored complete form body differs from its declared source",
+            ));
+        }
+        SourcePath::new(&path).map_err(EdtError::source)?;
+        accounted.insert(path);
+    }
+    Ok(accounted)
+}
+fn form_body_digest(body: &morph1c_core::ir::FormBody) -> Result<String, EdtError> {
+    struct Hash(Sha256);
+    impl std::io::Write for Hash {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.update(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let mut hash = Hash(Sha256::new());
+    serde_json::to_writer(&mut hash, body).map_err(EdtError::source)?;
+    Ok(format!("{:x}", hash.0.finalize()))
+}
+fn native_body_closure(
+    config: &Configuration,
+    rebuilt: &SourceTree,
+    root: &Path,
+    profile: FormatVersion,
+) -> Result<BTreeSet<String>, EdtError> {
+    let Some(manifest) = rebuilt
+        .entries()
+        .iter()
+        .find(|e| e.path().as_str() == "ConfigDumpInfo.xml")
+    else {
+        return Ok(BTreeSet::new());
+    };
+    if formats_xml::form::read_native_data_path_annotation(manifest.bytes(), profile)
+        .map_err(EdtError::source)?
+        .is_none()
+    {
+        return Ok(BTreeSet::new());
+    }
+    let restored = read_codec(Format::Designer, root, profile)?;
+    data_path_body_closure(config, &restored, manifest.bytes(), profile)
+}
+
+#[cfg(test)]
 fn inventory_accounting(
     source: &SourceTree,
     rebuilt: &SourceTree,
     format: Format,
+) -> Result<Vec<FileAccounting>, EdtError> {
+    inventory_accounting_with_profile(
+        source,
+        rebuilt,
+        format,
+        morph1c_core::version::SSL,
+        &BTreeSet::new(),
+    )
+}
+fn inventory_accounting_with_profile(
+    source: &SourceTree,
+    rebuilt: &SourceTree,
+    format: Format,
+    profile: FormatVersion,
+    restored_forms: &BTreeSet<String>,
 ) -> Result<Vec<FileAccounting>, EdtError> {
     let index = rebuilt
         .entries()
@@ -373,6 +478,30 @@ fn inventory_accounting(
     };
     for e in source.entries() {
         let path = e.path().as_str();
+        if format == Format::Designer && path == "ConfigDumpInfo.xml" {
+            let regenerated = index.get(path).map(|e| e.bytes());
+            let typed = formats_xml::form::compare_native_data_path_annotations(
+                e.bytes(),
+                regenerated,
+                profile,
+            )
+            .map_err(EdtError::source)?;
+            match typed {
+                Some(true) => accounting.push(FileAccounting {
+                    path: e.path().clone(),
+                    disposition: Disposition::Converted,
+                }),
+                Some(false) => reject(
+                    path,
+                    "CURRENT annotated ConfigDumpInfo did not regenerate its typed control",
+                ),
+                None => accounting.push(FileAccounting {
+                    path: e.path().clone(),
+                    disposition: Disposition::Retained,
+                }),
+            }
+            continue;
+        }
         if let Some(new) = index.get(path) {
             // Descriptors are parsed with totality checks and regenerated from typed IR.
             // Lexical differences are represented by provenance. Every other artifact
@@ -381,6 +510,7 @@ fn inventory_accounting(
             if !descriptor {
                 match same_body(e, new) {
                     Ok(true) => {}
+                    Ok(false) if restored_forms.contains(path) => {}
                     Ok(false) => {
                         reject(
                             path,
@@ -507,7 +637,9 @@ pub(crate) fn xml_to_edt(
     publish_new_with_limits(source, &src, large_limits()).map_err(EdtError::source)?;
     let config = read_codec(Format::Designer, &src, v)?;
     let rebuilt = render(Format::Designer, &config, &stage.path().join("rebuilt"), v)?;
-    let accounting = inventory_accounting(source, &rebuilt, Format::Designer)?;
+    let forms = native_body_closure(&config, &rebuilt, &stage.path().join("rebuilt"), v)?;
+    let accounting =
+        inventory_accounting_with_profile(source, &rebuilt, Format::Designer, v, &forms)?;
     drop(rebuilt);
     let converted = render(Format::Edt, &config, &stage.path().join("generated"), v)?;
     let mut entries = Vec::new();
@@ -564,7 +696,8 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
             .collect::<Result<Vec<_>, _>>()?,
     )
     .map_err(EdtError::source)?;
-    let mut accounting = inventory_accounting(&src_tree, &rebuilt, Format::Edt)?;
+    let mut accounting =
+        inventory_accounting_with_profile(&src_tree, &rebuilt, Format::Edt, v, &BTreeSet::new())?;
     drop(src_tree);
     drop(rebuilt);
     for a in &mut accounting {
@@ -606,7 +739,19 @@ pub(crate) fn edt_to_xml(project: &Project, o: &ConversionOptions) -> Result<Con
                 &stage.path().join("validated-original-rebuilt"),
                 v,
             )?;
-            inventory_accounting(&original, &original_regenerated, Format::Designer)?;
+            let forms = native_body_closure(
+                &original_config,
+                &original_regenerated,
+                &stage.path().join("validated-original-rebuilt"),
+                v,
+            )?;
+            inventory_accounting_with_profile(
+                &original,
+                &original_regenerated,
+                Format::Designer,
+                v,
+                &forms,
+            )?;
             if provenance::semantic_digest(&original_config)?
                 != provenance::semantic_digest(&config)?
             {
@@ -963,6 +1108,12 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
         // Only the versioned form resource consumed by the typed pipeline has
         // JSON lexical freedom; unrelated JSON remains byte-exact.
         return Ok(formats_xml::form::same_picture_semantics_resource(a, b));
+    }
+    if parts.last().copied() == Some(formats_xml::form::DATA_PATH_SEMANTICS_RESOURCE)
+        && (parts.len() == 3 && parts[0] == "CommonForms"
+            || parts.len() == 5 && parts[2] == "Forms")
+    {
+        return Ok(formats_xml::form::same_data_path_semantics_resource(a, b));
     }
     if parts.last().copied() == Some(formats_xml::form::EVENT_SEMANTICS_RESOURCE)
         && (parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
@@ -1343,6 +1494,70 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn current_data_path_body_closure_checks_complete_body_and_declared_identity() {
+        use morph1c_core::ir::{MetadataObject, NamedFormBody, ObjectKind, PropertyValue, Uuid};
+        let root = Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        ));
+        let mut cfg = read_codec(Format::Designer, root, FormatVersion::new(2, 21)).unwrap();
+        let xml = concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\"><items xsi:type=\"form:FormField\"><name>Field</name><id>1</id><dataPath xsi:type=\"form:DataPath\"><segments>List.A</segments></dataPath><type>LabelField</type><extInfo xsi:type=\"form:LabelFieldExtInfo\"/></items></form:Form>\r\n"
+        );
+        let mut body =
+            formats_xml::form::read_form(formats_xml::form::FormDialect::Edt, xml.as_bytes())
+                .unwrap();
+        body.items[0]
+            .properties
+            .iter_mut()
+            .find(|(field, _)| {
+                *field == morph1c_core::spec::forms::controls::form_field::F_DATA_PATH
+            })
+            .unwrap()
+            .1 = PropertyValue::DataPath(morph1c_core::ir::form::DataPathSpec {
+            segments: vec!["List".into(), "A~current".into()],
+            extra_paths: vec!["Other.B".into()],
+        });
+        let mut obj = MetadataObject::new(
+            ObjectKind::new("CommonForm"),
+            "CurrentPaths",
+            Uuid([77; 16]),
+        );
+        obj.form_bodies.push(NamedFormBody {
+            name: "CurrentPaths".into(),
+            body,
+            ordinary_body: None,
+            module: None,
+            help: vec![],
+            help_resources: vec![],
+        });
+        cfg.objects.push(obj);
+        let profile = FormatVersion::new(2, 21);
+        let manifest = formats_xml::form::write_native_data_path_annotation(&cfg, profile)
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            data_path_body_closure(&cfg, &cfg, &manifest, profile).unwrap(),
+            BTreeSet::from(["CommonForms/CurrentPaths/Ext/Form.xml".into()])
+        );
+        let mut changed = cfg.clone();
+        changed.objects.last_mut().unwrap().form_bodies[0]
+            .body
+            .commands
+            .push(morph1c_core::ir::FormCommand::new("CurrentCommand", 55));
+        assert!(
+            data_path_body_closure(&cfg, &changed, &manifest, profile).is_err(),
+            "a non-path body change must not be hidden by CURRENT path accounting"
+        );
+        let mut renamed = cfg.clone();
+        let object = renamed.objects.last_mut().unwrap();
+        object.name = "OtherPaths".into();
+        object.form_bodies[0].name = "OtherPaths".into();
+        assert!(data_path_body_closure(&cfg, &renamed, &manifest, profile).is_err());
+    }
 
     #[test]
     fn nullable_choice_picture_guard_requires_exact_typed_role_and_empty_singleton() {

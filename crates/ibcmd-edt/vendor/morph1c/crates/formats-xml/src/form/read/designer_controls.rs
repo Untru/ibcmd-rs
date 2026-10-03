@@ -401,19 +401,8 @@ pub(crate) fn read_designer_table(el: &Element) -> Result<FormItem, FormError> {
     // (`FormItem::row_picture_path_unavailable`; write_designer возвращает сигилу, X зануляет).
     // См. IR-док: точный предикат платформы требует разбора текста запроса ⇒ §1.0 — несём
     // наблюдённый бит, а не угаданное правило.
-    if let Some((i, PropertyValue::Ref(p))) = item
-        .properties
-        .iter_mut()
-        .enumerate()
-        .find(|(_, (f, _))| *f == tb::F_ROW_PICTURE_DATA_PATH)
-        .map(|(i, (_, v))| (i, v))
-    {
-        let _ = i;
-        if let Some(bare) = p.strip_prefix('~') {
-            *p = bare.to_string();
-            item.row_picture_path_unavailable = true;
-        }
-    }
+    item.row_picture_path_unavailable = el.child("RowPictureDataPath")
+        .filter(|c| c.prefix.is_empty()).is_some_and(|c| c.text.starts_with('~'));
     // showCommandBar три-состояние: Designer кодирует ОДНИМ `<ShowCommandBar>значение`
     // ({true, false, auto}); EDT — двумя полями (см. read_edt_table_show_command_bar).
     if let Some(scb) = el.child("ShowCommandBar").filter(|c| c.prefix.is_empty()) {

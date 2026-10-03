@@ -19,6 +19,11 @@ use std::sync::OnceLock;
 use crate::emit::Envelope;
 
 mod availability;
+mod data_path;
+mod data_path_semantics;
+mod native_data_paths;
+pub use native_data_paths::{NativeDataPathAnnotation, read_native_data_path_annotation, write_native_data_path_annotation, compare_native_data_path_annotations};
+pub use data_path_semantics::{DATA_PATH_SEMANTICS_RESOURCE, project_data_path_semantics, apply_data_path_semantics_resource, apply_data_path_semantics_resource_with_context, verify_restored_data_path_semantics, same_data_path_semantics_resource, data_path_semantics_resource_count};
 mod java_case_fold;
 pub use availability::{FormProjectionContext, bind_native_availability_sources};
 mod event_catalog;

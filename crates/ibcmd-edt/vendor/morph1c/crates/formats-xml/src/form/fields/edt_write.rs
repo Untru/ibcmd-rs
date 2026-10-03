@@ -145,10 +145,8 @@ pub(crate) fn render_edt(
         (Codec::Value, PropertyValue::Value(spec)) => {
             value_codec::encode(ValueDialect::Edt, "", tag, spec).map_err(FormError::Frame)?
         }
-        (Codec::DataPath, PropertyValue::Ref(p)) => {
-            let mut el = OutElement::branch("", tag).attr("xsi:type", "form:DataPath");
-            el.push(OutElement::leaf("", "segments", p.clone()));
-            el
+        (Codec::DataPath, v @ (PropertyValue::Ref(_) | PropertyValue::DataPath(_))) => {
+            super::super::data_path::write_edt(tag, v)?
         }
         (Codec::MdObjectRef, PropertyValue::Ref(r)) => {
             let mut el = OutElement::branch("", tag).attr("xsi:type", "core:ReferenceValue");
@@ -334,9 +332,7 @@ pub(crate) fn emit_type_link_edt(v: &PropertyValue) -> Result<OutElement, FormEr
     if n != 0 {
         el.push(OutElement::leaf("", "linkItem", n.to_string()));
     }
-    let mut dp = OutElement::branch("", "datapath").attr("xsi:type", "form:DataPath");
-    dp.push(OutElement::leaf("", "segments", path.to_string()));
-    el.push(dp);
+    el.push(super::super::data_path::write_edt("datapath", path)?);
     Ok(el)
 }
 
@@ -353,9 +349,7 @@ fn emit_choice_parameter_links_edt(
         if let Some(m) = mode {
             el.push(OutElement::leaf("", "changeMode", m.to_string()));
         }
-        let mut dp = OutElement::branch("", "datapath").attr("xsi:type", "form:DataPath");
-        dp.push(OutElement::leaf("", "segments", path.to_string()));
-        el.push(dp);
+        el.push(super::super::data_path::write_edt("datapath", path)?);
         out.push(el);
     }
     Ok(())

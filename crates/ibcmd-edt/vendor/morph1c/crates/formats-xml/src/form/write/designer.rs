@@ -40,7 +40,7 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
 
     // Designer-порядок (сверен topo по 104 CommonForms): Width, WindowOpeningMode,
     // AutoSave/EnterKey/SaveData, SaveWindowSettings, AutoTitle, AutoURL, Group,
-    // AutoFillCheck, HorizontalAlign, Customizable, CommandBarLocation, VerticalScroll,
+    // HorizontalAlign, VerticalAlign, AutoFillCheck, Customizable, CommandBarLocation, VerticalScroll,
     // ConversationsRepresentation, WindowViewMode, CommandSet, ShowCommandBar,
     // AutoCommandBar, Events, ChildItems, Attributes, Commands, Parameters.
     push_des_attr(&mut root, body, fr::F_WIDTH);
@@ -62,12 +62,12 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // Scale — после Group, ДО AutoCommandBar (witness ПомощникСозданияОбменаДанными.
     // ВыборТипаТранспорта: Group→Scale=101→AutoCommandBar).
     push_des_attr(&mut root, body, fr::F_SCALE);
-    push_des_attr(&mut root, body, fr::F_AUTO_FILL_CHECK);
     push_des_attr(&mut root, body, fr::F_HORIZONTAL_ALIGN);
     // verticalAlign/horizontalSpacing/childItemsWidth — контейнер-геометрия, ПОСЛЕ HorizontalAlign,
     // ДО Customizable/VerticalScroll (witness Group→HorizontalSpacing→ChildItemsWidth,
     // Group→ChildItemsWidth→VerticalScroll).
     push_des_attr(&mut root, body, fr::F_VERTICAL_ALIGN);
+    push_des_attr(&mut root, body, fr::F_AUTO_FILL_CHECK);
     push_des_attr(&mut root, body, fr::F_CHILD_ITEMS_WIDTH);
     push_des_attr(&mut root, body, fr::F_ALLOW_FORM_CUSTOMIZE);
     push_des_attr(&mut root, body, fr::F_ENABLED);
@@ -97,22 +97,27 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // CommandSet→GroupList→AutoCommandBar). EDT держит это же поле ВНУТРИ extInfo (см.
     // edt_root_ext_info). Форм-атрибут F_GROUP_LIST — эмитим напрямую (не в edt/designer-attr-петле,
     // где он не значится: witness-позиция специфична для дин-списка).
-    push_des_attr(&mut root, body, fr::F_GROUP_LIST);
-    // Форма объекта-документа: Designer эмитит ВСЕ ТРИ поля прямыми детьми корня СРАЗУ после
-    // CommandSet (witness Анкета CommandSet→AutoTime→UsePostingMode→RepostOnWrite→AutoCommandBar);
-    // EDT держит их внутри form:DocumentFormExtInfo, опуская дефолты (см. edt_root_ext_info).
-    if let Some(d) = &body.document_form {
-        root.push(OutElement::leaf("", "AutoTime", d.auto_time.clone()));
-        root.push(OutElement::leaf(
-            "",
-            "UsePostingMode",
-            d.use_posting_mode.clone(),
-        ));
-        root.push(OutElement::leaf(
-            "",
-            "RepostOnWrite",
-            if d.repost_on_write { "true" } else { "false" },
-        ));
+    // In 2.21 FormXmlWriter emits current root scalars, including ShowCommandBar,
+    // before flattening ExtInfo. The 2.20 native layout retains its early slots.
+    let extension_tail = target == morph1c_core::version::FormatVersion::new(2, 21);
+    let push_extension_fields = |root: &mut OutElement| {
+        push_des_attr(root, body, fr::F_GROUP_LIST);
+        if let Some(d) = &body.document_form {
+            root.push(OutElement::leaf("", "AutoTime", d.auto_time.clone()));
+            root.push(OutElement::leaf(
+                "",
+                "UsePostingMode",
+                d.use_posting_mode.clone(),
+            ));
+            root.push(OutElement::leaf(
+                "",
+                "RepostOnWrite",
+                if d.repost_on_write { "true" } else { "false" },
+            ));
+        }
+    };
+    if !extension_tail {
+        push_extension_fields(&mut root);
     }
     // Enabled/ShowTitle/ShowCloseButton — ПОСЛЕ CommandSet, ДО CreateButtonsGroupTitle/
     // ShowCommandBar (SSL Designer-корень: Group<ShowTitle×12, CommandBarLocation<ShowTitle×4,
@@ -136,6 +141,9 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // CollapseItemsByImportanceVariant and CreateButtonsGroupTitle, in both
     // native profiles. ExtInfo follows; its own fields keep their current order.
     push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
+    if extension_tail {
+        push_extension_fields(&mut root);
+    }
     // Форма отчёта: корневые поля (`form:ReportFormExtInfo` в EDT). Designer эмитит
     // ReportFormType/AutoShowState/[CustomSettingsFolder]/ReportResultViewMode/
     // ViewModeApplicationOnSetReportResult СРАЗУ после ShowCommandBar (corpus fact).
@@ -245,10 +253,10 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
             ci.push(designer_cmi_panel(
                 "NavigationPanel",
                 &body.form_ci_navigation_panel,
-            ));
+            )?);
         }
         if !body.form_ci_command_bar.is_empty() {
-            ci.push(designer_cmi_panel("CommandBar", &body.form_ci_command_bar));
+            ci.push(designer_cmi_panel("CommandBar", &body.form_ci_command_bar)?);
         }
         root.push(ci);
     }
@@ -267,14 +275,14 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
 /// `0`, НЕЗАВИСИМО от group — index-БЕЗ-группы (N≥1) эмитит `<Index>` без `<CommandGroup>`) +
 /// видимость (`DefaultVisible=false` ⟺ задана; `<Visible><xr:Common>false` ⟺ задана `false`).
 /// Инверсия [`read_designer_cmi_panel`]; правила — док [`FormCiItem`].
-pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElement {
+pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> Result<OutElement, FormError> {
     let mut panel = OutElement::branch("", local);
     for it in items {
         let mut item = OutElement::branch("", "Item");
         item.push(OutElement::leaf("", "Command", it.command.clone()));
         item.push(OutElement::leaf("", "Type", it.ty.clone()));
         if let Some(path) = &it.command_parameter {
-            item.push(OutElement::leaf("", "Attribute", path.clone()));
+            item.push(OutElement::leaf("", "Attribute", super::super::data_path::write_native(&PropertyValue::DataPath(path.clone()))?));
         }
         if let Some(g) = &it.group {
             item.push(OutElement::leaf("", "CommandGroup", g.clone()));
@@ -307,7 +315,7 @@ pub(crate) fn designer_cmi_panel(local: &str, items: &[FormCiItem]) -> OutElemen
         }
         panel.push(item);
     }
-    panel
+    Ok(panel)
 }
 
 /// XML 2.20 omits Auto when ThreeState is true (22/1142 genuine BSP SDK
@@ -474,6 +482,7 @@ pub(crate) fn designer_title(pairs: &[(Lang, String)], formatted_false: bool) ->
 
 /// Designer диспетчер контрола [`FormItem`] → элемент по виду.
 pub(crate) fn designer_item(item: &FormItem) -> Result<OutElement, FormError> {
+    item.validate_additions().map_err(|e| FormError::Frame(e.into()))?;
     let k = item.kind.as_str();
     match k {
         "Button" => {

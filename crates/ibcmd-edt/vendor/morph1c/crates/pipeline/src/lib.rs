@@ -80,7 +80,7 @@ pub use convert::{read_config, write_config};
 // Private adapter lab access to the same typed form/sidecar pipeline as whole
 // configuration conversion. This adds no ibcmd public canonical model surface.
 #[doc(hidden)]
-pub use form_read::attach_form_body;
+pub use form_read::{attach_form_body, native_form_bodies};
 #[doc(hidden)]
 pub use form_write::{write_form_bodies, write_form_bodies_with_context};
 #[doc(hidden)]

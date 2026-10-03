@@ -1,6 +1,7 @@
-//! Native SDK feature order for fully typed control slots.
-//! FormItemWriter/ExtInfoWriter providers supply explicit orders; other extensions
-//! use their declared EStructuralFeature order. Ordered contents are never visited.
+//! Native target feature order for fully typed control slots.
+//! SDK provider orders supply the baseline; independently captured native exports
+//! supply the materialization differences. The same-native wire facet restores
+//! source spelling after this current-value projection. Ordered contents keep order.
 use crate::emit::OutElement;
 use morph1c_core::version::{FormatVersion, SSL, current_roundtrip_target};
 
@@ -27,10 +28,10 @@ pub(super) fn apply(el: &mut OutElement) {
             "VerticalStretch",
             "TextColor",
             "Font",
+            "Title",
             "GroupHorizontalAlign",
             "GroupVerticalAlign",
             "OnMainServerUnavailableBehavior",
-            "Title",
             "Hyperlink",
             "HorizontalAlign",
             "VerticalAlign",
@@ -408,8 +409,8 @@ pub(super) fn apply(el: &mut OutElement) {
             "EnableDrag",
             "ValuesPicture",
             "TextColor",
-            "Border",
             "BorderColor",
+            "Border",
             "Font",
             "FileDragMode",
             "BackgroundShowMode",
@@ -623,8 +624,6 @@ pub(super) fn apply(el: &mut OutElement) {
             "VerticalStretch",
             "ShowGrid",
             "ShowHeaders",
-            "ShowCellNames",
-            "ShowRowAndColumnNames",
             "PointerType",
             "CellActionsButtonViewMode",
             "SpreadsheetDocumentMultipleSelectionPanelViewMode",
@@ -638,6 +637,8 @@ pub(super) fn apply(el: &mut OutElement) {
             "Edit",
             "ShowGroups",
             "EnableStartDrag",
+            "ShowCellNames",
+            "ShowRowAndColumnNames",
             "EnableDrag",
             "BorderColor",
             "ViewScalingMode",
@@ -1613,7 +1614,7 @@ pub(super) fn apply(el: &mut OutElement) {
             "UserVisible",
             "Enabled",
             "ToolTipRepresentation",
-            "Source",
+            "AdditionSource",
             "Title",
             "ToolTip",
             "GroupHorizontalAlign",
@@ -1636,7 +1637,7 @@ pub(super) fn apply(el: &mut OutElement) {
             "UserVisible",
             "Enabled",
             "ToolTipRepresentation",
-            "Source",
+            "AdditionSource",
             "Title",
             "ToolTip",
             "GroupHorizontalAlign",
@@ -1664,7 +1665,7 @@ pub(super) fn apply(el: &mut OutElement) {
             "UserVisible",
             "Enabled",
             "ToolTipRepresentation",
-            "Source",
+            "AdditionSource",
             "Title",
             "ToolTip",
             "GroupHorizontalAlign",
@@ -1687,11 +1688,13 @@ pub(super) fn apply(el: &mut OutElement) {
     // Keep unlisted slots in place; only known typed slots change physical order.
     let tag = el.local.as_str();
     let rank = |name: &str| {
-        // Additions are an ordered typed array, not singleton scalar slots.
+        // Table additions are three SDK singleton features, in feature order
+        // after ExtendedTooltip. Ordered ChildItems within them are untouched.
+        // Other holders retain their independently defined placement.
         if matches!(
             name,
             "SearchStringAddition" | "ViewStatusAddition" | "SearchControlAddition"
-        ) {
+        ) && tag != "Table" {
             return None;
         }
         if target == FormatVersion::new(2, 21) {
@@ -1710,6 +1713,12 @@ pub(super) fn apply(el: &mut OutElement) {
             }
             if tag == "Table" && name == "ShowCommandBar" {
                 return order.iter().position(|n| *n == "ViewMode").map(|r| 2 * r);
+            }
+            if tag == "Popup" && name == "CommandSource" {
+                return order
+                    .iter()
+                    .position(|n| *n == "Representation")
+                    .map(|r| 2 * r);
             }
             if tag == "PictureDecoration" && name == "PictureColor" {
                 return order

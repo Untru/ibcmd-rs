@@ -144,10 +144,32 @@ fn read_config(
     inventory.verify()?;
     Ok(config)
 }
+
+fn native_body_closure(
+    config: &Configuration,
+    rebuilt: &Inventory,
+    profile: FormatVersion,
+) -> Result<std::collections::BTreeSet<String>, EdtError> {
+    let Some(index) = rebuilt.entry("ConfigDumpInfo.xml") else {
+        return Ok(std::collections::BTreeSet::new());
+    };
+    let manifest = rebuilt.read_entry(index)?;
+    if formats_xml::form::read_native_data_path_annotation(&manifest, profile)
+        .map_err(EdtError::source)?
+        .is_none()
+    {
+        return Ok(std::collections::BTreeSet::new());
+    }
+    let restored = read_config(Format::Designer, rebuilt, profile)?;
+    codec::data_path_body_closure(config, &restored, &manifest, profile)
+}
+
 fn accounting(
     source: &Inventory,
     rebuilt: &Inventory,
     format: Format,
+    profile: FormatVersion,
+    restored_forms: &std::collections::BTreeSet<String>,
 ) -> Result<Vec<DirectoryFileAccounting>, EdtError> {
     source.verify()?;
     rebuilt.verify()?;
@@ -155,12 +177,42 @@ fn accounting(
     let mut failures = Vec::new();
     let mut count = 0usize;
     for (index, entry) in source.entries.iter().enumerate() {
+        if format == Format::Designer && entry.path == "ConfigDumpInfo.xml" {
+            let original = source.read_entry(index)?;
+            let generated = rebuilt
+                .entry(&entry.path)
+                .map(|i| rebuilt.read_entry(i))
+                .transpose()?;
+            let typed = formats_xml::form::compare_native_data_path_annotations(
+                &original,
+                generated.as_deref(),
+                profile,
+            )
+            .map_err(EdtError::source)?;
+            match typed {
+                Some(true) => accounting.push(DirectoryFileAccounting {
+                    path: entry.path.clone(),
+                    disposition: Disposition::Converted,
+                }),
+                Some(false) => {
+                    return Err(EdtError::new(
+                        "CURRENT annotated ConfigDumpInfo did not regenerate its typed control",
+                    ));
+                }
+                None => accounting.push(DirectoryFileAccounting {
+                    path: entry.path.clone(),
+                    disposition: Disposition::Retained,
+                }),
+            }
+            continue;
+        }
         let result = match rebuilt.entry(&entry.path) {
             Some(_) if entry.path.ends_with(".mdo") || entry.metadata => {
                 Ok(Some(Disposition::Converted))
             }
-            Some(other) => disk::compare_bodies(source, rebuilt, index, other)
-                .map(|same| same.then_some(Disposition::Converted)),
+            Some(other) => disk::compare_bodies(source, rebuilt, index, other).map(|same| {
+                (same || restored_forms.contains(&entry.path)).then_some(Disposition::Converted)
+            }),
             None if format == Format::Designer && entry.path == "ConfigDumpInfo.xml" => {
                 Ok(Some(Disposition::Retained))
             }
@@ -230,7 +282,14 @@ fn xml_to_edt(
         &owner.path().join("rebuilt"),
         version,
     )?;
-    let files = accounting(&source.inventory, &rebuilt, Format::Designer)?;
+    let forms = native_body_closure(&config, &rebuilt, version)?;
+    let files = accounting(
+        &source.inventory,
+        &rebuilt,
+        Format::Designer,
+        version,
+        &forms,
+    )?;
     fs::remove_dir_all(&rebuilt.root).map_err(EdtError::source)?;
     let project = owner.path().join("project");
     fs::create_dir(&project).map_err(EdtError::source)?;
@@ -303,7 +362,13 @@ fn edt_to_xml(
     let typed_source = Inventory::scan(&source.inventory.root.join("src"))?;
     let config = read_config(Format::Edt, &typed_source, version)?;
     let rebuilt = render(Format::Edt, &config, &owner.path().join("rebuilt"), version)?;
-    let mut files = accounting(&typed_source, &rebuilt, Format::Edt)?;
+    let mut files = accounting(
+        &typed_source,
+        &rebuilt,
+        Format::Edt,
+        version,
+        &std::collections::BTreeSet::new(),
+    )?;
     for file in &mut files {
         file.path = format!("src/{}", file.path);
     }
@@ -334,7 +399,14 @@ fn edt_to_xml(
                 &owner.path().join("original-rebuilt"),
                 version,
             )?;
-            accounting(&original, &original_rebuilt, Format::Designer)?;
+            let forms = native_body_closure(&original_config, &original_rebuilt, version)?;
+            accounting(
+                &original,
+                &original_rebuilt,
+                Format::Designer,
+                version,
+                &forms,
+            )?;
             if provenance::semantic_digest(&original_config)?
                 != provenance::semantic_digest(&config)?
             {

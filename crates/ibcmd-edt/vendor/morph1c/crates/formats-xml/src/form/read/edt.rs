@@ -383,8 +383,7 @@ pub(crate) fn read_edt_cmi_panel(panel: &Element) -> Result<Vec<FormCiItem>, For
             .child("commandParameter")
             .filter(|c| c.prefix.is_empty())
             .map(|parameter| {
-                super::super::fields::claim_xsi(parameter, "commandParameter", "form:DataPath")?;
-                super::super::fields::require_single_leaf(parameter, "commandParameter", "segments")
+                read_edt_data_path_elem(parameter, "commandParameter")
             })
             .transpose()?;
         let ty = match rec.child("type").filter(|c| c.prefix.is_empty()) {
@@ -912,29 +911,9 @@ pub(crate) fn read_edt_data_attribute(el: &Element) -> Result<FormDataAttribute,
 
 /// Прочитать EDT `<tag xsi:type="form:DataPath"><segments>Путь</segments></tag>`-элемент → путь.
 /// Иной xsi:type / состав — §1.0-ошибка.
-pub(crate) fn read_edt_data_path_elem(s: &Element, tag: &str) -> Result<String, FormError> {
-    s.claim();
-    let xt = s
-        .attr("xsi:type")
-        .ok_or_else(|| FormError::Frame(format!("<{tag}>: no xsi:type")))?;
-    if xt.value != "form:DataPath" {
-        return Err(FormError::Frame(format!(
-            "<{tag}> xsi:type={:?}, want form:DataPath",
-            xt.value
-        )));
-    }
-    xt.claimed.set(true);
-    let seg = s
-        .child("segments")
-        .filter(|c| c.prefix.is_empty())
-        .ok_or_else(|| FormError::Frame(format!("<{tag}>: no <segments> (§1.0)")))?;
-    seg.claim_with_text();
-    if s.children.len() != 1 {
-        return Err(FormError::Frame(format!(
-            "<{tag}>: expected one <segments> (§1.0)"
-        )));
-    }
-    Ok(seg.text.clone())
+pub(crate) fn read_edt_data_path_elem(s: &Element, tag: &str) -> Result<morph1c_core::ir::form::DataPathSpec, FormError> {
+    let value = super::super::data_path::read_edt(s, tag)?;
+    super::super::data_path::current(&value)
 }
 
 /// Прочитать EDT `<extInfo>` реквизита →

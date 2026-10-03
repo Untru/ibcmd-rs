@@ -26,7 +26,7 @@ fn native(body: &FormBody, version: FormatVersion) -> Vec<u8> {
     with_roundtrip_target(version, || write_form(FormDialect::Designer, body)).unwrap()
 }
 #[test]
-fn final_query_batch_aliases_are_bounded_and_source_version_specific() {
+fn final_query_batch_aliases_are_source_version_specific_and_deep_queries_work() {
     let form = body(
         "SELECT Old AS Missing INTO Temporary; SELECT Source.Real AS Selected FROM Source; DESTROY Temporary",
         None,
@@ -87,15 +87,34 @@ fn final_query_batch_aliases_are_bounded_and_source_version_specific() {
         ))
         .is_err()
     );
+    // Balanced nesting is valid query syntax, including depths beyond the old
+    // fixed ceiling. The iterative delimiter stack scales with the input;
+    // lexical failures still fail closed.
+    for depth in [65, 1024] {
+        let query = format!(
+            "SELECT {}x{} AS Selected",
+            "(".repeat(depth),
+            ")".repeat(depth)
+        );
+        let deep = body(&query, None);
+        let output = String::from_utf8(native(&deep, FormatVersion::new(2, 20))).unwrap();
+        assert!(output.contains("<Field>List.Selected</Field>"));
+        assert!(output.contains("<Field>~List.Missing</Field>"));
+        assert_eq!(
+            deep.data_attributes[0]
+                .dynamic_list
+                .as_ref()
+                .unwrap()
+                .query_text
+                .as_deref(),
+            Some(query.as_str())
+        );
+    }
     invalid.data_attributes[0]
         .dynamic_list
         .as_mut()
         .unwrap()
-        .query_text = Some(format!(
-        "SELECT {}x{} AS Selected",
-        "(".repeat(65),
-        ")".repeat(65)
-    ));
+        .query_text = Some("SELECT (Selected FROM Source".into());
     assert!(
         with_roundtrip_target(FormatVersion::new(2, 20), || write_form(
             FormDialect::Designer,

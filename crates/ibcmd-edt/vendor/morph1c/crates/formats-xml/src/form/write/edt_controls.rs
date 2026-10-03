@@ -5,6 +5,7 @@ use super::*;
 
 /// EDT диспетчер контрола [`FormItem`] → `<items xsi:type="form:X">` по виду.
 pub(crate) fn edt_item(item: &FormItem) -> Result<OutElement, FormError> {
+    item.validate_additions().map_err(|e| FormError::Frame(e.into()))?;
     match item.kind.as_str() {
         "Button" => edt_button(item),
         "Table" => edt_table(item),
@@ -47,6 +48,7 @@ pub(crate) fn edt_auto_table(item: &FormItem) -> Result<OutElement, FormError> {
 /// все регионы (поля/колонки/добавления/autoCommandBar/декораторы). Внешнюю обёртку/xsi:type
 /// ставит вызывающий.
 pub(crate) fn edt_table_body_into(el: &mut OutElement, item: &FormItem) -> Result<(), FormError> {
+    item.validate_additions().map_err(|e| FormError::Frame(e.into()))?;
     super::super::event_owners::validate_table_owned(item)?;
     el.push(OutElement::leaf("", "name", item.name.clone()));
     // id=0 (главная autoTable) EDT ОПУСКАЕТ; ⟺ Designer `id="0"` (см. push_edt_id).

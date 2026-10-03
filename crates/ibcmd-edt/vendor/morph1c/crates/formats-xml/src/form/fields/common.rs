@@ -465,10 +465,10 @@ pub(crate) fn bare_undefined_spec() -> morph1c_core::ir::value::ValueSpec {
 // ВНИМАНИЕ: EDT-тег вложенного пути — СТРОЧНЫЙ `datapath` (не `dataPath` Codec::DataPath).
 
 /// Разложить канон typeLink в `(путь, linkItem)`.
-pub(crate) fn type_link_parts(v: &PropertyValue) -> Result<(&str, i64), FormError> {
+pub(crate) fn type_link_parts(v: &PropertyValue) -> Result<(&PropertyValue, i64), FormError> {
     match v {
         PropertyValue::List(p) if p.len() == 2 => match (&p[0], &p[1]) {
-            (PropertyValue::Ref(path), PropertyValue::Int(n)) => Ok((path.as_str(), *n)),
+            (path @ (PropertyValue::Ref(_) | PropertyValue::DataPath(_)), PropertyValue::Int(n)) => Ok((path, *n)),
             _ => Err(FormError::Frame(
                 "typeLink canon must be [Ref, Int] (§1.6)".into(),
             )),
@@ -485,7 +485,7 @@ pub(crate) fn type_link_parts(v: &PropertyValue) -> Result<(&str, i64), FormErro
 /// НЕ-Clear, как в дескрипторном кодеке `choice_param_links`).
 pub(crate) fn choice_parameter_link_parts(
     item: &PropertyValue,
-) -> Result<(&str, &str, Option<&str>), FormError> {
+) -> Result<(&str, &PropertyValue, Option<&str>), FormError> {
     match item {
         PropertyValue::List(p) if p.len() == 2 || p.len() == 3 => {
             let mode = match p.get(2) {
@@ -498,8 +498,8 @@ pub(crate) fn choice_parameter_link_parts(
                 }
             };
             match (&p[0], &p[1]) {
-                (PropertyValue::Str(name), PropertyValue::Ref(path)) => {
-                    Ok((name.as_str(), path.as_str(), mode))
+                (PropertyValue::Str(name), path @ (PropertyValue::Ref(_) | PropertyValue::DataPath(_))) => {
+                    Ok((name.as_str(), path, mode))
                 }
                 _ => Err(FormError::Frame(
                     "choiceParameterLinks item must be [name:Str, path:Ref, changeMode?] (§1.6)"

@@ -89,6 +89,11 @@ pub(crate) fn read_fields_designer(
                 .iter()
                 .find(|c| c.local == entry.des && c.prefix.is_empty());
             match node {
+                Some(n) if matches!(entry.codec, Codec::DataPath) && super::super::tables::field_kind(owner).is_some() => {
+                    n.claim_with_text();
+                    if !n.children.is_empty() { return Err(FormError::Frame("DataPath must be a text leaf".into())); }
+                    Some(super::super::data_path::read_native_field(&n.text)?)
+                }
                 Some(n) => Some(decode_designer(entry, n)?),
                 None => None,
             }
@@ -190,9 +195,7 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
             if !el.children.is_empty() {
                 return Err(FormError::Frame(format!("<{tag}>: must be a text leaf")));
             }
-            Ok(PropertyValue::Ref(
-                el.text.strip_prefix('~').unwrap_or(&el.text).to_owned(),
-            ))
+            super::super::data_path::read_native(&el.text)
         }
         Codec::MdObjectRef => {
             claim_xsi(el, tag, "xr:MDObjectRef")?;
@@ -785,7 +788,7 @@ pub(crate) fn read_type_link_designer(el: &Element) -> Result<PropertyValue, For
         ));
     }
     Ok(PropertyValue::List(vec![
-        PropertyValue::Ref(dp.text.clone()),
+        super::super::data_path::read_native(&dp.text)?,
         PropertyValue::Int(parse_int(&li.text, "TypeLink LinkItem")?),
     ]))
 }
@@ -835,7 +838,7 @@ fn read_choice_parameter_links_designer(cl: &Element) -> Result<Vec<PropertyValu
         }
         let mut entry = vec![
             PropertyValue::Str(name.text.clone()),
-            PropertyValue::Ref(dp.text.clone()),
+            super::super::data_path::read_native(&dp.text)?,
         ];
         if vc.text != "Clear" {
             entry.push(PropertyValue::Enum(Token::new(vc.text.clone())));

@@ -92,6 +92,14 @@ fn read_config_inner(
         });
     }
 
+    let native_path_annotation=if format==Format::Designer {
+        let path=src.join("ConfigDumpInfo.xml");
+        if path.exists(){let bytes=crate::form_read::read_regular_source(&path).map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?;
+            formats_xml::form::read_native_data_path_annotation(&bytes,source_version.unwrap_or(morph1c_core::version::SSL))
+                .map_err(|e|ConvertError::Read{kind:"Configuration".into(),object:"DataPath annotation".into(),reason:e.to_string()})?
+        }else{None}
+    }else{None};
+
     let reg = FormatRegistry::for_format(format)?;
 
     // (1) §1.0 preflight — abort on any non-excluded blocked kind.
@@ -204,7 +212,7 @@ fn read_config_inner(
                                 // наследует, а без неё ридер снова достраивал бы свойства,
                                 // которых в дампе этой версии нет.
                                 morph1c_core::version::with_source_version(source_version, || {
-                                    read_object_at(format, fk, name, path)
+                                    read_object_at_with_semantics(format, fk, name, path, native_path_annotation.as_ref())
                                 })
                             },
                         )
@@ -253,6 +261,10 @@ fn read_config_inner(
         .map(|e| (e.kind.clone(), e.object_count))
         .collect();
 
+    if let Some(annotation)=&native_path_annotation {
+        annotation.verify_configuration(&cfg,source_version.unwrap_or(morph1c_core::version::SSL))
+            .map_err(|e|ConvertError::Read{kind:"Configuration".into(),object:"CURRENT DataPath annotation".into(),reason:e.to_string()})?;
+    }
     crate::picture_read::resolve_form_picture_transparency(format, &mut cfg)?;
     if format == Format::Designer {
         formats_xml::form::bind_native_availability_sources(&mut cfg)
@@ -264,12 +276,8 @@ fn read_config_inner(
 }
 
 /// Read a descriptor and all its source-family bodies.
-pub(crate) fn read_object_at(
-    format: Format,
-    fk: &FormatKind,
-    name: &str,
-    path: &Path,
-) -> Result<MetadataObject, ConvertError> {
+fn read_object_at_with_semantics(format:Format,fk:&FormatKind,name:&str,path:&Path,
+    annotation:Option<&formats_xml::form::NativeDataPathAnnotation>)->Result<MetadataObject,ConvertError>{
     let bytes = std::fs::read(path).map_err(|e| ConvertError::Io {
         path: path.display().to_string(),
         reason: e.to_string(),
@@ -347,7 +355,7 @@ pub(crate) fn read_object_at(
         // `Items/<Имя>/Picture.<ext>` pictures) → `templates` (object + children).
         crate::graph_template_read::attach_graph_template_bodies(format, fk.kind, path, &mut obj)?;
         // Form-body sidecar (`Form.form` / `Ext/Form.xml`) → `obj.form_bodies` (§1.0-strict).
-        crate::form_read::attach_form_body(format, fk.kind, path, &mut obj)?;
+        crate::form_read::attach_form_body_with_semantics(format, fk.kind, path, &mut obj, annotation)?;
         // XDTO-schema sidecar (`Package.xdto` / `Ext/Package.bin`) → `obj.xdto_schema` (§1.0-strict).
         crate::xdto_read::attach_xdto_schema(format, fk.kind, path, &mut obj)?;
         // WSDL sidecar set (`WsDefinitions.wsdl`+`<N>.xsd` / `Ext/WSDefinition.xml`+`Ext/<N>.xsd`)
@@ -666,6 +674,13 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
         .find(|o| o.kind.as_str() == "Configuration")
     {
         crate::language_write::write_languages(format, dst, root)?;
+    }
+    if format==Format::Designer {
+        let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+        if let Some(bytes)=formats_xml::form::write_native_data_path_annotation(cfg,profile)
+            .map_err(|e|ConvertError::Write{kind:"Configuration".into(),object:"CURRENT DataPath annotation".into(),reason:e.to_string()})? {
+            crate::form_write::write_file(&dst.join("ConfigDumpInfo.xml"),&bytes)?;
+        }
     }
     if timing {
         eprintln!("[timing]   write_config total: {:?}", t1.elapsed());

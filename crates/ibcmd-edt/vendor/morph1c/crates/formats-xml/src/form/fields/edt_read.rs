@@ -146,11 +146,7 @@ pub(crate) fn decode_edt(entry: &FieldProj, el: &Element) -> Result<PropertyValu
             el.claim();
             value_codec::decode(ValueDialect::Edt, el).map_err(FormError::Frame)
         }
-        Codec::DataPath => {
-            claim_xsi(el, tag, "form:DataPath")?;
-            let v = require_single_leaf(el, tag, "segments")?;
-            Ok(PropertyValue::Ref(v))
-        }
+        Codec::DataPath => super::super::data_path::read_edt(el, tag),
         Codec::MdObjectRef => {
             claim_xsi(el, tag, "core:ReferenceValue")?;
             let v = require_single_leaf(el, tag, "value")?;
@@ -618,13 +614,12 @@ pub(crate) fn read_choice_parameters_edt(
 }
 
 /// EDT-разбор вложенного `<datapath xsi:type="form:DataPath"><segments>Путь</segments>`.
-fn decode_edt_nested_datapath(host: &Element, ctx: &str) -> Result<String, FormError> {
+fn decode_edt_nested_datapath(host: &Element, ctx: &str) -> Result<PropertyValue, FormError> {
     let dp = host
         .child("datapath")
         .filter(|c| c.prefix.is_empty())
         .ok_or_else(|| FormError::Frame(format!("{ctx}: no <datapath> (§1.0)")))?;
-    claim_xsi(dp, "datapath", "form:DataPath")?;
-    require_single_leaf(dp, ctx, "segments")
+    super::super::data_path::read_edt(dp, "datapath")
 }
 
 /// EDT `<typeLink>` → канон `List([Ref(путь), Int(linkItem)])` (linkItem absent ⇒ 0).
@@ -645,7 +640,7 @@ pub(crate) fn read_type_link_edt(el: &Element) -> Result<PropertyValue, FormErro
         ));
     }
     Ok(PropertyValue::List(vec![
-        PropertyValue::Ref(path),
+        path,
         PropertyValue::Int(link_item),
     ]))
 }
@@ -686,7 +681,7 @@ fn read_choice_parameter_links_edt(
         }
         let mut entry = vec![
             PropertyValue::Str(name_el.text.clone()),
-            PropertyValue::Ref(path),
+            path,
         ];
         if let Some(m) = change_mode.filter(|m| m != "Clear") {
             entry.push(PropertyValue::Enum(Token::new(m)));

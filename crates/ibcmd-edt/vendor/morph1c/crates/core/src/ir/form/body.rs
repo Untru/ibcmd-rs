@@ -37,7 +37,7 @@ pub struct FormCiItem {
     pub ty: String,
     /// Typed command DataPath parameter (EDT commandParameter / XML Attribute).
     #[serde(default)]
-    pub command_parameter: Option<String>,
+    pub command_parameter: Option<super::DataPathSpec>,
     /// Группа команд (`FormCommandBarImportant`/`CommandGroup.<Имя>`): EDT `<group>` ⟺
     /// Designer `<CommandGroup>`.
     pub group: Option<String>,
