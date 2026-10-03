@@ -176,7 +176,7 @@ fn mxl_stream_keeps_namespace_scopes_and_has_no_fixed_depth_budget() {
     assert_eq!(
         target,
         source
-            .replace("actual\ncontent", "actual\r\ncontent")
+            .replace("actual\ncontent\rretained", "actual\r\ncontent\r\nretained")
             .as_bytes()
     );
     let deep = format!(
@@ -228,7 +228,7 @@ fn mxl_stream_keeps_namespace_scopes_and_has_no_fixed_depth_budget() {
     assert_eq!(
         std::fs::read(out.path().join("CommonTemplates/Witness/Template.mxlx")).unwrap(),
         cdata
-            .replace("actual\ncontent", "actual\r\ncontent")
+            .replace("actual\ncontent\rretained", "actual\r\ncontent\r\nretained")
             .as_bytes()
     );
 }

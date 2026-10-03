@@ -1,5 +1,6 @@
 use formats_xml::form::{
-    FormDialect, read_chart_sidecar, read_form, write_chart_sidecar, write_form,
+    FormDialect, apply_chart_semantics_resource, project_chart_semantics, read_chart_sidecar,
+    read_form, write_chart_sidecar, write_form,
 };
 use ibcmd_edt::{
     ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
@@ -49,9 +50,16 @@ fn value(settings: &mut ChartSettings) -> &mut ChartTypedValue {
     };
     value
 }
+const CHART_FORM_UUID: Uuid = Uuid([81; 16]);
+
 fn native(settings: &ChartSettings, minor: u16) -> Vec<u8> {
     with_roundtrip_target(FormatVersion::new(2, minor), || {
-        write_form(FormDialect::Designer, &body(settings.clone()))
+        let current = body(settings.clone());
+        let projected = project_chart_semantics(&current, CHART_FORM_UUID).unwrap();
+        write_form(
+            FormDialect::Designer,
+            projected.as_ref().map_or(&current, |(body, _)| body),
+        )
     })
     .unwrap()
 }
@@ -65,6 +73,23 @@ fn returned(bytes: &[u8], minor: u16) -> ChartSettings {
     .chart_settings
     .unwrap()
 }
+// Whole-model comparisons include the typed current resource. Bare returned()
+// remains the native schema projection used by the wire enum assertions below.
+fn complete_returned(bytes: &[u8], current: &ChartSettings, minor: u16) -> ChartSettings {
+    with_roundtrip_target(FormatVersion::new(2, minor), || {
+        let original = body(current.clone());
+        let projection = project_chart_semantics(&original, CHART_FORM_UUID).unwrap();
+        let mut returned = with_source_version(Some(FormatVersion::new(2, minor)), || {
+            read_form(FormDialect::Designer, bytes)
+        })
+        .unwrap();
+        if let Some((_, resource)) = projection {
+            apply_chart_semantics_resource(&mut returned, CHART_FORM_UUID, &resource).unwrap();
+        }
+        returned.data_attributes.remove(0).chart_settings.unwrap()
+    })
+}
+
 #[test]
 fn enum_package_identity_and_current_values_do_not_follow_a_package_first_match() {
     for minor in [20, 21] {
@@ -157,7 +182,7 @@ fn expanded_native_aliases_and_unique_protocol_inverse_preserve_current_type() {
         );
         let bytes = native(&original, minor);
         assert!(String::from_utf8_lossy(&bytes).contains("ChartTrendlineApproximationType"));
-        assert_eq!(returned(&bytes, minor), original);
+        assert_eq!(complete_returned(&bytes, &original, minor), original);
         // A future protocol type may equal a known reverse-map local spelling.
         // Its unknown forward type still belongs to current-config, not the known UI URI.
         let future_local = chart(
@@ -168,7 +193,10 @@ fn expanded_native_aliases_and_unique_protocol_inverse_preserve_current_type() {
             String::from_utf8_lossy(&future_native)
                 .contains("xsi:type=\"cfg:ChartTrendlineApproximationType\"")
         );
-        assert_eq!(returned(&future_native, minor), future_local);
+        assert_eq!(
+            complete_returned(&future_native, &future_local, minor),
+            future_local
+        );
         let original = chart("xsi:type=\"core:SysEnumValue\"><value>HorizontalAlign.Left</value>");
         let bytes = String::from_utf8(native(&original, minor)).unwrap();
         let alias = bytes.replace(
@@ -176,13 +204,19 @@ fn expanded_native_aliases_and_unique_protocol_inverse_preserve_current_type() {
             "xmlns:alias=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"alias:HorizontalAlign\"",
         );
         assert_ne!(alias, bytes);
-        assert_eq!(returned(alias.as_bytes(), minor), original);
+        assert_eq!(
+            complete_returned(alias.as_bytes(), &original, minor),
+            original
+        );
         let unprefixed = bytes.replace(
             "xsi:type=\"v8ui:HorizontalAlign\"",
             "xmlns=\"http://v8.1c.ru/8.1/data/ui\" xsi:type=\"HorizontalAlign\"",
         );
         assert_ne!(unprefixed, bytes);
-        assert_eq!(returned(unprefixed.as_bytes(), minor), original);
+        assert_eq!(
+            complete_returned(unprefixed.as_bytes(), &original, minor),
+            original
+        );
         assert!(
             read_form(
                 FormDialect::Designer,
@@ -217,7 +251,10 @@ fn expanded_native_aliases_and_unique_protocol_inverse_preserve_current_type() {
             .is_err()
         );
         let unicode = chart("xsi:type=\"core:SysEnumValue\"><value>НовыйТип.Значение</value>");
-        assert_eq!(returned(&native(&unicode, minor), minor), unicode);
+        assert_eq!(
+            complete_returned(&native(&unicode, minor), &unicode, minor),
+            unicode
+        );
     }
 }
 #[test]
@@ -256,7 +293,10 @@ fn nullable_symbolic_values_and_sdk_truncation_remain_distinct_current_data() {
             "xsi:type=\"common:ChartLineTypeValue\"><value>{line}</value>"
         ));
         for minor in [20, 21] {
-            assert_eq!(returned(&native(&current, minor), minor), current);
+            assert_eq!(
+                complete_returned(&native(&current, minor), &current, minor),
+                current
+            );
         }
     }
 }
@@ -324,7 +364,7 @@ fn period_layout_dates_and_current_order_are_typed_and_cross_dialect() {
             let text = String::from_utf8_lossy(&bytes);
             assert!(text.contains("<v8:startDate>2026-01-02T03:04:05</v8:startDate>"));
             assert!(!text.contains("startDate xsi:type"));
-            assert_eq!(returned(&bytes, minor), current);
+            assert_eq!(complete_returned(&bytes, &current, minor), current);
         }
         assert_eq!(
             read_chart_sidecar(&write_chart_sidecar(&current).unwrap()).unwrap(),
@@ -604,5 +644,52 @@ fn public_current_enum_identity_and_null_members_survive_both_cycles_and_forgery
         );
         assert!(String::from_utf8_lossy(native.bytes()).contains(">Right</"));
         assert_ne!(changed.tree, original);
+    }
+}
+
+#[test]
+fn design_and_value_records_preserve_dotted_native_literals_and_reject_stale_counterparts() {
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let current = chart(
+                "xsi:type=\"core:EnumValue\"><value>http://future.example/model#FutureEnum/Literal.With.Dot</value>",
+            );
+            let original = body(current.clone());
+            let (projected, resource) = project_chart_semantics(&original, CHART_FORM_UUID)
+                .unwrap()
+                .unwrap();
+            let rows: serde_json::Value = serde_json::from_slice(&resource).unwrap();
+            assert_eq!(rows["designs"].as_array().unwrap().len(), 1);
+            assert_eq!(rows["values"].as_array().unwrap().len(), 1);
+            let bytes = write_form(FormDialect::Designer, &projected).unwrap();
+            let mut counterpart = with_source_version(Some(FormatVersion::new(2, minor)), || {
+                read_form(FormDialect::Designer, &bytes)
+            })
+            .unwrap();
+            assert!(matches!(
+                value(counterpart.data_attributes[0].chart_settings.as_mut().unwrap()),
+                ChartTypedValue::SysEnum(Some(s)) if s == "FutureEnum.Literal.With.Dot"
+            ));
+            let mut changed = counterpart.clone();
+            *value(changed.data_attributes[0].chart_settings.as_mut().unwrap()) =
+                ChartTypedValue::SysEnum(Some("FutureEnum.CurrentLiteral".into()));
+            let before = serde_json::to_vec(&changed).unwrap();
+            let error = apply_chart_semantics_resource(&mut changed, CHART_FORM_UUID, &resource)
+                .unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("stale/conflicting current native design binding")
+            );
+            assert_eq!(serde_json::to_vec(&changed).unwrap(), before);
+            apply_chart_semantics_resource(&mut counterpart, CHART_FORM_UUID, &resource).unwrap();
+            assert_eq!(
+                counterpart.data_attributes[0]
+                    .chart_settings
+                    .as_ref()
+                    .unwrap(),
+                &current
+            );
+        });
     }
 }

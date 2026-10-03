@@ -10,6 +10,15 @@ fn source(kind: &str, content: &str) -> FormBody {
         "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\"><attributes><name>Diagram</name><id>1</id><valueType><types>{kind}</types></valueType><view><common>true</common></view><edit><common>true</common></edit><extInfo xsi:type=\"form:{kind}ExtInfo\"/></attributes></form:Form>\r\n"
     );
     let mut body = read_form(FormDialect::Edt, xml.as_bytes()).unwrap();
+    // These controls exercise visible Series/Point omission transport, rather
+    // than the separately tested disabled-design whole-collection transport.
+    let content = if kind == "Chart" {
+        format!(
+            "<isSeriesDesign>true</isSeriesDesign><isPointsDesign>true</isPointsDesign>{content}"
+        )
+    } else {
+        content.to_owned()
+    };
     let content = content
         .replace("<realSeriesData>", "<realSeriesData><properties>")
         .replace("</realSeriesData>", "</properties></realSeriesData>")
@@ -39,22 +48,39 @@ fn rows<'a>(body: &'a mut FormBody, name: &str) -> &'a mut Vec<Vec<(String, Char
     };
     items
 }
+fn native_counterpart(projected: &FormBody) -> FormBody {
+    let xml = write_form(FormDialect::Designer, projected).unwrap();
+    read_form(FormDialect::Designer, &xml).unwrap()
+}
 fn returned(original: &FormBody) -> FormBody {
-    let (projected, payload) = project_chart_semantics(original, UUID).unwrap().unwrap();
-    assert!(project_chart_semantics(&projected, UUID).unwrap().is_none());
-    let xml = write_form(FormDialect::Designer, &projected).unwrap();
-    let mut returned = read_form(FormDialect::Designer, &xml).unwrap();
-    apply_chart_semantics_resource(&mut returned, UUID, &payload).unwrap();
-    assert_eq!(
-        returned.data_attributes[0].chart_settings,
-        original.data_attributes[0].chart_settings
-    );
-    let settings = returned.data_attributes[0].chart_settings.as_ref().unwrap();
-    assert_eq!(
-        read_chart_sidecar(&write_chart_sidecar(settings).unwrap()).unwrap(),
-        *settings
-    );
-    returned
+    let mut final_return = None;
+    for minor in [20, 21] {
+        let current = morph1c_core::version::with_roundtrip_target(
+            morph1c_core::version::FormatVersion::new(2, minor),
+            || {
+                let (projected, payload) =
+                    project_chart_semantics(original, UUID).unwrap().unwrap();
+                assert!(project_chart_semantics(&projected, UUID).unwrap().is_none());
+                let mut returned = morph1c_core::version::with_source_version(
+                    Some(morph1c_core::version::FormatVersion::new(2, minor)),
+                    || native_counterpart(&projected),
+                );
+                apply_chart_semantics_resource(&mut returned, UUID, &payload).unwrap();
+                assert_eq!(
+                    returned.data_attributes[0].chart_settings,
+                    original.data_attributes[0].chart_settings
+                );
+                let settings = returned.data_attributes[0].chart_settings.as_ref().unwrap();
+                assert_eq!(
+                    read_chart_sidecar(&write_chart_sidecar(settings).unwrap()).unwrap(),
+                    *settings
+                );
+                returned
+            },
+        );
+        final_return = Some(current);
+    }
+    final_return.unwrap()
 }
 #[test]
 fn persisted_series_info_preserves_nullable_values_and_complete_numeric_domain() {
@@ -66,7 +92,14 @@ fn persisted_series_info_preserves_nullable_values_and_complete_numeric_domain()
         returned(&source("Chart", content));
     }
     let absent = source("Chart", "<realSeriesData><id>1</id></realSeriesData>");
-    assert!(project_chart_semantics(&absent, UUID).unwrap().is_none());
+    let (_, absent_resource) = project_chart_semantics(&absent, UUID).unwrap().unwrap();
+    let absent_payload: serde_json::Value = serde_json::from_slice(&absent_resource).unwrap();
+    assert_eq!(absent_payload["records"], serde_json::json!([]));
+    assert_eq!(
+        absent_payload["designs"][0]["current"],
+        serde_json::json!([["realExSeriesData", "Absent"]])
+    );
+    returned(&absent);
     let present = source(
         "Chart",
         "<realSeriesData><id>1</id><info/></realSeriesData>",
@@ -136,7 +169,7 @@ fn trend_topology_uses_current_native_lines_and_preserves_only_unprojected_lines
             "stale" => changed["trends"][0]["current_native_sha256"] = "0".repeat(64).into(),
             _ => unreachable!(),
         }
-        let mut body = projected.clone();
+        let mut body = native_counterpart(&projected);
         let before = serde_json::to_vec(&body).unwrap();
         assert!(
             apply_chart_semantics_resource(&mut body, UUID, &serde_json::to_vec(&changed).unwrap())
@@ -175,7 +208,7 @@ fn every_binding_is_validated_before_any_omitted_property_is_restored() {
             "stale" => changed["records"][1]["current_item_sha256"] = "0".repeat(64).into(),
             _ => unreachable!(),
         }
-        let mut current = projected.clone();
+        let mut current = native_counterpart(&projected);
         let before = serde_json::to_vec(&current).unwrap();
         assert!(
             apply_chart_semantics_resource(
@@ -188,12 +221,12 @@ fn every_binding_is_validated_before_any_omitted_property_is_restored() {
         );
         assert_eq!(serde_json::to_vec(&current).unwrap(), before, "{mutation}");
     }
-    let mut current = projected.clone();
+    let mut current = native_counterpart(&projected);
     rows(&mut current, "realSeriesData")[1].retain(|(n, _)| n != "info");
     let before = serde_json::to_vec(&current).unwrap();
     assert!(apply_chart_semantics_resource(&mut current, UUID, &payload).is_err());
     assert_eq!(serde_json::to_vec(&current).unwrap(), before);
-    let mut current = projected;
+    let mut current = native_counterpart(&projected);
     rows(&mut current, "realSeriesData").reverse();
     let before = serde_json::to_vec(&current).unwrap();
     assert!(apply_chart_semantics_resource(&mut current, UUID, &payload).is_err());

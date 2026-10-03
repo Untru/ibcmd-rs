@@ -25,7 +25,7 @@ impl<'a> FormProjectionContext<'a> {
     pub fn new(metadata: &'a Configuration) -> Result<Self, FormError> {
         let mut objects = BTreeMap::new();
         for object in &metadata.objects {
-            if family(object.kind.as_str()).is_none() {
+            if family(object.kind.as_str()).is_none() && object.kind.as_str() != "CommonAttribute" {
                 continue;
             }
             let identity =
@@ -37,6 +37,15 @@ impl<'a> FormProjectionContext<'a> {
             }
         }
         let mut hash = DependencyHash(Sha256::new());
+        // The SDK calculated-field provider depends on CURRENT project
+        // compatibility, independently of the requested native XML dialect.
+        let compatibility = morph1c_core::spec::metadata::configuration::F_COMPATIBILITY_MODE;
+        hash.part(
+            &metadata
+                .properties
+                .iter()
+                .find(|(id, _)| *id == compatibility),
+        )?;
         for object in objects.values() {
             let mut pending = vec![*object];
             while let Some(object) = pending.pop() {
@@ -132,7 +141,11 @@ fn dependency_sha256(
             attributes.extend(additional.columns.iter().rev());
         }
     }
-    for command in body.form_ci_navigation_panel.iter().chain(&body.form_ci_command_bar) {
+    for command in body
+        .form_ci_navigation_panel
+        .iter()
+        .chain(&body.form_ci_command_bar)
+    {
         hash.part(&(&command.command, &command.command_parameter))?;
     }
     let mut items: Vec<_> = body.items.iter().rev().collect();
@@ -170,7 +183,13 @@ fn dependency_sha256(
                 .iter()
                 .flat_map(|fields| fields.iter())
                 .filter(|field| {
-                    field.region == region && matches!(field.codec, super::fields::Codec::DataPath | super::fields::Codec::TypeLink | super::fields::Codec::ChoiceParameterLinks)
+                    field.region == region
+                        && matches!(
+                            field.codec,
+                            super::fields::Codec::DataPath
+                                | super::fields::Codec::TypeLink
+                                | super::fields::Codec::ChoiceParameterLinks
+                        )
                 })
                 .map(|field| field.id)
                 .collect();
@@ -288,6 +307,54 @@ fn current_token<'a>(object: &'a MetadataObject, name: &str) -> &'a str {
         _ => "",
     }
 }
+#[derive(Clone, Copy)]
+enum CommonAttributeFilter {
+    DbView,
+    Any,
+    Nonseparators,
+}
+
+fn common_attribute_used(
+    attribute: &MetadataObject,
+    target: &str,
+    filter: CommonAttributeFilter,
+) -> bool {
+    // The SDK DbView provider excludes an independent separator even when
+    // CURRENT content explicitly requests Use for this metadata object.
+    let separated = current_token(attribute, "dataSeparation") == "Separate";
+    if separated
+        && match filter {
+            CommonAttributeFilter::Any => false,
+            CommonAttributeFilter::Nonseparators => true,
+            CommonAttributeFilter::DbView => {
+                current_token(attribute, "separatedDataUse") != "IndependentlyAndSimultaneously"
+            }
+        }
+    {
+        return false;
+    }
+    if let Some(PropertyValue::List(content)) = current_property(attribute, "content") {
+        for row in content {
+            let PropertyValue::List(parts) = row else {
+                continue;
+            };
+            let [PropertyValue::Str(metadata), PropertyValue::Enum(usage)] = parts.as_slice()
+            else {
+                continue;
+            };
+            if !super::java_case_fold::equal(metadata, target) {
+                continue;
+            }
+            match usage.as_str() {
+                "Use" => return true,
+                "DontUse" => return false,
+                _ => {}
+            }
+        }
+    }
+    current_token(attribute, "autoUse") == "Use"
+}
+
 fn family(name: &str) -> Option<&'static str> {
     [
         ("Catalog", "Справочник"),
@@ -310,6 +377,35 @@ fn family(name: &str) -> Option<&'static str> {
     .map(|(en, _)| en)
 }
 impl FormProjectionContext<'_> {
+    fn calculated_fields_available(&self) -> bool {
+        let id = morph1c_core::spec::metadata::configuration::F_COMPATIBILITY_MODE;
+        let mode = self
+            .metadata
+            .properties
+            .iter()
+            .find(|(field, _)| *field == id)
+            .and_then(|(_, value)| match value {
+                PropertyValue::Enum(mode) => Some(mode.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+        // Bound SDK EEnum factory/import default is 8.5.1. Its DontUse reader
+        // sentinel maps to 8.3.8, not to the native XML target or latest mode.
+        if mode.is_empty() {
+            return true;
+        }
+        if mode == "DontUse" {
+            return false;
+        }
+        let mut parts = mode.split('.').map(str::parse::<u32>);
+        match (parts.next(), parts.next(), parts.next(), parts.next()) {
+            (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None) => {
+                [major, minor, patch] > [8, 3, 18]
+            }
+            _ => false,
+        }
+    }
+
     fn table(&self, table: &str) -> Option<MetadataTable> {
         let mut parts = table.split('.');
         let kind = family(parts.next()?)?;
@@ -418,18 +514,60 @@ impl FormProjectionContext<'_> {
                 }
             }
         }
-        Some(MetadataTable { fields, required, standards })
+        let target = format!("{kind}.{name}");
+        let filter = match kind {
+            "ExchangePlan" => CommonAttributeFilter::Any,
+            "DocumentJournal" if !matches!(current_property(object, "registeredDocuments"), Some(PropertyValue::List(v)) if !v.is_empty()) => {
+                CommonAttributeFilter::Nonseparators
+            }
+            _ => CommonAttributeFilter::DbView,
+        };
+        for common in self
+            .objects
+            .values()
+            .filter(|object| kind != "Enum" && object.kind.as_str() == "CommonAttribute")
+        {
+            if common_attribute_used(common, &target, filter) {
+                // A current CommonAttribute owns one name in both SDK maps;
+                // it is not a standard definition with inferred language twins.
+                fields.insert(common.name.clone());
+            }
+        }
+        Some(MetadataTable {
+            fields,
+            required,
+            standards,
+        })
     }
     fn fields(&self, list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormError> {
         if !list.custom_query {
-            return Ok(list
+            let Some(mut fields) = list
                 .main_table
                 .as_deref()
                 .and_then(|t| self.table(t))
-                .map(|t| t.fields));
+                .map(|t| t.fields)
+            else {
+                return Ok(None);
+            };
+            if self.calculated_fields_available() {
+                fields.extend(list.calculated_fields.iter().map(|c| c.data_path.clone()));
+            }
+            return Ok(Some(fields));
         }
         if !list.auto_fill_available_fields {
-            return fields(list);
+            let mut available = list
+                .fields
+                .iter()
+                .map(|field| field.data_path.clone())
+                .collect::<BTreeSet<_>>();
+            if self.calculated_fields_available() {
+                available.extend(
+                    list.calculated_fields
+                        .iter()
+                        .map(|field| field.data_path.clone()),
+                );
+            }
+            return Ok(Some(available));
         }
         let Some(query) = &list.query_text else {
             return Ok(Some(BTreeSet::new()));
@@ -472,7 +610,10 @@ impl FormProjectionContext<'_> {
                     // The SDK chooses one matching QuerySchemaOperator, then
                     // subtracts that operator's selected field definitions.
                     for field in &schema.required {
-                        let identity = (canonical_table(&scope.main_table), schema.field_identity(field));
+                        let identity = (
+                            canonical_table(&scope.main_table),
+                            schema.field_identity(field),
+                        );
                         if !scope.selected_backing.contains(&identity) {
                             fields.insert(field.clone());
                         }
@@ -480,7 +621,9 @@ impl FormProjectionContext<'_> {
                 }
             }
         }
-        fields.extend(list.calculated_fields.iter().map(|c| c.data_path.clone()));
+        if self.calculated_fields_available() {
+            fields.extend(list.calculated_fields.iter().map(|c| c.data_path.clone()));
+        }
         Ok(Some(fields))
     }
 }
@@ -858,12 +1001,18 @@ fn selected_field_identity(
         if qualifier.is_some_and(|name| !super::java_case_fold::equal(name, alias)) {
             return None;
         }
-        context.table(table).filter(|schema| contains_name(&schema.fields, field))
+        context
+            .table(table)
+            .filter(|schema| contains_name(&schema.fields, field))
             .map(|schema| (canonical_table(table), schema.field_identity(field)))
     });
     let first = definitions.next()?;
     // Ambiguous unqualified query names do not prove one backing definition.
-    if definitions.next().is_some() { None } else { Some(first) }
+    if definitions.next().is_some() {
+        None
+    } else {
+        Some(first)
+    }
 }
 fn selection(query: &str) -> Result<Option<Selection>, FormError> {
     selection_current(query, None, None)
@@ -909,7 +1058,10 @@ fn selection_current(
         if depth == 0 && keyword(token, &["UNION", "ОБЪЕДИНИТЬ"]) {
             operators.push(&batch[start..index]);
             start = index + 1;
-            if batch.get(start).is_some_and(|next| keyword(next, &["ALL", "ВСЕ"])) {
+            if batch
+                .get(start)
+                .is_some_and(|next| keyword(next, &["ALL", "ВСЕ"]))
+            {
                 start += 1;
             }
         }
@@ -920,8 +1072,13 @@ fn selection_current(
     };
     if let Some(main) = main_table {
         for operator in operators {
-            if query_tables(operator).iter().any(|(_, table)| canonical_table(table) == canonical_table(main)) {
-                let Some(scope) = selection_operator(operator, context)? else { return Ok(None) };
+            if query_tables(operator)
+                .iter()
+                .any(|(_, table)| canonical_table(table) == canonical_table(main))
+            {
+                let Some(scope) = selection_operator(operator, context)? else {
+                    return Ok(None);
+                };
                 selection.required_scope = Some(RequiredScope {
                     main_table: main.into(),
                     selected_backing: scope.selected_backing,
@@ -933,7 +1090,10 @@ fn selection_current(
     }
     Ok(Some(selection))
 }
-fn selection_operator(batch: &[String], context: Option<&FormProjectionContext<'_>>) -> Result<Option<Selection>, FormError> {
+fn selection_operator(
+    batch: &[String],
+    context: Option<&FormProjectionContext<'_>>,
+) -> Result<Option<Selection>, FormError> {
     let Some(mut i) = batch
         .iter()
         .position(|t| keyword(t, &["ВЫБРАТЬ", "SELECT"]))
@@ -1031,7 +1191,11 @@ fn selection_operator(batch: &[String], context: Option<&FormProjectionContext<'
             continue;
         }
         let explicit_alias = n >= 2 && keyword(term[n - 2], &["КАК", "AS"]) && ident(term[n - 1]);
-        let expression = if explicit_alias { &term[..n - 2] } else { &term[..] };
+        let expression = if explicit_alias {
+            &term[..n - 2]
+        } else {
+            &term[..]
+        };
         if let Some(context) = context {
             if let Some(identity) = selected_field_identity(context, &sources, expression) {
                 selected_backing.insert(identity);
@@ -1064,7 +1228,14 @@ fn selection_operator(batch: &[String], context: Option<&FormProjectionContext<'
         };
         fields.insert(name);
     }
-    Ok(Some(Selection { fields, aliases, sources, selected_backing, has_star, required_scope: None }))
+    Ok(Some(Selection {
+        fields,
+        aliases,
+        sources,
+        selected_backing,
+        has_star,
+        required_scope: None,
+    }))
 }
 
 fn standard_pairs(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {

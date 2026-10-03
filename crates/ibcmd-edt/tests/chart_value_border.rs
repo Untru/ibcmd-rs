@@ -1,5 +1,6 @@
 use formats_xml::form::{
-    FormDialect, read_chart_sidecar, read_form, write_chart_sidecar, write_form,
+    FormDialect, apply_chart_semantics_resource, project_chart_semantics, read_chart_sidecar,
+    read_form, write_chart_sidecar, write_form,
 };
 use ibcmd_edt::{
     ConversionOptions, Project, ReaderLimits, edt_to_xml, read_xml_source, xml_to_edt,
@@ -45,21 +46,33 @@ fn value(settings: &mut ChartSettings) -> &mut ChartTypedValue {
     };
     value
 }
+const CHART_FORM_UUID: Uuid = Uuid([84; 16]);
+
 fn native(settings: &ChartSettings, minor: u16) -> Vec<u8> {
     with_roundtrip_target(FormatVersion::new(2, minor), || {
-        write_form(FormDialect::Designer, &body(settings.clone()))
+        let current = body(settings.clone());
+        let projection = project_chart_semantics(&current, CHART_FORM_UUID).unwrap();
+        write_form(
+            FormDialect::Designer,
+            projection
+                .as_ref()
+                .map_or(&current, |(projected, _)| projected),
+        )
     })
     .unwrap()
 }
-fn returned(bytes: &[u8], minor: u16) -> ChartSettings {
-    with_source_version(Some(FormatVersion::new(2, minor)), || {
-        read_form(FormDialect::Designer, bytes)
+fn returned(bytes: &[u8], current: &ChartSettings, minor: u16) -> ChartSettings {
+    with_roundtrip_target(FormatVersion::new(2, minor), || {
+        let projection = project_chart_semantics(&body(current.clone()), CHART_FORM_UUID).unwrap();
+        let mut returned = with_source_version(Some(FormatVersion::new(2, minor)), || {
+            read_form(FormDialect::Designer, bytes)
+        })
+        .unwrap();
+        if let Some((_, resource)) = projection {
+            apply_chart_semantics_resource(&mut returned, CHART_FORM_UUID, &resource).unwrap();
+        }
+        returned.data_attributes.remove(0).chart_settings.unwrap()
     })
-    .unwrap()
-    .data_attributes
-    .remove(0)
-    .chart_settings
-    .unwrap()
 }
 #[test]
 fn full_border_enum_and_signed_eint_current_values_do_not_collapse() {
@@ -90,7 +103,7 @@ fn full_border_enum_and_signed_eint_current_values_do_not_collapse() {
                 let text = String::from_utf8_lossy(&bytes);
                 assert!(text.contains("xsi:type=\"v8ui:Border\""));
                 assert!(text.contains(&format!("width=\"{width}\"")));
-                assert_eq!(returned(&bytes, minor), current);
+                assert_eq!(returned(&bytes, &current, minor), current);
                 assert_eq!(
                     read_chart_sidecar(&write_chart_sidecar(&current).unwrap()).unwrap(),
                     current
@@ -102,7 +115,7 @@ fn full_border_enum_and_signed_eint_current_values_do_not_collapse() {
             "<realDataItems><dataValue xsi:type=\"core:BorderValue\"><value xsi:type=\"core:BorderDef\"/></dataValue></realDataItems>",
         );
         assert_ne!(current, absent);
-        assert_eq!(returned(&native(&current, minor), minor), current);
+        assert_eq!(returned(&native(&current, minor), &current, minor), current);
     }
 }
 #[test]
@@ -122,18 +135,18 @@ fn symbolic_reference_and_nested_order_edits_are_current_typed_data() {
         *value(&mut current) = ChartTypedValue::BorderRef("Style.CurrentBorder".into());
         let bytes = native(&current, minor);
         assert!(String::from_utf8_lossy(&bytes).contains("ref=\"style:CurrentBorder\""));
-        assert_eq!(returned(&bytes, minor), current);
+        assert_eq!(returned(&bytes, &current, minor), current);
         let mut nested = chart(
             "<realDataItems><dataValue xsi:type=\"core:ValueList\"><values xsi:type=\"core:BorderValue\"><value xsi:type=\"core:BorderRef\"><border>Style.CurrentBorder</border></value></values><values xsi:type=\"core:FixedArrayValue\"><values xsi:type=\"core:BorderValue\"><value xsi:type=\"core:BorderDef\"><style>Rounded</style><width>3</width></value></values></values></dataValue></realDataItems>",
         );
-        assert_eq!(returned(&native(&nested, minor), minor), nested);
+        assert_eq!(returned(&native(&nested, minor), &nested, minor), nested);
         let old = serde_json::to_vec(&nested).unwrap();
         let ChartTypedValue::ValueList(values) = value(&mut nested) else {
             panic!()
         };
         values.reverse();
         assert_ne!(serde_json::to_vec(&nested).unwrap(), old);
-        assert_eq!(returned(&native(&nested, minor), minor), nested);
+        assert_eq!(returned(&native(&nested, minor), &nested, minor), nested);
     }
 }
 #[test]
@@ -272,7 +285,19 @@ fn public_stripped_current_border_edits_and_forged_hashes_cannot_replay_source()
             .iter()
             .find(|e| e.path().as_str() == "CommonForms/ChartBorder/Ext/Form.xml")
             .unwrap();
-        assert_eq!(returned(native.bytes(), minor), current);
+        // Read the complete public source, including its actual resource and owner
+        // binding, instead of comparing an isolated native projection to CURRENT.
+        let complete = xml_to_edt(&changed.tree, &options).unwrap().tree;
+        let restored = read_chart_sidecar(
+            complete
+                .entries()
+                .iter()
+                .find(|e| e.path().as_str() == path)
+                .unwrap()
+                .bytes(),
+        )
+        .unwrap();
+        assert_eq!(restored, current);
         assert!(!String::from_utf8_lossy(native.bytes()).contains("style:FutureBorder"));
         assert_ne!(changed.tree, original);
     }

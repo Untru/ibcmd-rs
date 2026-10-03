@@ -1,5 +1,6 @@
 use formats_xml::form::{
-    FormDialect, read_chart_sidecar, read_form, write_chart_sidecar, write_form,
+    FormDialect, apply_chart_semantics_resource, project_chart_semantics, read_chart_sidecar,
+    read_form, write_chart_sidecar, write_form,
 };
 use morph1c_core::ir::form::ChartValue;
 
@@ -13,14 +14,85 @@ fn source(content: &str) -> Vec<u8> {
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<chart:Chart xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:chart=\"http://g5.1c.ru/v8/dt/chart/model\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\">{content}</chart:Chart>\r\n").into_bytes()
 }
 
+const CHART_FORM_UUID: morph1c_core::ir::Uuid = morph1c_core::ir::Uuid([82; 16]);
+
+fn native_chart(current: &morph1c_core::ir::form::ChartSettings) -> Vec<u8> {
+    let body = form_with_chart(current.clone());
+    let projection = project_chart_semantics(&body, CHART_FORM_UUID).unwrap();
+    write_form(
+        FormDialect::Designer,
+        projection
+            .as_ref()
+            .map_or(&body, |(projected, _)| projected),
+    )
+    .unwrap()
+}
+
+// Complete current equality requires the typed resource; the low-level native
+// projection alone cannot retain nullable or disabled design collections.
+fn current_native_form(
+    native: &[u8],
+    current: &morph1c_core::ir::form::ChartSettings,
+) -> morph1c_core::ir::FormBody {
+    let projection =
+        project_chart_semantics(&form_with_chart(current.clone()), CHART_FORM_UUID).unwrap();
+    let mut returned = read_form(FormDialect::Designer, native).unwrap();
+    if let Some((_, resource)) = projection {
+        apply_chart_semantics_resource(&mut returned, CHART_FORM_UUID, &resource).unwrap();
+    }
+    returned
+}
+
+#[test]
+fn repeated_native_design_projection_preserves_present_and_omitted_factory_spelling() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target};
+    for minor in [20, 21] {
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            let chart = read_chart_sidecar(&source(
+                "<isSeriesDesign>true</isSeriesDesign><realSeriesData><properties><key xsi:type=\"core:NumberValue\"><value>1.5</value></key></properties></realSeriesData>",
+            ))
+            .unwrap();
+            let (projected, resource) =
+                project_chart_semantics(&form_with_chart(chart), CHART_FORM_UUID)
+                    .unwrap()
+                    .unwrap();
+            let text =
+                String::from_utf8(write_form(FormDialect::Designer, &projected).unwrap()).unwrap();
+            let start = text.find("<d4p1:realExSeriesData>").unwrap();
+            let end = text[start..].find("</d4p1:realExSeriesData>").unwrap()
+                + start
+                + "</d4p1:realExSeriesData>".len();
+            for omitted in [false, true] {
+                let native = if omitted {
+                    // Remove the complete physical line range, retaining the
+                    // rest of the actual native form and its formatting.
+                    let line_start = text[..start].rfind('\n').unwrap() + 1;
+                    let line_end = text[end..].find('\n').unwrap() + end + 1;
+                    format!("{}{}", &text[..line_start], &text[line_end..])
+                } else {
+                    text.clone()
+                };
+                let mut current = read_form(FormDialect::Designer, native.as_bytes()).unwrap();
+                apply_chart_semantics_resource(&mut current, CHART_FORM_UUID, &resource).unwrap();
+                let (again, _) = project_chart_semantics(&current, CHART_FORM_UUID)
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(
+                    write_form(FormDialect::Designer, &again).unwrap(),
+                    native.as_bytes(),
+                    "profile 2.{minor}, factory omitted={omitted}"
+                );
+            }
+        });
+    }
+}
+
 #[test]
 fn translucence_current_values_have_native_projection_and_semantic_identity() {
     for mode in ["Auto", "DontUse", "Use"] {
         let chart = read_chart_sidecar(&source(&format!("<translucenceMode>{mode}</translucenceMode><translucencePercent>37</translucencePercent>"))).unwrap();
-        let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-        let decoded = read_form(FormDialect::Designer, &native)
-            .unwrap()
-            .data_attributes[0]
+        let native = native_chart(&chart);
+        let decoded = current_native_form(&native, &chart).data_attributes[0]
             .chart_settings
             .clone()
             .unwrap();
@@ -253,15 +325,13 @@ fn all54_genuine_chart_sidecars_preserve_current_semantics() {
 #[test]
 fn current_axis_bounds_duplicates_and_enum_edits_are_checked() {
     let chart=read_chart_sidecar(&source("<valuesAxis><interval><leftIsNum>true</leftIsNum><leftNum>5.0</leftNum><rightIsNum>true</rightIsNum><rightNum>8.0</rightNum></interval><minValueDetectionMethod>AutoDetect</minValueDetectionMethod><maxValueDetectionMethod>AutoDetect</maxValueDetectionMethod></valuesAxis>")).unwrap();
-    let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
+    let native = native_chart(&chart);
     assert!(
         std::str::from_utf8(&native)
             .unwrap()
             .contains(">5</d4p1:minValue>")
     );
-    let decoded = read_form(FormDialect::Designer, &native)
-        .unwrap()
-        .data_attributes[0]
+    let decoded = current_native_form(&native, &chart).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
@@ -283,10 +353,8 @@ fn current_axis_bounds_duplicates_and_enum_edits_are_checked() {
 fn ordered_nonempty_gauge_and_reference_current_values_roundtrip() {
     let content = "<gaugeQualityBands><items><begin>2</begin><end>9</end><textString>A</textString></items><items><begin>15</begin><end>23</end><tooltipString>B</tooltipString></items><useTextStr>true</useTextStr></gaugeQualityBands><valuesReferenceLines><chartReferenceLine><value xsi:type=\"core:NumberValue\"><value>3.5</value></value><position>Auto</position></chartReferenceLine></valuesReferenceLines>";
     let mut chart = read_chart_sidecar(&source(content)).unwrap();
-    let output = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-    let decoded = read_form(FormDialect::Designer, &output)
-        .unwrap()
-        .data_attributes[0]
+    let output = native_chart(&chart);
+    let decoded = current_native_form(&output, &chart).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
@@ -307,10 +375,8 @@ fn ordered_nonempty_gauge_and_reference_current_values_roundtrip() {
     };
     items.reverse();
     assert_ne!(serde_json::to_vec(&chart).unwrap(), source_digest);
-    let output = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-    let decoded = read_form(FormDialect::Designer, &output)
-        .unwrap()
-        .data_attributes[0]
+    let output = native_chart(&chart);
+    let decoded = current_native_form(&output, &chart).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
@@ -434,20 +500,16 @@ fn collect_xml_paths(
 #[test]
 fn known_gantt_collections_and_item_current_values_are_not_constants() {
     let chart=read_chart_sidecar(&source("<realExSeriesData><properties><id>4</id><valInfo xsi:type=\"core:StringValue\"><value>Info</value></valInfo><key xsi:type=\"core:NumberValue\"><value>7.5</value></key></properties></realExSeriesData><trendLinesArray><seriesId>4</seriesId><line><approximationType>Polynomial</approximationType><approximationDegree>4</approximationDegree><showEquation>true</showEquation></line></trendLinesArray>")).unwrap();
-    let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-    let reread = read_form(FormDialect::Designer, &native)
-        .unwrap()
-        .data_attributes[0]
+    let native = native_chart(&chart);
+    let reread = current_native_form(&native, &chart).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
     assert_eq!(reread, chart);
     let bytes=b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ganttchart:GanttChart xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:ganttchart=\"http://g5.1c.ru/v8/dt/ganttchart/model\"><interval><itemKey>4</itemKey><begin>2026-10-02T00:00:00</begin><end>2026-10-03T00:00:00</end></interval><value><itemKey>4</itemKey><editFlag>true</editFlag></value><link><beginKey>4</beginKey><endKey>7</endKey><linkType>EndBegin</linkType></link></ganttchart:GanttChart>\r\n";
     let mut chart = read_chart_sidecar(bytes).unwrap();
-    let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-    let reread = read_form(FormDialect::Designer, &native)
-        .unwrap()
-        .data_attributes[0]
+    let native = native_chart(&chart);
+    let reread = current_native_form(&native, &chart).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
@@ -520,11 +582,11 @@ fn line_style_and_eint_width_are_validated_on_read_and_current_write() {
 #[test]
 fn current_palette_colors_preserve_order_and_edits() {
     let mut chart=read_chart_sidecar(&source("<customPalette xsi:type=\"core:ColorRef\"><color>Windows.Highlight</color></customPalette><customPalette xsi:type=\"core:ColorDef\"><red>17</red><green>34</green><blue>51</blue></customPalette>")).unwrap();
-    let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
+    let native = native_chart(&chart);
     let text = std::str::from_utf8(&native).unwrap();
     assert!(text.contains("xsi:type=\"v8ui:Color\""));
     assert!(text.contains("win:Highlight"));
-    let read = read_form(FormDialect::Designer, &native).unwrap();
+    let read = current_native_form(&native, &chart);
     assert_eq!(
         read.data_attributes[0].chart_settings.as_ref(),
         Some(&chart)
@@ -540,8 +602,8 @@ fn current_palette_colors_preserve_order_and_edits() {
     };
     items.reverse();
     items[0][0].1 = ChartValue::Color("#445566".into());
-    let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
-    let read = read_form(FormDialect::Designer, &native).unwrap();
+    let native = native_chart(&chart);
+    let read = current_native_form(&native, &chart);
     assert_eq!(
         read.data_attributes[0].chart_settings.as_ref(),
         Some(&chart)
@@ -608,7 +670,7 @@ fn current_nonnull_gantt_picture_reference_is_typed_and_editable() {
 #[test]
 fn native_trend_projection_keeps_current_lines_and_rejects_untransported_topology() {
     let source = source(
-        "<realSeriesData><properties><id>2</id></properties></realSeriesData><realSeriesData><properties><id>1</id></properties></realSeriesData><trendLinesArray><seriesId>1</seriesId><line><approximationDegree>3</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>2</seriesId><line><approximationDegree>4</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>2</seriesId><line><approximationDegree>5</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>99</seriesId><line><approximationDegree>6</approximationDegree></line></trendLinesArray>",
+        "<isSeriesDesign>true</isSeriesDesign><realSeriesData><properties><id>2</id></properties></realSeriesData><realSeriesData><properties><id>1</id></properties></realSeriesData><trendLinesArray><seriesId>1</seriesId><line><approximationDegree>3</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>2</seriesId><line><approximationDegree>4</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>2</seriesId><line><approximationDegree>5</approximationDegree></line></trendLinesArray><trendLinesArray><seriesId>99</seriesId><line><approximationDegree>6</approximationDegree></line></trendLinesArray>",
     );
     let mut chart = read_chart_sidecar(&source).unwrap();
     let original = chart.clone();
@@ -616,10 +678,8 @@ fn native_trend_projection_keeps_current_lines_and_rejects_untransported_topolog
     assert_ne!(projected, chart);
     assert_eq!(chart, original);
     assert!(write_form(FormDialect::Designer, &form_with_chart(chart.clone())).is_err());
-    let native = write_form(FormDialect::Designer, &form_with_chart(projected.clone())).unwrap();
-    let returned = read_form(FormDialect::Designer, &native)
-        .unwrap()
-        .data_attributes[0]
+    let native = native_chart(&projected);
+    let returned = current_native_form(&native, &projected).data_attributes[0]
         .chart_settings
         .clone()
         .unwrap();
@@ -1124,11 +1184,9 @@ fn typed_unicode_number_reads_ascii_and_current_number_edits_remain_authoritativ
         let mut chart = read_chart_sidecar(&source(&content(number))).unwrap();
         let expected = read_chart_sidecar(&source(&content(&ascii))).unwrap();
         assert_eq!(chart, expected);
-        let native = write_form(FormDialect::Designer, &form_with_chart(chart.clone())).unwrap();
+        let native = native_chart(&chart);
         assert_eq!(
-            read_form(FormDialect::Designer, &native)
-                .unwrap()
-                .data_attributes[0]
+            current_native_form(&native, &chart).data_attributes[0]
                 .chart_settings
                 .as_ref(),
             Some(&expected)
@@ -1211,7 +1269,7 @@ fn public_unicode_number_source_consumption_is_typed_in_both_lanes() {
         let mut config = read_config(Format::Designer, fixture, &ConvertOptions::default())
             .unwrap()
             .0;
-        let chart=read_chart_sidecar(&source("<realSeriesData><properties><key xsi:type=\"core:NumberValue\"><value>1.5</value></key></properties></realSeriesData>")).unwrap();
+        let chart=read_chart_sidecar(&source("<isSeriesDesign>true</isSeriesDesign><realSeriesData><properties><key xsi:type=\"core:NumberValue\"><value>1.5</value></key></properties></realSeriesData>")).unwrap();
         let mut object = MetadataObject::new(
             ObjectKind::new("CommonForm"),
             "UnicodeNumber",

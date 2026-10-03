@@ -475,3 +475,349 @@ fn custom_attributes_do_not_acquire_language_twins_from_other_metadata_families(
         }
     }
 }
+
+#[test]
+fn default_dynamic_list_calculated_fields_use_current_names_without_a_query() {
+    let mut cfg = Configuration::new();
+    cfg.objects.push(MetadataObject::new(
+        ObjectKind::new("Catalog"),
+        "Items",
+        Uuid([1; 16]),
+    ));
+    let mut body = body();
+    let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
+    list.main_table = Some("Catalog.Items".into());
+    list.custom_query = false;
+    list.query_text = None;
+    list.calculated_fields.push(
+        serde_json::from_value::<morph1c_core::ir::form::DcsCalculatedField>(serde_json::json!({
+            "data_path": "Computed", "expression": ""
+        }))
+        .unwrap(),
+    );
+    body.items.clear();
+    for (index, path) in ["List.Computed", "List.Renamed", "List.Missing"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut item = FormItem::new(
+            FormControlKind::new("LabelField"),
+            format!("Field{index}"),
+            index as i64 + 1,
+        );
+        item.properties
+            .push((ff::F_DATA_PATH, PropertyValue::Ref(path.into())));
+        body.items.push(item);
+    }
+    for minor in [20, 21] {
+        for (name, expected) in [
+            (
+                "Computed",
+                ["List.Computed", "~List.Renamed", "~List.Missing"],
+            ),
+            (
+                "Renamed",
+                ["~List.Computed", "List.Renamed", "~List.Missing"],
+            ),
+        ] {
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .data_path = name.into();
+            let before = serde_json::to_value(&body).unwrap();
+            let context = FormProjectionContext::new(&cfg).unwrap();
+            let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                write_form_with_context(FormDialect::Designer, &body, &context)
+            })
+            .unwrap();
+            assert_eq!(paths(&bytes), expected, "profile 2.{minor}: {name}");
+            assert_eq!(serde_json::to_value(&body).unwrap(), before);
+        }
+    }
+}
+
+#[test]
+fn calculated_field_availability_uses_current_compatibility_independently_of_xml_profile() {
+    use morph1c_core::spec::metadata::configuration::F_COMPATIBILITY_MODE;
+    let mut cfg = Configuration::new();
+    cfg.objects.push(MetadataObject::new(
+        ObjectKind::new("Catalog"),
+        "Items",
+        Uuid([1; 16]),
+    ));
+    let mut body = body();
+    let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
+    list.main_table = Some("Catalog.Items".into());
+    list.calculated_fields.push(
+        serde_json::from_value(serde_json::json!({ "data_path": "Computed", "expression": "" }))
+            .unwrap(),
+    );
+    body.items.clear();
+    let mut item = FormItem::new(FormControlKind::new("LabelField"), "Computed", 1);
+    item.properties
+        .push((ff::F_DATA_PATH, PropertyValue::Ref("List.Computed".into())));
+    body.items.push(item);
+    for minor in [20, 21] {
+        for mode in [
+            None,
+            Some(""),
+            Some("8.3.18"),
+            Some("8.3.19"),
+            Some("8.5.1"),
+            Some("DontUse"),
+        ] {
+            cfg.properties.clear();
+            if let Some(mode) = mode {
+                cfg.properties.push((
+                    F_COMPATIBILITY_MODE,
+                    PropertyValue::Enum(morph1c_core::ir::Token::new(mode)),
+                ));
+            }
+            let visible = !matches!(mode, Some("8.3.18" | "DontUse"));
+            for (custom_query, auto_fill) in [(false, true), (true, true), (true, false)] {
+                let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
+                list.custom_query = custom_query;
+                list.auto_fill_available_fields = auto_fill;
+                query(&mut body, "SELECT I.Ref FROM Catalog.Items AS I");
+                let context = FormProjectionContext::new(&cfg).unwrap();
+                let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                    write_form_with_context(FormDialect::Designer, &body, &context)
+                })
+                .unwrap();
+                assert_eq!(
+                    paths(&bytes),
+                    [if visible {
+                        "List.Computed"
+                    } else {
+                        "~List.Computed"
+                    }],
+                    "profile2.{minor} mode{mode:?} custom{custom_query} auto{auto_fill}"
+                );
+            }
+        }
+        cfg.properties.clear();
+        let first = FormProjectionContext::new(&cfg)
+            .unwrap()
+            .dependency_sha256(&body, FormatVersion::new(2, minor))
+            .unwrap();
+        cfg.properties.push((
+            F_COMPATIBILITY_MODE,
+            PropertyValue::Enum(morph1c_core::ir::Token::new("8.3.18")),
+        ));
+        let second = FormProjectionContext::new(&cfg)
+            .unwrap()
+            .dependency_sha256(&body, FormatVersion::new(2, minor))
+            .unwrap();
+        assert_ne!(
+            first, second,
+            "compatibility edit must invalidate saved availability spelling"
+        );
+    }
+}
+
+#[test]
+fn common_attributes_follow_current_content_separator_policy_and_metadata_family() {
+    use morph1c_core::ir::Token;
+    use morph1c_core::spec::metadata::common_attribute as ca;
+    let mut body = body();
+    body.items.clear();
+    let mut item = FormItem::new(FormControlKind::new("LabelField"), "Shared", 1);
+    item.properties
+        .push((ff::F_DATA_PATH, PropertyValue::Ref("List.Shared".into())));
+    body.items.push(item);
+    body.data_attributes[0]
+        .dynamic_list
+        .as_mut()
+        .unwrap()
+        .custom_query = false;
+    for minor in [20, 21] {
+        for (family, auto_use, usage, separation, separated_use, journal_has_documents, expected) in [
+            (
+                "Catalog",
+                "DontUse",
+                Some("Use"),
+                "DontUse",
+                "Independently",
+                false,
+                "List.Shared",
+            ),
+            (
+                "Catalog",
+                "Use",
+                Some("DontUse"),
+                "DontUse",
+                "Independently",
+                false,
+                "~List.Shared",
+            ),
+            (
+                "Catalog",
+                "Use",
+                Some("Auto"),
+                "DontUse",
+                "Independently",
+                false,
+                "List.Shared",
+            ),
+            (
+                "Catalog",
+                "DontUse",
+                Some("Auto"),
+                "DontUse",
+                "Independently",
+                false,
+                "~List.Shared",
+            ),
+            (
+                "Catalog",
+                "Use",
+                None,
+                "DontUse",
+                "Independently",
+                false,
+                "List.Shared",
+            ),
+            (
+                "Catalog",
+                "DontUse",
+                Some("Use"),
+                "Separate",
+                "Independently",
+                false,
+                "~List.Shared",
+            ),
+            (
+                "Catalog",
+                "DontUse",
+                Some("Use"),
+                "Separate",
+                "IndependentlyAndSimultaneously",
+                false,
+                "List.Shared",
+            ),
+            (
+                "ExchangePlan",
+                "DontUse",
+                Some("Use"),
+                "Separate",
+                "Independently",
+                false,
+                "List.Shared",
+            ),
+            (
+                "Enum",
+                "Use",
+                None,
+                "DontUse",
+                "Independently",
+                false,
+                "~List.Shared",
+            ),
+            (
+                "DocumentJournal",
+                "Use",
+                None,
+                "Separate",
+                "IndependentlyAndSimultaneously",
+                false,
+                "~List.Shared",
+            ),
+            (
+                "DocumentJournal",
+                "Use",
+                None,
+                "Separate",
+                "IndependentlyAndSimultaneously",
+                true,
+                "List.Shared",
+            ),
+        ] {
+            let mut cfg = Configuration::new();
+            let mut target = MetadataObject::new(ObjectKind::new(family), "Items", Uuid([1; 16]));
+            if journal_has_documents {
+                let spec = morph1c_core::spec::registry::spec_for(family).unwrap();
+                let field = spec
+                    .fields
+                    .iter()
+                    .find(|f| f.name == "registeredDocuments")
+                    .unwrap();
+                target.properties.push((
+                    field.id,
+                    PropertyValue::List(vec![PropertyValue::Ref("Document.Document".into())]),
+                ));
+            }
+            cfg.objects.push(target);
+            let mut common =
+                MetadataObject::new(ObjectKind::new("CommonAttribute"), "Shared", Uuid([2; 16]));
+            common.properties = vec![
+                (ca::F_AUTO_USE, PropertyValue::Enum(Token::new(auto_use))),
+                (
+                    ca::F_DATA_SEPARATION,
+                    PropertyValue::Enum(Token::new(separation)),
+                ),
+                (
+                    ca::F_SEPARATED_DATA_USE,
+                    PropertyValue::Enum(Token::new(separated_use)),
+                ),
+                (
+                    ca::F_CONTENT,
+                    PropertyValue::List(
+                        usage
+                            .map(|usage| {
+                                vec![PropertyValue::List(vec![
+                                    PropertyValue::Str(format!("{family}.Items")),
+                                    PropertyValue::Enum(Token::new(usage)),
+                                ])]
+                            })
+                            .unwrap_or_default(),
+                    ),
+                ),
+            ];
+            cfg.objects.push(common);
+            cfg.objects.push(MetadataObject::new(
+                ObjectKind::new("Document"),
+                "Document",
+                Uuid([3; 16]),
+            ));
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .main_table = Some(format!("{family}.Items"));
+            let before = serde_json::to_value(&body).unwrap();
+            let context = FormProjectionContext::new(&cfg).unwrap();
+            let digest = context
+                .dependency_sha256(&body, FormatVersion::new(2, minor))
+                .unwrap();
+            let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                write_form_with_context(FormDialect::Designer, &body, &context)
+            })
+            .unwrap();
+            assert_eq!(
+                paths(&bytes),
+                [expected],
+                "profile2.{minor} family{family} usage{usage:?} auto{auto_use} separator{separation}/{separated_use}"
+            );
+            assert_eq!(serde_json::to_value(&body).unwrap(), before);
+            cfg.objects[1].name = "Renamed".into();
+            let changed = FormProjectionContext::new(&cfg).unwrap();
+            assert_ne!(
+                digest,
+                changed
+                    .dependency_sha256(&body, FormatVersion::new(2, minor))
+                    .unwrap()
+            );
+            let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                write_form_with_context(FormDialect::Designer, &body, &changed)
+            })
+            .unwrap();
+            assert_eq!(
+                paths(&bytes),
+                ["~List.Shared"],
+                "old common name must not remain available"
+            );
+        }
+    }
+}

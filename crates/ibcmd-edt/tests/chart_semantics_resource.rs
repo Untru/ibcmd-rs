@@ -16,6 +16,24 @@ use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_ve
 use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
 use sha2::{Digest, Sha256};
 
+fn assert_resource_shape(bytes: &[u8], expected: [usize; 5]) -> usize {
+    let payload: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+    let keys = ["records", "values", "trends", "designs", "numbers"];
+    let actual = keys.map(|key| {
+        payload
+            .get(key)
+            .map_or(0, |value| value.as_array().unwrap().len())
+    });
+    assert_eq!(actual, expected, "exact CURRENT transport categories");
+    if expected[3] == 1 {
+        assert_eq!(
+            payload["designs"][0]["current"],
+            serde_json::json!([["realExSeriesData", "Absent"]])
+        );
+    }
+    actual.into_iter().sum()
+}
+
 const UUID: Uuid = Uuid([63; 16]);
 const FORM: &str = "CommonForms/ChartFlags/Ext/Form.xml";
 const RESOURCE: &str = "CommonForms/ChartFlags/Ext/ibcmd-chart-semantics.v1.json";
@@ -150,7 +168,7 @@ fn decoded(tree: &SourceTree, minor: u16) -> FormBody {
 fn three_flags_are_semantic_current_values_and_native_projection_is_explicit() {
     for minor in [20, 21] {
         let body = body();
-        assert_eq!(chart_semantics_resource_count(&body).unwrap(), Some(2));
+        assert_eq!(chart_semantics_resource_count(&body).unwrap(), Some(3));
         assert!(
             with_roundtrip_target(FormatVersion::new(2, minor), || write_form(
                 FormDialect::Designer,
@@ -159,6 +177,7 @@ fn three_flags_are_semantic_current_values_and_native_projection_is_explicit() {
             .is_err()
         );
         let (native, resource) = project_chart_semantics(&body, UUID).unwrap().unwrap();
+        assert_eq!(assert_resource_shape(&resource, [2, 0, 0, 1, 0]), 3);
         assert_eq!(chart_semantics_resource_count(&native).unwrap(), None);
         assert!(project_chart_semantics(&native, UUID).unwrap().is_none());
         let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
@@ -232,6 +251,10 @@ fn public_exact_return_stripped_current_edits_and_forged_hashes() {
     for minor in [20, 21] {
         let options = options(minor);
         let original = original(minor);
+        assert_eq!(
+            assert_resource_shape(entry(&original, RESOURCE), [2, 0, 0, 1, 0]),
+            3
+        );
         let converted = xml_to_edt(&original, &options).unwrap();
         assert!(
             converted
@@ -239,7 +262,7 @@ fn public_exact_return_stripped_current_edits_and_forged_hashes() {
                 .iter()
                 .any(|e| e.id == "ibcmd-chart-semantics/1"
                     && e.resources == 1
-                    && e.references == 2)
+                    && e.references == 3)
         );
         assert!(
             converted
@@ -289,11 +312,15 @@ fn public_exact_return_stripped_current_edits_and_forged_hashes() {
             &edited
         );
         assert_ne!(changed.tree, original);
+        assert_eq!(
+            assert_resource_shape(entry(&changed.tree, RESOURCE), [1, 0, 0, 1, 0]),
+            2
+        );
         assert!(
             changed
                 .extensions
                 .iter()
-                .any(|e| e.id == "ibcmd-chart-semantics/1" && e.references == 1)
+                .any(|e| e.id == "ibcmd-chart-semantics/1" && e.references == 2)
         );
         let mut manifest: serde_json::Value =
             serde_json::from_slice(entry(&generated, ".ibcmd-provenance/manifest.json")).unwrap();
@@ -357,6 +384,10 @@ fn directory_resources_are_consumed_reemitted_and_accounted_once() {
     for minor in [20, 21] {
         let options = options(minor);
         let original = original(minor);
+        assert_eq!(
+            assert_resource_shape(entry(&original, RESOURCE), [2, 0, 0, 1, 0]),
+            3
+        );
         let tmp = tempfile::tempdir().unwrap();
         let source = tmp.path().join("native");
         std::fs::create_dir(&source).unwrap();
@@ -374,7 +405,7 @@ fn directory_resources_are_consumed_reemitted_and_accounted_once() {
                 .iter()
                 .any(|e| e.id == "ibcmd-chart-semantics/1"
                     && e.resources == 1
-                    && e.references == 2)
+                    && e.references == 3)
         );
         assert_eq!(edt.accounting.iter().filter(|e| e.path == RESOURCE && e.disposition == ibcmd_edt::Disposition::Converted).count(), 1);
         let project = tmp.path().join("project");
@@ -390,7 +421,7 @@ fn directory_resources_are_consumed_reemitted_and_accounted_once() {
                 .iter()
                 .any(|e| e.id == "ibcmd-chart-semantics/1"
                     && e.resources == 1
-                    && e.references == 2)
+                    && e.references == 3)
         );
         let output = tmp.path().join("returned");
         native.publish_new(&output).unwrap();

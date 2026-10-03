@@ -157,12 +157,28 @@ fn form_command_data_path_parameter_is_typed_and_preserved() {
         body.form_ci_navigation_panel
     );
     let text = std::str::from_utf8(&edt).unwrap();
+    let repeated = text.replace(
+        "</commandParameter>",
+        "<segments>Other.Ref</segments></commandParameter>",
+    );
+    let ordered = read_form(FormDialect::Edt, repeated.as_bytes()).unwrap();
+    assert_eq!(
+        ordered.form_ci_navigation_panel[0]
+            .command_parameter
+            .as_ref()
+            .unwrap()
+            .segments,
+        ["Объект", "Ref", "Other", "Ref"]
+    );
+    for dialect in [FormDialect::Edt, FormDialect::Designer] {
+        let bytes = write_form(dialect, &ordered).unwrap();
+        assert_eq!(
+            read_form(dialect, &bytes).unwrap().form_ci_navigation_panel,
+            ordered.form_ci_navigation_panel
+        );
+    }
     for bad in [
         text.replace("form:DataPath", "core:StringValue"),
-        text.replace(
-            "</commandParameter>",
-            "<segments>Other.Ref</segments></commandParameter>",
-        ),
         text.replace(
             "</commandParameter>",
             "<unknown>keep</unknown></commandParameter>",

@@ -1,5 +1,6 @@
 use formats_xml::form::{
-    FormDialect, read_chart_sidecar, read_form, write_chart_sidecar, write_form,
+    FormDialect, apply_chart_semantics_resource, project_chart_semantics, read_chart_sidecar,
+    read_form, write_chart_sidecar, write_form,
 };
 use morph1c_core::ir::form::{ChartSettings, ChartValue};
 use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
@@ -13,13 +14,26 @@ fn form_with_chart(chart: ChartSettings) -> morph1c_core::ir::FormBody {
     body.data_attributes[0].chart_settings = Some(chart);
     body
 }
+const CHART_FORM_UUID: morph1c_core::ir::Uuid = morph1c_core::ir::Uuid([83; 16]);
+
 fn through_native(chart: &ChartSettings, version: FormatVersion) -> (Vec<u8>, ChartSettings) {
-    let native = with_roundtrip_target(version, || {
-        write_form(FormDialect::Designer, &form_with_chart(chart.clone()))
-    })
-    .unwrap();
-    let returned =
+    let (native, resource) = with_roundtrip_target(version, || {
+        let current = form_with_chart(chart.clone());
+        let projection = project_chart_semantics(&current, CHART_FORM_UUID).unwrap();
+        let native = write_form(
+            FormDialect::Designer,
+            projection
+                .as_ref()
+                .map_or(&current, |(projected, _)| projected),
+        )
+        .unwrap();
+        (native, projection.map(|(_, resource)| resource))
+    });
+    let mut returned =
         with_source_version(Some(version), || read_form(FormDialect::Designer, &native)).unwrap();
+    if let Some(resource) = resource {
+        apply_chart_semantics_resource(&mut returned, CHART_FORM_UUID, &resource).unwrap();
+    }
     let chart = returned.data_attributes[0].chart_settings.clone().unwrap();
     (native, chart)
 }
@@ -124,17 +138,27 @@ fn current_color_namespaces_and_edits_use_shared_codec() {
 }
 #[test]
 fn line_gap_is_current_and_repeated_series_order_is_semantic() {
-    let chart = read_chart_sidecar(&source("<realSeriesData><properties><id>2</id><line><width>3</width><gap>true</gap><style>Dashed</style></line></properties></realSeriesData><realSeriesData><properties><id>1</id><line><width>4</width><style>Solid</style></line></properties></realSeriesData>")).unwrap();
+    let chart = read_chart_sidecar(&source("<isSeriesDesign>true</isSeriesDesign><realSeriesData><properties><id>2</id><line><width>3</width><gap>true</gap><style>Dashed</style></line></properties></realSeriesData><realSeriesData><properties><id>1</id><line><width>4</width><style>Solid</style></line></properties></realSeriesData>")).unwrap();
     let (native, returned) = through_native(&chart, FormatVersion::new(2, 21));
     assert!(String::from_utf8_lossy(&native).contains("width=\"3\" gap=\"true\""));
     assert_eq!(
         value(&chart, "realSeriesData"),
         value(&returned, "realSeriesData")
     );
+    let mut disabled = chart.clone();
+    disabled
+        .fields
+        .iter_mut()
+        .find(|(name, _)| name == "isSeriesDesign")
+        .unwrap()
+        .1 = ChartValue::Bool(false);
+    let (disabled_native, disabled_returned) = through_native(&disabled, FormatVersion::new(2, 21));
+    assert!(!String::from_utf8_lossy(&disabled_native).contains("width=\"3\" gap=\"true\""));
+    assert_eq!(disabled_returned, disabled);
     let own = write_chart_sidecar(&chart).unwrap();
     assert!(String::from_utf8_lossy(&own).contains("<gap>true</gap>"));
     let sparse = read_chart_sidecar(&source(
-        "<realSeriesData><properties><line><gap>true</gap></line></properties></realSeriesData>",
+        "<isSeriesDesign>true</isSeriesDesign><realSeriesData><properties><line><gap>true</gap></line></properties></realSeriesData>",
     ))
     .unwrap();
     let (sparse_native, sparse_returned) = through_native(&sparse, FormatVersion::new(2, 21));

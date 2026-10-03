@@ -82,7 +82,10 @@
     "Actual selected backing field identities, final result batches and separate UNION scopes drive required DynamicList fields; only actual CURRENT standard definitions have language twins and the public Order property is independent of SELECT columns",
     "Table additions are three SDK singleton features with duplicate-cardinality guards and canonical semantic serialization; real children remain ordered and CURRENT value edits remain fingerprint-visible",
     "Native 2.20/2.21 property ordering is corrected for table additions/tooltips, picture borders, spreadsheet names, popup commands and root document/group-list extensions without sorting semantic event/child collections",
-    "Chart numeric projection follows SDK EFloat/EDouble rounding and integral long conversion; closed CURRENT numeric records preserve genuinely lossy binary64 values alongside existing chart design/item records, and lexical fraction widths never replay old values"
+    "Chart numeric projection follows SDK EFloat/EDouble rounding and integral long conversion; closed CURRENT numeric records preserve genuinely lossy binary64 values alongside existing chart design/item records, and lexical fraction widths never replay old values",
+    "DesignRecord validation binds the already-native current chart counterpart before restoring separate Enum/Value records; dotted literal payloads and unrelated projected values are never projected twice",
+    "CURRENT DynamicList availability includes effective main-table CommonAttributes with content/autoUse/separation and family-specific SDK policies; calculated-field availability consumes CURRENT Configuration compatibility >8.3.18, with root mode and common definitions in dependency digests",
+    "CURRENT chart design projection retains validated Designer names-only factory presence while replacing values with freshly computed native defaults; EDT hidden source spelling is cleared"
   ],
   "files": [
     {
@@ -1603,7 +1606,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/availability.rs",
-      "sha256": "ab59b72e26eb820f6372b42d6d3459e5cff94d089addc9a487e12acbd56b8bf2"
+      "sha256": "57ab8a875b803e4822a6ca1f0d996986a052368bd6625ced510f8a21c96190cf"
     },
     {
       "path": "crates/formats-xml/src/form/chart/common.rs",
@@ -1667,7 +1670,7 @@
     },
     {
       "path": "crates/formats-xml/src/form/chart_semantics.rs",
-      "sha256": "e2236f192310c45ef738e1529f49a14da678fd52c44ce3da19aeba642c37650e"
+      "sha256": "c4fc1682b549898ac80d556def582ba8ccffd4dd55e6ccb1d3230f34f9916280"
     },
     {
       "path": "crates/formats-xml/src/form/data_path.rs",

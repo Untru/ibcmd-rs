@@ -224,7 +224,9 @@ fn interval_color(
         return Ok(None);
     }
     let value = field(fields, "textColor")?;
-    if value == &ChartValue::Absent { return Ok(None); }
+    if value == &ChartValue::Absent {
+        return Ok(None);
+    }
     let ChartValue::Color(color) = value else {
         return Err(error("wrong current interval color kind"));
     };
@@ -255,30 +257,53 @@ struct NumberRecord {
     current_native_sha256: String,
     current: Vec<(Vec<Step>, String)>,
 }
-fn number_paths(
-    chart: &mut ChartSettings,
-) -> Result<Vec<(Vec<Step>, String)>, FormError> {
+fn number_paths(chart: &mut ChartSettings) -> Result<Vec<(Vec<Step>, String)>, FormError> {
     use morph1c_core::ir::form::ChartLayoutSegment;
-    Ok(super::chart::project_native_double_fields(chart)?.into_iter().map(|(path, current)| {
-        (path.into_iter().map(|segment| match segment {
-            ChartLayoutSegment::Field(name) => Step::Field(name),
-            ChartLayoutSegment::Item(index) => Step::Item(index),
-        }).collect(), current)
-    }).collect())
+    Ok(super::chart::project_native_double_fields(chart)?
+        .into_iter()
+        .map(|(path, current)| {
+            (
+                path.into_iter()
+                    .map(|segment| match segment {
+                        ChartLayoutSegment::Field(name) => Step::Field(name),
+                        ChartLayoutSegment::Item(index) => Step::Item(index),
+                    })
+                    .collect(),
+                current,
+            )
+        })
+        .collect())
 }
 fn restore_numbers(chart: &mut ChartSettings, row: &NumberRecord) -> Result<(), FormError> {
-    fn set(fields: &mut [(String, ChartValue)], path: &[Step], current: &str) -> Result<(), FormError> {
-        let Some(Step::Field(name)) = path.first() else { return Err(error("invalid numeric field path")); };
-        let value = &mut fields.iter_mut().find(|(n, _)| n == name)
-            .ok_or_else(|| error("orphan current numeric field"))?.1;
+    fn set(
+        fields: &mut [(String, ChartValue)],
+        path: &[Step],
+        current: &str,
+    ) -> Result<(), FormError> {
+        let Some(Step::Field(name)) = path.first() else {
+            return Err(error("invalid numeric field path"));
+        };
+        let value = &mut fields
+            .iter_mut()
+            .find(|(n, _)| n == name)
+            .ok_or_else(|| error("orphan current numeric field"))?
+            .1;
         match &path[1..] {
             [] => match value {
-                ChartValue::Int(number) => { *number = current.into(); Ok(()) },
+                ChartValue::Int(number) => {
+                    *number = current.into();
+                    Ok(())
+                }
                 _ => Err(error("wrong current numeric field kind")),
             },
             [Step::Item(index), rest @ ..] => match value {
-                ChartValue::Items(items) => set(items.get_mut(*index)
-                    .ok_or_else(|| error("orphan current numeric item"))?, rest, current),
+                ChartValue::Items(items) => set(
+                    items
+                        .get_mut(*index)
+                        .ok_or_else(|| error("orphan current numeric item"))?,
+                    rest,
+                    current,
+                ),
                 _ => Err(error("wrong current numeric item kind")),
             },
             rest => match value {
@@ -287,7 +312,9 @@ fn restore_numbers(chart: &mut ChartSettings, row: &NumberRecord) -> Result<(), 
             },
         }
     }
-    for (path, current) in &row.current { set(&mut chart.fields, path, current)?; }
+    for (path, current) in &row.current {
+        set(&mut chart.fields, path, current)?;
+    }
     Ok(())
 }
 /// CURRENT typed collections suppressed by the SDK's explicit design flags.
@@ -312,8 +339,14 @@ fn project_design(
             .find(|(n, _)| n == name)
             .ok_or_else(|| error("missing current design field"))?
             .1 = replacement;
-        // This transport projection no longer has the source's explicit hidden spelling.
-        if let Some(layout) = &mut chart.source_layout {
+        // An EDT hidden spelling changes under projection. A native counterpart was
+        // already validated and its names-only layout retains explicit factory presence.
+        // The emitted values still come exclusively from the CURRENT computed default.
+        if let Some(layout) = chart
+            .source_layout
+            .as_mut()
+            .filter(|layout| layout.format != morph1c_core::ir::form::ChartSourceFormat::Designer)
+        {
             for composite in &mut layout.composites {
                 if composite.path.is_empty() {
                     composite.fields.retain(|n| n != name);
@@ -883,7 +916,10 @@ fn collect(body: &FormBody, form_uuid: Uuid) -> Result<Resource, FormError> {
     visit_attributes(
         &mut numeric_body.data_attributes,
         &mut Vec::new(),
-        &|a| AttributeEdge::Attribute { name: a.name.clone(), id: a.id },
+        &|a| AttributeEdge::Attribute {
+            name: a.name.clone(),
+            id: a.id,
+        },
         &mut |attribute, chart| {
             let current = number_paths(chart)?;
             if !current.is_empty() {
@@ -1017,7 +1053,10 @@ fn decode(bytes: &[u8]) -> Result<Resource, FormError> {
             || !["Chart", "GanttChart"].contains(&row.chart_kind.as_str())
             || row.current.is_empty()
             || row.current_native_sha256.len() != 64
-            || !row.current_native_sha256.bytes().all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            || !row
+                .current_native_sha256
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
             || !seen.insert(format!("number:{}", key(&row.attribute, &[])?))
         {
             return Err(error("invalid/duplicate current number binding"));
@@ -1150,7 +1189,10 @@ fn decode(bytes: &[u8]) -> Result<Resource, FormError> {
                 || !matches!(
                     (name.as_str(), current),
                     ("realSeriesData" | "realPointData", ChartValue::Items(_))
-                        | ("realExSeriesData", ChartValue::Nested(_) | ChartValue::Absent)
+                        | (
+                            "realExSeriesData",
+                            ChartValue::Nested(_) | ChartValue::Absent
+                        )
                 )
             {
                 return Err(error("invalid/default current design payload"));
@@ -1222,14 +1264,22 @@ pub fn apply_chart_semantics_resource(
     if resource.form_uuid != form_uuid {
         return Err(error("chart resource differs from declared form UUID"));
     }
-    let mut pending_numbers: HashSet<_> = resource.numbers.iter()
-        .map(|r| key(&r.attribute, &[])).collect::<Result<_, FormError>>()?;
+    let mut pending_numbers: HashSet<_> = resource
+        .numbers
+        .iter()
+        .map(|r| key(&r.attribute, &[]))
+        .collect::<Result<_, FormError>>()?;
     inspect_attributes(
         &body.data_attributes,
         &mut Vec::new(),
-        &|a| AttributeEdge::Attribute { name: a.name.clone(), id: a.id },
+        &|a| AttributeEdge::Attribute {
+            name: a.name.clone(),
+            id: a.id,
+        },
         &mut |attribute, chart| {
-            let Some(row) = resource.numbers.iter().find(|r| r.attribute == attribute) else { return Ok(()); };
+            let Some(row) = resource.numbers.iter().find(|r| r.attribute == attribute) else {
+                return Ok(());
+            };
             if !pending_numbers.remove(&key(attribute, &[])?)
                 || chart.kind != row.chart_kind
                 || design_digest(chart, true)? != row.current_native_sha256
@@ -1239,12 +1289,16 @@ pub fn apply_chart_semantics_resource(
             let mut restored = chart.clone();
             restore_numbers(&mut restored, row)?;
             if number_paths(&mut restored)? != row.current || restored.fields != chart.fields {
-                return Err(error("current numeric payload conflicts with native projection"));
+                return Err(error(
+                    "current numeric payload conflicts with native projection",
+                ));
             }
             Ok(())
         },
     )?;
-    if !pending_numbers.is_empty() { return Err(error("orphan current numeric chart binding")); }
+    if !pending_numbers.is_empty() {
+        return Err(error("orphan current numeric chart binding"));
+    }
     let mut pending_designs: HashSet<_> = resource
         .designs
         .iter()
@@ -1272,7 +1326,10 @@ pub fn apply_chart_semantics_resource(
                     return Err(error("current design payload conflicts with native flags"));
                 }
                 project_design(&mut restored, &row.current)?;
-                if design_digest(&restored, false)? != row.current_native_sha256 {
+                // The restored design fields now contain canonical native defaults.
+                // Other values are already native and await their own ValueRecords;
+                // projecting them again can truncate a dotted enum literal.
+                if design_digest(&restored, true)? != row.current_native_sha256 {
                     return Err(error(
                         "current design payload conflicts with native counterpart",
                     ));
