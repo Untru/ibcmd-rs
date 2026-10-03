@@ -1,5 +1,6 @@
 //! Validating XML serializer.
 use crate::node::{AttributeKind, XmlDocument, XmlElement, XmlNode, valid_name};
+use ibcmd_core::source_policy::SourceOperationPolicy;
 use std::collections::HashSet;
 use std::fmt;
 
@@ -28,18 +29,28 @@ pub struct XmlWriter;
 impl XmlWriter {
     /// Validates and returns all bytes; no caller-owned output is modified on failure.
     pub fn to_vec(document: &XmlDocument, policy: LexicalPolicy) -> Result<Vec<u8>, WriteError> {
+        Self::to_vec_with_policy(document, policy, SourceOperationPolicy::Bounded)
+    }
+
+    /// Serializes a complete document under an explicit source resource policy.
+    /// Syntax checks remain identical; allocation uses the measured output size.
+    pub fn to_vec_with_policy(
+        document: &XmlDocument,
+        policy: LexicalPolicy,
+        operation: SourceOperationPolicy,
+    ) -> Result<Vec<u8>, WriteError> {
         validate_document(document)?;
         let normalized_len = document_output_len(document, LexicalPolicy::Normalized)?;
-        enforce_output_limit(normalized_len)?;
+        enforce_output_limit(normalized_len, operation)?;
         let output_len = if policy == LexicalPolicy::Normalized {
             normalized_len
         } else {
             let output_len = document_output_len(document, policy)?;
-            enforce_output_limit(output_len)?;
+            enforce_output_limit(output_len, operation)?;
             output_len
         };
         // Preflight independently so an invalid generated subtree never yields partial bytes.
-        let mut scratch = String::with_capacity(normalized_len);
+        let mut scratch = output_buffer(normalized_len)?;
         if let Some(decl) = document.declaration() {
             xml_chars(decl, "XML declaration")?;
             if decl.contains("?>") {
@@ -58,7 +69,7 @@ impl XmlWriter {
         }
         debug_assert_eq!(scratch.len(), normalized_len);
         drop(scratch);
-        let mut out = String::with_capacity(output_len);
+        let mut out = output_buffer(output_len)?;
         if policy == LexicalPolicy::Preserve && document.has_utf8_bom() {
             out.push(UTF8_BOM);
         }
@@ -86,27 +97,35 @@ impl XmlWriter {
 /// Returns the exact retained lexeme of one parsed node, or its normalized
 /// spelling for generated nodes. Kept crate-private for opaque-slot capture.
 pub(crate) fn node_to_vec(node: &XmlNode, policy: LexicalPolicy) -> Result<Vec<u8>, WriteError> {
+    node_to_vec_with_policy(node, policy, SourceOperationPolicy::Bounded)
+}
+
+pub(crate) fn node_to_vec_with_policy(
+    node: &XmlNode,
+    policy: LexicalPolicy,
+    operation: SourceOperationPolicy,
+) -> Result<Vec<u8>, WriteError> {
     match node {
         XmlNode::Element(element) => validate_element(element)?,
         _ => validate_node_value(node)?,
     }
     let normalized_len = node_output_len(node, LexicalPolicy::Normalized)?;
-    enforce_output_limit(normalized_len)?;
+    enforce_output_limit(normalized_len, operation)?;
     let output_len = if policy == LexicalPolicy::Normalized {
         normalized_len
     } else {
         let output_len = node_output_len(node, policy)?;
-        enforce_output_limit(output_len)?;
+        enforce_output_limit(output_len, operation)?;
         output_len
     };
-    let mut scratch = String::with_capacity(normalized_len);
+    let mut scratch = output_buffer(normalized_len)?;
     match node {
         XmlNode::Element(element) => element_out(element, &mut scratch, LexicalPolicy::Normalized)?,
         _ => node_out(node, &mut scratch, LexicalPolicy::Normalized)?,
     }
     debug_assert_eq!(scratch.len(), normalized_len);
     drop(scratch);
-    let mut out = String::with_capacity(output_len);
+    let mut out = output_buffer(output_len)?;
     match node {
         XmlNode::Element(element) => element_out(element, &mut out, policy)?,
         _ => node_out(node, &mut out, policy)?,
@@ -132,31 +151,167 @@ pub(crate) fn element_start_to_vec(
     element: &XmlElement,
     policy: LexicalPolicy,
 ) -> Result<Vec<u8>, WriteError> {
+    element_start_to_vec_with_policy(element, policy, SourceOperationPolicy::Bounded)
+}
+
+pub(crate) fn element_start_to_vec_with_policy(
+    element: &XmlElement,
+    policy: LexicalPolicy,
+    operation: SourceOperationPolicy,
+) -> Result<Vec<u8>, WriteError> {
     validate_element_start(element)?;
     let normalized_len = element_start_len(element, LexicalPolicy::Normalized)?;
-    enforce_output_limit(normalized_len)?;
+    enforce_output_limit(normalized_len, operation)?;
     let output_len = element_start_len(element, policy)?;
-    enforce_output_limit(output_len)?;
+    enforce_output_limit(output_len, operation)?;
+    let mut out = output_buffer(output_len)?;
     if use_raw_start(element, policy) {
-        return Ok(element
-            .raw_start()
-            .expect("checked by use_raw_start")
-            .as_bytes()
-            .to_vec());
+        out.push_str(element.raw_start().expect("checked by use_raw_start"));
+        return Ok(out.into_bytes());
     }
-    let mut out = String::with_capacity(output_len);
     normalized_element_start_out(element, &mut out);
     debug_assert_eq!(out.len(), output_len);
     Ok(out.into_bytes())
 }
 
-fn enforce_output_limit(length: usize) -> Result<(), WriteError> {
-    if length > MAX_OUTPUT_BYTES {
+fn enforce_output_limit(length: usize, operation: SourceOperationPolicy) -> Result<(), WriteError> {
+    if operation == SourceOperationPolicy::Bounded && length > MAX_OUTPUT_BYTES {
         return Err(WriteError(format!(
             "XML output exceeds {MAX_OUTPUT_BYTES} bytes"
         )));
     }
     Ok(())
+}
+
+fn output_buffer(length: usize) -> Result<String, WriteError> {
+    let mut output = String::new();
+    output
+        .try_reserve_exact(length)
+        .map_err(|error| WriteError(format!("cannot allocate measured XML output: {error}")))?;
+    Ok(output)
+}
+
+#[cfg(test)]
+mod source_policy_tests {
+    use super::*;
+    use crate::{Attribute, QName, XmlReader};
+
+    #[test]
+    fn source_writer_accepts_measured_large_content_without_relaxing_defaults_or_syntax() {
+        let element = XmlElement::with_parts(
+            QName::new("root").unwrap(),
+            vec![],
+            vec![XmlNode::text("x".repeat(MAX_OUTPUT_BYTES + 1))],
+        );
+        let document = XmlDocument::new(element);
+        assert!(XmlWriter::to_vec(&document, LexicalPolicy::Preserve).is_err());
+        let bytes = XmlWriter::to_vec_with_policy(
+            &document,
+            LexicalPolicy::Preserve,
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert_eq!(bytes.len(), MAX_OUTPUT_BYTES + 1 + "<root></root>".len());
+        assert!(bytes.starts_with(b"<root>"));
+        assert!(bytes.ends_with(b"</root>"));
+        let node = XmlNode::Element(document.root().clone());
+        assert!(node_to_vec(&node, LexicalPolicy::Preserve).is_err());
+        assert_eq!(
+            node_to_vec_with_policy(
+                &node,
+                LexicalPolicy::Preserve,
+                SourceOperationPolicy::Source
+            )
+            .unwrap(),
+            bytes
+        );
+        let bad = XmlDocument::new(XmlElement::with_parts(
+            QName::new("root").unwrap(),
+            vec![],
+            vec![XmlNode::text("invalid\0text")],
+        ));
+        assert!(
+            XmlWriter::to_vec_with_policy(
+                &bad,
+                LexicalPolicy::Preserve,
+                SourceOperationPolicy::Source
+            )
+            .is_err()
+        );
+        assert!(output_buffer(usize::MAX).is_err());
+    }
+
+    #[test]
+    fn source_start_tag_can_exceed_default_output_limit_with_exact_escaping() {
+        let element = XmlElement::with_parts(
+            QName::new("root").unwrap(),
+            vec![Attribute::ordinary(
+                QName::new("value").unwrap(),
+                "&".repeat(MAX_OUTPUT_BYTES / 5 + 1),
+            )],
+            vec![],
+        );
+        assert!(element_start_to_vec(&element, LexicalPolicy::Normalized).is_err());
+        let bytes = element_start_to_vec_with_policy(
+            &element,
+            LexicalPolicy::Normalized,
+            SourceOperationPolicy::Source,
+        )
+        .unwrap();
+        assert!(bytes.len() > MAX_OUTPUT_BYTES);
+        assert!(bytes.starts_with(b"<root value=\"&amp;&amp;"));
+        assert!(bytes.ends_with(b"\"/>"));
+    }
+
+    #[test]
+    fn deep_xml_lifecycle_and_writer_are_iterative_on_a_small_thread_stack() {
+        std::thread::Builder::new()
+            .stack_size(128 * 1024)
+            .spawn(|| {
+                let depth = 4096;
+                let bytes =
+                    format!("{}leaf{}", "<n>".repeat(depth), "</n>".repeat(depth)).into_bytes();
+                let document = XmlReader::from_slice(&bytes).unwrap();
+                let cloned = document.clone();
+                assert!(cloned == document);
+                for policy in [LexicalPolicy::Preserve, LexicalPolicy::Normalized] {
+                    assert_eq!(
+                        XmlWriter::to_vec_with_policy(
+                            &cloned,
+                            policy,
+                            SourceOperationPolicy::Source
+                        )
+                        .unwrap(),
+                        bytes
+                    );
+                }
+                let mut invalid = XmlElement::with_parts(
+                    QName::new("n").unwrap(),
+                    vec![],
+                    vec![XmlNode::comment("invalid--comment")],
+                );
+                for _ in 0..depth {
+                    invalid = XmlElement::with_parts(
+                        QName::new("n").unwrap(),
+                        vec![],
+                        vec![XmlNode::Element(invalid)],
+                    );
+                }
+                assert!(
+                    XmlWriter::to_vec_with_policy(
+                        &XmlDocument::new(invalid),
+                        LexicalPolicy::Preserve,
+                        SourceOperationPolicy::Source
+                    )
+                    .is_err()
+                );
+                drop(document);
+                drop(cloned);
+            })
+            .unwrap()
+            .join()
+            .unwrap();
+    }
 }
 
 fn add_output_len(total: &mut usize, value: usize) -> Result<(), WriteError> {
@@ -180,7 +335,10 @@ fn escaped_output_len(value: &str, attribute: bool) -> Result<usize, WriteError>
     })
 }
 
-fn document_output_len(document: &XmlDocument, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn document_output_len(
+    document: &XmlDocument,
+    policy: LexicalPolicy,
+) -> Result<usize, WriteError> {
     let mut total = if policy == LexicalPolicy::Preserve && document.has_utf8_bom() {
         UTF8_BOM.len_utf8()
     } else {
@@ -207,7 +365,7 @@ fn document_output_len(document: &XmlDocument, policy: LexicalPolicy) -> Result<
     Ok(total)
 }
 
-fn node_output_len(node: &XmlNode, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn node_output_len(node: &XmlNode, policy: LexicalPolicy) -> Result<usize, WriteError> {
     if policy == LexicalPolicy::Preserve
         && let Some(raw) = node.raw()
     {
@@ -268,7 +426,25 @@ fn use_raw_start(element: &XmlElement, policy: LexicalPolicy) -> bool {
         && (element.children().is_empty() || element.raw_end().is_some())
 }
 
-fn element_output_len(element: &XmlElement, policy: LexicalPolicy) -> Result<usize, WriteError> {
+pub(crate) fn element_output_len(
+    element: &XmlElement,
+    policy: LexicalPolicy,
+) -> Result<usize, WriteError> {
+    let mut total = 0usize;
+    let mut pending = vec![element];
+    while let Some(element) = pending.pop() {
+        add_output_len(&mut total, element_shell_len(element, policy)?)?;
+        for child in element.children() {
+            match child {
+                XmlNode::Element(element) => pending.push(element),
+                _ => add_output_len(&mut total, node_output_len(child, policy)?)?,
+            }
+        }
+    }
+    Ok(total)
+}
+
+fn element_shell_len(element: &XmlElement, policy: LexicalPolicy) -> Result<usize, WriteError> {
     let preserve_raw_start = use_raw_start(element, policy);
     let mut total = if preserve_raw_start {
         element.raw_start().expect("checked above").len()
@@ -301,9 +477,6 @@ fn element_output_len(element: &XmlElement, policy: LexicalPolicy) -> Result<usi
     }
     if !preserve_raw_start {
         add_output_len(&mut total, 1)?;
-    }
-    for child in element.children() {
-        add_output_len(&mut total, node_output_len(child, policy)?)?;
     }
     let suffix_len = if policy == LexicalPolicy::Preserve {
         element
@@ -358,9 +531,13 @@ pub(crate) fn validate_document(document: &XmlDocument) -> Result<(), WriteError
 
 fn validate_element(element: &XmlElement) -> Result<(), WriteError> {
     validate_element_start(element)?;
-    for child in element.children() {
+    let mut pending: Vec<_> = element.children().iter().rev().collect();
+    while let Some(child) = pending.pop() {
         match child {
-            XmlNode::Element(child) => validate_element(child)?,
+            XmlNode::Element(child) => {
+                validate_element_start(child)?;
+                pending.extend(child.children().iter().rev());
+            }
             XmlNode::DocType(_) => {
                 return Err(WriteError(
                     "document type is only valid in the prolog".into(),
@@ -476,34 +653,52 @@ fn element_out(
     out: &mut String,
     policy: LexicalPolicy,
 ) -> Result<(), WriteError> {
+    enum Step<'a> {
+        Start(&'a XmlElement),
+        Node(&'a XmlNode),
+        End(&'a XmlElement),
+    }
+    let mut pending = vec![Step::Start(element)];
+    while let Some(step) = pending.pop() {
+        match step {
+            Step::Node(XmlNode::Element(element)) => pending.push(Step::Start(element)),
+            Step::Node(node) => node_out(node, out, policy)?,
+            Step::End(element) => {
+                if policy == LexicalPolicy::Preserve
+                    && let Some(raw) = element.raw_end()
+                {
+                    out.push_str(raw);
+                } else {
+                    out.push_str("</");
+                    out.push_str(element.name().raw());
+                    out.push('>');
+                }
+            }
+            Step::Start(element) => {
+                element_start_out(element, out, policy);
+                if !element.children().is_empty() {
+                    pending.push(Step::End(element));
+                    pending.extend(element.children().iter().rev().map(Step::Node));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+fn element_start_out(element: &XmlElement, out: &mut String, policy: LexicalPolicy) {
     let preserve_raw_start = use_raw_start(element, policy);
     if preserve_raw_start {
         out.push_str(element.raw_start().unwrap());
     } else {
         normalized_element_start_out(element, out);
     }
-    if element.children().is_empty() {
-        if preserve_raw_start {
-            if let Some(raw) = element.raw_end() {
-                out.push_str(raw);
-            }
-            return Ok(());
-        }
-        return Ok(());
-    }
-    for child in element.children() {
-        node_out(child, out, policy)?;
-    }
-    if policy == LexicalPolicy::Preserve
+    if element.children().is_empty()
+        && preserve_raw_start
         && let Some(raw) = element.raw_end()
     {
         out.push_str(raw);
-        return Ok(());
     }
-    out.push_str("</");
-    out.push_str(element.name().raw());
-    out.push('>');
-    Ok(())
 }
 
 fn normalized_element_start_out(element: &XmlElement, out: &mut String) {

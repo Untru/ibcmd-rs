@@ -13,6 +13,7 @@ use crate::asset::AssetReference;
 use crate::identity::{LogicalIdentity, ObjectUuid};
 use crate::opaque::{OpaqueFacet, OpaqueFacets};
 use crate::provenance::SourceProvenance;
+use crate::source_policy::SourceOperationPolicy;
 use crate::value::{CanonicalField, CanonicalValue, CanonicalValueKind, FieldName};
 
 /// Maximum encoded length of an open graph kind token.
@@ -27,14 +28,16 @@ pub const MAX_GENERATED_TYPES: usize = 4_096;
 pub const MAX_OBJECT_ASSETS: usize = 16_384;
 /// Maximum aggregate members retained by one canonical object.
 pub const MAX_OBJECT_MEMBERS: usize = 262_144;
-/// Maximum canonical objects retained by one configuration.
-pub const MAX_CONFIGURATION_OBJECTS: usize = 65_536;
-/// Maximum aggregate members across all configuration objects.
-pub const MAX_CONFIGURATION_MEMBERS: usize = 262_144;
+/// Hard ceiling for canonical objects in a complete configuration, enforced by
+/// constructors and streaming deserialization without relaxing object limits.
+pub const MAX_CONFIGURATION_OBJECTS: usize = 262_144;
+/// Hard ceiling for aggregate members across all configuration objects.
+pub const MAX_CONFIGURATION_MEMBERS: usize = 8_388_608;
 /// Maximum variable-sized retained bytes in one canonical object.
 pub const MAX_OBJECT_RETAINED_BYTES: usize = 134_217_728;
-/// Maximum variable-sized retained bytes in one canonical configuration.
-pub const MAX_CONFIGURATION_RETAINED_BYTES: usize = 268_435_456;
+/// Hard ceiling for variable-sized retained bytes in a complete canonical graph;
+/// source file bytes are not a substitute for this canonical accounting.
+pub const MAX_CONFIGURATION_RETAINED_BYTES: usize = 1_073_741_824;
 
 /// Failure to construct or revalidate the bounded canonical graph model.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -300,6 +303,12 @@ pub struct GeneratedType {
     kind: GeneratedTypeKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     value_id: Option<ObjectUuid>,
+    #[serde(default, skip_serializing_if = "alias_is_false")]
+    owner_identity_alias: bool,
+}
+
+fn alias_is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl GeneratedType {
@@ -312,6 +321,7 @@ impl GeneratedType {
             uuid,
             kind,
             value_id: None,
+            owner_identity_alias: false,
         }
     }
 
@@ -335,6 +345,29 @@ impl GeneratedType {
     /// Returns the independently sourced generated ValueId, when declared.
     pub const fn value_id(&self) -> Option<ObjectUuid> {
         self.value_id
+    }
+
+    /// Declares that this Enum list type shares its own object's identity.
+    /// Graph validation checks the complete Enum/List/TypeId/ValueId relationship.
+    /// Distinct declarations remain the default; this flag is retained on the wire.
+    pub const fn with_owner_identity_alias(mut self) -> Self {
+        self.owner_identity_alias = true;
+        self
+    }
+
+    /// Whether the generated declaration explicitly aliases its own object UUID.
+    pub const fn is_owner_identity_alias(&self) -> bool {
+        self.owner_identity_alias
+    }
+
+    pub(crate) fn valid_owner_identity_alias(&self, object: &CanonicalObject) -> bool {
+        self.owner_identity_alias
+            && object.kind().as_str() == "Enum"
+            && self.kind.as_str() == "List"
+            && self.uuid == object.identity().uuid()
+            && self.value_id.is_some_and(|value| {
+                value != self.uuid && value.as_bytes().iter().any(|byte| *byte != 0)
+            })
     }
 }
 
@@ -402,22 +435,35 @@ pub struct CanonicalObject {
 impl CanonicalObject {
     /// Validates all count, duplicate-property, and aggregate-byte invariants.
     pub fn new(parts: CanonicalObjectParts) -> Result<Self, ModelBuildError> {
+        Self::new_with_policy(parts, SourceOperationPolicy::bounded_default())
+    }
+
+    /// Constructs source metadata with explicit resource accounting. All
+    /// duplicate-property and ordered semantic invariants remain mandatory.
+    pub fn new_with_policy(
+        parts: CanonicalObjectParts,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ModelBuildError> {
         validate_item_count(
             "object properties",
             parts.properties.len(),
-            MAX_OBJECT_PROPERTIES,
+            policy.maximum(MAX_OBJECT_PROPERTIES),
         )?;
         validate_item_count(
             "object references",
             parts.references.len(),
-            MAX_OBJECT_REFERENCES,
+            policy.maximum(MAX_OBJECT_REFERENCES),
         )?;
         validate_item_count(
             "object generated types",
             parts.generated_types.len(),
-            MAX_GENERATED_TYPES,
+            policy.maximum(MAX_GENERATED_TYPES),
         )?;
-        validate_item_count("object assets", parts.assets.len(), MAX_OBJECT_ASSETS)?;
+        validate_item_count(
+            "object assets",
+            parts.assets.len(),
+            policy.maximum(MAX_OBJECT_ASSETS),
+        )?;
         validate_unique_properties(&parts.properties)?;
 
         let object = Self {
@@ -434,10 +480,14 @@ impl CanonicalObject {
         enforce_member_budget(
             "canonical object",
             object.member_count()?,
-            MAX_OBJECT_MEMBERS,
+            policy.maximum(MAX_OBJECT_MEMBERS),
         )?;
         let retained = measure_object_retained_bytes(&object)?;
-        enforce_retained_budget("canonical object", retained, MAX_OBJECT_RETAINED_BYTES)?;
+        enforce_retained_budget(
+            "canonical object",
+            retained,
+            policy.maximum(MAX_OBJECT_RETAINED_BYTES),
+        )?;
         Ok(object)
     }
 
@@ -639,11 +689,9 @@ fn measure_object_retained_bytes(object: &CanonicalObject) -> Result<usize, Mode
 }
 
 fn measure_opaque_facet(facet: &OpaqueFacet) -> Result<usize, ModelBuildError> {
-    let bytes = usize::try_from(facet.byte_len())
-        .map_err(|_| ModelBuildError::RetainedByteCountOverflow)?;
-    let retained = checked_add_retained(bytes, 32 + facet.media_kind().as_str().len())?;
-    let retained = checked_add_retained(retained, facet.placement().kind().as_str().len())?;
-    checked_add_retained(retained, facet.provenance().retained_byte_len())
+    facet
+        .retained_byte_len()
+        .map_err(|_| ModelBuildError::RetainedByteCountOverflow)
 }
 
 struct BoundedVec<T, const MAXIMUM: usize> {
@@ -817,12 +865,21 @@ pub struct CanonicalConfiguration {
 impl CanonicalConfiguration {
     /// Validates global count and aggregate retained-byte bounds without reordering.
     pub fn new(objects: Vec<CanonicalObject>) -> Result<Self, ModelBuildError> {
+        Self::new_with_policy(objects, SourceOperationPolicy::bounded_default())
+    }
+
+    /// Constructs a complete source graph using the selected accounting policy.
+    /// Identity, ownership and reference validation remains a separate proof.
+    pub fn new_with_policy(
+        objects: Vec<CanonicalObject>,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ModelBuildError> {
         validate_item_count(
             "configuration objects",
             objects.len(),
-            MAX_CONFIGURATION_OBJECTS,
+            policy.maximum(MAX_CONFIGURATION_OBJECTS),
         )?;
-        validate_configuration_budgets(&objects)?;
+        validate_configuration_budgets(&objects, policy)?;
         Ok(Self { objects })
     }
 
@@ -847,26 +904,84 @@ impl CanonicalConfiguration {
     }
 }
 
-fn validate_configuration_budgets(objects: &[CanonicalObject]) -> Result<(), ModelBuildError> {
-    let mut members = 0_usize;
-    let mut retained = 0_usize;
-    for object in objects {
-        members = members
-            .checked_add(object.member_count()?)
-            .ok_or(ModelBuildError::CountOverflow)?;
-        if members > MAX_CONFIGURATION_MEMBERS {
-            return Err(ModelBuildError::TooManyMembers {
-                scope: "canonical configuration",
-                maximum: MAX_CONFIGURATION_MEMBERS,
-                actual: members,
-            });
+/// Incremental canonical graph accounting for adapters before retaining objects.
+/// Asset references are included in their owning object's accounting.
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct CanonicalConfigurationBudget {
+    objects: usize,
+    members: usize,
+    retained: usize,
+    policy: SourceOperationPolicy,
+}
+
+impl CanonicalConfigurationBudget {
+    /// Starts checked incremental accounting for an explicit source operation.
+    pub fn with_policy(policy: SourceOperationPolicy) -> Self {
+        Self {
+            policy,
+            ..Self::default()
         }
-        retained = checked_add_retained(retained, object.retained_byte_len())?;
+    }
+
+    /// Accounts for an asset appended later to an already-accounted object.
+    /// Call once before retaining each additional reference; assets already
+    /// present in `add_object` must not be counted again.
+    pub fn add_asset_reference(&mut self, asset: &AssetReference) -> Result<(), ModelBuildError> {
+        let members = checked_add_members(self.members, 1)?;
+        enforce_member_budget(
+            "canonical configuration",
+            members,
+            self.policy.maximum(MAX_CONFIGURATION_MEMBERS),
+        )?;
+        let retained = checked_add_retained(self.retained, 40 + asset.media_kind().as_str().len())?;
         enforce_retained_budget(
             "canonical configuration",
             retained,
-            MAX_CONFIGURATION_RETAINED_BYTES,
+            self.policy.maximum(MAX_CONFIGURATION_RETAINED_BYTES),
         )?;
+        self.members = members;
+        self.retained = retained;
+        Ok(())
+    }
+
+    /// Checks the next object against the same hard bounds as configuration
+    /// construction. Failure leaves the accumulator unchanged.
+    pub fn add_object(&mut self, object: &CanonicalObject) -> Result<(), ModelBuildError> {
+        let objects = checked_add_members(self.objects, 1)?;
+        validate_item_count(
+            "configuration objects",
+            objects,
+            self.policy.maximum(MAX_CONFIGURATION_OBJECTS),
+        )?;
+        let members = checked_add_members(self.members, object.member_count()?)?;
+        enforce_member_budget(
+            "canonical configuration",
+            members,
+            self.policy.maximum(MAX_CONFIGURATION_MEMBERS),
+        )?;
+        let retained = checked_add_retained(self.retained, object.retained_byte_len())?;
+        enforce_retained_budget(
+            "canonical configuration",
+            retained,
+            self.policy.maximum(MAX_CONFIGURATION_RETAINED_BYTES),
+        )?;
+        *self = Self {
+            objects,
+            members,
+            retained,
+            policy: self.policy,
+        };
+        Ok(())
+    }
+}
+
+fn validate_configuration_budgets(
+    objects: &[CanonicalObject],
+    policy: SourceOperationPolicy,
+) -> Result<(), ModelBuildError> {
+    let mut budget = CanonicalConfigurationBudget::with_policy(policy);
+    for object in objects {
+        budget.add_object(object)?;
     }
     Ok(())
 }
@@ -895,30 +1010,12 @@ impl<'de> Visitor<'de> for BoundedObjectsVisitor {
                 .unwrap_or_default()
                 .min(MAX_CONFIGURATION_OBJECTS),
         );
-        let mut members = 0_usize;
-        let mut retained = 0_usize;
+        let mut budget = CanonicalConfigurationBudget::default();
         while objects.len() < MAX_CONFIGURATION_OBJECTS {
             let Some(object) = sequence.next_element::<CanonicalObject>()? else {
                 return Ok(BoundedObjects(objects));
             };
-            members = members
-                .checked_add(object.member_count().map_err(de::Error::custom)?)
-                .ok_or_else(|| de::Error::custom(ModelBuildError::CountOverflow))?;
-            if members > MAX_CONFIGURATION_MEMBERS {
-                return Err(de::Error::custom(ModelBuildError::TooManyMembers {
-                    scope: "canonical configuration",
-                    maximum: MAX_CONFIGURATION_MEMBERS,
-                    actual: members,
-                }));
-            }
-            retained = checked_add_retained(retained, object.retained_byte_len())
-                .map_err(de::Error::custom)?;
-            enforce_retained_budget(
-                "canonical configuration",
-                retained,
-                MAX_CONFIGURATION_RETAINED_BYTES,
-            )
-            .map_err(de::Error::custom)?;
+            budget.add_object(&object).map_err(de::Error::custom)?;
             objects.push(object);
         }
         if sequence.next_element::<IgnoredAny>()?.is_some() {
@@ -992,6 +1089,231 @@ mod tests {
             MetadataKind::new("Catalog").unwrap(),
             provenance(id, "one"),
         )
+    }
+
+    #[test]
+    fn incremental_budget_rejects_before_retaining_and_preserves_state() {
+        let object = CanonicalObject::new(parts()).unwrap();
+        for seeded in [
+            CanonicalConfigurationBudget {
+                objects: MAX_CONFIGURATION_OBJECTS,
+                members: 0,
+                retained: 0,
+                ..CanonicalConfigurationBudget::default()
+            },
+            CanonicalConfigurationBudget {
+                objects: 0,
+                members: MAX_CONFIGURATION_MEMBERS,
+                retained: 0,
+                ..CanonicalConfigurationBudget::default()
+            },
+            CanonicalConfigurationBudget {
+                objects: 0,
+                members: 0,
+                retained: MAX_CONFIGURATION_RETAINED_BYTES,
+                ..CanonicalConfigurationBudget::default()
+            },
+        ] {
+            let mut budget = seeded.clone();
+            assert!(budget.add_object(&object).is_err());
+            assert_eq!(budget, seeded);
+        }
+        let mut budget = CanonicalConfigurationBudget::default();
+        budget.add_object(&object).unwrap();
+        assert_eq!(budget.objects, 1);
+        assert_eq!(budget.members, object.member_count().unwrap());
+        assert_eq!(budget.retained, object.retained_byte_len());
+    }
+
+    #[test]
+    fn incremental_asset_budget_matches_attached_object_accounting() {
+        let asset = AssetReference::new(
+            crate::storage::Sha256Digest::for_bytes(b"asset"),
+            5,
+            crate::asset::MediaKind::new("application/octet-stream").unwrap(),
+        )
+        .unwrap();
+        let object = CanonicalObject::new(parts()).unwrap();
+        let mut incremental = CanonicalConfigurationBudget::default();
+        incremental.add_object(&object).unwrap();
+        incremental.add_asset_reference(&asset).unwrap();
+        let mut attached = parts();
+        attached.assets.push(asset.clone());
+        let mut whole = CanonicalConfigurationBudget::default();
+        whole
+            .add_object(&CanonicalObject::new(attached).unwrap())
+            .unwrap();
+        assert_eq!(incremental, whole);
+        for seeded in [
+            CanonicalConfigurationBudget {
+                objects: 1,
+                members: MAX_CONFIGURATION_MEMBERS,
+                retained: 0,
+                ..CanonicalConfigurationBudget::default()
+            },
+            CanonicalConfigurationBudget {
+                objects: 1,
+                members: 1,
+                retained: MAX_CONFIGURATION_RETAINED_BYTES,
+                ..CanonicalConfigurationBudget::default()
+            },
+        ] {
+            let mut budget = seeded.clone();
+            assert!(budget.add_asset_reference(&asset).is_err());
+            assert_eq!(budget, seeded);
+        }
+    }
+
+    #[test]
+    fn source_policy_preserves_normal_models_and_default_wire_contract() {
+        let bounded = CanonicalObject::new(parts()).unwrap();
+        let source =
+            CanonicalObject::new_with_policy(parts(), SourceOperationPolicy::source_operation())
+                .unwrap();
+        assert_eq!(bounded, source);
+        let bounded = CanonicalConfiguration::new(vec![bounded]).unwrap();
+        let source = CanonicalConfiguration::new_with_policy(
+            vec![source],
+            SourceOperationPolicy::source_operation(),
+        )
+        .unwrap();
+        assert_eq!(bounded, source);
+        assert_eq!(
+            serde_json::to_vec(&bounded).unwrap(),
+            serde_json::to_vec(&source).unwrap()
+        );
+        assert_eq!(serde_json::from_slice::<CanonicalConfiguration>(
+            &serde_json::to_vec(&source).unwrap(),
+        ).unwrap(), source);
+        crate::validate::validate_configuration(&source).unwrap();
+    }
+
+    #[test]
+    fn external_opaque_reference_counts_retained_metadata_in_the_complete_graph() {
+        let mut with_reference = parts();
+        let facet = OpaqueFacet::from_reference(
+            with_reference.provenance.clone(),
+            crate::opaque::OpaquePlacement::new("xml:child", 0).unwrap(),
+            AssetReference::new(
+                crate::storage::Sha256Digest::for_bytes(b"x"),
+                u64::MAX,
+                crate::asset::MediaKind::octet_stream(),
+            )
+            .unwrap(),
+        );
+        let expected_bytes = facet.retained_byte_len().unwrap();
+        let plain = CanonicalObject::new(parts()).unwrap();
+        with_reference.opaque_facets = OpaqueFacets::new(vec![facet]).unwrap();
+        let bounded = CanonicalObject::new(with_reference.clone()).unwrap();
+        let source =
+            CanonicalObject::new_with_policy(with_reference, SourceOperationPolicy::Source)
+                .unwrap();
+        assert_eq!(source, bounded);
+        assert_eq!(
+            measure_object_retained_bytes(&source).unwrap()
+                - measure_object_retained_bytes(&plain).unwrap(),
+            expected_bytes
+        );
+        let graph =
+            CanonicalConfiguration::new_with_policy(vec![source], SourceOperationPolicy::Source)
+                .unwrap();
+        crate::validate::validate_configuration(&graph).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<CanonicalConfiguration>(&serde_json::to_vec(&graph).unwrap())
+                .unwrap(),
+            graph
+        );
+        assert!(
+            graph.objects()[0].opaque_facets().as_slice()[0]
+                .resolve_emit_permit(&ProfileId::parse("profile:test").unwrap(), b"x")
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn source_policy_allows_large_ordered_properties_but_keeps_untrusted_decode_bounded() {
+        let mut large = parts();
+        large.properties = (0..=MAX_OBJECT_PROPERTIES)
+            .map(|index| {
+                CanonicalField::named(
+                    &format!("p{index}"),
+                    CanonicalValue::boolean(index % 2 == 0),
+                )
+                .unwrap()
+            })
+            .collect();
+        assert!(CanonicalObject::new(large.clone()).is_err());
+        let source =
+            CanonicalObject::new_with_policy(large, SourceOperationPolicy::source_operation())
+                .unwrap();
+        assert_eq!(source.properties().len(), MAX_OBJECT_PROPERTIES + 1);
+        assert_eq!(
+            source.properties()[MAX_OBJECT_PROPERTIES].name().as_str(),
+            format!("p{MAX_OBJECT_PROPERTIES}")
+        );
+        let encoded = serde_json::to_vec(&source).unwrap();
+        assert!(serde_json::from_slice::<CanonicalObject>(&encoded).is_err());
+        let graph = CanonicalConfiguration::new_with_policy(
+            vec![source],
+            SourceOperationPolicy::source_operation(),
+        )
+        .unwrap();
+        crate::validate::validate_configuration(&graph).unwrap();
+
+        let mut duplicate = parts();
+        duplicate.properties = vec![
+            CanonicalField::named("same", CanonicalValue::boolean(true)).unwrap(),
+            CanonicalField::named("same", CanonicalValue::boolean(false)).unwrap(),
+        ];
+        assert!(matches!(
+            CanonicalObject::new_with_policy(duplicate, SourceOperationPolicy::source_operation(),),
+            Err(ModelBuildError::DuplicateProperty { .. })
+        ));
+    }
+
+    #[test]
+    fn source_budget_counts_actual_growth_and_preserves_state_on_overflow() {
+        let object = CanonicalObject::new(parts()).unwrap();
+        let mut budget = CanonicalConfigurationBudget {
+            objects: MAX_CONFIGURATION_OBJECTS,
+            members: MAX_CONFIGURATION_MEMBERS,
+            retained: MAX_CONFIGURATION_RETAINED_BYTES,
+            policy: SourceOperationPolicy::source_operation(),
+        };
+        budget.add_object(&object).unwrap();
+        assert_eq!(budget.objects, MAX_CONFIGURATION_OBJECTS + 1);
+        assert!(budget.retained > MAX_CONFIGURATION_RETAINED_BYTES);
+
+        let asset = AssetReference::new(
+            crate::storage::Sha256Digest::for_bytes(b"a"),
+            1,
+            crate::asset::MediaKind::new("application/octet-stream").unwrap(),
+        )
+        .unwrap();
+        for (objects, members, retained) in
+            [(usize::MAX, 0, 0), (0, usize::MAX, 0), (0, 0, usize::MAX)]
+        {
+            let mut overflow = CanonicalConfigurationBudget {
+                objects,
+                members,
+                retained,
+                policy: SourceOperationPolicy::source_operation(),
+            };
+            let before = overflow.clone();
+            assert!(overflow.add_object(&object).is_err());
+            assert_eq!(overflow, before);
+        }
+        for (members, retained) in [(usize::MAX, 0), (0, usize::MAX)] {
+            let mut overflow = CanonicalConfigurationBudget {
+                objects: 1,
+                members,
+                retained,
+                policy: SourceOperationPolicy::source_operation(),
+            };
+            let before = overflow.clone();
+            assert!(overflow.add_asset_reference(&asset).is_err());
+            assert_eq!(overflow, before);
+        }
     }
 
     #[test]

@@ -89,6 +89,20 @@ def main() -> None:
         ),
         (f"{package_root}/sbom.cdx.json", normalized_text(sbom), 0o100644),
     ]
+    # Ship the complete separately licensed, source-derived number formatter.
+    # This is Rust source and its notices, never an installed Java/EDT payload.
+    for relative in ("Cargo.toml", "src/lib.rs", "src/parse.rs", "LICENSE", "NOTICE.md"):
+        files.append((
+            f"{package_root}/third-party/ibcmd-number-format/{relative}",
+            normalized_text(root / "crates/ibcmd-number-format" / relative),
+            0o100644,
+        ))
+    for relative in ("LICENSE-APACHE", "NOTICE.md"):
+        files.append((
+            f"{package_root}/third-party/morph1c/{relative}",
+            normalized_text(root / "crates/ibcmd-edt/vendor/morph1c" / relative),
+            0o100644,
+        ))
 
     epoch = max(source_date_epoch(root), 315532800)
     stamp = datetime.datetime.fromtimestamp(epoch, datetime.UTC)

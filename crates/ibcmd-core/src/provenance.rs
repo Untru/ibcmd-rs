@@ -8,6 +8,7 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
 
 use crate::artifact::ProfileId;
 use crate::diagnostic::{ObjectPath, PropertyPath};
+use crate::source_policy::SourceOperationPolicy;
 
 /// Maximum encoded length of an optional source locator.
 pub const MAX_PROVENANCE_LOCATOR_BYTES: usize = 4_096;
@@ -55,7 +56,15 @@ pub struct ProvenanceLocator(Box<str>);
 impl ProvenanceLocator {
     /// Retains a bounded, control-free source locator.
     pub fn new(value: &str) -> Result<Self, ProvenanceBuildError> {
-        validate_locator(value)?;
+        Self::new_with_policy(value, SourceOperationPolicy::Bounded)
+    }
+
+    /// Retains exact source evidence under an explicit operation policy.
+    pub fn new_with_policy(
+        value: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ProvenanceBuildError> {
+        validate_locator(value, policy)?;
         Ok(Self(value.into()))
     }
 
@@ -65,13 +74,17 @@ impl ProvenanceLocator {
     }
 }
 
-fn validate_locator(value: &str) -> Result<(), ProvenanceBuildError> {
+fn validate_locator(
+    value: &str,
+    policy: SourceOperationPolicy,
+) -> Result<(), ProvenanceBuildError> {
     if value.is_empty() {
         return Err(ProvenanceBuildError::EmptyLocator);
     }
-    if value.len() > MAX_PROVENANCE_LOCATOR_BYTES {
+    let maximum = policy.maximum(MAX_PROVENANCE_LOCATOR_BYTES);
+    if value.len() > maximum {
         return Err(ProvenanceBuildError::LocatorTooLong {
-            maximum: MAX_PROVENANCE_LOCATOR_BYTES,
+            maximum,
             actual: value.len(),
         });
     }
@@ -191,10 +204,25 @@ impl SourceProvenance {
         anchor: CanonicalAnchor,
         locator: &str,
     ) -> Result<Self, ProvenanceBuildError> {
+        Self::with_locator_and_policy(
+            source_profile,
+            anchor,
+            locator,
+            SourceOperationPolicy::Bounded,
+        )
+    }
+
+    /// Creates exact source evidence with an explicitly selected resource policy.
+    pub fn with_locator_and_policy(
+        source_profile: ProfileId,
+        anchor: CanonicalAnchor,
+        locator: &str,
+        policy: SourceOperationPolicy,
+    ) -> Result<Self, ProvenanceBuildError> {
         Ok(Self {
             source_profile,
             anchor,
-            locator: Some(ProvenanceLocator::new(locator)?),
+            locator: Some(ProvenanceLocator::new_with_policy(locator, policy)?),
         })
     }
 
@@ -253,6 +281,32 @@ mod tests {
         assert_eq!(
             value.anchor().property_path().to_string(),
             "$/name:future_property"
+        );
+    }
+
+    #[test]
+    fn source_locator_preserves_large_coordinates_and_bounded_wire_contract() {
+        let source = SourceOperationPolicy::Source;
+        let locator = "x".repeat(MAX_PROVENANCE_LOCATOR_BYTES + 1);
+        assert!(ProvenanceLocator::new(&locator).is_err());
+        let value = SourceProvenance::with_locator_and_policy(
+            ProfileId::parse("profile:source").unwrap(),
+            anchor(),
+            &locator,
+            source,
+        )
+        .unwrap();
+        assert_eq!(value.locator().unwrap().as_str(), locator);
+        assert!(
+            serde_json::from_str::<SourceProvenance>(&serde_json::to_string(&value).unwrap())
+                .is_err()
+        );
+        for invalid in ["", "bad\nlocator"] {
+            assert!(ProvenanceLocator::new_with_policy(invalid, source).is_err());
+        }
+        assert_eq!(
+            ProvenanceLocator::new("same").unwrap(),
+            ProvenanceLocator::new_with_policy("same", source).unwrap()
         );
     }
 

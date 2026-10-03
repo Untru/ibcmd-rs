@@ -6,12 +6,75 @@ use ibcmd_core::identity::ObjectUuid;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
+use std::sync::Arc;
 
 pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree};
-pub use writer::{SourceTreeWriter, publish_new};
+#[doc(hidden)]
+pub use writer::rename_directory_new;
+pub use writer::{SourceTreeWriter, publish_new, publish_new_with_limits};
 
-pub const MAX_SOURCE_FILES: usize = 65_536;
-pub const MAX_SOURCE_DIRECTORIES: usize = 65_536;
+/// Classifies a relative source path without reading its payload.
+/// Classification does not validate path safety or source XML.
+pub fn classify_source_path(path: &str) -> SourceKind {
+    reader::classify(path)
+}
+
+/// Checks relative source path safety without applying resource quotas.
+/// The filesystem determines its representable component and path lengths.
+pub fn validate_source_path_safety(value: &str) -> Result<(), SourceTreeError> {
+    safe_relative_path(value).map(|_| ())
+}
+
+/// Inspects complete XML before deriving the root or first-level source UUID.
+pub fn inspect_source_uuid<R: std::io::BufRead + std::io::Seek>(
+    path: &str,
+    mut input: R,
+) -> Result<Option<ObjectUuid>, SourceTreeError> {
+    use std::io::SeekFrom;
+    let path = SourcePath(safe_relative_path(path)?.into());
+    let origin = input.stream_position()?;
+    crate::XmlReader::inspect_reader(&mut input).map_err(|error| SourceTreeError::Xml {
+        path: path.clone(),
+        message: error.to_string(),
+    })?;
+    input.seek(SeekFrom::Start(origin))?;
+    reader::derive_uuid_from_reader(&path, input)
+}
+
+fn safe_relative_path(value: &str) -> Result<String, SourceTreeError> {
+    if value.starts_with("\\\\") || value.starts_with('/') || value.as_bytes().get(1) == Some(&b':')
+    {
+        return Err(SourceTreeError::UnsafePath(value.to_string()));
+    }
+    let value = value.replace('\\', "/");
+    let parent_resource = reader::parent_configuration_resource(&value);
+    if value.is_empty()
+        || value.split('/').any(|part| {
+            part.is_empty()
+                || part == "."
+                || part == ".."
+                || part.ends_with(['.', ' '])
+                || part.chars().any(|character| {
+                    character.is_control()
+                        || matches!(character, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+                })
+                || reserved(part)
+                || !parent_resource && matches!(part, ".git" | "target" | ".idea" | ".vscode")
+        })
+    {
+        return Err(SourceTreeError::UnsafePath(value));
+    }
+    Ok(value)
+}
+
+/// Absolute inventory bounds, including a complete ERP UH source tree and
+/// reversible EDT preservation records. Readers retain smaller defaults.
+pub const MAX_SOURCE_FILES: usize = 524_288;
+pub const MAX_SOURCE_DIRECTORIES: usize = 524_288;
+/// Source files are not canonical assets: native MXL/XML files exceed 100 MiB.
+pub const MAX_SOURCE_FILE_BYTES: usize = 256 * 1024 * 1024;
+/// Complete source inventory, separate from the bounded semantic object model.
+pub const MAX_SOURCE_RETAINED_BYTES: usize = 32 * 1024 * 1024 * 1024;
 pub const MAX_SOURCE_DEPTH: usize = 64;
 pub const MAX_SOURCE_COMPONENT_BYTES: usize = 255;
 pub const MAX_SOURCE_PATH_BYTES: usize = 4_096;
@@ -20,31 +83,15 @@ pub const MAX_SOURCE_PATH_BYTES: usize = 4_096;
 pub struct SourcePath(Box<str>);
 impl SourcePath {
     pub fn new(value: impl AsRef<str>) -> Result<Self, SourceTreeError> {
-        let value = value.as_ref();
-        if value.starts_with("\\\\")
-            || value.starts_with('/')
-            || value.as_bytes().get(1) == Some(&b':')
-        {
-            return Err(SourceTreeError::UnsafePath(value.to_string()));
-        }
-        let value = value.replace('\\', "/");
-        if value.is_empty() || value.len() > MAX_SOURCE_PATH_BYTES {
+        let value = safe_relative_path(value.as_ref())?;
+        if value.len() > MAX_SOURCE_PATH_BYTES {
             return Err(SourceTreeError::UnsafePath(value));
         }
         let parts: Vec<_> = value.split('/').collect();
         if parts.len() > MAX_SOURCE_DEPTH
-            || parts.iter().any(|p| {
-                p.is_empty()
-                    || *p == "."
-                    || *p == ".."
-                    || p.len() > MAX_SOURCE_COMPONENT_BYTES
-                    || p.ends_with(['.', ' '])
-                    || p.chars().any(|c| {
-                        c.is_control() || matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
-                    })
-                    || reserved(p)
-                    || matches!(*p, ".git" | "target" | ".idea" | ".vscode")
-            })
+            || parts
+                .iter()
+                .any(|part| part.len() > MAX_SOURCE_COMPONENT_BYTES)
         {
             return Err(SourceTreeError::UnsafePath(value));
         }
@@ -103,27 +150,49 @@ pub enum SourceKind {
 pub struct SourceEntry {
     path: SourcePath,
     kind: SourceKind,
-    bytes: Box<[u8]>,
+    // Source trees are immutable. Sharing their byte buffers prevents inventory
+    // and provenance clones from copying an entire multi-gigabyte configuration.
+    bytes: Arc<Vec<u8>>,
     uuid: Option<ObjectUuid>,
     digest: ibcmd_core::storage::Sha256Digest,
 }
 impl SourceEntry {
     pub fn from_bytes(path: SourcePath, bytes: Vec<u8>) -> Result<Self, SourceTreeError> {
+        let (kind, uuid) = Self::classify_bytes(&path, &bytes)?;
+        Self::new(path, kind, bytes, uuid)
+    }
+    /// Rebinds immutable content to a validated path without copying its bytes.
+    /// Path-dependent XML validation, classification and identity are repeated.
+    pub fn with_path(&self, path: SourcePath) -> Result<Self, SourceTreeError> {
+        let (kind, uuid) = Self::classify_bytes(&path, self.bytes())?;
+        Ok(Self {
+            path,
+            kind,
+            bytes: Arc::clone(&self.bytes),
+            uuid,
+            digest: self.digest,
+        })
+    }
+    fn classify_bytes(
+        path: &SourcePath,
+        bytes: &[u8],
+    ) -> Result<(SourceKind, Option<ObjectUuid>), SourceTreeError> {
         let mut kind = reader::classify(path.as_str());
-        let document = if path.as_str().to_ascii_lowercase().ends_with(".xml") {
-            Some(
-                crate::XmlReader::from_slice(&bytes).map_err(|e| SourceTreeError::Xml {
-                    path: path.clone(),
-                    message: e.to_string(),
-                })?,
-            )
-        } else {
-            None
-        };
+        let root =
+            if kind != SourceKind::Binary && path.as_str().to_ascii_lowercase().ends_with(".xml") {
+                Some(
+                    crate::XmlReader::inspect_slice(bytes).map_err(|e| SourceTreeError::Xml {
+                        path: path.clone(),
+                        message: e.to_string(),
+                    })?,
+                )
+            } else {
+                None
+            };
         if matches!(kind, SourceKind::OtherXml)
-            && document.as_ref().is_some_and(|d| {
+            && root.as_ref().is_some_and(|name| {
                 matches!(
-                    d.root().name().local(),
+                    name.local(),
                     "MetaDataObject" | "Configuration" | "DefinedType"
                 )
             })
@@ -134,11 +203,11 @@ impl SourceEntry {
             kind,
             SourceKind::ConfigurationRoot | SourceKind::MetadataXml
         ) {
-            reader::derive_uuid(&path, document.as_ref().unwrap())?
+            reader::derive_uuid_from_bytes(path, bytes)?
         } else {
             None
         };
-        Self::new(path, kind, bytes, uuid)
+        Ok((kind, uuid))
     }
     pub(crate) fn new(
         path: SourcePath,
@@ -146,7 +215,7 @@ impl SourceEntry {
         bytes: Vec<u8>,
         uuid: Option<ObjectUuid>,
     ) -> Result<Self, SourceTreeError> {
-        if bytes.len() > ibcmd_core::asset::MAX_ASSET_BYTES {
+        if bytes.len() > MAX_SOURCE_FILE_BYTES {
             return Err(SourceTreeError::AssetTooLarge {
                 path,
                 actual: bytes.len(),
@@ -156,7 +225,7 @@ impl SourceEntry {
             path,
             kind,
             digest: ibcmd_core::storage::Sha256Digest::for_bytes(&bytes),
-            bytes: bytes.into(),
+            bytes: Arc::new(bytes),
             uuid,
         })
     }
@@ -202,7 +271,7 @@ impl SourceTree {
             total = total
                 .checked_add(e.bytes.len())
                 .ok_or(SourceTreeError::TotalTooLarge)?;
-            if total > ibcmd_core::model::MAX_CONFIGURATION_RETAINED_BYTES {
+            if total > MAX_SOURCE_RETAINED_BYTES {
                 return Err(SourceTreeError::TotalTooLarge);
             }
             let fold = e
@@ -405,6 +474,60 @@ mod tests {
             assert!(SourcePath::new(path).is_err(), "{path}");
         }
     }
+
+    #[test]
+    fn streaming_identity_keeps_shallow_uuid_precedence() {
+        let path = SourcePath::new("Roles/R/Ext/Rights.xml").unwrap();
+        let u = "12345678-90ab-cdef-0123-456789abcdef";
+        for source in [
+            "<root><child/></root>".to_owned(),
+            format!("<root uuid='{u}'><child uuid='invalid'/></root>"),
+            format!("<root><child uuid='{u}'/></root>"),
+            format!("<root><child><nested uuid='{u}'/></child></root>"),
+            format!("<root xmlns:uuid='{u}'/>"),
+            format!("<root xmlns:p='urn:p' uuid='{u}' p:UUID='{u}'/>"),
+            format!("<root><child uuid='{u}'/><other uuid='{u}'/></root>"),
+            format!("<root><child uuid='{u}'/><other uuid='{u}'/><bad uuid='invalid'/></root>"),
+            format!("<root uuid='invalid'><child uuid='{u}'/></root>"),
+        ] {
+            let doc = crate::XmlReader::from_slice(source.as_bytes()).unwrap();
+            let old = reader::derive_uuid(&path, &doc);
+            let streaming = reader::derive_uuid_from_bytes(&path, source.as_bytes());
+            assert_eq!(format!("{old:?}"), format!("{streaming:?}"), "{source}");
+        }
+    }
+
+    #[test]
+    fn explicit_source_limits_publish_large_file_without_changing_defaults() {
+        let temp = Temp::new();
+        let bytes = vec![42; ibcmd_core::asset::MAX_ASSET_BYTES + 1];
+        let entry = SourceEntry::from_bytes(SourcePath::new("large.bin").unwrap(), bytes).unwrap();
+        let expected = entry.digest();
+        let tree = SourceTree::new(vec![entry]).unwrap();
+        let refused = temp.0.join("default");
+        assert!(matches!(
+            publish_new(&tree, &refused),
+            Err(SourceTreeError::AssetTooLarge { .. })
+        ));
+        assert!(!refused.exists());
+        let limits = ReaderLimits {
+            asset_bytes: MAX_SOURCE_FILE_BYTES,
+            total_bytes: MAX_SOURCE_RETAINED_BYTES,
+            ..ReaderLimits::default()
+        };
+        let output = temp.0.join("explicit");
+        publish_new_with_limits(&tree, &output, limits).unwrap();
+        assert!(matches!(
+            read_source_tree(&output),
+            Err(SourceTreeError::AssetTooLarge { .. })
+        ));
+        let reread = SourceTreeReader::new(limits)
+            .unwrap()
+            .read(&output)
+            .unwrap();
+        assert_eq!(reread.entries()[0].digest(), expected);
+        assert_eq!(reread, tree);
+    }
     #[test]
     fn entries_have_digest_and_tree_rejects_case_parent_and_uuid_conflicts() {
         let p = SourcePath::new("abc").unwrap();
@@ -590,6 +713,80 @@ mod tests {
         }
     }
     #[test]
+    fn root_parent_attachment_resources_are_opaque_without_filename_sniffing() {
+        let temp = Temp::new();
+        let payload = b"<?xml bad <!DOCTYPE raw>\xff\0";
+        for prefix in [
+            "Ext/ParentConfigurations/",
+            "Configuration/ParentConfigurations/",
+            "src/Configuration/ParentConfigurations/",
+            ".ibcmd-provenance/xml/Ext/ParentConfigurations/",
+        ] {
+            for name in ["nested/payload.xml", "payload.mdo", "original.cf"] {
+                let path = format!("{prefix}{name}");
+                let entry =
+                    SourceEntry::from_bytes(SourcePath::new(&path).unwrap(), payload.to_vec())
+                        .unwrap();
+                assert_eq!(entry.kind(), SourceKind::Binary);
+                assert_eq!(entry.uuid(), None);
+                assert_eq!(entry.bytes(), payload);
+                assert!(
+                    entry
+                        .with_path(SourcePath::new("Catalogs/Declared.xml").unwrap())
+                        .is_err()
+                );
+                temp.file(&path, payload);
+            }
+        }
+        let tree = read_source_tree(&temp.0).unwrap();
+        assert_eq!(tree.entries().len(), 12);
+        assert!(
+            tree.entries()
+                .iter()
+                .all(|e| e.kind() == SourceKind::Binary && e.bytes() == payload)
+        );
+        for path in [
+            "Ext/ParentConfigurations.xml",
+            "Ext/Other/payload.xml",
+            "Catalogs/C/ParentConfigurations/payload.xml",
+            "Configuration/ParentConfigurationsExtra/payload.xml",
+        ] {
+            assert!(
+                SourceEntry::from_bytes(SourcePath::new(path).unwrap(), payload.to_vec()).is_err()
+            );
+        }
+    }
+
+    #[test]
+    fn parent_resource_artifact_names_are_payloads_and_remain_rejected_outside_owner_scope() {
+        let temp = Temp::new();
+        let bytes = b"<?xml opaque invalid\xff";
+        for name in [
+            "target/payload.xml",
+            ".git/config",
+            ".idea/raw.mdo",
+            ".vscode/data.cf",
+        ] {
+            let path = format!("Ext/ParentConfigurations/{name}");
+            let entry =
+                SourceEntry::from_bytes(SourcePath::new(&path).unwrap(), bytes.to_vec()).unwrap();
+            assert_eq!(entry.kind(), SourceKind::Binary);
+            temp.file(&path, bytes);
+            assert!(SourcePath::new(name).is_err());
+            assert!(validate_source_path_safety(name).is_err());
+            assert!(validate_source_path_safety(&path).is_ok());
+        }
+        assert_eq!(read_source_tree(&temp.0).unwrap().entries().len(), 4);
+        for bad in [
+            "Ext/ParentConfigurations/../target/payload.xml",
+            "Ext/ParentConfigurations/target/../../outside.xml",
+        ] {
+            assert!(SourcePath::new(bad).is_err());
+            assert!(validate_source_path_safety(bad).is_err());
+        }
+    }
+
+    #[test]
     fn metadata_ext_subfiles_include_root_and_nested_ext() {
         for path in ["Ext/Help.xml", "Catalogs/A/Ext/Help.xml"] {
             let entry =
@@ -597,6 +794,46 @@ mod tests {
                     .unwrap();
             assert_eq!(entry.kind(), SourceKind::MetadataXml, "{path}");
         }
+    }
+    #[test]
+    fn rebinding_shares_bytes_but_revalidates_path_dependent_xml_identity() {
+        let entry = SourceEntry::from_bytes(
+            SourcePath::new("payload.bin").unwrap(),
+            b"<Configuration uuid='12345678-90ab-cdef-0123-456789abcdef'/>".to_vec(),
+        )
+        .unwrap();
+        assert_eq!(entry.uuid(), None);
+        let moved = entry
+            .with_path(SourcePath::new("Configuration.xml").unwrap())
+            .unwrap();
+        assert_eq!(moved.kind(), SourceKind::ConfigurationRoot);
+        assert_eq!(
+            moved.uuid().unwrap().to_string(),
+            "12345678-90ab-cdef-0123-456789abcdef"
+        );
+        assert_eq!(moved.digest(), entry.digest());
+        assert!(Arc::ptr_eq(&entry.bytes, &moved.bytes));
+        let expected = SourceEntry::from_bytes(moved.path.clone(), entry.bytes().to_vec()).unwrap();
+        assert_eq!(moved, expected);
+        drop(entry);
+        assert_eq!(moved.bytes(), expected.bytes());
+
+        let bad = SourceEntry::from_bytes(
+            SourcePath::new("bad.bin").unwrap(),
+            b"<Configuration uuid='bad'/>".to_vec(),
+        )
+        .unwrap();
+        assert!(matches!(
+            bad.with_path(SourcePath::new("Configuration.xml").unwrap()),
+            Err(SourceTreeError::InvalidUuid { .. })
+        ));
+        let malformed =
+            SourceEntry::from_bytes(SourcePath::new("bad.bin").unwrap(), b"<root>".to_vec())
+                .unwrap();
+        assert!(matches!(
+            malformed.with_path(SourcePath::new("body.xml").unwrap()),
+            Err(SourceTreeError::Xml { .. })
+        ));
     }
     #[test]
     fn uuid_errors_and_root_wins() {
@@ -758,6 +995,29 @@ mod tests {
                 .to_string_lossy()
                 .contains("ibcmd-new")
         }));
+    }
+    #[test]
+    fn streamed_staging_verification_rejects_changed_missing_extra_and_malformed_files() {
+        let temp = Temp::new();
+        temp.file(
+            "Configuration.xml",
+            b"<Configuration uuid='12345678-90ab-cdef-0123-456789abcdef'/>",
+        );
+        temp.file("Module.bsl", b"text");
+        let tree = read_source_tree(&temp.0).unwrap();
+        let verify = || reader::verify_with_limits(&temp.0, &tree, ReaderLimits::default());
+        verify().unwrap();
+        temp.file("Module.bsl", b"edit");
+        assert!(verify().is_err());
+        temp.file("Module.bsl", b"text");
+        fs::remove_file(temp.0.join("Module.bsl")).unwrap();
+        assert!(verify().is_err());
+        temp.file("Module.bsl", b"text");
+        temp.file("extra.bin", b"unexpected");
+        assert!(verify().is_err());
+        fs::remove_file(temp.0.join("extra.bin")).unwrap();
+        temp.file("Configuration.xml", b"<Configuration>");
+        assert!(matches!(verify(), Err(SourceTreeError::Xml { .. })));
     }
     #[test]
     fn writer_io_error_does_not_leave_a_staging_directory() {

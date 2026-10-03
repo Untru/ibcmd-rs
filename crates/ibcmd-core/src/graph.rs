@@ -52,6 +52,13 @@ impl GraphNodeAddress {
 /// Failure to create deterministic graph indexes without overwriting a node.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum GraphIndexError {
+    /// An explicit generated-type alias has an invalid owner/type relationship.
+    InvalidGeneratedAlias {
+        /// Claimed type identity.
+        uuid: ObjectUuid,
+        /// Address of the invalid binding.
+        address: GeneratedTypeAddress,
+    },
     /// Two graph nodes claimed the same global UUID.
     DuplicateUuid {
         /// Conflicting UUID.
@@ -75,6 +82,10 @@ pub enum GraphIndexError {
 impl Display for GraphIndexError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::InvalidGeneratedAlias { uuid, address } => write!(
+                formatter,
+                "invalid owner identity alias {uuid} at {address:?}"
+            ),
             Self::DuplicateUuid {
                 uuid,
                 first,
@@ -99,8 +110,9 @@ impl Error for GraphIndexError {}
 
 /// Immutable deterministic indexes over a canonical configuration.
 ///
-/// UUIDs use one namespace across objects and generated types. Construction
-/// fails at the first collision instead of silently replacing a prior entry.
+/// UUIDs use one namespace across distinct objects and generated types. A
+/// witnessed explicit Enum list alias keeps both typed indexes and resolves
+/// the shared node address to its owning object. Other collisions fail.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct GraphIndex {
     object_by_uuid: BTreeMap<ObjectUuid, usize>,
@@ -145,14 +157,32 @@ impl GraphIndex {
                     object_index,
                     generated_type_index,
                 };
-                insert_uuid(
-                    &mut index.node_by_uuid,
-                    generated_type.uuid(),
-                    GraphNodeAddress::GeneratedType(generated_address),
-                )?;
-                index
-                    .generated_type_by_uuid
-                    .insert(generated_type.uuid(), generated_address);
+                if generated_type.is_owner_identity_alias() {
+                    if !generated_type.valid_owner_identity_alias(object) {
+                        return Err(GraphIndexError::InvalidGeneratedAlias {
+                            uuid: generated_type.uuid(),
+                            address: generated_address,
+                        });
+                    }
+                } else {
+                    insert_uuid(
+                        &mut index.node_by_uuid,
+                        generated_type.uuid(),
+                        GraphNodeAddress::GeneratedType(generated_address),
+                    )?;
+                }
+                match index.generated_type_by_uuid.entry(generated_type.uuid()) {
+                    Entry::Vacant(slot) => {
+                        slot.insert(generated_address);
+                    }
+                    Entry::Occupied(slot) => {
+                        return Err(GraphIndexError::DuplicateUuid {
+                            uuid: generated_type.uuid(),
+                            first: GraphNodeAddress::GeneratedType(*slot.get()),
+                            duplicate: GraphNodeAddress::GeneratedType(generated_address),
+                        });
+                    }
+                }
             }
         }
         Ok(index)
@@ -173,7 +203,8 @@ impl GraphIndex {
         self.generated_type_by_uuid.get(&uuid).copied()
     }
 
-    /// Looks up either an object or generated type in the global UUID namespace.
+    /// Looks up a distinct node; an explicit owner alias resolves to its object.
+    /// Its generated declaration remains available via [`Self::generated_type_address`].
     pub fn node_address(&self, uuid: ObjectUuid) -> Option<GraphNodeAddress> {
         self.node_by_uuid.get(&uuid).copied()
     }

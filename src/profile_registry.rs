@@ -80,9 +80,17 @@ pub const BUNDLED_PROFILES: &[BundledProfile<'static>] = &[
         name: "profiles/xml/2.21.json",
         json: include_str!("../profiles/xml/2.21.json"),
     },
+    BundledProfile {
+        name: "profiles/edt/2025.2.3-xml-2.20.json",
+        json: include_str!("../profiles/edt/2025.2.3-xml-2.20.json"),
+    },
+    BundledProfile {
+        name: "profiles/edt/2025.2.3-xml-2.21.json",
+        json: include_str!("../profiles/edt/2025.2.3-xml-2.21.json"),
+    },
 ];
 
-/// Resolves the seven project-owned seed profiles without filesystem access.
+/// Resolves the project-owned seed profiles without filesystem access.
 pub fn load_bundled_profile_registry() -> Result<ProfileRegistry> {
     load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())
 }
@@ -254,8 +262,8 @@ mod tests {
     #[test]
     fn bundled_seed_profiles_keep_version_axes_independent() {
         let registry = load_bundled_profile_registry().unwrap();
-        assert_eq!(BUNDLED_PROFILES.len(), 8);
-        assert_eq!(registry.profiles().len(), 8);
+        assert_eq!(BUNDLED_PROFILES.len(), 10);
+        assert_eq!(registry.profiles().len(), 10);
 
         for version in ["2.17", "2.20", "2.21"] {
             let id = ProfileId::parse(&format!("xml-{version}")).unwrap();

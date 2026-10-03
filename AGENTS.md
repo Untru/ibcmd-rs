@@ -14,3 +14,10 @@ evidence (commit, measurement, test), finish or explicitly move (with the
 reason) any issue that is not done, and bring every status up to date. Do not
 create the `v*` tag while the milestone holds an open or stale issue. Details:
 "Milestone check before tagging" in `docs/release-criteria.md`.
+
+## Issue tracking
+
+When taking milestone issues into implementation, update their GitHub Project
+status to `In progress` at the start. Keep the board synchronized with actual
+work: move ready work to `In review`, and use `Done` only after the issue's
+acceptance criteria are satisfied. A draft PR does not complete its issues.

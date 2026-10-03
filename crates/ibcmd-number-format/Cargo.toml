@@ -1,0 +1,14 @@
+[package]
+name = "ibcmd-number-format"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.85"
+license = "GPL-2.0-only WITH Classpath-exception-2.0"
+description = "Source-attributed OpenJDK 17 binary64 decimal formatting for the offline converter"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"

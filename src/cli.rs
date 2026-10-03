@@ -339,6 +339,8 @@ pub enum Commands {
 pub enum ConversionFormat {
     /// Hierarchical 1C XML source tree.
     Xml,
+    /// EDT project directory containing DT-INF and src.
+    Edt,
     /// Binary 1C CF configuration archive.
     Cf,
 }
@@ -347,6 +349,7 @@ impl ConversionFormat {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::Xml => "xml",
+            Self::Edt => "edt",
             Self::Cf => "cf",
         }
     }
@@ -364,7 +367,7 @@ pub enum ConversionLossPolicy {
 
 #[derive(Debug, Args)]
 pub struct ConvertArgs {
-    /// Source artifact: an XML source directory or a CF file.
+    /// Source artifact: an XML source directory, EDT project, or CF file.
     pub input: PathBuf,
     /// New destination artifact. Existing paths are never overwritten.
     pub output: PathBuf,

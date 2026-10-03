@@ -10,8 +10,11 @@ members = [
     "crates/ibcmd-xml",
     "crates/ibcmd-v8",
     "crates/ibcmd-cf",
+    "crates/ibcmd-edt",
+    "crates/ibcmd-number-format",
 ]
 resolver = "3"
+exclude = ["crates/ibcmd-edt/vendor/morph1c"]
 
 [features]
 default = []
@@ -37,6 +40,7 @@ ibcmd-cf = { path = "crates/ibcmd-cf" }
 ibcmd-schema = { path = "crates/ibcmd-schema" }
 ibcmd-v8 = { path = "crates/ibcmd-v8" }
 ibcmd-xml = { path = "crates/ibcmd-xml" }
+ibcmd-edt = { path = "crates/ibcmd-edt" }
 # The process allocator, installed in main.rs.
 mimalloc = "0.1.52"
 quick-xml = "0.38"
@@ -65,3 +69,10 @@ inherits = "release"
 opt-level = 1
 incremental = true
 codegen-units = 256
+
+[patch.crates-io]
+morph1c-core = { path = "crates/ibcmd-edt/vendor/morph1c/crates/core" }
+formats-xml = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats-xml" }
+morph1c-pipeline = { path = "crates/ibcmd-edt/vendor/morph1c/crates/pipeline" }
+formats-edt = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/edt" }
+formats-designer = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/designer" }

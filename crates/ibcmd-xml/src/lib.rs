@@ -81,14 +81,15 @@ pub use metadata::{
     CctTemplateChildrenError, CharacteristicsXmlError, MetadataDecodeError, MetadataEncodeError,
     MetadataEnvelope, MetadataFamilyCodec, MetadataOrderError, MetadataRegistry,
     MetadataRegistryError, append_cct_template_children, bundled_metadata_registry,
-    decode_metadata_envelope, decode_metadata_envelope_with_dialect, order_metadata_features,
-    order_produced_type_values, register_business_process_codec, register_catalog_codec,
-    register_constant_codec, register_data_processor_codec, register_defined_type_codec,
-    register_document_codec, register_enum_codec, register_event_subscription_codec,
-    register_exchange_plan_codec, register_functional_option_codec,
-    register_functional_options_parameter_codec, register_http_service_codec,
-    register_integration_service_codec, register_language_codec, register_report_codec,
-    register_scheduled_job_codec, register_session_parameter_codec,
+    decode_metadata_envelope, decode_metadata_envelope_with_dialect,
+    decode_source_metadata_envelope, decode_source_metadata_envelope_with_policy,
+    order_metadata_features, order_produced_type_values, register_business_process_codec,
+    register_catalog_codec, register_constant_codec, register_data_processor_codec,
+    register_defined_type_codec, register_document_codec, register_enum_codec,
+    register_event_subscription_codec, register_exchange_plan_codec,
+    register_functional_option_codec, register_functional_options_parameter_codec,
+    register_http_service_codec, register_integration_service_codec, register_language_codec,
+    register_report_codec, register_scheduled_job_codec, register_session_parameter_codec,
     register_settings_storage_codec, register_subsystem_codec, register_task_codec,
     register_web_service_codec, register_ws_reference_codec, register_xdto_package_codec,
     render_cct_characteristics_xml, render_characteristics_xml,
@@ -129,6 +130,37 @@ pub mod schema {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn streaming_inspection_keeps_document_and_lexical_validation() {
+        for input in [
+            b"<root/>".as_slice(),
+            b"\xef\xbb\xbf<?xml version='1.0'?><p:r xmlns:p='urn:p'>a&amp;&#x42;<![CDATA[x]]><!-- ok --><p:e/></p:r>",
+            b"<!DOCTYPE root><root/>",
+            b"<root/><second/>",
+            b"<root><unclosed>",
+            b"<root></different>",
+            b"<root a='1' a='2'/>",
+            b"<root>&unknown;</root>",
+            b"<root>&#0;</root>",
+            b"<root>\x01</root>",
+            b"<root>\xff</root>",
+            b"text<root/>",
+            b"<root/>text",
+            b"<!-- prior --><?xml version='1.0'?><root/>",
+            b" <?xml version='1.0'?><root/>",
+            b"<?xml version='2.0'?><root/>",
+            b"<root><!-- bad -- comment --></root>",
+            b"<root/><!DOCTYPE root>",
+            b"<root>\xef\xbb\xbf</root>",
+        ] {
+            match (XmlReader::from_slice(input), XmlReader::inspect_slice(input)) {
+                (Ok(document), Ok(name)) => assert_eq!(document.root().name(), &name),
+                (Err(full), Err(streaming)) => assert_eq!(full, streaming),
+                outcomes => panic!("validation differs for {input:?}: {outcomes:?}"),
+            }
+        }
+    }
 
     #[test]
     fn crate_identity_is_stable() {

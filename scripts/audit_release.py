@@ -32,6 +32,27 @@ FORBIDDEN_BINARY_MARKERS = (
     b".jar",
 )
 FORBIDDEN_ARCHIVE_SUFFIXES = (".jar", ".class", ".war", ".ear", ".so", ".dylib", ".dll")
+# Declarative IDs written to .project / UTF-8 prefs by the offline EDT adapter.
+# These are source-format data, not runtime packages. All other Eclipse names,
+# Java class paths, launchers, JNI, JARs and archive payloads remain forbidden.
+EDT_SOURCE_IDS = (
+    b"org.eclipse.xtext.ui.shared.xtextbuilder",
+    b"org.eclipse.xtext.ui.shared.xtextnature",
+    b".settings/org.eclipse.core.resources.prefs",
+)
+
+
+def forbidden_binary_markers(data: bytes) -> list[bytes]:
+    lowered = data.lower()
+    declarative = bytearray(lowered)
+    for identifier in EDT_SOURCE_IDS:
+        position = 0
+        while (position := lowered.find(identifier, position)) != -1:
+            end = position + len(identifier)
+            if identifier.startswith(b".settings/") or lowered[end:end + 1] not in (b".", b"/", b"$"):
+                declarative[position:end] = b"\0" * len(identifier)
+            position = end
+    return [marker for marker in FORBIDDEN_BINARY_MARKERS if marker in declarative]
 
 
 def arguments() -> argparse.Namespace:
@@ -44,12 +65,10 @@ def arguments() -> argparse.Namespace:
 
 
 def audit_binary(binary: pathlib.Path) -> None:
-    data = binary.read_bytes().lower()
-    for marker in FORBIDDEN_BINARY_MARKERS:
-        if marker in data:
-            raise SystemExit(
-                f"release binary contains forbidden platform/EDT marker: {marker.decode('ascii')}"
-            )
+    for marker in forbidden_binary_markers(binary.read_bytes()):
+        raise SystemExit(
+            f"release binary contains forbidden platform/EDT marker: {marker.decode('ascii')}"
+        )
 
     with tempfile.TemporaryDirectory(prefix="ibcmd-rs-empty-path-") as empty_path:
         environment = os.environ.copy()
@@ -140,10 +159,18 @@ def audit_sbom(sbom_path: pathlib.Path) -> dict:
     for marker in ("eclipse", "osgi", "java", "jni", "1cv8"):
         if marker in names:
             raise SystemExit(f"release SBOM contains forbidden dependency marker: {marker}")
+    formatter = [component for component in bom.get("components", [])
+                 if component.get("name") == "ibcmd-number-format"]
+    if len(formatter) != 1 or formatter[0].get("licenses") != [
+        {"expression": "GPL-2.0-only WITH Classpath-exception-2.0"}
+    ]:
+        raise SystemExit("release SBOM must identify the number formatter and its actual license")
     return bom
 
 
-def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict | None) -> None:
+def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict | None,
+                  source_root: pathlib.Path | None = None) -> None:
+    source_root = source_root or pathlib.Path(__file__).resolve().parent.parent
     with zipfile.ZipFile(archive_path) as archive:
         names = archive.namelist()
         if names != sorted(names) or len(names) != len(set(names)):
@@ -159,6 +186,11 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
             f"{root}/ibcmd-rs",
             f"{root}/sbom.cdx.json",
         }
+        formatter_sources = ("Cargo.toml", "src/lib.rs", "src/parse.rs", "LICENSE", "NOTICE.md")
+        expected.update(f"{root}/third-party/ibcmd-number-format/{name}"
+                        for name in formatter_sources)
+        expected.update(f"{root}/third-party/morph1c/{name}"
+                        for name in ("LICENSE-APACHE", "NOTICE.md"))
         if any(name.endswith("/ibcmd-rs.exe") for name in names):
             expected.remove(f"{root}/ibcmd-rs")
             expected.add(f"{root}/ibcmd-rs.exe")
@@ -172,6 +204,16 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
             lowered = name.lower()
             if lowered.endswith(FORBIDDEN_ARCHIVE_SUFFIXES):
                 raise SystemExit(f"release archive contains forbidden payload: {name}")
+        for name in formatter_sources:
+            source = source_root / "crates/ibcmd-number-format" / name
+            text = source.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            if archive.read(f"{root}/third-party/ibcmd-number-format/{name}") != text.encode("utf-8"):
+                raise SystemExit(f"release number formatter source/notice differs: {name}")
+        for name in ("LICENSE-APACHE", "NOTICE.md"):
+            source = source_root / "crates/ibcmd-edt/vendor/morph1c" / name
+            text = source.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            if archive.read(f"{root}/third-party/morph1c/{name}") != text.encode("utf-8"):
+                raise SystemExit(f"release morph1c license/notice differs: {name}")
         binary_members = [
             name for name in names if name.endswith("/ibcmd-rs") or name.endswith("/ibcmd-rs.exe")
         ]

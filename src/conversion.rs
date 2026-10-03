@@ -4,6 +4,8 @@
 //! The module contains no executable discovery and never starts 1C, EDT, Java,
 //! or any other subprocess.
 
+mod edt;
+
 use std::{
     error::Error,
     fmt::{self, Display, Formatter},
@@ -128,6 +130,33 @@ pub struct ConversionDiagnostic {
 }
 
 #[derive(Clone, Debug, Serialize)]
+pub struct EdtFileAccounting {
+    pub path: String,
+    pub disposition: &'static str,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct EdtSourceExtensionReport {
+    pub id: &'static str,
+    pub resources: usize,
+    pub references: usize,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct EdtConversionReport {
+    pub edt_version: String,
+    pub xml_dialect: String,
+    pub runtime_version: String,
+    pub canonical_objects: usize,
+    pub canonical_retained_bytes: usize,
+    pub asset_references: usize,
+    pub referenced_asset_bytes: u64,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub extensions: Vec<EdtSourceExtensionReport>,
+    pub files: Vec<EdtFileAccounting>,
+}
+
+#[derive(Clone, Debug, Serialize)]
 pub struct ConversionReport {
     pub schema_version: u32,
     pub command: &'static str,
@@ -148,6 +177,8 @@ pub struct ConversionReport {
     pub publication: Option<ConversionPublicationReport>,
     pub output_published: bool,
     pub errors: Vec<ConversionDiagnostic>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub edt: Option<EdtConversionReport>,
 }
 
 impl ConversionReport {
@@ -188,6 +219,7 @@ impl ConversionReport {
             publication: None,
             output_published: false,
             errors: Vec::new(),
+            edt: None,
         }
     }
 
@@ -286,6 +318,19 @@ pub fn convert(args: &ConvertArgs) -> std::result::Result<ConversionReport, Conv
         (ConversionFormat::Cf, ConversionFormat::Cf) => {
             convert_cf_to_cf(args, source_profile, target_profile, report)
         }
+        (ConversionFormat::Edt, ConversionFormat::Xml)
+        | (ConversionFormat::Xml, ConversionFormat::Edt)
+        | (ConversionFormat::Edt, ConversionFormat::Edt) => {
+            edt::convert(args, &profiles, source_profile, target_profile, report)
+        }
+        (ConversionFormat::Cf, ConversionFormat::Edt)
+        | (ConversionFormat::Edt, ConversionFormat::Cf) => Err(failure(
+            &mut report,
+            PHASE_PLAN,
+            "conversion.route-unsupported",
+            "EDT/CF conversion has no verified direct adapter; use an explicitly supported XML route".to_owned(),
+            None,
+        )),
     }
 }
 
@@ -353,9 +398,20 @@ fn require_profile_coordinate(
             profile.xml_dialect.is_some()
                 && profile.platform_build.is_none()
                 && profile.storage_profile.is_none()
+                && !profile.constants.contains_key("edt.project-format")
         }
         ConversionFormat::Cf => {
             profile.platform_build.is_some() && profile.storage_profile.is_some()
+        }
+        ConversionFormat::Edt => {
+            profile.xml_dialect.is_some()
+                && profile.platform_build.is_none()
+                && profile.storage_profile.is_none()
+                && profile
+                    .constants
+                    .get("edt.project-format")
+                    .is_some_and(|entry| entry.value == "mdo")
+                && profile.constants.contains_key("edt.tool-version")
         }
     };
     if valid {
@@ -1336,8 +1392,35 @@ fn validate_dialect(
     dialects: &DialectRegistry,
     profile: &ProfileId,
 ) -> std::result::Result<(), String> {
+    validate_dialect_with_policy(
+        document,
+        dialects,
+        profile,
+        ibcmd_core::source_policy::SourceOperationPolicy::Bounded,
+    )
+}
+
+fn validate_source_dialect(
+    document: &XmlDocument,
+    dialects: &DialectRegistry,
+    profile: &ProfileId,
+) -> std::result::Result<(), String> {
+    validate_dialect_with_policy(
+        document,
+        dialects,
+        profile,
+        ibcmd_core::source_policy::SourceOperationPolicy::source_operation(),
+    )
+}
+
+fn validate_dialect_with_policy(
+    document: &XmlDocument,
+    dialects: &DialectRegistry,
+    profile: &ProfileId,
+    operation: ibcmd_core::source_policy::SourceOperationPolicy,
+) -> std::result::Result<(), String> {
     let detection = dialects
-        .detect(document)
+        .detect_with_policy(document, operation)
         .map_err(|error| format!("XML dialect detection failed: {error}"))?;
     let matches = match detection {
         DialectDetection::Exact { candidate, .. } => candidate.profile_id() == profile,
@@ -1451,14 +1534,22 @@ fn report_path_conflict(
     let output = normalized_absolute(output);
     report == input
         || report == output
-        || (source_format == "xml" && report.starts_with(&input))
-        || (target_format == "xml" && report.starts_with(&output))
+        || (matches!(source_format, "xml" | "edt") && report.starts_with(&input))
+        || (matches!(target_format, "xml" | "edt") && report.starts_with(&output))
 }
 
 fn artifact_path_conflict(args: &ConvertArgs) -> bool {
     let input = normalized_absolute(&args.input);
     let output = normalized_absolute(&args.output);
-    input == output || (args.source_format == ConversionFormat::Xml && output.starts_with(input))
+    input == output
+        || (matches!(
+            args.source_format,
+            ConversionFormat::Xml | ConversionFormat::Edt
+        ) && output.starts_with(&input))
+        || (matches!(
+            args.target_format,
+            ConversionFormat::Xml | ConversionFormat::Edt
+        ) && input.starts_with(&output))
 }
 
 fn normalized_absolute(path: &Path) -> PathBuf {
