@@ -91,7 +91,7 @@ def main() -> None:
     ]
     # Ship the complete separately licensed, source-derived number formatter.
     # This is Rust source and its notices, never an installed Java/EDT payload.
-    for relative in ("Cargo.toml", "src/lib.rs", "LICENSE", "NOTICE.md"):
+    for relative in ("Cargo.toml", "src/lib.rs", "src/parse.rs", "LICENSE", "NOTICE.md"):
         files.append((
             f"{package_root}/third-party/ibcmd-number-format/{relative}",
             normalized_text(root / "crates/ibcmd-number-format" / relative),

@@ -143,6 +143,40 @@ fn dependency_sha256(
             None
         };
         hash.part(&(&item.kind, &item.name, item.id, row_path))?;
+        // CURRENT typed AbstractDataPath values participate in the binding too:
+        // editing a control path must not replay its previous native marker.
+        let mut projections: Vec<&[super::fields::FieldProj]> = Vec::new();
+        if let Some(kind) = super::tables::field_kind(item.kind.as_str()) {
+            projections.extend([super::tables::FORM_FIELD_COMMON, kind.ext]);
+        } else if let Some(kind) = super::tables::group_kind(item.kind.as_str()) {
+            projections.extend([super::tables::FORM_GROUP_BODY, kind.ext]);
+        } else if let Some(kind) = super::tables::decoration_kind(item.kind.as_str()) {
+            projections.extend([super::tables::DECORATION_BODY, kind.ext]);
+        } else {
+            match item.kind.as_str() {
+                "Button" => projections.push(super::tables::BUTTON_BODY),
+                "Table" => projections.push(super::tables::TABLE_BODY),
+                _ => {}
+            }
+        }
+        for (region, bag) in [
+            (super::fields::Region::Body, &item.properties),
+            (super::fields::Region::Ext, &item.ext_info),
+        ] {
+            let path_fields: BTreeSet<_> = projections
+                .iter()
+                .flat_map(|fields| fields.iter())
+                .filter(|field| {
+                    field.region == region && matches!(field.codec, super::fields::Codec::DataPath)
+                })
+                .map(|field| field.id)
+                .collect();
+            for (field, value) in bag {
+                if path_fields.contains(field) {
+                    hash.part(&(region == super::fields::Region::Ext, field, value))?;
+                }
+            }
+        }
         items.extend(item.children.iter().rev());
         items.extend(item.additions.iter().rev());
         if let Some(table) = &item.auto_table {
@@ -544,6 +578,18 @@ pub(crate) fn marked(path: &str, source_marker: bool) -> bool {
             unavailable(path)
         }
     })
+}
+/// Render CURRENT AbstractDataPath values; native marker presence is restored
+/// separately by the typed wire-order facet under the same dependency guard.
+pub(crate) fn rendered_data_path(path: &str) -> String {
+    if unavailable(path) && !path.starts_with('~') {
+        format!("~{path}")
+    } else {
+        path.to_owned()
+    }
+}
+pub(crate) fn retain_source_markers() -> bool {
+    RETAIN_SOURCE.with(std::cell::Cell::get)
 }
 pub(crate) fn with_availability<T>(
     body: &FormBody,

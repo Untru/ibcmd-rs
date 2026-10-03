@@ -190,7 +190,9 @@ pub(crate) fn decode_designer(entry: &FieldProj, el: &Element) -> Result<Propert
             if !el.children.is_empty() {
                 return Err(FormError::Frame(format!("<{tag}>: must be a text leaf")));
             }
-            Ok(PropertyValue::Ref(el.text.clone()))
+            Ok(PropertyValue::Ref(
+                el.text.strip_prefix('~').unwrap_or(&el.text).to_owned(),
+            ))
         }
         Codec::MdObjectRef => {
             claim_xsi(el, tag, "xr:MDObjectRef")?;

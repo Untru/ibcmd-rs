@@ -265,6 +265,10 @@ fn d_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
         Shape::Enum => Ok(ChartValue::Enum(leaf_text(el, path)?)),
         Shape::Color => {
             let c = leaf_text(el, path)?;
+            // Original ColorReader decodes this native spelling to a NULL reference.
+            if c.eq_ignore_ascii_case("auto") {
+                return Ok(ChartValue::Absent);
+            }
             check_color_canon(&c, path)?;
             Ok(ChartValue::Color(c))
         }
@@ -700,6 +704,9 @@ fn d_value_out(t: Tbl, row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutE
             OutElement::leaf("d4p1", name, s.clone())
         }),
         (Shape::Enum, ChartValue::Enum(s)) => one(OutElement::leaf("d4p1", name, s.clone())),
+        (Shape::Color, ChartValue::Absent) => {
+            one(OutElement::leaf("d4p1", name, "auto"))
+        }
         (Shape::Color, ChartValue::Color(c)) => {
             check_color_canon(c, path)?;
             one(OutElement::leaf("d4p1", name, c.clone()))

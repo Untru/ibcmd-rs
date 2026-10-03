@@ -170,7 +170,9 @@ pub(crate) fn render_designer(
         (Codec::Value, PropertyValue::Value(spec)) => {
             value_codec::encode(ValueDialect::Designer, "", tag, spec).map_err(FormError::Frame)?
         }
-        (Codec::DataPath, PropertyValue::Ref(p)) => OutElement::leaf("", tag, p.clone()),
+        (Codec::DataPath, PropertyValue::Ref(p)) => {
+            OutElement::leaf("", tag, super::super::availability::rendered_data_path(p))
+        }
         (Codec::MdObjectRef, PropertyValue::Ref(r)) => {
             OutElement::leaf("", tag, r.clone()).attr("xsi:type", "xr:MDObjectRef")
         }

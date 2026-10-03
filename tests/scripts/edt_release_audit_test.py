@@ -62,7 +62,17 @@ class FormatterDistribution(unittest.TestCase):
             audit.audit_checksum(package, package.with_name("package.zip.sha256"))
             with zipfile.ZipFile(package) as archive:
                 entries = {name: archive.read(name) for name in archive.namelist()}
-            for suffix in ("Cargo.toml", "src/lib.rs", "LICENSE", "NOTICE.md"):
+            formatter_root = root / "crates/ibcmd-number-format"
+            formatter_files = {"Cargo.toml", "LICENSE", "NOTICE.md"} | {
+                path.relative_to(formatter_root).as_posix()
+                for path in (formatter_root / "src").rglob("*.rs")
+            }
+            bundled_formatter_files = {
+                name.split("/third-party/ibcmd-number-format/", 1)[1]
+                for name in entries if "/third-party/ibcmd-number-format/" in name
+            }
+            self.assertEqual(bundled_formatter_files, formatter_files)
+            for suffix in sorted(formatter_files):
                 name = next(name for name in entries if name.endswith(
                     "/third-party/ibcmd-number-format/" + suffix))
                 changed = directory / (suffix.replace("/", "-") + ".zip")
@@ -71,6 +81,13 @@ class FormatterDistribution(unittest.TestCase):
                         archive.writestr(key, data + b"changed" if key == name else data)
                 with self.assertRaisesRegex(SystemExit, "source/notice differs"):
                     audit.audit_archive(changed, binary, bom)
+                missing = directory / (suffix.replace("/", "-") + "-missing.zip")
+                with zipfile.ZipFile(missing, "w") as archive:
+                    for key, data in sorted(entries.items()):
+                        if key != name:
+                            archive.writestr(key, data)
+                with self.assertRaisesRegex(SystemExit, "allowlist mismatch"):
+                    audit.audit_archive(missing, binary, bom)
             extra = directory / "extra.zip"
             with zipfile.ZipFile(extra, "w") as archive:
                 for key, data in sorted({**entries, f"ibcmd-rs-{version}-x86_64-pc-windows-msvc/third-party/extra.rs": b"unknown"}.items()):

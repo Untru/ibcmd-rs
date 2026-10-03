@@ -246,7 +246,7 @@ fn native_factory_scales_omit_only_complete_defaults_and_axes_remain_forced() {
             },
         ),
         ("font", font),
-        ("textColor", ChartValue::Color("auto".into())),
+        ("textColor", ChartValue::Color("#000000".into())),
     ] {
         let mut explicit = current.clone();
         let settings = explicit.data_attributes[0].chart_settings.as_mut().unwrap();
@@ -333,6 +333,278 @@ fn native_factory_scales_omit_only_complete_defaults_and_axes_remain_forced() {
         current.data_attributes[0].chart_settings
     );
 }
+#[test]
+fn native_null_colors_are_forced_without_conflating_present_objects() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
+    for minor in [20, 21] {
+        let version = FormatVersion::new(2, minor);
+        with_source_version(Some(version), || {
+            with_roundtrip_target(version, || {
+                let body = chart(
+                    "<valuesScale><titleArea><border xsi:type=\"core:BorderDef\"><width>1</width></border></titleArea></valuesScale>",
+                );
+                let (_, native, _) = roundtrip(&body);
+                let text = std::str::from_utf8(&native).unwrap();
+                assert!(text.contains("<d4p1:labelsColor>auto</d4p1:labelsColor>"));
+                let scale = text
+                    .split("<d4p1:valuesScale>")
+                    .nth(1)
+                    .unwrap()
+                    .split("</d4p1:valuesScale>")
+                    .next()
+                    .unwrap();
+                let area = scale
+                    .split("<d4p1:titleArea>")
+                    .nth(1)
+                    .unwrap()
+                    .split("</d4p1:titleArea>")
+                    .next()
+                    .unwrap();
+                for name in ["textColor", "backColor", "borderColor"] {
+                    assert!(area.contains(&format!("<d4p1:{name}>auto</d4p1:{name}>")));
+                }
+                assert!(!area.contains("<d4p1:font"));
+                assert!(area.contains("<d4p1:border"));
+                let decoded = read_form(FormDialect::Designer, &native).unwrap();
+                let settings = decoded.data_attributes[0].chart_settings.as_ref().unwrap();
+                assert_eq!(
+                    settings
+                        .fields
+                        .iter()
+                        .find(|(n, _)| n == "labelsColor")
+                        .unwrap()
+                        .1,
+                    ChartValue::Absent
+                );
+                let explicit = chart(
+                    "<labelsColor xsi:type=\"core:ColorDef\"/><valuesScale><titleArea><font xsi:type=\"core:AutoFont\"/><textColor xsi:type=\"core:ColorRef\"><color>Style.WarningText</color></textColor><border xsi:type=\"core:BorderDef\"><width>1</width></border></titleArea></valuesScale>",
+                );
+                let (_, native, _) = roundtrip(&explicit);
+                let text = std::str::from_utf8(&native).unwrap();
+                assert!(text.contains("<d4p1:labelsColor>#000000</d4p1:labelsColor>"));
+                assert!(text.contains("<d4p1:textColor>style:WarningText</d4p1:textColor>"));
+                assert!(text.contains("<d4p1:font"));
+                assert!(text.contains("<d4p1:border"));
+                let items = chart(
+                    "<isSeriesDesign>true</isSeriesDesign><isPointsDesign>true</isPointsDesign><realPointData><id>7</id></realPointData><realSeriesData><properties><id>9</id></properties></realSeriesData>",
+                );
+                let (_, native, _) = roundtrip(&items);
+                let text = std::str::from_utf8(&native).unwrap();
+                for name in ["realPointData", "realSeriesData"] {
+                    let item = text
+                        .split(&format!("<d4p1:{name}>"))
+                        .nth(1)
+                        .unwrap()
+                        .split(&format!("</d4p1:{name}>"))
+                        .next()
+                        .unwrap();
+                    assert!(item.contains("<d4p1:color>auto</d4p1:color>"));
+                }
+            })
+        });
+    }
+}
+
+#[test]
+fn gantt_inherited_force_preserves_nested_null_and_current_nonnull_colors() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
+    for minor in [20, 21] {
+        let version = FormatVersion::new(2, minor);
+        with_source_version(Some(version), || {
+            with_roundtrip_target(version, || {
+                let source = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<ganttchart:GanttChart xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:ganttchart=\"http://g5.1c.ru/v8/dt/ganttchart/model\"><points><contentCacheItem/></points><series><contentCacheItem/></series><timeScale/></ganttchart:GanttChart>\r\n";
+                let mut body = chart("");
+                body.data_attributes[0].chart_settings = Some(read_chart_sidecar(source).unwrap());
+                let (_, native, _) = roundtrip(&body);
+                let text = std::str::from_utf8(&native).unwrap();
+                let points = text
+                    .split("<d4p1:points>")
+                    .nth(1)
+                    .unwrap()
+                    .split("</d4p1:points>")
+                    .next()
+                    .unwrap();
+                for name in ["mainColor", "secondColor", "backColor", "textColor"] {
+                    assert!(points.contains(&format!("<d4p1:{name}>auto</d4p1:{name}>")));
+                }
+                let time = text
+                    .split("<d4p1:timeScale>")
+                    .nth(1)
+                    .unwrap()
+                    .split("</d4p1:timeScale>")
+                    .next()
+                    .unwrap();
+                assert!(time.contains("<d4p1:backColor>auto</d4p1:backColor>"));
+                for value in [
+                    ChartValue::Color("#000000".into()),
+                    ChartValue::Color("style:WarningText".into()),
+                    ChartValue::Absent,
+                ] {
+                    let settings = body.data_attributes[0].chart_settings.as_mut().unwrap();
+                    let ChartValue::Nested(points) = &mut settings
+                        .fields
+                        .iter_mut()
+                        .find(|(n, _)| n == "points")
+                        .unwrap()
+                        .1
+                    else {
+                        panic!()
+                    };
+                    let ChartValue::Nested(content) = &mut points
+                        .iter_mut()
+                        .find(|(n, _)| n == "contentCacheItem")
+                        .unwrap()
+                        .1
+                    else {
+                        panic!()
+                    };
+                    content
+                        .iter_mut()
+                        .find(|(n, _)| n == "mainColor")
+                        .unwrap()
+                        .1 = value.clone();
+                    let (_, native, _) = roundtrip(&body);
+                    let expected = match &value {
+                        ChartValue::Color(c) => c.as_str(),
+                        ChartValue::Absent => "auto",
+                        _ => unreachable!(),
+                    };
+                    assert!(
+                        std::str::from_utf8(&native)
+                            .unwrap()
+                            .contains(&format!("<d4p1:mainColor>{expected}</d4p1:mainColor>"))
+                    );
+                }
+            })
+        });
+    }
+}
+
+#[test]
+fn native_auto_case_facet_cannot_replay_a_previous_current_color() {
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
+    for minor in [20, 21] {
+        let version = FormatVersion::new(2, minor);
+        with_source_version(Some(version), || {
+            with_roundtrip_target(version, || {
+                let (_, native, _) = roundtrip(&chart(""));
+                let native = String::from_utf8(native).unwrap();
+                for spelling in ["auto", "AUTO", "AuTo", "aUtO"] {
+                    let source = native.replace(
+                        "<d4p1:labelsColor>auto</d4p1:labelsColor>",
+                        &format!("<d4p1:labelsColor>{spelling}</d4p1:labelsColor>"),
+                    );
+                    assert_ne!(source.matches("<d4p1:labelsColor>").count(), 0);
+                    let mut current = read_form(FormDialect::Designer, source.as_bytes()).unwrap();
+                    assert_eq!(
+                        write_form(FormDialect::Designer, &current).unwrap(),
+                        source.as_bytes()
+                    );
+                    for color in ["#000000", "#12ABEF", "style:WarningText"] {
+                        current.data_attributes[0]
+                            .chart_settings
+                            .as_mut()
+                            .unwrap()
+                            .fields
+                            .iter_mut()
+                            .find(|(n, _)| n == "labelsColor")
+                            .unwrap()
+                            .1 = ChartValue::Color(color.into());
+                        let output = write_form(FormDialect::Designer, &current).unwrap();
+                        assert!(
+                            std::str::from_utf8(&output)
+                                .unwrap()
+                                .contains(&format!("<d4p1:labelsColor>{color}</d4p1:labelsColor>"))
+                        );
+                        let decoded = read_form(FormDialect::Designer, &output).unwrap();
+                        assert_eq!(
+                            decoded.data_attributes[0].chart_settings,
+                            current.data_attributes[0].chart_settings
+                        );
+                    }
+                    current.data_attributes[0]
+                        .chart_settings
+                        .as_mut()
+                        .unwrap()
+                        .fields
+                        .iter_mut()
+                        .find(|(n, _)| n == "labelsColor")
+                        .unwrap()
+                        .1 = ChartValue::Absent;
+                    assert_eq!(
+                        write_form(FormDialect::Designer, &current).unwrap(),
+                        source.as_bytes()
+                    );
+                    for bad in [
+                        "<d4p1:labelsColor extra=\"x\">auto</d4p1:labelsColor>",
+                        "<d4p1:labelsColor><d4p1:unknown/></d4p1:labelsColor>",
+                    ] {
+                        let broken = source.replace(
+                            &format!("<d4p1:labelsColor>{spelling}</d4p1:labelsColor>"),
+                            bad,
+                        );
+                        assert!(read_form(FormDialect::Designer, broken.as_bytes()).is_err());
+                    }
+                }
+            })
+        });
+    }
+}
+
+#[test]
+fn edt_null_color_shapes_preserve_source_presence_and_current_edits() {
+    use formats_xml::form::write_chart_sidecar;
+    use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_version};
+    for minor in [20, 21] {
+        let version = FormatVersion::new(2, minor);
+        with_source_version(Some(version), || {
+            with_roundtrip_target(version, || {
+                let body = chart("<labelsColor xsi:nil=\"true\"/>");
+                let canonical = String::from_utf8(
+                    write_chart_sidecar(body.data_attributes[0].chart_settings.as_ref().unwrap())
+                        .unwrap(),
+                )
+                .unwrap();
+                assert!(canonical.contains("<labelsColor xsi:nil=\"true\"/>"));
+                for shape in ["<labelsColor/>", "<labelsColor xsi:nil=\"true\"/>"] {
+                    let source = canonical.replace("<labelsColor xsi:nil=\"true\"/>", shape);
+                    let mut settings = read_chart_sidecar(source.as_bytes()).unwrap();
+                    assert_eq!(
+                        settings
+                            .fields
+                            .iter()
+                            .find(|(n, _)| n == "labelsColor")
+                            .unwrap()
+                            .1,
+                        ChartValue::Absent
+                    );
+                    assert_eq!(write_chart_sidecar(&settings).unwrap(), source.as_bytes());
+                    settings
+                        .fields
+                        .iter_mut()
+                        .find(|(n, _)| n == "labelsColor")
+                        .unwrap()
+                        .1 = ChartValue::Color("#12ABEF".into());
+                    let output = write_chart_sidecar(&settings).unwrap();
+                    let text = std::str::from_utf8(&output).unwrap();
+                    assert!(text.contains("<labelsColor xsi:type=\"core:ColorDef\">"));
+                    assert!(!text.contains("<labelsColor xsi:nil="));
+                    assert_eq!(read_chart_sidecar(&output).unwrap(), settings);
+                }
+                for shape in [
+                    "<labelsColor unexpected=\"x\"/>",
+                    "<labelsColor xsi:nil=\"true\">nonempty</labelsColor>",
+                    "<labelsColor xsi:nil=\"true\"><unknown/></labelsColor>",
+                    "<labelsColor xmlns:xsi=\"urn:wrong\" xsi:nil=\"true\"/>",
+                ] {
+                    let source = canonical.replace("<labelsColor xsi:nil=\"true\"/>", shape);
+                    assert!(read_chart_sidecar(source.as_bytes()).is_err());
+                }
+            })
+        });
+    }
+}
+
 #[test]
 fn platform_funnel_spelling_and_native_source_fraction_presence_use_current_number() {
     let body = chart(

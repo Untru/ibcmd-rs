@@ -1,13 +1,12 @@
 //! Lexical ordering of closed, typed singleton property slots. This facet never
 //! stores values, namespace aliases, arbitrary XML, or ordering inside semantic arrays.
 use super::{
-    FormDialect, FormError,
     fields::{Codec, FieldProj, Region},
-    tables,
+    tables, FormDialect, FormError,
 };
 use crate::{descriptor::Element, emit::OutElement};
-use morph1c_core::ir::FormBody;
 use morph1c_core::ir::form::FormWireOrder;
+use morph1c_core::ir::FormBody;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 #[derive(Clone)]
@@ -272,6 +271,29 @@ fn slots(s: &Scope, d: FormDialect) -> BTreeSet<&'static str> {
     out
 }
 
+fn data_path_slots(scope: &Scope) -> BTreeSet<&'static str> {
+    let mut projections: Vec<&[FieldProj]> = Vec::new();
+    if let Some(kind) = tables::field_kind(&scope.kind) {
+        projections.extend([tables::FORM_FIELD_COMMON, kind.ext]);
+    } else if let Some(kind) = tables::group_kind(&scope.kind) {
+        projections.extend([tables::FORM_GROUP_BODY, kind.ext]);
+    } else if let Some(kind) = tables::decoration_kind(&scope.kind) {
+        projections.extend([tables::DECORATION_BODY, kind.ext]);
+    } else {
+        match scope.kind.as_str() {
+            "Button" => projections.push(tables::BUTTON_BODY),
+            "Table" => projections.push(tables::TABLE_BODY),
+            _ => {}
+        }
+    }
+    projections
+        .iter()
+        .flat_map(|fields| fields.iter())
+        .filter(|field| matches!(field.codec, Codec::DataPath))
+        .map(|field| field.des)
+        .collect()
+}
+
 fn repeatable(s: &Scope, tag: &str, d: FormDialect) -> bool {
     if d != FormDialect::Edt {
         return false;
@@ -336,16 +358,38 @@ fn read_choice_presence(
     scope: &Scope,
     out: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), FormError> {
-    fn wrapper(el: &Element, scope: &Scope, name: &str, path: &mut Vec<usize>, out: &mut BTreeMap<String, Vec<String>>) -> Result<(), FormError> {
-        if el.attr("xsi:type").map(|a| a.value.as_str()) != Some("FormChoiceListDesTimeValue") { return Ok(()); }
-        let picture = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Picture");
-        if picture.is_none_or(|p| p.attrs.is_empty() && p.children.is_empty() && p.text.is_empty()) {
-            let value = if picture.is_some() { vec!["Picture".into()] } else { Vec::new() };
+    fn wrapper(
+        el: &Element,
+        scope: &Scope,
+        name: &str,
+        path: &mut Vec<usize>,
+        out: &mut BTreeMap<String, Vec<String>>,
+    ) -> Result<(), FormError> {
+        if el.attr("xsi:type").map(|a| a.value.as_str()) != Some("FormChoiceListDesTimeValue") {
+            return Ok(());
+        }
+        let picture = el
+            .children
+            .iter()
+            .find(|c| c.prefix.is_empty() && c.local == "Picture");
+        if picture.is_none_or(|p| p.attrs.is_empty() && p.children.is_empty() && p.text.is_empty())
+        {
+            let value = if picture.is_some() {
+                vec!["Picture".into()]
+            } else {
+                Vec::new()
+            };
             if out.insert(choice_key(scope, name, path), value).is_some() {
-                return Err(FormError::Frame("duplicate typed choice picture presence scope".into()));
+                return Err(FormError::Frame(
+                    "duplicate typed choice picture presence scope".into(),
+                ));
             }
         }
-        if let Some(value) = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Value" && c.attr("xsi:type").map(|a| a.value.as_str()) == Some("v8:FixedArray")) {
+        if let Some(value) = el.children.iter().find(|c| {
+            c.prefix.is_empty()
+                && c.local == "Value"
+                && c.attr("xsi:type").map(|a| a.value.as_str()) == Some("v8:FixedArray")
+        }) {
             for (index, child) in value.children.iter().enumerate() {
                 if child.prefix == "v8" && child.local == "Value" {
                     path.push(index); wrapper(child, scope, name, path, out)?; path.pop();
@@ -371,21 +415,56 @@ fn out_choice_presence(
     facet: Option<&FormWireOrder>,
     orders: &mut BTreeMap<String, Vec<String>>,
 ) -> Result<(), FormError> {
-    fn wrapper(el: &mut OutElement, scope: &Scope, name: &str, path: &mut Vec<usize>, facet: Option<&FormWireOrder>, orders: &mut BTreeMap<String, Vec<String>>) -> Result<(), FormError> {
-        if !el.attrs.iter().any(|(k,v)| k == "xsi:type" && v == "FormChoiceListDesTimeValue") { return Ok(()); }
+    fn wrapper(
+        el: &mut OutElement,
+        scope: &Scope,
+        name: &str,
+        path: &mut Vec<usize>,
+        facet: Option<&FormWireOrder>,
+        orders: &mut BTreeMap<String, Vec<String>>,
+    ) -> Result<(), FormError> {
+        if !el
+            .attrs
+            .iter()
+            .any(|(k, v)| k == "xsi:type" && v == "FormChoiceListDesTimeValue")
+        {
+            return Ok(());
+        }
         let key = choice_key(scope, name, path);
         let source = facet.and_then(|f| f.scopes.get(&key));
         if source.is_some_and(|s| !s.is_empty() && s.as_slice() != ["Picture"]) {
-            return Err(FormError::Frame("invalid typed choice picture presence slot".into()));
+            return Err(FormError::Frame(
+                "invalid typed choice picture presence slot".into(),
+            ));
         }
-        let picture = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Picture");
-        if picture.is_none_or(|p| p.attrs.is_empty() && p.children.is_empty() && p.text.as_deref().unwrap_or("").is_empty()) {
-            orders.insert(key, if picture.is_some() { vec!["Picture".into()] } else { Vec::new() });
+        let picture = el
+            .children
+            .iter()
+            .find(|c| c.prefix.is_empty() && c.local == "Picture");
+        if picture.is_none_or(|p| {
+            p.attrs.is_empty()
+                && p.children.is_empty()
+                && p.text.as_deref().unwrap_or("").is_empty()
+        }) {
+            orders.insert(
+                key,
+                if picture.is_some() {
+                    vec!["Picture".into()]
+                } else {
+                    Vec::new()
+                },
+            );
             if picture.is_none() && source.is_some_and(|s| !s.is_empty()) {
                 el.push(OutElement::self_closing("", "Picture"));
             }
         }
-        if let Some(value) = el.children.iter_mut().find(|c| c.prefix.is_empty() && c.local == "Value" && c.attrs.iter().any(|(k,v)| k == "xsi:type" && v == "v8:FixedArray")) {
+        if let Some(value) = el.children.iter_mut().find(|c| {
+            c.prefix.is_empty()
+                && c.local == "Value"
+                && c.attrs
+                    .iter()
+                    .any(|(k, v)| k == "xsi:type" && v == "v8:FixedArray")
+        }) {
             for (index, child) in value.children.iter_mut().enumerate() {
                 if child.prefix == "v8" && child.local == "Value" {
                     path.push(index); wrapper(child, scope, name, path, facet, orders)?; path.pop();
@@ -412,6 +491,7 @@ fn read_orders(
     parent: &Scope,
     root: bool,
     out: &mut BTreeMap<String, Vec<String>>,
+    markers: &mut BTreeMap<String, BTreeSet<String>>,
 ) -> Result<(), FormError> {
     let text = |name: &str| {
         el.children
@@ -446,6 +526,22 @@ fn read_orders(
     };
     let next = scope.as_ref().unwrap_or(parent);
     if let Some(s) = &scope {
+        if d == FormDialect::Designer {
+            let allowed = data_path_slots(s);
+            let marked: BTreeSet<_> = el
+                .children
+                .iter()
+                .filter(|child| {
+                    child.prefix.is_empty()
+                        && allowed.contains(child.local.as_str())
+                        && child.text.starts_with('~')
+                })
+                .map(|child| child.local.clone())
+                .collect();
+            if !marked.is_empty() {
+                markers.insert(s.key.clone(), marked);
+            }
+        }
         insert(
             out,
             s,
@@ -486,7 +582,7 @@ fn read_orders(
                 && c.prefix.is_empty()
                 && kind(d, &c.local, None, None).is_some())
         {
-            read_orders(d, c, next, false, out)?;
+            read_orders(d, c, next, false, out, markers)?;
         }
     }
     Ok(())
@@ -547,14 +643,40 @@ fn walk_out(
     let next = scope.as_ref().unwrap_or(parent);
     if let Some(s) = &scope {
         let allowed = slots(s, d);
+        if d == FormDialect::Designer {
+            if let Some(markers) = facet.and_then(|f| f.data_path_markers.get(&s.key)) {
+                let path_slots = data_path_slots(s);
+                if markers
+                    .iter()
+                    .any(|slot| !path_slots.contains(slot.as_str()))
+                {
+                    return Err(FormError::Frame(
+                        "unknown typed source DataPath marker slot".into(),
+                    ));
+                }
+                if super::availability::retain_source_markers() {
+                    for child in &mut el.children {
+                        if child.prefix.is_empty() && markers.contains(&child.local) {
+                            if let Some(current) = &mut child.text {
+                                if !current.starts_with('~') {
+                                    current.insert(0, '~');
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
         // Reconstitute only computed current defaults omitted by the target
         // serializer. Source order stores presence/names, never source values.
         if let Some(source) = facet.and_then(|f| f.scopes.get(&s.key)) {
             if s.kind == "GraphicalSchemaField" && s.ext && d == FormDialect::Edt {
-                el.children.retain(|c| !(c.prefix.is_empty()
-                    && matches!(c.local.as_str(), "width" | "height")
-                    && c.text.as_deref() == Some("0")
-                    && !source.iter().any(|tag| tag == &c.local)));
+                el.children.retain(|c| {
+                    !(c.prefix.is_empty()
+                        && matches!(c.local.as_str(), "width" | "height")
+                        && c.text.as_deref() == Some("0")
+                        && !source.iter().any(|tag| tag == &c.local))
+                });
             }
             let defaults: &[(&str, &str)] = if s.kind == "GraphicalSchemaField" && d == FormDialect::Designer {
                 &[("Width", "50"), ("Height", "10")]
@@ -660,7 +782,15 @@ pub(super) fn capture(
     body: &FormBody,
 ) -> Result<FormWireOrder, FormError> {
     let mut scopes = BTreeMap::new();
-    read_orders(d, root, &root_scope(), true, &mut scopes)?;
+    let mut data_path_markers = BTreeMap::new();
+    read_orders(
+        d,
+        root,
+        &root_scope(),
+        true,
+        &mut scopes,
+        &mut data_path_markers,
+    )?;
     let mut canonical = match d {
         FormDialect::Designer => {
             let v = root
@@ -688,6 +818,7 @@ pub(super) fn capture(
             .map(|a| a.value.clone())
             .or_else(|| morph1c_core::version::current_source_version().map(|v| v.to_string())),
         scopes,
+        data_path_markers,
     })
 }
 pub(super) fn apply(
@@ -783,14 +914,23 @@ pub(super) fn capture_xml221_default_presence(
     d: FormDialect,
     root: &Element,
 ) -> Result<Option<FormWireOrder>, FormError> {
-    let version = root.attr("version").map(|a| a.value.clone()).or_else(|| {
-        morph1c_core::version::current_source_version().map(|v| v.to_string())
-    });
+    let version = root
+        .attr("version")
+        .map(|a| a.value.clone())
+        .or_else(|| morph1c_core::version::current_source_version().map(|v| v.to_string()));
     if version.as_deref() != Some("2.21") {
         return Ok(None);
     }
     let mut scopes = BTreeMap::new();
-    read_orders(d, root, &root_scope(), true, &mut scopes)?;
+    let mut data_path_markers = BTreeMap::new();
+    read_orders(
+        d,
+        root,
+        &root_scope(),
+        true,
+        &mut scopes,
+        &mut data_path_markers,
+    )?;
     scopes.retain(|key, tags| {
         let allowed = xml221_presence_slots(key, d);
         tags.retain(|tag| allowed.contains(&tag.as_str()));
@@ -800,6 +940,7 @@ pub(super) fn capture_xml221_default_presence(
         designer: d == FormDialect::Designer,
         version,
         scopes,
+        data_path_markers,
     }))
 }
 
@@ -839,7 +980,9 @@ pub(super) fn apply_xml221_default_presence(
             if !valid_scope
                 || tags.iter().any(|tag| !allowed.contains(&tag.as_str()) || !seen.insert(tag))
             {
-                return Err(FormError::Frame("unknown or duplicate XML 2.21 default-presence slot".into()));
+                return Err(FormError::Frame(
+                    "unknown or duplicate XML 2.21 default-presence slot".into(),
+                ));
             }
         }
     }

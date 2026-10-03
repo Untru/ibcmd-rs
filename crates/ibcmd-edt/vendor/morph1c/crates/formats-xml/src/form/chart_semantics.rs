@@ -223,7 +223,9 @@ fn interval_color(
     if !matches!(kind, Kind::GanttInterval) {
         return Ok(None);
     }
-    let ChartValue::Color(color) = field(fields, "textColor")? else {
+    let value = field(fields, "textColor")?;
+    if value == &ChartValue::Absent { return Ok(None); }
+    let ChartValue::Color(color) = value else {
         return Err(error("wrong current interval color kind"));
     };
     super::chart::check_color_canon(color, "GanttChart interval textColor")?;
@@ -455,7 +457,7 @@ fn project_values(fields: &mut Vec<(String, ChartValue)>, path: &mut Vec<Step>, 
                 *value = match kind {
                     Kind::SeriesItem => ChartValue::Absent,
                     Kind::PointItem => ChartValue::Int("0".into()),
-                    Kind::GanttInterval => ChartValue::Color("auto".into()),
+                    Kind::GanttInterval => ChartValue::Absent,
                     _ => unreachable!(),
                 };
             }

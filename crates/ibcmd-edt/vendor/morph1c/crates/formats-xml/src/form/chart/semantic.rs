@@ -111,7 +111,8 @@ fn default_value(t: Tbl, row: &Row, format: ChartSourceFormat) -> Option<ChartVa
         }
         Shape::SeriesItem => Some(ChartValue::Absent),
         Shape::Loc => Some(ChartValue::Localized(Vec::new())),
-        Shape::Color => Some(ChartValue::Color("auto".into())),
+        // Native `auto` is NULL according to the original ColorReader, not a Color object.
+        Shape::Color => Some(ChartValue::Absent),
         Shape::Font => Some(ChartValue::Font(auto_font())),
         Shape::SeriesItems
         | Shape::PointItems
@@ -378,7 +379,27 @@ fn project_fields(
                 }
             }
         }
+        let was_present = original.is_some_and(|o| o.fields.iter().any(|s| s == n));
         if value == ChartValue::Absent && row.shape != Shape::Picture {
+            let native_null_color = format == ChartSourceFormat::Designer
+                && row.shape == Shape::Color
+                && (was_present || native_forces_color(t, n));
+            let edt_null_color = format == ChartSourceFormat::Edt
+                && row.shape == Shape::Color
+                && layout.is_some_and(|l| {
+                    l.format == format && l.composites.iter().any(|c| {
+                        let mut null_path = path.clone();
+                        null_path.push(ChartLayoutSegment::Field(n.into()));
+                        c.path == null_path && c.fields.iter().any(|f| {
+                            matches!(f.as_str(), "nullColorEmpty" | "nullColorNil")
+                        })
+                    })
+                });
+            if !native_null_color && !edt_null_color {
+                continue;
+            }
+            // Only CURRENT NULL can reach these writers; no prior Color value is retained.
+            out.push((n.to_owned(), value));
             continue;
         }
         if t == Tbl::SeriesItem && n == "info" && format == ChartSourceFormat::Designer {
@@ -448,7 +469,6 @@ fn project_fields(
                 )));
             }
         }
-        let was_present = original.is_some_and(|o| o.fields.iter().any(|s| s == n));
         if !was_present {
             let default = match default_value(t, row, format) {
                 Some(ChartValue::Nested(f)) => subtable(row.shape)
@@ -715,6 +735,21 @@ fn capture_primitives(
                     }
                 }
             }
+            if row.shape == Shape::Color {
+                if format == ChartSourceFormat::Designer && child.text.eq_ignore_ascii_case("auto") {
+                    for (i, c) in child.text.bytes().enumerate() {
+                        if c.is_ascii_uppercase() {
+                            names.push(format!("autoUpper{i}"));
+                        }
+                    }
+                } else if format == ChartSourceFormat::Edt && child.attr("xsi:type").is_none() {
+                    names.push(if child.attr("xsi:nil").is_some() {
+                        "nullColorNil".into()
+                    } else {
+                        "nullColorEmpty".into()
+                    });
+                }
+            }
             out.push(ChartCompositeLayout {
                 path: path.clone(),
                 fields: names,
@@ -773,6 +808,12 @@ fn restore_primitive_children(
             ) {
                 path.pop();
             }
+        } else if row.shape == Shape::Color && el.attrs.iter().any(|a| a.0 == "xsi:nil") {
+            if let Some(original) = layout.composites.iter().find(|c| c.path == *path) {
+                if original.fields.iter().any(|name| name == "nullColorEmpty") {
+                    el.attrs.retain(|a| a.0 != "xsi:nil");
+                }
+            }
         } else if row.shape == Shape::Line {
             if let Some(original) = layout.composites.iter().find(|c| c.path == *path) {
                 el.children.retain(|e| {
@@ -791,6 +832,9 @@ fn restore_primitive_children(
 
 fn validate_primitive(row: &Row, value: &ChartValue) -> Result<(), FormError> {
     if let ChartValue::Color(color) = value {
+        if row.shape == Shape::Color && color.eq_ignore_ascii_case("auto") {
+            return Err(frame("chart: NULL Color reference requires typed Absent".into()));
+        }
         check_color_canon(color, row.name)?;
     }
     if let (Shape::Line, ChartValue::Line { style, width, .. }) = (row.shape, value) {
@@ -818,6 +862,19 @@ fn native_forces_localized(t: Tbl, name: &str) -> bool {
             (Tbl::GDimPoint | Tbl::GDimSeries, "title") | (Tbl::TsLevel, "format")
                 | (Tbl::SeriesItem, "text")
         )
+}
+
+// Original ChartXmlWriter/LabelAreaWriter, PointPropertiesWriter and SeriesPropertiesColorWriter force NULL
+// colors; GanttChartXmlWriter passes true through its SimpleFeatureElementWriter children.
+fn native_forces_color(t: Tbl, name: &str) -> bool {
+    (t == Tbl::Chart && !matches!(name, "gradientPaletteStartColor" | "gradientPaletteEndColor"))
+        || t == Tbl::LabelArea
+        || (matches!(t, Tbl::SeriesItem | Tbl::PointItem) && name == "color")
+        || matches!(t,
+            Tbl::Gantt | Tbl::GContentPoint | Tbl::GContentSeries | Tbl::TimeScale
+                | Tbl::TsLevel | Tbl::GValue | Tbl::GLink | Tbl::TimeLabel | Tbl::CollectItem
+        )
+        || (t == Tbl::GInterval && name != "textColor")
 }
 
 fn validate_number(t: Tbl, row: &Row, value: &ChartValue) -> Result<(), FormError> {
@@ -1073,6 +1130,18 @@ pub(super) fn restore_native_picture_layout(
                         }
                         element.text = Some(text);
                     }
+                }
+            } else if row.shape == Shape::Color {
+                if let Some(spelling) = layout.composites.iter().find(|c| c.path == *path)
+                    .filter(|_| current_value_at(current, path) == Some(&ChartValue::Absent))
+                {
+                    let mut text = *b"auto";
+                    for (i, ch) in text.iter_mut().enumerate() {
+                        if spelling.fields.iter().any(|s| s == &format!("autoUpper{i}")) {
+                            *ch = ch.to_ascii_uppercase();
+                        }
+                    }
+                    element.text = Some(String::from_utf8(text.to_vec()).expect("ASCII color spelling"));
                 }
             } else if row.shape == Shape::Picture {
                 if let Some(original) = layout.composites.iter().find(|c| c.path == *path) {

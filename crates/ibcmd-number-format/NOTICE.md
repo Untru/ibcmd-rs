@@ -1,6 +1,6 @@
 # OpenJDK 17 number formatter
 
-This library translates the binary64 emission algorithm of
+This library translates the binary32/binary64 emission algorithm of
 `jdk.internal.math.FloatingDecimal` into Rust. It is source-derived code,
 not a clean-room implementation. Natural-number limb arithmetic is locally
 implemented. The original copyright notice is retained in `src/lib.rs`.
@@ -20,13 +20,16 @@ https://github.com/openjdk/jdk17u/blob/jdk-17.0.16%2B8/src/java.base/share/class
 License source:
 https://github.com/openjdk/jdk17u/blob/jdk-17.0.16%2B8/LICENSE
 
-Modification date: 2026-10-02. Changes include the Rust translation, the
+Modification dates: 2026-10-02 and 2026-10-03. Changes include the Rust translation, the
 locally implemented unsigned limb operations, preserving the original signed
-32/64-bit stopping behavior, and a standalone `f64 -> String` API.
+32/64-bit stopping behavior, standalone `f32/f64 -> String` APIs, and locally
+implemented Java-compatible decimal/hexadecimal lexical parsing with direct
+IEEE binary32/binary64 rounding. The lexical parser is not translated from
+OpenJDK source; it is distributed under this library's license.
 The formatter has no dependencies beyond the Rust standard library.
 Its tests compare actual installed JDK outputs, including subnormals,
 rounding boundaries, signed zero and nonfinite values.
 
 The binary archive distributes the complete modified library source
-(`Cargo.toml`, `src/lib.rs`), this notice and the license under
+(`Cargo.toml`, `src/lib.rs`, `src/parse.rs`), this notice and the license under
 `third-party/ibcmd-number-format/`. SBOM records the package's actual license.

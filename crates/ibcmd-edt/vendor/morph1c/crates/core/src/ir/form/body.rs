@@ -428,6 +428,8 @@ pub struct FormWireOrder {
     pub designer: bool,
     pub version: Option<String>,
     pub scopes: std::collections::BTreeMap<String, Vec<String>>,
+    /// Native marker presence bound to typed ancestry/slot, never source paths or values.
+    pub data_path_markers: std::collections::BTreeMap<String, std::collections::BTreeSet<String>>,
 }
 
 impl FormBody {

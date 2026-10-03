@@ -352,10 +352,10 @@ fn settings_bytes(bytes: &[u8], owner: &str) -> Vec<u8> {
                 }
             }
             Event::End(_) => {
-                if let Some((begin, level)) = capture {
-                    if depth == level {
-                        return bytes[begin..offset + reader.buffer_position() as usize].to_vec();
-                    }
+                if let Some((begin, level)) = capture
+                    && depth == level
+                {
+                    return bytes[begin..offset + reader.buffer_position() as usize].to_vec();
                 }
                 if owned == Some(depth) {
                     owned = None;

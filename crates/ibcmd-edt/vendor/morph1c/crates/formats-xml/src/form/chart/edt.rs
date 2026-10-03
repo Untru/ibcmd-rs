@@ -322,6 +322,19 @@ fn e_read_value(el: &Element, row: &Row, path: &str) -> Result<ChartValue, FormE
 /// EDT-цвет: `core:ColorDef` (r/g/b-дети; 0-компоненты опущены) → `#RRGGBB`;
 /// `core:ColorRef`+`Style.X` → `style:X`. Иные ссылки (System./web-цвета) не витнесснуты.
 fn e_read_color(el: &Element, path: &str) -> Result<ChartValue, FormError> {
+    // Actual ChartResource leaves an untyped empty Color reference NULL; xsi:nil=true
+    // has the same model effect. Claim only these closed, value-free source shapes.
+    if el.attr("xsi:type").is_none() && el.children.is_empty() && el.text.is_empty() {
+        if let Some(nil) = el.attr("xsi:nil") {
+            if nil.value != "true" {
+                return Err(frame(format!("chart {path}: invalid untyped NULL Color")));
+            }
+            nil.claimed.set(true);
+        }
+        el.claim();
+        expect_attrs_claimed(el, path)?;
+        return Ok(ChartValue::Absent);
+    }
     chart_read_edt_color(el, path)
 }
 
@@ -638,6 +651,9 @@ fn e_value_outs(
             one(OutElement::leaf("", name, s.clone()))
         }
         (Shape::Enum, ChartValue::Enum(s)) => one(OutElement::leaf("", name, s.clone())),
+        (Shape::Color, ChartValue::Absent) => {
+            one(OutElement::self_closing("", name).attr("xsi:nil", "true"))
+        }
         (Shape::Color, ChartValue::Color(c)) => one(e_color_out(name, c, path)?),
         (Shape::Font, ChartValue::Font(f)) => one(e_font_out(name, f, path)?),
         (Shape::Line, ChartValue::Line { style, width, gap }) => {

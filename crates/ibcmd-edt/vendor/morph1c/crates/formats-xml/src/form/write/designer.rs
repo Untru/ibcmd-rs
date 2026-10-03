@@ -97,10 +97,6 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // CommandSet→GroupList→AutoCommandBar). EDT держит это же поле ВНУТРИ extInfo (см.
     // edt_root_ext_info). Форм-атрибут F_GROUP_LIST — эмитим напрямую (не в edt/designer-attr-петле,
     // где он не значится: witness-позиция специфична для дин-списка).
-    // Native 8.5 emits the current command-bar scalar before flattened ExtInfo.
-    if target == morph1c_core::version::FormatVersion::new(2, 21) {
-        push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
-    }
     push_des_attr(&mut root, body, fr::F_GROUP_LIST);
     // Форма объекта-документа: Designer эмитит ВСЕ ТРИ поля прямыми детьми корня СРАЗУ после
     // CommandSet (witness Анкета CommandSet→AutoTime→UsePostingMode→RepostOnWrite→AutoCommandBar);
@@ -136,9 +132,10 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
             root.push(t);
         }
     }
-    if target != morph1c_core::version::FormatVersion::new(2, 21) {
-        push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
-    }
+    // FormXmlWriter's scalar order places this after ShowTitle/ShowCloseButton,
+    // CollapseItemsByImportanceVariant and CreateButtonsGroupTitle, in both
+    // native profiles. ExtInfo follows; its own fields keep their current order.
+    push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
     // Форма отчёта: корневые поля (`form:ReportFormExtInfo` в EDT). Designer эмитит
     // ReportFormType/AutoShowState/[CustomSettingsFolder]/ReportResultViewMode/
     // ViewModeApplicationOnSetReportResult СРАЗУ после ShowCommandBar (corpus fact).

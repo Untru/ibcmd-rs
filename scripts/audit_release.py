@@ -186,7 +186,7 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
             f"{root}/ibcmd-rs",
             f"{root}/sbom.cdx.json",
         }
-        formatter_sources = ("Cargo.toml", "src/lib.rs", "LICENSE", "NOTICE.md")
+        formatter_sources = ("Cargo.toml", "src/lib.rs", "src/parse.rs", "LICENSE", "NOTICE.md")
         expected.update(f"{root}/third-party/ibcmd-number-format/{name}"
                         for name in formatter_sources)
         expected.update(f"{root}/third-party/morph1c/{name}"
