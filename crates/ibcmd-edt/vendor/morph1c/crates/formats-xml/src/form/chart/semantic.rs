@@ -66,9 +66,16 @@ fn default_value(t: Tbl, row: &Row, format: ChartSourceFormat) -> Option<ChartVa
     if t == Tbl::Interval && matches!(row.name, "leftDate" | "rightDate") {
         return Some(ChartValue::Absent);
     }
+    // These current references are nullable in the SDK. A present automatic font,
+    // color or default-valued border is distinct from NULL, even when rendering alike.
+    if matches!(t, Tbl::Scale | Tbl::LabelArea)
+        && matches!(row.shape, Shape::Font | Shape::Color | Shape::Line | Shape::Border)
+    {
+        return Some(ChartValue::Absent);
+    }
     if let Some(mut v) = super::sdk_defaults::scalar_default(t, row.name, format) {
         if let (Shape::Dec, ChartValue::Int(n)) = (row.shape, &mut v) {
-            *n = designer_decimal(n);
+            *n = canonical_float_text(t, row.name, n).ok()?;
         }
         if matches!(
             (row.shape, &v),
@@ -92,6 +99,17 @@ fn default_value(t: Tbl, row: &Row, format: ChartSourceFormat) -> Option<ChartVa
     }
     match row.shape {
         Shape::Picture => Some(ChartValue::Absent),
+        // XmlNullNode.toModel is a no-op: native omission retains the versioned
+        // ChartObjectsFactory singleton. Bare EDT model absence remains nullable.
+        Shape::SeriesItem if format == ChartSourceFormat::Designer => {
+            Some(ChartValue::Nested(vec![
+                ("id".into(), ChartValue::Int("1".into())),
+                ("line".into(), ChartValue::Line {
+                    style: "Solid".into(), width: "2".into(), gap: false,
+                }),
+            ]))
+        }
+        Shape::SeriesItem => Some(ChartValue::Absent),
         Shape::Loc => Some(ChartValue::Localized(Vec::new())),
         Shape::Color => Some(ChartValue::Color("auto".into())),
         Shape::Font => Some(ChartValue::Font(auto_font())),
@@ -107,7 +125,7 @@ fn default_value(t: Tbl, row: &Row, format: ChartSourceFormat) -> Option<ChartVa
             if matches!(
                 t2,
                 Tbl::Axis | Tbl::Scale | Tbl::Cpd | Tbl::ReferenceLines | Tbl::ReferenceBands
-            ) =>
+            ) || (t == Tbl::Scale && t2 == Tbl::LabelArea) =>
         {
             Some(ChartValue::Nested(Vec::new()))
         }
@@ -244,7 +262,7 @@ fn canonical_fields(
         }
         if matches!(row.shape, Shape::Dec) {
             if let ChartValue::Int(v) = &mut value {
-                *v = designer_decimal(v);
+                *v = canonical_float_text(t, row.name, v)?;
             }
         }
         out.push((row.name.to_owned(), value));
@@ -403,7 +421,7 @@ fn project_fields(
                 continue;
             }
             if matches!(&value,ChartValue::Color(c) if c=="auto")
-                && matches!(t, Tbl::Scale | Tbl::Cpd)
+                && t == Tbl::Cpd
             {
                 continue;
             }
@@ -411,9 +429,6 @@ fn project_fields(
                 && t == Tbl::Chart
                 && matches!(n, "gradientPaletteStartColor" | "gradientPaletteEndColor")
             {
-                continue;
-            }
-            if matches!(&value,ChartValue::Font(f) if f==&auto_font()) && t == Tbl::Scale {
                 continue;
             }
             if t == Tbl::GInterval && n == "textColor" {
@@ -547,6 +562,29 @@ fn project_fields(
                 path.pop();
             }
         }
+        if format == ChartSourceFormat::Designer
+            && original.is_none()
+            && matches!(row.shape, Shape::Nested(Tbl::Scale))
+        {
+            if native_field_default(t, row)?.as_ref() == Some(&value) {
+                continue;
+            }
+        }
+        if t == Tbl::Chart && format == ChartSourceFormat::Designer && original.is_none() {
+            if let Some(flag) = design_flag(n) {
+                if fields.iter().find(|(name, _)| name == flag).map(|(_, v)| v)
+                    == Some(&ChartValue::Bool(false))
+                {
+                    if native_field_default(t, row)?.as_ref() == Some(&value) {
+                        continue;
+                    }
+                    return Err(frame(
+                        "chart: current disabled design data requires bound semantic transport"
+                            .into(),
+                    ));
+                }
+            }
+        }
         if let Some(sub) = subtable(row.shape) {
             path.push(ChartLayoutSegment::Field(n.to_owned()));
             value = match value {
@@ -624,6 +662,16 @@ fn capture_primitives(
             ) {
                 path.pop();
             }
+        } else if format == ChartSourceFormat::Designer && row.shape == Shape::Dec {
+            // The scalar remains CURRENT typed data. Only the native spelling
+            // convention is retained; no previous number is stored here.
+            let mut fields = vec!["nativeDecimal".into()];
+            if let Some((_, fraction)) = child.text.split_once('.') {
+                if !fraction.is_empty() && fraction.bytes().all(|b| b == b'0') {
+                    fields.push(format!("fractionZeros:{}", fraction.len()));
+                }
+            }
+            out.push(ChartCompositeLayout { path: path.clone(), fields });
         } else if format == ChartSourceFormat::Designer
             && row.shape == Shape::Value
             && matches!(
@@ -768,6 +816,7 @@ fn native_forces_localized(t: Tbl, name: &str) -> bool {
         || matches!(
             (t, name),
             (Tbl::GDimPoint | Tbl::GDimSeries, "title") | (Tbl::TsLevel, "format")
+                | (Tbl::SeriesItem, "text")
         )
 }
 
@@ -776,7 +825,8 @@ fn validate_number(t: Tbl, row: &Row, value: &ChartValue) -> Result<(), FormErro
         let valid = match super::sdk_defaults::numeric_type(t, row.name) {
             Some("EInt") => number.parse::<i32>().is_ok(),
             Some("ELong") => number.parse::<i64>().is_ok(),
-            Some("EFloat" | "EDouble") => number.parse::<f64>().is_ok(),
+            Some("EFloat") => ibcmd_number_format::parse_binary32(number).is_some(),
+            Some("EDouble") => ibcmd_number_format::parse_binary64(number).is_some(),
             Some("EBigDecimal") => valid_big_decimal(number),
             _ => true,
         };
@@ -838,13 +888,25 @@ pub fn project_native_trends(cs: &ChartSettings) -> Result<ChartSettings, FormEr
     }
     let mut projected = Vec::new();
     // This is also the order used by collect_associated_trendlines after native read.
-    for name in ["realSeriesData", "realExSeriesData"] {
+    let series_names: &[&str] = if cs
+        .fields
+        .iter()
+        .find(|(n, _)| n == "isSeriesDesign")
+        .map(|(_, v)| v)
+        == Some(&ChartValue::Bool(false))
+    {
+        &[]
+    } else {
+        &["realSeriesData", "realExSeriesData"]
+    };
+    for &name in series_names {
         let Some((_, value)) = cs.fields.iter().find(|(n, _)| n == name) else {
             continue;
         };
         let groups: Vec<&Vec<(String, ChartValue)>> = match value {
             ChartValue::Items(items) if name == "realSeriesData" => items.iter().collect(),
             ChartValue::Nested(fields) if name == "realExSeriesData" => vec![fields],
+            ChartValue::Absent if name == "realExSeriesData" => Vec::new(),
             _ => return Err(frame("chart: invalid current series shape".into())),
         };
         for fields in groups {
@@ -970,6 +1032,7 @@ pub(super) fn restore_native_picture_layout(
         elements: &mut [OutElement],
         t: Tbl,
         layout: &ChartSourceLayout,
+        current: &[(String, ChartValue)],
         path: &mut Vec<ChartLayoutSegment>,
     ) -> Result<(), FormError> {
         let mut counts = std::collections::HashMap::new();
@@ -988,9 +1051,28 @@ pub(super) fn restore_native_picture_layout(
                     path.push(ChartLayoutSegment::Item(*index));
                     *index += 1;
                 }
-                walk(&mut element.children, sub, layout, path)?;
+                walk(&mut element.children, sub, layout, current, path)?;
                 if repeated {
                     path.pop();
+                }
+            } else if row.shape == Shape::Dec {
+                if let Some(spelling) = layout.composites.iter().find(|c| c.path == *path)
+                    .filter(|c| c.fields.iter().any(|s| s == "nativeDecimal"))
+                {
+                    if let Some(ChartValue::Int(number)) = current_value_at(current, path) {
+                        let mut text = canonical_float_text(t, row.name, number)?;
+                        if let Some(zeros) = spelling.fields.iter()
+                            .find_map(|s| s.strip_prefix("fractionZeros:")?.parse::<usize>().ok())
+                        {
+                            if !text.contains(['.', 'e', 'E'])
+                                && !matches!(text.as_str(), "Infinity" | "-Infinity" | "NaN")
+                            {
+                                text.push('.');
+                                text.extend(std::iter::repeat_n('0', zeros));
+                            }
+                        }
+                        element.text = Some(text);
+                    }
                 }
             } else if row.shape == Shape::Picture {
                 if let Some(original) = layout.composites.iter().find(|c| c.path == *path) {
@@ -1029,5 +1111,94 @@ pub(super) fn restore_native_picture_layout(
         }
         Ok(())
     }
-    walk(elements, top_tbl(&cs.kind)?, layout, &mut Vec::new())
+    walk(elements, top_tbl(&cs.kind)?, layout, &cs.fields, &mut Vec::new())
+}
+
+fn current_value_at<'a>(fields: &'a [(String, ChartValue)], path: &[ChartLayoutSegment]) -> Option<&'a ChartValue> {
+    let (ChartLayoutSegment::Field(name), rest) = path.split_first()? else { return None; };
+    let value = &fields.iter().find(|(n, _)| n == name)?.1;
+    if rest.is_empty() { return Some(value); }
+    match value {
+        ChartValue::Nested(child) => current_value_at(child, rest),
+        ChartValue::Items(items) => {
+            let (ChartLayoutSegment::Item(index), tail) = rest.split_first()? else { return None; };
+            current_value_at(items.get(*index)?, tail)
+        }
+        _ => None,
+    }
+}
+
+// Only the original model's EFloat/EDouble attributes have binary floating-point
+// semantics. BigDecimal, Value.Number and percentage projections stay separate.
+pub(super) fn native_float_text(t: Tbl, name: &str, value: &str) -> Result<String, FormError> {
+    match super::sdk_defaults::numeric_type(t, name) {
+        Some("EFloat") => ibcmd_number_format::parse_binary32(value)
+            .map(ibcmd_number_format::format_binary32)
+            .ok_or_else(|| frame(format!("chart: invalid current EFloat {name}"))),
+        Some("EDouble") => ibcmd_number_format::parse_binary64(value)
+            .map(ibcmd_number_format::format_binary64)
+            .ok_or_else(|| frame(format!("chart: invalid current EDouble {name}"))),
+        _ => Ok(designer_decimal(value)),
+    }
+}
+
+fn canonical_float_text(t: Tbl, name: &str, value: &str) -> Result<String, FormError> {
+    Ok(designer_decimal(&native_float_text(t, name, value)?))
+}
+
+fn native_field_default(t: Tbl, row: &Row) -> Result<Option<ChartValue>, FormError> {
+    match default_value(t, row, ChartSourceFormat::Designer) {
+        Some(ChartValue::Nested(fields)) => Ok(Some(ChartValue::Nested(canonical_fields(
+            fields,
+            subtable(row.shape)
+                .ok_or_else(|| frame("chart: missing native default subtable".into()))?,
+            ChartSourceFormat::Designer,
+            &mut Vec::new(),
+            &mut Vec::new(),
+        )?))),
+        other => Ok(other),
+    }
+}
+fn design_flag(name: &str) -> Option<&'static str> {
+    match name {
+        "realSeriesData" | "realExSeriesData" => Some("isSeriesDesign"),
+        "realPointData" => Some("isPointsDesign"),
+        _ => None,
+    }
+}
+pub(in crate::form) fn native_design_default(name: &str) -> Result<ChartValue, FormError> {
+    if design_flag(name).is_none() {
+        return Err(frame("chart: unknown design collection".into()));
+    }
+    native_field_default(Tbl::Chart, row_by_name(Tbl::Chart, name).unwrap())?
+        .ok_or_else(|| frame("chart: missing native design default".into()))
+}
+pub(in crate::form) fn suppressed_design_fields(
+    cs: &ChartSettings,
+) -> Result<Vec<(String, ChartValue)>, FormError> {
+    if cs.kind != "Chart" {
+        return Ok(Vec::new());
+    }
+    // Full closed typed validation before a resource may claim any CURRENT collection.
+    canonical_fields(
+        cs.fields.clone(),
+        Tbl::Chart,
+        ChartSourceFormat::Edt,
+        &mut Vec::new(),
+        &mut Vec::new(),
+    )?;
+    let mut out = Vec::new();
+    for name in ["realSeriesData", "realExSeriesData", "realPointData"] {
+        let disabled = cs.fields.iter()
+            .find(|(n, _)| n == design_flag(name).unwrap())
+            .map(|(_, v)| v) == Some(&ChartValue::Bool(false));
+        if let Some((_, value)) = cs.fields.iter().find(|(n, _)| n == name) {
+            // Native import also cannot clear this singleton to null when design is enabled.
+            let nullable_absence = name == "realExSeriesData" && value == &ChartValue::Absent;
+            if (disabled || nullable_absence) && value != &native_design_default(name)? {
+                out.push((name.into(), value.clone()));
+            }
+        }
+    }
+    Ok(out)
 }

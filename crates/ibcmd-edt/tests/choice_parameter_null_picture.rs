@@ -10,6 +10,18 @@ use morph1c_core::version::{FormatVersion, with_roundtrip_target, with_source_ve
 use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
 use sha2::{Digest, Sha256};
 
+fn exact_bytes(actual: &[u8], expected: &[u8]) {
+    assert!(
+        actual == expected,
+        "native byte mismatch: first={:?}, lengths={}/{}, sha256={:x}/{:x}",
+        actual.iter().zip(expected).position(|(a, b)| a != b),
+        actual.len(),
+        expected.len(),
+        Sha256::digest(actual),
+        Sha256::digest(expected)
+    );
+}
+
 fn read(dialect: FormDialect, bytes: &[u8], minor: u16) -> FormBody {
     let bytes = if bytes.starts_with(b"<form:Form") {
         [
@@ -38,7 +50,17 @@ fn native_null_picture_is_versioned_and_current_value_is_retained() {
         let body = fixture(minor);
         let native = write(FormDialect::Designer, &body, minor);
         let text = String::from_utf8(native.clone()).unwrap();
-        assert_eq!(text.matches("<Picture/>").count(), usize::from(minor == 21));
+        assert_eq!(text.matches("<Picture/>").count(), 0);
+        let authored = text.replace(
+            "\t\t\t\t\t</app:value>",
+            "\t\t\t\t\t\t<Picture/>\r\n\t\t\t\t\t</app:value>",
+        );
+        assert_ne!(authored, text);
+        let authored_body = read(FormDialect::Designer, authored.as_bytes(), minor);
+        exact_bytes(
+            &write(FormDialect::Designer, &authored_body, minor),
+            authored.as_bytes(),
+        );
         let current = read(FormDialect::Designer, &native, minor);
         assert_eq!(
             serde_json::to_vec(&current).unwrap(),
@@ -63,7 +85,7 @@ fn native_null_picture_is_versioned_and_current_value_is_retained() {
                 .unwrap()
                 .matches("<Picture/>")
                 .count(),
-            usize::from(minor == 20)
+            0
         );
     }
 }
@@ -90,7 +112,7 @@ fn fixed_array_members_keep_order_values_and_their_nullable_slot() {
             String::from_utf8_lossy(&native)
                 .matches("<Picture/>")
                 .count(),
-            if minor == 21 { 3 } else { 0 }
+            0
         );
         let current = read(FormDialect::Designer, &native, minor);
         assert_eq!(
@@ -102,10 +124,11 @@ fn fixed_array_members_keep_order_values_and_their_nullable_slot() {
             serde_json::to_vec(&read(FormDialect::Edt, &edt, minor)).unwrap(),
             serde_json::to_vec(&current).unwrap()
         );
-        let invalid =
-            String::from_utf8(native)
-                .unwrap()
-                .replacen("<Picture/>", "<Picture/><Picture/>", 1);
+        let invalid = String::from_utf8(native).unwrap().replacen(
+            "</app:value>",
+            "<Picture/><Picture/></app:value>",
+            1,
+        );
         if minor == 21 {
             assert!(
                 with_source_version(Some(FormatVersion::new(2, minor)), || read_form(
@@ -120,7 +143,9 @@ fn fixed_array_members_keep_order_values_and_their_nullable_slot() {
 
 #[test]
 fn nullable_picture_is_closed_and_required_value_is_still_required() {
-    let native = String::from_utf8(write(FormDialect::Designer, &fixture(21), 21)).unwrap();
+    let native = String::from_utf8(write(FormDialect::Designer, &fixture(21), 21))
+        .unwrap()
+        .replace("</app:value>", "<Picture/></app:value>");
     for altered in [
         native.replace("<Picture/>", "<Picture unknown=\"true\"/>"),
         native.replace("<Picture/>", "<Picture/><Picture/>"),
@@ -266,7 +291,7 @@ fn public_same_source_strip_current_edit_and_forged_hash_are_safe() {
         assert!(String::from_utf8_lossy(bytes).contains(">17<"));
         assert_eq!(
             String::from_utf8_lossy(bytes).matches("<Picture/>").count(),
-            usize::from(minor == 21)
+            0
         );
     }
 }

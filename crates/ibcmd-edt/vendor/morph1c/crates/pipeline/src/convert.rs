@@ -254,6 +254,12 @@ fn read_config_inner(
         .collect();
 
     crate::picture_read::resolve_form_picture_transparency(format, &mut cfg)?;
+    if format == Format::Designer {
+        formats_xml::form::bind_native_availability_sources(&mut cfg)
+            .map_err(|error| ConvertError::Read {
+                kind: "Configuration".into(), object: "form availability context".into(), reason: error.to_string(),
+            })?;
+    }
     Ok((cfg, skipped))
 }
 
@@ -372,6 +378,7 @@ fn write_object(
     out: &Path,
     obj: &MetadataObject,
     picture_defaults: &std::collections::BTreeMap<String, bool>,
+    form_context: &formats_xml::form::FormProjectionContext<'_>,
 ) -> Result<(), ConvertError> {
     let help_view = crate::help_read::descriptor_with_help(obj)?;
     let projection = if format == Format::Edt {
@@ -406,7 +413,7 @@ fn write_object(
     crate::source_extensions::emit(format, out, obj)?;
     crate::metadata_picture_semantics::emit(out, projection.as_ref().and_then(|(_,bytes)| bytes.as_deref()))?;
     let kind = obj.kind.as_str();
-    crate::form_write::write_form_bodies(format, out, obj)?;
+    crate::form_write::write_form_bodies_with_context(format, out, obj, form_context)?;
     if kind == "Configuration" {
         // The ROOT's modules are the config-level Ext APPLICATION modules (root-level
         // `Ext/*.bsl` / `src/Configuration/*.bsl`), NOT per-object `<Name>/Ext/` module
@@ -531,6 +538,11 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
             kind: "CommonPicture".into(), object: "configuration context".into(), reason,
         })?;
 
+    let form_context = formats_xml::form::FormProjectionContext::new(cfg)
+        .map_err(|error| ConvertError::Write {
+            kind: "Configuration".into(), object: "form projection context".into(), reason: error.to_string(),
+        })?;
+
     // PHASE 1 — plan every object's output path (nothing written yet, so a path error aborts
     // BEFORE any partial output). Nested (Subsystem) kinds reconstruct the HIERARCHICAL path
     // from the object's parent chain (`layout::nested_output_path`) — the flat own-name collides
@@ -609,7 +621,7 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
             // Clock reads only when profiling — see `fsio::accounting`.
             let t = timing.then(std::time::Instant::now);
             let r = morph1c_core::version::with_captured_roundtrip_target(ambient_target, || {
-                write_object(format, fk, out, obj, &picture_defaults)
+                write_object(format, fk, out, obj, &picture_defaults, &form_context)
             });
             if let Some(t) = t {
                 use std::sync::atomic::Ordering::Relaxed;

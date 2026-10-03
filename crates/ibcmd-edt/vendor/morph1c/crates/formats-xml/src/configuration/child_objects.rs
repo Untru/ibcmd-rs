@@ -239,14 +239,15 @@ fn is_edt_child_list_tag(tag: &str) -> bool {
     child_kind_by_edt_plural(tag).is_some()
 }
 
-/// Имя inline-языка EDT (`<languages>/<name>` текст), если есть. Нужно childObjects-
-/// кодеку EDT для синтеза записи Language (первой в каноническом списке).
-fn edt_language_name(root: &Element) -> Option<String> {
+/// Inline languages contribute every declared name, in source order. Their
+/// bodies and required fields are validated by the separate languages codec.
+fn edt_language_names(root: &Element) -> Vec<String> {
     root.children
         .iter()
-        .find(|c| c.local == "languages" && c.prefix.is_empty())
-        .and_then(|el| el.child("name"))
+        .filter(|c| c.local == "languages" && c.prefix.is_empty())
+        .filter_map(|el| el.child("name"))
         .map(|n| n.text.clone())
+        .collect()
 }
 
 /// Декодировать ChildObjects (по диалекту). EDT — синтезирует Language из inline
@@ -254,8 +255,8 @@ fn edt_language_name(root: &Element) -> Option<String> {
 pub fn decode_child_objects(dialect: ConfigDialect, root: &Element) -> Decoded {
     match dialect {
         ConfigDialect::Edt => {
-            let lang = edt_language_name(root);
-            decode_child_objects_edt(root, lang.as_deref())
+            let languages = edt_language_names(root);
+            decode_child_objects_edt(root, &languages)
         }
         ConfigDialect::Designer => decode_child_objects_designer(root),
     }
@@ -278,7 +279,7 @@ pub fn claim_child_objects(dialect: ConfigDialect, root: &Element) {
     }
 }
 
-fn decode_child_objects_edt(root: &Element, lang_name: Option<&str>) -> Decoded {
+fn decode_child_objects_edt(root: &Element, language_names: &[String]) -> Decoded {
     // AUTHORED-порядок документа, НЕ регруппировка по слотам таблицы: платформа эмитит
     // ref-листы EDT и Designer-<ChildObjects> ОДНИМ обходом модели, поэтому физический
     // порядок обоих диалектов СОВПАДАЕТ (сверено: все 15 coverage-стадий + SSL, 2660
@@ -288,8 +289,8 @@ fn decode_child_objects_edt(root: &Element, lang_name: Option<&str>) -> Decoded 
     // ломала edt→designer byte-exactness корня. Language (inline `<languages>`, не
     // ref-лист) синтезируется ПЕРВОЙ — её позиция в Designer-ChildObjects (witnessed).
     let mut rows: Vec<Vec<String>> = Vec::new();
-    if let Some(ln) = lang_name {
-        rows.push(vec!["Language".to_string(), ln.to_string()]);
+    for name in language_names {
+        rows.push(vec!["Language".to_string(), name.clone()]);
     }
     for ch in &root.children {
         if !ch.prefix.is_empty() {
@@ -457,6 +458,25 @@ pub fn emit_child_objects_versioned(
             Ok(out)
         }
         ConfigDialect::Designer => {
+            // Native configuration exports place Bot after DefinedType (and
+            // the 2.21 PaletteColor block), while EDT appends its bot refs.
+            // Move this kind only; keep all other authored interleaving and
+            // every current name within a kind unchanged.
+            let (bots, mut rows): (Vec<_>, Vec<_>) =
+                rows.into_iter().partition(|r| r[0] == "Bot");
+            if !bots.is_empty() {
+                let defined_rank = CHILD_KIND_TABLE.iter()
+                    .position(|k| k.kind == "DefinedType")
+                    .expect("closed child kind table includes DefinedType");
+                let position = rows.iter().rposition(|r| r[0] == "DefinedType")
+                    .map(|i| i + 1)
+                    .or_else(|| rows.iter().position(|r| {
+                        CHILD_KIND_TABLE.iter().position(|k| k.kind == r[0])
+                            .is_some_and(|rank| rank > defined_rank)
+                    }))
+                    .unwrap_or(rows.len());
+                rows.splice(position..position, bots);
+            }
             let rows = if target == FormatVersion::new(2, 21) {
                 let (palette, mut rest): (Vec<_>, Vec<_>) =
                     rows.into_iter().partition(|r| r[0] == "PaletteColor");

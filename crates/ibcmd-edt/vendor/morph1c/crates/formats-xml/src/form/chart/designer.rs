@@ -524,7 +524,7 @@ fn d_children_out(
         if t == Tbl::Chart && name == "trendLinesArray" {
             continue;
         }
-        outs.extend(d_value_out(row, v, &format!("{path}/{name}"))?);
+        outs.extend(d_value_out(t, row, v, &format!("{path}/{name}"))?);
     }
     if t == Tbl::Chart {
         emit_associated_trendlines(&mut outs, fields, path)?;
@@ -598,7 +598,7 @@ fn emit_associated_trendlines(
 }
 
 /// Designer-эмиссия ОДНОГО поля (повторяемые шейпы дают несколько элементов).
-fn d_value_out(row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutElement>, FormError> {
+fn d_value_out(t: Tbl, row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutElement>, FormError> {
     let name = row.d_name();
     let one = |el: OutElement| Ok(vec![el]);
     match (row.shape, v) {
@@ -691,18 +691,9 @@ fn d_value_out(row: &Row, v: &ChartValue, path: &str) -> Result<Vec<OutElement>,
             if *b { "true" } else { "false" },
         )),
         (Shape::Int, ChartValue::Int(s)) => one(OutElement::leaf("d4p1", name, s.clone())),
-        (Shape::Dec, ChartValue::Int(s)) => one(OutElement::leaf(
-            "d4p1",
-            name,
-            if matches!(
-                name,
-                "funnelNeckHeightPercent" | "funnelNeckWidthPercent" | "funnelGapSumPercent"
-            ) {
-                edt_decimal(&designer_decimal(s))
-            } else {
-                designer_decimal(s)
-            },
-        )),
+        (Shape::Dec, ChartValue::Int(s)) => {
+            one(OutElement::leaf("d4p1", name, super::semantic::native_float_text(t, row.name, s)?))
+        }
         (Shape::Str | Shape::DateTime, ChartValue::Str(s)) => one(if s.is_empty() {
             OutElement::self_closing("d4p1", name)
         } else {

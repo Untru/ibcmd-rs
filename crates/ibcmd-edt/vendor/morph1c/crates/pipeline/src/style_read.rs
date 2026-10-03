@@ -55,7 +55,7 @@ const BOM: char = '\u{FEFF}';
 /// cf (контейнер) — no-op; Style БЕЗ сайдкара — тоже no-op (coverage-стаб — дескриптор-только).
 ///
 /// §1.0: сайдкар, чья пере-сериализация не воспроизводит исходные байты → ГРОМКИЙ отказ
-/// (см. модульный docstring); ПУСТОЙ состав — незасвидетельствованный шейп → отказ.
+/// (см. модульный docstring). Empty current item collections are valid SDK styles.
 pub fn attach_style(
     format: Format,
     kind: &str,
@@ -85,30 +85,40 @@ pub fn attach_style(
     let ctx = format!("style {}", path.display());
     // §1.0-самопроверка: канон обязан пере-сериализоваться в ИСХОДНЫЕ байты (Designer —
     // ВЕРСИЕЙ ИСТОЧНИКА: версия — свойство файла, детектится из его корня, §1.6).
-    let (records, back) = match format {
+    let (records, back, native_palette) = match format {
         Format::Edt => {
             let r = parse_edt(&doc.root, &ctx).map_err(read_err)?;
             let back = serialize_edt(&r).map_err(read_err)?;
-            (r, back)
+            (r, back, None)
         }
         Format::Designer => {
             let (r, version) = parse_designer(&doc.root, &ctx).map_err(read_err)?;
-            let back = serialize_designer(&r, version).map_err(read_err)?;
-            (r, back)
+            let palette = match doc.root.attr("xmlns:pal") {
+                Some(attr) if version >= FormatVersion::new(2, 21)
+                    && attr.value == "http://v8.1c.ru/8.1/data/ui/colors/palette" => true,
+                Some(_) => return Err(read_err("style has an invalid palette namespace binding for its source version".into())),
+                None => false,
+            };
+            // Validate both registered native namespace spellings against the
+            // source, without changing values or accepting unknown attributes.
+            let back = serialize_designer_with_palette(&r, version, palette).map_err(read_err)?;
+            (r, back, Some((version, palette)))
         }
         Format::Cf => unreachable!("cf returned above"),
+    };
+    let empty_root = if records.is_empty() {
+        Some((format == Format::Designer, bytes.ends_with(b"/>") || bytes.ends_with(b"/>\r\n")))
+    } else {
+        None
+    };
+    let back = match empty_root {
+        Some((_, self_closing)) => empty_root_spelling(back, format, self_closing).map_err(read_err)?,
+        None => back,
     };
     if back != bytes {
         return Err(read_err(format!(
             "style {} does not round-trip byte-exactly through the IR (the sidecar carries a \
              shape this codec does not model — refusing to silently drop it, §1.0)",
-            path.display()
-        )));
-    }
-    if records.is_empty() {
-        return Err(read_err(format!(
-            "style {} carries ZERO records — an empty style sidecar is not a witnessed shape \
-             (§1.0; the witnessed carrier holds 231)",
             path.display()
         )));
     }
@@ -121,6 +131,9 @@ pub fn attach_style(
         ));
     }
     obj.style_records = records;
+    obj.style_native_palette = native_palette;
+    obj.style_sidecar_present = true;
+    obj.style_empty_root = empty_root;
     Ok(())
 }
 
@@ -134,7 +147,7 @@ pub fn write_style(
     descriptor_out: &Path,
     obj: &MetadataObject,
 ) -> Result<(), ConvertError> {
-    if obj.style_records.is_empty() {
+    if obj.style_records.is_empty() && !obj.style_sidecar_present {
         return Ok(());
     }
     if format == Format::Cf {
@@ -158,12 +171,41 @@ pub fn write_style(
     let bytes = match format {
         Format::Edt => serialize_edt(&obj.style_records).map_err(write_err)?,
         Format::Designer => {
-            serialize_designer(&obj.style_records, crate::sidecar_version::write_target())
-                .map_err(write_err)?
+            let target = crate::sidecar_version::write_target();
+            match obj.style_native_palette.filter(|(source, _)| *source == target) {
+                Some((_, present)) => serialize_designer_with_palette(&obj.style_records, target, present),
+                None => serialize_designer(&obj.style_records, target),
+            }.map_err(write_err)?
         }
         Format::Cf => unreachable!("cf returned above"),
     };
+    let bytes = if obj.style_records.is_empty() {
+        let self_closing = obj.style_empty_root
+            .filter(|(native, _)| *native == (format == Format::Designer))
+            .is_some_and(|(_, closing)| closing);
+        empty_root_spelling(bytes, format, self_closing).map_err(write_err)?
+    } else {
+        bytes
+    };
     crate::form_write::write_file(&path, &bytes)
+}
+
+/// Rebuild only the empty root's closing token from newly emitted current data.
+fn empty_root_spelling(mut bytes: Vec<u8>, format: Format, self_closing: bool) -> Result<Vec<u8>, String> {
+    if !self_closing {
+        return Ok(bytes);
+    }
+    let (suffix, replacement): (&[u8], &[u8]) = match format {
+        Format::Designer => (b">\r\n</Style>", b"/>"),
+        Format::Edt => (b">\r\n</style:Style>\r\n", b"/>\r\n"),
+        Format::Cf => return Err("container format has no XML style root".into()),
+    };
+    if !bytes.ends_with(suffix) {
+        return Err("empty style writer produced an unexpected root closure".into());
+    }
+    bytes.truncate(bytes.len() - suffix.len());
+    bytes.extend_from_slice(replacement);
+    Ok(bytes)
 }
 
 /// Путь сайдкара состава стиля относительно дескриптора: EDT `<obj-dir>/Style.style`,
@@ -599,11 +641,15 @@ fn parse_edt_border(el: &Element, ctx: &str) -> Result<String, String> {
 /// Designer `Ext/Style.xml`: С BOM, CRLF, ТАБ-отступ, БЕЗ хвостового перевода строки. Корень
 /// штампуется `version` заданной версии формата (ns-блок — побайтно witnessed ERP).
 fn serialize_designer(records: &[StyleRecord], version: FormatVersion) -> Result<Vec<u8>, String> {
+    serialize_designer_with_palette(records, version, version >= FormatVersion::new(2, 21))
+}
+
+fn serialize_designer_with_palette(records: &[StyleRecord], version: FormatVersion, palette: bool) -> Result<Vec<u8>, String> {
     let mut out = String::new();
     out.push(BOM);
     out.push_str("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n");
     out.push_str(&format!(
-        "<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" \
+        "<Style xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" {palette_namespace}\
          xmlns:style=\"http://v8.1c.ru/8.1/data/ui/style\" \
          xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\" \
          xmlns:v8ui=\"http://v8.1c.ru/8.1/data/ui\" \
@@ -612,6 +658,7 @@ fn serialize_designer(records: &[StyleRecord], version: FormatVersion) -> Result
          xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" \
          xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" \
          xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"{version}\">\r\n",
+        palette_namespace = if palette { "xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\" " } else { "" },
     ));
     for r in records {
         out.push_str(&format!("\t<Item name=\"{}\">\r\n", r.name));

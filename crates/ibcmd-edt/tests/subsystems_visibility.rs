@@ -25,6 +25,7 @@ fn set_ci(config: &mut morph1c_core::ir::Configuration) {
         .find(|o| o.kind.as_str() == "Configuration")
         .unwrap()
         .root_command_interface = Some(CommandInterface {
+        native_groups_order: None,
         subsystems_visibility: vec![SubsystemVisibility {
             subsystem: "Subsystem.Управление".into(),
             common_visible: true,

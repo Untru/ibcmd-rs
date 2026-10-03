@@ -152,10 +152,10 @@ pub(crate) fn designer_dcs_calculated_field(
 ) -> Result<OutElement, FormError> {
     let mut el = OutElement::branch("", "CalculatedField");
     el.push(OutElement::leaf("dcssch", "dataPath", cf.data_path.clone()));
-    el.push(OutElement::leaf(
+    el.push(designer_dcs_plain_text(
         "dcssch",
         "expression",
-        cf.expression.clone(),
+        &cf.expression,
     ));
     if let Some(t) = designer_dcs_title(&cf.title) {
         el.push(t);
@@ -310,7 +310,7 @@ pub(crate) fn designer_dcs_parameter(p: &DcsParameter) -> Result<OutElement, For
     if p.value_list_allowed {
         el.push(OutElement::leaf("dcssch", "valueListAllowed", "true"));
     }
-    if let Some(expression) = &p.expression { el.push(OutElement::leaf("dcssch", "expression", expression.clone())); }
+    if let Some(expression) = &p.expression { el.push(designer_dcs_plain_text("dcssch", "expression", expression)); }
     if let Some(b) = p.available_as_field {
         el.push(OutElement::leaf(
             "dcssch",
@@ -490,6 +490,7 @@ pub(crate) fn designer_dcs_settings_parameter_value(it: &DcsSettingsParameterVal
         DcsCorValue::LocalString(pairs) => {
             let mut v =
                 OutElement::branch("dcscor", "value").attr("xsi:type", "v8:LocalStringType");
+            v.self_closing = pairs.is_empty();
             for (lang, text) in pairs {
                 let mut item = OutElement::branch("v8", "item");
                 item.push(OutElement::leaf("v8", "lang", lang.as_str().to_string()));
@@ -584,7 +585,7 @@ pub(crate) fn designer_dcs_item(it: &DcsItem) -> OutElement {
             } else {
                 left_type.as_str()
             };
-            el.push(OutElement::leaf("dcsset", "left", left_field.clone()).attr("xsi:type", lt));
+            el.push(designer_dcs_text_value_ns("dcsset", "left", left_field, lt));
             el.push(OutElement::leaf(
                 "dcsset",
                 "comparisonType",
@@ -872,6 +873,11 @@ pub(crate) fn designer_dcs_text_value_ns(prefix: &str, local: &str, v: &str, xt:
     } else {
         OutElement::leaf(prefix, local, v.to_string()).attr("xsi:type", xt)
     }
+}
+
+fn designer_dcs_plain_text(prefix: &str, local: &str, value: &str) -> OutElement {
+    if value.is_empty() { OutElement::self_closing(prefix, local) }
+    else { OutElement::leaf(prefix, local, value) }
 }
 
 /// Bind only typed DCS right-value aliases produced by the shared writer.

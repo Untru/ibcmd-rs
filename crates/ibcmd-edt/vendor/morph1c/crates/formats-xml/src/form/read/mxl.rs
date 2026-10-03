@@ -52,7 +52,7 @@ pub(crate) fn read_designer_spreadsheet_settings(
     if is_minimal_spreadsheet_body(s, "mxl") {
         read_spreadsheet_settings_body(s, "mxl")
     } else {
-        Ok(rich_spreadsheet_settings(capture_full_body(s), false))
+        Ok(rich_spreadsheet_settings(capture_full_body(s)?, false))
     }
 }
 
@@ -104,34 +104,116 @@ pub(crate) fn is_minimal_spreadsheet_body(host: &Element, prefix: &str) -> bool 
 
 /// Захватить ВСЕ верхнеуровневые дети `host` (тело табличного документа) в generic-tree, склеймив
 /// каждое поддерево целиком (§1.0-тотальность — ничего не выброшено, всё регенерируется byte-exact).
-pub(crate) fn capture_full_body(host: &Element) -> Vec<MxlNode> {
-    host.children
-        .iter()
-        .map(|c| {
-            c.claim_subtree();
-            build_mxl_node(c)
-        })
-        .collect()
+pub(crate) fn capture_full_body(host: &Element) -> Result<Vec<MxlNode>, FormError> {
+    // Native Settings uses actual enclosing declarations captured by the form reader.
+    // Standalone sidecars begin with only the XML builtin and the empty default namespace.
+    let mut scope = host.resolved_namespace_scope.borrow().as_ref().map(|scope| (**scope).clone())
+        .unwrap_or_else(|| std::collections::BTreeMap::from([
+            (String::new(), String::new()),
+            ("xml".into(), "http://www.w3.org/XML/1998/namespace".into()),
+        ]));
+    bind_mxl_namespaces(host, &mut scope)?;
+    let source_default = scope.get("").is_some_and(|u| u == super::super::MXL_NS_URI);
+    host.children.iter().map(|el| {
+        let node = build_mxl_node_scoped(el, &scope, source_default)?;
+        el.claim_subtree();
+        Ok(node)
+    }).collect()
 }
 
-/// Рекурсивно скопировать [`Element`] в [`MxlNode`] (префикс/local/атрибуты-в-порядке/текст/дети).
-/// Самозакрытие ⟺ нет детей И пустой текст (конвенция MXL/1С — пустой элемент всегда `<tag/>`).
-pub(crate) fn build_mxl_node(el: &Element) -> MxlNode {
-    let attrs = el
-        .attrs
-        .iter()
-        .map(|a| (a.name.clone(), a.value.clone()))
-        .collect::<Vec<_>>();
-    let children = el.children.iter().map(build_mxl_node).collect::<Vec<_>>();
-    let self_closing = children.is_empty() && el.text.is_empty();
-    MxlNode {
-        prefix: el.prefix.clone(),
-        local: el.local.clone(),
-        attrs,
-        children,
-        text: el.text.clone(),
-        self_closing,
+pub(super) fn bind_mxl_namespaces(el: &Element, scope: &mut std::collections::BTreeMap<String, String>) -> Result<(), FormError> {
+    let mut seen = std::collections::BTreeSet::new();
+    for a in &el.attrs {
+        let prefix = if a.name == "xmlns" { "" } else if let Some(p) = a.name.strip_prefix("xmlns:") { p } else { continue };
+        if a.name == "xmlns:" {
+            return Err(FormError::Frame("MXL malformed namespace declaration".into()));
+        }
+        if !seen.insert(prefix) {
+            return Err(FormError::Frame("MXL duplicate namespace declaration".into()));
+        }
+        if prefix == "xmlns" || (prefix == "xml" && a.value != "http://www.w3.org/XML/1998/namespace") {
+            return Err(FormError::Frame("MXL invalid reserved namespace binding".into()));
+        }
+        if (!prefix.is_empty() && a.value.is_empty())
+            || (prefix != "xml" && a.value == "http://www.w3.org/XML/1998/namespace")
+            || a.value == "http://www.w3.org/2000/xmlns/"
+        {
+            return Err(FormError::Frame("MXL invalid reserved namespace binding".into()));
+        }
+        scope.insert(prefix.into(), a.value.clone());
+        if !prefix.is_empty() { mxl_expanded(&format!("{prefix}:binding"), scope, false)?; }
     }
+    Ok(())
+}
+fn mxl_expanded(name: &str, scope: &std::collections::BTreeMap<String, String>, default: bool) -> Result<String, FormError> {
+    let (prefix, local) = name.split_once(':').unwrap_or(("", name));
+    let start = |c: char| c == '_' || c.is_ascii_alphabetic() || matches!(c as u32,
+        0xc0..=0xd6 | 0xd8..=0xf6 | 0xf8..=0x2ff | 0x370..=0x37d | 0x37f..=0x1fff
+        | 0x200c..=0x200d | 0x2070..=0x218f | 0x2c00..=0x2fef | 0x3001..=0xd7ff
+        | 0xf900..=0xfdcf | 0xfdf0..=0xfffd | 0x10000..=0xeffff);
+    let valid = |part: &str| {
+        let mut chars = part.chars();
+        chars.next().is_some_and(start) && chars.all(|c| start(c) || c.is_ascii_digit()
+            || matches!(c, '-' | '.' | '\u{b7}') || matches!(c as u32, 0x300..=0x36f | 0x203f..=0x2040))
+    };
+    if !valid(local) || (!prefix.is_empty() && !valid(prefix))
+        || (name.contains(':') && prefix.is_empty())
+    {
+        return Err(FormError::Frame("MXL malformed QName".into()));
+    }
+    let uri = if prefix.is_empty() && !default { "" } else {
+        scope.get(prefix).map(String::as_str).ok_or_else(|| FormError::Frame("MXL unbound namespace prefix".into()))?
+    };
+    Ok(if uri.is_empty() { local.into() } else { format!("{{{uri}}}{local}") })
+}
+fn build_mxl_node_scoped(el: &Element, inherited: &std::collections::BTreeMap<String, String>, source_default: bool) -> Result<MxlNode, FormError> {
+    use morph1c_core::ir::form::MxlNodeLayout;
+    let mut scope = inherited.clone();
+    bind_mxl_namespaces(el, &mut scope)?;
+    let element_name = if el.prefix.is_empty() { el.local.clone() } else { format!("{}:{}", el.prefix, el.local) };
+    mxl_expanded(&element_name, &scope, true)?;
+    let namespace = scope.get(&el.prefix).cloned().ok_or_else(|| FormError::Frame("MXL unbound element namespace".into()))?;
+    let mut attrs = Vec::new();
+    let mut lexical_attrs = Vec::new();
+    let mut namespaces = Vec::new();
+    let mut qnames = Vec::new();
+    for a in &el.attrs {
+        if a.name == "xmlns" || a.name.starts_with("xmlns:") {
+            namespaces.push((a.name.clone(), a.value.clone()));
+            lexical_attrs.push((a.name.clone(), a.name.clone()));
+            continue;
+        }
+        let name = mxl_expanded(&a.name, &scope, false)?;
+        if attrs.iter().any(|(n, _)| n == &name) {
+            return Err(FormError::Frame("MXL duplicate expanded attribute".into()));
+        }
+        let value = if name == "{http://www.w3.org/2001/XMLSchema-instance}type" {
+            let expanded = mxl_expanded(&a.value, &scope, true)?;
+            qnames.push((name.clone(), a.value.split_once(':').map_or("", |(p, _)| p).into()));
+            expanded
+        } else { a.value.clone() };
+        lexical_attrs.push((name.clone(), a.name.clone()));
+        attrs.push((name, value));
+    }
+    attrs.sort_by(|a, b| a.0.cmp(&b.0));
+    let children = el.children.iter().map(|c| build_mxl_node_scoped(c, &scope, source_default)).collect::<Result<Vec<_>, _>>()?;
+    let qname_text = (namespace == "http://v8.1c.ru/8.1/data/core" && el.local == "Type")
+        || attrs.iter().any(|(name,value)| name == "{http://www.w3.org/2001/XMLSchema-instance}type"
+            && value == "{http://www.w3.org/2001/XMLSchema}QName");
+    let text_qname = if qname_text && !el.text.is_empty() {
+        let expanded = mxl_expanded(&el.text, &scope, true)?;
+        let (uri, local) = if let Some(rest) = expanded.strip_prefix('{') {
+            rest.split_once('}').expect("expanded QName")
+        } else { ("", expanded.as_str()) };
+        qnames.push(("#text".into(), el.text.split_once(':').map_or("", |(p,_)| p).into()));
+        Some((uri.into(), local.into()))
+    } else { None };
+    let self_closing = children.is_empty() && el.text.is_empty();
+    Ok(MxlNode {
+        prefix: el.prefix.clone(), namespace, local: el.local.clone(), attrs, children,
+        text: if text_qname.is_some() { String::new() } else { el.text.clone() }, text_qname, self_closing,
+        source_layout: Some(MxlNodeLayout { default_spreadsheet_namespace: source_default, namespaces, attributes: lexical_attrs, qname_prefixes: qnames }),
+    })
 }
 
 /// Собрать БОГАТЫЙ [`MxlSpreadsheetSettings`] (generic-tree тело + presence-бит конверта). Минимальные

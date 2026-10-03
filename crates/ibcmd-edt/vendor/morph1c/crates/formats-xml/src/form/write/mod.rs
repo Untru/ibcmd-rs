@@ -43,6 +43,7 @@ mod edt_data;
 mod edt_dcs;
 mod font;
 mod mxl;
+mod native_order;
 mod tooltip;
 
 pub(crate) use designer::*;
@@ -62,17 +63,28 @@ pub fn write_form(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, Form
     // same target even when callers do not supply an explicit version scope.
     let target = morph1c_core::version::current_roundtrip_target()
         .unwrap_or(morph1c_core::version::SSL);
-    morph1c_core::version::with_roundtrip_target(target, || write_form_current(dialect, body))
+    morph1c_core::version::with_roundtrip_target(target, || write_form_current(dialect, body, None))
 }
 
-fn write_form_current(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, FormError> {
+/// Whole-configuration projection. Availability is resolved against CURRENT
+/// metadata; standalone `write_form` retains its body-only fallback.
+pub fn write_form_with_context(
+    dialect: FormDialect,
+    body: &FormBody,
+    context: &super::FormProjectionContext<'_>,
+) -> Result<Vec<u8>, FormError> {
+    let target = morph1c_core::version::current_roundtrip_target()
+        .unwrap_or(morph1c_core::version::SSL);
+    morph1c_core::version::with_roundtrip_target(target, || write_form_current(dialect, body, Some(context)))
+}
+fn write_form_current(dialect: FormDialect, body: &FormBody, context: Option<&super::FormProjectionContext<'_>>) -> Result<Vec<u8>, FormError> {
     match dialect {
         FormDialect::Edt => super::picture_defaults::with_common_picture_defaults(
             &body.common_picture_transparency,
             || write_edt(body),
         ),
         FormDialect::Designer => {
-            super::availability::with_availability(body, || write_designer(body))
+            super::availability::with_availability(body, context, || write_designer(body))
         }
     }
 }

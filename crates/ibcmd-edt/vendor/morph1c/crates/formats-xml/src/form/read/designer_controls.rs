@@ -166,7 +166,15 @@ pub(crate) fn read_designer_field(
     // её в `<extInfo><autoTable>`). Читается обычным Designer-Table-движком.
     if tables::field_kind_has_auto_table(fk.kind) {
         if let Some(at) = el.child("Table").filter(|c| c.prefix.is_empty()) {
-            item.auto_table = Some(Box::new(read_designer_table(at)?));
+            let mut table = read_designer_table(at)?;
+            // The official TableHolder reader does not store the native child
+            // DataPath. Its writer derives that scalar from the current field.
+            // Canonicalize only the equal inherited value; a distinct declared
+            // value remains authoritative instead of being silently discarded.
+            if let Some(parent_path) = item.properties.iter().find(|(id, _)| *id == morph1c_core::spec::forms::controls::form_field::F_DATA_PATH).map(|(_, value)| value) {
+                table.properties.retain(|(id, value)| *id != tb::F_DATA_PATH || value != parent_path);
+            }
+            item.auto_table = Some(Box::new(table));
         }
     }
     if let Some(events) = el.child("Events").filter(|c| c.prefix.is_empty()) {
@@ -558,7 +566,10 @@ pub(crate) fn read_designer_addition(
         ("Enabled", tb::F_ADDITION_ENABLED),
     ] {
         if let Some(v) = el.child(tag).filter(|c| c.prefix.is_empty()) {
-            item.properties.push((fid, read_bool_text(v, tag)?));
+            let value = read_bool_text(v, tag)?;
+            if fid != tb::F_ADDITION_ENABLED || value != PropertyValue::Bool(true) {
+                item.properties.push((fid, value));
+            }
         }
     }
 

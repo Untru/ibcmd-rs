@@ -92,7 +92,7 @@ pub(crate) fn edt_table_body_into(el: &mut OutElement, item: &FormItem) -> Resul
         el.push(edt_handlers_ctrl(ev));
     }
     for add in &item.additions {
-        el.push(edt_addition(add)?);
+        el.push(edt_addition(add, el.local != "autoTable")?);
     }
     if let Some(t) = &item.ext_tooltip {
         el.push(edt_extended_tooltip(t)?);
@@ -141,7 +141,10 @@ pub(crate) fn edt_dynamic_list_ext(dx: &DynamicListExt) -> Result<OutElement, Fo
 
 /// EDT ДОБАВЛЕНИЕ Таблицы. Порядок: name, id, extendedTooltip, contextMenu, [type], source,
 /// extInfo(autoMaxWidth).
-pub(crate) fn edt_addition(item: &FormItem) -> Result<OutElement, FormError> {
+pub(crate) fn edt_addition(item: &FormItem, enabled_default: bool) -> Result<OutElement, FormError> {
+    if item.get(tb::F_ADDITION_ENABLED).is_some_and(|v| !matches!(v, PropertyValue::Bool(_))) {
+        return Err(FormError::Frame("Addition.Enabled must be a current boolean".into()));
+    }
     let ak = tables::addition_kind(item.kind.as_str()).ok_or_else(|| {
         FormError::Frame(format!("EDT: unknown addition {:?}", item.kind.as_str()))
     })?;
@@ -164,7 +167,12 @@ pub(crate) fn edt_addition(item: &FormItem) -> Result<OutElement, FormError> {
         (tb::F_ADDITION_VISIBLE, "visible"),
         (tb::F_ADDITION_ENABLED, "enabled"),
     ] {
-        if let Some(PropertyValue::Bool(b)) = item.get(fid) {
+        if fid == tb::F_ADDITION_ENABLED {
+            let current = !matches!(item.get(fid), Some(PropertyValue::Bool(false)));
+            if current != enabled_default {
+                el.push(OutElement::leaf("", tag, if current { "true" } else { "false" }));
+            }
+        } else if let Some(PropertyValue::Bool(b)) = item.get(fid) {
             el.push(OutElement::leaf("", tag, if *b { "true" } else { "false" }));
         }
     }
@@ -255,6 +263,9 @@ pub(crate) fn edt_addition(item: &FormItem) -> Result<OutElement, FormError> {
 /// [visible], enabled, userVisible, name, id, extendedTooltip, contextMenu, [type], source,
 /// [groupHorizontalAlign], extInfo([width][autoMaxWidth][horizontalStretch]).
 pub(crate) fn edt_addition_control(item: &FormItem) -> Result<OutElement, FormError> {
+    if item.get(tb::F_ADDITION_ENABLED).is_some_and(|v| !matches!(v, PropertyValue::Bool(_))) {
+        return Err(FormError::Frame("Addition.Enabled must be a current boolean".into()));
+    }
     let ak = tables::addition_kind(item.kind.as_str()).ok_or_else(|| {
         FormError::Frame(format!(
             "EDT: unknown addition control {:?}",
@@ -280,7 +291,9 @@ pub(crate) fn edt_addition_control(item: &FormItem) -> Result<OutElement, FormEr
     ) {
         el.push(OutElement::leaf("", "visible", "true"));
     }
-    el.push(OutElement::leaf("", "enabled", "true"));
+    if !matches!(item.get(tb::F_ADDITION_ENABLED), Some(PropertyValue::Bool(false))) {
+        el.push(OutElement::leaf("", "enabled", "true"));
+    }
     let mut uv = OutElement::branch("", "userVisible");
     uv.push(OutElement::leaf("", "common", "true"));
     el.push(uv);
@@ -595,7 +608,7 @@ pub(crate) fn edt_ext_info_ref(
     // * GanttChartField — `<autoTable>` (item.auto_table).
     // Ни на одном контроле не со-встречаются ⇒ порядок между ними нейтрален.
     for add in additions {
-        ext.push(edt_addition(add)?);
+        ext.push(edt_addition(add, true)?);
     }
     if let Some(at) = auto_table {
         ext.push(edt_auto_table(at)?);

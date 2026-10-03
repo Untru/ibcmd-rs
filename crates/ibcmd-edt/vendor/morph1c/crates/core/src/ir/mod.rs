@@ -583,13 +583,22 @@ pub struct SubsystemVisibility {
     pub role_values: Vec<RoleVisibility>,
 }
 
-/// Командный интерфейс подсистемы (`Subsystem`) — канонический IR текстового спутника
-/// `CommandInterface.cmi` (EDT) / `Ext/CommandInterface.xml` (Designer). Несёт до четырёх
-/// регионов в фиксированном порядке эмиссии: `commandsVisibility`, `commandsPlacement`,
-/// `commandsOrder`, `subsystemsOrder` (Designer дополнительно эмитит производный
-/// `GroupsOrder` — см. `pipeline::cmi_read`).
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+/// Native GroupsOrder spelling. Names bind the policy to the current ordered groups;
+/// command values are always emitted from the current semantic vectors.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NativeGroupsOrder {
+    pub groups: Vec<String>,
+    pub present: bool,
+    /// Complete native region, including empty group slots not in CommandsOrder.
+    pub region_groups: Vec<String>,
+}
+
+/// Semantic command interface shared by Subsystem and Configuration sidecars.
+/// GroupsOrder is derived; native lexical presence is not a semantic field.
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CommandInterface {
+    #[serde(skip)]
+    pub native_groups_order: Option<NativeGroupsOrder>,
     /// Ordered subsystem visibility, independent of command visibility.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subsystems_visibility: Vec<SubsystemVisibility>,
@@ -614,6 +623,17 @@ pub struct CommandInterface {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subsystems_order: Vec<String>,
 }
+
+impl PartialEq for CommandInterface {
+    fn eq(&self, other: &Self) -> bool {
+        self.subsystems_visibility == other.subsystems_visibility
+            && self.commands == other.commands
+            && self.placement == other.placement
+            && self.order == other.order
+            && self.subsystems_order == other.subsystems_order
+    }
+}
+impl Eq for CommandInterface {}
 
 /// РАБОЧАЯ ОБЛАСТЬ НАЧАЛЬНОЙ СТРАНИЦЫ — канонический IR конфиг-сайдкара КОРНЯ
 /// (`Ext/HomePageWorkArea.xml` Designer / `src/Configuration/HomePageWorkArea.hpwa` EDT;
@@ -875,6 +895,17 @@ pub struct MetadataObject {
     /// `skip_serializing_if` держит RON-снапшоты прочих объектов байт-идентичными.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub style_records: Vec<StyleRecord>,
+    /// Native style namespace presence only; never retains style values.
+    /// Consulted only for the same target profile as the validated source.
+    #[serde(skip)]
+    pub style_native_palette: Option<(crate::version::FormatVersion, bool)>,
+    /// A validated style sidecar may contain zero current records.
+    /// Presence is a source container detail, never a former style value.
+    #[serde(skip)]
+    pub style_sidecar_present: bool,
+    /// Empty root closure spelling only: (native source, self-closing).
+    #[serde(skip)]
+    pub style_empty_root: Option<(bool, bool)>,
     /// Свойства по каноническому [`FieldId`], в порядке эмиссии спека (дефолты НЕ
     /// хранятся). `Vec`, а не map: порядок структурен и детерминирует
     /// сериализацию (§1.5). Уникальность ключей — инвариант движка, не типа.
@@ -937,6 +968,9 @@ impl MetadataObject {
             help_resources: Vec::new(),
             schedule: None,
             style_records: Vec::new(),
+            style_native_palette: None,
+            style_sidecar_present: false,
+            style_empty_root: None,
             properties: Vec::new(),
             children: Vec::new(),
             modules: Vec::new(),

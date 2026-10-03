@@ -82,7 +82,7 @@ pub use convert::{read_config, write_config};
 #[doc(hidden)]
 pub use form_read::attach_form_body;
 #[doc(hidden)]
-pub use form_write::write_form_bodies;
+pub use form_write::{write_form_bodies, write_form_bodies_with_context};
 #[doc(hidden)]
 pub use sdk_body_projection::mxl_newlines as project_mxl_content_newlines;
 pub use sdk_body_projection::{dcs_qname_semantic_bytes, dcs_template_semantic_body};

@@ -15,7 +15,7 @@ struct Templates<'a>(&'a MetadataObject, TemplateBodyProjection);
 struct TemplateView<'a>(&'a MetadataObject, &'a Template, TemplateBodyProjection);
 struct Properties<'a>(&'a [(FieldId, PropertyValue)], bool);
 struct ConfigurationRoster<'a>(&'a PropertyValue);
-// The installed native writer relocates the PaletteColor block in 2.21.
+// Native configuration writers relocate Bot and the 2.21 PaletteColor block.
 // Its location among different metadata kinds is physical spelling. Keep all
 // other rows in their current order, and every current palette name in order.
 // This borrowed view never changes the source IR or any writer input.
@@ -28,6 +28,7 @@ impl Serialize for ConfigurationRoster<'_> {
         };
         let mut rest = Vec::with_capacity(rows.len());
         let mut palette = Vec::new();
+        let mut bots = Vec::new();
         for row in rows {
             let PropertyValue::List(pair) = row else {
                 return Err(serde::ser::Error::custom(
@@ -52,11 +53,14 @@ impl Serialize for ConfigurationRoster<'_> {
             }
             if kind == "PaletteColor" {
                 palette.push(row);
+            } else if kind == "Bot" {
+                bots.push(row);
             } else {
                 rest.push(row);
             }
         }
         rest.extend(palette);
+        rest.extend(bots);
         // Preserve the ordinary PropertyValue::List JSON representation in this
         // explicit semantic view; ordinary IR serialization remains unchanged.
         #[derive(Serialize)]

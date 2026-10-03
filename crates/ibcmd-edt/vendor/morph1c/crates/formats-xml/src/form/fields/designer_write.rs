@@ -355,9 +355,6 @@ fn emit_choice_wrapper_designer(prefix: &str, name: &str, value: &PropertyValue)
             wrap.push(output);
         } else { wrap.push(render_designer(&choice_picture_projection(), picture)?); }
     }
-    else if morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL) >= morph1c_core::version::SSL {
-        wrap.push(OutElement::self_closing("", "Picture"));
-    }
     Ok(wrap)
 }
 

@@ -1117,6 +1117,7 @@ mod tests {
         };
         let base = temp_base("ifaces");
         let empty_ci = CommandInterface {
+            native_groups_order: None,
             subsystems_visibility: Vec::new(),
             commands: Vec::new(),
             placement: Vec::new(),

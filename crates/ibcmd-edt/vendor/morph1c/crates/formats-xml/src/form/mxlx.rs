@@ -128,7 +128,7 @@ pub fn read_spreadsheet_mxlx(bytes: &[u8]) -> Result<MxlSpreadsheetSettings, For
         ss.envelope_without_pal = envelope_without_pal;
         ss
     } else {
-        rich_spreadsheet_settings(capture_full_body(&root), envelope_without_pal)
+        rich_spreadsheet_settings(capture_full_body(&root)?, envelope_without_pal)
     };
     // §1.0 тотальность по всему дереву сайдкара.
     let leftover = root.unclaimed_count();
@@ -406,8 +406,8 @@ mod tests {
             for a in &root.attrs {
                 out = out.attr(a.name.clone(), a.value.clone());
             }
-            for n in capture_full_body(&root) {
-                out.push(mxl_node_to_out(&n));
+            for n in capture_full_body(&root).unwrap() {
+                out.push(mxl_node_to_out(&n, false));
             }
             assert_eq!(
                 render(&env, &out),

@@ -32,6 +32,8 @@
 //! Uses exact unsigned arithmetic for the large branch; small branches retain
 //! Java's signed wrapping arithmetic, which has distinct stopping behavior.
 use std::cmp::Ordering;
+mod parse;
+pub use parse::{parse_binary32, parse_binary64};
 
 #[derive(Clone)]
 struct Natural(Vec<u32>);
@@ -240,6 +242,47 @@ pub fn format_binary64(value: f64) -> String {
         significant = 53;
     }
     bin -= 1023;
+    format_unpacked(negative, fraction, bin, significant)
+}
+
+/// Java 17 Float.toString: unpack binary32 and use FloatingDecimal's shared
+/// compatible-format dtoa with the original 24-bit significance.
+pub fn format_binary32(value: f32) -> String {
+    let raw = value.to_bits();
+    let negative = raw >> 31 != 0;
+    let mut fraction = raw & ((1u32 << 23) - 1);
+    let mut bin = ((raw >> 23) & 0xff) as i32;
+    if bin == 0xff {
+        return if fraction != 0 {
+            "NaN".into()
+        } else if negative {
+            "-Infinity".into()
+        } else {
+            "Infinity".into()
+        };
+    }
+    if bin == 0 && fraction == 0 {
+        return if negative {
+            "-0.0".into()
+        } else {
+            "0.0".into()
+        };
+    }
+    let significant;
+    if bin == 0 {
+        let leading = fraction.leading_zeros() as i32;
+        let shift = leading - 8;
+        fraction <<= shift;
+        bin = 1 - shift;
+        significant = 32 - leading;
+    } else {
+        fraction |= 1u32 << 23;
+        significant = 24;
+    }
+    format_unpacked(negative, u64::from(fraction) << 29, bin - 127, significant)
+}
+
+fn format_unpacked(negative: bool, mut fraction: u64, bin: i32, significant: i32) -> String {
     let tail = fraction.trailing_zeros() as i32;
     let nfract = 53 - tail;
     let tiny = (nfract - bin - 1).max(0);
@@ -385,7 +428,31 @@ pub fn format_binary64(value: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::format_binary64;
+    use super::{format_binary32, format_binary64};
+    #[test]
+    fn binary32_java17_boundary_rendering() {
+        for (bits, expected) in [
+            (0, "0.0"),
+            (0x80000000, "-0.0"),
+            (1, "1.4E-45"),
+            (0x00800000, "1.17549435E-38"),
+            (0x7f7fffff, "3.4028235E38"),
+            (0x3dcccccd, "0.1"),
+            (0x7f800000, "Infinity"),
+            (0xff800000, "-Infinity"),
+            (0x7fc00000, "NaN"),
+            (0x4b800000, "1.6777216E7"),
+            (0x4b800001, "1.6777218E7"),
+        ] {
+            assert_eq!(
+                format_binary32(f32::from_bits(bits)),
+                expected,
+                "{bits:08x}"
+            );
+        }
+        assert_eq!(format_binary32("16777217".parse().unwrap()), "1.6777216E7");
+        assert_eq!(format_binary32("16777219".parse().unwrap()), "1.677722E7");
+    }
     #[test]
     fn binary64_java17_boundary_rendering() {
         for (bits, expected) in [

@@ -94,6 +94,7 @@ fn read_form_current(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, For
     }
     let root = descriptor.root;
     validate_qname_bindings(&root, &std::collections::BTreeMap::new())?;
+    capture_namespace_scopes(&root)?;
     let mut body = match dialect {
         FormDialect::Edt => read_edt(&root),
         FormDialect::Designer => {
@@ -113,6 +114,11 @@ fn read_form_current(dialect: FormDialect, bytes: &[u8]) -> Result<FormBody, For
     // Both readers have already rejected every unclaimed node/attribute.
     body.source_xml221_default_presence = super::wire_order::capture_xml221_default_presence(dialect, &root)?;
     body.source_wire_order = Some(super::wire_order::capture(dialect, &root, &body)?);
+    if dialect == FormDialect::Designer {
+        let profile = root.attr("version").and_then(|v| detect_form_profile(&v.value))
+            .ok_or_else(|| FormError::Frame("native availability requires a validated profile".into()))?;
+        body.availability_source_form_dependency = Some(super::availability::source_form_dependency_sha256(&body, profile.format)?);
+    }
     Ok(body)
 }
 
@@ -169,6 +175,26 @@ fn validate_qname_bindings(
     }
     for child in &element.children {
         validate_qname_bindings(child, &namespaces)?;
+    }
+    Ok(())
+}
+
+fn capture_namespace_scopes(root: &Element) -> Result<(), FormError> {
+    use std::collections::BTreeMap;
+    use std::sync::Arc;
+    let initial = Arc::new(BTreeMap::from([
+        (String::new(), String::new()),
+        ("xml".into(), "http://www.w3.org/XML/1998/namespace".into()),
+    ]));
+    let mut pending = vec![(root, initial)];
+    while let Some((element, inherited)) = pending.pop() {
+        let scope = if element.attrs.iter().any(|a| a.name == "xmlns" || a.name.starts_with("xmlns:")) {
+            let mut scope = (*inherited).clone();
+            mxl::bind_mxl_namespaces(element, &mut scope)?;
+            Arc::new(scope)
+        } else { inherited };
+        *element.resolved_namespace_scope.borrow_mut() = Some(scope.clone());
+        for child in element.children.iter().rev() { pending.push((child, scope.clone())); }
     }
     Ok(())
 }

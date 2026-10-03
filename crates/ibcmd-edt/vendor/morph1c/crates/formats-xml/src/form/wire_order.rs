@@ -15,6 +15,7 @@ struct Scope {
     key: String,
     kind: String,
     ext: bool,
+    auto_table: bool,
 }
 
 fn kind(d: FormDialect, local: &str, xsi: Option<&str>, ty: Option<&str>) -> Option<String> {
@@ -90,9 +91,10 @@ fn root_scope() -> Scope {
         key: "root".into(),
         kind: "root".into(),
         ext: false,
+        auto_table: false,
     }
 }
-fn child_scope(parent: &Scope, k: String, id: &str) -> Result<Scope, FormError> {
+fn child_scope(parent: &Scope, k: String, id: &str, auto_table: bool) -> Result<Scope, FormError> {
     let id = id
         .parse::<i64>()
         .map_err(|_| FormError::Frame("invalid typed control id in property ordering".into()))?;
@@ -100,6 +102,7 @@ fn child_scope(parent: &Scope, k: String, id: &str) -> Result<Scope, FormError> 
         key: format!("{}/{}:{}", parent.key, k, id),
         kind: k,
         ext: false,
+        auto_table,
     })
 }
 fn ext_scope(parent: &Scope) -> Scope {
@@ -107,6 +110,7 @@ fn ext_scope(parent: &Scope) -> Scope {
         key: format!("{}:ext", parent.key),
         kind: parent.kind.clone(),
         ext: true,
+        auto_table: parent.auto_table,
     }
 }
 
@@ -183,6 +187,11 @@ fn slots(s: &Scope, d: FormDialect) -> BTreeSet<&'static str> {
             }
             _ => {}
         }
+    }
+    // Native EditMode's typed codec emits this companion scalar manually.
+    // The reader has fully claimed and validated its current enum semantics.
+    if tables::field_kind(&s.kind).is_some() && d == FormDialect::Designer {
+        out.insert("AutoEditMode");
     }
     // This is a typed Table glue slot (FormItem.show_command_bar), not a
     // property-bag entry. Preserve its native source position among the known
@@ -315,6 +324,88 @@ fn insert(
     }
     Ok(())
 }
+// The SDK's generic choice-value caller omits a null Picture, even in 2.21.
+// Native authored empty containment is lexical presence only. Bind it to the
+// current control, parameter name and ordered nested wrapper path; never retain
+// any presentation, value, reference or image bytes.
+fn choice_key(scope: &Scope, name: &str, path: &[usize]) -> String {
+    format!("{}:choice:{}:{}:{path:?}", scope.key, name.len(), name)
+}
+fn read_choice_presence(
+    owner: &Element,
+    scope: &Scope,
+    out: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), FormError> {
+    fn wrapper(el: &Element, scope: &Scope, name: &str, path: &mut Vec<usize>, out: &mut BTreeMap<String, Vec<String>>) -> Result<(), FormError> {
+        if el.attr("xsi:type").map(|a| a.value.as_str()) != Some("FormChoiceListDesTimeValue") { return Ok(()); }
+        let picture = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Picture");
+        if picture.is_none_or(|p| p.attrs.is_empty() && p.children.is_empty() && p.text.is_empty()) {
+            let value = if picture.is_some() { vec!["Picture".into()] } else { Vec::new() };
+            if out.insert(choice_key(scope, name, path), value).is_some() {
+                return Err(FormError::Frame("duplicate typed choice picture presence scope".into()));
+            }
+        }
+        if let Some(value) = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Value" && c.attr("xsi:type").map(|a| a.value.as_str()) == Some("v8:FixedArray")) {
+            for (index, child) in value.children.iter().enumerate() {
+                if child.prefix == "v8" && child.local == "Value" {
+                    path.push(index); wrapper(child, scope, name, path, out)?; path.pop();
+                }
+            }
+        }
+        Ok(())
+    }
+    for container in owner.children.iter().filter(|c| c.prefix.is_empty() && c.local == "ChoiceParameters") {
+        for item in &container.children {
+            if item.prefix != "app" || item.local != "item" { continue; }
+            let Some(name) = item.attr("name").map(|a| a.value.as_str()) else { continue; };
+            for value in item.children.iter().filter(|c| c.prefix == "app" && c.local == "value") {
+                wrapper(value, scope, name, &mut Vec::new(), out)?;
+            }
+        }
+    }
+    Ok(())
+}
+fn out_choice_presence(
+    owner: &mut OutElement,
+    scope: &Scope,
+    facet: Option<&FormWireOrder>,
+    orders: &mut BTreeMap<String, Vec<String>>,
+) -> Result<(), FormError> {
+    fn wrapper(el: &mut OutElement, scope: &Scope, name: &str, path: &mut Vec<usize>, facet: Option<&FormWireOrder>, orders: &mut BTreeMap<String, Vec<String>>) -> Result<(), FormError> {
+        if !el.attrs.iter().any(|(k,v)| k == "xsi:type" && v == "FormChoiceListDesTimeValue") { return Ok(()); }
+        let key = choice_key(scope, name, path);
+        let source = facet.and_then(|f| f.scopes.get(&key));
+        if source.is_some_and(|s| !s.is_empty() && s.as_slice() != ["Picture"]) {
+            return Err(FormError::Frame("invalid typed choice picture presence slot".into()));
+        }
+        let picture = el.children.iter().find(|c| c.prefix.is_empty() && c.local == "Picture");
+        if picture.is_none_or(|p| p.attrs.is_empty() && p.children.is_empty() && p.text.as_deref().unwrap_or("").is_empty()) {
+            orders.insert(key, if picture.is_some() { vec!["Picture".into()] } else { Vec::new() });
+            if picture.is_none() && source.is_some_and(|s| !s.is_empty()) {
+                el.push(OutElement::self_closing("", "Picture"));
+            }
+        }
+        if let Some(value) = el.children.iter_mut().find(|c| c.prefix.is_empty() && c.local == "Value" && c.attrs.iter().any(|(k,v)| k == "xsi:type" && v == "v8:FixedArray")) {
+            for (index, child) in value.children.iter_mut().enumerate() {
+                if child.prefix == "v8" && child.local == "Value" {
+                    path.push(index); wrapper(child, scope, name, path, facet, orders)?; path.pop();
+                }
+            }
+        }
+        Ok(())
+    }
+    for container in owner.children.iter_mut().filter(|c| c.prefix.is_empty() && c.local == "ChoiceParameters") {
+        for item in &mut container.children {
+            if item.prefix != "app" || item.local != "item" { continue; }
+            let Some(name) = item.attrs.iter().find(|(k,_)| k == "name").map(|(_,v)| v.clone()) else { continue; };
+            for value in item.children.iter_mut().filter(|c| c.prefix == "app" && c.local == "value") {
+                wrapper(value, scope, &name, &mut Vec::new(), facet, orders)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 fn read_orders(
     d: FormDialect,
     el: &Element,
@@ -345,6 +436,7 @@ fn read_orders(
             } else {
                 text("id").unwrap_or("0")
             },
+            el.local == "autoTable",
         )?)
     } else if d == FormDialect::Edt && el.local == "extInfo" && el.prefix.is_empty() && !parent.ext
     {
@@ -364,6 +456,9 @@ fn read_orders(
                 &slots(s, d),
             ),
         )?;
+    }
+    if d == FormDialect::Designer {
+        if let Some(s) = &scope { read_choice_presence(el, s, out)?; }
     }
     // Only control/container descendants are matched. A similarly named element
     // inside DCS values or events cannot become a lexical property scope.
@@ -431,6 +526,7 @@ fn out_scope(
             } else {
                 text("id").unwrap_or("0")
             },
+            el.local == "autoTable",
         )?)
     } else if d == FormDialect::Edt && el.local == "extInfo" && el.prefix.is_empty() && !parent.ext
     {
@@ -451,6 +547,28 @@ fn walk_out(
     let next = scope.as_ref().unwrap_or(parent);
     if let Some(s) = &scope {
         let allowed = slots(s, d);
+        // Reconstitute only computed current defaults omitted by the target
+        // serializer. Source order stores presence/names, never source values.
+        if let Some(source) = facet.and_then(|f| f.scopes.get(&s.key)) {
+            if s.kind == "GraphicalSchemaField" && s.ext && d == FormDialect::Edt {
+                el.children.retain(|c| !(c.prefix.is_empty()
+                    && matches!(c.local.as_str(), "width" | "height")
+                    && c.text.as_deref() == Some("0")
+                    && !source.iter().any(|tag| tag == &c.local)));
+            }
+            let defaults: &[(&str, &str)] = if s.kind == "GraphicalSchemaField" && d == FormDialect::Designer {
+                &[("Width", "50"), ("Height", "10")]
+            } else if tables::addition_kind(&s.kind).is_some() && !s.ext {
+                if d == FormDialect::Designer { &[("Enabled", "true")] }
+                else if el.local != "items" && !parent.auto_table { &[("enabled", "true")] }
+                else { &[("enabled", "false")] }
+            } else { &[] };
+            for (tag, literal) in defaults {
+                if source.iter().any(|t| t == tag) && !el.children.iter().any(|c| c.prefix.is_empty() && c.local == *tag) {
+                    el.push(OutElement::leaf("", *tag, *literal));
+                }
+            }
+        }
         let order = property_order(
             el.children
                 .iter()
@@ -502,6 +620,9 @@ fn walk_out(
                 el.children[i] = c;
             }
         }
+    }
+    if d == FormDialect::Designer {
+        if let Some(s) = &scope { out_choice_presence(el, s, facet, orders)?; }
     }
     for c in &mut el.children {
         if c.prefix.is_empty()

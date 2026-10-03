@@ -64,8 +64,7 @@ pub(crate) fn designer_table_control(
             // ровно тем контролам, что её несли (5/312 SSL). См. `FormItem::row_picture_path_unavailable`.
             DesSlot::F(id)
                 if *id == tb::F_ROW_PICTURE_DATA_PATH
-                    && (item.row_picture_path_unavailable
-                        || matches!(item.get(*id), Some(PropertyValue::Ref(path)) if super::super::availability::unavailable(path))) =>
+                    && matches!(item.get(*id), Some(PropertyValue::Ref(path)) if super::super::availability::marked(path, item.row_picture_path_unavailable)) =>
             {
                 if let Some(entry) = common.iter().find(|e| e.id == *id) {
                     let sigiled: Vec<(morph1c_core::ir::FieldId, PropertyValue)> = item
@@ -169,13 +168,26 @@ pub(crate) fn designer_table_control(
             DesSlot::AutoTable => {
                 // GanttChartField авто-таблица: прямой ребёнок `<Table>` (обычный Designer-Table).
                 if let Some(at) = &item.auto_table {
-                    el.push(designer_table_control(
+                    let mut table = designer_table_control(
                         at,
                         "Table",
                         tables::TABLE_BODY,
                         &[],
                         tables::DES_TABLE_ORDER,
-                    )?);
+                    )?;
+                    // TableHolder's native DataPath is a current parent-field
+                    // projection, not an independently stored child path.
+                    let inherited_path = if at.properties.iter().any(|(id, _)| *id == tb::F_DATA_PATH) {
+                        None
+                    } else {
+                        item.properties.iter().find(|(id, _)| *id == ff::F_DATA_PATH).map(|(_, value)| value)
+                    };
+                    if let Some(parent_path) = inherited_path {
+                        let entry = tables::TABLE_BODY.iter().find(|field| field.id == tb::F_DATA_PATH).expect("typed Table DataPath projection");
+                        emit_field_designer(&mut table, entry, &[(tb::F_DATA_PATH, parent_path.clone())])?;
+                        super::native_order::apply(&mut table);
+                    }
+                    el.push(table);
                 }
             }
             DesSlot::TableDynamicList => {
@@ -198,6 +210,7 @@ pub(crate) fn designer_table_control(
             }
         }
     }
+    super::native_order::apply(&mut el);
     Ok(el)
 }
 
@@ -207,6 +220,9 @@ pub(crate) fn designer_table_control(
 /// ContextMenu, ExtendedTooltip. `AutoMaxWidth` — OppositeBool: эмитится `false` ⟺ bag БЕЗ
 /// sparse-true (Designer опускает `true`-дефолт).
 pub(crate) fn designer_addition(item: &FormItem) -> Result<OutElement, FormError> {
+    if item.get(tb::F_ADDITION_ENABLED).is_some_and(|v| !matches!(v, PropertyValue::Bool(_))) {
+        return Err(FormError::Frame("Addition.Enabled must be a current boolean".into()));
+    }
     let ak = tables::addition_kind(item.kind.as_str()).ok_or_else(|| {
         FormError::Frame(format!(
             "Designer: unknown addition {:?}",
@@ -227,7 +243,9 @@ pub(crate) fn designer_addition(item: &FormItem) -> Result<OutElement, FormError
         (tb::F_ADDITION_ENABLED, "Enabled"),
     ] {
         if let Some(PropertyValue::Bool(b)) = item.get(fid) {
-            el.push(OutElement::leaf("", tag, if *b { "true" } else { "false" }));
+            if fid != tb::F_ADDITION_ENABLED || !b {
+                el.push(OutElement::leaf("", tag, if *b { "true" } else { "false" }));
+            }
         }
     }
     // toolTip — Localized (метамодель Addition#4; ERP ×1; loose до ToolTipRepresentation).
@@ -343,6 +361,7 @@ pub(crate) fn designer_decorator(tag: &str, d: &DecoratorRef) -> Result<OutEleme
                     .attr("id", d.id.to_string()),
             );
             push_designer_tooltip_body(&mut el, body)?;
+            super::native_order::apply(&mut el);
             // Тело не дало детей ⇒ bare-ref (Designer-дефолты autoMax=true опущены, иного нет).
             if el.children.is_empty() {
                 with_head(
@@ -590,7 +609,7 @@ pub(crate) fn designer_data_attribute_named(
     // денормализация, снятая на чтении в канон (EDT-написание). Возвращаем её РОВНО тем путям,
     // что её несли (`designer_unavailable_paths`). См. `FormDataAttribute` в ir/form.rs.
     let sigil = |p: &String| -> String {
-        if a.designer_unavailable_paths.contains(p) || super::super::availability::unavailable(p) {
+        if super::super::availability::marked(p, a.designer_unavailable_paths.contains(p)) {
             format!("~{p}")
         } else {
             p.clone()

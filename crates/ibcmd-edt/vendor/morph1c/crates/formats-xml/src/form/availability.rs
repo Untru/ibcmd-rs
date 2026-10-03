@@ -3,53 +3,579 @@
 //! src/mssql_dump/form_body.rs; query bytes and canonical paths are unchanged.
 use super::FormError;
 use morph1c_core::{
-    ir::{DynamicListAttrExt, FormBody},
-    version::{FormatVersion, current_roundtrip_target},
+    ir::{Configuration, DynamicListAttrExt, FormBody, MetadataObject, PropertyValue},
+    version::{current_roundtrip_target, FormatVersion},
 };
+use serde::Serialize;
+use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
 };
+/// CURRENT configuration metadata used only to derive native path availability.
+/// The namespace borrows fully claimed objects; no source paths or field values
+/// are cached in the form or transported through provenance.
+pub struct FormProjectionContext<'a> {
+    pub metadata: &'a Configuration,
+    objects: BTreeMap<String, &'a MetadataObject>,
+    metadata_sha256: String,
+}
+impl<'a> FormProjectionContext<'a> {
+    pub fn new(metadata: &'a Configuration) -> Result<Self, FormError> {
+        let mut objects = BTreeMap::new();
+        for object in &metadata.objects {
+            if family(object.kind.as_str()).is_none() {
+                continue;
+            }
+            let identity =
+                super::java_case_fold::fold(&format!("{}.{}", object.kind.as_str(), object.name));
+            if objects.insert(identity, object).is_some() {
+                return Err(FormError::Frame(
+                    "duplicate current metadata identity in form projection".into(),
+                ));
+            }
+        }
+        let mut hash = DependencyHash(Sha256::new());
+        for object in objects.values() {
+            let mut pending = vec![*object];
+            while let Some(object) = pending.pop() {
+                hash.part(&(
+                    object.kind.as_str(),
+                    &object.name,
+                    object.uuid,
+                    &object.properties,
+                ))?;
+                pending.extend(object.children.iter().rev());
+            }
+        }
+        Ok(Self {
+            metadata,
+            objects,
+            metadata_sha256: hash.finish(),
+        })
+    }
+}
+struct DependencyHash(Sha256);
+impl Write for DependencyHash {
+    fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+        self.0.update(bytes);
+        Ok(bytes.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+impl DependencyHash {
+    fn part(&mut self, value: &impl Serialize) -> Result<(), FormError> {
+        serde_json::to_writer(&mut *self, value)
+            .map_err(|e| FormError::Frame(format!("form availability dependency: {e}")))?;
+        self.0.update([0]);
+        Ok(())
+    }
+    fn finish(self) -> String {
+        format!("{:x}", self.0.finalize())
+    }
+}
+impl FormProjectionContext<'_> {
+    /// Bind CURRENT dependencies only; no source values, modules or asset bytes.
+    pub fn dependency_sha256(
+        &self,
+        body: &FormBody,
+        profile: FormatVersion,
+    ) -> Result<String, FormError> {
+        dependency_sha256(body, profile, &self.metadata_sha256)
+    }
+}
+pub(crate) fn source_form_dependency_sha256(
+    body: &FormBody,
+    profile: FormatVersion,
+) -> Result<String, FormError> {
+    dependency_sha256(body, profile, "standalone-form-v1")
+}
+fn dependency_sha256(
+    body: &FormBody,
+    profile: FormatVersion,
+    metadata_sha256: &str,
+) -> Result<String, FormError> {
+    let mut hash = DependencyHash(Sha256::new());
+    hash.part(&(metadata_sha256, profile.major, profile.minor))?;
+    let mut attributes: Vec<_> = body.data_attributes.iter().rev().collect();
+    while let Some(attribute) = attributes.pop() {
+        hash.part(&(
+            &attribute.name,
+            attribute.id,
+            &attribute.value_type,
+            attribute.main,
+            &attribute.settings_saved_data,
+            &attribute.not_default_use_always,
+        ))?;
+        if let Some(list) = &attribute.dynamic_list {
+            hash.part(&(
+                &list.query_text,
+                &list.main_table,
+                &list.key_type,
+                list.custom_query,
+                list.dynamic_data_read,
+                list.auto_fill_available_fields,
+                list.auto_save_user_settings,
+                list.get_invisible_field_presentations,
+                &list.key_fields,
+                &list.calculated_fields,
+                &list.fields,
+                &list.parameters,
+            ))?;
+        }
+        attributes.extend(attribute.columns.iter().rev());
+        for additional in attribute.additional_columns.iter().rev() {
+            hash.part(&additional.table_path)?;
+            attributes.extend(additional.columns.iter().rev());
+        }
+    }
+    let mut items: Vec<_> = body.items.iter().rev().collect();
+    if let Some(bar) = &body.auto_command_bar {
+        items.extend(bar.items.iter().rev());
+    }
+    while let Some(item) = items.pop() {
+        let row_path = if item.kind.as_str() == "Table" {
+            item.get(morph1c_core::spec::forms::controls::table::F_ROW_PICTURE_DATA_PATH)
+        } else {
+            None
+        };
+        hash.part(&(&item.kind, &item.name, item.id, row_path))?;
+        items.extend(item.children.iter().rev());
+        items.extend(item.additions.iter().rev());
+        if let Some(table) = &item.auto_table {
+            items.push(table);
+        }
+        if let Some(bar) = &item.auto_command_bar {
+            items.extend(bar.items.iter().rev());
+        }
+        if let Some(menu) = &item.context_menu {
+            if let morph1c_core::ir::DecoratorBody::ContextMenu(menu) = &menu.body {
+                items.extend(menu.items.iter().rev());
+            }
+        }
+    }
+    Ok(hash.finish())
+}
+/// Called only after the complete native configuration has been read.
+pub fn bind_native_availability_sources(metadata: &mut Configuration) -> Result<(), FormError> {
+    let Some(profile) = metadata.source_version else {
+        return Ok(());
+    };
+    let context = FormProjectionContext::new(metadata)?;
+    let mut pending: Vec<_> = metadata
+        .objects
+        .iter()
+        .enumerate()
+        .rev()
+        .map(|(i, o)| (vec![i], o))
+        .collect();
+    let mut plans = Vec::new();
+    while let Some((path, object)) = pending.pop() {
+        for (index, form) in object.form_bodies.iter().enumerate() {
+            if form.ordinary_body.is_none() && form.body.designer_path_spelling {
+                plans.push((
+                    path.clone(),
+                    index,
+                    context.dependency_sha256(&form.body, profile)?,
+                ));
+            }
+        }
+        for (index, child) in object.children.iter().enumerate().rev() {
+            let mut child_path = path.clone();
+            child_path.push(index);
+            pending.push((child_path, child));
+        }
+    }
+    drop(context);
+    for (path, index, digest) in plans {
+        let mut object = &mut metadata.objects[path[0]];
+        for child in &path[1..] {
+            object = &mut object.children[*child];
+        }
+        object.form_bodies[index]
+            .body
+            .availability_source_dependency = Some(digest);
+    }
+    Ok(())
+}
+// The SDK alias-shadowing predicate uses String.toLowerCase, separately from
+// identifier equalsIgnoreCase. Neither comparison changes authored spelling.
+fn contains_alias(names: &BTreeSet<String>, name: &str) -> bool {
+    names
+        .iter()
+        .any(|candidate| candidate.to_lowercase() == name.to_lowercase())
+}
+fn contains_name(names: &BTreeSet<String>, name: &str) -> bool {
+    names
+        .iter()
+        .any(|candidate| super::java_case_fold::equal(candidate, name))
+}
+struct MetadataTable {
+    fields: BTreeSet<String>,
+    required: BTreeSet<String>,
+}
+fn current_property<'a>(object: &'a MetadataObject, name: &str) -> Option<&'a PropertyValue> {
+    let spec = morph1c_core::spec::registry::spec_for(object.kind.as_str())?;
+    let field = spec.fields.iter().find(|f| f.name == name)?;
+    object.get(field.id).or(field.default.as_ref())
+}
+fn current_bool(object: &MetadataObject, name: &str) -> bool {
+    matches!(
+        current_property(object, name),
+        Some(PropertyValue::Bool(true))
+    )
+}
+fn current_int(object: &MetadataObject, name: &str) -> i64 {
+    match current_property(object, name) {
+        Some(PropertyValue::Int(n)) => *n,
+        _ => 0,
+    }
+}
+fn current_token<'a>(object: &'a MetadataObject, name: &str) -> &'a str {
+    match current_property(object, name) {
+        Some(PropertyValue::Enum(n)) => n.as_str(),
+        _ => "",
+    }
+}
+fn family(name: &str) -> Option<&'static str> {
+    [
+        ("Catalog", "Справочник"),
+        ("Document", "Документ"),
+        ("Enum", "Перечисление"),
+        ("ChartOfCharacteristicTypes", "ПланВидовХарактеристик"),
+        ("ChartOfAccounts", "ПланСчетов"),
+        ("ChartOfCalculationTypes", "ПланВидовРасчета"),
+        ("ExchangePlan", "ПланОбмена"),
+        ("BusinessProcess", "БизнесПроцесс"),
+        ("Task", "Задача"),
+        ("InformationRegister", "РегистрСведений"),
+        ("AccumulationRegister", "РегистрНакопления"),
+        ("AccountingRegister", "РегистрБухгалтерии"),
+        ("CalculationRegister", "РегистрРасчета"),
+        ("DocumentJournal", "ЖурналДокументов"),
+    ]
+    .into_iter()
+    .find(|(en, ru)| en.eq_ignore_ascii_case(name) || super::java_case_fold::equal(ru, name))
+    .map(|(en, _)| en)
+}
+impl FormProjectionContext<'_> {
+    fn table(&self, table: &str) -> Option<MetadataTable> {
+        let mut parts = table.split('.');
+        let kind = family(parts.next()?)?;
+        let name = parts.next()?;
+        let object = self
+            .objects
+            .get(&super::java_case_fold::fold(&format!("{kind}.{name}")))?;
+        // Main tables and authored tabular sections are distinct CURRENT namespaces.
+        // Virtual tables require their own compiler field rules, never a guessed
+        // reuse of the main-table universe.
+        if let Some(section) = parts.next() {
+            if parts.next().is_some() {
+                return None;
+            }
+            let child = object.children.iter().find(|c| {
+                c.kind.as_str().ends_with(".TabularSection")
+                    && super::java_case_fold::equal(&c.name, section)
+            })?;
+            let mut fields = BTreeSet::new();
+            fields.extend(["Ref", "Ссылка", "LineNumber", "НомерСтроки"].map(String::from));
+            for attribute in &child.children {
+                if attribute.kind.as_str().ends_with(".Attribute") {
+                    fields.insert(attribute.name.clone());
+                }
+            }
+            return Some(MetadataTable {
+                fields,
+                required: BTreeSet::new(),
+            });
+        }
+        let mut fields = BTreeSet::new();
+        let mut required = BTreeSet::new();
+        let pairs = standard_pairs(kind)?;
+        for (ru, en) in pairs {
+            let present = match (kind, *en) {
+                ("InformationRegister", "Period") => {
+                    current_token(object, "informationRegisterPeriodicity") != "Nonperiodical"
+                }
+                ("InformationRegister", "Recorder" | "LineNumber" | "Active") => {
+                    current_token(object, "writeMode") == "RecorderSubordinate"
+                }
+                ("Catalog", "IsFolder") => {
+                    current_bool(object, "hierarchical")
+                        && current_token(object, "hierarchyType") == "HierarchyFoldersAndItems"
+                }
+                ("Catalog" | "ChartOfCharacteristicTypes", "Parent" | "IsFolder") => {
+                    current_bool(object, "hierarchical")
+                }
+                ("Catalog", "Owner") => {
+                    matches!(current_property(object, "owners"), Some(PropertyValue::List(v)) if !v.is_empty())
+                }
+                (_, "Code") => current_int(object, "codeLength") > 0,
+                (_, "Description") => current_int(object, "descriptionLength") > 0,
+                (_, "Number") => current_int(object, "numberLength") > 0,
+                ("AccumulationRegister", "RecordType") => {
+                    current_token(object, "registerType") == "Balance"
+                }
+                _ => true,
+            };
+            if !present {
+                continue;
+            }
+            fields.insert((*ru).into());
+            fields.insert((*en).into());
+            // DynamicListFieldService selects keys, deletion/posted, recorder,
+            // hierarchy and date roles; it does not append every std attribute.
+            let injected = matches!(
+                *en,
+                "Ref"
+                    | "DeletionMark"
+                    | "Posted"
+                    | "Recorder"
+                    | "Parent"
+                    | "IsFolder"
+                    | "Owner"
+                    | "Date"
+            ) || (kind == "InformationRegister" && *en == "Period")
+                || (kind == "AccumulationRegister" && matches!(*en, "Period" | "LineNumber"));
+            if injected {
+                required.insert((*ru).into());
+                required.insert((*en).into());
+            }
+        }
+        for child in &object.children {
+            let suffix = child
+                .kind
+                .as_str()
+                .strip_prefix(kind)
+                .and_then(|s| s.strip_prefix('.'));
+            if matches!(
+                suffix,
+                Some(
+                    "Attribute"
+                        | "Dimension"
+                        | "Resource"
+                        | "AccountingFlag"
+                        | "ExtDimensionAccountingFlag"
+                )
+            ) {
+                fields.insert(child.name.clone());
+                if suffix == Some("Dimension") && kind == "InformationRegister" {
+                    required.insert(child.name.clone());
+                }
+            }
+        }
+        Some(MetadataTable { fields, required })
+    }
+    fn fields(&self, list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormError> {
+        if !list.custom_query {
+            return Ok(list
+                .main_table
+                .as_deref()
+                .and_then(|t| self.table(t))
+                .map(|t| t.fields));
+        }
+        if !list.auto_fill_available_fields {
+            return fields(list);
+        }
+        let Some(query) = &list.query_text else {
+            return Ok(Some(BTreeSet::new()));
+        };
+        let Some(Selection {
+            mut fields,
+            aliases,
+        }) = selection_current(query, Some(self))?
+        else {
+            return Ok(None);
+        };
+        // Query aliases are independent names; language twins belong only to
+        // CURRENT metadata fields referenced without an explicit alias.
+        for table in query_tables(&tokens(query)?) {
+            if let Some(schema) = self.table(&table.1) {
+                for kind in [
+                    "Catalog",
+                    "Document",
+                    "Enum",
+                    "ChartOfCharacteristicTypes",
+                    "ChartOfAccounts",
+                    "ChartOfCalculationTypes",
+                    "ExchangePlan",
+                    "BusinessProcess",
+                    "Task",
+                    "InformationRegister",
+                    "AccumulationRegister",
+                    "AccountingRegister",
+                    "CalculationRegister",
+                    "DocumentJournal",
+                ] {
+                    for (ru, en) in standard_pairs(kind).unwrap_or(&[]) {
+                        if contains_name(&fields, ru)
+                            && !contains_alias(&aliases, ru)
+                            && contains_name(&schema.fields, en)
+                        {
+                            fields.insert((*en).into());
+                        }
+                        if contains_name(&fields, en)
+                            && !contains_alias(&aliases, en)
+                            && contains_name(&schema.fields, ru)
+                        {
+                            fields.insert((*ru).into());
+                        }
+                    }
+                }
+                if list
+                    .main_table
+                    .as_deref()
+                    .is_some_and(|main| canonical_table(main) == canonical_table(&table.1))
+                {
+                    for field in schema.required {
+                        if !contains_alias(&aliases, &field) {
+                            fields.insert(field);
+                        }
+                    }
+                }
+            }
+        }
+        fields.extend(list.calculated_fields.iter().map(|c| c.data_path.clone()));
+        Ok(Some(fields))
+    }
+}
+fn canonical_table(table: &str) -> String {
+    let Some((kind, name)) = table.split_once('.') else {
+        return super::java_case_fold::fold(table);
+    };
+    super::java_case_fold::fold(&format!("{}.{}", family(kind).unwrap_or(kind), name))
+}
+// Top-level source references only. Nested SELECTs own their source namespace;
+// their output requires a result schema rather than treating inner fields as
+// columns of the outer query.
+fn query_tables(tokens: &[String]) -> Vec<(String, String)> {
+    let mut result = Vec::new();
+    let mut depth = 0;
+    let mut i = 0;
+    while i < tokens.len() {
+        match tokens[i].as_str() {
+            "(" | "{" => {
+                depth += 1;
+                i += 1;
+                continue;
+            }
+            ")" | "}" => {
+                depth -= 1;
+                i += 1;
+                continue;
+            }
+            _ => {}
+        }
+        if depth == 0 && keyword(&tokens[i], &["ИЗ", "FROM", "СОЕДИНЕНИЕ", "JOIN"]) {
+            i += 1;
+            let start = i;
+            if i < tokens.len() && ident(&tokens[i]) {
+                i += 1;
+                while i + 1 < tokens.len() && tokens[i] == "." && ident(&tokens[i + 1]) {
+                    i += 2;
+                }
+                if i - start >= 3 {
+                    let table = tokens[start..i].join("");
+                    if tokens.get(i).is_some_and(|t| t == "(") {
+                        let mut args = 1;
+                        i += 1;
+                        while i < tokens.len() && args != 0 {
+                            match tokens[i].as_str() {
+                                "(" => args += 1,
+                                ")" => args -= 1,
+                                _ => {}
+                            }
+                            i += 1;
+                        }
+                    }
+                    let mut alias = tokens[i - 1].clone();
+                    if tokens.get(i).is_some_and(|t| keyword(t, &["КАК", "AS"]))
+                        && tokens.get(i + 1).is_some_and(|t| ident(t))
+                    {
+                        alias = tokens[i + 1].clone();
+                        i += 2;
+                    }
+                    result.push((alias, table));
+                }
+            }
+        } else {
+            i += 1;
+        }
+    }
+    result
+}
 struct Availability {
     default_picture_unavailable: bool,
     fields: Option<BTreeSet<String>>,
 }
 thread_local! { static AVAILABILITY: RefCell<BTreeMap<String,Availability>> = const {RefCell::new(BTreeMap::new())}; }
+thread_local! { static RETAIN_SOURCE: std::cell::Cell<bool> = const {std::cell::Cell::new(true)}; }
 pub(crate) fn unavailable(path: &str) -> bool {
+    resolve(path).unwrap_or(false)
+}
+fn resolve(path: &str) -> Option<bool> {
     let Some((owner, field)) = path.split_once('.') else {
-        return false;
+        return None;
     };
     AVAILABILITY.with(|map| {
         let map = map.borrow();
-        let Some(a) = map.get(owner) else {
-            return false;
+        let Some(a) = map.get(&super::java_case_fold::fold(owner)) else {
+            return None;
         };
-        if field == "DefaultPicture" {
-            return a.default_picture_unavailable;
+        if field.eq_ignore_ascii_case("DefaultPicture") {
+            return Some(a.default_picture_unavailable);
         }
         if field.contains('.') {
-            return false;
+            return None;
         }
-        a.fields.as_ref().is_some_and(|fields| {
-            !fields
-                .iter()
-                .any(|value| value.to_lowercase() == field.to_lowercase())
-        })
+        a.fields
+            .as_ref()
+            .map(|fields| !contains_name(fields, field))
+    })
+}
+pub(crate) fn marked(path: &str, source_marker: bool) -> bool {
+    RETAIN_SOURCE.with(|retain| {
+        if retain.get() {
+            source_marker || unavailable(path)
+        } else {
+            unavailable(path)
+        }
     })
 }
 pub(crate) fn with_availability<T>(
     body: &FormBody,
+    context: Option<&FormProjectionContext<'_>>,
     f: impl FnOnce() -> Result<T, FormError>,
 ) -> Result<T, FormError> {
-    struct Restore(BTreeMap<String, Availability>);
+    struct Restore(BTreeMap<String, Availability>, bool);
     impl Drop for Restore {
         fn drop(&mut self) {
             AVAILABILITY.with(|m| *m.borrow_mut() = std::mem::take(&mut self.0));
+            RETAIN_SOURCE.with(|retain| retain.set(self.1));
         }
     }
+    let retain_source = match context {
+        None => current_roundtrip_target()
+            .map(|profile| source_form_dependency_sha256(body, profile))
+            .transpose()?
+            .is_some_and(|hash| body.availability_source_form_dependency.as_ref() == Some(&hash)),
+        Some(context) => current_roundtrip_target()
+            .map(|profile| context.dependency_sha256(body, profile))
+            .transpose()?
+            .is_some_and(|hash| body.availability_source_dependency.as_ref() == Some(&hash)),
+    };
     let mut map = BTreeMap::new();
-    if !body.designer_path_spelling
-        && matches!(current_roundtrip_target(), Some(FormatVersion { major: 2, minor: 20 | 21 }))
+    if (!body.designer_path_spelling || !retain_source)
+        && matches!(
+            current_roundtrip_target(),
+            Some(FormatVersion {
+                major: 2,
+                minor: 20 | 21
+            })
+        )
     {
         for attr in &body.data_attributes {
             if let Some(list) = &attr.dynamic_list {
@@ -58,10 +584,13 @@ pub(crate) fn with_availability<T>(
                         .split_once('.')
                         .is_some_and(|(family, _)| matches!(family, "Enum" | "FilterCriterion"))
                 });
-                let fields = fields(list)?;
+                let fields = match context {
+                    Some(context) => context.fields(list)?,
+                    None => fields(list)?,
+                };
                 if map
                     .insert(
-                        attr.name.clone(),
+                        super::java_case_fold::fold(&attr.name),
                         Availability {
                             default_picture_unavailable: no_picture,
                             fields,
@@ -76,17 +605,37 @@ pub(crate) fn with_availability<T>(
             }
         }
     }
-    let _restore = Restore(AVAILABILITY.with(|m| m.replace(map)));
+    let _restore = Restore(
+        AVAILABILITY.with(|m| m.replace(map)),
+        RETAIN_SOURCE.with(|retain| retain.replace(retain_source)),
+    );
     f()
 }
 fn fields(list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormError> {
-    if !list.custom_query || !list.auto_fill_available_fields {
+    if !list.custom_query {
         return Ok(None);
+    }
+    if !list.auto_fill_available_fields {
+        let mut fields: BTreeSet<String> = list
+            .fields
+            .iter()
+            .map(|field| field.data_path.clone())
+            .collect();
+        fields.extend(
+            list.calculated_fields
+                .iter()
+                .map(|field| field.data_path.clone()),
+        );
+        return Ok(Some(fields));
     }
     let Some(query) = &list.query_text else {
         return Ok(None);
     };
-    let Some(mut fields) = selection(query)? else {
+    let Some(Selection {
+        mut fields,
+        aliases,
+    }) = selection(query)?
+    else {
         return Ok(None);
     };
     // Standard platform columns also have localized field-map twins. Do not
@@ -109,7 +658,7 @@ fn fields(list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormErr
     ] {
         if let Some(pairs) = standard_pairs(kind) {
             for (ru, en) in pairs {
-                if fields.contains(*ru) {
+                if fields.contains(*ru) && !aliases.contains(*ru) {
                     fields.insert((*en).into());
                 }
             }
@@ -120,8 +669,13 @@ fn fields(list: &DynamicListAttrExt) -> Result<Option<BTreeSet<String>>, FormErr
             return Ok(None);
         };
         for (ru, en) in pairs {
-            fields.insert((*ru).into());
-            fields.insert((*en).into());
+            // An explicit query alias is its own name, even when it spells a
+            // localized platform field. The SDK does not add that selected
+            // definition again under its other language spelling.
+            if !fields.contains(*ru) && !fields.contains(*en) {
+                fields.insert((*ru).into());
+                fields.insert((*en).into());
+            }
         }
     }
     for calculated in &list.calculated_fields {
@@ -138,14 +692,11 @@ fn keyword(s: &str, words: &[&str]) -> bool {
     words.iter().any(|w| s.to_uppercase() == *w)
 }
 fn tokens(query: &str) -> Result<Vec<String>, FormError> {
-    const BYTES: usize = 4 * 1024 * 1024;
-    const TOKENS: usize = 262144;
-    if query.len() > BYTES {
-        return Err(FormError::Frame(
-            "dynamic-list query exceeds bounded projection byte limit".into(),
-        ));
-    }
-    let chars: Vec<char> = query.chars().collect();
+    let mut chars = Vec::new();
+    chars
+        .try_reserve_exact(query.chars().count())
+        .map_err(|_| FormError::Frame("dynamic-list query allocation failed".into()))?;
+    chars.extend(query.chars());
     let mut out = Vec::new();
     let mut i = 0;
     let mut stack = Vec::new();
@@ -188,20 +739,19 @@ fn tokens(query: &str) -> Result<Vec<String>, FormError> {
         } else {
             i += 1;
             if matches!(c, '(' | '{') {
+                stack
+                    .try_reserve(1)
+                    .map_err(|_| FormError::Frame("query delimiter allocation failed".into()))?;
                 stack.push(c);
-                if stack.len() > 64 {
-                    return Err(FormError::Frame("query projection depth limit".into()));
-                }
             } else if matches!(c, ')' | '}')
                 && stack.pop() != Some(if c == ')' { '(' } else { '{' })
             {
                 return Err(FormError::Frame("unbalanced query delimiter".into()));
             }
         }
+        out.try_reserve(1)
+            .map_err(|_| FormError::Frame("query token allocation failed".into()))?;
         out.push(chars[start..i].iter().collect());
-        if out.len() > TOKENS {
-            return Err(FormError::Frame("query projection token limit".into()));
-        }
     }
     if !stack.is_empty() {
         return Err(FormError::Frame("unbalanced query delimiter".into()));
@@ -219,7 +769,17 @@ fn top_keyword(tokens: &[String], words: &[&str]) -> bool {
         depth == 0 && keyword(t, words)
     })
 }
-fn selection(query: &str) -> Result<Option<BTreeSet<String>>, FormError> {
+struct Selection {
+    fields: BTreeSet<String>,
+    aliases: BTreeSet<String>,
+}
+fn selection(query: &str) -> Result<Option<Selection>, FormError> {
+    selection_current(query, None)
+}
+fn selection_current(
+    query: &str,
+    context: Option<&FormProjectionContext<'_>>,
+) -> Result<Option<Selection>, FormError> {
     let tokens = tokens(query)?;
     let mut batches = Vec::new();
     let mut begin = 0;
@@ -308,12 +868,34 @@ fn selection(query: &str) -> Result<Option<BTreeSet<String>>, FormError> {
         return Ok(None);
     }
     let mut fields = BTreeSet::new();
+    let mut aliases = BTreeSet::new();
     for term in terms {
         let n = term.len();
-        if n == 0 || term.contains(&"*") || term.contains(&"{") {
+        if n == 0 || term.contains(&"{") {
             return Ok(None);
         }
+        if term.last() == Some(&"*") && (n == 1 || (n == 3 && ident(term[0]) && term[1] == ".")) {
+            let Some(context) = context else {
+                return Ok(None);
+            };
+            let sources = query_tables(batch);
+            let selected: Vec<_> = sources
+                .iter()
+                .filter(|(alias, _)| n == 1 || super::java_case_fold::equal(alias, term[0]))
+                .collect();
+            if selected.is_empty() {
+                return Ok(None);
+            }
+            for (_, table) in selected {
+                let Some(schema) = context.table(table) else {
+                    return Ok(None);
+                };
+                fields.extend(schema.fields);
+            }
+            continue;
+        }
         let name = if n >= 2 && keyword(term[n - 2], &["КАК", "AS"]) && ident(term[n - 1]) {
+            aliases.insert(term[n - 1].to_owned());
             term[n - 1].to_owned()
         } else if n % 2 == 1
             && term
@@ -339,7 +921,7 @@ fn selection(query: &str) -> Result<Option<BTreeSet<String>>, FormError> {
         };
         fields.insert(name);
     }
-    Ok(Some(fields))
+    Ok(Some(Selection { fields, aliases }))
 }
 
 fn standard_pairs(kind: &str) -> Option<&'static [(&'static str, &'static str)]> {

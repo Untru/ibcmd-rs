@@ -145,6 +145,7 @@ pub(super) fn binding(fields: &[(String, ChartValue)]) -> Result<Vec<ChartValue>
         let rows: Vec<_> = match value {
             ChartValue::Items(rows) if name == "realSeriesData" => rows.iter().collect(),
             ChartValue::Nested(row) if name == "realExSeriesData" => vec![row],
+            ChartValue::Absent if name == "realExSeriesData" => Vec::new(),
             _ => return Err(error()),
         };
         for row in rows {

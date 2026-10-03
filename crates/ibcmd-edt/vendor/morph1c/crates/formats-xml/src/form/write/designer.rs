@@ -46,8 +46,8 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     push_des_attr(&mut root, body, fr::F_WIDTH);
     push_des_attr(&mut root, body, fr::F_HEIGHT);
     push_des_attr(&mut root, body, fr::F_WINDOW_OPENING_MODE);
-    push_des_attr(&mut root, body, fr::F_AUTO_SAVE_DATA_IN_SETTINGS);
     push_des_attr(&mut root, body, fr::F_ENTER_KEY_BEHAVIOR);
+    push_des_attr(&mut root, body, fr::F_AUTO_SAVE_DATA_IN_SETTINGS);
     push_des_attr(&mut root, body, fr::F_SAVE_DATA_IN_SETTINGS);
     push_des_attr(&mut root, body, fr::F_SETTINGS_STORAGE);
     push_des_attr(&mut root, body, fr::F_SAVE_WINDOW_SETTINGS);
@@ -57,6 +57,7 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     push_des_attr(&mut root, body, fr::F_CHILDREN_ALIGN);
     // VerticalSpacing — СРАЗУ после Group (witness УничтожениеПерсональныхДанных.
     // ФормаСозданияАктов: Group→VerticalSpacing→CommandBarLocation).
+    push_des_attr(&mut root, body, fr::F_HORIZONTAL_SPACING);
     push_des_attr(&mut root, body, fr::F_VERTICAL_SPACING);
     // Scale — после Group, ДО AutoCommandBar (witness ПомощникСозданияОбменаДанными.
     // ВыборТипаТранспорта: Group→Scale=101→AutoCommandBar).
@@ -67,7 +68,6 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // ДО Customizable/VerticalScroll (witness Group→HorizontalSpacing→ChildItemsWidth,
     // Group→ChildItemsWidth→VerticalScroll).
     push_des_attr(&mut root, body, fr::F_VERTICAL_ALIGN);
-    push_des_attr(&mut root, body, fr::F_HORIZONTAL_SPACING);
     push_des_attr(&mut root, body, fr::F_CHILD_ITEMS_WIDTH);
     push_des_attr(&mut root, body, fr::F_ALLOW_FORM_CUSTOMIZE);
     push_des_attr(&mut root, body, fr::F_ENABLED);
@@ -84,7 +84,6 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
         )?);
     }
     // Native BSP 8.3 witness: after mobile command bar, before AutoCommandBar.
-    push_des_attr(&mut root, body, fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT);
     // Форм-уровневый CommandSet (между CommandBarLocation/WindowViewMode и ShowCommandBar).
     if !body.excluded_commands.is_empty() {
         let mut cs = OutElement::branch("", "CommandSet");
@@ -98,6 +97,10 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // CommandSet→GroupList→AutoCommandBar). EDT держит это же поле ВНУТРИ extInfo (см.
     // edt_root_ext_info). Форм-атрибут F_GROUP_LIST — эмитим напрямую (не в edt/designer-attr-петле,
     // где он не значится: witness-позиция специфична для дин-списка).
+    // Native 8.5 emits the current command-bar scalar before flattened ExtInfo.
+    if target == morph1c_core::version::FormatVersion::new(2, 21) {
+        push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
+    }
     push_des_attr(&mut root, body, fr::F_GROUP_LIST);
     // Форма объекта-документа: Designer эмитит ВСЕ ТРИ поля прямыми детьми корня СРАЗУ после
     // CommandSet (witness Анкета CommandSet→AutoTime→UsePostingMode→RepostOnWrite→AutoCommandBar);
@@ -122,6 +125,7 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
     // была слепой «Designer не эмитит никогда» и ломала ShowTitle→ShowCommandBar).
     push_des_attr(&mut root, body, fr::F_SHOW_TITLE);
     push_des_attr(&mut root, body, fr::F_SHOW_CLOSE_BUTTON);
+    push_des_attr(&mut root, body, fr::F_COLLAPSE_ITEMS_BY_IMPORTANCE_VARIANT);
     // Заголовок группы кнопок создания — ПОСЛЕ VerticalScroll/CommandSet, ДО ShowCommandBar/
     // AutoCommandBar (сверено 4/4: Наборы VerticalScroll→CreateButtonsGroupTitle→ShowCommandBar;
     // Файлы CommandSet→CreateButtonsGroupTitle→AutoCommandBar).
@@ -132,7 +136,9 @@ pub(crate) fn designer_root(body: &FormBody) -> Result<OutElement, FormError> {
             root.push(t);
         }
     }
-    push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
+    if target != morph1c_core::version::FormatVersion::new(2, 21) {
+        push_des_attr(&mut root, body, fr::F_SHOW_COMMAND_BAR);
+    }
     // Форма отчёта: корневые поля (`form:ReportFormExtInfo` в EDT). Designer эмитит
     // ReportFormType/AutoShowState/[CustomSettingsFolder]/ReportResultViewMode/
     // ViewModeApplicationOnSetReportResult СРАЗУ после ShowCommandBar (corpus fact).

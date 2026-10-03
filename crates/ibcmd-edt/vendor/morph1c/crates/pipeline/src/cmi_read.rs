@@ -53,8 +53,8 @@ use std::path::{Path, PathBuf};
 use formats_xml::Element;
 use formats_xml::registry::Format;
 use morph1c_core::ir::{
-    CommandGroupFragment, CommandInterface, CommandVisibility, MetadataObject, RoleVisibility,
-    SubsystemVisibility,
+    CommandGroupFragment, CommandInterface, CommandVisibility, MetadataObject, NativeGroupsOrder,
+    RoleVisibility, SubsystemVisibility,
 };
 use morph1c_core::version::FormatVersion;
 
@@ -67,6 +67,7 @@ const CMI_SIDECAR_KINDS: &[&str] = &["Subsystem"];
 const EDT_CMI_FILE: &str = "CommandInterface.cmi";
 /// Designer sidecar file name (under `<Name>/Ext/`).
 const DESIGNER_CMI_FILE: &str = "CommandInterface.xml";
+const NIL_GROUP: &str = "00000000-0000-0000-0000-000000000000";
 
 /// Designer `<Placement>`-текст ПОДСИСТЕМНЫХ сайдкаров — единственный witnessed (SSL 22/22 +
 /// ERP 401/401). КОНФИГ-УРОВНЕВЫЕ cmi-сайдкары несут [`PLACEMENT_MANUAL`]
@@ -319,14 +320,31 @@ pub(crate) fn serialize_designer_with_placement(
         }
         s.push_str("\t</SubsystemsOrder>\r\n");
     }
-    // Designer-only `GroupsOrder` — the group sequence of `order` (derived; EDT omits it). Emitted
-    // only when there IS an order region (RE: GroupsOrder always co-occurs with CommandsOrder —
-    // 164/164 ERP + SSL).
-    if !ci.order.is_empty() {
+    // SDK omits the nil group from this derived region, while retaining all
+    // its commands in CommandsOrder. Native source spelling is names-only and
+    // applies only while the current ordered group identities still match.
+    let source = ci.native_groups_order.as_ref().filter(|source| {
+        source
+            .groups
+            .iter()
+            .map(String::as_str)
+            .eq(ci.order.iter().map(|f| f.group.as_str()))
+    });
+    let groups: Vec<&str> = source.map_or_else(
+        || {
+            ci.order
+                .iter()
+                .filter(|f| f.group != NIL_GROUP)
+                .map(|f| f.group.as_str())
+                .collect()
+        },
+        |source| source.region_groups.iter().map(String::as_str).collect(),
+    );
+    if source.map_or(!groups.is_empty(), |source| source.present) {
         s.push_str("\t<GroupsOrder>\r\n");
-        for f in &ci.order {
+        for group in groups {
             s.push_str("\t\t<Group>");
-            s.push_str(&f.group);
+            s.push_str(&visibility_escape(group));
             s.push_str("</Group>\r\n");
         }
         s.push_str("\t</GroupsOrder>\r\n");
@@ -428,6 +446,7 @@ pub(crate) fn parse_command_interface_with_placement(
 /// [<subsystemsOrder><subsystems>PATH</subsystems>×]</cmi:CommandInterface>`.
 fn parse_edt(root: &Element) -> Result<CommandInterface, String> {
     let mut ci = CommandInterface {
+        native_groups_order: None,
         commands: Vec::new(),
         subsystems_visibility: Vec::new(),
         placement: Vec::new(),
@@ -850,6 +869,7 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
         .ok_or_else(|| "CommandInterface root has no version attribute (§1.0)".to_string())?;
     crate::sidecar_version::parse_witnessed(&version.value, "CommandInterface")?;
     let mut ci = CommandInterface {
+        native_groups_order: None,
         commands: Vec::new(),
         subsystems_visibility: Vec::new(),
         placement: Vec::new(),
@@ -874,13 +894,16 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
             }
             "CommandsOrder" => ci.order = parse_designer_fragments(region, None)?,
             "SubsystemsOrder" => ci.subsystems_order = parse_subsystem_list(region, "Subsystem")?,
-            // `GroupsOrder` is a Designer-ONLY region: the order of command GROUPS. RE (SSL:
-            // Администрирование/ОценкаПроизводительности/УчетОригиналов… + ERP 164/164) shows it
-            // is EXACTLY the group sequence of `CommandsOrder` (EDT has no such region — it is
-            // redundant with the order fragments). We DERIVE it from `ci.order` on write; here we
-            // VERIFY the source agrees (§1.0 — a divergence would break the derive-on-write
-            // assumption, so error). Region order guarantees `CommandsOrder` was parsed first.
-            "GroupsOrder" => verify_groups_order(region, &ci.order)?,
+            // Native platform source may include the nil group; SDK source
+            // excludes it. Both exact derived sequences retain current commands.
+            "GroupsOrder" => {
+                let region_groups = verify_groups_order(region, &ci.order)?;
+                ci.native_groups_order = Some(NativeGroupsOrder {
+                    groups: ci.order.iter().map(|f| f.group.clone()).collect(),
+                    present: true,
+                    region_groups,
+                });
+            }
             other => {
                 return Err(format!(
                     "CommandInterface carries unmodelled region <{other}> (only \
@@ -891,35 +914,71 @@ fn parse_designer(root: &Element, placement_text: &str) -> Result<CommandInterfa
             }
         }
     }
+    if ci.native_groups_order.is_none() {
+        ci.native_groups_order = Some(NativeGroupsOrder {
+            groups: ci.order.iter().map(|f| f.group.clone()).collect(),
+            present: false,
+            region_groups: Vec::new(),
+        });
+    }
     Ok(ci)
 }
 
-/// §1.0 verify the Designer `<GroupsOrder>` region equals the group sequence of `order` (the
-/// invariant that lets us DERIVE GroupsOrder from `order` on write, so EDT — which omits the
-/// region — round-trips to designer byte-exact). A `<Group>` list not matching order's fragment
-/// groups (in order) errors loudly rather than silently accept an unreconstructable ordering.
-fn verify_groups_order(region: &Element, order: &[CommandGroupFragment]) -> Result<(), String> {
-    let mut groups: Vec<&str> = Vec::new();
+/// GroupsOrder is not an SDK semantic property. Preserve empty native slots,
+/// but require every active group in its current relative order (nil may be omitted).
+fn verify_groups_order(
+    region: &Element,
+    order: &[CommandGroupFragment],
+) -> Result<Vec<String>, String> {
+    let mut groups = Vec::new();
+    let mut seen = std::collections::HashSet::new();
     for g in &region.children {
-        if g.local != "Group" {
-            return Err(format!(
-                "GroupsOrder carries unexpected <{}> (only <Group> modelled, §1.0)",
-                g.local
-            ));
+        if g.local != "Group" || !g.children.is_empty() || !g.attrs.is_empty() {
+            return Err("GroupsOrder requires plain <Group> references".to_string());
         }
-        if g.text.is_empty() {
-            return Err("GroupsOrder <Group> has empty text (§1.0)".to_string());
+        if g.text.is_empty() || !seen.insert(g.text.as_str()) {
+            return Err("GroupsOrder has an empty or duplicate group reference".to_string());
         }
-        groups.push(&g.text);
+        if !order.iter().any(|f| f.group == g.text) && !empty_group_reference(&g.text) {
+            return Err("GroupsOrder has an invalid empty group reference".to_string());
+        }
+        groups.push(g.text.clone());
     }
-    let from_order: Vec<&str> = order.iter().map(|f| f.group.as_str()).collect();
-    if groups != from_order {
-        return Err(format!(
-            "GroupsOrder {groups:?} != commandsOrder group sequence {from_order:?} — the derive-\
-             from-order invariant does not hold (§1.0 — GroupsOrder would be lost on edt round-trip)"
-        ));
+    let active: Vec<_> = groups
+        .iter()
+        .filter(|g| g.as_str() != NIL_GROUP && order.iter().any(|f| f.group == **g))
+        .map(String::as_str)
+        .collect();
+    let expected: Vec<_> = order
+        .iter()
+        .filter(|f| f.group != NIL_GROUP)
+        .map(|f| f.group.as_str())
+        .collect();
+    if active != expected {
+        return Err("GroupsOrder misses or reorders current CommandsOrder groups".to_string());
     }
-    Ok(())
+    Ok(groups)
+}
+
+/// Standard symbolic group names, metadata CommandGroup links and native UUID links.
+/// No fixed factory-name or length quota; unknown XML shapes are still rejected.
+fn empty_group_reference(group: &str) -> bool {
+    let bytes = group.as_bytes();
+    if bytes.len() == 36
+        && bytes.iter().enumerate().all(|(i, b)| {
+            if matches!(i, 8 | 13 | 18 | 23) {
+                *b == b'-'
+            } else {
+                b.is_ascii_hexdigit()
+            }
+        })
+    {
+        return true;
+    }
+    let name = group.strip_prefix("CommandGroup.").unwrap_or(group);
+    let mut chars = name.chars();
+    chars.next().is_some_and(|c| c == '_' || c.is_alphabetic())
+        && chars.all(|c| c == '_' || c.is_alphanumeric())
 }
 
 /// Designer `<CommandsVisibility>` → `Vec<CommandVisibility>` (`<Command name>` per command).

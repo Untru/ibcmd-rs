@@ -1,5 +1,7 @@
-//! Typed adapter carrier for metadata-command PictureRef transparency.
-//! All values live in current command properties; selection contains only UUIDs.
+//! Typed adapter carrier for metadata PictureRef transparency.
+//! Commands and Subsystem root slots use their registered current picture field.
+//! The v1 command_uuid/command_kind keys remain compatible target identities;
+//! selection contains only UUIDs, never former picture values.
 use crate::picture;
 use morph1c_core::ir::{FieldId, MetadataObject, Uuid};
 use serde::{Deserialize, Serialize};
@@ -41,7 +43,7 @@ struct Resource {
 }
 fn field(obj: &MetadataObject) -> Option<FieldId> {
     let kind = obj.kind.as_str();
-    if !kind.ends_with(".Command") && kind != "CommonCommand" && kind != "CommandGroup" {
+    if !kind.ends_with(".Command") && !matches!(kind, "CommonCommand" | "CommandGroup" | "Subsystem") {
         return None;
     }
     morph1c_core::spec::spec_for(kind)?
@@ -52,8 +54,8 @@ fn field(obj: &MetadataObject) -> Option<FieldId> {
 }
 fn targets(obj: &MetadataObject) -> Vec<&MetadataObject> {
     std::iter::once(obj)
-        .filter(|c| matches!(c.kind.as_str(), "CommonCommand" | "CommandGroup"))
-        .chain(obj.children.iter())
+        .filter(|c| matches!(c.kind.as_str(), "CommonCommand" | "CommandGroup" | "Subsystem"))
+        .chain(obj.children.iter().filter(|c| c.kind.as_str() != "Subsystem"))
         .filter(|c| field(c).is_some())
         .collect()
 }

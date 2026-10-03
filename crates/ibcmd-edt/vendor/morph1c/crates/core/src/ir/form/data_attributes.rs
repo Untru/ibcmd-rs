@@ -196,10 +196,17 @@ pub struct MxlSpreadsheetSettings {
 /// префикс+local+атрибуты(в исходном порядке, включая инлайн-`xmlns:*`)+текст(листа)+дети —
 /// достаточный для byte-exact ре-эмиссии В ТОМ ЖЕ диалекте. §1.0: не Blob — всё дерево разобрано и
 /// склеймлено; неизвестных фрагментов нет.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MxlNode {
     /// Ns-префикс тега (`""` = default-ns/без префикса; `mxl`/`v8`/`v8ui`/…).
+    #[serde(skip)]
     pub prefix: String,
+    /// Current expanded element namespace; prefix spelling is source-only.
+    #[serde(default)]
+    pub namespace: String,
+    /// Names-only lexical spelling of the captured source dialect.
+    #[serde(skip)]
+    pub source_layout: Option<MxlNodeLayout>,
     /// Local-name тега.
     pub local: String,
     /// Атрибуты `(имя, значение)` в ИСХОДНОМ порядке (значения unescaped; включает инлайн-`xmlns:*`
@@ -212,10 +219,31 @@ pub struct MxlNode {
     /// Текст листа (unescaped; `""` у ветки/самозакрытого).
     #[serde(default)]
     pub text: String,
+    /// Expanded identity for schema-declared QName text, distinct from ordinary text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_qname: Option<(String, String)>,
     /// Эмитить как самозакрывающийся `<tag/>` (пустой без детей/текста — конвенция MXL/1С).
-    #[serde(default)]
+    #[serde(skip)]
     pub self_closing: bool,
 }
+
+/// Lexical namespace and attribute names only; no previous values or XML payload.
+#[derive(Debug, Clone)]
+pub struct MxlNodeLayout {
+    pub default_spreadsheet_namespace: bool,
+    pub namespaces: Vec<(String, String)>,
+    pub attributes: Vec<(String, String)>,
+    pub qname_prefixes: Vec<(String, String)>,
+}
+
+impl PartialEq for MxlNode {
+    fn eq(&self, other: &Self) -> bool {
+        self.namespace == other.namespace && self.local == other.local
+            && self.attrs == other.attrs && self.children == other.children && self.text == other.text
+            && self.text_qname == other.text_qname
+    }
+}
+impl Eq for MxlNode {}
 
 /// `<mxl:languageSettings>` — языковые настройки табличного документа (текущий/по умолчанию язык +
 /// список `<mxl:languageInfo>`). RE: SSL CommonForm.РедактированиеТабличногоДокумента.

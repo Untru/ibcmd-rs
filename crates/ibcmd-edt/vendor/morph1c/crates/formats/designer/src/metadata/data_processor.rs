@@ -145,6 +145,10 @@ impl LocusMap for DesignerTabularSectionAttribute {
 // ===== TabularSection (recursion-узел) =====
 pub struct DesignerTabularSection;
 impl LocusMap for DesignerTabularSection {
+    fn emit_empty_child_container(&self) -> bool {
+        // Native exports keep this container even for an attribute-less section.
+        true
+    }
     fn lookup(&self, field: FieldId) -> Option<FieldProjection> {
         Some(match field {
             ts::F_SYNONYM => fp(&["Synonym"], Codec::LocalizedV8),

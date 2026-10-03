@@ -783,9 +783,11 @@ pub(crate) static PDF_DOCUMENT_FIELD_EXT: &[FieldProj] = &[
 /// эмитит `false`). Порядок = EDT (witness КартаМаршрутаБизнесПроцесса.Форма). Designer эмитит
 /// лишь Width/Height/Edit (autoMax*/stretch дефолтны).
 pub(crate) static FLOWCHART_FIELD_EXT: &[FieldProj] = &[
-    geo_width(Policy::Symmetric),
+    // Bare EDT Ecore defaults are zero; the original native FormObjectFactory
+    // initializes the current Flowchart ext-info geometry to 50 by 10.
+    geo_width(keep("0", None, "50", DesOmit::Eq("50"))),
     geo_auto_max_width(Policy::OppositeBool),
-    geo_height(Policy::Symmetric),
+    geo_height(keep("0", None, "10", DesOmit::Eq("10"))),
     geo_auto_max_height(Policy::OppositeBool),
     geo_h_stretch(Policy::OppositeBool),
     geo_v_stretch(Policy::OppositeBool),

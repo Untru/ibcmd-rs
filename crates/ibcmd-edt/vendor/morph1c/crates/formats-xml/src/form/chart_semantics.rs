@@ -1,8 +1,8 @@
 //! Closed transport of current chart state omitted by native SDK XML.
 //! Item bindings contain identities and a digest, never previous chart values.
-use super::FormError;
 use super::series_info::SeriesInfo;
 use super::trend_transport::{self, TrendTopology};
+use super::FormError;
 use morph1c_core::ir::form::{ChartSettings, ChartTypedValue, ChartValue, FormDataAttribute};
 use morph1c_core::ir::{FormBody, Uuid};
 use serde::{Deserialize, Serialize};
@@ -240,7 +240,66 @@ struct Resource {
     values: Vec<ValueRecord>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     trends: Vec<TrendRecord>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    designs: Vec<DesignRecord>,
 }
+/// CURRENT typed collections suppressed by the SDK's explicit design flags.
+/// No previous chart body or projected values are stored in this payload.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DesignRecord {
+    attribute: Vec<AttributeEdge>,
+    chart_kind: String,
+    current_native_sha256: String,
+    current: Vec<(String, ChartValue)>,
+}
+fn project_design(
+    chart: &mut ChartSettings,
+    current: &[(String, ChartValue)],
+) -> Result<(), FormError> {
+    for (name, _) in current {
+        let replacement = super::chart::native_design_default(name)?;
+        chart
+            .fields
+            .iter_mut()
+            .find(|(n, _)| n == name)
+            .ok_or_else(|| error("missing current design field"))?
+            .1 = replacement;
+        // This transport projection no longer has the source's explicit hidden spelling.
+        if let Some(layout) = &mut chart.source_layout {
+            for composite in &mut layout.composites {
+                if composite.path.is_empty() {
+                    composite.fields.retain(|n| n != name);
+                }
+            }
+            layout.composites.retain(|c| !matches!(c.path.first(),Some(morph1c_core::ir::form::ChartLayoutSegment::Field(n)) if n == name));
+        }
+    }
+    Ok(())
+}
+fn design_digest(chart: &ChartSettings, native: bool) -> Result<String, FormError> {
+    let mut fields = chart.fields.clone();
+    if !native {
+        project_values(&mut fields, &mut Vec::new(), false);
+        fields = trend_transport::projected(&fields)?;
+    }
+    project_values(&mut fields, &mut Vec::new(), true);
+    let mut out = DigestWriter(Sha256::new());
+    serde_json::to_writer(&mut out, &fields).map_err(|e| error(e.to_string()))?;
+    Ok(format!("{:x}", out.0.finalize()))
+}
+fn restore_design(chart: &mut ChartSettings, row: &DesignRecord) -> Result<(), FormError> {
+    for (name, value) in &row.current {
+        chart
+            .fields
+            .iter_mut()
+            .find(|(n, _)| n == name)
+            .ok_or_else(|| error("missing native design counterpart"))?
+            .1 = value.clone();
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct TrendRecord {
@@ -505,12 +564,11 @@ fn item_kind(path: &[Step]) -> Option<Kind> {
         [.., Step::Field(collection), Step::Item(_)] if collection == "realDataItems" => {
             Some(Kind::DataItem)
         }
-        [
-            ..,
-            Step::Field(collection),
-            Step::Field(items),
-            Step::Item(_),
-        ] if collection == "gaugeQualityBands" && items == "items" => Some(Kind::GaugeBand),
+        [.., Step::Field(collection), Step::Field(items), Step::Item(_)]
+            if collection == "gaugeQualityBands" && items == "items" =>
+        {
+            Some(Kind::GaugeBand)
+        }
         [.., Step::Field(collection), Step::Item(_)] if collection == "realSeriesData" => {
             Some(Kind::SeriesItem)
         }
@@ -728,6 +786,49 @@ where
     Ok(())
 }
 fn collect(body: &FormBody, form_uuid: Uuid) -> Result<Resource, FormError> {
+    let mut designs = Vec::new();
+    let mut projected = None;
+    inspect_attributes(
+        &body.data_attributes,
+        &mut Vec::new(),
+        &|a| AttributeEdge::Attribute {
+            name: a.name.clone(),
+            id: a.id,
+        },
+        &mut |attribute, chart| {
+            let current = super::chart::suppressed_design_fields(chart)?;
+            if !current.is_empty() {
+                let mut counterpart = chart.clone();
+                project_design(&mut counterpart, &current)?;
+                designs.push(DesignRecord {
+                    attribute: attribute.to_vec(),
+                    chart_kind: chart.kind.clone(),
+                    current_native_sha256: design_digest(&counterpart, false)?,
+                    current,
+                });
+            }
+            Ok(())
+        },
+    )?;
+    if !designs.is_empty() {
+        let mut copy = body.clone();
+        visit_attributes(
+            &mut copy.data_attributes,
+            &mut Vec::new(),
+            &|a| AttributeEdge::Attribute {
+                name: a.name.clone(),
+                id: a.id,
+            },
+            &mut |attribute, chart| {
+                if let Some(row) = designs.iter().find(|r| r.attribute == attribute) {
+                    project_design(chart, &row.current)?;
+                }
+                Ok(())
+            },
+        )?;
+        projected = Some(copy);
+    }
+    let body = projected.as_ref().unwrap_or(body);
     let mut records = Vec::new();
     let mut values = Vec::new();
     let mut trends = Vec::new();
@@ -825,13 +926,17 @@ fn collect(body: &FormBody, form_uuid: Uuid) -> Result<Resource, FormError> {
         records,
         values,
         trends,
+        designs,
     })
 }
 fn decode(bytes: &[u8]) -> Result<Resource, FormError> {
     let value: Resource = super::strict_resource::parse(bytes).map_err(|e| error(e.to_string()))?;
     if value.schema != SCHEMA
         || value.version != 1
-        || (value.records.is_empty() && value.values.is_empty() && value.trends.is_empty())
+        || (value.records.is_empty()
+            && value.values.is_empty()
+            && value.trends.is_empty()
+            && value.designs.is_empty())
     {
         return Err(error("unknown/empty chart resource schema"));
     }
@@ -932,6 +1037,34 @@ fn decode(bytes: &[u8]) -> Result<Resource, FormError> {
         }
         super::chart::validate_current_value(&row.current)?;
     }
+    for row in &value.designs {
+        if row.attribute.is_empty()
+            || row.chart_kind != "Chart"
+            || row.current.is_empty()
+            || row.current_native_sha256.len() != 64
+            || !row
+                .current_native_sha256
+                .bytes()
+                .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            || !seen.insert(format!("design:{}", key(&row.attribute, &[])?))
+        {
+            return Err(error("invalid/duplicate current design identity"));
+        }
+        let mut fields = HashSet::new();
+        for (name, current) in &row.current {
+            let default = super::chart::native_design_default(name)?;
+            if !fields.insert(name)
+                || current == &default
+                || !matches!(
+                    (name.as_str(), current),
+                    ("realSeriesData" | "realPointData", ChartValue::Items(_))
+                        | ("realExSeriesData", ChartValue::Nested(_) | ChartValue::Absent)
+                )
+            {
+                return Err(error("invalid/default current design payload"));
+            }
+        }
+    }
     for row in &value.trends {
         if row.attribute.is_empty()
             || !["Chart", "GanttChart"].contains(&row.chart_kind.as_str())
@@ -955,7 +1088,11 @@ pub fn project_chart_semantics(
     form_uuid: Uuid,
 ) -> Result<Option<(FormBody, Vec<u8>)>, FormError> {
     let resource = collect(body, form_uuid)?;
-    if resource.records.is_empty() && resource.values.is_empty() && resource.trends.is_empty() {
+    if resource.records.is_empty()
+        && resource.values.is_empty()
+        && resource.trends.is_empty()
+        && resource.designs.is_empty()
+    {
         return Ok(None);
     }
     let mut body = body.clone();
@@ -966,7 +1103,10 @@ pub fn project_chart_semantics(
             name: a.name.clone(),
             id: a.id,
         },
-        &mut |_, chart| {
+        &mut |attribute, chart| {
+            if let Some(row) = resource.designs.iter().find(|r| r.attribute == attribute) {
+                project_design(chart, &row.current)?;
+            }
             project_values(&mut chart.fields, &mut Vec::new(), false);
             all_fields_mut(&mut chart.fields, &mut Vec::new(), &mut |_, fields| {
                 if fields.iter().any(|(n, _)| n == "trendLinesArray") {
@@ -987,6 +1127,45 @@ pub fn apply_chart_semantics_resource(
     let resource = decode(bytes)?;
     if resource.form_uuid != form_uuid {
         return Err(error("chart resource differs from declared form UUID"));
+    }
+    let mut pending_designs: HashSet<_> = resource
+        .designs
+        .iter()
+        .map(|r| key(&r.attribute, &[]))
+        .collect::<Result<_, FormError>>()?;
+    inspect_attributes(
+        &body.data_attributes,
+        &mut Vec::new(),
+        &|a| AttributeEdge::Attribute {
+            name: a.name.clone(),
+            id: a.id,
+        },
+        &mut |attribute, chart| {
+            if let Some(row) = resource.designs.iter().find(|r| r.attribute == attribute) {
+                if !pending_designs.remove(&key(attribute, &[])?)
+                    || chart.kind != row.chart_kind
+                    || design_digest(chart, true)? != row.current_native_sha256
+                    || !super::chart::suppressed_design_fields(chart)?.is_empty()
+                {
+                    return Err(error("stale/conflicting current native design binding"));
+                }
+                let mut restored = chart.clone();
+                restore_design(&mut restored, row)?;
+                if super::chart::suppressed_design_fields(&restored)? != row.current {
+                    return Err(error("current design payload conflicts with native flags"));
+                }
+                project_design(&mut restored, &row.current)?;
+                if design_digest(&restored, false)? != row.current_native_sha256 {
+                    return Err(error(
+                        "current design payload conflicts with native counterpart",
+                    ));
+                }
+            }
+            Ok(())
+        },
+    )?;
+    if !pending_designs.is_empty() {
+        return Err(error("orphan current design binding"));
     }
     let mut remaining: HashMap<_, _> = resource
         .records
@@ -1205,6 +1384,20 @@ pub fn apply_chart_semantics_resource(
             })
         },
     )?;
+    visit_attributes(
+        &mut body.data_attributes,
+        &mut Vec::new(),
+        &|a| AttributeEdge::Attribute {
+            name: a.name.clone(),
+            id: a.id,
+        },
+        &mut |attribute, chart| {
+            if let Some(row) = resource.designs.iter().find(|r| r.attribute == attribute) {
+                restore_design(chart, row)?;
+            }
+            Ok(())
+        },
+    )?;
     Ok(())
 }
 fn restore_values(
@@ -1235,59 +1428,13 @@ pub fn same_chart_semantics_resource(a: &[u8], b: &[u8]) -> bool {
     }
 }
 pub fn chart_semantics_resource_count(body: &FormBody) -> Result<Option<usize>, FormError> {
-    // UUID is irrelevant to counting; use the current typed form's collected records.
-    let mut count = 0usize;
-    inspect_attributes(
-        &body.data_attributes,
-        &mut Vec::new(),
-        &|a| AttributeEdge::Attribute {
-            name: a.name.clone(),
-            id: a.id,
-        },
-        &mut |_, chart| {
-            inspect_fields(&chart.fields, &mut Vec::new(), &mut |_, kind, item| {
-                if flags(item, kind)?.iter().any(|(_, value)| *value)
-                    || series_info(item, kind)?.is_some()
-                    || point_aux(item, kind)?.is_some()
-                    || interval_color(item, kind)?.is_some()
-                    || axis_inactive(item, kind)?.is_some()
-                {
-                    count = count
-                        .checked_add(1)
-                        .ok_or_else(|| error("chart reference count overflow"))?;
-                }
-                Ok(())
-            })
-        },
-    )?;
-    inspect_attributes(
-        &body.data_attributes,
-        &mut Vec::new(),
-        &|a| AttributeEdge::Attribute {
-            name: a.name.clone(),
-            id: a.id,
-        },
-        &mut |_, chart| {
-            all_fields(&chart.fields, &mut Vec::new(), &mut |_, fields| {
-                for (name, value) in fields {
-                    if let ChartValue::Value(value) = value {
-                        if projected_field_value(name, value).as_ref() != Some(value.as_ref()) {
-                            count = count
-                                .checked_add(1)
-                                .ok_or_else(|| error("chart reference count overflow"))?;
-                        }
-                    }
-                }
-                if fields.iter().any(|(n, _)| n == "trendLinesArray")
-                    && TrendTopology::collect(fields)?.is_some()
-                {
-                    count = count
-                        .checked_add(1)
-                        .ok_or_else(|| error("chart reference count overflow"))?;
-                }
-                Ok(())
-            })
-        },
-    )?;
+    let resource = collect(body, Uuid([0; 16]))?;
+    let count = resource
+        .records
+        .len()
+        .checked_add(resource.values.len())
+        .and_then(|n| n.checked_add(resource.trends.len()))
+        .and_then(|n| n.checked_add(resource.designs.len()))
+        .ok_or_else(|| error("chart reference count overflow"))?;
     Ok((count > 0).then_some(count))
 }

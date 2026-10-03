@@ -19,6 +19,8 @@ use std::sync::OnceLock;
 use crate::emit::Envelope;
 
 mod availability;
+mod java_case_fold;
+pub use availability::{FormProjectionContext, bind_native_availability_sources};
 mod event_catalog;
 mod event_semantics;
 mod strict_resource;
@@ -61,7 +63,7 @@ pub use dcss::{
 pub use mxlx::{read_spreadsheet_mxlx, write_spreadsheet_mxlx};
 pub use pictures::{PictureSlot, picture_slots, set_sidecar_ext, sidecar_slots};
 pub use read::read_form;
-pub use write::write_form;
+pub use write::{write_form, write_form_with_context};
 
 /// Какой XML-формат тела формы читает/пишет коннектор.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

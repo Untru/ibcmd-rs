@@ -76,14 +76,12 @@ pub(crate) fn read_edt_addition_control(el: &Element) -> Result<FormItem, FormEr
         }
         None => visibility.push((tb::F_ADDITION_VISIBLE, PropertyValue::Bool(false))),
     }
-    let en = el
-        .child("enabled")
-        .filter(|c| c.prefix.is_empty())
-        .ok_or_else(|| FormError::Frame("form:Addition: no <enabled> (§1.0)".into()))?;
-    if !matches!(read_bool_text(en, "enabled")?, PropertyValue::Bool(true)) {
-        return Err(FormError::Frame(
-            "form:Addition <enabled> must be true (§1.0)".into(),
-        ));
+    // Ecore Visible.Enabled defaults false; the native sparse default is true.
+    // Canonical omission means true, while false remains an explicit current value.
+    let enabled = el.child("enabled").filter(|c| c.prefix.is_empty())
+        .map(|c| read_bool_text(c, "enabled")).transpose()?.unwrap_or(PropertyValue::Bool(false));
+    if enabled == PropertyValue::Bool(false) {
+        visibility.push((tb::F_ADDITION_ENABLED, enabled));
     }
     let uv = el
         .child("userVisible")
@@ -388,7 +386,7 @@ pub(crate) fn read_edt_form_field(el: &Element) -> Result<FormItem, FormError> {
         if tables::field_kind_has_ext_additions(actual_ext.kind) {
             for ak in tables::ADDITION_KINDS {
                 if let Some(a) = ex.child(ak.edt_tag).filter(|c| c.prefix.is_empty()) {
-                    item.additions.push(read_edt_addition(a, ak)?);
+                    item.additions.push(read_edt_addition(a, ak, true)?);
                 }
             }
         }
@@ -797,7 +795,7 @@ pub(crate) fn read_edt_table_body(el: &Element) -> Result<FormItem, FormError> {
     // Добавления (searchString/viewStatus/searchControl).
     for ak in tables::ADDITION_KINDS {
         if let Some(a) = el.child(ak.edt_tag).filter(|c| c.prefix.is_empty()) {
-            item.additions.push(read_edt_addition(a, ak)?);
+            item.additions.push(read_edt_addition(a, ak, el.local != "autoTable")?);
         }
     }
     // Decorator-стабы таблицы.
@@ -938,6 +936,7 @@ pub(crate) fn read_edt_table_show_command_bar(el: &Element) -> Result<Option<Str
 pub(crate) fn read_edt_addition(
     el: &Element,
     ak: &tables::AdditionKind,
+    enabled_default: bool,
 ) -> Result<FormItem, FormError> {
     el.claim();
     // Каркас видимости добавления (SPARSE head, ДО name): EDT опускает дефолт `true`, эмитит
@@ -949,8 +948,14 @@ pub(crate) fn read_edt_addition(
         ("visible", tb::F_ADDITION_VISIBLE),
         ("enabled", tb::F_ADDITION_ENABLED),
     ] {
-        if let Some(v) = el.child(tag).filter(|c| c.prefix.is_empty()) {
-            visibility.push((fid, read_bool_text(v, tag)?));
+        let value = el.child(tag).filter(|c| c.prefix.is_empty())
+            .map(|v| read_bool_text(v, tag)).transpose()?;
+        if fid == tb::F_ADDITION_ENABLED {
+            if matches!(value, Some(PropertyValue::Bool(false))) || (value.is_none() && !enabled_default) {
+                visibility.push((fid, PropertyValue::Bool(false)));
+            }
+        } else if let Some(value) = value {
+            visibility.push((fid, value));
         }
     }
     let name = leaf_text(el, "name")?;

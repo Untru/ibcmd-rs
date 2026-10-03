@@ -47,6 +47,8 @@ pub struct Element {
     pub(crate) resolved_name: RefCell<Option<(String, String)>>,
     /// Expanded QName text for native Type/TypeSet leaves.
     pub(crate) resolved_text: RefCell<Option<(String, String)>>,
+    /// Actual enclosing XML declarations captured by the form reader; never inferred prefixes.
+    pub(crate) resolved_namespace_scope: RefCell<Option<std::sync::Arc<std::collections::BTreeMap<String, String>>>>,
 }
 
 impl Element {
@@ -63,6 +65,7 @@ impl Element {
             resolved_type: RefCell::new(None),
             resolved_name: RefCell::new(None),
             resolved_text: RefCell::new(None),
+            resolved_namespace_scope: RefCell::new(None),
         }
     }
 

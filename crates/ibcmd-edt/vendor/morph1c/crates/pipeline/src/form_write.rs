@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use formats_xml::form::{
-    FormDialect, write_form, write_list_settings_dcss, write_spreadsheet_mxlx,
+    FormDialect, FormProjectionContext, write_form, write_form_with_context, write_list_settings_dcss, write_spreadsheet_mxlx,
 };
 use formats_xml::registry::Format;
 use morph1c_core::ir::{FormBody, FormDataAttribute, MetadataObject};
@@ -37,6 +37,23 @@ pub fn write_form_bodies(
     format: Format,
     descriptor_out: &Path,
     obj: &MetadataObject,
+) -> Result<(), ConvertError> {
+    write_form_bodies_current(format, descriptor_out, obj, None)
+}
+/// Whole-configuration variant: render against the fully read CURRENT metadata.
+pub fn write_form_bodies_with_context(
+    format: Format,
+    descriptor_out: &Path,
+    obj: &MetadataObject,
+    context: &FormProjectionContext<'_>,
+) -> Result<(), ConvertError> {
+    write_form_bodies_current(format, descriptor_out, obj, Some(context))
+}
+fn write_form_bodies_current(
+    format: Format,
+    descriptor_out: &Path,
+    obj: &MetadataObject,
+    context: Option<&FormProjectionContext<'_>>,
 ) -> Result<(), ConvertError> {
     if obj.form_bodies.is_empty() {
         return Ok(());
@@ -152,7 +169,10 @@ pub fn write_form_bodies(
             None
         };
         let body = chart_projection.as_ref().map_or(body, |(body, _)| body);
-        let bytes = write_form(dialect, body).map_err(|e| ConvertError::Write {
+        let bytes = match context {
+            Some(context) => write_form_with_context(dialect, body, context),
+            None => write_form(dialect, body),
+        }.map_err(|e| ConvertError::Write {
             kind: kind.to_string(),
             object: format!("{}.{}", obj.name, form.name),
             reason: e.to_string(),

@@ -90,6 +90,12 @@ pub struct FormBody {
     /// Native source spelling must remain exact; derived SDK path glyphs are EDT-only.
     #[serde(skip)]
     pub designer_path_spelling: bool,
+    /// Hash-only native lexical availability binding; CURRENT dependencies win after edits.
+    #[serde(skip)]
+    pub availability_source_dependency: Option<String>,
+    /// Standalone native lexical binding; never substitutes for metadata context.
+    #[serde(skip)]
+    pub availability_source_form_dependency: Option<String>,
     /// Локализованный заголовок формы (`<title>`/`<Title>`), если задан. Оба формата
     /// эмитят его явно (X-сравнимо). `None` ⇒ форма без заголовка (как пилот).
     pub title: Option<PropertyValue>,
@@ -436,6 +442,8 @@ impl FormBody {
             designer_checkbox_auto_presence: std::collections::BTreeMap::new(),
             common_picture_transparency: std::collections::BTreeMap::new(),
             designer_path_spelling: false,
+            availability_source_dependency: None,
+            availability_source_form_dependency: None,
             ca_envelope_without_lf_pal: false,
             title: None,
             attributes: Vec::new(),

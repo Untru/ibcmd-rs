@@ -99,22 +99,149 @@ fn range(body: &[u8], part: &[u8]) -> Result<(usize, usize), ConvertError> {
     Ok((start, end))
 }
 
+struct BodyTextFrame {
+    name: String,
+    namespace_undo: Vec<(String, Option<String>)>,
+    protected: bool,
+    localized_content: bool,
+}
 pub(crate) fn text_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError> {
+    // PictureValue text is encoded binary data, not an XML string value. Its
+    // base64 framing is preserved in both template dialects.
     let mut cursor = MarkupCursor { body, offset: 0 };
+    let mut stack: Vec<BodyTextFrame> = Vec::new();
+    let mut ns = BTreeMap::new();
     let mut out = output(body.len())?;
     let mut end = 0;
     while let Some((start, next)) = cursor.next()? {
         let text = &body[end..start];
-        if text.iter().any(|b| !b.is_ascii_whitespace()) {
+        if (text.iter().any(|b| !b.is_ascii_whitespace())
+            || stack.last().is_some_and(|frame| frame.localized_content))
+            && !stack.last().is_some_and(|frame| frame.protected)
+        {
             append_newlines(&mut out, text, to_crlf)?;
         } else {
             append(&mut out, text)?;
         }
-        append(&mut out, &body[start..next])?;
+        let token = &body[start..next];
+        match token.get(1) {
+            Some(b'!' | b'?') => {}
+            Some(b'/') => {
+                let name = std::str::from_utf8(&token[2..token.len() - 1])
+                    .map_err(|e| error(e.to_string()))?
+                    .trim();
+                let frame = stack
+                    .pop()
+                    .ok_or_else(|| error("template closing tag has no owner"))?;
+                if frame.name != name {
+                    return Err(error("template closing tag mismatch"));
+                }
+                restore_body_namespaces(&mut ns, frame.namespace_undo);
+            }
+            _ => {
+                let empty = token.ends_with(b"/>");
+                let el = body_start_tag(token, empty)?;
+                let undo = bind_body_namespaces(&el, &mut ns);
+                let localized_content = el.local == "content"
+                    && ns.get(&el.prefix).map(String::as_str)
+                        == Some("http://v8.1c.ru/8.1/data/core");
+                let protected = el.local == "value"
+                    && ns.get(&el.prefix).map(String::as_str)
+                        == Some("http://v8.1c.ru/8.1/data-composition-system/core")
+                    && body_type(&el, &ns) == Some(("http://v8.1c.ru/8.1/data/ui", "Picture"));
+                if empty {
+                    restore_body_namespaces(&mut ns, undo);
+                } else {
+                    let name = if el.prefix.is_empty() {
+                        el.local
+                    } else {
+                        format!("{}:{}", el.prefix, el.local)
+                    };
+                    push(
+                        &mut stack,
+                        BodyTextFrame {
+                            name,
+                            namespace_undo: undo,
+                            protected,
+                            localized_content,
+                        },
+                    )?;
+                }
+            }
+        }
+        append(&mut out, token)?;
         end = next;
+    }
+    if !stack.is_empty() {
+        return Err(error("incomplete template root"));
     }
     append(&mut out, &body[end..])?;
     Ok(out)
+}
+
+fn body_start_tag(token: &[u8], empty: bool) -> Result<formats_xml::Element, ConvertError> {
+    let mut single = output(
+        token
+            .len()
+            .checked_add(1)
+            .ok_or_else(|| error("markup byte count overflow"))?,
+    )?;
+    append(&mut single, token)?;
+    if !empty {
+        single.pop();
+        append(&mut single, b"/>")?;
+    }
+    Ok(formats_xml::parse(&single)
+        .map_err(|e| error(e.to_string()))?
+        .root)
+}
+fn bind_body_namespaces(
+    el: &formats_xml::Element,
+    ns: &mut BTreeMap<String, String>,
+) -> Vec<(String, Option<String>)> {
+    let mut undo = Vec::new();
+    for a in &el.attrs {
+        let key = if a.name == "xmlns" {
+            Some("")
+        } else if a.name == "xml:space" {
+            Some("xml:space")
+        } else {
+            a.name.strip_prefix("xmlns:")
+        };
+        if let Some(key) = key {
+            undo.push((key.to_owned(), ns.insert(key.to_owned(), a.value.clone())));
+        }
+    }
+    undo
+}
+fn restore_body_namespaces(ns: &mut BTreeMap<String, String>, undo: Vec<(String, Option<String>)>) {
+    for (key, previous) in undo.into_iter().rev() {
+        if let Some(value) = previous {
+            ns.insert(key, value);
+        } else {
+            ns.remove(&key);
+        }
+    }
+}
+fn body_type<'a>(
+    el: &'a formats_xml::Element,
+    ns: &'a BTreeMap<String, String>,
+) -> Option<(&'a str, &'a str)> {
+    let value = el
+        .attrs
+        .iter()
+        .find(|a| {
+            let Some((prefix, local)) = a.name.split_once(':') else {
+                return false;
+            };
+            local == "type"
+                && ns.get(prefix).map(String::as_str)
+                    == Some("http://www.w3.org/2001/XMLSchema-instance")
+        })?
+        .value
+        .as_str();
+    let (prefix, local) = value.split_once(':').unwrap_or(("", value));
+    Some((ns.get(prefix)?.as_str(), local))
 }
 
 // A lexical cursor owns no per-element inventory. The current markup window
@@ -185,7 +312,8 @@ fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) -> Result<(), 
         text.iter()
             .enumerate()
             .filter(|&(index, &b)| {
-                b == b'\n' && index.checked_sub(1).is_none_or(|p| text[p] != b'\r')
+                (b == b'\n' && index.checked_sub(1).is_none_or(|p| text[p] != b'\r'))
+                    || (b == b'\r' && text.get(index + 1) != Some(&b'\n'))
             })
             .count()
     } else {
@@ -204,7 +332,7 @@ fn append_newlines(out: &mut Vec<u8>, text: &[u8], to_crlf: bool) -> Result<(), 
                 out.extend_from_slice(if to_crlf { b"\r\n" } else { b"\n" });
                 i += 2;
             }
-            b'\n' => {
+            b'\n' | b'\r' => {
                 out.extend_from_slice(if to_crlf { b"\r\n" } else { b"\n" });
                 i += 1;
             }
@@ -314,10 +442,18 @@ pub fn mxl_newlines(body: &[u8], to_crlf: bool) -> Result<Vec<u8>, ConvertError>
                     }
                     root_seen = true;
                 }
-                let projected = el.local == "content"
-                    && ns.get(&el.prefix).map(String::as_str)
-                        == Some("http://v8.1c.ru/8.1/data/core");
-                if projected && (!el.attrs.is_empty() || ns.contains_key("xml:space")) {
+                let uri = ns.get(&el.prefix).map(String::as_str);
+                let localized =
+                    el.local == "content" && uri == Some("http://v8.1c.ru/8.1/data/core");
+                let string_type =
+                    body_type(&el, &ns) == Some(("http://www.w3.org/2001/XMLSchema", "string"));
+                let projected = localized
+                    || uri == Some("http://v8.1c.ru/8.2/data/spreadsheet")
+                        && (el.local == "detailParameter" || el.local == "v" && string_type)
+                    || uri == Some("http://v8.1c.ru/8.2/data/chart")
+                        && el.local == "valData"
+                        && string_type;
+                if localized && (!el.attrs.is_empty() || ns.contains_key("xml:space")) {
                     return Err(error("MXL localized content must be a plain text leaf"));
                 }
                 if empty {

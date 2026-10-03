@@ -535,10 +535,13 @@ fn list_and_spreadsheet_namespace_flags_preserve_bytes_and_current_typed_content
                         .unwrap()
                         .full_body = Some(vec![MxlNode {
                         prefix: String::new(),
+                        namespace: "http://v8.1c.ru/8.2/data/spreadsheet".into(),
+                        source_layout: None,
                         local: "columns".into(),
                         attrs: vec![],
                         children: vec![],
                         text: String::new(),
+                        text_qname: None,
                         self_closing: true,
                     }])
                 }
