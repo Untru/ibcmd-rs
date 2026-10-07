@@ -180,6 +180,36 @@ fn metadata_context(
     let mut config = Configuration::new().with_source_version(Some(version));
     let mut bindings = Vec::new();
     let mut identities = BTreeSet::new();
+    // Production read_config copies the registered root's properties into the
+    // Configuration before building FormProjectionContext. Compatibility is a
+    // CURRENT metadata dependency, independently of the native target version.
+    let root_kind = registry.root_kind().ok_or("no Configuration reader")?;
+    let root_path = layout::singleton_path(registry, root_kind, root)
+        .ok_or("no Configuration descriptor layout")?;
+    let root_relative = root_path
+        .strip_prefix(root)
+        .map_err(|e| e.to_string())?
+        .to_str()
+        .ok_or("non UTF-8 Configuration descriptor path")?
+        .replace('\\', "/");
+    ibcmd_xml::source_tree::validate_source_path_safety(&root_relative)
+        .map_err(|e| e.to_string())?;
+    let root_before = file_sha(&root_path)?;
+    let root_raw = fs::read(&root_path).map_err(|e| e.to_string())?;
+    if root_before != (sha(&root_raw), root_raw.len() as u64) {
+        return Err("Configuration descriptor changed before decode".into());
+    }
+    let root_object = with_source_version(Some(version), || (root_kind.read)(&root_raw))?;
+    if root_object.kind.as_str() != root_kind.kind {
+        return Err("registered Configuration descriptor identity mismatch".into());
+    }
+    if file_sha(&root_path)? != root_before {
+        return Err("Configuration descriptor changed during decode".into());
+    }
+    bindings.push(json!({"path_sha256":sha(root_relative.as_bytes()),"sha256":root_before.0,"bytes":root_before.1,"kind":root_kind.kind}));
+    identities.insert(root_relative.to_lowercase());
+    config.properties = root_object.properties.clone();
+    config.objects.push(root_object);
     for kind in registry.iter().filter(|kind| {
         matches!(
             kind.kind,
@@ -197,6 +227,7 @@ fn metadata_context(
                 | "AccountingRegister"
                 | "CalculationRegister"
                 | "DocumentJournal"
+                | "CommonAttribute"
         )
     }) {
         let directory = layout::kind_rel_dir(registry, kind)
@@ -334,6 +365,164 @@ fn bind_form(
     resolve_common_picture_transparency(&mut object.form_bodies[0].body, pictures, edt)
         .map_err(|e| e.to_string())?;
     bind_picture_semantics(&mut object.form_bodies[0].body, uuid, edt).map_err(|e| e.to_string())
+}
+
+#[test]
+fn census_metadata_matches_production_common_attributes_and_compatibility() {
+    use formats_xml::form::{FormDialect, read_form, write_form_with_context};
+    use morph1c_core::ir::{FormControlKind, FormItem, ObjectKind, PropertyValue, Token, Uuid};
+    use morph1c_core::spec::forms::controls::form_field::F_DATA_PATH;
+    use morph1c_core::spec::metadata::{
+        common_attribute as ca, configuration::F_COMPATIBILITY_MODE,
+    };
+    use morph1c_pipeline::{ConvertOptions, read_config, write_config};
+
+    let registry = FormatRegistry::for_format(Format::Edt).unwrap();
+    let mut configuration = read_config(
+        Format::Designer,
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/subsystem-ci/src"
+        )),
+        &ConvertOptions::default(),
+    )
+    .unwrap()
+    .0;
+    let owner_name = configuration
+        .objects
+        .iter()
+        .find(|object| object.kind.as_str() == "Catalog")
+        .unwrap()
+        .name
+        .clone();
+    let mut common =
+        MetadataObject::new(ObjectKind::new("CommonAttribute"), "Shared", Uuid([2; 16]));
+    common.properties = vec![
+        (ca::F_AUTO_USE, PropertyValue::Enum(Token::new("DontUse"))),
+        (
+            ca::F_DATA_SEPARATION,
+            PropertyValue::Enum(Token::new("DontUse")),
+        ),
+        (
+            ca::F_CONTENT,
+            PropertyValue::List(vec![PropertyValue::List(vec![
+                PropertyValue::Str(format!("Catalog.{owner_name}")),
+                PropertyValue::Enum(Token::new("Use")),
+            ])]),
+        ),
+    ];
+    configuration.objects.push(common);
+
+    let mut body = read_form(
+        FormDialect::Edt,
+        br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:form="http://g5.1c.ru/v8/dt/form">
+<attributes><name>List</name><valueType><types>DynamicList</types></valueType>
+<view><common>true</common></view><edit><common>true</common></edit>
+<extInfo xsi:type="form:DynamicListExtInfo"><autoFillAvailableFields>true</autoFillAvailableFields></extInfo>
+</attributes></form:Form>"#,
+    )
+    .unwrap();
+    let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
+    list.main_table = Some(format!("Catalog.{owner_name}"));
+    list.custom_query = false;
+    list.auto_fill_available_fields = true;
+    list.calculated_fields
+        .push(serde_json::from_value(json!({"data_path":"Computed","expression":""})).unwrap());
+    for (id, name) in [(1, "Shared"), (2, "Computed")] {
+        let mut item = FormItem::new(FormControlKind::new("LabelField"), name, id);
+        item.properties
+            .push((F_DATA_PATH, PropertyValue::Ref(format!("List.{name}"))));
+        body.items.push(item);
+    }
+
+    for (mode, computed_path) in [("8.3.18", "~List.Computed"), ("8.3.27", "List.Computed")] {
+        let root = configuration
+            .objects
+            .iter_mut()
+            .find(|object| object.kind.as_str() == "Configuration")
+            .unwrap();
+        root.properties
+            .retain(|(id, _)| *id != F_COMPATIBILITY_MODE);
+        root.properties
+            .push((F_COMPATIBILITY_MODE, PropertyValue::Enum(Token::new(mode))));
+        configuration.properties = root.properties.clone();
+        for minor in [20, 21] {
+            let version = FormatVersion::new(2, minor);
+            let directory = tempfile::tempdir().unwrap();
+            let source = directory.path().join("src");
+            fs::create_dir(&source).unwrap();
+            let dt_inf = directory.path().join("DT-INF");
+            fs::create_dir(&dt_inf).unwrap();
+            // read_config derives EDT source version from the real project
+            // envelope, not from ConvertOptions' target version.
+            let runtime = if minor == 20 { "8.3.27" } else { "8.5.1" };
+            fs::write(
+                dt_inf.join("PROJECT.PMF"),
+                format!("Runtime-Version: {runtime}\n"),
+            )
+            .unwrap();
+            with_roundtrip_target(version, || {
+                write_config(Format::Edt, &configuration, &source)
+            })
+            .unwrap();
+            let before = snapshot(directory.path()).unwrap();
+            let production = read_config(Format::Edt, &source, &ConvertOptions::default())
+                .unwrap()
+                .0;
+            let (census, bindings) = metadata_context(&registry, &source, version).unwrap();
+            assert_eq!(census.properties, production.properties);
+            let production_common = production
+                .objects
+                .iter()
+                .find(|object| object.kind.as_str() == "CommonAttribute")
+                .unwrap();
+            let census_common = census
+                .objects
+                .iter()
+                .find(|object| object.kind.as_str() == "CommonAttribute")
+                .unwrap();
+            assert_eq!(census_common.properties, production_common.properties);
+            for kind in ["Configuration", "CommonAttribute"] {
+                assert_eq!(
+                    bindings
+                        .iter()
+                        .filter(|binding| binding["kind"] == kind)
+                        .count(),
+                    1
+                );
+            }
+            let expected_context = FormProjectionContext::new(&production).unwrap();
+            let context = FormProjectionContext::new(&census).unwrap();
+            assert_eq!(
+                context.dependency_sha256(&body, version).unwrap(),
+                expected_context.dependency_sha256(&body, version).unwrap()
+            );
+            let bytes = with_roundtrip_target(version, || {
+                write_form_with_context(FormDialect::Designer, &body, &context)
+            })
+            .unwrap();
+            let expected = with_roundtrip_target(version, || {
+                write_form_with_context(FormDialect::Designer, &body, &expected_context)
+            })
+            .unwrap();
+            assert_eq!(bytes, expected);
+            let parsed = formats_xml::parse(&bytes).unwrap();
+            let paths: Vec<_> = parsed
+                .root
+                .child("ChildItems")
+                .unwrap()
+                .children
+                .iter()
+                .map(|item| item.child("DataPath").unwrap().text.as_str())
+                .collect();
+            assert_eq!(paths, ["List.Shared", computed_path]);
+            assert_eq!(snapshot(directory.path()).unwrap(), before);
+            assert_eq!(
+                metadata_context(&registry, &source, version).unwrap().1,
+                bindings
+            );
+        }
+    }
 }
 
 #[test]
