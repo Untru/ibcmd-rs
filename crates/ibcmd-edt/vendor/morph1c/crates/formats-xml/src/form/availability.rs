@@ -4,11 +4,12 @@
 use super::FormError;
 use morph1c_core::{
     ir::{Configuration, DynamicListAttrExt, FormBody, MetadataObject, PropertyValue},
-    version::{current_roundtrip_target, FormatVersion},
+    version::{FormatVersion, current_roundtrip_target},
 };
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::io::Write;
+use std::sync::Arc;
 use std::{
     cell::RefCell,
     collections::{BTreeMap, BTreeSet},
@@ -20,6 +21,7 @@ pub struct FormProjectionContext<'a> {
     pub metadata: &'a Configuration,
     objects: BTreeMap<String, &'a MetadataObject>,
     metadata_sha256: String,
+    reference_graph: Arc<ReferenceGraph>,
 }
 impl<'a> FormProjectionContext<'a> {
     pub fn new(metadata: &'a Configuration) -> Result<Self, FormError> {
@@ -58,11 +60,14 @@ impl<'a> FormProjectionContext<'a> {
                 pending.extend(object.children.iter().rev());
             }
         }
-        Ok(Self {
+        let mut context = Self {
             metadata,
             objects,
             metadata_sha256: hash.finish(),
-        })
+            reference_graph: Arc::new(ReferenceGraph::default()),
+        };
+        context.reference_graph = Arc::new(context.reference_graph());
+        Ok(context)
     }
 }
 struct DependencyHash(Sha256);
@@ -549,6 +554,16 @@ impl FormProjectionContext<'_> {
             else {
                 return Ok(None);
             };
+            if let Some(node) = list
+                .main_table
+                .as_deref()
+                .and_then(|table| self.reference_graph.nodes.get(&canonical_table(table)))
+            {
+                fields.retain(|field| {
+                    node.fields
+                        .contains_key(&super::java_case_fold::fold(field))
+                });
+            }
             if self.calculated_fields_available() {
                 fields.extend(list.calculated_fields.iter().map(|c| c.data_path.clone()));
             }
@@ -695,6 +710,12 @@ fn query_tables(tokens: &[String]) -> Vec<(String, String)> {
 struct Availability {
     default_picture_unavailable: bool,
     fields: Option<BTreeSet<String>>,
+    reference_root: Option<String>,
+    untyped_roots: BTreeSet<String>,
+}
+thread_local! {
+    static REFERENCE_GRAPH: RefCell<Option<Arc<ReferenceGraph>>> = const { RefCell::new(None) };
+    static CURRENT_DATA_TABLES: RefCell<BTreeMap<String, Option<String>>> = const { RefCell::new(BTreeMap::new()) };
 }
 thread_local! { static AVAILABILITY: RefCell<BTreeMap<String,Availability>> = const {RefCell::new(BTreeMap::new())}; }
 thread_local! { static RETAIN_SOURCE: std::cell::Cell<bool> = const {std::cell::Cell::new(true)}; }
@@ -702,32 +723,20 @@ pub(crate) fn unavailable(path: &str) -> bool {
     resolve(path).unwrap_or(false)
 }
 fn resolve(path: &str) -> Option<bool> {
-    let Some((owner, field)) = path.split_once('.') else {
-        return None;
-    };
     AVAILABILITY.with(|map| {
-        let map = map.borrow();
-        let Some(a) = map.get(&super::java_case_fold::fold(owner)) else {
-            return None;
-        };
-        // DynamicListPropertyInfoProvider creates this public property before
-        // the query-derived children, even when SELECT has no Order column.
-        if super::java_case_fold::equal(field, "Order")
-            || super::java_case_fold::equal(field, "Порядок")
-        {
-            return Some(false);
-        }
-        if field.eq_ignore_ascii_case("DefaultPicture") {
-            return Some(a.default_picture_unavailable);
-        }
-        if field.contains('.') {
-            return None;
-        }
-        a.fields
-            .as_ref()
-            .map(|fields| !contains_name(fields, field))
+        REFERENCE_GRAPH.with(|graph| {
+            CURRENT_DATA_TABLES.with(|tables| {
+                resolve_current_path(
+                    &map.borrow(),
+                    graph.borrow().as_deref(),
+                    &tables.borrow(),
+                    path,
+                )
+            })
+        })
     })
 }
+
 pub(crate) fn marked(path: &str, source_marker: bool) -> bool {
     RETAIN_SOURCE.with(|retain| {
         if retain.get() {
@@ -754,11 +763,18 @@ pub(crate) fn with_availability<T>(
     context: Option<&FormProjectionContext<'_>>,
     f: impl FnOnce() -> Result<T, FormError>,
 ) -> Result<T, FormError> {
-    struct Restore(BTreeMap<String, Availability>, bool);
+    struct Restore(
+        BTreeMap<String, Availability>,
+        bool,
+        Option<Arc<ReferenceGraph>>,
+        BTreeMap<String, Option<String>>,
+    );
     impl Drop for Restore {
         fn drop(&mut self) {
             AVAILABILITY.with(|m| *m.borrow_mut() = std::mem::take(&mut self.0));
             RETAIN_SOURCE.with(|retain| retain.set(self.1));
+            REFERENCE_GRAPH.with(|graph| *graph.borrow_mut() = self.2.take());
+            CURRENT_DATA_TABLES.with(|tables| *tables.borrow_mut() = std::mem::take(&mut self.3));
         }
     }
     let retain_source = match context {
@@ -798,6 +814,24 @@ pub(crate) fn with_availability<T>(
                         Availability {
                             default_picture_unavailable: no_picture,
                             fields,
+                            reference_root: if list.custom_query
+                                || !attr.columns.is_empty()
+                                || !attr.additional_columns.is_empty()
+                            {
+                                None
+                            } else {
+                                list.main_table.as_deref().map(canonical_table)
+                            },
+                            untyped_roots: if context
+                                .is_none_or(|context| context.calculated_fields_available())
+                            {
+                                list.calculated_fields
+                                    .iter()
+                                    .map(|field| field.data_path.clone())
+                                    .collect()
+                            } else {
+                                BTreeSet::new()
+                            },
                         },
                     )
                     .is_some()
@@ -809,9 +843,13 @@ pub(crate) fn with_availability<T>(
             }
         }
     }
+    let tables = current_data_tables(body)?;
+    let graph = context.map(|context| Arc::clone(&context.reference_graph));
     let _restore = Restore(
         AVAILABILITY.with(|m| m.replace(map)),
         RETAIN_SOURCE.with(|retain| retain.replace(retain_source)),
+        REFERENCE_GRAPH.with(|current| current.replace(graph)),
+        CURRENT_DATA_TABLES.with(|current| current.replace(tables)),
     );
     f()
 }
@@ -1380,5 +1418,927 @@ fn standard_pairs(kind: &str) -> Option<&'static [(&'static str, &'static str)]>
         "CalculationRegister" => Some(&CALCULATION_REGISTER),
         "DocumentJournal" => Some(&DOCUMENT_JOURNAL),
         _ => None,
+    }
+}
+
+// Original DCS eFormField reference expansion: current main DbView definitions,
+// actual reference targets and parent availability, never arbitrary dotted names.
+#[derive(Clone, Default)]
+struct ReferenceGraph {
+    nodes: BTreeMap<String, ReferenceNode>,
+}
+#[derive(Clone)]
+struct ReferenceNode {
+    fields: BTreeMap<String, ReferenceField>,
+    complete: bool,
+}
+#[derive(Clone, Default)]
+struct ReferenceField {
+    targets: BTreeSet<String>,
+    type_ids: BTreeSet<String>,
+    unknown_type: bool,
+    compound_type: bool,
+    table: bool,
+    record_reference: bool,
+}
+impl ReferenceField {
+    fn merge(&mut self, other: &Self) {
+        self.targets.extend(other.targets.iter().cloned());
+        self.type_ids.extend(other.type_ids.iter().cloned());
+        self.unknown_type |= other.unknown_type;
+        self.compound_type |= other.compound_type || self.type_ids.len() > 1;
+    }
+}
+
+fn reference_type(type_id: &str) -> Option<String> {
+    let (kind, name) = type_id.split_once('.')?;
+    let kind = kind.strip_suffix("Ref")?;
+    // A reference identity comes from TypeSpec, not from a guessed query alias.
+    let kind = family(kind)?;
+    Some(super::java_case_fold::fold(&format!("{kind}.{name}")))
+}
+fn field_type(value: Option<&PropertyValue>) -> ReferenceField {
+    let Some(PropertyValue::Type(value)) = value else {
+        return ReferenceField {
+            unknown_type: true,
+            ..ReferenceField::default()
+        };
+    };
+    let mut field = ReferenceField {
+        compound_type: value.parts.len() > 1,
+        ..ReferenceField::default()
+    };
+    for part in &value.parts {
+        field.type_ids.insert(part.id.clone());
+        if let Some(target) = reference_type(&part.id) {
+            field.targets.insert(target);
+        } else if !part.is_dbview_scalar() {
+            // TypeSet/DefinedType/provider expansion needs its actual registry.
+            // Unknown is not a negative lookup or an invented all-fields node.
+            field.unknown_type = true;
+        }
+    }
+    field
+}
+
+impl FormProjectionContext<'_> {
+    fn remove_password_fields(&self) -> bool {
+        let id = morph1c_core::spec::metadata::configuration::F_COMPATIBILITY_MODE;
+        let mode = self
+            .metadata
+            .properties
+            .iter()
+            .find(|(field, _)| *field == id)
+            .and_then(|(_, value)| match value {
+                PropertyValue::Enum(mode) => Some(mode.as_str()),
+                _ => None,
+            })
+            .unwrap_or("");
+        if mode.is_empty() {
+            return false;
+        }
+        if mode == "DontUse" {
+            return true;
+        }
+        let mut parts = mode.split('.').map(str::parse::<u32>);
+        matches!((parts.next(), parts.next(), parts.next(), parts.next()),
+            (Some(Ok(major)), Some(Ok(minor)), Some(Ok(patch)), None)
+                if [major, minor, patch] <= morph1c_core::spec::metadata::configuration::PASSWORD_FIELDS_COMPATIBILITY_BOUNDARY)
+    }
+
+    fn reference_graph(&self) -> ReferenceGraph {
+        let mut graph = ReferenceGraph::default();
+        for (identity, object) in &self.objects {
+            let Some(schema) = self.table(&format!("{}.{}", object.kind.as_str(), object.name))
+            else {
+                continue;
+            };
+            let mut fields: BTreeMap<_, _> = schema
+                .fields
+                .iter()
+                .map(|name| {
+                    (
+                        super::java_case_fold::fold(name),
+                        ReferenceField {
+                            unknown_type: true,
+                            ..ReferenceField::default()
+                        },
+                    )
+                })
+                .collect();
+            // Ref belongs to the root result but LocalBase excludes the actual
+            // recordRefField when expanding a reference. Presentation is a
+            // distinct virtual field and is not in this main-field registry.
+            for (ru, en) in &schema.standards {
+                if *en == "Ref" {
+                    let field = ReferenceField {
+                        targets: BTreeSet::from([identity.clone()]),
+                        record_reference: true,
+                        ..ReferenceField::default()
+                    };
+                    for name in [*ru, *en] {
+                        fields.insert(super::java_case_fold::fold(name), field.clone());
+                    }
+                }
+            }
+            for child in &object.children {
+                let suffix = child.kind.as_str().rsplit('.').next();
+                if matches!(
+                    suffix,
+                    Some(
+                        "Attribute"
+                            | "Dimension"
+                            | "Resource"
+                            | "AccountingFlag"
+                            | "ExtDimensionAccountingFlag"
+                    )
+                ) {
+                    let key = super::java_case_fold::fold(&child.name);
+                    if self.remove_password_fields() && current_bool(child, "passwordMode") {
+                        fields.remove(&key);
+                    } else if fields.contains_key(&key) {
+                        fields.insert(key, field_type(current_property(child, "type")));
+                    }
+                } else if suffix == Some("TabularSection") {
+                    // Single-reference expansion includes actual authored table
+                    // definitions; mixed references exclude them in DcsUtil.
+                    let target = format!("{identity}.{}", super::java_case_fold::fold(&child.name));
+                    let mut table_fields = BTreeMap::new();
+                    for attribute in &child.children {
+                        if attribute.kind.as_str().ends_with(".Attribute")
+                            && !(self.remove_password_fields()
+                                && current_bool(attribute, "passwordMode"))
+                        {
+                            table_fields.insert(
+                                super::java_case_fold::fold(&attribute.name),
+                                field_type(current_property(attribute, "type")),
+                            );
+                        }
+                    }
+                    // Existing table registry owns the proved standard aliases.
+                    if let Some(table) = self.table(&format!(
+                        "{}.{}.{}",
+                        object.kind.as_str(),
+                        object.name,
+                        child.name
+                    )) {
+                        for (ru, en) in table.standards {
+                            for name in [ru, en] {
+                                table_fields
+                                    .entry(super::java_case_fold::fold(name))
+                                    .or_insert(ReferenceField {
+                                        unknown_type: true,
+                                        ..ReferenceField::default()
+                                    });
+                            }
+                        }
+                    }
+                    graph.nodes.insert(
+                        target.clone(),
+                        ReferenceNode {
+                            fields: table_fields,
+                            complete: true,
+                        },
+                    );
+                    fields.insert(
+                        super::java_case_fold::fold(&child.name),
+                        ReferenceField {
+                            targets: BTreeSet::from([target]),
+                            table: true,
+                            ..ReferenceField::default()
+                        },
+                    );
+                }
+            }
+            for common in self
+                .objects
+                .values()
+                .filter(|o| o.kind.as_str() == "CommonAttribute")
+            {
+                let key = super::java_case_fold::fold(&common.name);
+                if !fields.contains_key(&key) {
+                    continue;
+                }
+                if self.remove_password_fields() && current_bool(common, "passwordMode") {
+                    fields.remove(&key);
+                } else {
+                    fields.insert(key, field_type(current_property(common, "type")));
+                }
+            }
+            // Other families have provider-derived views/standard definitions
+            // beyond the existing main registry. Their known authored fields
+            // remain positive; absence must not become a guessed negative.
+            let complete = morph1c_core::spec::ir_child::ReferenceChildRosterFamily::for_kind(
+                object.kind.as_str(),
+            )
+            .is_some();
+            graph
+                .nodes
+                .insert(identity.clone(), ReferenceNode { fields, complete });
+        }
+        graph
+    }
+}
+
+impl ReferenceGraph {
+    // Some(true)=proved missing, Some(false)=proved present, None=unknown.
+    // Each segment consumes one CURRENT typed edge; cycles need no depth limit.
+    fn resolve(&self, root: &str, path: &str) -> Option<bool> {
+        let mut targets = BTreeSet::from([root.to_owned()]);
+        let mut unknown = false;
+        let mut reference_child = false;
+        let mut current_compound = false;
+        let mut inherited_multi_ref = false;
+        let mut in_nested_table = false;
+        let mut segments = path.split('.').peekable();
+        while let Some(segment) = segments.next() {
+            let key = super::java_case_fold::fold(cut_index(segment));
+            let mut found: Option<ReferenceField> = None;
+            for target in &targets {
+                let Some(node) = self.nodes.get(target) else {
+                    unknown = true;
+                    continue;
+                };
+                if let Some(field) = node.fields.get(&key) {
+                    if reference_child
+                        && (field.record_reference
+                            || ((current_compound || inherited_multi_ref || in_nested_table)
+                                && field.table))
+                    {
+                        continue;
+                    }
+                    if let Some(found) = &mut found {
+                        found.merge(field);
+                    } else {
+                        found = Some(field.clone());
+                    }
+                } else if !node.complete {
+                    unknown = true;
+                }
+            }
+            let Some(field) = found else {
+                return (!unknown).then_some(true);
+            };
+            if segments.peek().is_none() {
+                return Some(false);
+            }
+            targets = field.targets;
+            unknown |= field.unknown_type;
+            // DcsUtil's current TypeDescription compound predicate is local to
+            // this expansion. LocalBase's actual-reference multiplicity and
+            // nested-table flags are inherited independently.
+            current_compound = field.compound_type;
+            inherited_multi_ref |= targets.len() > 1;
+            in_nested_table |= field.table;
+            reference_child = true;
+        }
+        None
+    }
+}
+
+fn current_data_tables(body: &FormBody) -> Result<BTreeMap<String, Option<String>>, FormError> {
+    let mut tables = BTreeMap::new();
+    let mut pending: Vec<_> = body.items.iter().rev().collect();
+    if let Some(bar) = &body.auto_command_bar {
+        pending.extend(bar.items.iter().rev());
+    }
+    while let Some(item) = pending.pop() {
+        if item.kind.as_str() == "Table" {
+            let source = match item.get(morph1c_core::spec::forms::controls::table::F_DATA_PATH) {
+                Some(PropertyValue::DataPath(path)) if path.extra_paths.is_empty() => {
+                    Some(path.primary())
+                }
+                Some(PropertyValue::DataPath(_)) => None,
+                Some(PropertyValue::Ref(path)) => Some(path.as_str().to_owned()),
+                None => None,
+                _ => {
+                    return Err(FormError::Frame(
+                        "current Table dataPath type mismatch".into(),
+                    ));
+                }
+            };
+            if tables
+                .insert(super::java_case_fold::fold(&item.name), source)
+                .is_some()
+            {
+                return Err(FormError::Frame("duplicate CURRENT Table identity".into()));
+            }
+        }
+        pending.extend(item.children.iter().rev());
+        pending.extend(item.additions.iter().rev());
+        if let Some(bar) = &item.auto_command_bar {
+            pending.extend(bar.items.iter().rev());
+        }
+        // AutoTable paths require the separately proved parent-path derivation.
+        // Do not manufacture a binding from its name or dotted path spelling.
+    }
+    Ok(tables)
+}
+
+fn resolve_current_path(
+    map: &BTreeMap<String, Availability>,
+    graph: Option<&ReferenceGraph>,
+    tables: &BTreeMap<String, Option<String>>,
+    path: &str,
+) -> Option<bool> {
+    if let Some((table, current, field)) =
+        morph1c_core::spec::forms::controls::table::table_element_member_path(path)
+    {
+        if !morph1c_core::spec::forms::controls::table::CURRENT_DATA_MEMBER_NAMES
+            .iter()
+            .any(|name| super::java_case_fold::equal(cut_index(current), name))
+        {
+            return None;
+        }
+        let source = tables.get(&super::java_case_fold::fold(cut_index(table)))?;
+        // EMPTY_CURRENT_DATA has no fields, but with no CURRENT list source
+        // it is not related to a DynamicList for DataPathWriter's marker.
+        let source = source.as_deref()?;
+        // Only actual DynamicList sources are in this map. A regular form
+        // attribute/table needs its own existing PropertyInfo provider.
+        let (owner, _) = source.split_once('.').unwrap_or((source, ""));
+        if !map.contains_key(&super::java_case_fold::fold(cut_index(owner))) {
+            return None;
+        }
+        return resolve_list_path(map, graph, &format!("{source}.{field}"));
+    }
+    resolve_list_path(map, graph, path)
+}
+
+fn resolve_list_path(
+    map: &BTreeMap<String, Availability>,
+    graph: Option<&ReferenceGraph>,
+    path: &str,
+) -> Option<bool> {
+    let (owner, field) = path.split_once('.')?;
+    let a = map.get(&super::java_case_fold::fold(cut_index(owner)))?;
+    if super::java_case_fold::equal(field, "Order")
+        || super::java_case_fold::equal(field, "Порядок")
+    {
+        return Some(false);
+    }
+    if field.eq_ignore_ascii_case("DefaultPicture") {
+        return Some(a.default_picture_unavailable);
+    }
+    // Preserve the existing custom-query/standalone dotted-path boundary. Only
+    // a CURRENT default-list root supplies the newly proved reference graph.
+    if field.contains('.') && a.reference_root.is_none() {
+        return None;
+    }
+    let fields = a.fields.as_ref()?;
+    let first = cut_index(field.split('.').next()?);
+    if !contains_name(fields, first) {
+        return Some(true);
+    }
+    if !field.contains('.') {
+        return Some(false);
+    }
+    if contains_name(&a.untyped_roots, first) {
+        return None;
+    }
+    let graph = graph?;
+    let root = a.reference_root.as_deref()?;
+    // Calculated/schema-only fields belong to their actual expression provider,
+    // not to a manufactured metadata edge (even if their name is declared).
+    if !graph
+        .nodes
+        .get(root)?
+        .fields
+        .contains_key(&super::java_case_fold::fold(first))
+    {
+        return None;
+    }
+    graph.resolve(root, field)
+}
+
+fn cut_index(segment: &str) -> &str {
+    segment.split_once('[').map_or(segment, |(name, _)| name)
+}
+
+#[cfg(test)]
+mod reference_child_tests {
+    use super::*;
+    use morph1c_core::ir::{FormControlKind, FormItem, ObjectKind, Token, TypeRef, TypeSpec, Uuid};
+    use morph1c_core::version::with_roundtrip_target;
+
+    fn attribute(kind: &str, name: &str, types: &[&str]) -> MetadataObject {
+        let mut object = MetadataObject::new(ObjectKind::new(kind), name, Uuid([2; 16]));
+        object.properties.push((
+            morph1c_core::spec::ir_child::F_TYPE,
+            PropertyValue::Type(TypeSpec {
+                parts: types
+                    .iter()
+                    .map(|name| TypeRef {
+                        id: (*name).to_owned(),
+                        qualifier: None,
+                    })
+                    .collect(),
+            }),
+        ));
+        object
+    }
+    fn metadata() -> Configuration {
+        let mut metadata = Configuration::new();
+        let mut source = MetadataObject::new(
+            ObjectKind::new("AccumulationRegister"),
+            "Source",
+            Uuid([1; 16]),
+        );
+        source.children.push(attribute(
+            "AccumulationRegister.Attribute",
+            "Reference",
+            &["CatalogRef.Target"],
+        ));
+        let mut target = MetadataObject::new(ObjectKind::new("Catalog"), "Target", Uuid([3; 16]));
+        target
+            .children
+            .push(attribute("Catalog.Attribute", "KnownChild", &["String"]));
+        target
+            .children
+            .push(attribute("Catalog.Attribute", "Next", &["CatalogRef.Deep"]));
+        target
+            .children
+            .push(attribute("Catalog.Attribute", "Password", &["String"]));
+        target.children[2].properties.push((
+            morph1c_core::spec::ir_child::F_PASSWORD_MODE,
+            PropertyValue::Bool(true),
+        ));
+        let mut deep = MetadataObject::new(ObjectKind::new("Catalog"), "Deep", Uuid([4; 16]));
+        deep.children
+            .push(attribute("Catalog.Attribute", "Leaf", &["Boolean"]));
+        let mut other = MetadataObject::new(ObjectKind::new("Catalog"), "Other", Uuid([5; 16]));
+        other
+            .children
+            .push(attribute("Catalog.Attribute", "OtherChild", &["Number"]));
+        metadata.objects.extend([source, target, deep, other]);
+        metadata
+    }
+    fn body() -> FormBody {
+        let xml = b"<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:core=\"http://g5.1c.ru/v8/dt/mcore\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\">\r\n<attributes><name>List</name><valueType><types>DynamicList</types></valueType><view><common>true</common></view><edit><common>true</common></edit><extInfo xsi:type=\"form:DynamicListExtInfo\"><mainTable>AccumulationRegister.Source</mainTable></extInfo></attributes>\r\n</form:Form>\r\n";
+        super::super::read_form(super::super::FormDialect::Edt, xml).unwrap()
+    }
+    fn lookup(metadata: &Configuration, body: &FormBody, minor: u16, path: &str) -> Option<bool> {
+        let context = FormProjectionContext::new(metadata).unwrap();
+        with_roundtrip_target(FormatVersion::new(2, minor), || {
+            with_availability(body, Some(&context), || Ok(resolve(path)))
+        })
+        .unwrap()
+    }
+    #[test]
+    fn current_default_list_reference_child_graph_positive_negative_and_deep() {
+        let mut metadata = metadata();
+        let body = body();
+        for minor in [20, 21] {
+            for path in [
+                "List.Reference.KnownChild",
+                "List.Reference.Next.Leaf",
+                "list.reference.knownchild",
+                "List.Reference[0].KnownChild",
+            ] {
+                assert_eq!(lookup(&metadata, &body, minor, path), Some(false), "{path}");
+            }
+            for path in [
+                "List.Reference.MissingChild",
+                "List.Reference.Missing.Leaf",
+                "List.Reference.Next.Missing",
+                "List.Reference.Ref",
+                "List.Reference.Presentation",
+                "List.Reference.KnownChild.Anything",
+            ] {
+                assert_eq!(lookup(&metadata, &body, minor, path), Some(true), "{path}");
+            }
+            // A missing intermediate cannot use a later name from another branch.
+            metadata.objects[1].children[1].name = "RenamedNext".into();
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Next.Leaf"),
+                Some(true)
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.RenamedNext.Leaf"),
+                Some(false)
+            );
+            metadata.objects[1].children[1].name = "Next".into();
+            metadata.objects[1].children[0].name = "CurrentChild".into();
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.KnownChild"),
+                Some(true)
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.CurrentChild"),
+                Some(false)
+            );
+            metadata.objects[1].children[0].name = "KnownChild".into();
+        }
+    }
+    #[test]
+    fn current_reference_union_retarget_unknown_provider_and_password_compatibility() {
+        let mut metadata = metadata();
+        let body = body();
+        for minor in [20, 21] {
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Target", "CatalogRef.Other"],
+            );
+            for path in [
+                "List.Reference.KnownChild",
+                "List.Reference.OtherChild",
+                "List.Reference.Next.Leaf",
+            ] {
+                assert_eq!(lookup(&metadata, &body, minor, path), Some(false));
+            }
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Missing"),
+                Some(true)
+            );
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Other"],
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.KnownChild"),
+                Some(true)
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.OtherChild"),
+                Some(false)
+            );
+            metadata.objects[0].children[0] =
+                attribute("AccumulationRegister.Attribute", "Reference", &["AnyRef"]);
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Missing"),
+                None
+            );
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Target"],
+            );
+            let compatibility = morph1c_core::spec::metadata::configuration::F_COMPATIBILITY_MODE;
+            metadata.properties = vec![(compatibility, PropertyValue::Enum(Token::new("8.3.11")))];
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Password"),
+                Some(true)
+            );
+            metadata.properties = vec![(compatibility, PropertyValue::Enum(Token::new("8.3.12")))];
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Password"),
+                Some(false)
+            );
+            metadata.properties.clear();
+        }
+    }
+    #[test]
+    fn table_current_data_uses_only_its_current_dynamic_list_binding() {
+        let metadata = metadata();
+        let mut body = body();
+        let mut table = FormItem::new(FormControlKind::new("Table"), "ActualTable", 1);
+        let path = morph1c_core::spec::forms::controls::table::F_DATA_PATH;
+        table
+            .properties
+            .push((path, PropertyValue::DataPath("List".into())));
+        body.items.push(table);
+        let mut second = body.data_attributes[0].clone();
+        second.name = "OtherList".into();
+        second.dynamic_list.as_mut().unwrap().main_table = Some("Catalog.Other".into());
+        body.data_attributes.push(second);
+        for minor in [20, 21] {
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.Reference.KnownChild"
+                ),
+                Some(false)
+            );
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.Reference.Missing"
+                ),
+                Some(true)
+            );
+            body.items[0].properties[0].1 = PropertyValue::DataPath("OtherList".into());
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.OtherChild"
+                ),
+                Some(false)
+            );
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.Reference.KnownChild"
+                ),
+                Some(true)
+            );
+            body.items[0].properties.clear();
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.OtherChild"
+                ),
+                None
+            );
+            body.items[0]
+                .properties
+                .push((path, PropertyValue::DataPath("List".into())));
+            let mut second_table = body.items[0].clone();
+            second_table.name = "SecondTable".into();
+            second_table.id = 2;
+            second_table.properties[0].1 = PropertyValue::DataPath("OtherList".into());
+            body.items.push(second_table);
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.SecondTable.CurrentData.OtherChild"
+                ),
+                Some(false)
+            );
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "Items.ActualTable.CurrentData.OtherChild"
+                ),
+                Some(true)
+            );
+            body.items.pop();
+        }
+    }
+    #[test]
+    fn default_reference_graph_does_not_change_custom_query_alias_resolution() {
+        let metadata = metadata();
+        let mut body = body();
+        let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
+        list.custom_query = true;
+        list.auto_fill_available_fields = true;
+        list.query_text =
+            Some("SELECT R.Reference AS CurrentAlias FROM AccumulationRegister.Source AS R".into());
+        for minor in [20, 21] {
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.CurrentAlias"),
+                Some(false)
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference"),
+                Some(true)
+            );
+            // Alias type inference is not replaced by a guessed main-table edge.
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.CurrentAlias.KnownChild"),
+                None
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.KnownChild"),
+                None
+            );
+        }
+    }
+    #[test]
+    fn default_reference_graph_drives_production_native_markers_from_current_values() {
+        let mut metadata = metadata();
+        let mut body = body();
+        body.data_attributes[0].not_default_use_always = [
+            "List.Reference.KnownChild",
+            "List.Reference.MissingChild",
+            "List.Reference.Next.Leaf",
+            "List.Reference.Missing.Leaf",
+        ]
+        .map(morph1c_core::ir::form::DataPathSpec::from_form_text)
+        .to_vec();
+        let emitted = |metadata: &Configuration, body: &FormBody, minor| {
+            let context = FormProjectionContext::new(metadata).unwrap();
+            let bytes = with_roundtrip_target(FormatVersion::new(2, minor), || {
+                super::super::write_form_with_context(
+                    super::super::FormDialect::Designer,
+                    body,
+                    &context,
+                )
+            })
+            .unwrap();
+            crate::parse(&bytes)
+                .unwrap()
+                .root
+                .child("Attributes")
+                .unwrap()
+                .child("Attribute")
+                .unwrap()
+                .child("UseAlways")
+                .unwrap()
+                .children
+                .iter()
+                .map(|field| field.text.clone())
+                .collect::<Vec<_>>()
+        };
+        for minor in [20, 21] {
+            assert_eq!(
+                emitted(&metadata, &body, minor),
+                [
+                    "List.Reference.KnownChild",
+                    "~List.Reference.MissingChild",
+                    "List.Reference.Next.Leaf",
+                    "~List.Reference.Missing.Leaf",
+                ]
+            );
+            // Rename CURRENT target data; the old name cannot prove presence.
+            metadata.objects[1].children[0].name = "MissingChild".into();
+            assert_eq!(
+                emitted(&metadata, &body, minor),
+                [
+                    "~List.Reference.KnownChild",
+                    "List.Reference.MissingChild",
+                    "List.Reference.Next.Leaf",
+                    "~List.Reference.Missing.Leaf",
+                ]
+            );
+            metadata.objects[1].children[0].name = "KnownChild".into();
+        }
+    }
+    #[test]
+    fn compound_type_and_inherited_reference_table_policies_remain_distinct() {
+        let mut metadata = metadata();
+        let body = body();
+        let mut first = MetadataObject::new(
+            ObjectKind::new("Catalog.TabularSection"),
+            "FirstTable",
+            Uuid([6; 16]),
+        );
+        first.children.push(attribute(
+            "Catalog.TabularSection.Attribute",
+            "Link",
+            &["CatalogRef.Deep"],
+        ));
+        metadata.objects[1].children.push(first);
+        let mut second = MetadataObject::new(
+            ObjectKind::new("Catalog.TabularSection"),
+            "SecondTable",
+            Uuid([7; 16]),
+        );
+        second.children.push(attribute(
+            "Catalog.TabularSection.Attribute",
+            "TableLeaf",
+            &["String"],
+        ));
+        metadata.objects[2].children.push(second);
+        metadata.objects[3].children.push(attribute(
+            "Catalog.Attribute",
+            "Next",
+            &["CatalogRef.Deep"],
+        ));
+        for minor in [20, 21] {
+            // A single reference permits its current declared table definition.
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "List.Reference.FirstTable.Link.Leaf"
+                ),
+                Some(false)
+            );
+            // LocalBase's inNestedTable flag is inherited through scalar refs.
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "List.Reference.FirstTable.Link.SecondTable.TableLeaf"
+                ),
+                Some(true)
+            );
+            // CURRENT compound type excludes its immediate table definitions,
+            // but String contributes no DbObjectDef / inherited inMultiRef.
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Target", "String"],
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.FirstTable"),
+                Some(true)
+            );
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "List.Reference.Next.SecondTable.TableLeaf"
+                ),
+                Some(false)
+            );
+            // A genuine two-reference parent sets LocalBase.inMultiRef; shared
+            // deduplicated child targets do not clear the inherited flag.
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Target", "CatalogRef.Other"],
+            );
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Next.Leaf"),
+                Some(false)
+            );
+            assert_eq!(
+                lookup(
+                    &metadata,
+                    &body,
+                    minor,
+                    "List.Reference.Next.SecondTable.TableLeaf"
+                ),
+                Some(true)
+            );
+            metadata.objects[0].children[0] = attribute(
+                "AccumulationRegister.Attribute",
+                "Reference",
+                &["CatalogRef.Target"],
+            );
+        }
+    }
+    #[test]
+    fn calculated_field_children_remain_with_their_current_expression_provider() {
+        let metadata = metadata();
+        let mut body = body();
+        body.data_attributes[0]
+            .dynamic_list
+            .as_mut()
+            .unwrap()
+            .calculated_fields
+            .push(
+                serde_json::from_value::<morph1c_core::ir::form::DcsCalculatedField>(
+                    serde_json::json!({
+                        "data_path": "Computed", "expression": "1"
+                    }),
+                )
+                .unwrap(),
+            );
+        for minor in [20, 21] {
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Computed"),
+                Some(false)
+            );
+            assert_eq!(lookup(&metadata, &body, minor, "List.Computed.Child"), None);
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.Missing"),
+                Some(true)
+            );
+            let context = FormProjectionContext::new(&metadata).unwrap();
+            let profile = FormatVersion::new(2, minor);
+            let before = context.dependency_sha256(&body, profile).unwrap();
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .expression = "2".into();
+            assert_ne!(context.dependency_sha256(&body, profile).unwrap(), before);
+            assert_eq!(lookup(&metadata, &body, minor, "List.Computed.Child"), None);
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .data_path = "Renamed".into();
+            assert_ne!(context.dependency_sha256(&body, profile).unwrap(), before);
+            assert_eq!(lookup(&metadata, &body, minor, "List.Computed"), Some(true));
+            assert_eq!(lookup(&metadata, &body, minor, "List.Renamed"), Some(false));
+            assert_eq!(lookup(&metadata, &body, minor, "List.Renamed.Child"), None);
+            // A same-name calculated definition cannot borrow a metadata type.
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .data_path = "Reference".into();
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.KnownChild"),
+                None
+            );
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .data_path = "Computed".into();
+            body.data_attributes[0]
+                .dynamic_list
+                .as_mut()
+                .unwrap()
+                .calculated_fields[0]
+                .expression = "1".into();
+        }
     }
 }

@@ -174,6 +174,25 @@ pub struct TypeRef {
     pub qualifier: Option<TypeQualifier>,
 }
 
+impl TypeRef {
+    /// Primitive database-view values have no reference-member provider.
+    /// Other type identities require their actual CURRENT type registry.
+    pub fn is_dbview_scalar(&self) -> bool {
+        matches!(
+            self.id.as_str(),
+            "String"
+                | "Number"
+                | "Boolean"
+                | "Date"
+                | "Undefined"
+                | "Null"
+                | "UUID"
+                | "BinaryData"
+                | "ValueStorage"
+        )
+    }
+}
+
 /// Квалификатор примитивной компоненты — РОВНО один из видов, соответствующий
 /// примитиву. Типобезопасный enum (а не `Vec<(String,Value)>`): нельзя положить
 /// квалификатор не того вида и нельзя случайно расхождение default-омиссии между
