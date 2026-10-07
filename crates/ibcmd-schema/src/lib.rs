@@ -18505,26 +18505,44 @@ pub mod metadata_child_storage_facts {
 
     impl AdditionalIndexStandardFieldFamily {
         pub fn for_owner(kind: &str) -> Self {
-            match kind {
-                "Catalog" => Self::Catalog,
+            Self::for_table(kind, true)
+        }
+
+        /// Only the catalog's own table uses catalog standard-attribute codes.
+        /// Its tabular sections retain the shared index field code family.
+        pub fn for_table(owner_kind: &str, is_owner_table: bool) -> Self {
+            match (owner_kind, is_owner_table) {
+                ("Catalog", true) => Self::Catalog,
                 _ => Self::RegisterOrTabularSection,
             }
         }
 
-        pub fn field_name(self, code: &str) -> Option<&'static str> {
+        fn fields(self) -> &'static [(&'static str, i64)] {
             match self {
-                Self::Catalog => CATALOG_STANDARD_FIELDS
-                    .iter()
-                    .find(|(_, marker)| marker.to_string() == code.trim())
-                    .map(|(name, _)| *name),
-                Self::RegisterOrTabularSection => match code.trim() {
-                    "-2" => Some("Period"),
-                    "-3" => Some("Recorder"),
-                    "-4" => Some("LineNumber"),
-                    "-5" => Some("Ref"),
-                    _ => None,
-                },
+                Self::Catalog => CATALOG_STANDARD_FIELDS,
+                Self::RegisterOrTabularSection => &[
+                    ("Period", -2),
+                    ("Recorder", -3),
+                    ("LineNumber", -4),
+                    ("Ref", -5),
+                ],
             }
+        }
+
+        /// Closed inverse of field_name: a name outside this table's family
+        /// must resolve as a declared UUID field or be rejected by the caller.
+        pub fn field_code(self, name: &str) -> Option<i64> {
+            self.fields()
+                .iter()
+                .find(|(field, _)| *field == name)
+                .map(|(_, code)| *code)
+        }
+
+        pub fn field_name(self, code: &str) -> Option<&'static str> {
+            self.fields()
+                .iter()
+                .find(|(_, marker)| marker.to_string() == code.trim())
+                .map(|(name, _)| *name)
         }
     }
 
@@ -18589,13 +18607,21 @@ pub mod metadata_child_storage_facts {
         fn index_standard_codes_remain_owner_specific_and_closed() {
             let catalog = AdditionalIndexStandardFieldFamily::for_owner("Catalog");
             let register = AdditionalIndexStandardFieldFamily::for_owner("InformationRegister");
+            let section = AdditionalIndexStandardFieldFamily::for_table("Catalog", false);
             assert_eq!(catalog.field_name("-2"), Some("Code"));
             assert_eq!(register.field_name("-2"), Some("Period"));
             assert_eq!(catalog.field_name("-4"), Some("Parent"));
             assert_eq!(register.field_name("-4"), Some("LineNumber"));
-            for family in [catalog, register] {
+            assert_eq!(section.field_code("LineNumber"), Some(-4));
+            assert_eq!(section.field_code("Ref"), Some(-5));
+            assert_eq!(catalog.field_code("Period"), None);
+            for family in [catalog, register, section] {
                 assert_eq!(family.field_name("-02"), None);
                 assert_eq!(family.field_name("999"), None);
+                for (name, code) in family.fields() {
+                    assert_eq!(family.field_code(name), Some(*code));
+                    assert_eq!(family.field_name(&code.to_string()), Some(*name));
+                }
             }
         }
 

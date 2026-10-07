@@ -23,6 +23,7 @@
 //! name.
 
 use anyhow::{Result, anyhow};
+use ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily;
 use std::collections::BTreeMap;
 
 use super::source_assets::AdditionalIndexesOwner;
@@ -84,7 +85,7 @@ fn resolve_table(
 /// Field name for one `{"#",<field type>,{1,<slot>}}` reference.
 fn resolve_field(
     field: &str,
-    owner_kind: &str,
+    family: AdditionalIndexStandardFieldFamily,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)
@@ -118,30 +119,26 @@ fn resolve_field(
             })?;
             Ok(leaf.to_string())
         }
-        [code] => {
-            use ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily;
-            let family = AdditionalIndexStandardFieldFamily::for_owner(owner_kind);
-            family
-                .field_name(code)
-                .map(str::to_string)
-                .ok_or_else(|| match family {
-                    AdditionalIndexStandardFieldFamily::Catalog => anyhow!(
-                        "additional-index catalog standard-field code {} is not known",
-                        code.trim()
-                    ),
-                    AdditionalIndexStandardFieldFamily::RegisterOrTabularSection => anyhow!(
-                        "additional-index standard-field code {} is not in the evidenced table",
-                        code.trim()
-                    ),
-                })
-        }
+        [code] => family
+            .field_name(code)
+            .map(str::to_string)
+            .ok_or_else(|| match family {
+                AdditionalIndexStandardFieldFamily::Catalog => anyhow!(
+                    "additional-index catalog standard-field code {} is not known",
+                    code.trim()
+                ),
+                AdditionalIndexStandardFieldFamily::RegisterOrTabularSection => anyhow!(
+                    "additional-index standard-field code {} is not in the evidenced table",
+                    code.trim()
+                ),
+            }),
         _ => Err(anyhow!("additional-index field slot has an unknown shape")),
     }
 }
 
 fn resolve_field_list(
     list: &str,
-    owner_kind: &str,
+    family: AdditionalIndexStandardFieldFamily,
     object_refs: &BTreeMap<String, String>,
 ) -> Result<Vec<String>> {
     let fields = split_1c_braced_fields(list.trim(), 0)
@@ -159,7 +156,7 @@ fn resolve_field_list(
     fields
         .iter()
         .skip(1)
-        .map(|field| resolve_field(field, owner_kind, object_refs))
+        .map(|field| resolve_field(field, family, object_refs))
         .collect()
 }
 
@@ -220,12 +217,15 @@ pub(super) fn parse_additional_indexes(
             .get(1)
             .and_then(|value| parse_uuid_field(value.trim()))
             .ok_or_else(|| anyhow!("additional-index table holds no uuid"))?;
+        let table = resolve_table(&table_uuid, owner, object_refs)?;
+        let family =
+            AdditionalIndexStandardFieldFamily::for_table(&owner.kind, table_uuid == owner.uuid);
         indexes.push(AdditionalIndex {
             id,
             name,
-            table: resolve_table(&table_uuid, owner, object_refs)?,
-            indexed_fields: resolve_field_list(body[2], &owner.kind, object_refs)?,
-            additional_fields: resolve_field_list(body[3], &owner.kind, object_refs)?,
+            table,
+            indexed_fields: resolve_field_list(body[2], family, object_refs)?,
+            additional_fields: resolve_field_list(body[3], family, object_refs)?,
         });
     }
     Ok(indexes)
@@ -395,6 +395,98 @@ mod tests {
         assert!(
             error.to_string().contains("is not a known object"),
             "{error}",
+        );
+    }
+
+    const CATALOG_UUID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const SECTION_UUID: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const PERIOD_UUID: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc";
+
+    fn catalog_owner() -> AdditionalIndexesOwner {
+        AdditionalIndexesOwner {
+            kind: "Catalog".into(),
+            name: "Products".into(),
+            uuid: CATALOG_UUID.into(),
+        }
+    }
+
+    fn catalog_metadata_xml(declare_period: bool) -> String {
+        let attribute = if declare_period {
+            format!(
+                "<Attribute uuid=\"{PERIOD_UUID}\"><Properties><Name>Period</Name></Properties></Attribute>"
+            )
+        } else {
+            String::new()
+        };
+        format!(
+            "<MetaDataObject><Catalog uuid=\"{CATALOG_UUID}\"><ChildObjects>{attribute}<TabularSection uuid=\"{SECTION_UUID}\"><Properties><Name>Rows</Name></Properties><ChildObjects/></TabularSection></ChildObjects></Catalog></MetaDataObject>"
+        )
+    }
+
+    fn catalog_index(table: &str, fields: &[&str]) -> AdditionalIndex {
+        AdditionalIndex {
+            id: "dddddddd-dddd-4ddd-8ddd-dddddddddddd".into(),
+            name: "ByFields".into(),
+            table: table.into(),
+            indexed_fields: fields.iter().map(|field| (*field).into()).collect(),
+            additional_fields: Vec::new(),
+        }
+    }
+
+    fn pack_and_read_catalog_indexes(
+        indexes: &[AdditionalIndex],
+        declare_period: bool,
+    ) -> Result<Vec<AdditionalIndex>> {
+        use std::io::Read;
+
+        let owner = catalog_owner();
+        let xml = format_additional_indexes_xml(indexes);
+        let blob = crate::module_blob::pack_additional_indexes_blob_from_xml(
+            xml.as_bytes(),
+            catalog_metadata_xml(declare_period).as_bytes(),
+            &owner.kind,
+            &owner.name,
+            &owner.uuid,
+        )?;
+        let mut bytes = Vec::new();
+        flate2::read::DeflateDecoder::new(blob.as_slice()).read_to_end(&mut bytes)?;
+        let refs = BTreeMap::from([
+            (
+                SECTION_UUID.into(),
+                "Catalog.Products.TabularSection.Rows".into(),
+            ),
+            (
+                PERIOD_UUID.into(),
+                "Catalog.Products.Attribute.Period".into(),
+            ),
+        ]);
+        parse_additional_indexes(&bytes, &owner, &refs)
+    }
+
+    #[test]
+    fn catalog_root_and_section_standard_fields_roundtrip_in_distinct_families() {
+        let indexes = [
+            catalog_index("Catalog.Products", &["Code", "Parent"]),
+            catalog_index("Catalog.Products.Rows", &["LineNumber", "Ref"]),
+        ];
+        let returned = pack_and_read_catalog_indexes(&indexes, false).unwrap();
+        assert_eq!(returned.len(), indexes.len());
+        for (actual, expected) in returned.iter().zip(&indexes) {
+            assert_eq!(actual.table, expected.table);
+            assert_eq!(actual.indexed_fields, expected.indexed_fields);
+            assert_eq!(actual.additional_fields, expected.additional_fields);
+        }
+    }
+
+    #[test]
+    fn catalog_period_resolves_only_as_a_declared_attribute() {
+        let indexes = [catalog_index("Catalog.Products", &["Period"])];
+        let returned = pack_and_read_catalog_indexes(&indexes, true).unwrap();
+        assert_eq!(returned[0].indexed_fields, ["Period"]);
+        let error = pack_and_read_catalog_indexes(&indexes, false).unwrap_err();
+        assert!(
+            error.to_string().contains("field Period is not a field"),
+            "{error}"
         );
     }
 }

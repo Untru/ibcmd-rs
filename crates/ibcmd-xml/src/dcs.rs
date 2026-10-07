@@ -6247,11 +6247,8 @@ pub fn reconcile_form_list_settings_data_parameters(
         .trim()
         .is_empty()
     {
-        if let Some(start) = fragment.find("<dcsset:dataParameters>") {
-            fragment = format!("{}<dcsset:dataParameters/>\r\n", &fragment[..start]);
-        } else {
-            return None;
-        }
+        let start = fragment.find("<dcsset:dataParameters>")?;
+        fragment = format!("{}<dcsset:dataParameters/>\r\n", &fragment[..start]);
     }
     Some(fragment)
 }

@@ -2317,26 +2317,13 @@ pub fn pack_additional_indexes_blob_from_xml(
                 index.table
             ));
         };
+        let family = ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily::for_table(
+            owner_kind, section.is_none(),
+        );
         let field_node = |name: &str| -> Result<StyleNode> {
-            // A catalog's standard fields carry the catalog's own codes
-            // (`Code` -2 on one 8.3.27 corpus), not the register ones.
-            let catalog_code = matches!(
-                ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily::for_owner(owner_kind),
-                ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily::Catalog
-            )
-            .then_some(ibcmd_schema::metadata_child_storage_facts::CATALOG_STANDARD_FIELDS)
-            .and_then(|codes| codes.iter().find(|(standard, _)| *standard == name));
-            let slot = match name {
-                _ if catalog_code.is_some() => StyleNode::List(vec![StyleNode::token(
-                    catalog_code
-                        .map(|(_, code)| code.to_string())
-                        .unwrap_or_default(),
-                )]),
-                "Period" => StyleNode::List(vec![StyleNode::token("-2")]),
-                "Recorder" => StyleNode::List(vec![StyleNode::token("-3")]),
-                "LineNumber" => StyleNode::List(vec![StyleNode::token("-4")]),
-                "Ref" => StyleNode::List(vec![StyleNode::token("-5")]),
-                _ => {
+            let slot = match family.field_code(name) {
+                Some(code) => StyleNode::List(vec![StyleNode::token(code.to_string())]),
+                None => {
                     let uuid = section
                         .and_then(|section| owner.sections.get(section))
                         .and_then(|(_, fields)| fields.get(name))
