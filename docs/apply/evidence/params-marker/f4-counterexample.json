@@ -1,0 +1,63 @@
+{
+  "scope": "independent read-only historical F4 counterexample; not a new runtime matrix",
+  "source_paths": [
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\out\\f4_g4.activate.recovery.json",
+      "bytes": 8648546,
+      "sha256": "50814B5E67F3B67E532F6B22CC4ABFCDDE8848D2AA56654F6411A3D8CF49EAFA"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\out\\f4_g4.activate.json",
+      "bytes": 4758,
+      "sha256": "055F1A3CEE1CE09073A7844AF6B8323BA254E5BE78F7AEBF88028A0158DD3FC6"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\ddlkit\\snap\\ibcmd_rs_04_apply_g4d_20260930\\nat_after\\svc.json",
+      "bytes": 5912208,
+      "sha256": "D9E1342D1AC81C343C026C08683BEFFF70A61E90A73202D14993CEAFA3F3744A"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\ddlkit\\snap\\ibcmd_rs_04_apply_g4c_20260930\\own_after\\svc.json",
+      "bytes": 5911973,
+      "sha256": "AA8199794838562AD418078E09B866EDE4C6C0B56AE3A17BC28C3AC9B8EFB8BA"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\logs\\native_f4_g4_twin_apply.out",
+      "bytes": 681,
+      "sha256": "B34F8D2E7108F0DBCDE91F4C15B472BF4E2A36D1A628FB8A0104D75A66A8EC34"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\logs\\native_s5C.out",
+      "bytes": 681,
+      "sha256": "84A0B419D7E4F1B643577A750196CF0F1FE00B50CDFA0C76E42FA3900EFB15DD"
+    },
+    {
+      "path": "F:\\ibcmd\\lab\\04\\apply\\work\\s5C_apply.json",
+      "bytes": 2812,
+      "sha256": "DAFAF33AC06A3F54397E64EA9A354D06F5385E0BD9695089B29D636C81217C24"
+    }
+  ],
+  "descriptor_name": "16b3681c-426d-4d6f-9ffe-588a23974222",
+  "compressed_old_bytes": 173,
+  "compressed_stage_bytes": 174,
+  "compressed_old_sha256": "EE205692F438A486572FAA1B97771246C4ECB87D1C4CAF956EDF435865A38022",
+  "compressed_stage_sha256": "2CA5A62B3681C5F667980EED1905CF64410D22AF0B7DE02B3DB571B1B02424BE",
+  "decoded_bytes": 289,
+  "decoded_sha256": "6616706B607D8902900263A8EC4B30E23C3A0643B795484FEA3376FF862A0957",
+  "decoded_exact_equal": true,
+  "native_params_marker_preserves_exact_payload": true,
+  "params_marker_bytes": 119,
+  "params_marker_sha256": "B3E6E78DDA1475034B608BAAEA2D88CCE8A9E5074BC8209E41610FC316E01639",
+  "own_params_marker_missing": true,
+  "current_rule_descriptor_presence_is_insufficient": true,
+  "required_next_evidence": [
+    "same stage with identical compressed descriptor",
+    "same stage with recompressed identical descriptor",
+    "semantically changed descriptor",
+    "body-only stage",
+    "repeat apply"
+  ],
+  "production_fix_verified": false,
+  "issue_418_complete": false,
+  "writes_to_original_evidence": false
+}

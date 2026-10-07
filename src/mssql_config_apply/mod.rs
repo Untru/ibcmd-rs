@@ -30,6 +30,7 @@ pub mod errors;
 pub mod gate;
 pub mod model;
 pub mod objects;
+mod params_marker;
 pub mod recovery;
 pub mod registrations;
 pub mod removals;
@@ -1652,6 +1653,21 @@ pub fn plan_with_gate(
         .count() as i64;
     let mut consumed_names = consumed.iter().cloned().collect::<Vec<_>>();
     consumed_names.sort();
+    let marker_decision = params_marker::plan(params_marker::PlanInput {
+        client,
+        db: &db,
+        profile: options.platform_profile,
+        staged: &staged,
+        replaced: &replaced,
+        special: &special,
+        active_versions: &active_versions,
+        history: &history,
+        config_marker: config_marker.as_deref(),
+        params_marker: params_marker.as_deref(),
+    })
+    .map_err(|error| {
+        NeedsNativeApply::apply(format!("Params marker descriptor decision: {error:#}"))
+    })?;
     let inputs = ScriptInputs {
         database: options.database.clone(),
         client_pid: std::process::id(),
@@ -1662,10 +1678,8 @@ pub fn plan_with_gate(
         replaced: replaced_fp,
         special_config: special_config_fp,
         special_params: special_params_fp,
-        clear_params_marker: report
-            .stage
-            .as_ref()
-            .is_some_and(|stage| stage.descriptors > 0),
+        clear_params_marker: marker_decision.clear,
+        params_marker_guard_sql: marker_decision.guard_sql,
         generations: history.generations.clone(),
         reset_change_registrations: has_change_registrations,
         files_rewrites,

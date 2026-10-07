@@ -52,7 +52,13 @@ pub struct VersionsRow {
 
 pub fn parse_versions(blob: &[u8]) -> Result<VersionsRow> {
     let plain = inflate_row(blob).map_err(|error| anyhow!("versions: {error}"))?;
-    let text = std::str::from_utf8(strip_bom(&plain))
+    parse_versions_plain(&plain)
+}
+
+/// Parse an already fully validated/inflated ordinary version map. Storage
+/// callers can derive allocation from the actual stream without decoding twice.
+pub(super) fn parse_versions_plain(plain: &[u8]) -> Result<VersionsRow> {
+    let text = std::str::from_utf8(strip_bom(plain))
         .map_err(|_| anyhow!("versions: the row is not UTF-8"))?;
     let inner = text
         .trim()
