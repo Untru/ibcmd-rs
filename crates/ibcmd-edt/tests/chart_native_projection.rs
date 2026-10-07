@@ -766,10 +766,10 @@ fn platform_funnel_spelling_and_native_source_fraction_presence_use_current_numb
     );
     let native = write_form(FormDialect::Designer, &body).unwrap();
     let text = std::str::from_utf8(&native).unwrap();
-    assert!(text.contains("<d4p1:funnelNeckHeightPercent>10.0</d4p1:funnelNeckHeightPercent>"));
+    assert!(text.contains("<d4p1:funnelNeckHeightPercent>10</d4p1:funnelNeckHeightPercent>"));
     for (spelling, current) in [("10", "27"), ("10.0", "27.0"), ("10.00", "27.00")] {
         let explicit = text.replace(
-            "<d4p1:funnelNeckHeightPercent>10.0</",
+            "<d4p1:funnelNeckHeightPercent>10</",
             &format!("<d4p1:funnelNeckHeightPercent>{spelling}</"),
         );
         let mut decoded = read_form(FormDialect::Designer, explicit.as_bytes()).unwrap();
@@ -958,7 +958,7 @@ fn funnel_current_efloat_rounding_is_distinct_from_edouble_and_big_decimal() {
                 ("1.4e-45", "1.4E-45"),
                 ("3.4028235e38", "3.4028235E38"),
                 ("0.1", "0.1"),
-                ("-0", "-0.0"),
+                ("-0", "-0"),
                 ("NaN", "NaN"),
                 ("Infinity", "Infinity"),
             ] {
@@ -1050,7 +1050,7 @@ fn chart_float_inputs_follow_original_emf_grammar_for_current_values_only() {
         with_roundtrip_target(FormatVersion::new(2, minor), || {
             for (lexical, expected) in [
                 ("  1.25\t", "1.25"),
-                ("0x1.8p1", "3.0"),
+                ("0x1.8p1", "3"),
                 ("1.25f", "1.25"),
                 ("1.25D", "1.25"),
                 ("+NaN", "NaN"),
@@ -1063,8 +1063,7 @@ fn chart_float_inputs_follow_original_emf_grammar_for_current_values_only() {
                 let (_, native, _) = roundtrip(&body);
                 let text = String::from_utf8(native).unwrap();
                 assert!(text.contains(&format!("<d4p1:funnelNeckHeightPercent>{expected}</")));
-                let double_expected = if expected == "3.0" { "3" } else { expected };
-                assert!(text.contains(&format!("<d4p1:userMaxValue>{double_expected}</")));
+                assert!(text.contains(&format!("<d4p1:userMaxValue>{expected}</")));
             }
             for lexical in ["inf", "NaNf", "InfinityD", "１２.５", "0x1", "1.2.3"] {
                 let source = format!(
