@@ -1539,6 +1539,17 @@ impl MetadataSourceContext {
             .split_once('.')
             .map(|(_, name)| name)
             .ok_or_else(|| anyhow!("invalid metadata type reference: {reference}"))?;
+        // A tabular section's types (`DocumentTabularSection.<owner>.<section>`)
+        // live in the owner's own file.
+        let owner_file = ibcmd_schema::generated_tabular_section_source_owner(generated_type_name);
+        if let Some(owner) = owner_file {
+            let path = self.source_root.join(folder).join(format!("{owner}.xml"));
+            if let Ok(xml) = self.read_source(&path)
+                && let Ok(type_id) = parse_generated_type_type_id(&xml, generated_type_name)
+            {
+                return Ok(type_id);
+            }
+        }
         let path = self.source_root.join(folder).join(format!("{name}.xml"));
         let xml = self
             .read_source(&path)
@@ -1808,9 +1819,13 @@ pub fn pack_module_blob_container_bytes(container: &[u8]) -> Result<PackedModule
 }
 
 pub fn unpack_module_blob_text(blob: &[u8]) -> Result<Vec<u8>> {
-    read_element_from_blob(blob, "text")
+    let text = read_element_from_blob(blob, "text")
         .context("failed to read module blob text element")?
-        .ok_or_else(|| anyhow!("module blob does not contain text element"))
+        .ok_or_else(|| anyhow!("module blob does not contain text element"))?;
+    // Protected modules can retain a `text` element containing ciphertext.
+    // It is not BSL source; exporting it would lose the binary container.
+    std::str::from_utf8(&text).context("module text element is not UTF-8 source")?;
+    Ok(text)
 }
 
 /// Recognizes a module body carrying no V8-container framing at all: the
@@ -2302,13 +2317,13 @@ pub fn pack_additional_indexes_blob_from_xml(
                 index.table
             ));
         };
+        let family = ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily::for_table(
+            owner_kind, section.is_none(),
+        );
         let field_node = |name: &str| -> Result<StyleNode> {
-            let slot = match name {
-                "Period" => StyleNode::List(vec![StyleNode::token("-2")]),
-                "Recorder" => StyleNode::List(vec![StyleNode::token("-3")]),
-                "LineNumber" => StyleNode::List(vec![StyleNode::token("-4")]),
-                "Ref" => StyleNode::List(vec![StyleNode::token("-5")]),
-                _ => {
+            let slot = match family.field_code(name) {
+                Some(code) => StyleNode::List(vec![StyleNode::token(code.to_string())]),
+                None => {
                     let uuid = section
                         .and_then(|section| owner.sections.get(section))
                         .and_then(|(_, fields)| fields.get(name))
@@ -4742,11 +4757,28 @@ fn format_native_table_record(
                 )
             })?;
             let segments = scan_braced_fields(&resolved, 0)?;
-            let last = segments
-                .last()
-                .cloned()
-                .ok_or_else(|| anyhow!("a table's <RowPictureDataPath> resolved to no segment"))?;
-            format!("{{1,{}}}", &resolved[last])
+            // The segments past the table's own binding: a path reaching
+            // through a reference column keeps all of them (`{2,{0,<column>},{-7}}`
+            // for `Объект.Обращения.Обращение.DeletionMark` in dmh
+            // `Documents/ВыгрузкаВССТУ`), while one reaching into the row
+            // keeps its single trailing segment.
+            let table_segments = data_paths
+                .resolve(item.data_path.as_deref().unwrap_or(""))
+                .and_then(|own| scan_braced_fields(&own, 0).ok())
+                .map_or(0, |own| own.len().saturating_sub(1));
+            let first = segments.len().saturating_sub(1).min(1 + table_segments);
+            let keep = &segments[first.max(1)..];
+            let keep = if keep.len() > 1 {
+                keep
+            } else {
+                &segments[segments.len() - 1..]
+            };
+            let joined = keep
+                .iter()
+                .map(|range| resolved[range.clone()].trim())
+                .collect::<Vec<_>>()
+                .join(",");
+            format!("{{{},{joined}}}", keep.len())
         }
     };
     let head = native::format_table_head(&native::NativeTableHead {
@@ -4829,7 +4861,7 @@ fn format_native_table_record(
             main_attribute_class,
             source,
             items_root,
-            nested_in_gantt_chart.then_some(item.id.as_str()),
+            Some(item.id.as_str()),
         )?);
     }
 
@@ -4991,6 +5023,16 @@ fn native_root_property_bag(
         };
         if let Some(target) = items.get(name) {
             return Ok(target.id.clone());
+        }
+        // An item's extended tooltip is an item too (Документооборот 3.0
+        // `Reports/НеограниченныеПрава`: `<CustomSettingsFolder>` names one).
+        if let Some(id) = properties.child_items.iter().find_map(|item| {
+            item.extended_tooltip
+                .as_ref()
+                .filter(|tip| tip.name == name)
+                .map(|tip| tip.id.clone())
+        }) {
+            return Ok(id);
         }
         match name.split_once(':') {
             Some((id, _)) if id.chars().all(|c| c.is_ascii_digit()) => Ok(id.to_string()),
@@ -5300,11 +5342,10 @@ fn native_table_addition(
         },
         None => match served_table_id {
             Some(table_id) => table_id.to_string(),
-            None => {
-                return Err(anyhow!(
-                    "an addition with no <AdditionSource> is not measured"
-                ));
-            }
+            // An addition standing outside any table (a search string inside
+            // a command bar) serves no item: the stored member is `{-1,-1}`
+            // (Документооборот 3.0 `Catalogs/МестаХраненияДел/Forms/ФормаВыбора`).
+            None => "-1".to_string(),
         },
     };
 
@@ -5319,6 +5360,7 @@ fn native_table_addition(
         1 => native::format_view_status_addition_payload(
             item.scalars.get("HorizontalLocation").map(String::as_str),
             auto_max_width,
+            item.horizontal_stretch,
         )
         .ok_or_else(|| anyhow!("a view status addition names an unmeasured location"))?,
         _ => native::format_search_control_addition_payload(auto_max_width),
@@ -5614,8 +5656,13 @@ fn native_container_payload(
             // Payload member 2 holds the group's own events --
             // `OnCurrentPageChange` -- 374 of 374.
             let events = native_item_events(item, "")?;
-            native::format_pages_payload(item.pages_representation.as_deref(), &events, &associated)
-                .ok_or_else(|| anyhow!("<Pages> names a spelling the writer cannot place"))
+            native::format_pages_payload(
+                item.pages_representation.as_deref(),
+                &events,
+                &associated,
+                item.scalars.get("CurrentRowUse").map(String::as_str),
+            )
+            .ok_or_else(|| anyhow!("the pages group names a spelling the writer cannot place"))
         }
         "Popup" => {
             let picture = native_item_picture(item, source, items_root)?;
@@ -5956,7 +6003,7 @@ fn native_choice_list(
 /// `<SpellCheckingOnTextInput>` (`Use` 1, `DontUse` 2), a constant 0, and
 /// `<SpecialTextInputMode>` (`Email` 4, `PhoneNumber` 5, `Digits` 6); 0 when
 /// absent. Another spelling is refused.
-fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 6]> {
+fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 8]> {
     let code = |name: &str, table: &[(&str, &'static str)]| -> Result<&'static str> {
         match item.scalars.get(name).map(String::as_str) {
             None => Ok("0"),
@@ -5973,11 +6020,17 @@ fn native_text_input_tail(item: &FormXmlChildItem) -> Result<[&'static str; 6]> 
         code("AutoShowOpenButtonMode", &show)?,
         code("AutoCorrectionOnTextInput", &usage)?,
         code("SpellCheckingOnTextInput", &usage)?,
-        "0",
+        // Slot 59 `<AutoCapitalizationOnTextInput>` (Sentences 3) and slot 61
+        // `<OnScreenKeyboardReturnKeyText>` (Done 7): the exporter's
+        // InputFieldSlot table in form_schema.rs.
+        code("AutoCapitalizationOnTextInput", &[("Sentences", "3")])?,
         code(
             "SpecialTextInputMode",
             &[("Email", "4"), ("PhoneNumber", "5"), ("Digits", "6")],
         )?,
+        code("OnScreenKeyboardReturnKeyText", &[("Done", "7")])?,
+        // Slot 63 `<AutofillHint>` (FullName 1), behind the slot 62 sub-tuple.
+        code("AutofillHint", &[("FullName", "1")])?,
     ])
 }
 
@@ -6361,8 +6414,8 @@ fn native_field_payload(
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let events = native_item_events_where(item, main_attribute_class, |name| name != "OnChange")?;
-    match item.tag.as_str() {
-        "LabelField" => Ok(native::format_label_payload(&native::NativeLabelPayload {
+    match native::native_field_kind(&item.tag) {
+        Some(1) => Ok(native::format_label_payload(&native::NativeLabelPayload {
             width: item.width.as_deref().unwrap_or("0"),
             height: item.height.as_deref().unwrap_or("0"),
             horizontal_stretch: item.horizontal_stretch,
@@ -6385,7 +6438,7 @@ fn native_field_payload(
             border_color: &native_scalar_color(item, "BorderColor", source)?,
             ..native::NativeLabelPayload::plain(false)
         })),
-        "InputField" => {
+        Some(2) => {
             let choice_parameter_links = native_choice_parameter_links(item, data_paths)?;
             native::format_input_payload(&native::NativeInputPayload {
                 width: item.width.as_deref().unwrap_or("0"),
@@ -6404,7 +6457,7 @@ fn native_field_payload(
                     "ExtendedEditMultipleValues",
                     false,
                 ),
-                drop_list_settings: &native_input_drop_list_settings(item, data_paths)?,
+                drop_list_settings: &native_input_drop_list_settings(item, data_paths, source)?,
                 auto_choice_incomplete: native_scalar_tristate(item, "AutoChoiceIncomplete")?,
                 choice_folders_and_items: item
                     .scalars
@@ -6479,7 +6532,7 @@ fn native_field_payload(
             })
             .ok_or_else(|| anyhow!("the input field names something the writer cannot place"))
         }
-        "CheckBoxField" => {
+        Some(3) => {
             // Slot 5 holds a check box's `<EditFormat>` -- the `БЛ=…; БИ=…`
             // pair of its two captions, 81 ERP УХ forms -- and `<Format>` when
             // it names that instead.
@@ -6508,7 +6561,7 @@ fn native_field_payload(
             })
             .ok_or_else(|| anyhow!("<CheckBoxField> names a spelling the writer cannot place"))
         }
-        "GraphicalSchemaField" => {
+        Some(14) => {
             // The exporter reads the kind's own tuple for its extent,
             // `<Output>`, `<Edit>` and `<AutoMaxWidth>` only
             // (`FORM_DOCUMENT_FIELD_GEOMETRY`): the other geometry flags and
@@ -6538,7 +6591,26 @@ fn native_field_payload(
                 anyhow!("<GraphicalSchemaField> names a spelling the writer cannot place")
             })
         }
-        "ChartField" => {
+        Some(19) => {
+            if item.max_width.is_some()
+                || item.max_height.is_some()
+                || item.auto_max_width.is_some()
+                || item.auto_max_height.is_some()
+                || item.horizontal_stretch == Some(false)
+                || item.vertical_stretch == Some(false)
+            {
+                return Err(anyhow!(
+                    "the planner field names a property whose slot is not measured"
+                ));
+            }
+            Ok(native::format_planner_payload(
+                item.width.as_deref().unwrap_or("50"),
+                item.height.as_deref().unwrap_or("10"),
+                item.enable_start_drag.unwrap_or(false),
+                &events,
+            ))
+        }
+        Some(11) => {
             let horizontal = item.horizontal_stretch.unwrap_or(true);
             let vertical = item.vertical_stretch.unwrap_or(true);
             if horizontal != vertical
@@ -6563,7 +6635,7 @@ fn native_field_payload(
         // and the stretch pair only where they are not the default, so a
         // default the source spells out would not come back and refuses, as
         // does every extent the bag has no member for.
-        "GanttChartField" => {
+        Some(12) => {
             let count = |value: Option<&str>| {
                 value.is_none_or(|value| {
                     !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
@@ -6573,7 +6645,7 @@ fn native_field_payload(
             if item.max_width.is_some()
                 || item.max_height.is_some()
                 || item.auto_max_width == Some(true)
-                || item.auto_max_height.is_some()
+                || item.auto_max_height == Some(true)
                 || !count(item.width.as_deref())
                 || !count(item.height.as_deref())
                 || item.width.as_deref() == Some("50")
@@ -6591,10 +6663,11 @@ fn native_field_payload(
                 item.horizontal_stretch.unwrap_or(true),
                 item.vertical_stretch.unwrap_or(true),
                 item.auto_max_width.unwrap_or(true),
+                item.auto_max_height.unwrap_or(true),
                 &events,
             ))
         }
-        "PDFDocumentField" => {
+        Some(20) => {
             if events != "{0,1,0}"
                 || item.max_width.is_some()
                 || item.max_height.is_some()
@@ -6612,7 +6685,7 @@ fn native_field_payload(
                 item.height.as_deref().unwrap_or("10"),
             ))
         }
-        "HTMLDocumentField" => {
+        Some(15) => {
             native::format_html_document_payload(&native::NativeHtmlDocumentPayload {
                 // A document field's size defaults are not a field's: absent
                 // stores 50 and 10, over all 222 records of both corpora.
@@ -6630,7 +6703,7 @@ fn native_field_payload(
             })
             .ok_or_else(|| anyhow!("<HTMLDocumentField> names a spelling the writer cannot place"))
         }
-        "FormattedDocumentField" => {
+        Some(17) => {
             // Members 3 and 4, horizontal then vertical: the exporter reads
             // them so, and the 8.5.1.1150 BSP field that stretches one way
             // only exports byte for byte through it.
@@ -6648,10 +6721,12 @@ fn native_field_payload(
                     events: &events,
                     auto_max_width: item.auto_max_width.unwrap_or(true),
                     auto_max_height: item.auto_max_height.unwrap_or(true),
+                    text_color: &native_scalar_color(item, "TextColor", source)?,
+                    max_height: item.max_height.as_deref().unwrap_or("0"),
                 },
             ))
         }
-        "TextDocumentField" => Ok(native::format_text_document_payload(
+        Some(7) => Ok(native::format_text_document_payload(
             &native::NativeTextDocumentPayload {
                 width: item.width.as_deref().unwrap_or("50"),
                 height: item.height.as_deref().unwrap_or("10"),
@@ -6666,7 +6741,7 @@ fn native_field_payload(
                 events: &events,
             },
         )),
-        "RadioButtonField" => {
+        Some(5) => {
             // The font and the choice list used to refuse together, which
             // put 114 BSP forms behind a condition none of them meets: not
             // one radio button of that tree names a `<Font>`. They are two
@@ -6694,7 +6769,7 @@ fn native_field_payload(
             })
             .ok_or_else(|| anyhow!("<RadioButtonField> names a spelling the writer cannot place"))
         }
-        "SpreadSheetDocumentField" => {
+        Some(6) => {
             let border_color = native_scalar_color(item, "BorderColor", source)?;
             native::format_spreadsheet_payload(&native::NativeSpreadsheetPayload {
                 events: &events,
@@ -6735,7 +6810,7 @@ fn native_field_payload(
         // width (32 when absent), a constant 1, the horizontal stretch, the
         // maximum (100), the representation (`Broken` 0, absent 1), the
         // percentage and the maximum-width switch; the rest never varies.
-        "ProgressBarField" => {
+        Some(9) => {
             if item.height.is_some() {
                 return Err(anyhow!(
                     "a progress bar names a height, which is not measured"
@@ -6768,7 +6843,7 @@ fn native_field_payload(
         // switch, the font and colour, the events, the months panel, the
         // months across and down (1 when absent), the border (style 1 when
         // absent), and the maximum-size switches.
-        "CalendarField" => {
+        Some(8) => {
             let events =
                 native_item_events_where(item, main_attribute_class, |name| name != "OnChange")?;
             let border = if item.control_border.is_none() && !item.control_border_seen {
@@ -6777,9 +6852,23 @@ fn native_field_payload(
                 native_item_control_border(item)?
             };
             Ok(format!(
-                "{{6,{width},{height},1,1,0,{current},1,00010101000000,00010101000000,{font},{color},0,0,{events},{months_panel},{across},{down},{border},{auto_max_width},0,0,{auto_max_height},0}}",
+                "{{6,{width},{height},{hstretch},{vstretch},{selection},{current},1,00010101000000,00010101000000,{font},{color},0,{drag},{events},{months_panel},{across},{down},{border},{auto_max_width},0,0,{auto_max_height},{max_height}}}",
                 width = item.width.as_deref().unwrap_or("16"),
                 height = item.height.as_deref().unwrap_or("9"),
+                // Slot 5 is `<SelectionMode>` (Multiple=1, Interval=2) and slot 13
+                // `<EnableDrag>`; the exporter's reader in form_body.rs is the
+                // evidence for both tables.
+                // Slots 3/4 are the stretch flags (default 1) and slot 23 is
+                // `<MaxHeight>` (0 when absent), per the document-field
+                // geometry table of the exporter for `CalendarField`.
+                hstretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
+                vstretch = u8::from(item.vertical_stretch.unwrap_or(true)),
+                max_height = item.max_height.as_deref().unwrap_or("0"),
+                selection = crate::form_schema::form_calendar_selection_mode_code(
+                    item.scalars.get("SelectionMode").map(String::as_str),
+                )
+                .ok_or_else(|| anyhow!("a calendar's selection mode is not measured"))?,
+                drag = u8::from(item.enable_drag.unwrap_or(false)),
                 current = u8::from(native_scalar_flag(item, "ShowCurrentDate", true)),
                 font = native_item_font(item, source)?,
                 color = native_scalar_color(item, "TextColor", source)?,
@@ -6797,18 +6886,13 @@ fn native_field_payload(
             ))
         }
         // A track bar's `{2,…}` payload, 18 members over 13 records.
-        "TrackBarField" => {
-            let marking = match item.scalars.get("MarkingAppearance").map(String::as_str) {
-                None => "2",
-                Some("TopLeft") => "1",
-                Some(other) => {
-                    return Err(anyhow!(
-                        "a track bar's <MarkingAppearance>{other} is not measured"
-                    ));
-                }
-            };
+        Some(10) => {
+            let marking = crate::form_schema::form_track_bar_marking_appearance_code(
+                item.scalars.get("MarkingAppearance").map(String::as_str),
+            )
+            .ok_or_else(|| anyhow!("a track bar's marking appearance is not measured"))?;
             Ok(format!(
-                "{{2,{width},{height},{stretch},0,{min},{max},{step},0,{large_step},{marking_step},{marking},{{3,4,{{0}}}},{auto_max_width},0,0,1,0}}",
+                "{{2,{width},{height},{stretch},0,{min},{max},{step},0,{large_step},{marking_step},{marking},{{3,4,{{0}}}},{auto_max_width},{max_width},0,1,0}}",
                 width = item.width.as_deref().unwrap_or("32"),
                 height = item.height.as_deref().unwrap_or("2"),
                 stretch = u8::from(item.horizontal_stretch.unwrap_or(true)),
@@ -6818,9 +6902,11 @@ fn native_field_payload(
                 large_step = item.scalars.get("LargeStep").map_or("10", String::as_str),
                 marking_step = item.scalars.get("MarkingStep").map_or("5", String::as_str),
                 auto_max_width = u8::from(item.auto_max_width.unwrap_or(true)),
+                // Member 14 is `<MaxWidth>` (form_schema.rs `max_width`).
+                max_width = item.max_width.as_deref().unwrap_or("0"),
             ))
         }
-        "PictureField" => {
+        Some(4) => {
             if item.picture_present {
                 return Err(anyhow!("a picture field names a picture"));
             }
@@ -6954,7 +7040,12 @@ fn native_decoration_payload(
             },
         )
         .ok_or_else(|| {
-            anyhow!("<PictureDecoration> names a spelling the payload writer cannot place")
+            anyhow!(
+                "picture decoration {} names a spelling the payload writer cannot place (PictureSize {:?}, FileDragMode {:?})",
+                item.name,
+                item.scalars.get("PictureSize"),
+                file_drag_mode
+            )
         });
     }
 
@@ -7867,9 +7958,11 @@ fn native_item_extended_tooltip(
         horizontal_stretch: native_flag(tip.horizontal_stretch),
         vertical_stretch: native_flag(tip.vertical_stretch),
         content: &title_content,
-        enabled: true,
+        // Members 9 and 20 of a tooltip record are its `<Visible>` and
+        // `<Enabled>` (exporter: `tooltip.hidden` / `tooltip.disabled`).
+        enabled: tip.enabled.unwrap_or(true),
         context_menu: None,
-        visible: true,
+        visible: tip.visible.unwrap_or(true),
         skip_on_input: None,
         tooltip_representation: None,
         group_horizontal_align: tip
@@ -8152,7 +8245,12 @@ fn native_embedded_chart_kind(attribute: &FormXmlAttribute) -> Option<bool> {
 /// The attribute's `<Settings xsi:type="d4p1:Chart">` or `d4p1:GanttChart`,
 /// written by the chart codec: member 14 is the chart's own serialization
 /// (rt-embedded.md §1.2), and the codec refuses whatever it cannot place.
-fn native_embedded_chart(form_text: &str, attribute: &str, gantt: bool) -> Result<String> {
+fn native_embedded_chart(
+    form_text: &str,
+    attribute: &str,
+    gantt: bool,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
     let missing =
         || anyhow!("the chart attribute {attribute} spells no <Settings> the writer can find");
     let head = format!("<Attribute name=\"{attribute}\"");
@@ -8167,12 +8265,47 @@ fn native_embedded_chart(form_text: &str, attribute: &str, gantt: bool) -> Resul
     if close <= open {
         return Err(missing());
     }
-    let settings = &block[open..close];
+    let settings = native_chart_style_colours(&block[open..close], source);
+    let settings = settings.as_str();
     if gantt {
         crate::compiler::bodies::form_chart::format_form_embedded_gantt_chart(settings)
     } else {
         crate::compiler::bodies::form_chart::format_form_embedded_chart(settings)
     }
+}
+
+/// The chart's `style:<name>` colours that name a style item of the
+/// configuration, spelled `0:<uuid>` the way the chart record stores them
+/// (`{3,3,{0,<uuid>}}`) and the exporter prints one it cannot name
+/// (Документооборот 3.0 `DataProcessors/ПротоколРаботыСотрудников`,
+/// `style:ПользовательВыбранный`). The platform's own styles stay as they are.
+fn native_chart_style_colours(settings: &str, source: Option<&MetadataSourceContext>) -> String {
+    let Some(source) = source else {
+        return settings.to_string();
+    };
+    let mut out = String::with_capacity(settings.len());
+    let mut rest = settings;
+    while let Some(at) = rest.find(">style:") {
+        let name_start = at + ">style:".len();
+        let Some(end) = rest[name_start..].find('<') else {
+            break;
+        };
+        let name = &rest[name_start..name_start + end];
+        out.push_str(&rest[..at + 1]);
+        match source.resolve_style_item_uuid(&format!("StyleItem.{name}")) {
+            Ok(uuid) => {
+                out.push_str("0:");
+                out.push_str(&uuid);
+            }
+            Err(_) => {
+                out.push_str("style:");
+                out.push_str(name);
+            }
+        }
+        rest = &rest[name_start + end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// A column's `<View>` and `<Edit>`, each the default tuple when absent.
@@ -8325,6 +8458,7 @@ fn native_extra_picture(
 fn native_input_drop_list_settings(
     item: &FormXmlChildItem,
     data_paths: &NativeDataPaths<'_>,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
     let check = native_scalar_tristate(item, "ShowCheckBoxesInDropList")?;
     let column = |name: &str| -> Result<Option<String>> {
@@ -8344,6 +8478,23 @@ fn native_input_drop_list_settings(
         {
             return Ok(Some(format!("{{1,{last}}}")));
         }
+        // A path that reaches a metadata attribute past the field's own data
+        // path stores that attribute's own `{<marker>,<uuid>}` segment alone
+        // (ЛИМС КОРП `Documents/лимсПретензия/Forms/ФормаДокумента`:
+        // `{1,{0,deb0d622-…}}` for `Объект.АнализыПретензии.СписокСотрудников.
+        // Ответственный`; the exporter reads it back the same way).
+        if let Some(last) = ranges.last().map(|range| resolved[range.clone()].trim())
+            && ranges.len() > 3
+            && item.data_path.as_deref().is_some_and(|own| {
+                path.strip_prefix(own)
+                    .is_some_and(|rest| rest.starts_with('.'))
+            })
+            && scan_braced_fields(last, 0)
+                .ok()
+                .is_some_and(|inner| inner.len() == 2 && last[inner[1].clone()].trim().len() == 36)
+        {
+            return Ok(Some(format!("{{1,{last}}}")));
+        }
         if ranges.len() != 3 || resolved[ranges[0].clone()].trim() != "2" {
             return Err(anyhow!(
                 "<{name}> names {path}, which is not an attribute column"
@@ -8355,9 +8506,24 @@ fn native_input_drop_list_settings(
         )))
     };
     let value_path = column("MultipleValueDataPath")?;
+    let picture_path = column("MultipleValuePictureDataPath")?;
     let present_path = column("MultipleValuePresentDataPath")?;
     let allow_empty = native_scalar_tristate(item, "AllowInputEmptyMultipleValues")?;
-    if check.is_none() && value_path.is_none() && present_path.is_none() && allow_empty.is_none() {
+    let hyperlink = native_scalar_flag(item, "MultipleValuesHyperlink", false);
+    let font = match item.fonts.get("MultipleValuesFont") {
+        Some(attributes) => native_font_of(item, Some(attributes), source)?,
+        None => "{7,3,0,1,100}".to_string(),
+    };
+    let back_color = native_scalar_color(item, "MultipleValuesBackColor", source)?;
+    if check.is_none()
+        && value_path.is_none()
+        && picture_path.is_none()
+        && present_path.is_none()
+        && allow_empty.is_none()
+        && !hyperlink
+        && !item.fonts.contains_key("MultipleValuesFont")
+        && !item.scalars.contains_key("MultipleValuesBackColor")
+    {
         return Ok("{0}".to_string());
     }
     Ok(
@@ -8365,7 +8531,11 @@ fn native_input_drop_list_settings(
             allow_empty.unwrap_or(false),
             check,
             value_path.as_deref().unwrap_or("{0}"),
+            picture_path.as_deref().unwrap_or("{0}"),
             present_path.as_deref().unwrap_or("{0}"),
+            hyperlink,
+            &font,
+            &back_color,
         ),
     )
 }
@@ -8438,8 +8608,9 @@ fn native_form_body_blockers(properties: &FormXmlBodyProperties) -> Vec<String> 
             attribute.types.first().map(|value| value.trim()) == Some("mxl:SpreadsheetDocument");
         // A chart's `<Settings>` is written by the chart codec, which refuses
         // on its own what it cannot place (rt-embedded.md §1.2).
-        let embedded_chart =
-            native_embedded_chart_kind(attribute).is_some() || native_embedded_flowchart(attribute);
+        let embedded_chart = native_embedded_chart_kind(attribute).is_some()
+            || native_embedded_flowchart(attribute)
+            || native_embedded_planner(attribute);
         if attribute.settings.is_some()
             && attribute.types.first().map(|value| value.trim()) != Some("cfg:DynamicList")
             && !embedded_spreadsheet
@@ -8786,6 +8957,7 @@ fn format_native_form_body(
         native_mobile_device_command_bar_content(properties, &data_paths.form.items)?;
     let tail = crate::compiler::bodies::form_native::format_root_tail(
         &crate::compiler::bodies::form_native::NativeRootTail {
+            scale: properties.root_scalars.get("Scale").map(String::as_str),
             auto_url: properties.auto_url.unwrap_or(true),
             vertical_scroll: properties.vertical_scroll.map(|scroll| match scroll {
                 FormXmlVerticalScroll::UseIfNecessary => "useIfNecessary",
@@ -9016,7 +9188,7 @@ fn format_native_form_body(
         {
             let text =
                 form_text.ok_or_else(|| anyhow!("an embedded chart needs the Form.xml text"))?;
-            Some(native_embedded_chart(text, &attribute.name, gantt)?)
+            Some(native_embedded_chart(text, &attribute.name, gantt, source)?)
         } else if attribute.settings.is_some() && native_embedded_planner(attribute) {
             let text =
                 form_text.ok_or_else(|| anyhow!("an embedded planner needs the Form.xml text"))?;
@@ -11027,7 +11199,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         .push_str(chunk.as_ref());
                 }
                 if form_nested_text_element(&path) {
-                    nested_text.push_str(text.xml_content()?.as_ref());
+                    nested_text.push_str(&form_text_chunk(&text, &path)?);
                 }
                 // A scalar child of a child item -- `<LabelDecoration><TextColor>`
                 // and its like. The record writers read these from the item's
@@ -11524,7 +11696,7 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                     )
                     || path_ends_with_for_form_type_text(&path)
                 {
-                    text_value.push_str(text.xml_content()?.as_ref());
+                    text_value.push_str(&form_text_chunk(&text, &path)?);
                 }
             }
             Ok(Event::CData(text)) => {
@@ -11587,7 +11759,8 @@ fn parse_form_xml_body_properties(xml: &[u8]) -> Result<FormXmlBodyProperties> {
                         .push_str(chunk.as_ref());
                 }
                 if form_nested_text_element(&path) {
-                    nested_text.push_str(text.xml_content()?.as_ref());
+                    let text = quick_xml::events::BytesText::from_escaped(text.decode()?);
+                    nested_text.push_str(&form_text_chunk(&text, &path)?);
                 }
                 if path_ends_with(&path, &["Form", "WindowOpeningMode"])
                     || path_ends_with(&path, &["Form", "EnterKeyBehavior"])
@@ -18292,6 +18465,20 @@ fn is_form_property_bag_undefined_value(value: &str) -> bool {
         && fields.first().is_some_and(|range| {
             parse_1c_quoted_string(&value[range.clone()]).is_ok_and(|marker| marker == "U")
         })
+}
+
+/// The text of a `Form.xml` element as the body stores it. A localized
+/// `<v8:content>` keeps the CRs the file spells: a CR LF there is a CR the
+/// string holds, which the body stores as CR CR LF (Управление задачами
+/// `Catalogs/узВопросыОтветы/Forms/ФормаЭлемента`); a bare LF stays a bare
+/// LF, which the platform reads the same as CR LF. Every other text reads as
+/// before, line breaks normalized.
+fn form_text_chunk(text: &quick_xml::events::BytesText<'_>, path: &[String]) -> Result<String> {
+    if path.last().map(String::as_str) == Some("content") {
+        let raw = text.decode()?;
+        return Ok(raw.replace("\r\n", "\r\r\n"));
+    }
+    Ok(text.xml_content()?.into_owned())
 }
 
 fn format_form_title_value(title: &[LocalizedString]) -> String {
@@ -33054,6 +33241,64 @@ mod tests {
         r#"xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">"#,
     );
 
+    #[test]
+    fn choice_list_localized_content_preserves_stored_carriage_returns() -> anyhow::Result<()> {
+        let xml = format!(
+            "{FORM_XML_HEAD}<ChildItems><RadioButtonField name=\"Choice\" id=\"1\"><ChoiceList><xr:Item><xr:Value xsi:type=\"FormChoiceListDesTimeValue\"><Presentation><v8:item><v8:lang>en</v8:lang><v8:content>first\r\nsecond &amp; third</v8:content></v8:item></Presentation><Value xsi:type=\"xs:string\">value</Value></xr:Value></xr:Item></ChoiceList></RadioButtonField></ChildItems></Form>"
+        );
+        let properties = super::parse_form_xml_body_properties(xml.as_bytes())?;
+        let choices = properties.child_items[0].choice_list.as_ref().unwrap();
+        assert_eq!(choices[0].title[0].content, "first\r\r\nsecond & third");
+        Ok(())
+    }
+
+    #[test]
+    fn ordinary_table_additions_without_source_serve_the_enclosing_table() -> anyhow::Result<()> {
+        use crate::metadata_model::brace::{self, Brace};
+        let mut xml = format!(
+            "{FORM_XML_HEAD}<AutoCommandBar name=\"FormBar\" id=\"-1\"/><ChildItems><Table name=\"Rows\" id=\"25\"><AutoCommandBar name=\"Bar\" id=\"26\"/>"
+        );
+        for (index, tag) in [
+            "SearchStringAddition",
+            "ViewStatusAddition",
+            "SearchControlAddition",
+        ]
+        .iter()
+        .enumerate()
+        {
+            let id = index * 3 + 30;
+            xml.push_str(&format!("<{tag} name=\"Addition{index}\" id=\"{id}\"><ContextMenu name=\"Menu{index}\" id=\"{}\"/><ExtendedTooltip name=\"Tip{index}\" id=\"{}\"/></{tag}>", id + 1, id + 2));
+        }
+        xml.push_str("<ContextMenu name=\"TableMenu\" id=\"50\"/><ExtendedTooltip name=\"TableTip\" id=\"51\"/></Table></ChildItems></Form>");
+        let body = super::compile_native_form_body(xml.as_bytes(), None, None, None)?;
+        let tree = brace::parse_row(body.as_bytes())?;
+        fn collect(node: &Brace, sources: &mut Vec<Brace>) {
+            if let Some(items) = node.as_list() {
+                if items
+                    .get(6)
+                    .and_then(Brace::as_str)
+                    .is_some_and(|name| name.starts_with("Addition"))
+                {
+                    sources.push(items[19].clone());
+                }
+                for child in items {
+                    collect(child, sources);
+                }
+            }
+        }
+        let mut sources = Vec::new();
+        collect(&tree, &mut sources);
+        assert_eq!(
+            sources,
+            vec![
+                Brace::list(vec![Brace::num(25), Brace::num(0)]),
+                Brace::list(vec![Brace::num(25), Brace::num(1)]),
+                Brace::list(vec![Brace::num(25), Brace::num(2)]),
+            ]
+        );
+        Ok(())
+    }
+
     /// `<MobileDeviceCommandBarContent>` reaches root trailer slot 22, and
     /// what it stores there is the id of the form **item** its `<xr:Value>`
     /// names.
@@ -33876,6 +34121,12 @@ mod tests {
         let text = b"Procedure Run()\r\nEndProcedure\r\n";
         let packed = super::pack_module_blob_bytes(text, None, None).unwrap();
         assert_eq!(super::unpack_module_blob_text(&packed.blob).unwrap(), text);
+    }
+
+    #[test]
+    fn rejects_encrypted_module_text_element() {
+        let packed = super::pack_module_blob_bytes(&[0xd2, 0xc6, 0x98, 0xff], None, None).unwrap();
+        assert!(super::unpack_module_blob_text(&packed.blob).is_err());
     }
 
     /// Real ERP УХ 3.2.12.6 `CommonModules` module bodies carrying no V8

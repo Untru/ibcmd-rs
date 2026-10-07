@@ -475,6 +475,7 @@ fn value_namespace(prefix: &str, local: &str) -> Option<&'static str> {
             "TextDocument" => "http://v8.1c.ru/8.1/data/txtedt",
             "GeographicalSchema" => "http://v8.1c.ru/8.2/data/geo",
             "FlowchartContextType" => "http://v8.1c.ru/8.2/data/graphscheme",
+            "Filter" => "http://v8.1c.ru/8.2/misc",
             "DataAnalysisTimeIntervalUnitType" => "http://v8.1c.ru/8.2/data/data-analysis",
             "ConditionalAppearance" => "http://v8.1c.ru/8.3/data/entext",
             _ => "http://v8.1c.ru/8.1/data/enterprise/current-config",

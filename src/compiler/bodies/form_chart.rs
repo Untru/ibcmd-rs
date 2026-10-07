@@ -1150,12 +1150,19 @@ fn rectangle(node: &XmlNode) -> Result<[String; 4]> {
 // The Gantt chart wrapper, `{19,…}`.
 // ---------------------------------------------------------------------------
 
+// The platform's one time-unit enumeration: the exporter's MXL chart reader
+// (mssql_dump/moxel.rs) and the planner codec decode `40` as `Week`, `60`
+// `Quarter`, `70` `Year`; Управление задачами `Reports/узПланированиеПроекта/
+// Templates/пмГант_ГантДиаграмма` spells `Week`.
 const TIME_MEASURES: &[(&str, &str)] = &[
     ("Second", "5"),
     ("Minute", "10"),
     ("Hour", "20"),
     ("Day", "30"),
+    ("Week", "40"),
     ("Month", "50"),
+    ("Quarter", "60"),
+    ("Year", "70"),
 ];
 
 /// `{19,{0,{11},{74,…}},<points>,<series>,0,0,drawEmpty,<timeScale>,
@@ -1197,16 +1204,24 @@ fn gantt_wrapper(node: &XmlNode, host: ChartHost) -> Result<String> {
     )?;
     empty(c.required("extTitle")?)?;
     let outbound_color = color(c.required("outboundColor")?)?;
-    {
+    // `backIntervals`: the outer `<ticks>` is member 2 of the stored
+    // collection (the template exporter reads it there); Управление задачами
+    // `пмГант_ГантДиаграмма` spells 864000000.
+    let back_interval_ticks = {
         let intervals = c.required("backIntervals")?;
         let mut b = Children::chart(intervals)?;
         let collection = b.required("collection")?;
         let mut inner = Children::chart(collection)?;
         exact(inner.required("ticks")?, "0")?;
         inner.finish()?;
-        exact(b.required("ticks")?, "0")?;
+        let ticks = leaf(b.required("ticks")?)?.trim().to_string();
+        ensure!(
+            !ticks.is_empty() && ticks.bytes().all(|byte| byte.is_ascii_digit()),
+            "<d4p1:ticks> {ticks} is not a tick count"
+        );
         b.finish()?;
-    }
+        ticks
+    };
     let links_color = color(c.required("linksColor")?)?;
     let links_line = line(c.required("linksLine")?)?;
     let show_points_text = code(
@@ -1241,7 +1256,7 @@ fn gantt_wrapper(node: &XmlNode, host: ChartHost) -> Result<String> {
         show_value_text.into(),
         "{1,0}".into(),
         outbound_color,
-        "{3,{0,{1,0,0},0},{0,0}}".into(),
+        format!("{{3,{{0,{{1,0,0}},{back_interval_ticks}}},{{0,0}}}}"),
         "0".into(),
         links_color,
         links_line,
@@ -1336,7 +1351,10 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
                 "<d4p1:dayFormatRule> spells {other}, which the chart writer has not measured"
             ),
         };
-        empty(l.required("format")?)?;
+        // Member 7 is the level's localized `<format>` (`{1,0}` when empty),
+        // the slot the template exporter reads it from (mssql_dump/moxel.rs);
+        // Управление задачами `пмГант_ГантДиаграмма` spells `ДФ=ММММ`.
+        let level_format = localized(l.required("format")?)?;
         let mut labels = Children::chart(l.required("labels")?)?;
         exact(labels.required("ticks")?, "0")?;
         labels.finish()?;
@@ -1345,7 +1363,7 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
         exact(l.required("showPereodicalLabels")?, "true")?;
         l.finish()?;
         levels.push(format!(
-            "{{8,{measure},1,{show},{level_line},{{3,0,{{12632256}}}},{day_format_rule},{{1,0}},{{0,{{1,0,0}}}},{AUTO_COLOR},{AUTO_COLOR},1}}"
+            "{{8,{measure},1,{show},{level_line},{{3,0,{{12632256}}}},{day_format_rule},{level_format},{{0,{{1,0,0}}}},{AUTO_COLOR},{AUTO_COLOR},1}}"
         ));
     }
     ensure!(
@@ -1355,10 +1373,18 @@ fn gantt_time_scale(node: &XmlNode) -> Result<String> {
     exact(c.required("transparent")?, "false")?;
     let back_color = color(c.required("backColor")?)?;
     let text_color = color(c.required("textColor")?)?;
-    exact(c.required("currentLevel")?, "0")?;
+    // The last member is `<currentLevel>`, an index into the levels (the
+    // template exporter reads it there and refuses one past the last level);
+    // Управление задачами `пмГант_ГантДиаграмма` stands on level 1.
+    let current_level = leaf(c.required("currentLevel")?)?.trim();
+    let current = current_level
+        .parse::<usize>()
+        .ok()
+        .filter(|level| *level < levels.len())
+        .ok_or_else(|| anyhow!("<d4p1:currentLevel> {current_level} names no level"))?;
     c.finish()?;
     Ok(format!(
-        "{{3,0,{},{},0,{back_color},{text_color},0}}",
+        "{{3,0,{},{},0,{back_color},{text_color},{current}}}",
         levels.len(),
         levels.join(",")
     ))

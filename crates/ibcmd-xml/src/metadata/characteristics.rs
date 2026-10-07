@@ -308,6 +308,9 @@ fn decode_field(element: &XmlElement) -> Result<CharacteristicField, MetadataDec
         "0" => Ok(CharacteristicField::Sentinel(
             CharacteristicFieldSentinel::Empty,
         )),
+        _ if value.starts_with("0:") => ibcmd_core::identity::ObjectUuid::parse(&value[2..])
+            .map(CharacteristicField::Unresolved)
+            .map_err(|error| MetadataDecodeError::Core(error.to_string())),
         _ => CharacteristicReference::new(&value, None)
             .map(CharacteristicField::Reference)
             .map_err(|error| MetadataDecodeError::Core(error.to_string())),
@@ -519,6 +522,7 @@ fn field_value(
     field: &CharacteristicField,
 ) -> Result<CanonicalField, MetadataDecodeError> {
     let value = match field {
+        CharacteristicField::Unresolved(uuid) => return text_field(name, &format!("0:{uuid}")),
         CharacteristicField::Reference(reference) => reference.path(),
         CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined) => "undefined",
         CharacteristicField::Sentinel(CharacteristicFieldSentinel::Empty) => "empty",
@@ -598,13 +602,14 @@ const fn is_xml_1_0(character: char) -> bool {
 
 fn push_field(xml: &mut String, indent: &str, name: &str, field: &CharacteristicField) {
     let value = match field {
-        CharacteristicField::Reference(reference) => reference.path(),
-        CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined) => "-1",
-        CharacteristicField::Sentinel(CharacteristicFieldSentinel::Empty) => "0",
+        CharacteristicField::Unresolved(uuid) => format!("0:{uuid}"),
+        CharacteristicField::Reference(reference) => reference.path().to_string(),
+        CharacteristicField::Sentinel(CharacteristicFieldSentinel::Undefined) => "-1".to_string(),
+        CharacteristicField::Sentinel(CharacteristicFieldSentinel::Empty) => "0".to_string(),
     };
     xml.push_str(&format!(
         "{indent}<xr:{name}>{}</xr:{name}>\r\n",
-        escape_text(value)
+        escape_text(&value)
     ));
 }
 
@@ -776,6 +781,28 @@ mod tests {
         format!(
             "<Root xmlns=\"urn:test\" xmlns:r=\"{XR_NAMESPACE}\" xmlns:i=\"{XSI_NAMESPACE}\" xmlns:s=\"{XML_SCHEMA_NAMESPACE}\"><Characteristics><r:Characteristic><r:CharacteristicTypes from=\"Catalog.Types\"><r:KeyField>0</r:KeyField><r:TypesFilterField>-1</r:TypesFilterField>{filter}<r:DataPathField>0</r:DataPathField><r:MultipleValuesUseField>-1</r:MultipleValuesUseField></r:CharacteristicTypes><r:CharacteristicValues from=\"Catalog.Values\"><r:ObjectField>0</r:ObjectField><r:TypeField>-1</r:TypeField><r:ValueField>0</r:ValueField><r:MultipleValuesKeyField>-1</r:MultipleValuesKeyField><r:MultipleValuesOrderField>0</r:MultipleValuesOrderField></r:CharacteristicValues></r:Characteristic></Characteristics></Root>"
         )
+    }
+
+    #[test]
+    fn unresolved_field_uuid_survives_xml_round_trip() {
+        let raw = "0:abdb0915-16b2-43ad-b128-6953ba9db5f0";
+        let fixture = qname_fixture(XSI_NAMESPACE, XML_SCHEMA_NAMESPACE).replace(
+            "<r:MultipleValuesUseField>-1</r:MultipleValuesUseField>",
+            &format!("<r:MultipleValuesUseField>{raw}</r:MultipleValuesUseField>"),
+        );
+        let model = decode_fixture(&fixture).unwrap();
+        assert!(matches!(
+            model.items()[0].types().multiple_values_use_field(),
+            CharacteristicField::Unresolved(_)
+        ));
+        let rendered = render_characteristics_xml(&model, "").unwrap();
+        assert!(rendered.contains(&format!(
+            "<xr:MultipleValuesUseField>{raw}</xr:MultipleValuesUseField>"
+        )));
+        let wrapped = format!(
+            "<Root xmlns:xr=\"{XR_NAMESPACE}\" xmlns:xsi=\"{XSI_NAMESPACE}\" xmlns:xs=\"{XML_SCHEMA_NAMESPACE}\">{rendered}</Root>"
+        );
+        assert_eq!(decode_fixture(&wrapped).unwrap(), model);
     }
 
     #[test]

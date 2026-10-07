@@ -110,6 +110,9 @@ pub enum CharacteristicFieldSentinel {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CharacteristicField {
     Reference(CharacteristicReference),
+    /// A stored field UUID that no longer resolves in the configuration.
+    /// The platform retains this value rather than discarding the owner.
+    Unresolved(ObjectUuid),
     Sentinel(CharacteristicFieldSentinel),
 }
 
@@ -117,7 +120,7 @@ impl CharacteristicField {
     pub const fn reference(&self) -> Option<&CharacteristicReference> {
         match self {
             Self::Reference(reference) => Some(reference),
-            Self::Sentinel(_) => None,
+            Self::Unresolved(_) | Self::Sentinel(_) => None,
         }
     }
 }

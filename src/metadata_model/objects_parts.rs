@@ -506,6 +506,11 @@ impl<'a> Obj<'a> {
         let field = match text {
             "" | "-1" => brace_list![num(-1)],
             "0" => brace_list![num(0)],
+            _ if text.starts_with("0:") => {
+                let uuid = ibcmd_core::identity::ObjectUuid::parse(&text[2..])
+                    .map_err(|error| anyhow!("invalid unresolved characteristic field: {error}"))?;
+                brace_list![num(0), Brace::uuid(&uuid.to_string())]
+            }
             _ => self.field_ref(text)?,
         };
         Ok(brace_list![num(1), field, num(0)])

@@ -4078,6 +4078,9 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_GRAPHICAL_SCHEMA_ON_ACTIVATE_EVENT_UUID, "OnActivate"),
             ],
             FormChildItemEventCollectionOwner::PlannerField => &[
+                (FORM_ITEM_DRAG_CHECK_EVENT_UUID, "DragCheck"),
+                (FORM_ITEM_DRAG_START_EVENT_UUID, "DragStart"),
+                (FORM_ITEM_DRAG_END_EVENT_UUID, "DragEnd"),
                 (FORM_PLANNER_BEFORE_CREATE_EVENT_UUID, "BeforeCreate"),
                 (
                     FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID,
@@ -6920,6 +6923,28 @@ pub(crate) enum FormSpecialFieldKind {
     GanttChart,
 }
 
+/// Calendar option member 5; the reader publishes Multiple=1 and Interval=2.
+pub(crate) fn form_calendar_selection_mode_code(value: Option<&str>) -> Option<&'static str> {
+    match value {
+        None => Some("0"),
+        Some("Multiple") => Some("1"),
+        Some("Interval") => Some("2"),
+        _ => None,
+    }
+}
+
+/// Track-bar option member 11, shared with `FormSpecialFieldSchema::marking_appearance`.
+/// Управление задачами Reports/узПланированиеПроекта/Forms/ФормаУправляемая
+/// stores 0 for DontShow; the omitted/default spelling stores 2.
+pub(crate) fn form_track_bar_marking_appearance_code(value: Option<&str>) -> Option<&'static str> {
+    match value {
+        None => Some("2"),
+        Some("TopLeft") => Some("1"),
+        Some("DontShow") => Some("0"),
+        _ => None,
+    }
+}
+
 /// The literal `2`-revision option bag the one short-revision `GanttChartField`
 /// of the stand carries. See [`FormSpecialFieldSchema::from_raw_layout`].
 const FORM_GANTT_CHART_SHORT_OPTION_BAG: [&str; 12] = [
@@ -7066,8 +7091,8 @@ impl FormSpecialFieldSchema {
     ///   default `1`; 9 `LargeStep`, default `10`; 10 `MarkingStep`, default
     ///   `5`.
     /// * 11 `MarkingAppearance`: `1` on exactly the 3 items the platform
-    ///   writes `TopLeft` on, `2` on the other 6. No other code occurs, so the
-    ///   remaining appearances stay unread rather than guessed.
+    ///   writes `TopLeft` on, `2` on the other 6. Src also stores `0` on a
+    ///   track bar whose native XML publishes `DontShow`.
     /// * 13 `AutoMaxWidth`: `0` on the one item the platform writes `false`
     ///   on, `1` on the other 8.
     fn track_bar_dimension(options: &[&str], slot: usize, default: &str) -> Option<String> {
@@ -7144,11 +7169,11 @@ impl FormSpecialFieldSchema {
     }
 
     pub(crate) fn marking_appearance(self, options: &[&str]) -> Option<&'static str> {
-        matches!(
-            (self.kind, options.get(11).map(|field| field.trim())),
-            (FormSpecialFieldKind::TrackBar, Some("1"))
-        )
-        .then_some("TopLeft")
+        match (self.kind, options.get(11).map(|field| field.trim())) {
+            (FormSpecialFieldKind::TrackBar, Some("0")) => Some("DontShow"),
+            (FormSpecialFieldKind::TrackBar, Some("1")) => Some("TopLeft"),
+            _ => None,
+        }
     }
 
     pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
@@ -7169,10 +7194,15 @@ impl FormSpecialFieldSchema {
     /// this member from the default `1` to `0`; every other option member is
     /// byte-identical. The full corpus agrees: the sole native `false` has `0`
     /// here and all 148 omitted properties have `1`.
+    /// The revision-3 Gantt bag uses member 9: Src stores `0` where native
+    /// XML publishes false, while the existing default bags store `1`.
     pub(crate) fn auto_max_height(self, options: &[&str]) -> Option<bool> {
-        (self.kind == FormSpecialFieldKind::ProgressBar
-            && options.get(14).map(|field| field.trim()) == Some("0"))
-        .then_some(false)
+        let slot = match self.kind {
+            FormSpecialFieldKind::ProgressBar => 14,
+            FormSpecialFieldKind::GanttChart if !self.gantt_short_option_revision => 9,
+            _ => return None,
+        };
+        (options.get(slot).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
     /// The progress bar keeps `HorizontalStretch` in the same option member the
@@ -8017,8 +8047,9 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // itself is emitted separately right after this ordered block (see the
     // `item.tag == "Table" && item.row_filter_nil` check in
     // `format_form_child_item_xml`), so this position alone reproduces the
-    // evidenced order.
-    FormTableXmlProperty::BehaviorOnHorizontalCompression,
+    // evidenced order. It sits behind `CurrentRowUse` (below): ЛИМС КОРП
+    // `Documents/лимсРегистрацияРезультатовКонтроля/Forms/ФормаДокумента`
+    // `ДеревоНормативов` writes `CurrentRowUse` first.
     FormTableXmlProperty::ToolTip,
     FormTableXmlProperty::ToolTipRepresentation,
     FormTableXmlProperty::SearchStringLocation,
@@ -8054,6 +8085,7 @@ pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     // and `GroupVerticalAlign` (1), with no pair counted both ways.
     FormTableXmlProperty::RefreshRequest,
     FormTableXmlProperty::CurrentRowUse,
+    FormTableXmlProperty::BehaviorOnHorizontalCompression,
     FormTableXmlProperty::AutoRefresh,
     FormTableXmlProperty::AutoRefreshPeriod,
     FormTableXmlProperty::Period,
@@ -8728,7 +8760,7 @@ impl FormTableSchema {
         let slot = fields
             .len()
             .checked_sub(Self::BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET)?;
-        matches!(fields.get(slot)?.trim(), "0" | "2").then_some(slot)
+        matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
     /// `<BehaviorOnHorizontalCompression>`, evidenced only as
@@ -8739,11 +8771,17 @@ impl FormTableSchema {
         self,
         fields: &[&str],
     ) -> Option<&'static str> {
-        (fields
+        // `1` is `HideItemsByImportance`: ЛИМС КОРП
+        // `Documents/лимсРегистрацияРезультатовКонтроля/Forms/ФормаДокумента`
+        // `ДеревоНормативов` holds it and the platform writes that spelling.
+        match fields
             .get(self.behavior_on_horizontal_compression_slot(fields)?)?
             .trim()
-            == "2")
-            .then_some("MoveItemsByImportance")
+        {
+            "1" => Some("HideItemsByImportance"),
+            "2" => Some("MoveItemsByImportance"),
+            _ => None,
+        }
     }
 
     pub(crate) fn current_row_use_slot(self, fields: &[&str]) -> Option<usize> {
@@ -9867,6 +9905,42 @@ mod table_tail_property_tests {
 mod track_bar_extent_tests {
     use super::*;
 
+    #[test]
+    fn native_src_special_fields_keep_height_limit_and_hidden_marks() {
+        let gantt = [
+            "3", "50", "10", "1", "1", "{0,1,0}", "0", "0", "0", "0", "0", "0", "0", "0", "2", "2",
+        ];
+        let schema =
+            FormSpecialFieldSchema::from_raw_layout("37", 60, Some("12"), 0, &gantt, Some("1"))
+                .unwrap();
+        assert_eq!(schema.auto_max_width(&gantt), Some(false));
+        assert_eq!(schema.auto_max_height(&gantt), Some(false));
+        let track = [
+            "2",
+            "39",
+            "1",
+            "0",
+            "0",
+            "40",
+            "200",
+            "10",
+            "0",
+            "30",
+            "5",
+            "0",
+            "{3,4,{0}}",
+            "1",
+            "0",
+            "0",
+            "1",
+            "0",
+        ];
+        let schema =
+            FormSpecialFieldSchema::from_raw_layout("37", 59, Some("10"), 0, &track, Some("2"))
+                .unwrap();
+        assert_eq!(schema.marking_appearance(&track), Some("DontShow"));
+    }
+
     /// Evidence: `DataProcessors/СопоставлениеНоменклатурыБЭД/Forms/Форма`
     /// `ТочностьПоискаРегулирование` of 1C:Документооборот 3.0.17, whose option
     /// tuple is `{2,1,1,1,0,30,100,1,0,10,5,1,{3,4,{0}},0,20,0,1,0}` and whose
@@ -9897,5 +9971,233 @@ mod track_bar_extent_tests {
             FormSpecialFieldSchema::from_raw_layout("37", 59, Some("10"), 0, &options, Some("2"))
                 .unwrap();
         assert_eq!(schema.max_width(&options).as_deref(), Some("20"));
+    }
+}
+
+/// List row operations belong to a main attribute even when the raw form
+/// command set retains them on a form without one (LIMS selection forms).
+pub(crate) fn form_list_row_command_requires_main_attribute(command: &str) -> bool {
+    matches!(command, "Change" | "Choose" | "Copy" | "Create" | "Delete")
+}
+
+/// Font mask revisions 7 and 8 have the same member ordering. Revision 8
+/// occurs in 8.3.27 forms and must retain the revision 7 interpretation.
+pub(crate) struct FormFontMaskLayout;
+impl FormFontMaskLayout {
+    pub(crate) fn recognizes_revision(revision: &str) -> bool {
+        matches!(revision, "7" | "8")
+    }
+}
+
+/// Percent scales serialize only when they differ from the 100% default.
+pub(crate) fn form_nondefault_percent_scale(value: &str) -> Option<String> {
+    (value != "100" && value.parse::<u32>().is_ok()).then(|| value.to_string())
+}
+
+/// A qualified query member cannot start a clause. Classifying the lexical
+/// token keeps the binding walker independent of the query punctuation.
+pub(crate) enum FormQueryLexeme {
+    MemberSeparator,
+    Other,
+}
+impl FormQueryLexeme {
+    pub(crate) fn classify(token: &str) -> Self {
+        match token {
+            "." => Self::MemberSeparator,
+            _ => Self::Other,
+        }
+    }
+    pub(crate) fn is_member_separator(self) -> bool {
+        matches!(self, Self::MemberSeparator)
+    }
+}
+
+/// Only input fields own the multiple-value and metadata-member binding bag.
+pub(crate) struct FormInputBindingLayout;
+impl FormInputBindingLayout {
+    pub(crate) fn applies_to(tag: &str) -> bool {
+        tag == "InputField"
+    }
+}
+
+/// The extended button trailer has a command uniqueness flag two members
+/// before its end; compact button layouts have no such member.
+pub(crate) struct FormButtonCommandUniquenessSchema;
+impl FormButtonCommandUniquenessSchema {
+    pub(crate) fn decode(tag: &str, extended: bool, fields: &[&str]) -> Option<bool> {
+        (tag == "Button" && extended)
+            .then(|| fields.len().checked_sub(2))
+            .flatten()
+            .and_then(|slot| fields.get(slot))
+            .and_then(|field| (field.trim() == "0").then_some(false))
+    }
+}
+
+/// Current-row ownership is stored in two distinct container option layouts.
+/// Usual groups use member 25; the six-member revision 4 Pages bag uses member 3.
+#[derive(Clone, Copy)]
+pub(crate) enum FormContainerCurrentRowSchema {
+    UsualGroup,
+    Pages,
+}
+impl FormContainerCurrentRowSchema {
+    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
+        match tag {
+            "UsualGroup" => Some(Self::UsualGroup),
+            "Pages" => Some(Self::Pages),
+            _ => None,
+        }
+    }
+    pub(crate) const fn options_slot(self) -> usize {
+        20
+    }
+    pub(crate) const fn is_pages(self) -> bool {
+        matches!(self, Self::Pages)
+    }
+    pub(crate) fn decode(self, members: &[&str]) -> Option<&'static str> {
+        match self {
+            Self::UsualGroup => match members.get(25)?.trim() {
+                "0" => Some("Use"),
+                "1" => Some("DontUse"),
+                _ => None,
+            },
+            Self::Pages if members.len() == 6 && members[0].trim() == "4" => {
+                (members.get(3)?.trim() == "1").then_some("DontUse")
+            }
+            Self::Pages => None,
+        }
+    }
+}
+
+/// Built-in binding members have owner-specific physical markers. Period
+/// stays physical when undeclared; Ref preserves the referenced owner type.
+pub(crate) enum FormStandardBindingMember {
+    Period,
+    Reference,
+}
+impl FormStandardBindingMember {
+    pub(crate) const fn marker(self) -> &'static str {
+        match self {
+            Self::Period => "-2",
+            Self::Reference => "-5",
+        }
+    }
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Period => "Period",
+            Self::Reference => "Ref",
+        }
+    }
+    pub(crate) fn retains_reference_type(name: &str) -> bool {
+        name == Self::Reference.name()
+    }
+}
+
+/// Planner standard commands are an item-scoped registry, independent of the
+/// actual form name or item id. The dated planner corpus records Preview.
+pub(crate) fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+    match uuid {
+        "2c75e90f-36f0-48c8-913d-0d92afdb4b93" => Some("Preview"),
+        _ => None,
+    }
+}
+
+/// Chart revision 75 adds eight color tuples after the revision 74 payload.
+pub(crate) struct FormChartColorTailLayout;
+impl FormChartColorTailLayout {
+    pub(crate) fn payload_end(fields: &[&str], compact: fn(&str) -> String) -> Option<usize> {
+        let cut = fields.len().checked_sub(8)?;
+        fields[cut..]
+            .iter()
+            .all(|member| compact(member).starts_with("{3,"))
+            .then_some(cut)
+    }
+}
+
+/// Canonical form scalars that have more than one physical placement.
+/// Callers choose their measured order; this boundary owns their XML QName
+/// and CRLF spelling. Values have already been escaped by the common writer.
+pub(crate) enum FormScalarXmlProperty {
+    Scale,
+    CurrentRowUse,
+    AutoCorrectionOnTextInput,
+}
+impl FormScalarXmlProperty {
+    pub(crate) fn emit(self, xml: &mut String, tab: &str, escaped_value: &str) {
+        let name = match self {
+            Self::Scale => "Scale",
+            Self::CurrentRowUse => "CurrentRowUse",
+            Self::AutoCorrectionOnTextInput => "AutoCorrectionOnTextInput",
+        };
+        xml.push_str(&format!("{tab}<{name}>{escaped_value}</{name}>\r\n"));
+    }
+}
+
+pub(crate) struct FormPlannerDatedLabel {
+    pub(crate) key: String,
+    pub(crate) line_color: String,
+    pub(crate) text_color: String,
+}
+
+/// Dated labels carry empty, unformatted text and two independent colors.
+/// The schema owns the versioned layout and the corresponding canonical XML;
+/// physical adapters supply only decoded dates, colors and tick counts.
+pub(crate) struct FormPlannerDatedLabelsSchema;
+impl FormPlannerDatedLabelsSchema {
+    pub(crate) fn recognizes_record(record: &[&str], count: usize, limit: usize) -> bool {
+        record.first().is_some_and(|version| version.trim() == "1")
+            && count <= limit
+            && record.len() == 3 + 2 * count
+    }
+    pub(crate) fn recognizes_label(compact: &[String]) -> bool {
+        compact.len() == 7
+            && compact[0] == "5"
+            && compact[1] == "{0}"
+            && compact[2] == "{1,0}"
+            && compact[3] == "{\"U\"}"
+            && compact[6] == "{1,{1,0},0}"
+    }
+    pub(crate) fn emit(labels: &[FormPlannerDatedLabel], ticks: &str, indent: usize) -> String {
+        let tab = "\t".repeat(indent);
+        let mut xml = format!("{tab}<labels>\r\n");
+        for label in labels {
+            xml.push_str(&format!("{tab}\t<label>\r\n{tab}\t\t<key>{}</key>\r\n{tab}\t\t<text/>\r\n{tab}\t\t<textFormatted>false</textFormatted>\r\n{tab}\t\t<lineColor>{}</lineColor>\r\n{tab}\t\t<textColor>{}</textColor>\r\n{tab}\t</label>\r\n", label.key, label.line_color, label.text_color));
+        }
+        xml.push_str(&format!(
+            "{tab}\t<ticks>{ticks}</ticks>\r\n{tab}</labels>\r\n"
+        ));
+        xml
+    }
+}
+
+#[cfg(test)]
+mod form_layout_policy_tests {
+    use super::*;
+
+    #[test]
+    fn current_row_layouts_are_distinct_and_unknown_codes_are_omitted() {
+        let pages = FormContainerCurrentRowSchema::from_tag("Pages").unwrap();
+        assert_eq!(
+            pages.decode(&["4", "0", "0", "1", "0", "0"]),
+            Some("DontUse")
+        );
+        assert_eq!(pages.decode(&["4", "0", "0", "2", "0", "0"]), None);
+        assert_eq!(pages.decode(&["3", "0", "0", "1", "0", "0"]), None);
+        let mut usual = ["0"; 26];
+        let group = FormContainerCurrentRowSchema::from_tag("UsualGroup").unwrap();
+        assert_eq!(group.decode(&usual), Some("Use"));
+        usual[25] = "1";
+        assert_eq!(group.decode(&usual), Some("DontUse"));
+        usual[25] = "2";
+        assert_eq!(group.decode(&usual), None);
+    }
+
+    #[test]
+    fn font_and_percent_scale_defaults_remain_exact() {
+        assert!(FormFontMaskLayout::recognizes_revision("8"));
+        assert!(!FormFontMaskLayout::recognizes_revision("9"));
+        assert_eq!(form_nondefault_percent_scale("100"), None);
+        assert_eq!(form_nondefault_percent_scale("0100"), Some("0100".into()));
+        assert_eq!(form_nondefault_percent_scale("1,0"), None);
     }
 }

@@ -225,7 +225,8 @@ fn finish(
         fs::remove_dir_all(&parked)
             .with_context(|| format!("failed to clear {}", parked.display()))?;
     }
-    fs::rename(&folder, &parked).with_context(|| format!("failed to move {}", folder.display()))?;
+    rename_directory(&folder, &parked)
+        .with_context(|| format!("failed to move {}", folder.display()))?;
     let (from_dir, to_dir) = (parked.join(name), output_dir.join(name));
     let from_xml = parked.join(format!("{name}.xml"));
     let to_xml = output_dir.join(format!("{name}.xml"));
@@ -234,7 +235,7 @@ fn finish(
             .with_context(|| format!("failed to clear {}", to_dir.display()))?;
     }
     if from_dir.exists() {
-        fs::rename(&from_dir, &to_dir)
+        rename_directory(&from_dir, &to_dir)
             .with_context(|| format!("failed to move {}", from_dir.display()))?;
     }
     let root = fs::read_to_string(&from_xml)
@@ -246,13 +247,32 @@ fn finish(
         fs::remove_dir(&parked)?;
     } else {
         // Nothing else is expected there; whatever is keeps its place.
-        fs::rename(&parked, &folder)?;
+        rename_directory(&parked, &folder)?;
     }
     if to_dir.exists() {
         rename_tree(&to_dir, main)?;
     }
     rewrite_report(report, main, stored);
     Ok(())
+}
+
+// Windows scanners can briefly hold a directory after its files are written.
+// Retry only access/sharing failures, keeping other errors immediate.
+fn rename_directory(from: &Path, to: &Path) -> std::io::Result<()> {
+    for attempt in 0..10 {
+        match fs::rename(from, to) {
+            Ok(()) => return Ok(()),
+            Err(error)
+                if cfg!(windows)
+                    && matches!(error.raw_os_error(), Some(5 | 32 | 33))
+                    && attempt < 9 =>
+            {
+                std::thread::sleep(std::time::Duration::from_millis(50 * (attempt + 1)));
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!()
 }
 
 /// Renames object references in every XML/HTML file under `dir`. A file that
