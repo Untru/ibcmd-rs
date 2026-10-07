@@ -148,11 +148,21 @@ def audit_infobase_mode(binary: pathlib.Path, environment: dict) -> None:
 
 def audit_sbom(sbom_path: pathlib.Path) -> dict:
     bom = json.loads(sbom_path.read_text(encoding="utf-8"))
+    audit_sbom_document(bom)
+    return bom
+
+
+def audit_sbom_document(bom: dict) -> None:
     if bom.get("bomFormat") != "CycloneDX" or bom.get("specVersion") != "1.5":
         raise SystemExit("release SBOM is not deterministic CycloneDX 1.5 JSON")
     root = bom.get("metadata", {}).get("component", {})
     if root.get("name") != "ibcmd-rs":
         raise SystemExit("release SBOM does not identify ibcmd-rs as its root component")
+    root_components = [root] + [component for component in bom.get("components", [])
+                                if component.get("name") == "ibcmd-rs"]
+    if any(component.get("licenses") != [{"expression": "MIT"}]
+           for component in root_components):
+        raise SystemExit("release SBOM must identify the ibcmd-rs root license as MIT")
     names = "\n".join(
         str(component.get("name", "")) for component in bom.get("components", [])
     ).lower()
@@ -165,7 +175,6 @@ def audit_sbom(sbom_path: pathlib.Path) -> dict:
         {"expression": "GPL-2.0-only WITH Classpath-exception-2.0"}
     ]:
         raise SystemExit("release SBOM must identify the number formatter and its actual license")
-    return bom
 
 
 def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict | None,
@@ -180,6 +189,7 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
             raise SystemExit("release archive must contain one versioned root directory")
         root = next(iter(roots))
         expected = {
+            f"{root}/LICENSE",
             f"{root}/README.md",
             f"{root}/compatibility/matrix.json",
             f"{root}/compatibility/matrix.schema.json",
@@ -204,6 +214,9 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
             lowered = name.lower()
             if lowered.endswith(FORBIDDEN_ARCHIVE_SUFFIXES):
                 raise SystemExit(f"release archive contains forbidden payload: {name}")
+        license_text = (source_root / "LICENSE").read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+        if archive.read(f"{root}/LICENSE") != license_text.encode("utf-8"):
+            raise SystemExit("release root MIT license differs from repository LICENSE")
         for name in formatter_sources:
             source = source_root / "crates/ibcmd-number-format" / name
             text = source.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
@@ -223,6 +236,7 @@ def audit_archive(archive_path: pathlib.Path, binary: pathlib.Path, sbom: dict |
         if len(sbom_members) != 1:
             raise SystemExit("release archive must contain exactly one CycloneDX SBOM")
         archived_sbom = json.loads(archive.read(sbom_members[0]))
+        audit_sbom_document(archived_sbom)
         if sbom is not None and archived_sbom != sbom:
             raise SystemExit("release archive SBOM differs from the audited SBOM")
 

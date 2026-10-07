@@ -42,7 +42,7 @@ class FormatterDistribution(unittest.TestCase):
         root = source.parent.parent
         version = tomllib.loads((root / "Cargo.toml").read_text(encoding="utf-8"))["package"]["version"]
         bom = {"bomFormat": "CycloneDX", "specVersion": "1.5",
-               "metadata": {"component": {"name": "ibcmd-rs"}},
+               "metadata": {"component": {"name": "ibcmd-rs", "licenses": [{"expression": "MIT"}]}},
                "components": [{"name": "ibcmd-number-format", "licenses": [
                    {"expression": "GPL-2.0-only WITH Classpath-exception-2.0"}]}]}
         with tempfile.TemporaryDirectory() as directory:
@@ -98,6 +98,93 @@ class FormatterDistribution(unittest.TestCase):
             sbom.write_text(json.dumps(bom), encoding="utf-8")
             with self.assertRaisesRegex(SystemExit, "actual license"):
                 audit.audit_sbom(sbom)
+
+
+class ProjectLicenseDistribution(unittest.TestCase):
+    def setUp(self):
+        self.root = source.parent.parent
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.directory = Path(temporary.name)
+        self.binary = self.directory / "ibcmd-rs.exe"
+        self.binary.write_bytes(b"standalone license package fixture")
+        generator_spec = importlib.util.spec_from_file_location(
+            "generate_sbom", self.root / "scripts/generate_sbom.py")
+        generator = importlib.util.module_from_spec(generator_spec)
+        generator_spec.loader.exec_module(generator)
+        root_package = tomllib.loads((self.root / "Cargo.toml").read_text(encoding="utf-8"))["package"]
+        formatter_package = tomllib.loads((self.root / "crates/ibcmd-number-format/Cargo.toml").read_text(encoding="utf-8"))["package"]
+        root_component = generator.component({**root_package, "id": "root"}, None, "root")
+        formatter_component = generator.component({**formatter_package, "id": "formatter"}, None, "root")
+        self.bom = {"bomFormat": "CycloneDX", "specVersion": "1.5",
+                    "metadata": {"component": root_component},
+                    "components": [root_component, formatter_component]}
+        self.sbom = self.directory / "sbom.json"
+        self.sbom.write_text(json.dumps(self.bom), encoding="utf-8")
+        self.package = self.directory / "package.zip"
+        subprocess.run([sys.executable, str(self.root / "scripts/package_release.py"),
+                        "--binary", str(self.binary), "--sbom", str(self.sbom),
+                        "--output", str(self.package), "--version", root_package["version"],
+                        "--target", "x86_64-pc-windows-msvc", "--repository-root", str(self.root)],
+                       check=True, capture_output=True)
+        with zipfile.ZipFile(self.package) as archive:
+            self.entries = {name: archive.read(name) for name in archive.namelist()}
+        self.archive_root = next(iter(self.entries)).split("/", 1)[0]
+
+    def rewritten_archive(self, entries):
+        changed = self.directory / "changed.zip"
+        with zipfile.ZipFile(changed, "w") as archive:
+            for name, data in sorted(entries.items()):
+                archive.writestr(name, data)
+        return changed
+
+    def test_package_and_generated_sbom_preserve_separate_licenses(self):
+        self.assertEqual(self.bom["metadata"]["component"]["licenses"], [{"expression": "MIT"}])
+        self.assertEqual(self.bom["components"][1]["licenses"],
+                         [{"expression": "GPL-2.0-only WITH Classpath-exception-2.0"}])
+        audit.audit_sbom(self.sbom)
+        audit.audit_archive(self.package, self.binary, None)
+        audit.audit_checksum(self.package, self.package.with_name("package.zip.sha256"))
+        paths = {
+            "LICENSE": "LICENSE",
+            "third-party/ibcmd-number-format/LICENSE": "crates/ibcmd-number-format/LICENSE",
+            "third-party/ibcmd-number-format/NOTICE.md": "crates/ibcmd-number-format/NOTICE.md",
+            "third-party/morph1c/LICENSE-APACHE": "crates/ibcmd-edt/vendor/morph1c/LICENSE-APACHE",
+            "third-party/morph1c/NOTICE.md": "crates/ibcmd-edt/vendor/morph1c/NOTICE.md",
+        }
+        for member, relative in paths.items():
+            expected = (self.root / relative).read_text(encoding="utf-8").encode("utf-8")
+            self.assertEqual(self.entries[f"{self.archive_root}/{member}"], expected)
+
+    def test_missing_or_changed_root_license_is_rejected(self):
+        name = f"{self.archive_root}/LICENSE"
+        missing = {key: value for key, value in self.entries.items() if key != name}
+        with self.assertRaisesRegex(SystemExit, "allowlist mismatch"):
+            audit.audit_archive(self.rewritten_archive(missing), self.binary, None)
+        changed = {**self.entries, name: self.entries[name].replace(b"2026", b"2025")}
+        with self.assertRaisesRegex(SystemExit, "root MIT license differs"):
+            audit.audit_archive(self.rewritten_archive(changed), self.binary, None)
+
+    def test_missing_or_wrong_root_sbom_license_is_rejected_in_both_inputs(self):
+        for licenses in (None, [{"expression": "Apache-2.0"}]):
+            with self.subTest(licenses=licenses):
+                bom = json.loads(json.dumps(self.bom))
+                if licenses is None:
+                    del bom["metadata"]["component"]["licenses"]
+                else:
+                    bom["metadata"]["component"]["licenses"] = licenses
+                self.sbom.write_text(json.dumps(bom), encoding="utf-8")
+                with self.assertRaisesRegex(SystemExit, "root license as MIT"):
+                    audit.audit_sbom(self.sbom)
+                changed = {**self.entries, f"{self.archive_root}/sbom.cdx.json": json.dumps(bom).encode("utf-8")}
+                with self.assertRaisesRegex(SystemExit, "root license as MIT"):
+                    audit.audit_archive(self.rewritten_archive(changed), self.binary, None)
+
+    def test_conflicting_duplicate_root_sbom_license_is_rejected(self):
+        self.bom["components"][0] = {**self.bom["components"][0], "licenses": [{"expression": "Apache-2.0"}]}
+        self.sbom.write_text(json.dumps(self.bom), encoding="utf-8")
+        with self.assertRaisesRegex(SystemExit, "root license as MIT"):
+            audit.audit_sbom(self.sbom)
 
 
 if __name__ == "__main__":

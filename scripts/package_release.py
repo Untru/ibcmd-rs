@@ -77,6 +77,7 @@ def main() -> None:
     files = [
         (f"{package_root}/{binary_name}", binary.read_bytes(), 0o100755),
         (f"{package_root}/README.md", normalized_text(root / "README.md"), 0o100644),
+        (f"{package_root}/LICENSE", normalized_text(root / "LICENSE"), 0o100644),
         (
             f"{package_root}/compatibility/matrix.json",
             normalized_text(root / "compatibility/matrix.json"),

@@ -93,6 +93,7 @@ The archive contains exactly one versioned root and this allowlist:
 
 - `ibcmd-rs` or `ibcmd-rs.exe`;
 - `README.md`;
+- `LICENSE`, the MIT license for the project's own code;
 - `compatibility/matrix.json`;
 - `compatibility/matrix.schema.json`;
 - `sbom.cdx.json`.
@@ -106,6 +107,11 @@ or hidden runtime can be added without making `scripts/audit_release.py` fail.
 The audit also rejects platform-oracle markers and commands in the default
 binary and verifies that the archived binary and SBOM exactly equal the audited
 files.
+The audit requires MIT in the SBOM's `ibcmd-rs` root component and checks the
+archived `LICENSE` against the repository file after text line ending
+normalization. The archived SBOM is validated even when no separate SBOM is
+supplied to the audit. Dependency licenses remain separate from the root
+license; morph1c retains its Apache-2.0 distribution license and notices.
 The number formatter is a Rust translation of OpenJDK 17 binary32/binary64 emission,
 licensed `GPL-2.0-only WITH Classpath-exception-2.0`. Its original notice and
 exception are retained, its actual license enters the SBOM, and the audit
