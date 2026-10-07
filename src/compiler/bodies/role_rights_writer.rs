@@ -146,38 +146,7 @@ pub struct WrittenRoleRights {
     pub field_refs: BTreeMap<String, String>,
 }
 
-/// The platform's order of the Configuration root's rights, as Designer
-/// writes the whole list (ERP УХ, 251 roles carry it complete). Used only to
-/// place a launch-mode right the XML omits; the uuid `4df6d046-…` that sits
-/// between `AnalyticsSystemClient` and `SaveUserData` there has no name and
-/// is never written from XML (БСП's full-rights role stores none).
-const CONFIGURATION_RIGHT_ORDER: [&str; 25] = [
-    "Administration",
-    "DataAdministration",
-    "UpdateDataBaseConfiguration",
-    "ExclusiveMode",
-    "ActiveUsers",
-    "EventLog",
-    "ThinClient",
-    "WebClient",
-    "MobileClient",
-    "ThickClient",
-    "ExternalConnection",
-    "Automation",
-    "TechnicalSpecialistMode",
-    "CollaborationSystemInfoBaseRegistration",
-    "MainWindowModeNormal",
-    "MainWindowModeWorkplace",
-    "MainWindowModeEmbeddedWorkplace",
-    "MainWindowModeFullscreenWorkplace",
-    "MainWindowModeKiosk",
-    "AnalyticsSystemClient",
-    "SaveUserData",
-    "ConfigurationExtensionsAdministration",
-    "InteractiveOpenExtDataProcessors",
-    "InteractiveOpenExtReports",
-    "Output",
-];
+use ibcmd_schema::configuration_rights::CONFIGURATION_RIGHT_ORDER;
 
 /// Compiles a `Rights.xml` into the stored row's plain text.
 pub fn write_role_rights(
@@ -1400,5 +1369,81 @@ mod tests {
             "{0,900e3c92-6e18-4874-846a-b28780b5b54c,-1,d066966a-ff6a-4a41-bd68-6191cab083bc,1,"
         ));
         assert!(plain.ends_with("\r\n},\r\n{0},1,1,0,4294967295}"));
+    }
+
+    #[test]
+    fn writes_termination_right_and_preserves_configuration_defaults() {
+        use ibcmd_schema::configuration_rights::{
+            EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START,
+            EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID,
+        };
+        use std::io::Write;
+
+        for flag in [false, true] {
+            for explicit_modes in [false, true] {
+                for termination_value in [false, true] {
+                    let mut rights = vec![RightsRight {
+                        name: "CollaborationSystemInfoBaseRegistration".into(),
+                        value: !flag,
+                        restrictions: vec![],
+                    }];
+                    if explicit_modes {
+                        rights.extend(CONFIGURATION_MODE_RIGHT_NAMES.map(|name| RightsRight {
+                            name: name.into(),
+                            value: !flag,
+                            restrictions: vec![],
+                        }));
+                    }
+                    rights.extend([
+                        RightsRight {
+                            name: EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START.into(),
+                            value: termination_value,
+                            restrictions: vec![],
+                        },
+                        RightsRight {
+                            name: "SaveUserData".into(),
+                            value: !flag,
+                            restrictions: vec![],
+                        },
+                    ]);
+                    let mut expected = RightsDocument {
+                        set_for_new_objects: flag,
+                        set_for_attributes_by_default: true,
+                        objects: vec![RightsObject {
+                            name: "Configuration.C".into(),
+                            rights,
+                        }],
+                        ..Default::default()
+                    };
+                    let written = write_role_rights_document(&expected, &Fixed).unwrap();
+                    assert!(
+                        String::from_utf8_lossy(&written.plain)
+                            .contains(EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID)
+                    );
+                    let mut encoder = flate2::write::DeflateEncoder::new(
+                        Vec::new(),
+                        flate2::Compression::default(),
+                    );
+                    encoder.write_all(&written.plain).unwrap();
+                    let blob = encoder.finish().unwrap();
+                    let xml = crate::mssql_dump::role_rights_xml_from_blob(
+                        &blob,
+                        &written.object_refs,
+                        &written.field_refs,
+                    )
+                    .unwrap();
+                    // Explicit default rights are intentionally omitted by
+                    // the native Configuration-root presentation convention.
+                    expected.objects[0]
+                        .rights
+                        .retain(|right| right.value != flag);
+                    assert_eq!(
+                        parse_rights_xml(xml.as_bytes()).unwrap(),
+                        expected,
+                        "flag={flag}, modes={explicit_modes}, termination={termination_value}"
+                    );
+                }
+            }
+        }
     }
 }

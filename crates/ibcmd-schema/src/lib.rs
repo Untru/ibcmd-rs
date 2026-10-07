@@ -6,6 +6,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod configuration_rights;
+
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
