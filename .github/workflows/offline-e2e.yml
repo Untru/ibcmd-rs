@@ -112,6 +112,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Select a physical temporary directory
+        shell: pwsh
+        run: |
+          $physicalTemp = Join-Path $env:RUNNER_TEMP 'ibcmd-physical-tmp'
+          New-Item -ItemType Directory -Force -Path $physicalTemp | Out-Null
+          foreach ($name in @('TEMP', 'TMP', 'TMPDIR')) {
+            "$name=$physicalTemp" >> $env:GITHUB_ENV
+          }
+
       - name: Enforce EDT-derived corpus governance
         shell: pwsh
         run: |

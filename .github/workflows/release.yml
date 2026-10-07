@@ -121,6 +121,15 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Select a physical temporary directory
+        shell: pwsh
+        run: |
+          $physicalTemp = Join-Path $env:RUNNER_TEMP 'ibcmd-physical-tmp'
+          New-Item -ItemType Directory -Force -Path $physicalTemp | Out-Null
+          foreach ($name in @('TEMP', 'TMP', 'TMPDIR')) {
+            "$name=$physicalTemp" >> $env:GITHUB_ENV
+          }
+
       - name: Install pinned Rust target
         uses: dtolnay/rust-toolchain@stable
         with:
