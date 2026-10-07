@@ -358,6 +358,7 @@ fn failed_row_name(
         MetadataBodyFamily::AdditionalIndexes => match kind {
             "Document" => "3",
             "AccumulationRegister" => "4",
+            "Catalog" => "1d",
             _ => return None,
         },
         MetadataBodyFamily::ObjectModules | MetadataBodyFamily::NestedCommandModules => {

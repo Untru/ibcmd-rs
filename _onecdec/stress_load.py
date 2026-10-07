@@ -9,7 +9,8 @@ Edits, where the tree has them:
   module   the first module text gets a trailing comment line
 Outcome per file: `ok`, `export-failed`, `load-failed <message>`, or
 `differ <files>`. --platform also loads the result with 8.3.27.2214
-(verify_edit.py). The binary is IBCMD_EXE or target-main's build.
+on fresh disposable bases and compares native dumps. The binary is
+IBCMD_EXE or target-main's build.
 """
 import json, os, re, shutil, subprocess, sys, tempfile
 sys.stdout.reconfigure(encoding='utf-8')
@@ -47,9 +48,11 @@ def replace_first(path, old, new):
     return True
 
 
-def edit(tree):
+def edit(tree, selected=None):
     done = []
     names = sorted(files(tree))
+    if selected is not None:
+        names = [name for name in names if name in selected]
     roots = [n for n in names if n.endswith('.xml') and '/Ext/' not in n and not n.startswith('Ext/')
              and n not in ('Configuration.xml', 'ConfigDumpInfo.xml') and n.count('/') <= 1]
     for n in roots:
@@ -85,6 +88,11 @@ def platform_dump(path, dump, work):
     log = os.path.join(work, 'platform.log')
     v8dump._run(exe, ['CREATEINFOBASE', 'File="%s"' % ib], log)
     os.makedirs(dump)
+    if os.path.splitext(path)[1].lower() in ('.cf', '.cfe'):
+        extension = ['-Extension', 'CorpusCheck'] if path.lower().endswith('.cfe') else []
+        v8dump._run(exe, ['DESIGNER', '/F', ib, '/LoadCfg', path] + extension, log)
+        v8dump._run(exe, ['DESIGNER', '/F', ib, '/DumpConfigToFiles', dump] + extension, log)
+        return dump
     staging = os.path.join(work, 'staging-' + os.path.basename(dump))
     os.makedirs(staging)
     v8dump._run(exe, ['DESIGNER', '/F', ib, '/DumpExternalDataProcessorOrReportToFiles',
@@ -109,13 +117,17 @@ def one(path, platform):
         edits = edit(tree)
         r = run(['cf', 'load', tree, out, '--base', path])
         if r.returncode != 0:
+            with open(os.path.join(work, 'load-report.json'), 'wb') as report:
+                report.write(r.stderr or r.stdout)
             try:
                 errors = json.loads(r.stderr or r.stdout)['errors']
                 message = errors[0]['message'] if errors else '?'
             except Exception:
                 message = (r.stderr or r.stdout)[-300:].decode('utf-8', 'replace')
             return 'load-failed ' + message[:300], edits
-        run(['cf', 'export', out, back, '--overwrite'])
+        exported = run(['cf', 'export', out, back, '--overwrite'])
+        if exported.returncode not in (0, 2):
+            return 'export-back-failed ' + (exported.stderr or exported.stdout)[-300:].decode('utf-8', 'replace'), edits
         want, got = files(tree), files(back)
         want.pop('ConfigDumpInfo.xml', None); got.pop('ConfigDumpInfo.xml', None)
         differ = sorted(p for p in set(want) | set(got) if want.get(p) != got.get(p))
@@ -127,15 +139,26 @@ def one(path, platform):
             # this exporter reproduces the platform.
             expected = platform_dump(path, os.path.join(work, 'native'), work)
             got = platform_dump(out, os.path.join(work, 'loaded'), work)
-            edit(expected)
+            native_edits = edit(expected, selected=edits)
+            if native_edits != edits:
+                return 'platform-edit-mismatch ' + ', '.join(native_edits), edits
             want, have = files(expected), files(got)
             want.pop('ConfigDumpInfo.xml', None); have.pop('ConfigDumpInfo.xml', None)
+            # The platform regenerates the integration-service identity on
+            # each load. Keep the same documented normalization as verify_edit.
+            from verify_edit import INTEGRATION
+            for mapping in (want, have):
+                if 'Configuration.xml' in mapping:
+                    mapping['Configuration.xml'] = INTEGRATION.sub(lambda m: m.group(1), mapping['Configuration.xml'])
             differ = sorted(p for p in set(want) | set(have) if want.get(p) != have.get(p))
             if differ:
                 return 'platform ' + ', '.join(differ[:5]), edits
         return 'ok', edits
     finally:
-        shutil.rmtree(work, ignore_errors=True)
+        if '--keep-work' in sys.argv:
+            print('work ' + work, flush=True)
+        else:
+            shutil.rmtree(work, ignore_errors=True)
 
 
 def main():

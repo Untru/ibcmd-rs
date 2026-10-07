@@ -2366,6 +2366,13 @@ where
         [kind] if kind.trim() == r#""U""# && payload[1].trim() == "0" && typed_ids(&payload) => {
             FormChoiceParameterValue::DesignTimeRef(resolve(payload[3].trim(), payload[4].trim())?)
         }
+        // Mode `0` with both ids nil is a design-time reference that names no
+        // type at all; the platform writes it as an empty
+        // `<Value xsi:type="xr:DesignTimeRef"/>` (ЛИМС КОРП, 3 items in 3 forms,
+        // e.g. `Catalogs/СертификатыНоменклатуры/Forms/ФормаСписка`).
+        [kind] if kind.trim() == r#""U""# && payload[1].trim() == "0" && nil_ids(&payload) => {
+            FormChoiceParameterValue::DesignTimeRef(String::new())
+        }
         [kind, array_type, values]
             if exact_1c_string(kind).as_deref() == Some("#")
                 && array_type
@@ -4220,6 +4227,35 @@ pub enum GeneratedMetadataOwnerRole {
     RecordManager,
     RecordSet,
     RecordKey,
+}
+
+/// Tabular-section generated types are declared in the owning object's source,
+/// rather than in a file named after the section. Unknown prefixes stay unknown.
+pub fn generated_tabular_section_source_owner(reference: &str) -> Option<&str> {
+    let (kind, qualified_name) = reference.split_once('.')?;
+    match kind {
+        "CatalogTabularSection"
+        | "CatalogTabularSectionRow"
+        | "DocumentTabularSection"
+        | "DocumentTabularSectionRow"
+        | "DataProcessorTabularSection"
+        | "DataProcessorTabularSectionRow"
+        | "ReportTabularSection"
+        | "ReportTabularSectionRow"
+        | "ExchangePlanTabularSection"
+        | "ExchangePlanTabularSectionRow"
+        | "ChartOfCharacteristicTypesTabularSection"
+        | "ChartOfCharacteristicTypesTabularSectionRow"
+        | "ChartOfAccountsTabularSection"
+        | "ChartOfAccountsTabularSectionRow"
+        | "ChartOfCalculationTypesTabularSection"
+        | "ChartOfCalculationTypesTabularSectionRow"
+        | "BusinessProcessTabularSection"
+        | "BusinessProcessTabularSectionRow"
+        | "TaskTabularSection"
+        | "TaskTabularSectionRow" => qualified_name.split_once('.').map(|(owner, _)| owner),
+        _ => None,
+    }
 }
 
 /// Metadata families which have generated owner type QNames.
@@ -18225,3 +18261,397 @@ mod tests {
         ));
     }
 }
+
+/// Closed physical layouts and platform type names shared by metadata readers.
+/// These are schema identifiers/revisions, never configuration object UUIDs.
+pub mod metadata_storage_facts {
+    const DATA_PROCESSOR_TYPES: &[(&str, &str, &str)] = &[
+        (
+            "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5",
+            "d7p1:Chart",
+            "http://v8.1c.ru/8.2/data/chart",
+        ),
+        (
+            "4652c4ec-1d1d-4af4-b835-e33fcb43af8c",
+            "d7p1:Filter",
+            "http://v8.1c.ru/8.2/misc",
+        ),
+        (
+            "4af83795-fc2a-48cd-9bea-ce665789a62c",
+            "d7p1:FlowchartContextType",
+            "http://v8.1c.ru/8.2/data/graphscheme",
+        ),
+    ];
+
+    pub fn data_processor_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+        DATA_PROCESSOR_TYPES
+            .iter()
+            .find_map(|(id, reference, _)| id.eq_ignore_ascii_case(type_id).then_some(*reference))
+    }
+
+    pub fn data_processor_builtin_type_references()
+    -> impl Iterator<Item = (&'static str, &'static str)> {
+        DATA_PROCESSOR_TYPES
+            .iter()
+            .map(|(id, reference, _)| (*id, *reference))
+    }
+
+    pub fn data_processor_builtin_type_namespace_uri(reference: &str) -> Option<&'static str> {
+        DATA_PROCESSOR_TYPES
+            .iter()
+            .find_map(|(_, name, namespace)| (*name == reference).then_some(*namespace))
+    }
+
+    /// Direct Form headers have two measured revisions; revision 12 omits the final flag.
+    pub fn direct_form_header_layout(code: Option<&str>, field_count: usize) -> bool {
+        matches!((code, field_count), (Some("12"), 5) | (Some("14"), 6))
+    }
+
+    pub struct GeneratedTabularSectionLayout;
+    impl GeneratedTabularSectionLayout {
+        pub const RECORD_START: &'static str = "{11,";
+        pub fn record_is_valid(fields: &[&str]) -> bool {
+            fields.len() >= 6 && fields[0].trim() == "11"
+        }
+        pub fn header_wrapper_is_valid(fields: &[&str]) -> bool {
+            fields.len() == 2 && fields[0].trim() == "0"
+        }
+        pub fn header_is_valid(fields: &[&str]) -> bool {
+            fields.first().is_some_and(|code| code.trim() == "3")
+        }
+    }
+
+    /// Modern ExchangePlan sections may retain their older envelope. Both layouts
+    /// mean LineNumberLength=5; unknown lengths and discriminators are refused.
+    pub fn modern_exchange_plan_section_envelope(fields: &[&str]) -> bool {
+        (fields.len() == 2 && fields[0].trim() == "0")
+            || (fields.len() == 3 && fields[0].trim() == "1" && fields[2].trim() == "5")
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct InformationRegisterStandardAttributeLayout {
+        pub has_type_reduction_mode: bool,
+        pub absent_defaults: &'static [(&'static str, &'static str)],
+    }
+    impl InformationRegisterStandardAttributeLayout {
+        pub fn from_fields(fields: &[&str]) -> Option<Self> {
+            const DATA_HISTORY: (&str, &str) = (
+                "9288a8ed-b259-46d0-a8e3-70d87956ff2d",
+                "{\"#\",d46ea122-3201-4e5e-bed4-e669c6e463c8,{d46ea122-3201-4e5e-bed4-e669c6e463c8,1}}",
+            );
+            const CREATE_ON_INPUT: (&str, &str) = (
+                "33c74a4d-561f-4bc0-9eaa-8d21c893c0a9",
+                "{\"#\",ad3615c5-aae6-4725-89be-91827523abd9,{ad3615c5-aae6-4725-89be-91827523abd9,0}}",
+            );
+            const CHOICE_HISTORY: (&str, &str) = (
+                "7ba608f2-e654-42a3-8885-334fe88ca910",
+                "{\"#\",12ca4003-ac70-450e-b897-37faf86bd313,0}",
+            );
+            let (has_type_reduction_mode, absent_defaults): (bool, &'static [(&str, &str)]) = match (
+                fields.first().map(|v| v.trim()),
+                fields.get(1).map(|v| v.trim()),
+                fields.len(),
+            ) {
+                (Some("13"), Some("24"), 50) => (false, &[]),
+                (Some("12"), Some("23"), 48) => (false, &[DATA_HISTORY]),
+                (Some("8"), Some("21"), 44) => {
+                    (false, &[DATA_HISTORY, CREATE_ON_INPUT, CHOICE_HISTORY])
+                }
+                (Some("14" | "13"), Some("25"), 52) => (true, &[]),
+                _ => return None,
+            };
+            Some(Self {
+                has_type_reduction_mode,
+                absent_defaults,
+            })
+        }
+    }
+
+    /// Older resource/dimension wrappers are distinguished by their containing
+    /// class collection, before interpreting the payload's revision number.
+    pub fn information_register_child_collections()
+    -> &'static [(&'static str, &'static [&'static str])] {
+        &[
+            ("Resource", &["{13134202-f60b-11d5-a3c7-0050bae0a776,"]),
+            ("Dimension", &["{13134203-f60b-11d5-a3c7-0050bae0a776,"]),
+            ("Attribute", &["{a2207540-1400-11d6-a3c7-0050bae0a776,"]),
+        ]
+    }
+
+    pub fn document_number_periodicity(code: &str) -> Option<&'static str> {
+        match code.trim() {
+            "0" => Some("Nonperiodical"),
+            "1" => Some("Year"),
+            "2" => Some("Quarter"),
+            "3" => Some("Month"),
+            "4" => Some("Day"),
+            _ => None,
+        }
+    }
+
+    pub fn data_processor_owner_revision(code: Option<&str>) -> bool {
+        matches!(code, Some("16" | "17"))
+    }
+
+    pub fn catalog_code_is_string(code: u32) -> bool {
+        code == 1
+    }
+
+    pub fn style_brand_has_color(record: &str) -> bool {
+        record.trim() != "{0}"
+    }
+
+    pub fn style_color_85_layout(fields: &[&str]) -> bool {
+        fields.len() == 4
+            && fields[0].trim() == "4"
+            && (fields[3].trim() == "0" || fields[3].trim() == fields[1].trim())
+    }
+
+    #[derive(Clone, Copy)]
+    pub struct RegisterIncludeHelpLayout {
+        pub offset_after_header: usize,
+        pub minimum_fields_after_header: usize,
+        pub absent_or_malformed_default: Option<bool>,
+    }
+    pub fn register_include_help_layout(kind: &str) -> Option<RegisterIncludeHelpLayout> {
+        match kind {
+            "AccumulationRegister" => Some(RegisterIncludeHelpLayout {
+                offset_after_header: 4,
+                minimum_fields_after_header: 10,
+                absent_or_malformed_default: Some(false),
+            }),
+            "AccountingRegister" => Some(RegisterIncludeHelpLayout {
+                offset_after_header: 2,
+                minimum_fields_after_header: 0,
+                absent_or_malformed_default: None,
+            }),
+            _ => None,
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        #[test]
+        fn declared_type_names_and_namespaces_share_one_registry() {
+            for (id, name, namespace) in DATA_PROCESSOR_TYPES {
+                assert_eq!(
+                    data_processor_builtin_type_reference(&id.to_uppercase()),
+                    Some(*name)
+                );
+                assert_eq!(
+                    data_processor_builtin_type_namespace_uri(name),
+                    Some(*namespace)
+                );
+            }
+            assert_eq!(
+                data_processor_builtin_type_reference("00000000-0000-0000-0000-000000000000"),
+                None
+            );
+            assert_eq!(
+                data_processor_builtin_type_namespace_uri("d7p1:Unknown"),
+                None
+            );
+        }
+        #[test]
+        fn revisions_require_their_complete_layout_and_preserve_unknown_refusal() {
+            let mut fields = vec![""; 48];
+            fields[0] = "12";
+            fields[1] = "23";
+            let layout = InformationRegisterStandardAttributeLayout::from_fields(&fields).unwrap();
+            assert!(!layout.has_type_reduction_mode);
+            assert_eq!(layout.absent_defaults.len(), 1);
+            fields.push("");
+            assert!(InformationRegisterStandardAttributeLayout::from_fields(&fields).is_none());
+            assert!(modern_exchange_plan_section_envelope(&["0", "section"]));
+            assert!(modern_exchange_plan_section_envelope(&[
+                "1", "section", "5"
+            ]));
+            assert!(!modern_exchange_plan_section_envelope(&[
+                "1", "section", "6"
+            ]));
+            assert!(style_color_85_layout(&["4", "3", "{-1}", "3"]));
+            assert!(style_color_85_layout(&["4", "3", "{-1}", "0"]));
+            assert!(!style_color_85_layout(&["4", "3", "{-1}", "2"]));
+            assert_eq!(document_number_periodicity("3"), Some("Month"));
+            assert_eq!(document_number_periodicity("5"), None);
+        }
+    }
+}
+
+/// Shared metadata child record shapes and standard-field registries.
+/// The SQL adapter owns byte parsing; these facts also serve metadata writers.
+pub mod metadata_child_storage_facts {
+    /// Catalog root standard attributes, shared by row encoding and index decoding.
+    pub const CATALOG_STANDARD_FIELDS: &[(&str, i64)] = &[
+        ("PredefinedDataName", -13),
+        ("Predefined", -10),
+        ("Ref", -8),
+        ("DeletionMark", -7),
+        ("IsFolder", -6),
+        ("Owner", -5),
+        ("Parent", -4),
+        ("Description", -3),
+        ("Code", -2),
+    ];
+
+    /// Index references to a catalog root use catalog standard-attribute markers.
+    /// Register and tabular-section references retain their evidenced shared codes.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub enum AdditionalIndexStandardFieldFamily {
+        Catalog,
+        RegisterOrTabularSection,
+    }
+
+    impl AdditionalIndexStandardFieldFamily {
+        pub fn for_owner(kind: &str) -> Self {
+            Self::for_table(kind, true)
+        }
+
+        /// Only the catalog's own table uses catalog standard-attribute codes.
+        /// Its tabular sections retain the shared index field code family.
+        pub fn for_table(owner_kind: &str, is_owner_table: bool) -> Self {
+            match (owner_kind, is_owner_table) {
+                ("Catalog", true) => Self::Catalog,
+                _ => Self::RegisterOrTabularSection,
+            }
+        }
+
+        fn fields(self) -> &'static [(&'static str, i64)] {
+            match self {
+                Self::Catalog => CATALOG_STANDARD_FIELDS,
+                Self::RegisterOrTabularSection => &[
+                    ("Period", -2),
+                    ("Recorder", -3),
+                    ("LineNumber", -4),
+                    ("Ref", -5),
+                ],
+            }
+        }
+
+        /// Closed inverse of field_name: a name outside this table's family
+        /// must resolve as a declared UUID field or be rejected by the caller.
+        pub fn field_code(self, name: &str) -> Option<i64> {
+            self.fields()
+                .iter()
+                .find(|(field, _)| *field == name)
+                .map(|(_, code)| *code)
+        }
+
+        pub fn field_name(self, code: &str) -> Option<&'static str> {
+            self.fields()
+                .iter()
+                .find(|(_, marker)| marker.to_string() == code.trim())
+                .map(|(name, _)| *name)
+        }
+    }
+
+    /// Candidate form metadata revisions. Legacy direct revision 12 is exactly
+    /// five members and requires application-purpose validation in its last slot.
+    /// Revisions 13/14 remain candidates until the caller resolves the header.
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct FormMetadataRecordLayout {
+        pub application_purposes_slot: Option<usize>,
+    }
+
+    impl FormMetadataRecordLayout {
+        pub fn from_fields(fields: &[&str]) -> Option<Self> {
+            match fields.first()?.trim() {
+                "13" | "14" => Some(Self {
+                    application_purposes_slot: None,
+                }),
+                "12" if fields.len() == 5 => Some(Self {
+                    application_purposes_slot: Some(4),
+                }),
+                _ => None,
+            }
+        }
+    }
+
+    /// Common typed-child revision 25 is the 21-member predecessor of revision
+    /// 27. The latter appends Auto create-on-input and choice-history codes.
+    #[derive(Clone, Copy, Debug)]
+    pub struct LegacyTypedMetadataChildLayout {
+        pub typed_payload_slot: usize,
+        pub following_members_slot: usize,
+        pub current_revision: &'static str,
+        pub appended_defaults: &'static [&'static str],
+    }
+
+    impl LegacyTypedMetadataChildLayout {
+        pub const RECORD_START: &'static [u8] = b"{25,";
+
+        pub fn from_fields(fields: &[&str]) -> Option<Self> {
+            if fields.len() != 21 || fields.first()?.trim() != "25" {
+                return None;
+            }
+            Some(Self {
+                typed_payload_slot: 1,
+                following_members_slot: 2,
+                current_revision: "27",
+                appended_defaults: &["0", "0"],
+            })
+        }
+
+        /// The typed payload still requires the adapter to parse its nested header.
+        pub fn typed_payload_is_valid(fields: &[&str]) -> bool {
+            fields.len() == 3 && fields[0].trim() == "2"
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn index_standard_codes_remain_owner_specific_and_closed() {
+            let catalog = AdditionalIndexStandardFieldFamily::for_owner("Catalog");
+            let register = AdditionalIndexStandardFieldFamily::for_owner("InformationRegister");
+            let section = AdditionalIndexStandardFieldFamily::for_table("Catalog", false);
+            assert_eq!(catalog.field_name("-2"), Some("Code"));
+            assert_eq!(register.field_name("-2"), Some("Period"));
+            assert_eq!(catalog.field_name("-4"), Some("Parent"));
+            assert_eq!(register.field_name("-4"), Some("LineNumber"));
+            assert_eq!(section.field_code("LineNumber"), Some(-4));
+            assert_eq!(section.field_code("Ref"), Some(-5));
+            assert_eq!(catalog.field_code("Period"), None);
+            for family in [catalog, register, section] {
+                assert_eq!(family.field_name("-02"), None);
+                assert_eq!(family.field_name("999"), None);
+                for (name, code) in family.fields() {
+                    assert_eq!(family.field_code(name), Some(*code));
+                    assert_eq!(family.field_name(&code.to_string()), Some(*name));
+                }
+            }
+        }
+
+        #[test]
+        fn legacy_form_and_typed_child_layouts_refuse_incomplete_records() {
+            assert!(FormMetadataRecordLayout::from_fields(&["12", "", "", ""]).is_none());
+            let form =
+                FormMetadataRecordLayout::from_fields(&["12", "", "", "", "purposes"]).unwrap();
+            assert_eq!(form.application_purposes_slot, Some(4));
+            assert!(FormMetadataRecordLayout::from_fields(&["11", "", "", "", ""]).is_none());
+            let mut fields = vec![""; 21];
+            fields[0] = "25";
+            let layout = LegacyTypedMetadataChildLayout::from_fields(&fields).unwrap();
+            assert_eq!(fields.len() + layout.appended_defaults.len(), 23);
+            fields.push("");
+            assert!(LegacyTypedMetadataChildLayout::from_fields(&fields).is_none());
+            assert!(LegacyTypedMetadataChildLayout::typed_payload_is_valid(&[
+                "2", "{header}", "pattern"
+            ]));
+            assert!(!LegacyTypedMetadataChildLayout::typed_payload_is_valid(&[
+                "2", "{header}"
+            ]));
+            assert!(!LegacyTypedMetadataChildLayout::typed_payload_is_valid(&[
+                "3", "{header}", "pattern"
+            ]));
+        }
+    }
+}
+/// Closed legacy record revisions and normalized configuration coordinates.
+pub mod metadata_record_upgrades;
+
+/// Canonical storage admission for source-asset bodies.
+pub mod source_asset_storage_facts;

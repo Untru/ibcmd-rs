@@ -134,17 +134,8 @@ pub(crate) const DEPENDENCE_ON_CALCULATION_TYPES: Codes =
     &[("DontUse", 0), ("OnActionPeriod", 1), ("OnBasePeriod", 2)];
 
 // Standard-attribute markers per family, root level.
-pub(crate) const CATALOG_STANDARD: Codes = &[
-    ("PredefinedDataName", -13),
-    ("Predefined", -10),
-    ("Ref", -8),
-    ("DeletionMark", -7),
-    ("IsFolder", -6),
-    ("Owner", -5),
-    ("Parent", -4),
-    ("Description", -3),
-    ("Code", -2),
-];
+pub(crate) const CATALOG_STANDARD: Codes =
+    ibcmd_schema::metadata_child_storage_facts::CATALOG_STANDARD_FIELDS;
 pub(crate) const DOCUMENT_STANDARD: Codes = &[
     ("Posted", -7),
     ("Ref", -5),
@@ -751,6 +742,9 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
 };
 
 /// BusinessProcess, tag 30, 49 slots.
+// Slot 28 carries DataLockControlMode and slot 40 NumberAllowedLength: the
+// exporter census (BUSINESS_PROCESS_*_SLOT in mssql_dump/mod.rs) over 40
+// native business processes and dm `Подписание` (Fixed + Managed).
 static BUSINESS_PROCESS: Layout = Layout {
     slots: &[
         Tag(30, 30, 30),
@@ -775,7 +769,7 @@ static BUSINESS_PROCESS: Layout = Layout {
         Reference("Task"),
         Flag("IncludeHelpInContents"),
         Fields("InputByString"),
-        Code("NumberAllowedLength", ALLOWED_LENGTH),
+        Code("DataLockControlMode", DATA_LOCK_CONTROL_MODE),
         Flag("CreateTaskInPrivilegedMode"),
         StandardAttributes(BUSINESS_PROCESS_STANDARD),
         Code("NumberPeriodicity", BP_NUMBER_PERIODICITY),
@@ -787,7 +781,7 @@ static BUSINESS_PROCESS: Layout = Layout {
         Localized("ListPresentation"),
         Localized("ExtendedListPresentation"),
         Localized("Explanation"),
-        Code("DataLockControlMode", DATA_LOCK_CONTROL_MODE),
+        Code("NumberAllowedLength", ALLOWED_LENGTH),
         Characteristics,
         Code("FullTextSearch", USE),
         Fields("DataLockFields"),

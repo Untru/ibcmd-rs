@@ -359,6 +359,12 @@ pub(super) struct MetadataFieldDeclarationIndex {
     /// Whether a constants set's `<UseAlways>` names its `v8:ValueStorage`
     /// constants: 2.21 does (8.5.1.1150 ERP УХ, 75 forms), 2.20 never does.
     writes_value_storage_constants: bool,
+    /// Whether the configuration's script variant is English (root field 3
+    /// `0`): its queries name standard attributes in English only, so a
+    /// Russian standard name is a field the list cannot resolve (ERP WE
+    /// English `Catalogs/ItemKinds/Forms/ListFormForPricingSettings` is
+    /// written `~List.Наименование`).
+    english_script: bool,
 }
 
 impl MetadataFieldDeclarationIndex {
@@ -379,6 +385,10 @@ impl MetadataFieldDeclarationIndex {
 
     pub(super) fn writes_value_storage_constants(&self) -> bool {
         self.writes_value_storage_constants
+    }
+
+    pub(super) fn english_script(&self) -> bool {
+        self.english_script
     }
 
     pub(super) fn table(&self, reference: &str) -> Option<&MetadataTableStandardAttributes> {
@@ -554,6 +564,15 @@ pub(super) fn build_metadata_field_declaration_index_from_texts(
     type_index: &BTreeMap<String, String>,
 ) -> MetadataFieldDeclarationIndex {
     let mut index = MetadataFieldDeclarationIndex::default();
+    // Only the configuration's own root row is parsed: it carries the class
+    // uuid `9cd510cd-…` of the configuration properties.
+    index.english_script = rows.iter().any(|row| {
+        row.text.contains(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::PROPERTIES_CLASS_ID)
+            && configuration_root_fields(&row.text)
+                .is_some_and(|(fields, _)| fields.get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::SCRIPT_VARIANT_SLOT)
+                    .and_then(|field| ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::from_record_code(field.trim()))
+                    == Some(ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::English))
+    });
     index.declared_tables = object_refs
         .values()
         .filter(|reference| reference.split('.').count() == 2)
@@ -2389,7 +2408,11 @@ fn is_offset_inside_recalculation_dimension_list(text: &str, offset: usize) -> b
     is_offset_inside_any_list_marker(text, offset, &["{3c456b74-4ea5-4b22-a957-e9fad9133b54,"])
 }
 
-fn is_offset_inside_any_list_marker(text: &str, offset: usize, markers: &[&str]) -> bool {
+pub(super) fn is_offset_inside_any_list_marker(
+    text: &str,
+    offset: usize,
+    markers: &[&str],
+) -> bool {
     markers.iter().any(|marker| {
         let Some(start) = text[..offset].rfind(marker) else {
             return false;
@@ -4141,14 +4164,21 @@ pub(super) fn parse_configuration_properties_from_text(
     } else {
         None
     };
+    // ScriptVariant and DefaultRunMode are independent coordinates in the
+    // normalized configuration record. Keep their storage interpretation out
+    // of the property assembly below.
+    let default_run_mode = fields
+        .get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::DEFAULT_RUN_MODE_SLOT)
+        .and_then(|field| configuration_default_run_mode_xml(field.trim()));
+    let script_variant = fields
+        .get(ibcmd_schema::metadata_record_upgrades::ConfigurationRecordLayout::SCRIPT_VARIANT_SLOT)
+        .and_then(|field| configuration_script_variant_xml(field.trim()));
     Some(ConfigurationProperties {
         name_prefix: fields
             .get(2)
             .and_then(|field| parse_1c_quoted_string(field.trim())),
         configuration_extension_compatibility_mode,
-        default_run_mode: fields
-            .get(3)
-            .and_then(|field| configuration_default_run_mode_xml(field.trim())),
+        default_run_mode,
         use_purposes: Vec::new(),
         localized_properties: None,
         brief_information: parse_configuration_localized_property(&fields, 4),
@@ -4158,9 +4188,7 @@ pub(super) fn parse_configuration_properties_from_text(
         configuration_information_address: parse_configuration_localized_property(&fields, 8),
         default_style: parse_configuration_root_reference(&fields, 9, object_refs, "Style."),
         default_language: parse_configuration_root_reference(&fields, 10, object_refs, "Language."),
-        script_variant: fields
-            .get(13)
-            .and_then(|field| configuration_script_variant_xml(field.trim())),
+        script_variant,
         default_roles: fields
             .get(39)
             .map(|field| parse_configuration_default_roles(field, object_refs))
@@ -5424,11 +5452,8 @@ pub(super) fn configuration_default_run_mode_xml(value: &str) -> Option<&'static
 }
 
 pub(super) fn configuration_script_variant_xml(value: &str) -> Option<&'static str> {
-    match value {
-        "0" => Some("Russian"),
-        "1" => Some("English"),
-        _ => None,
-    }
+    ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::from_record_code(value)
+        .map(ibcmd_schema::metadata_record_upgrades::ConfigurationScriptVariant::metadata_name)
 }
 
 /// The highest packed platform-version value this reader has direct

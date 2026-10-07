@@ -271,6 +271,7 @@ const BUILTIN_TYPES: &[(&str, &str)] = &[
 /// `d7p1:Chart`): matched by local name; the export writes `d0p1:` and the
 /// writer puts the element's depth in.
 const BUILTIN_LOCAL_TYPES: &[(&str, &str)] = &[
+    ("d0p1:Filter", "4652c4ec-1d1d-4af4-b835-e33fcb43af8c"),
     ("d0p1:Chart", "3543ef08-3316-4f7e-9447-0cd0a1cbf1d5"),
     ("d0p1:GanttChart", "3a6e63bf-16aa-42eb-b48c-2fff9670ad2f"),
     ("d0p1:TextDocument", "ebf766b1-f32c-11d3-9851-008048da1252"),

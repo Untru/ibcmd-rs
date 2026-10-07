@@ -2121,6 +2121,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             &[
                 "Type",
                 "TypeId",
+                "TypeSet",
                 "NumberQualifiers",
                 "StringQualifiers",
                 "DateQualifiers",
@@ -2220,6 +2221,21 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                         "{{\"#\",{}}}",
                         uuid_text(&child.text, "<v8:TypeId>")?
                     ));
+                }
+                // `<v8:TypeSet>` of all catalog references stores the built-in
+                // `cfg:CatalogRef` type id, the one spelling the exporter reads
+                // back (mssql_dump/moxel.rs `ConfigTypeSet("CatalogRef")`).
+                "TypeSet" => {
+                    let spelled = child.text.trim();
+                    let name = spelled.split_once(':').map(|(_, name)| name);
+                    let prefix = spelled.split_once(':').map(|(prefix, _)| prefix);
+                    if name != Some("CatalogRef")
+                        || prefix.and_then(|prefix| child.own_namespace(prefix))
+                            != Some(CURRENT_CONFIG_NS)
+                    {
+                        bail!("<v8:TypeSet> {spelled} has no writer");
+                    }
+                    descriptors.push("{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}".to_string());
                 }
                 _ => {}
             }
