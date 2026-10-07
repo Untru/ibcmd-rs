@@ -455,11 +455,9 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
         (18, "{0,0}"),
         (19, "1"),
         (20, "{0,0}"),
-        (21, "1"),
         (27, "{0,0}"),
         (34, nil),
         (35, nil),
-        (37, nil),
         (42, "\"\""),
         (44, "1"),
         (45, "0"),
@@ -732,12 +730,16 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
         "DefaultRunMode",
         code(
             t,
-            3,
+            21,
             &[("OrdinaryApplication", "0"), ("ManagedApplication", "1")],
         )?,
     ));
     push(use_purposes);
-    push(leaf("ScriptVariant", "Russian"));
+    // Field 3 (`1` Russian, `0` English; see the compiler's root layout).
+    push(leaf(
+        "ScriptVariant",
+        code(t, 3, &[("English", "0"), ("Russian", "1")])?,
+    ));
     push(
         el("DefaultRoles").children(
             roles
@@ -789,7 +791,16 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     for name in [
         "DefaultReportAppearanceTemplate",
         "DefaultDynamicListSettingsForm",
+    ] {
+        push(el(name));
+    }
+    // Field 37, written by `root.rs` (Управление задачами names
+    // `CommonForm.ФормаПоиска` there).
+    push(leaf(
         "DefaultSearchForm",
+        nil_or_reference(t, 37, "CommonForm", context)?,
+    ));
+    for name in [
         "DefaultDataHistoryChangeHistoryForm",
         "DefaultDataHistoryVersionDataForm",
         "DefaultDataHistoryVersionDifferencesForm",

@@ -426,6 +426,17 @@ fn emit_value(
             sink.push(&policy.scalar_value)?;
             sink.push(">\r\n")
         }
+        // A reference with no identity at all (both ids nil) is written
+        // self-closed: ЛИМС КОРП `BusinessProcesses/лимсСогласование/Forms/
+        // ФормаСписка` `Отбор.Родитель`.
+        FormChoiceParameterValue::DesignTimeRef(reference) if reference.is_empty() => {
+            push_escaped(
+                sink,
+                &policy.design_time_ref_xsi_type,
+                EscapeMode::Attribute,
+            )?;
+            sink.push("\"/>\r\n")
+        }
         FormChoiceParameterValue::DesignTimeRef(reference) => {
             push_escaped(
                 sink,

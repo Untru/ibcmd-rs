@@ -116,6 +116,9 @@ pub(super) fn metadata_text_row_audit_from_text(
     let fields_missing = metadata_object_fields(&text).is_none();
     let header = parse_metadata_header_from_text(&text, file_name);
     let (kind, folder) = match object_code {
+        Some(12) if is_direct_code14_form_metadata_text(&text, file_name) => {
+            (Some("Form".to_string()), None)
+        }
         Some(12) => (Some("CommonModule".to_string()), Some("CommonModules")),
         // A form descriptor (`{0,{13,<header>,0,1,…}}`) shares an integration
         // service's code and header slot but names nothing behind the
@@ -136,6 +139,9 @@ pub(super) fn metadata_text_row_audit_from_text(
             .unwrap_or((None, None)),
         None => (None, None),
     };
+    // Old child records are respelled once here so every reader of the row
+    // sees the current layout (`legacy_child`).
+    let text = super::legacy_child::upgrade_legacy_child_records(&text).unwrap_or(text);
     let row = MetadataTextRow {
         file_name: file_name.to_string(),
         text,
@@ -502,6 +508,9 @@ pub(super) fn metadata_source_for_object_fields(
         9 => Some(("CommonCommand", "CommonCommands")),
         12 if header_index == Some(1) => Some(("CommonModule", "CommonModules")),
         14 => Some(("FilterCriterion", "FilterCriteria")),
+        16 if header_index == Some(3) && fields.len() == 12 => {
+            Some(("DataProcessor", "DataProcessors"))
+        }
         16 => Some(("Constant", "Constants")),
         17 => Some(("DataProcessor", "DataProcessors")),
         19 => Some(("Report", "Reports")),

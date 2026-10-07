@@ -1,0 +1,40 @@
+[package]
+workspace = "../.."
+name = "morph1c-pipeline"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+description = "Whole-configuration orchestration: compose per-(format,kind) byte-exact descriptor readers/writers into a config-level convert (read_config + write_config) around the canonical IR. Hub-and-spokes (ARCHITECTURE.md §2.1); §1.0-honest preflight reports every unconvertible kind, never silently skips. Reads cf as a SOURCE (records inside one container) with honest unclaimed-descriptor accounting; writes cf as a TARGET (assemble_cf: service trio + config-root + body-free descriptors), erroring on body-requiring / no-writer / dangling-reference configs (§1.0). Platform-loadability validated separately (vrunner E2E)."
+
+[lib]
+name = "morph1c_pipeline"
+path = "src/lib.rs"
+
+[lints.rust]
+unsafe_code = "forbid"
+
+[dependencies]
+# Canonical IR target (Configuration / MetadataObject) — the whole-config read populates
+# it; the whole-config write regenerates each descriptor from it (ARCHITECTURE.md §1).
+morph1c-core = { path = "../core" }
+# Harness-registry types (`Format` / `FormatKind` / `CorpusLayout`) shared by the XML
+# family — the pipeline looks up per-kind read/write through them (§2.1).
+formats-xml = { path = "../formats-xml" }
+# Per-format registries (`metadata::FORMAT_KINDS`).
+formats-edt = { path = "../formats/edt" }
+formats-designer = { path = "../formats/designer" }
+# cf connector (M3 — cf as a SOURCE). Provides `FORMAT_KINDS` (Container layout) plus the
+# container-level descriptor enumeration / record-claiming public API used by the §1.0-honest
+# cf read path. cf WRITE stays blocked (a later milestone — needs the from-scratch container
+# builder), so `--to cf` is rejected, not silently degraded.
+# Physical L0 container (CfFile/Container/Element) — the cf read path enumerates EVERY
+# dotless descriptor element of the payload container for honest unclaimed accounting.
+# Data-parallel per-object read/write. Objects are independent (each reads its own descriptor +
+# sidecars, each writes to its own layout path), and BOTH ends are dominated by per-file syscalls
+# — the XML write of SSL is 9 397 files / ~79 s serial. §1.0 error honesty is preserved: results
+# are collected INDEXED and the first failure by object order is the one returned, so the reported
+# error is identical to the sequential walk regardless of thread scheduling.
+rayon = "1"
+quick-xml = "0.36"
+

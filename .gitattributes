@@ -6,6 +6,8 @@ crates/ibcmd-schema/data/** text eol=lf
 tests/fixtures/mssql_extension_list_snapshot.json text eol=lf
 *.sh text eol=lf
 tests/fixtures/external/** -text
+crates/ibcmd-edt/vendor/** -text whitespace=cr-at-eol
+crates/ibcmd-edt/tests/fixtures/** -text
 tests/fixtures/platform85-dynamic/*.bin binary
 tests/fixtures/dynamic-metadata-native/*.bin binary
 tests/fixtures/template-physical-preservation/*.bin binary

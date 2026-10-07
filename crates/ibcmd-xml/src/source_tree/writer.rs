@@ -9,7 +9,33 @@ impl SourceTreeWriter {
     }
 }
 pub fn publish_new(tree: &SourceTree, dest: impl AsRef<Path>) -> Result<(), SourceTreeError> {
+    publish_new_with_limits(tree, dest, ReaderLimits::default())
+}
+/// Publish with explicit bounded inventory limits, including complete ERP trees.
+pub fn publish_new_with_limits(
+    tree: &SourceTree,
+    dest: impl AsRef<Path>,
+    limits: ReaderLimits,
+) -> Result<(), SourceTreeError> {
+    let limits = limits.validate()?;
     tree.validate()?;
+    if tree.entries().len() > limits.files {
+        return Err(SourceTreeError::TooManyFiles);
+    }
+    count_directories(tree.entries(), limits.directories)?;
+    let mut total = 0usize;
+    for entry in tree.entries() {
+        if entry.bytes().len() > limits.asset_bytes {
+            return Err(SourceTreeError::AssetTooLarge {
+                path: entry.path().clone(),
+                actual: entry.bytes().len(),
+            });
+        }
+        total = total
+            .checked_add(entry.bytes().len())
+            .filter(|value| *value <= limits.total_bytes)
+            .ok_or(SourceTreeError::TotalTooLarge)?;
+    }
     let dest = dest.as_ref();
     destination_absent(dest)?;
     let parent = dest
@@ -42,19 +68,47 @@ pub fn publish_new(tree: &SourceTree, dest: impl AsRef<Path>) -> Result<(), Sour
         f.write_all(e.bytes())?;
         f.sync_all()?;
     }
-    let reread = read_source_tree(&temp)?;
-    if &reread != tree {
-        return Err(SourceTreeError::PathConflict {
-            first: SourcePath::new("staging")?,
-            second: SourcePath::new("tree")?,
-        });
-    }
+    reader::verify_with_limits(&temp, tree, limits)?;
     destination_absent(dest)?;
-    fs::rename(&temp, dest)?;
+    rename_directory_new(&temp, dest)?;
     let mut guard = guard;
     guard.keep = true;
     Ok(())
 }
+
+#[cfg(target_os = "linux")]
+/// Atomically renames a caller-validated staged directory without replacement.
+#[doc(hidden)]
+pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
+    rustix::fs::renameat_with(
+        rustix::fs::CWD,
+        source,
+        rustix::fs::CWD,
+        dest,
+        rustix::fs::RenameFlags::NOREPLACE,
+    )
+    .map_err(std::io::Error::from)
+}
+
+#[cfg(windows)]
+/// Atomically renames a caller-validated staged directory without replacement.
+#[doc(hidden)]
+pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
+    // std::fs::rename can replace an empty directory on Windows. Use the
+    // safe wrapper around MoveFileExW with no replacement flag instead.
+    renamore::rename_exclusive(source, dest)
+}
+
+#[cfg(not(any(windows, target_os = "linux")))]
+/// Refuses atomic publication on systems without an exclusive rename primitive.
+#[doc(hidden)]
+pub fn rename_directory_new(_source: &Path, _dest: &Path) -> std::io::Result<()> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "atomic directory publication without replacement is not supported on this OS",
+    ))
+}
+
 fn destination_absent(path: &Path) -> Result<(), SourceTreeError> {
     match fs::symlink_metadata(path) {
         Ok(_) => Err(SourceTreeError::ExistingDestination),
@@ -71,5 +125,29 @@ impl Drop for Temp {
         if !self.keep {
             let _ = fs::remove_dir_all(&self.path);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn final_publication_never_replaces_newly_created_empty_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-directory-publish-race-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let staged = root.join("stage");
+        let destination = root.join("output");
+        fs::create_dir(&staged).unwrap();
+        fs::write(staged.join("new.bin"), b"new payload").unwrap();
+        destination_absent(&destination).unwrap();
+        // Another writer creates an empty destination after the pre-check.
+        fs::create_dir(&destination).unwrap();
+        assert!(rename_directory_new(&staged, &destination).is_err());
+        assert!(staged.join("new.bin").exists());
+        assert!(!destination.join("new.bin").exists());
+        fs::remove_dir_all(&root).unwrap();
     }
 }

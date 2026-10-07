@@ -75,10 +75,15 @@ pub struct MetadataXml {
 }
 
 impl MetadataXml {
+    /// Line breaks inside a text stay as the file spells them: the platform
+    /// stores what the string holds and dumps it byte for byte, so a CR LF it
+    /// published came from a stored CR LF. Управление задачами
+    /// `Catalogs/узКонфигурации` (a two-line tooltip) loaded back with LF and
+    /// dumped 10 bytes short when the reader normalized them.
     pub fn parse(xml: &[u8]) -> Result<Self> {
-        Ok(Self {
-            root: parse_element_tree(xml)?,
-        })
+        let mut root = parse_element_tree_raw_line_breaks(xml)?;
+        spell_stored_cr_lf(&mut root);
+        Ok(Self { root })
     }
     /// The object element (`<Catalog uuid=...>`).
     pub fn object(&self) -> Result<&Element> {
@@ -135,6 +140,18 @@ fn element_from_start(start: &BytesStart<'_>) -> Result<Element> {
         text: String::new(),
         namespaces,
     })
+}
+
+/// A CR LF inside a text is a CR the string holds before its LF, which the
+/// row spells `\r\r\n`; spelling it so here lets the (idempotent)
+/// `native_text` leave it alone while it turns a bare LF into CR LF.
+fn spell_stored_cr_lf(element: &mut Element) {
+    if element.text.contains("\r\n") {
+        element.text = element.text.replace("\r\n", "\r\r\n");
+    }
+    for child in &mut element.children {
+        spell_stored_cr_lf(child);
+    }
 }
 
 /// Parses a whole document into its root element.

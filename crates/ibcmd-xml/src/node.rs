@@ -151,7 +151,7 @@ impl XmlDeclaration {
         &self.value
     }
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Debug)]
 pub struct XmlElement {
     name: QName,
     attributes: Vec<Attribute>,
@@ -160,6 +160,85 @@ pub struct XmlElement {
     raw_end: Option<String>,
     empty: bool,
 }
+
+impl Clone for XmlElement {
+    fn clone(&self) -> Self {
+        struct Frame<'a> {
+            source: &'a XmlElement,
+            next_child: usize,
+            output: XmlElement,
+        }
+        fn frame(source: &XmlElement) -> Frame<'_> {
+            Frame {
+                source,
+                next_child: 0,
+                output: source.with_children(Vec::new()),
+            }
+        }
+        let mut stack = vec![frame(self)];
+        loop {
+            let current = stack.last_mut().expect("root frame exists until return");
+            if let Some(child) = current.source.children.get(current.next_child) {
+                current.next_child += 1;
+                if let XmlNode::Element(element) = child {
+                    stack.push(frame(element));
+                } else {
+                    current.output.children.push(child.clone());
+                }
+            } else {
+                let completed = stack.pop().expect("current frame exists").output;
+                if let Some(parent) = stack.last_mut() {
+                    parent.output.children.push(XmlNode::Element(completed));
+                } else {
+                    return completed;
+                }
+            }
+        }
+    }
+}
+
+impl PartialEq for XmlElement {
+    fn eq(&self, other: &Self) -> bool {
+        let mut pending = vec![(self, other)];
+        while let Some((left, right)) = pending.pop() {
+            if left.name != right.name
+                || left.attributes != right.attributes
+                || left.raw_start != right.raw_start
+                || left.raw_end != right.raw_end
+                || left.empty != right.empty
+                || left.children.len() != right.children.len()
+            {
+                return false;
+            }
+            for (left, right) in left.children.iter().zip(&right.children) {
+                match (left, right) {
+                    (XmlNode::Element(left), XmlNode::Element(right)) => {
+                        pending.push((left, right))
+                    }
+                    _ if left != right => return false,
+                    _ => {}
+                }
+            }
+        }
+        true
+    }
+}
+
+impl Eq for XmlElement {}
+
+impl Drop for XmlElement {
+    fn drop(&mut self) {
+        // Drain descendants before their destructors run. Every element then
+        // drops an empty child vector instead of recursing down the source tree.
+        let mut pending = std::mem::take(&mut self.children);
+        while let Some(mut node) = pending.pop() {
+            if let XmlNode::Element(element) = &mut node {
+                pending.append(&mut element.children);
+            }
+        }
+    }
+}
+
 impl XmlElement {
     pub fn new(name: QName) -> Self {
         Self {

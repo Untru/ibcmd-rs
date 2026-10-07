@@ -11,6 +11,8 @@ use crate::model::{CanonicalConfiguration, CanonicalObject};
 
 /// Stable code for a collision in the global object/generated-type UUID namespace.
 pub const DUPLICATE_UUID_CODE: &str = "model.duplicate-uuid";
+/// Stable code for an invalid explicit object/generated-type identity alias.
+pub const INVALID_GENERATED_ALIAS_CODE: &str = "model.invalid-generated-alias";
 /// Stable code for duplicate exact logical object paths.
 pub const DUPLICATE_PATH_CODE: &str = "model.duplicate-path";
 /// Stable code for an owner UUID that is not a canonical object.
@@ -73,6 +75,16 @@ pub fn validate_configuration(
 ) -> Result<ValidatedConfiguration<'_>, DiagnosticReport> {
     let mut diagnostics = Vec::new();
     let uuid_occurrences = collect_uuid_occurrences(configuration);
+    for object in configuration.objects() {
+        for (index, generated) in object.generated_types().iter().enumerate() {
+            if generated.is_owner_identity_alias() && !generated.valid_owner_identity_alias(object)
+            {
+                diagnostics.push(error_diagnostic(INVALID_GENERATED_ALIAS_CODE, object,
+                    indexed_property_path("generated_types", index, "owner_identity_alias"),
+                    "generated owner identity alias has an invalid Enum/List/TypeId/ValueId relationship"));
+            }
+        }
+    }
     validate_duplicate_uuids(configuration, &uuid_occurrences, &mut diagnostics);
     validate_duplicate_paths(configuration, &mut diagnostics);
 
@@ -136,6 +148,19 @@ fn validate_duplicate_uuids(
 ) {
     for (uuid, locations) in occurrences {
         if locations.len() < 2 {
+            continue;
+        }
+        if let [
+            UuidOccurrence::Object { object_index },
+            UuidOccurrence::GeneratedType {
+                object_index: owner_index,
+                generated_type_index,
+            },
+        ] = locations.as_slice()
+            && object_index == owner_index
+            && configuration.objects()[*object_index].generated_types()[*generated_type_index]
+                .valid_owner_identity_alias(&configuration.objects()[*object_index])
+        {
             continue;
         }
         for location in locations {
@@ -248,8 +273,12 @@ fn validate_ownership_cycles(
 ) {
     let mut unique_object_index = BTreeMap::<ObjectUuid, usize>::new();
     for (uuid, locations) in uuid_occurrences {
-        if locations.len() == 1
-            && let UuidOccurrence::Object { object_index } = locations[0]
+        let mut objects = locations.iter().filter_map(|location| match location {
+            UuidOccurrence::Object { object_index } => Some(*object_index),
+            UuidOccurrence::GeneratedType { .. } => None,
+        });
+        if let Some(object_index) = objects.next()
+            && objects.next().is_none()
         {
             unique_object_index.insert(*uuid, object_index);
         }
@@ -410,6 +439,141 @@ mod tests {
             .iter()
             .map(|diagnostic| diagnostic.code().as_str())
             .collect()
+    }
+
+    fn enum_alias_parts(id: u32, name: &str) -> CanonicalObjectParts {
+        let mut result = parts(id, name);
+        result.kind = MetadataKind::new("Enum").unwrap();
+        result.generated_types.push(
+            GeneratedType::new(uuid(id), GeneratedTypeKind::new("List").unwrap())
+                .with_value_id(uuid(id + 100))
+                .with_owner_identity_alias(),
+        );
+        result
+    }
+
+    #[test]
+    fn explicit_enum_list_owner_alias_preserves_both_indexes_and_wire_binding() {
+        let mut child = parts(2, "child");
+        child.owner = Some(uuid(1));
+        child.references.push(ObjectReference::new(
+            ReferenceKind::new("type").unwrap(),
+            uuid(1),
+        ));
+        let configuration =
+            CanonicalConfiguration::new(vec![object(enum_alias_parts(1, "enum")), object(child)])
+                .unwrap();
+        let validated = validate_configuration(&configuration).unwrap();
+        assert_eq!(validated.graph().object_index_by_uuid(uuid(1)), Some(0));
+        assert_eq!(
+            validated.graph().node_address(uuid(1)),
+            Some(crate::graph::GraphNodeAddress::Object { object_index: 0 })
+        );
+        let generated = validated.graph().generated_type_address(uuid(1)).unwrap();
+        assert_eq!(generated.object_index(), 0);
+        assert_eq!(generated.generated_type_index(), 0);
+        assert_eq!(validated.graph().generated_type_count(), 1);
+        assert_eq!(
+            configuration.objects()[0].generated_types()[0].value_id(),
+            Some(uuid(101))
+        );
+        let json = serde_json::to_string(&configuration).unwrap();
+        assert!(json.contains("\"owner_identity_alias\":true"));
+        let restored: CanonicalConfiguration = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, configuration);
+        validate_configuration(&restored).unwrap();
+        let ordinary = GeneratedType::new(uuid(90), GeneratedTypeKind::new("List").unwrap());
+        assert!(
+            !serde_json::to_string(&ordinary)
+                .unwrap()
+                .contains("owner_identity_alias")
+        );
+    }
+
+    #[test]
+    fn invalid_explicit_aliases_fail_even_without_a_uuid_collision() {
+        let invalid = [
+            ("Catalog", "List", 1, Some(101)),
+            ("Enum", "Ref", 1, Some(101)),
+            ("Enum", "List", 90, Some(101)),
+            ("Enum", "List", 1, None),
+            ("Enum", "List", 1, Some(0)),
+            ("Enum", "List", 1, Some(1)),
+        ];
+        for (kind, category, type_id, value_id) in invalid {
+            let mut owner = parts(1, "owner");
+            owner.kind = MetadataKind::new(kind).unwrap();
+            let mut generated =
+                GeneratedType::new(uuid(type_id), GeneratedTypeKind::new(category).unwrap())
+                    .with_owner_identity_alias();
+            if let Some(value_id) = value_id {
+                generated = generated.with_value_id(uuid(value_id));
+            }
+            owner.generated_types.push(generated);
+            let configuration = CanonicalConfiguration::new(vec![object(owner)]).unwrap();
+            let report = validate_configuration(&configuration).unwrap_err();
+            assert!(codes(&report).contains(&INVALID_GENERATED_ALIAS_CODE));
+            assert!(matches!(
+                GraphIndex::new(&configuration),
+                Err(crate::graph::GraphIndexError::InvalidGeneratedAlias { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn alias_does_not_authorize_other_duplicate_declarations() {
+        let mut unmarked = enum_alias_parts(1, "unmarked");
+        unmarked.generated_types[0] =
+            GeneratedType::new(uuid(1), GeneratedTypeKind::new("List").unwrap())
+                .with_value_id(uuid(101));
+        let mut repeated = enum_alias_parts(1, "repeated");
+        repeated
+            .generated_types
+            .push(repeated.generated_types[0].clone());
+        let cases = [
+            vec![object(unmarked)],
+            vec![object(repeated)],
+            vec![
+                object(enum_alias_parts(1, "enum")),
+                object(parts(1, "different")),
+            ],
+            vec![
+                object(parts(1, "different")),
+                object(enum_alias_parts(1, "enum")),
+            ],
+        ];
+        for objects in cases {
+            let configuration = CanonicalConfiguration::new(objects).unwrap();
+            assert!(
+                codes(&validate_configuration(&configuration).unwrap_err())
+                    .contains(&DUPLICATE_UUID_CODE)
+            );
+            assert!(matches!(
+                GraphIndex::new(&configuration),
+                Err(crate::graph::GraphIndexError::DuplicateUuid { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn alias_never_hides_self_or_multi_object_ownership_cycles() {
+        let mut first = enum_alias_parts(1, "first");
+        first.owner = Some(uuid(1));
+        let configuration = CanonicalConfiguration::new(vec![object(first)]).unwrap();
+        assert_eq!(
+            codes(&validate_configuration(&configuration).unwrap_err()),
+            vec![OWNERSHIP_CYCLE_CODE]
+        );
+        let mut first = enum_alias_parts(1, "first");
+        first.owner = Some(uuid(2));
+        let mut second = parts(2, "second");
+        second.owner = Some(uuid(1));
+        let configuration =
+            CanonicalConfiguration::new(vec![object(second), object(first)]).unwrap();
+        assert_eq!(
+            codes(&validate_configuration(&configuration).unwrap_err()),
+            vec![OWNERSHIP_CYCLE_CODE, OWNERSHIP_CYCLE_CODE]
+        );
     }
 
     #[test]

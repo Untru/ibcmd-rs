@@ -21,6 +21,32 @@ const FORBIDDEN_BINARY_MARKERS: &[&[u8]] = &[
     b"JavaVM",
     b"OSGi",
 ];
+const EDT_SOURCE_IDS: &[&[u8]] = &[
+    b"org.eclipse.xtext.ui.shared.xtextBuilder",
+    b"org.eclipse.xtext.ui.shared.xtextNature",
+    b".settings/org.eclipse.core.resources.prefs",
+];
+
+fn exclude_declarative_edt_ids(bytes: &mut [u8]) {
+    for identifier in EDT_SOURCE_IDS {
+        let positions: Vec<_> = bytes
+            .windows(identifier.len())
+            .enumerate()
+            .filter_map(|(index, window)| {
+                (window == *identifier
+                    && (identifier.starts_with(b".settings/")
+                        || !matches!(
+                            bytes.get(index + identifier.len()),
+                            Some(b'.' | b'/' | b'$')
+                        )))
+                .then_some(index)
+            })
+            .collect();
+        for index in positions {
+            bytes[index..index + identifier.len()].fill(0);
+        }
+    }
+}
 
 fn run(args: &[&str]) -> std::process::Output {
     Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
@@ -105,7 +131,10 @@ fn default_binary_has_no_known_platform_or_edt_payload_markers() {
     let executable = std::env::var_os("CARGO_BIN_EXE_ibcmd-rs")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ibcmd-rs")));
-    let bytes = fs::read(&executable).unwrap();
+    let mut bytes = fs::read(&executable).unwrap();
+    // Exact source-format IDs are legitimate data; runtime/Java markers remain
+    // forbidden. This does not allow Eclipse package names generally.
+    exclude_declarative_edt_ids(&mut bytes);
 
     for marker in FORBIDDEN_BINARY_MARKERS {
         assert!(
@@ -115,4 +144,39 @@ fn default_binary_has_no_known_platform_or_edt_payload_markers() {
             String::from_utf8_lossy(marker)
         );
     }
+}
+
+#[test]
+fn declarative_project_ids_do_not_allow_runtime_eclipse_payloads() {
+    let mut bytes = b"org.eclipse.xtext.ui.shared.xtextBuilder org.eclipse.equinox.launcher org/eclipse/Foo.class JNI_CreateJavaVM".to_vec();
+    exclude_declarative_edt_ids(&mut bytes);
+    assert!(
+        !bytes
+            .windows(EDT_SOURCE_IDS[0].len())
+            .any(|part| part == EDT_SOURCE_IDS[0])
+    );
+    for marker in [b"org.eclipse".as_slice(), b"JNI_CreateJavaVM"] {
+        assert!(bytes.windows(marker.len()).any(|part| part == marker));
+    }
+    for identifier in EDT_SOURCE_IDS {
+        for suffix in [b".evil.Launcher".as_slice(), b"/Runtime", b"$Runtime"] {
+            if identifier.starts_with(b".settings/") {
+                continue;
+            }
+            let mut extended = [*identifier, suffix].concat();
+            exclude_declarative_edt_ids(&mut extended);
+            assert!(
+                extended
+                    .windows(b"org.eclipse".len())
+                    .any(|part| part == b"org.eclipse")
+            );
+        }
+    }
+    let mut preferences = b".settings/org.eclipse.core.resources.prefs.ibcmd-provenance/ org.eclipse.core.resources.prefs.evil.Launcher".to_vec();
+    exclude_declarative_edt_ids(&mut preferences);
+    assert!(
+        preferences
+            .windows(b"org.eclipse.core.resources.prefs.evil".len())
+            .any(|part| part == b"org.eclipse.core.resources.prefs.evil")
+    );
 }

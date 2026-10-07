@@ -674,14 +674,12 @@ fn properties_tuple(
     let p = object.properties()?;
     // Properties no corpus shows at another value: accepted at that value only.
     for (name, expected) in [
-        ("ScriptVariant", &["Russian"][..]),
         ("AdditionalFullTextSearchDictionaries", &[][..]),
         ("DynamicListsUserSettingsStorage", &[][..]),
         ("URLExternalDataStorage", &[][..]),
         ("Content", &[][..]),
         ("DefaultReportAppearanceTemplate", &[][..]),
         ("DefaultDynamicListSettingsForm", &[][..]),
-        ("DefaultSearchForm", &[][..]),
         ("DefaultDataHistoryChangeHistoryForm", &[][..]),
         ("DefaultDataHistoryVersionDataForm", &[][..]),
         ("DefaultDataHistoryVersionDifferencesForm", &[][..]),
@@ -738,12 +736,16 @@ fn properties_tuple(
         brace_list![Brace::num(0), md_base(module_group, p)],
         // 2
         Brace::str(text_of(p, "NamePrefix")),
-        // 3
+        // 3: `ScriptVariant`, not `DefaultRunMode`. Over 21 corpora the
+        // field is `0` on the one English configuration (ERP WE English) and
+        // `1` on the 20 Russian ones, while the run mode is `Managed` on that
+        // English one and `Ordinary` on one Russian (acc) -- which field 21
+        // separates.
         enum_of(
             p,
-            "DefaultRunMode",
-            &[("OrdinaryApplication", 0), ("ManagedApplication", 1)],
-            "ManagedApplication",
+            "ScriptVariant",
+            &[("English", 0), ("Russian", 1)],
+            "Russian",
         )?,
         // 4, 5: detailed before brief (WMS5 tells the two apart).
         localized(p.child("DetailedInformation")),
@@ -771,7 +773,14 @@ fn properties_tuple(
         pair(),
         Brace::num(1),
         pair(),
-        Brace::num(1),
+        // 21: `DefaultRunMode` (`0` on acc, the one `OrdinaryApplication`
+        // corpus, `1` on the other 20).
+        enum_of(
+            p,
+            "DefaultRunMode",
+            &[("OrdinaryApplication", 0), ("ManagedApplication", 1)],
+            "ManagedApplication",
+        )?,
         // 22 .. 25
         reference(p, "CommonSettingsStorage", "SettingsStorage", context)?,
         reference(p, "ReportsUserSettingsStorage", "SettingsStorage", context)?,
@@ -800,8 +809,10 @@ fn properties_tuple(
             &[("Use", 0), ("UseWithWarnings", 1), ("DontUse", 2)],
             "DontUse",
         )?,
-        // 37
-        nil(),
+        // 37: `<DefaultSearchForm>`, read back by the exporter from this
+        // tuple field on the same terms as 30..32 (Управление задачами
+        // names `CommonForm.ФормаПоиска` there).
+        reference(p, "DefaultSearchForm", "CommonForm", context)?,
         // 38
         interface_8_3,
         // 39

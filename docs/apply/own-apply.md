@@ -171,7 +171,11 @@ A **third path** was seen for a stage of `versions` and one body row (S5C, a mod
 processor, 25 s): no «Сбор служебной информации», no help-index build, `Params.DynamicallyUpdated` and the
 `.si` rows left alone; `.ui` (3 rows), `MobileVersions.dat`, `Config` (with the fold of the dynamic
 overlay) and the change registrations are written. This apply reproduces it by writing `.si` only for new
-objects and the `Params` marker deletion only for stages with a descriptor row. The same paths, by owner
+objects. For 8.3.27.2214 the `Params` marker deletion uses the
+[partial descriptor-delta correction](evidence/params-marker/descriptor-delta-partial-fix.md):
+decoded-equal staged descriptors retain the marker, while changed/new descriptors
+keep the previous deletion policy. Other profiles retain the descriptor-presence
+policy pending their own controls. The same paths, by owner
 kind, in S5: a data processor's or a form's descriptor (short path), a catalog's (S5B: the long path, the
 register rebuilt).
 
@@ -255,10 +259,13 @@ One serializable transaction, data moves inside the server only:
 3. the plan's view must still hold: aggregate fingerprints of `ConfigSave`, of
    the `Config` rows it replaces, of the dynamic-update rows and of the `Params`
    marker (row count, byte total and three sums of SHA-256 slices, computed by
-   the server) equal what the read-only planning saw;
+   the server) equal what the read-only planning saw. The 8.3.27.2214 descriptor
+   decision additionally binds its complete physical preimages before any writes;
 4. the dynamic generations are folded oldest first (see step 9 above), then
    the `Config` `DynamicallyUpdated` row is deleted, and the `Params` one too when the
-   stage carries a descriptor row (native leaves it after a stage of body rows alone, S5C);
+   descriptor decision requests deletion: for 8.3.27.2214 decoded-equal descriptors
+   retain it; other profiles still use descriptor presence. Body-only stages
+   retain it (S5C). The remaining native marker matrix is open (#418);
 5. every `Config` row named by a staged row is deleted (all parts) and the staged
    rows are inserted as they are;
 6. `_ConfigChngR._MessageNo := NULL` for every object that owns a staged row, all

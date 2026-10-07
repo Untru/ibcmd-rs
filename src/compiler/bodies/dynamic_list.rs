@@ -1168,7 +1168,11 @@ pub(crate) fn dynamic_list_bag(
 
     let mut pairs = Vec::<(String, String)>::new();
     let query = scalar("QueryText").unwrap_or_default();
-    let query = query.replace("\r\n", "\n").replace('\n', "\r\n");
+    // A stored line break is spelled CR LF in the brace text; a CR the query
+    // holds stays in front of it (`\r\r\n`), so the text keeps its own CRs:
+    // Управление задачами `Catalogs/узВопросыОтветы/Forms/ФормаСписка` stores
+    // a CR LF query and the platform dumps it as such.
+    let query = query.replace('\n', "\r\n");
     pairs.push(("QueryText".into(), format!("{{\"S\",{}}}", quoted(&query))));
 
     let (main_table, category) = match scalar("MainTable") {
@@ -1405,7 +1409,66 @@ pub(crate) fn dynamic_list_bag(
         "ServerState".into(),
         server_state(&children, configuration)?,
     ));
-    let parameters = children_blocks(part("dcsset:dataParameters").and_then(inner_of), 5)?;
+    let mut parameters = children_blocks(part("dcsset:dataParameters").and_then(inner_of), 5)?;
+    // The exporter drops a stored `use=false`, nil-valued item of a parameter
+    // the schema declares with `useRestriction` and a nil value
+    // (`reconcile_nil_data_parameter_items`), so the element it publishes can
+    // be empty while the platform keeps the item: ЛИМС КОРП
+    // `Catalogs/лимсЛабораторноеОборудование/Forms/
+    // ФормаВыбораИзмеряемойВеличиныПоМетоду` stores `Метод` that way and
+    // publishes `<dcsset:dataParameters/>`. Put such items back, in the
+    // schema's parameter order, when the element is there at all.
+    if part("dcsset:dataParameters").is_some() {
+        let tag_text = |raw: &str, tag: &str| -> Option<String> {
+            let open = format!("<{tag}>");
+            let start = raw.find(&open)? + open.len();
+            let end = raw[start..].find(&format!("</{tag}>"))? + start;
+            Some(raw[start..end].trim().to_string())
+        };
+        let declared = children
+            .iter()
+            .filter(|(name, _)| name == "Parameter")
+            .filter_map(|(_, raw)| {
+                let name = tag_text(raw, "dcssch:name")?;
+                let restricted = tag_text(raw, "dcssch:useRestriction").as_deref() == Some("true")
+                    && raw.contains("<dcssch:value xsi:nil=\"true\"/>");
+                Some((name, restricted))
+            })
+            .collect::<Vec<_>>();
+        let present = |name: &str| {
+            parameters
+                .iter()
+                .any(|(raw, _)| tag_text(raw, "dcscor:parameter").as_deref() == Some(name))
+        };
+        let missing = declared
+            .iter()
+            .filter(|(name, restricted)| *restricted && !present(name))
+            .map(|(name, _)| name.clone())
+            .collect::<Vec<_>>();
+        if !missing.is_empty() {
+            let order = |raw: &str| {
+                tag_text(raw, "dcscor:parameter")
+                    .and_then(|name| declared.iter().position(|(declared, _)| *declared == name))
+                    .unwrap_or(usize::MAX)
+            };
+            for name in missing {
+                parameters.push((
+                    format!(
+                        // Laid out as the item sits in `Form.xml`: the
+                        // element at six tabs, its members at seven.
+                        "\t\t\t\t\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\
+                         \t\t\t\t\t\t\t<dcscor:use>false</dcscor:use>\r\n\
+                         \t\t\t\t\t\t\t<dcscor:parameter>{}</dcscor:parameter>\r\n\
+                         \t\t\t\t\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n\
+                         \t\t\t\t\t\t</dcscor:item>",
+                        quick_xml::escape::escape(name.as_str())
+                    ),
+                    5,
+                ));
+            }
+            parameters.sort_by_key(|(raw, _)| order(raw));
+        }
+    }
     pairs.push((
         "DataParameters".into(),
         document_field(

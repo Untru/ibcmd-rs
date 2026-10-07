@@ -27,7 +27,8 @@ pub use characteristics::{
 pub use children::{CctTemplateChildrenError, append_cct_template_children};
 pub use common::{
     MetadataDecodeError, MetadataEnvelope, decode_configuration_envelope, decode_metadata_envelope,
-    decode_metadata_envelope_with_dialect,
+    decode_metadata_envelope_with_dialect, decode_source_metadata_envelope,
+    decode_source_metadata_envelope_with_policy,
 };
 pub use common_objects::{
     register_command_group_codec, register_common_command_codec, register_common_module_codec,
@@ -62,3 +63,16 @@ pub use utility_objects::{
     register_data_processor_codec, register_enum_codec, register_report_codec,
     register_settings_storage_codec,
 };
+/// Emits the namespace declaration for a schema-known processor value type.
+pub fn data_processor_builtin_type_namespace_attribute(reference: &str) -> Option<&'static str> {
+    match ibcmd_schema::metadata_storage_facts::data_processor_builtin_type_namespace_uri(
+        reference,
+    )? {
+        "http://v8.1c.ru/8.2/data/chart" => Some(r#" xmlns:d7p1="http://v8.1c.ru/8.2/data/chart""#),
+        "http://v8.1c.ru/8.2/misc" => Some(r#" xmlns:d7p1="http://v8.1c.ru/8.2/misc""#),
+        "http://v8.1c.ru/8.2/data/graphscheme" => {
+            Some(r#" xmlns:d7p1="http://v8.1c.ru/8.2/data/graphscheme""#)
+        }
+        _ => None,
+    }
+}

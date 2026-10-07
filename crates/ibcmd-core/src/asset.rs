@@ -246,18 +246,15 @@ pub struct AssetReference {
 }
 
 impl AssetReference {
-    /// Constructs a reference whose declared size is within the canonical bound.
+    /// Constructs metadata for externally stored content without retaining its bytes.
+    ///
+    /// The length does not allocate memory. Storage adapters validate the actual
+    /// content's length and digest and enforce their own resource policy.
     pub fn new(
         sha256: Sha256Digest,
         byte_len: u64,
         media_kind: MediaKind,
     ) -> Result<Self, AssetBuildError> {
-        if byte_len > MAX_ASSET_BYTES as u64 {
-            return Err(AssetBuildError::AssetTooLarge {
-                maximum: MAX_ASSET_BYTES,
-                actual: byte_len,
-            });
-        }
         Ok(Self {
             sha256,
             byte_len,
@@ -278,6 +275,26 @@ impl AssetReference {
     /// Returns the exact open media-kind token.
     pub const fn media_kind(&self) -> &MediaKind {
         &self.media_kind
+    }
+
+    /// Verifies externally resolved content before any bytes are emitted.
+    /// No allocation is requested from the reference's declared length.
+    pub fn verify_bytes(&self, bytes: &[u8]) -> Result<(), AssetBuildError> {
+        let actual = bytes.len() as u64;
+        if self.byte_len != actual {
+            return Err(AssetBuildError::LengthMismatch {
+                declared: self.byte_len,
+                actual,
+            });
+        }
+        let actual = Sha256Digest::for_bytes(bytes);
+        if self.sha256 != actual {
+            return Err(AssetBuildError::DigestMismatch {
+                declared: self.sha256,
+                actual,
+            });
+        }
+        Ok(())
     }
 
     pub(crate) fn retained_byte_len(&self) -> usize {
@@ -335,7 +352,7 @@ impl Asset {
         Self::new(bytes, MediaKind::new(media_kind)?)
     }
 
-    fn from_serialized(
+    pub(crate) fn from_serialized(
         byte_len: u64,
         sha256: Sha256Digest,
         media_kind: MediaKind,
@@ -456,17 +473,61 @@ mod tests {
 
     #[test]
     fn metadata_and_streamed_bytes_are_bounded() {
-        assert!(
-            AssetReference::new(
-                Sha256Digest::for_bytes(&[]),
-                MAX_ASSET_BYTES as u64 + 1,
-                MediaKind::octet_stream(),
-            )
-            .is_err()
-        );
         assert!(serde_json::from_str::<BoundedBytes<3>>("[1,2,3]").is_ok());
         assert!(serde_json::from_str::<BoundedBytes<3>>("[1,2,3,4]").is_err());
         assert!(MediaKind::new("application/x-vendor.future+bin").is_ok());
         assert!(MediaKind::new("application / bad").is_err());
+    }
+
+    #[test]
+    fn large_source_reference_does_not_relax_inline_asset_budget() {
+        for length in [127_569_637, 4 * 1024 * 1024 * 1024, u64::MAX] {
+            let reference = AssetReference::new(
+                Sha256Digest::for_bytes(&[]),
+                length,
+                MediaKind::octet_stream(),
+            )
+            .unwrap();
+            let json = serde_json::to_string(&reference).unwrap();
+            assert_eq!(
+                serde_json::from_str::<AssetReference>(&json).unwrap(),
+                reference
+            );
+            assert_eq!(
+                reference.retained_byte_len(),
+                32 + "application/octet-stream".len()
+            );
+        }
+        let reference = AssetReference::new(
+            Sha256Digest::for_bytes(&[]),
+            u64::MAX,
+            MediaKind::octet_stream(),
+        )
+        .unwrap();
+        let json = serde_json::to_string(&reference).unwrap();
+        assert!(
+            serde_json::from_str::<AssetReference>(
+                &json.replace(&u64::MAX.to_string(), "18446744073709551616")
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<AssetReference>(&json.replacen(
+                "\"byte_len\":18446744073709551615",
+                "\"byte_len\":-1",
+                1
+            ))
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<AssetReference>(&json.replacen("{", "{\"unexpected\":true,", 1))
+                .is_err()
+        );
+        let oversized_inline = format!(
+            "{{\"byte_len\":{},\"sha256\":\"{}\",\"media_kind\":\"application/octet-stream\",\"bytes\":[]}}",
+            MAX_ASSET_BYTES + 1,
+            Sha256Digest::for_bytes(&[]),
+        );
+        assert!(serde_json::from_str::<Asset>(&oversized_inline).is_err());
     }
 }

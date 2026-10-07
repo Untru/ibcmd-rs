@@ -152,9 +152,23 @@ pub fn compile_source_rows_offline(
     })??;
     ensure_unique_source_stage_ids(&metadata_objects, &common_modules)?;
 
+    let child_xmls = metadata_xmls
+        .iter()
+        .map(|path| {
+            let xml = crate::metadata_model::xml::MetadataXml::parse(&fs::read(path)?)?;
+            let id = xml
+                .object()?
+                .attr("uuid")
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            Ok((id, xml))
+        })
+        .collect::<Result<std::collections::HashMap<_, _>>>()?;
     let mut rows = Vec::new();
     for object in &metadata_objects {
-        rows.push((object.object_id.clone(), object.metadata_blob.clone()));
+        let descriptor =
+            patch_child_headers(child_xmls.get(&object.object_id), &object.metadata_blob)?;
+        rows.push((object.object_id.clone(), descriptor));
         for body in &object.body_rows {
             rows.push((body.body_id.clone(), body.blob.clone()));
         }
@@ -212,6 +226,143 @@ fn same_children(xml: &[u8], row: &str) -> bool {
         .map(str::to_ascii_lowercase)
         .collect::<std::collections::BTreeSet<_>>();
     in_xml == in_row
+}
+
+/// The staging patch preserves child collections, including their headers.
+/// Apply edits to child names, synonyms and comments without rebuilding the
+/// collection's unexported fields.
+fn patch_child_headers(
+    xml: Option<&crate::metadata_model::xml::MetadataXml>,
+    packed: &[u8],
+) -> Result<Vec<u8>> {
+    use crate::metadata_model::{
+        brace::{self, Brace},
+        xml::Element,
+    };
+    type HeaderPatch = (Brace, [bool; 3]);
+    fn collect(node: &Element, headers: &mut std::collections::HashMap<String, HeaderPatch>) {
+        if let (Some(uuid), Some(properties)) = (node.attr("uuid"), node.child("Properties")) {
+            headers.insert(
+                uuid.to_ascii_lowercase(),
+                (
+                    crate::metadata_model::md_base(uuid, properties),
+                    ["Name", "Synonym", "Comment"].map(|name| properties.child(name).is_some()),
+                ),
+            );
+        }
+        for child in &node.children {
+            collect(child, headers);
+        }
+    }
+    fn patch(node: &mut Brace, headers: &std::collections::HashMap<String, HeaderPatch>) {
+        let Some(items) = node.as_list_mut() else {
+            return;
+        };
+        if items.first().and_then(Brace::as_atom) == Some("3") {
+            let uuid = items
+                .get(1)
+                .and_then(Brace::as_list)
+                .and_then(|v| v.get(2))
+                .and_then(Brace::as_atom);
+            if let Some((header, present)) = uuid.and_then(|uuid| headers.get(uuid))
+                && let Some(source) = header.as_list()
+                && items.len() >= 5
+            {
+                for (index, present) in present.iter().enumerate() {
+                    if *present {
+                        items[index + 2] = source[index + 2].clone();
+                    }
+                }
+            }
+        }
+        for item in items {
+            patch(item, headers);
+        }
+    }
+    if let Some(xml) = xml {
+        let object = xml.object()?;
+        let Some(children) = object.child("ChildObjects") else {
+            return Ok(packed.to_vec());
+        };
+        let mut headers = std::collections::HashMap::new();
+        collect(children, &mut headers);
+        if headers.is_empty() {
+            return Ok(packed.to_vec());
+        }
+        let mut row = brace::parse_row(&crate::module_blob::inflate_raw(packed)?)?;
+        patch(&mut row, &headers);
+        return crate::module_blob::deflate_raw(&brace::serialize_row(&row));
+    }
+    Ok(packed.to_vec())
+}
+
+#[cfg(test)]
+mod child_header_tests {
+    use super::*;
+
+    #[test]
+    fn edited_child_comment_preserves_unexported_header_fields() {
+        let id = "aaaaaaaa-0000-0000-0000-000000000001";
+        let xml = crate::metadata_model::xml::MetadataXml::parse(format!(
+            "<MetaDataObject><DataProcessor><ChildObjects><Attribute uuid=\"{id}\"><Properties><Name>Field</Name><Synonym/><Comment>edited</Comment></Properties></Attribute></ChildObjects></DataProcessor></MetaDataObject>"
+        ).as_bytes()).unwrap();
+        let row = format!("{{1,{{3,{{1,0,{id}}},\"Field\",{{0}},\"old\",7,8,9,10}}}}");
+        let packed = crate::module_blob::deflate_raw(row.as_bytes()).unwrap();
+        let result = patch_child_headers(Some(&xml), &packed).unwrap();
+        let result = crate::metadata_model::brace::parse_row(
+            &crate::module_blob::inflate_raw(&result).unwrap(),
+        )
+        .unwrap();
+        let expected = row.replace("\"old\"", "\"edited\"");
+        assert_eq!(
+            result,
+            crate::metadata_model::brace::parse_row(expected.as_bytes()).unwrap()
+        );
+    }
+
+    #[test]
+    fn omitted_child_name_and_synonym_preserve_stored_values() {
+        let id = "aaaaaaaa-0000-0000-0000-000000000001";
+        let xml = crate::metadata_model::xml::MetadataXml::parse(format!(
+            "<MetaDataObject><DataProcessor><ChildObjects><Attribute uuid=\"{id}\"><Properties><Comment>edited</Comment></Properties></Attribute></ChildObjects></DataProcessor></MetaDataObject>"
+        ).as_bytes()).unwrap();
+        let row = format!(
+            "{{1,{{3,{{1,0,{id}}},\"StoredName\",{{1,\"ru\",\"Stored synonym\"}},\"old\",7,8,9,10}}}}"
+        );
+        let packed = crate::module_blob::deflate_raw(row.as_bytes()).unwrap();
+        let result = patch_child_headers(Some(&xml), &packed).unwrap();
+        assert_eq!(
+            crate::metadata_model::brace::parse_row(
+                &crate::module_blob::inflate_raw(&result).unwrap()
+            )
+            .unwrap(),
+            crate::metadata_model::brace::parse_row(
+                row.replace("\"old\"", "\"edited\"").as_bytes()
+            )
+            .unwrap()
+        );
+    }
+
+    #[test]
+    fn explicit_empty_child_fields_clear_stored_values() {
+        let id = "aaaaaaaa-0000-0000-0000-000000000001";
+        let xml = crate::metadata_model::xml::MetadataXml::parse(format!(
+            "<MetaDataObject><DataProcessor><ChildObjects><Attribute uuid=\"{id}\"><Properties><Synonym/><Comment/></Properties></Attribute></ChildObjects></DataProcessor></MetaDataObject>"
+        ).as_bytes()).unwrap();
+        let row = format!(
+            "{{1,{{3,{{1,0,{id}}},\"StoredName\",{{1,\"ru\",\"Stored synonym\"}},\"old\",7,8,9,10}}}}"
+        );
+        let packed = crate::module_blob::deflate_raw(row.as_bytes()).unwrap();
+        let result = patch_child_headers(Some(&xml), &packed).unwrap();
+        let expected = format!("{{1,{{3,{{1,0,{id}}},\"StoredName\",{{0}},\"\",7,8,9,10}}}}");
+        assert_eq!(
+            crate::metadata_model::brace::parse_row(
+                &crate::module_blob::inflate_raw(&result).unwrap()
+            )
+            .unwrap(),
+            crate::metadata_model::brace::parse_row(expected.as_bytes()).unwrap()
+        );
+    }
 }
 
 /// Bodies an offline compile could not write (kept from the base unless an

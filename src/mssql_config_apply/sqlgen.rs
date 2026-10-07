@@ -227,10 +227,13 @@ pub struct ScriptInputs {
     pub replaced: Fingerprint,
     pub special_config: Fingerprint,
     pub special_params: Fingerprint,
-    /// Delete the `Params` marker too. The native apply collects the service
-    /// information (`.si`) and clears that marker only when the stage carries a
-    /// descriptor row; a stage of body rows alone leaves it (measured, S5).
+    /// Delete the `Params` marker for an admitted genuine descriptor change.
+    /// On 8.3.27.2214 a decoded-equal descriptor companion to changed bodies
+    /// retains it (native S/R5); other profiles retain their prior policy.
     pub clear_params_marker: bool,
+    /// Exact preimages used by the semantic marker decision. Rendered only by
+    /// the bound descriptor planner, under the transaction's table locks.
+    pub params_marker_guard_sql: String,
     /// Dynamic generations to fold into the ordinary rows, oldest first.
     pub generations: Vec<Uuid>,
     /// `_ConfigChngR` exists: reset the change registrations of the staged
@@ -504,6 +507,9 @@ pub fn render_apply_script(input: &ScriptInputs) -> Result<String> {
         );
     }
 
+    // Deciding marker/descriptor/history headers are frozen before any fold,
+    // publication, marker cleanup, or ConfigSave consumption (including no-op).
+    sql.push_str(&input.params_marker_guard_sql);
     render_timestamps(&mut sql);
 
     // A restructuring the gate let through: the tables are rebuilt and the schema published inside
@@ -1181,6 +1187,7 @@ mod tests {
             special_config: Fingerprint::default(),
             special_params: Fingerprint::default(),
             clear_params_marker: true,
+            params_marker_guard_sql: String::new(),
             generations: Vec::new(),
             reset_change_registrations: true,
             files_rewrites: Vec::new(),
@@ -1410,6 +1417,20 @@ SELECT 1;"
         input.clear_params_marker = true;
         let sql = render_apply_script(&input).unwrap();
         assert!(sql.contains("DELETE FROM dbo.Params WHERE FileName = N'DynamicallyUpdated';"));
+    }
+
+    #[test]
+    fn descriptor_decision_preimages_precede_publication_and_marker_cleanup() {
+        let mut input = inputs();
+        input.params_marker_guard_sql =
+            "-- bound descriptor decision preimages\nTHROW 57209, 'decision guard fixture', 1;\n"
+                .to_owned();
+        let sql = render_apply_script(&input).unwrap();
+        let guard = sql.find("decision guard fixture").unwrap();
+        let lock = sql.find("WITH (TABLOCKX, HOLDLOCK)").unwrap();
+        let publication = sql.find("INSERT dbo.Config").unwrap();
+        let cleanup = sql.find("DELETE FROM dbo.ConfigSave").unwrap();
+        assert!(lock < guard && guard < publication && guard < cleanup);
     }
 
     #[test]

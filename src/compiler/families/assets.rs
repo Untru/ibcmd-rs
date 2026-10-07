@@ -27,6 +27,25 @@ use crate::module_blob::{pack_module_blob_bytes_base_free, unpack_module_contain
 
 const SUPPORTED_STORAGE_PROFILE: &str = "storage:mssql-config-configsave";
 
+/// A module container with the compiled image and its information member.
+/// A text member may still be unreadable; the caller must attempt its codec
+/// before deciding whether preserving the binary-only module is necessary.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BinaryModuleMemberLayout {
+    pub text_member_present: bool,
+}
+
+impl BinaryModuleMemberLayout {
+    pub fn from_member_names(names: &BTreeSet<String>) -> Option<Self> {
+        if !names.contains("image") || !names.contains("info") {
+            return None;
+        }
+        Some(Self {
+            text_member_present: names.contains("text"),
+        })
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum SourceAssetCodec {
     Module,
@@ -662,6 +681,18 @@ pub enum SourceAssetRelationError {
 }
 
 impl SourceAssetRegistry {
+    /// Owner-relative rows containing `Ext/AdditionalIndexes.xml` values.
+    /// Catalogs use their root standard fields; document and register bodies
+    /// retain their existing suffixes. Unknown families have no admitted route.
+    pub fn additional_indexes_suffix(self, owner_family: &str) -> Option<&'static str> {
+        match owner_family {
+            "Document" => Some("3"),
+            "AccumulationRegister" => Some("4"),
+            "Catalog" => Some("1d"),
+            _ => None,
+        }
+    }
+
     pub fn owner_bound_route(self, owner_family: &FamilyId) -> Option<&'static SourceAssetRoute> {
         ROUTES.iter().find(|route| {
             route.owner_family == owner_family.as_str()
@@ -1836,6 +1867,46 @@ mod tests {
             help.pages[0].asset.sha256()
         );
         assert!(decoded.files.is_empty());
+    }
+
+    #[test]
+    fn binary_module_admission_requires_both_image_and_info_members() {
+        let mut names = BTreeSet::from(["image".to_owned(), "text".to_owned()]);
+        assert!(BinaryModuleMemberLayout::from_member_names(&names).is_none());
+        names.insert("info".to_owned());
+        assert!(
+            BinaryModuleMemberLayout::from_member_names(&names)
+                .unwrap()
+                .text_member_present
+        );
+        names.remove("text");
+        assert!(
+            !BinaryModuleMemberLayout::from_member_names(&names)
+                .unwrap()
+                .text_member_present
+        );
+        names.remove("image");
+        assert!(BinaryModuleMemberLayout::from_member_names(&names).is_none());
+    }
+
+    #[test]
+    fn additional_indexes_routes_are_closed_and_keep_existing_owner_suffixes() {
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("Catalog"),
+            Some("1d")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("Document"),
+            Some("3")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("AccumulationRegister"),
+            Some("4")
+        );
+        assert_eq!(
+            SourceAssetRegistry.additional_indexes_suffix("InformationRegister"),
+            None
+        );
     }
 
     #[test]
