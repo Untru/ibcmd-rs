@@ -171,8 +171,11 @@ jobs:
           $sbom = "$directory/$stem.sbom.cdx.json"
           $archive = "$directory/$stem.zip"
           python scripts/generate_sbom.py --manifest-path Cargo.toml --output $sbom --target ${{ matrix.target }}
+          if ($LASTEXITCODE -ne 0) { throw 'Target SBOM generation failed' }
           python scripts/package_release.py --binary $binary --sbom $sbom --output $archive --version $env:RELEASE_VERSION --target ${{ matrix.target }} --repository-root .
+          if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed' }
           python scripts/audit_release.py --binary $binary --sbom $sbom --archive $archive --checksum "$archive.sha256"
+          if ($LASTEXITCODE -ne 0) { throw 'Release audit failed' }
 
       - name: Upload Linux ABI evidence
         if: runner.os == 'Linux'

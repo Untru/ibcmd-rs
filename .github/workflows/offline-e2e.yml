@@ -155,11 +155,16 @@ jobs:
           python-version: "3.12"
 
       - name: Test installed-EDT oracle guards without the platform
+        shell: pwsh
         run: |
           python tests/scripts/edt_oracle_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_oracle_test failed' }
           python tests/scripts/edt_warm_context_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_warm_context_test failed' }
           python tests/scripts/edt_release_audit_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'edt_release_audit_test failed' }
           python tests/scripts/linux_abi_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'linux_abi_test failed' }
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
