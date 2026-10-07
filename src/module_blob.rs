@@ -33303,7 +33303,11 @@ mod tests {
         collect(&tree, &mut sources);
         assert_eq!(
             sources,
-            vec![Brace::list(vec![Brace::num(25), Brace::num(0)]); 3]
+            vec![
+                Brace::list(vec![Brace::num(25), Brace::num(0)]),
+                Brace::list(vec![Brace::num(25), Brace::num(1)]),
+                Brace::list(vec![Brace::num(25), Brace::num(2)]),
+            ]
         );
         Ok(())
     }
