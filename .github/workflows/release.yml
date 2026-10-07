@@ -100,12 +100,21 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary: ibcmd-rs
           - os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: ibcmd-rs.exe
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: ibcmd-rs
+          - os: macos-15
+            target: aarch64-apple-darwin
+            binary: ibcmd-rs
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: ibcmd-rs
     steps:
       - name: Checkout complete history
         uses: actions/checkout@v4
@@ -147,6 +156,10 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --release --no-default-features --target ${{ matrix.target }}
 
+      - name: Verify Ubuntu 22.04 GLIBC compatibility
+        if: runner.os == 'Linux'
+        run: python scripts/audit_linux_abi.py --binary target/${{ matrix.target }}/release/${{ matrix.binary }} --target ${{ matrix.target }} --output target/release-artifacts/${{ matrix.target }}.abi.json
+
       - name: Generate, package, and audit release
         shell: pwsh
         env:
@@ -161,11 +174,23 @@ jobs:
           python scripts/package_release.py --binary $binary --sbom $sbom --output $archive --version $env:RELEASE_VERSION --target ${{ matrix.target }} --repository-root .
           python scripts/audit_release.py --binary $binary --sbom $sbom --archive $archive --checksum "$archive.sha256"
 
+      - name: Upload Linux ABI evidence
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-abi-${{ matrix.target }}
+          path: target/release-artifacts/${{ matrix.target }}.abi.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Upload release artifacts
         uses: actions/upload-artifact@v4
         with:
           name: standalone-${{ matrix.target }}
-          path: target/release-artifacts/*
+          path: |
+            target/release-artifacts/*.zip
+            target/release-artifacts/*.zip.sha256
+            target/release-artifacts/*.sbom.cdx.json
           if-no-files-found: error
           retention-days: 30
 

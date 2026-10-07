@@ -89,13 +89,25 @@ jobs:
       matrix:
         include:
           - name: Linux
-            os: ubuntu-latest
+            os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary: target/release/ibcmd-rs
           - name: Windows
             os: windows-latest
             target: x86_64-pc-windows-msvc
             binary: target/release/ibcmd-rs.exe
+          - name: Linux ARM64
+            os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            binary: target/release/ibcmd-rs
+          - name: macOS ARM64
+            os: macos-15
+            target: aarch64-apple-darwin
+            binary: target/release/ibcmd-rs
+          - name: macOS Intel
+            os: macos-15-intel
+            target: x86_64-apple-darwin
+            binary: target/release/ibcmd-rs
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -147,6 +159,7 @@ jobs:
           python tests/scripts/edt_oracle_test.py
           python tests/scripts/edt_warm_context_test.py
           python tests/scripts/edt_release_audit_test.py
+          python tests/scripts/linux_abi_test.py
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
@@ -179,6 +192,10 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo build --locked --release --no-default-features
 
+      - name: Verify Ubuntu 22.04 GLIBC compatibility
+        if: runner.os == 'Linux'
+        run: python scripts/audit_linux_abi.py --binary ${{ matrix.binary }} --target ${{ matrix.target }} --output target/offline-evidence/${{ matrix.target }}.abi.json
+
       - name: Verify native micro-corpus parity offline
         shell: pwsh
         run: ./tools/verify-native-evidence.ps1 -RepositoryRoot . -BinaryPath ${{ matrix.binary }}
@@ -191,10 +208,24 @@ jobs:
       - name: Audit clean-environment release boundary
         run: python scripts/audit_release.py --binary ${{ matrix.binary }} --sbom target/offline-evidence/${{ matrix.target }}.sbom.cdx.json
 
+      - name: Package and audit the exact tested binary
+        shell: pwsh
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: |
+          $version = python -c "import tomllib; print(tomllib.load(open('Cargo.toml','rb'))['package']['version'])"
+          $env:SOURCE_DATE_EPOCH = git log -1 --format=%ct
+          $stem = "target/offline-evidence/ibcmd-rs-$version-${{ matrix.target }}"
+          $sbom = "target/offline-evidence/${{ matrix.target }}.sbom.cdx.json"
+          python scripts/package_release.py --binary ${{ matrix.binary }} --sbom $sbom --output "$stem.zip" --version $version --target ${{ matrix.target }} --repository-root .
+          if ($LASTEXITCODE -ne 0) { throw 'Release packaging failed' }
+          python scripts/audit_release.py --binary ${{ matrix.binary }} --sbom $sbom --archive "$stem.zip" --checksum "$stem.zip.sha256"
+          if ($LASTEXITCODE -ne 0) { throw 'Packaged release audit failed' }
+
       - name: Upload evidence
         uses: actions/upload-artifact@v4
         with:
           name: offline-evidence-${{ matrix.target }}
-          path: target/offline-evidence/${{ matrix.target }}.sbom.cdx.json
+          path: target/offline-evidence/*
           if-no-files-found: error
           retention-days: 14
