@@ -902,7 +902,14 @@ fn bootstrap_compile_failure(
         vec![
             diagnostic(
                 "bootstrap_compile_failed",
-                format!("source tree cannot be bootstrapped: {error}"),
+                format!(
+                    "source tree cannot be bootstrapped: {error}. \
+                     This command used the limited legacy bootstrap compiler. \
+                     For native XML trees, build newer source from master after PR #422 \
+                     (published v0.4.0 lacks the cf bootstrap --base-free option), then try \
+                     ibcmd-rs cf bootstrap --base-free --platform <version> <source-dir> <output.cf>. \
+                     The following diagnostics retain the exact rejected file and rule."
+                ),
             ),
             CfDiagnostic {
                 code: error.code(),

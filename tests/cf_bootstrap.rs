@@ -223,11 +223,25 @@ fn unsupported_source_prevents_publication() {
     assert!(!output.status.success());
     let report: Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(report["errors"][0]["code"], "bootstrap_compile_failed");
+    let guidance = report["errors"][0]["message"].as_str().unwrap();
+    assert!(
+        guidance.contains("limited legacy bootstrap compiler"),
+        "{guidance}"
+    );
+    assert!(guidance.contains("master after PR #422"), "{guidance}");
+    assert!(guidance.contains("v0.4.0 lacks"), "{guidance}");
+    assert!(
+        guidance.contains("ibcmd-rs cf bootstrap --base-free --platform <version>"),
+        "{guidance}"
+    );
     // The umbrella entry alone never says which rule fired or on which file;
     // the typed entry that follows it must.
     let detail = &report["errors"][1];
     assert_eq!(detail["code"], "unconsumed_source");
     assert_eq!(detail["element"], "unsupported.dat");
+    assert!(detail["message"].as_str().unwrap().contains("unsupported.dat"));
+    assert_eq!(report["errors"].as_array().unwrap().len(), 2);
+    assert!(report["publication"].is_null());
     assert!(!cf.exists());
 }
 
