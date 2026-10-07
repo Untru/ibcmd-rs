@@ -79845,8 +79845,8 @@ fn a_characteristic_without_a_source_reads_and_prints_empty() {
 }
 
 // Tests of the onecdec fork, kept apart from the upstream file.
-mod onecdec;
 mod configuration_rights_436;
+mod onecdec;
 
 /// Evidence: 1C:Документооборот's `Catalogs/ЗаписиРабочегоКалендаря` forms
 /// store the planner's and its item's border with an all-zero style id where
