@@ -1,7 +1,7 @@
 use super::*;
 use ibcmd_schema::configuration_rights::{
-    CONFIGURATION_RIGHT_ORDER, EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START,
-    EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID,
+    CONFIGURATION_MODE_GROUP_ANCHOR, CONFIGURATION_RIGHT_ORDER,
+    EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START, EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID,
 };
 
 pub(super) struct RoleRights {
@@ -897,7 +897,10 @@ pub(super) fn parse_configuration_root_object_rights(
     // XML places them before SaveUserData, followed by the termination right
     // if it differs from the role's default. Move the whole group so a
     // termination pair stored before the modes cannot split this sequence.
-    if entries.iter().any(|entry| entry.name == "SaveUserData") {
+    if entries
+        .iter()
+        .any(|entry| entry.name == CONFIGURATION_MODE_GROUP_ANCHOR)
+    {
         let (mut ordered, rest): (Vec<_>, Vec<_>) =
             std::mem::take(&mut entries).into_iter().partition(|entry| {
                 is_configuration_mode_right(&entry.name)
@@ -911,7 +914,7 @@ pub(super) fn parse_configuration_root_object_rights(
         });
         let insert_at = entries
             .iter()
-            .position(|entry| entry.name == "SaveUserData")?;
+            .position(|entry| entry.name == CONFIGURATION_MODE_GROUP_ANCHOR)?;
         entries.splice(insert_at..insert_at, ordered);
     }
 
@@ -1238,13 +1241,15 @@ pub(super) fn parse_role_restriction_templates(
 }
 
 pub(crate) fn role_right_name(uuid: &str) -> Option<&'static str> {
-    ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied()
+    ibcmd_schema::configuration_rights::termination_right_name(uuid)
+        .or_else(|| ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied())
 }
 
 /// The right uuid a `Rights.xml` right name stands for: the same table read
 /// the other way. Every name in it is unique, so the inverse is exact.
 pub(crate) fn role_right_uuid(name: &str) -> Option<&'static str> {
-    ROLE_RIGHT_UUIDS_BY_NAME.get(name).copied()
+    ibcmd_schema::configuration_rights::termination_right_uuid(name)
+        .or_else(|| ROLE_RIGHT_UUIDS_BY_NAME.get(name).copied())
 }
 
 static ROLE_RIGHT_NAMES_BY_UUID: LazyLock<HashMap<&'static str, &'static str>> =
@@ -1259,10 +1264,6 @@ static ROLE_RIGHT_UUIDS_BY_NAME: LazyLock<HashMap<&'static str, &'static str>> =
     });
 
 const ROLE_RIGHT_NAMES: &[(&str, &str)] = &[
-    (
-        EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID,
-        EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START,
-    ),
     ("fd05f656-7a23-43a4-8996-f480a806fb97", "ActiveUsers"),
     ("900e3c92-6e18-4874-846a-b28780b5b54c", "Administration"),
     (
