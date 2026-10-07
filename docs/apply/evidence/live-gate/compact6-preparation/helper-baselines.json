@@ -1,0 +1,87 @@
+[
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\lib.ps1",
+    "baseline_sha256": "8D02DCD0C3B9E3E45611ED460EAFE8D8B870D6C8221C9D09A7DC531B64B6A059",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\lib.ps1",
+    "copy_sha256": "8D02DCD0C3B9E3E45611ED460EAFE8D8B870D6C8221C9D09A7DC531B64B6A059",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-lib.ps1",
+    "baseline_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-lib.ps1",
+    "copy_sha256": "B859574D2E27C9594DC0A69969DD107894B4E5EF4F96865B7AB07C9AC8BA756E",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-start.ps1",
+    "baseline_sha256": "4D5C8BA38AE77ED95A9102AE1C1BCFA1F21C73C8DB18280280037905040AF726",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-start.ps1",
+    "copy_sha256": "4D5C8BA38AE77ED95A9102AE1C1BCFA1F21C73C8DB18280280037905040AF726",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\start.ps1",
+    "baseline_sha256": "A2326082C236A051AB5715835542E92FE6509952AD0021B080DB55E098791DCB",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\start.ps1",
+    "copy_sha256": "A2326082C236A051AB5715835542E92FE6509952AD0021B080DB55E098791DCB",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-register.ps1",
+    "baseline_sha256": "F673EDB24965F7DDDA01AA53D619D6F970BC53499415B63379F9A2EC9F671081",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-register.ps1",
+    "copy_sha256": "F673EDB24965F7DDDA01AA53D619D6F970BC53499415B63379F9A2EC9F671081",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\private-stop.ps1",
+    "baseline_sha256": "CF73BA4AEA75E53D1F4B269B3209C5F2C4D647D0D95B80A74D6F343B74044592",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\private-stop.ps1",
+    "copy_sha256": "CF73BA4AEA75E53D1F4B269B3209C5F2C4D647D0D95B80A74D6F343B74044592",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\cluster\\stop.ps1",
+    "baseline_sha256": "9F06D5976366C5FFD809ECCA46B599D3DBCCF5340B72828BB0E3A1CECB51287D",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\cluster\\stop.ps1",
+    "copy_sha256": "9F06D5976366C5FFD809ECCA46B599D3DBCCF5340B72828BB0E3A1CECB51287D",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\live\\process.ps1",
+    "baseline_sha256": "A69741DF6E6A6FDFCCF00BABC7A3FC03883A98956FAA9B7437051074B64D412A",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\process.ps1",
+    "copy_sha256": "68CE228D591E7EB1B3A56BC9C28AFA872C064BFEA3A18141C3430C4F75013AD7",
+    "mapping_only_delta": true
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\live\\workload_lab.ps1",
+    "baseline_sha256": "7793D8C5756260836B18158754D5F793071EF9D72D1BBC1BAC94EC9C7EA7C52A",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\workload_lab.ps1",
+    "copy_sha256": "7793D8C5756260836B18158754D5F793071EF9D72D1BBC1BAC94EC9C7EA7C52A",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\live\\obs.ps1",
+    "baseline_sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\obs.ps1",
+    "copy_sha256": "86CB2522A94B90BFCFE19CFCA60ABB087C5D24489A65FF7A15D59364B3D61010",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:\\ibcmd\\src\\ibcmd-rs-05-load-wave3\\scripts\\apply-lab\\live\\test_process.ps1",
+    "baseline_sha256": "1ADB76DEA00396E37F52C2D7E03EE9E3B5BB785B7310018F4B9E18137B782678",
+    "copy": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact6-tools\\live\\test_process.ps1",
+    "copy_sha256": "1ADB76DEA00396E37F52C2D7E03EE9E3B5BB785B7310018F4B9E18137B782678",
+    "mapping_only_delta": false
+  },
+  {
+    "source": "F:/ibcmd/lab/05/wave3/load/compact5-offline-r2/read_compact5_recovery_r2.py",
+    "baseline_sha256": "EC193A640452177C851961CF1EB6C1A91DB1EAB209EDF04A5E512D57793A55AC",
+    "copy": "F:/ibcmd/lab/05/wave3/load/read_compact6_recovery.py",
+    "copy_sha256": "A26A2D40E286AC711B4502BF5CD53D9CA7521EC953A9D5BC23225D42DD4128AE",
+    "mapping_only_delta": true,
+    "scope": "R2 UUID syntax unchanged; only fixed compact6 DB name changes"
+  }
+]

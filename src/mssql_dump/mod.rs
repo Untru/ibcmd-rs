@@ -1027,22 +1027,7 @@ pub(crate) fn fetch_main_activation_rows(
     // (`dbo.Config`, no view), so they are the rows as stored: never the
     // generation an export of this process resolved (#409 F-2).
     let _stored = dynamic_generation::StorageViewScope::begin(database);
-    fetch::fetch_binary_rows(sql, database, table, selected_file_names, false)?
-        .into_iter()
-        .map(|row| {
-            let data_size = u64::try_from(row.data_size)
-                .with_context(|| format!("negative DataSize for {table}.{}", row.file_name))?;
-            Ok(crate::mssql_main_activation::MainStorageRow {
-                file_name: row.file_name,
-                part_no: row.part_no,
-                creation: String::new(),
-                modified: String::new(),
-                attributes: 0,
-                data_size,
-                binary_data: row.binary,
-            })
-        })
-        .collect()
+    fetch::fetch_activation_rows(sql, database, table, selected_file_names)
 }
 
 pub(crate) fn fetch_extension_activation_rows(
@@ -1061,8 +1046,8 @@ pub(crate) fn fetch_extension_activation_rows(
             Ok(crate::mssql_main_activation::MainStorageRow {
                 file_name: row.file_name,
                 part_no: row.part_no,
-                creation: String::new(),
-                modified: String::new(),
+                creation: row.creation,
+                modified: row.modified,
                 attributes: row.attributes,
                 data_size,
                 binary_data: row.binary,
@@ -2068,6 +2053,19 @@ struct MssqlDumpRowManifest {
 
 pub fn dump_config(args: &MssqlDumpConfigArgs) -> Result<MssqlDumpConfigReport> {
     dump_config_with(args, DumpHooks::default())
+}
+
+pub(crate) fn dump_config_with_sql(
+    args: &MssqlDumpConfigArgs,
+    sql_override: Option<crate::sql::SqlExec>,
+) -> Result<MssqlDumpConfigReport> {
+    dump_config_with(
+        args,
+        DumpHooks {
+            sql: sql_override,
+            sink: None,
+        },
+    )
 }
 
 /// What a long-lived caller (the editor server, `crate::server`, through

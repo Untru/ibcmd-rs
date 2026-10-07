@@ -1,0 +1,5 @@
+PASS fmt 5s
+PASS guard 3s
+PASS clippy-1.95 1s
+PASS test-root-lib 106s
+DONE

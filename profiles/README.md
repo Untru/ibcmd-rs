@@ -44,6 +44,12 @@ compared with the native apply on twins: `8.3.27.2214` and `8.5.1.1150`. It is
 independent of `mssql.main.write`, so 8.5.1 can admit it while main writes stay
 unsupported; `8.3.27.1989` declares neither and fails closed.
 
+The drop-in `ibcmd infobase config apply --dynamic=force` (`docs/apply/dropin-dynamic.md`) has one of its
+own, `mssql.config.apply.dynamic`: a small delta stage published as a dynamic (online) generation, with the
+change registrations and `MobileVersions.dat` the platform's own `force` writes. It is declared supported
+for `8.3.27.2214` only, the build the online transition and the twin were measured on; `8.5.1.1150` declares
+it unsupported (its main writes are), `8.3.27.1989` not at all and fails closed.
+
 `profile_registry::BUNDLED_PROFILES` embeds these files at compile time and
 `load_bundled_profile_registry` resolves them without filesystem or platform
 access.

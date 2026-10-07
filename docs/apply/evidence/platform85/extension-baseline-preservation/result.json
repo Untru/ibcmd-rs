@@ -1,0 +1,9 @@
+{
+  "full_before_after_matches_postfailed": true,
+  "sha256": "B60985A24206B9146FCD8C45A0C89B999ECE63135CC3BEE28450B31344715690",
+  "bytes": 512516096,
+  "no_restore_registration_native_worker": true,
+  "backup": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\baselines\\extension-settled-A-20261002.bak",
+  "source": "ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+  "copy_only": true
+}

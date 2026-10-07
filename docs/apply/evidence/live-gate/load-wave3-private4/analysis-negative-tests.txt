@@ -1,0 +1,8 @@
+PASS copied wrong-UUID REFUSED: persisted receipt differs ibcmd-rs-load:private4-load-4-new-a:1 {'uuid': '00000000-0000-0000-0000-000000000000', 'posted': '01'}
+PASS copied unposted REFUSED: unposted physical operation ibcmd-rs-load:private4-load-4-new-a:1
+PASS copied duplicate-physical REFUSED: duplicate persisted operation ibcmd-rs-load:private4-load-4-new-a:1
+PASS copied report10 REFUSED: invalid report_ok value
+PASS copied report1extra REFUSED: invalid report_ok value
+PASS copied duplicate-report REFUSED: duplicate receipt field report_ok
+PASS existing different output refused, SHA unchanged; identical retry accepted
+PASS original physical/journal SHA unchanged; DB/process/native calls0

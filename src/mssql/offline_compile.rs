@@ -252,6 +252,47 @@ pub fn pack_module_text(key: &str, text: &[u8]) -> Result<Vec<u8>> {
     }
 }
 
+/// Whether an offline form must use the adoption adapter. XML spelling does
+/// not decide this: quotes, attribute order and whitespace around '=' are all
+/// interpreted by the strict XML reader.
+pub(super) fn requires_adoption_adapter(form_xml: &[u8], metadata_xml: &[u8]) -> Result<bool> {
+    if form_xml.is_empty() {
+        return Ok(false);
+    }
+    let document = ibcmd_xml::XmlReader::from_slice(form_xml).context("Form.xml is malformed")?;
+    let mut pending = vec![document.root()];
+    let mut has_call_type = false;
+    while let Some(node) = pending.pop() {
+        if node.name().local() == "BaseForm" {
+            return Ok(true);
+        }
+        has_call_type |= node.attributes().iter().any(|attribute| {
+            matches!(attribute.kind(),
+            ibcmd_xml::AttributeKind::Ordinary(name) if name.local() == "callType")
+        });
+        pending.extend(node.children().iter().filter_map(|child| match child {
+            ibcmd_xml::XmlNode::Element(element) => Some(element),
+            _ => None,
+        }));
+    }
+    if !has_call_type {
+        return Ok(false);
+    }
+    let metadata =
+        ibcmd_xml::XmlReader::from_slice(metadata_xml).context("form metadata XML is malformed")?;
+    let mut pending = vec![metadata.root()];
+    while let Some(node) = pending.pop() {
+        if node.name().local() == "ObjectBelonging" && node.children().iter().any(|child|
+            matches!(child, ibcmd_xml::XmlNode::Text(text) if text.value().trim() == "Adopted")) {
+            return Ok(true);
+        }
+        pending.extend(node.children().iter().filter_map(|child| match child {
+            ibcmd_xml::XmlNode::Element(element) => Some(element),
+            _ => None,
+        }));
+    }
+    Ok(false)
+}
 /// The body of a form an extension adopts, compiled from its `Form.xml`:
 /// the form without `<BaseForm>` and `callType` compiles as a configuration's
 /// form, its event blocks then take the call types
@@ -284,6 +325,22 @@ pub(super) fn adopted_form_body(
     let base_plain = String::from_utf8(crate::module_blob::inflate_raw(base_body)?)
         .context("the base form body is not UTF-8")?;
     let parsed = crate::module_blob::parse_form_body_plain(&base_plain)?;
+    if parsed
+        .trailing
+        .get(5)
+        .is_some_and(|field| field.trim() == "0")
+        && parsed
+            .trailing
+            .get(6)
+            .is_some_and(|field| field.trim() == "0")
+    {
+        if xml.contains("<BaseForm") {
+            bail!("Form.xml adds a BaseForm the stored form does not have");
+        }
+        // Common forms adopted without a base record keep the ordinary body
+        // ending; only their event blocks acquire interceptor codes.
+        return crate::module_blob::deflate_raw(plain.as_bytes());
+    }
     let base_form = match (
         parsed.trailing.get(5).map(|f| f.trim()),
         parsed.trailing.get(6),
@@ -310,6 +367,38 @@ type Bindings = Vec<(String, String)>;
 /// The form XML without `<BaseForm>`, each event's interceptor lines folded
 /// into one line under a stand-in handler, and the stand-ins' bindings.
 fn without_adoption(xml: &str) -> Result<(String, std::collections::BTreeMap<String, Bindings>)> {
+    ibcmd_xml::XmlReader::from_slice(xml.as_bytes()).context("adopted Form.xml is malformed")?;
+    let has_base = xml.contains("<BaseForm");
+    let mut reader = quick_xml::Reader::from_str(xml);
+    loop {
+        match reader.read_event()? {
+            quick_xml::events::Event::Start(node) | quick_xml::events::Event::Empty(node) => {
+                for attribute in node.attributes() {
+                    let attribute = attribute?;
+                    if attribute.key.local_name().as_ref() != b"callType" {
+                        continue;
+                    }
+                    if attribute.key.as_ref() != b"callType" {
+                        bail!("namespaced callType attributes are unsupported");
+                    }
+                    let call_type = attribute.decode_and_unescape_value(reader.decoder())?;
+                    if !matches!(call_type.as_ref(), "Before" | "After" | "Override") {
+                        bail!("unsupported form interceptor callType {call_type:?}");
+                    }
+                    if !has_base
+                        && node.name().local_name().as_ref() == b"Action"
+                        && call_type != "Before"
+                    {
+                        bail!(
+                            "a command interceptor without BaseForm is only evidenced for Before"
+                        );
+                    }
+                }
+            }
+            quick_xml::events::Event::Eof => break,
+            _ => {}
+        }
+    }
     let mut own = xml.to_owned();
     if let Some(start) = own.find("\t<BaseForm") {
         let line_end = start + own[start..].find('\n').context("<BaseForm> line")? + 1;
@@ -338,6 +427,20 @@ fn without_adoption(xml: &str) -> Result<(String, std::collections::BTreeMap<Str
         rest = &rest[close..];
     }
     out.push_str(rest);
+    // A differently spelled/prefixed Events container must not bypass the
+    // folding pass and silently compile an interceptor as Before.
+    let rewritten = ibcmd_xml::XmlReader::from_slice(out.as_bytes())?;
+    let mut pending = vec![rewritten.root()];
+    while let Some(node) = pending.pop() {
+        if node.name().local() == "Event" && node.attributes().iter().any(|attribute|
+            matches!(attribute.kind(), ibcmd_xml::AttributeKind::Ordinary(name) if name.local() == "callType")) {
+            bail!("unsupported Events XML spelling leaves an uncompiled interceptor");
+        }
+        pending.extend(node.children().iter().filter_map(|child| match child {
+            ibcmd_xml::XmlNode::Element(element) => Some(element),
+            _ => None,
+        }));
+    }
     Ok((out, stand_ins))
 }
 
@@ -349,35 +452,58 @@ fn folded_events(
 ) -> Result<String> {
     // (name, call type, handler) per line, in order.
     let mut lines = Vec::new();
-    let mut rest = body;
+    let mut reader = quick_xml::Reader::from_str(body);
     let mut first_start = None;
     let mut last_end = 0;
-    let mut consumed = 0;
-    while let Some(at) = rest.find("<Event name=\"") {
-        let start = consumed + at;
+    loop {
+        let start = usize::try_from(reader.buffer_position())?;
+        match reader.read_event()? {
+            quick_xml::events::Event::Start(node) if node.name().as_ref() == b"Event" => {
+                reader.read_to_end(node.name())?;
+            }
+            quick_xml::events::Event::Empty(node) if node.name().as_ref() == b"Event" => {}
+            quick_xml::events::Event::Eof => break,
+            quick_xml::events::Event::Comment(_) => continue,
+            quick_xml::events::Event::Text(text) if text.xml_content()?.trim().is_empty() => {
+                continue;
+            }
+            _ => bail!("unsupported content in form Events"),
+        }
+        let end = usize::try_from(reader.buffer_position())?;
         first_start.get_or_insert(start);
-        let open_end = rest[at..].find('>').context("event element")? + at;
-        let close = rest[at..].find("</Event>").context("event element close")? + at;
-        let open = &rest[at..open_end];
-        let name_start = "<Event name=\"".len();
-        let name = open[name_start..]
-            .split('"')
-            .next()
-            .unwrap_or_default()
-            .to_owned();
-        let call_type = open
-            .split_once(" callType=\"")
-            .map(|(_, value)| value.split('"').next().unwrap_or_default().to_owned());
-        let handler = rest[open_end + 1..close].to_owned();
-        lines.push((
-            name,
-            call_type,
-            handler,
-            rest[at..close + "</Event>".len()].to_owned(),
-        ));
-        last_end = consumed + close + "</Event>".len();
-        consumed += close + "</Event>".len();
-        rest = &body[consumed..];
+        let event_xml = ibcmd_xml::XmlReader::from_slice(body[start..end].as_bytes())
+            .context("form event XML is malformed")?;
+        let node = event_xml.root();
+        let attr = |name: &str| {
+            node.attributes()
+                .iter()
+                .find_map(|attribute| match attribute.kind() {
+                    ibcmd_xml::AttributeKind::Ordinary(key) if key.raw() == name => {
+                        Some(attribute.value())
+                    }
+                    _ => None,
+                })
+        };
+        let name = attr("name").context("form event has no name")?.to_owned();
+        let call_type = attr("callType").map(str::to_owned);
+        if node
+            .children()
+            .iter()
+            .any(|child| matches!(child, ibcmd_xml::XmlNode::Element(_)))
+        {
+            bail!("form event handler must be text");
+        }
+        let handler = node
+            .children()
+            .iter()
+            .filter_map(|child| match child {
+                ibcmd_xml::XmlNode::Text(text) => Some(text.value()),
+                ibcmd_xml::XmlNode::CData(text) => Some(text.value()),
+                _ => None,
+            })
+            .collect::<String>();
+        lines.push((name, call_type, handler, body[start..end].to_owned()));
+        last_end = end;
     }
     let Some(first_start) = first_start else {
         return Ok(body.to_owned());
@@ -490,10 +616,17 @@ fn with_call_type_blocks(
                 }
                 _ => ("", 0, &bindings[..]),
             };
-            first.push(format!("{event},\"{first_handler}\""));
+            first.push(format!(
+                "{event},\"{}\"",
+                first_handler.replace('"', "\"\"")
+            ));
             let mut tail = format!("{event},{first_code},{}", 1 + extras.len());
             for (handler, call_type) in extras {
-                tail.push_str(&format!(",\"{handler}\",{}", code(call_type)));
+                tail.push_str(&format!(
+                    ",\"{}\",{}",
+                    handler.replace('"', "\"\""),
+                    code(call_type)
+                ));
             }
             tails.push(tail);
         }
@@ -512,6 +645,133 @@ fn with_call_type_blocks(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn noncanonical_events_containers_cannot_silently_compile_before() {
+        let metadata =
+            b"<MetaDataObject><ObjectBelonging>Adopted</ObjectBelonging></MetaDataObject>";
+        for xml in [
+            "<Form><Events ><Event callType='After' name='OnOpen'>Handler</Event></Events></Form>",
+            "<Form xmlns:f='http://v8.1c.ru/8.3/xcf/logform'><f:Events><f:Event callType='After' name='OnOpen'>Handler</f:Event></f:Events></Form>",
+        ] {
+            assert!(super::requires_adoption_adapter(xml.as_bytes(), metadata).unwrap());
+            assert!(
+                super::without_adoption(xml)
+                    .unwrap_err()
+                    .to_string()
+                    .contains("uncompiled interceptor")
+            );
+        }
+        for xml in [
+            "<Form xmlns:lf='http://v8.1c.ru/8.3/xcf/logform'><Commands><Command><lf:Action callType='Override'>Run</lf:Action></Command></Commands></Form>",
+            "<Form xmlns:lf='http://v8.1c.ru/8.3/xcf/logform'><Events><Event lf:callType='After' name='OnOpen'>Handler</Event></Events></Form>",
+        ] {
+            assert!(super::requires_adoption_adapter(xml.as_bytes(), metadata).unwrap());
+            assert!(super::without_adoption(xml).is_err());
+        }
+    }
+    #[test]
+    fn interceptor_xml_spelling_does_not_change_dispatch_or_codes() {
+        let metadata = b"<MetaDataObject><CommonForm><Properties><ObjectBelonging>Adopted</ObjectBelonging></Properties></CommonForm></MetaDataObject>";
+        for event in [
+            "<Event name=\"OnOpen\" callType='After'>Handler</Event>",
+            "<Event callType=\"After\" name=\"OnOpen\">Handler</Event>",
+            "<Event name = 'OnOpen' callType = 'After'>Handler</Event>",
+            "<Event callType = 'Override' name = 'OnOpen'>Handler</Event>",
+        ] {
+            let xml = format!("<Form><Events>{event}</Events></Form>");
+            assert!(super::requires_adoption_adapter(xml.as_bytes(), metadata).unwrap());
+            let (own, stand_ins) = super::without_adoption(&xml).unwrap();
+            assert!(own.contains("ИбкмдПерехватчик0"));
+            assert_eq!(stand_ins["ИбкмдПерехватчик0"][0].0, "Handler");
+            assert_eq!(
+                stand_ins["ИбкмдПерехватчик0"][0].1,
+                if event.contains("Override") {
+                    "Override"
+                } else {
+                    "After"
+                }
+            );
+        }
+        let xml = b"<Form><Events><Event callType = 'Future' name = 'OnOpen'>Handler</Event></Events></Form>";
+        assert!(super::requires_adoption_adapter(xml, metadata).unwrap());
+        assert!(super::without_adoption(std::str::from_utf8(xml).unwrap()).is_err());
+    }
+
+    #[test]
+    fn event_spelling_in_a_comment_is_not_an_interceptor() {
+        let xml = "<Form><Events><!-- <Event name='OnOpen' callType='Before'>Bogus</Event> --><Event callType='After' name='OnOpen'>Handler</Event></Events></Form>";
+        let (_, bindings) = super::without_adoption(xml).unwrap();
+        assert_eq!(bindings.len(), 1);
+        assert_eq!(
+            bindings["ИбкмдПерехватчик0"],
+            vec![("Handler".to_owned(), "After".to_owned())]
+        );
+    }
+
+    #[test]
+    fn a_no_base_adopted_form_compiles_native_interceptor_shapes() {
+        let base =
+            crate::module_blob::pack_native_form_body_blob(FORM.as_bytes(), None, None, None)
+                .unwrap();
+        let base_parsed = crate::module_blob::parse_form_body_blob(&base.blob).unwrap();
+        for (call_type, expected) in [
+            (
+                "Before",
+                include_str!(
+                    "../../tests/fixtures/native-evidence/extension-form-interceptors/before.block.txt"
+                ),
+            ),
+            (
+                "After",
+                include_str!(
+                    "../../tests/fixtures/native-evidence/extension-form-interceptors/after.block.txt"
+                ),
+            ),
+            (
+                "Override",
+                include_str!(
+                    "../../tests/fixtures/native-evidence/extension-form-interceptors/override.block.txt"
+                ),
+            ),
+        ] {
+            let event = format!(
+                "\t<Events>\r\n\t\t<Event name=\"OnCreateAtServer\" callType=\"{call_type}\">ПриСозданииНаСервере</Event>\r\n\t</Events>\r\n"
+            );
+            let xml = FORM.replace("\t<Commands>", &format!("{event}\t<Commands>"));
+            let packed =
+                super::adopted_form_body(xml.as_bytes(), None, None, None, &base.blob).unwrap();
+            let parsed = crate::module_blob::parse_form_body_blob(&packed).unwrap();
+            assert!(
+                parsed.layout.contains(expected.trim()),
+                "{call_type}: {}",
+                parsed.layout
+            );
+            assert_eq!(parsed.trailing[5].trim(), "0");
+            assert_eq!(parsed.trailing[6].trim(), "0");
+            assert_eq!(
+                parsed.trailing, base_parsed.trailing,
+                "commands and trailing form sections changed"
+            );
+        }
+    }
+
+    #[test]
+    fn unknown_xml_call_types_and_unmeasured_command_types_are_refused() {
+        for call_type in ["Future", "", "before"] {
+            let xml = format!(
+                "<Form><Events><Event name=\"OnOpen\" callType=\"{call_type}\">ПриСозданииНаСервере</Event></Events></Form>"
+            );
+            assert!(super::without_adoption(&xml).is_err());
+        }
+        assert!(
+            super::without_adoption(
+                "<Form><Events><Event name=\"OnOpen\" callType=\"After\">Handler</Events></Form>"
+            )
+            .is_err()
+        );
+        assert!(super::without_adoption("<Form><Commands><Command><Action callType=\"After\">Run</Action></Command></Commands></Form>").is_err());
+    }
+
     const FORM: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Form xmlns=\"http://v8.1c.ru/8.3/xcf/logform\" xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n\t<AutoCommandBar name=\"ФормаКоманднаяПанель\" id=\"-1\"/>\r\n\t<Commands>\r\n\t\t<Command name=\"Включить\" id=\"1\">\r\n\t\t\t<Title>\r\n\t\t\t\t<v8:item>\r\n\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t<v8:content>Включить все</v8:content>\r\n\t\t\t\t</v8:item>\r\n\t\t\t</Title>\r\n\t\t\t<ToolTip>\r\n\t\t\t\t<v8:item>\r\n\t\t\t\t\t<v8:lang>ru</v8:lang>\r\n\t\t\t\t\t<v8:content>Включить все</v8:content>\r\n\t\t\t\t</v8:item>\r\n\t\t\t</ToolTip>\r\n\t\t\t<Picture>\r\n\t\t\t\t<xr:Ref>StdPicture.CheckAll</xr:Ref>\r\n\t\t\t\t<xr:LoadTransparent>true</xr:LoadTransparent>\r\n\t\t\t</Picture>\r\n\t\t\t<Action>Включить</Action>\r\n\t\t\t<Representation>TextPicture</Representation>\r\n\t\t\t<CurrentRowUse>DontUse</CurrentRowUse>\r\n\t\t</Command>\r\n\t</Commands>\r\n</Form>";
 
     /// Diagnostics, not a check: every Form.xml under IBCMD_RS_FORMS_TREE

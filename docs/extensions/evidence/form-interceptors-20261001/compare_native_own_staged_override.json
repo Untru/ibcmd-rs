@@ -1,0 +1,24 @@
+{
+  "left": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\override",
+  "right": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\native_own_staged_override",
+  "ignored": [
+    "ConfigDumpInfo.xml"
+  ],
+  "left_files": 464,
+  "right_files": 464,
+  "equal": 464,
+  "changed": [],
+  "left_only": [],
+  "right_only": [],
+  "config_dump_info": {
+    "exact": false,
+    "equal_after_blanking_only_configVersion": true,
+    "left_configVersion_count": 430,
+    "right_configVersion_count": 430,
+    "different_configVersion_values": 177
+  },
+  "left_version": "1.7.0.1",
+  "left_configuration_sha256": "520616970b10f043ff93fd89d5c69ec4a1a9012957e00fef69b91f3f81c7c387",
+  "right_version": "1.7.0.1",
+  "right_configuration_sha256": "520616970b10f043ff93fd89d5c69ec4a1a9012957e00fef69b91f3f81c7c387"
+}

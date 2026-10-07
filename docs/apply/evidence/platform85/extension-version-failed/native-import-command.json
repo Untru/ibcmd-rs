@@ -1,0 +1,20 @@
+{
+  "executable": "C:\\Program Files\\1cv8\\8.5.1.1150\\bin\\ibcmd.exe",
+  "started_utc": "2026-10-01T21:27:37.6014790Z",
+  "deadline_seconds": 60,
+  "arguments": [
+    "infobase",
+    "config",
+    "import",
+    "files",
+    "--dbms=MSSQLServer",
+    "--db-server=localhost",
+    "--db-name=ibcmd_rs_05_p85_w3_ext_version_native_20261001",
+    "--user=Администратор (обычное приложение)",
+    "--extension=ServiceDesk",
+    "--data=F:\\ibcmd\\lab\\05\\wave3\\platform85\\ibdata\\ext-version-native-v2-import",
+    "--base-dir=F:\\ibcmd\\lab\\05\\wave3\\platform85\\extension-version-settled-B-v2",
+    "--partial",
+    "Configuration.xml"
+  ]
+}

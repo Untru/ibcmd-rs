@@ -1,0 +1,31 @@
+{
+  "scope": "Actual ONE compact6 V2 life stopped at bounded heavy resource wait, before restore/start/registration/workload/native activation",
+  "source_head": "639bd0073a42037223535bc63650f6505030a24b",
+  "manifest_sha256": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+  "observed_utc": "2026-10-01T22:25:33.3025061Z",
+  "archive_completed": true,
+  "archive_state_sha256": "5B09714CAF28B294D13D2BF85A0BC0A5344D870E508E3931C984EF17FFF4943A",
+  "worker_release_exit": 0,
+  "heavy_acquire_exit": 1,
+  "heavy_release_exit": 1,
+  "heavy_release_foreign_refusal": true,
+  "owned_resource_holds": 0,
+  "current_resources": {
+    "worker": "",
+    "heavy": "track=edt-uha85-affinity since=2026-10-02T00:58:45",
+    "native": "track=edt-uha85-affinity since=2026-10-02T00:58:46"
+  },
+  "database_exists": false,
+  "registered": false,
+  "private_state_exists": false,
+  "private_root_processes": 0,
+  "private_listeners": 0,
+  "uncertain_child_receipts": 0,
+  "posted_report_pairs": 0,
+  "phase1_executed": false,
+  "cycle2_executed": false,
+  "runtime_measurement": "NOT REACHED",
+  "no_retry": true,
+  "no_purge_or_drop": true,
+  "cleanup_status_note": "guarded_stop_clean=false/resources_may_need_exact_owned_cleanup=true are conservative generic fields: no cluster ever started; fresh SQL/CIM/resource/artifact proofs establish no owned DB/process/lease remains"
+}

@@ -1,0 +1,10 @@
+{
+  "before": "own_first.json",
+  "after": "own_second.json",
+  "recovery_tag": "second_apply_final",
+  "planned_exact_triples": 12,
+  "committed_added_triples": 12,
+  "all_preexisting_entries_retained": true,
+  "ineligible_two_registrations_untouched": true,
+  "triples_equal": true
+}

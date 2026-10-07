@@ -1,0 +1,24 @@
+{
+  "left": "F:\\ibcmd\\lab\\05\\wave1\\extensions\\fixed_active\\_ДемоРасширение",
+  "right": "F:\\ibcmd\\lab\\05\\ext\\native\\8327\\_ДемоРасширение",
+  "ignored": [
+    "ConfigDumpInfo.xml"
+  ],
+  "left_files": 184,
+  "right_files": 184,
+  "equal": 184,
+  "changed": [],
+  "left_only": [],
+  "right_only": [],
+  "config_dump_info": {
+    "exact": true,
+    "equal_after_blanking_only_configVersion": true,
+    "left_configVersion_count": 169,
+    "right_configVersion_count": 169,
+    "different_configVersion_values": 0
+  },
+  "left_version": "1.0.1.14",
+  "left_configuration_sha256": "3de4e7f3550565b71509b7998b24bc292273629e26e546de5ff8554275f8cfe0",
+  "right_version": "1.0.1.14",
+  "right_configuration_sha256": "3de4e7f3550565b71509b7998b24bc292273629e26e546de5ff8554275f8cfe0"
+}

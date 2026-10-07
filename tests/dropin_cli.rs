@@ -614,11 +614,6 @@ fn apply_words_and_refusals_are_the_platforms_before_anything_runs() {
             "Недопустимое значение параметра --recovery-backup: ",
         ),
         (
-            "--dynamic=force",
-            UNSUPPORTED,
-            "Параметр `--dynamic=force` команды `infobase config apply`",
-        ),
-        (
             "--extension=E",
             UNSUPPORTED,
             "Параметр `--extension` команды `infobase config apply`",
@@ -661,6 +656,9 @@ fn apply_words_and_refusals_are_the_platforms_before_anything_runs() {
             "--session-terminate-message=lab",
         ],
         vec!["--dynamic=prompt", "--session-terminate=prompt"],
+        // the dynamic apply is served (#347): it parses, and the run stops at the connection like the others
+        vec!["--dynamic=force"],
+        vec!["--dynamic=force", "--session-terminate=force"],
         vec!["--recovery-backup=F:/lab/before.bak"],
         vec!["--i-have-a-backup"],
         vec!["--platform=8.5.1"],

@@ -1,0 +1,26 @@
+[
+  {
+    "case": "root_base",
+    "root_fields": 11,
+    "section_fields": 2,
+    "payload_fields": 28,
+    "payload_tokens": [
+      "1",
+      "25"
+    ],
+    "property_fields": 61,
+    "version": "\"1.7.0.0\""
+  },
+  {
+    "case": "root_version1",
+    "root_fields": 11,
+    "section_fields": 2,
+    "payload_fields": 28,
+    "payload_tokens": [
+      "1",
+      "25"
+    ],
+    "property_fields": 61,
+    "version": "\"1.7.0.1\""
+  }
+]

@@ -1,0 +1,66 @@
+{
+  "scope": "all3 exact measured derived cache differences; full help-search semantics unproven; no codec/write implementation",
+  "decoder_note": "raw-deflate inflation bounded under8MiB; strictUTF16LE decoding failed, no semantic normalization performed",
+  "rows": [
+    {
+      "file": "userDocs_ru.bin",
+      "native_first_equals_native_second_raw": true,
+      "own_equals_original_raw": true,
+      "inflated_bytes_equal": false,
+      "native": {
+        "raw_bytes": 47456,
+        "raw_sha256": "af20452e0ac5f8279c823ae9426c238c265a14af6ee38bfa1f3b9aa9b140b9d4",
+        "inflated_bytes": 229320,
+        "inflated_sha256": "17fe04c7f77394604b8f10f9760f1324f93de8aefd79acafe475836c52deca37",
+        "raw_header_hex": "cdfdeb8f24d991e509ca07ff120b2c5064114d82cb6266166b171ca06d5adf8f"
+      },
+      "own": {
+        "raw_bytes": 47528,
+        "raw_sha256": "cae1d95a6a2e4b741634a2478fb135c1d712e1de44450c527cf987e72795aa69",
+        "inflated_bytes": 229682,
+        "inflated_sha256": "1d1d2c1f3b7768bf28ef15ade2750cba4389b47c7415907bfd7e59b6a31c7ec8",
+        "raw_header_hex": "cdfddb8f6ce791e509da43bc9c010648298592a0518a642a67a006cabbf6fd72"
+      }
+    },
+    {
+      "file": "userPostings_ru.bin",
+      "native_first_equals_native_second_raw": true,
+      "own_equals_original_raw": true,
+      "inflated_bytes_equal": false,
+      "native": {
+        "raw_bytes": 536921,
+        "raw_sha256": "191ff8fc037ec650f4ec0e302964a965455c92f7c3e7f1bbe82a47801669149c",
+        "inflated_bytes": 1040000,
+        "inflated_sha256": "814bb631d8491149a05409f250c2d4b0c5f05746d44508094658aa98b5f73c38",
+        "raw_header_hex": "ecfdf5775cbbd6268c0ead72914ff77947ffd0ff6f4a5a4cc55cb6cbcc313b8e"
+      },
+      "own": {
+        "raw_bytes": 537522,
+        "raw_sha256": "792f02b6495311a8893c658e8097e9933a3ee702ac8360432e4e8d1c14e7a075",
+        "inflated_bytes": 1041137,
+        "inflated_sha256": "c579cb956648b3ab4a9535454450649e5f10eb1cb51b0d96ecf07ffd838e0dd1",
+        "raw_header_hex": "ecfdf5775cbbd6268c0ead72914ff77947ffd0ff6f4a5a4cc55cb6cbcc313b8e"
+      }
+    },
+    {
+      "file": "userVocabulary_ru.bin",
+      "native_first_equals_native_second_raw": true,
+      "own_equals_original_raw": true,
+      "inflated_bytes_equal": false,
+      "native": {
+        "raw_bytes": 105654,
+        "raw_sha256": "0adbf4d7b44a693bb9c2a6751485d1f383263530bf7ce8162bfac36a4e895b4b",
+        "inflated_bytes": 516184,
+        "inflated_sha256": "a82b4674ee4d90da2d35c0910892b59dbdec24b57404f0001bf1f28a23e1ce71",
+        "raw_header_hex": "acfddb9224b7b1e78dc6455c6db3fd0efd0871c0b12b2bbbaa92a9a6266bbaec"
+      },
+      "own": {
+        "raw_bytes": 105710,
+        "raw_sha256": "fe236c5f5c4bfdf83316087e729cd876c8b7d5c5f343b6103052b111f3b663ad",
+        "inflated_bytes": 516516,
+        "inflated_sha256": "c5a8da31a5e6781dd68d4ba738d777b2e1eadf9bbba552c8e4e7f02bac462f61",
+        "raw_header_hex": "b4fddb9224b7f1a78bc6455c6db3fd0efd0871c0b12b2b5955c9545393359db6"
+      }
+    }
+  ]
+}

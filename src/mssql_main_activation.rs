@@ -14,9 +14,9 @@ use uuid::Uuid;
 
 use crate::mssql_platform_profile::{OwnRasProcess, exclusive_session_gate};
 
-const MAX_ROW_BYTES: usize = 16 * 1024 * 1024;
-const MAX_PLAN_BYTES: usize = 32 * 1024 * 1024;
-const MAX_ROWS: usize = 128;
+pub(crate) const MAX_ROW_BYTES: usize = 16 * 1024 * 1024;
+pub(crate) const MAX_PLAN_BYTES: usize = 32 * 1024 * 1024;
+pub(crate) const MAX_ROWS: usize = 128;
 const MAX_INFLATED_VERSIONS_BYTES: usize = 16 * 1024 * 1024;
 const SERVICE_NAMES: [&str; 3] = ["root", "version", "versions"];
 
@@ -27,8 +27,9 @@ pub enum MainActivationMode {
     /// Publish while sessions remain connected. Existing sessions retain their
     /// loaded generation; sessions opened afterwards use the new generation.
     Online,
-    /// Publish ordinary rows, then force a lossless SQL recovery cycle so the
-    /// already-connected 1C session reloads the new generation.
+    /// Default: legacy two-cycle SQL reconnection readiness. The explicit live
+    /// checkpoint renderer splits cycle 1/continue and accepts idle RAS sessions only.
+    /// Warm client-side code still needs restart; neither route promises zero errors.
     Live,
     /// Publish ordinary rows while sessions are connected. The caller must
     /// hand the dedicated 1C worker process off after the SQL commit.
@@ -98,6 +99,10 @@ pub struct MainActivationRecoverySnapshot {
     pub old_generation: String,
     pub new_generation: String,
     pub overwritten_config_rows: Vec<MainStorageRow>,
+    /// Ordinary preimages asserted by an online publication but left in place.
+    /// Omitted when empty so historical non-no-op LIVE token bytes stay exact.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub retained_config_rows: Vec<MainStorageRow>,
     pub prior_config_dynamically_updated: Option<MainStorageRow>,
     pub prior_params_dynamically_updated: Option<MainStorageRow>,
     pub staged_rows: Vec<MainStorageRow>,
@@ -118,6 +123,12 @@ pub struct MainActivationDryRunReport {
     pub live_session_switch_expected: bool,
     pub requires_tail_log_artifact: bool,
     pub recovery_token: String,
+    /// New Config row names, excluding the root/version replacements.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_aliases: Vec<String>,
+    /// Fully qualified marker names inserted or updated by this publication.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub dynamic_markers: Vec<String>,
     /// `exclusive` only: the worker processes whose idle `1CV83 Server` sessions
     /// the session gate leaves out because the tool's own RAS verification
     /// opened them (#409 F-3).
@@ -136,7 +147,7 @@ pub struct MainActivationDryRunReport {
     /// markers: `Config.DynamicallyUpdated: written|deleted` (#409 F-13);
     /// empty as `published_config_rows` is.
     #[serde(default)]
-    pub dynamic_markers: Vec<String>,
+    pub dynamic_marker_actions: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -154,6 +165,15 @@ pub struct MainActivationPlan {
     no_op: bool,
     recovery: MainActivationRecoverySnapshot,
     own_ras_processes: Vec<OwnRasProcess>,
+    /// Writes the caller's apply makes in the same transaction (see [`Self::with_parity_sql`]).
+    parity_sql: Option<String>,
+    /// Internal caller's exact semantic inventory assertions, also required before no-op cleanup.
+    precondition_sql: Option<String>,
+    /// T-SQL that declares `@now`, the timestamp as the platform writes it (see
+    /// [`Self::with_platform_timestamps`]).
+    platform_timestamps: Option<String>,
+    /// Staged rows the publication consumes without publishing them (see [`Self::with_consumed_stage_rows`]).
+    consumed_stage_rows: Vec<MainStorageRow>,
     executor: MainActivationExecutor,
 }
 
@@ -222,6 +242,26 @@ impl MainActivationPlan {
         &self.recovery
     }
 
+    /// The dynamic generations the database holds before this publication, oldest first.
+    pub fn dynamic_history(&self) -> &[Uuid] {
+        &self.dynamic_history
+    }
+
+    /// The rows an `online` publication writes beside the active ones, by the name they get
+    /// (`<name>_dynupdate_<generation>`, the storage suffix last). `root` and `version` are
+    /// replaced in place and are not among them.
+    pub fn alias_rows(&self) -> Vec<String> {
+        let generation = self.new_generation.hyphenated().to_string();
+        self.staged_rows
+            .iter()
+            .filter(|row| !matches!(row.file_name.as_str(), "root" | "version"))
+            .map(|row| match row.file_name.as_str() {
+                "versions" => format!("versions_dynupdate_{generation}"),
+                name => dynamic_alias(name, &generation),
+            })
+            .collect()
+    }
+
     /// The worker processes the exclusive session gate leaves out (see [`Self::with_own_ras_processes`]).
     pub fn own_ras_processes(&self) -> &[OwnRasProcess] {
         &self.own_ras_processes
@@ -234,6 +274,51 @@ impl MainActivationPlan {
     pub fn with_own_ras_processes(mut self, own: Vec<OwnRasProcess>) -> Self {
         self.own_ras_processes = own;
         self
+    }
+
+    /// The plan with T-SQL the transaction runs after the rows are published and before the stage
+    /// is consumed (`ConfigSave` still holds the staged rows): the writes an apply makes besides
+    /// moving rows -- the change registrations and `Files.MobileVersions.dat` -- which the
+    /// exclusive apply renders and the dynamic apply of the drop-in shares
+    /// (`mssql_config_apply::sqlgen::render_parity_writes`). Only an `online` publication takes
+    /// it, and an unchanged stage (`no_op`) writes nothing, so nothing of it either.
+    pub fn with_parity_sql(mut self, sql: String) -> Self {
+        self.parity_sql = Some(sql).filter(|sql| !sql.trim().is_empty());
+        self
+    }
+
+    /// Internal, validated assertions executed under the same serializable transaction and row
+    /// locks as publication, after the exact stage/markers and before even no-op consumption.
+    /// This hook is for CAS assertions, not writes or user-supplied SQL.
+    pub(crate) fn with_precondition_sql(mut self, sql: String) -> Self {
+        self.precondition_sql = Some(sql).filter(|sql| !sql.trim().is_empty());
+        self
+    }
+
+    /// The plan whose `online` publication stamps the `DynamicallyUpdated` markers the way the
+    /// platform does -- local time shifted by the infobase's year offset, the `@now` the
+    /// `declarations` declare -- instead of UTC (the default, which the source-driven online apply
+    /// has always written). The declarations are run at the start of the transition, so the same
+    /// `@now` serves the parity writes ([`Self::with_parity_sql`]).
+    pub fn with_platform_timestamps(mut self, declarations: String) -> Self {
+        self.platform_timestamps = Some(declarations).filter(|sql| !sql.trim().is_empty());
+        self
+    }
+
+    /// The plan for a stage that holds rows besides the ones published: the caller has judged them (the
+    /// empty `deleted` list of an import stage, or a measured pending list the caller explicitly
+    /// copies through its parity hook). The core transition neither publishes nor acts on them.
+    /// They are part of the exact stage
+    /// the transaction asserts and go with `ConfigSave` when it is emptied; the plan validated and
+    /// published only the rows it was prepared with.
+    pub fn with_consumed_stage_rows(mut self, rows: Vec<MainStorageRow>) -> Self {
+        self.consumed_stage_rows = rows;
+        self
+    }
+
+    /// How many rows the stage holds in all: the published and the consumed.
+    fn stage_row_count(&self) -> usize {
+        self.staged_rows.len() + self.consumed_stage_rows.len()
     }
 
     pub fn dry_run_report(&self) -> MainActivationDryRunReport {
@@ -269,6 +354,19 @@ impl MainActivationPlan {
             ),
             requires_tail_log_artifact: self.mode == MainActivationMode::Live && !self.no_op,
             recovery_token: hex(&Sha256::digest(recovery_json)),
+            dynamic_aliases: if self.mode == MainActivationMode::Online && !self.no_op {
+                self.alias_rows()
+            } else {
+                Vec::new()
+            },
+            dynamic_markers: if self.mode == MainActivationMode::Online && !self.no_op {
+                vec![
+                    "Config.DynamicallyUpdated".to_owned(),
+                    "Params.DynamicallyUpdated".to_owned(),
+                ]
+            } else {
+                Vec::new()
+            },
             own_ras_processes: self.own_ras_processes.clone(),
             executor: self.executor,
             published_config_rows: if self.no_op
@@ -282,7 +380,9 @@ impl MainActivationPlan {
                     .map(|row| published_file_name(self.mode, &row.file_name, &generation))
                     .collect()
             },
-            dynamic_markers: if self.no_op || self.executor == MainActivationExecutor::ConfigApply {
+            dynamic_marker_actions: if self.no_op
+                || self.executor == MainActivationExecutor::ConfigApply
+            {
                 Vec::new()
             } else if self.mode == MainActivationMode::Online {
                 vec![
@@ -434,10 +534,16 @@ pub fn prepare_main_activation_for(
         ));
     }
 
+    let (overwritten, retained) = snapshot.config_rows.iter().cloned().partition(|row| {
+        !no_op
+            && (mode != MainActivationMode::Online
+                || matches!(row.file_name.as_str(), "root" | "version"))
+    });
     let recovery = MainActivationRecoverySnapshot {
         old_generation: old_generation.hyphenated().to_string(),
         new_generation: new_generation.hyphenated().to_string(),
-        overwritten_config_rows: snapshot.config_rows.clone(),
+        overwritten_config_rows: overwritten,
+        retained_config_rows: retained,
         prior_config_dynamically_updated: snapshot.config_dynamically_updated.clone(),
         prior_params_dynamically_updated: snapshot.params_dynamically_updated.clone(),
         staged_rows: staged_rows.clone(),
@@ -456,6 +562,10 @@ pub fn prepare_main_activation_for(
         no_op,
         recovery,
         own_ras_processes: Vec::new(),
+        parity_sql: None,
+        precondition_sql: None,
+        platform_timestamps: None,
+        consumed_stage_rows: Vec::new(),
         executor,
     })
 }
@@ -582,6 +692,14 @@ pub fn render_main_activation_sql(
     render_main_activation_sql_with(database, plan, tail_log_output, false)
 }
 
+/// A no-op still clears ConfigSave: it shares the pending-cycle guard with default LIVE.
+/// The non-noop checkpoint instead receives the identity-pinned phase-1 wrapper.
+pub fn protect_live_script(database: &str, checkpoint: bool, script: &mut MainActivationScript) {
+    if script.report.mode == MainActivationMode::Live && (!checkpoint || script.report.no_op) {
+        script.sql = crate::mssql_live_continue::guard_pending_live(database, &script.sql);
+    }
+}
+
 /// The script of a mode. `interrupt_sessions` is the operator's acceptance that the live switch rolls back the open work of the
 /// sessions of the database (`--interrupt-sessions`, live only; #409 F-10): without it the script refuses to start, and rolls the
 /// promotion back if such work appears before its `COMMIT`.
@@ -590,6 +708,38 @@ pub fn render_main_activation_sql_with(
     plan: &MainActivationPlan,
     tail_log_output: Option<&str>,
     interrupt_sessions: bool,
+) -> Result<MainActivationScript, MainActivationError> {
+    render_main_activation_sql_internal(database, plan, tail_log_output, interrupt_sessions, false)
+}
+
+pub fn render_main_activation_checkpoint(
+    database: &str,
+    plan: &MainActivationPlan,
+    tail_log_output: Option<&str>,
+    interrupt_sessions: bool,
+) -> Result<MainActivationScript, MainActivationError> {
+    if plan.mode != MainActivationMode::Live {
+        return Err(MainActivationError::SafetyGate(
+            "live checkpoint requires live mode".to_owned(),
+        ));
+    }
+    let mut script = render_main_activation_sql_internal(
+        database,
+        plan,
+        tail_log_output,
+        interrupt_sessions,
+        true,
+    )?;
+    script.report.live_session_switch_expected = false;
+    Ok(script)
+}
+
+fn render_main_activation_sql_internal(
+    database: &str,
+    plan: &MainActivationPlan,
+    tail_log_output: Option<&str>,
+    interrupt_sessions: bool,
+    checkpoint: bool,
 ) -> Result<MainActivationScript, MainActivationError> {
     if plan.is_carried_out_by_config_apply() {
         return Err(MainActivationError::SafetyGate(
@@ -641,12 +791,24 @@ pub fn render_main_activation_sql_with(
     )
     .unwrap();
 
-    render_expected_table(&mut sql, "ExpectedStage", &plan.staged_rows);
+    let exact_stage: Vec<MainStorageRow> = plan
+        .staged_rows
+        .iter()
+        .chain(&plan.consumed_stage_rows)
+        .cloned()
+        .collect();
+    render_expected_table(&mut sql, "ExpectedStage", &exact_stage);
     render_expected_table(&mut sql, "ExpectedActive", &plan.active_rows);
     render_exact_set_assertion(&mut sql, "ConfigSave", "ExpectedStage", 57201);
     render_selected_assertion(&mut sql, "Config", "ExpectedActive", 57202);
     render_marker_assertion(&mut sql, "Config", plan.config_marker.as_ref(), 57203);
     render_marker_assertion(&mut sql, "Params", plan.params_marker.as_ref(), 57204);
+    if let Some(precondition) = &plan.precondition_sql {
+        sql.push_str(precondition);
+        if !precondition.ends_with('\n') {
+            sql.push('\n');
+        }
+    }
     if !plan.no_op && plan.mode != MainActivationMode::Online {
         render_online_history_assertion(&mut sql, plan.mode, 57208);
     }
@@ -656,7 +818,7 @@ pub fn render_main_activation_sql_with(
         writeln!(
             sql,
             "IF @@ROWCOUNT <> {} THROW 57205, 'ConfigSave cleanup drifted', 1;",
-            plan.staged_rows.len()
+            plan.stage_row_count()
         )
         .unwrap();
         writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.ConfigSave) THROW 57206, 'ConfigSave postcondition failed', 1;").unwrap();
@@ -669,6 +831,14 @@ pub fn render_main_activation_sql_with(
         });
     }
 
+    if plan.mode == MainActivationMode::Online
+        && let Some(declarations) = &plan.platform_timestamps
+    {
+        sql.push_str(declarations);
+        if !declarations.ends_with('\n') {
+            sql.push('\n');
+        }
+    }
     match plan.mode {
         MainActivationMode::Exclusive => render_ordinary_transition(&mut sql, plan, true),
         MainActivationMode::Online => render_online_transition(&mut sql, plan),
@@ -676,11 +846,20 @@ pub fn render_main_activation_sql_with(
             render_ordinary_transition(&mut sql, plan, false)
         }
     }
+    if plan.mode == MainActivationMode::Online
+        && let Some(parity) = &plan.parity_sql
+    {
+        writeln!(sql, "-- the writes of the apply besides the rows").unwrap();
+        sql.push_str(parity);
+        if !parity.ends_with('\n') {
+            sql.push('\n');
+        }
+    }
     writeln!(sql, "DELETE FROM dbo.ConfigSave;").unwrap();
     writeln!(
         sql,
         "IF @@ROWCOUNT <> {} THROW 57220, 'ConfigSave cleanup drifted', 1;",
-        plan.staged_rows.len()
+        plan.stage_row_count()
     )
     .unwrap();
     render_postconditions(&mut sql, plan);
@@ -697,7 +876,17 @@ pub fn render_main_activation_sql_with(
     writeln!(sql, "COMMIT TRANSACTION;").unwrap();
     render_catch(&mut sql, None);
     if let Some(tail) = live_tail.as_deref() {
-        render_live_recovery(&mut sql, &database, &database_literal, tail);
+        if checkpoint {
+            render_live_recovery(
+                &mut sql,
+                &database,
+                &database_literal,
+                tail,
+                &plan.dry_run_report().recovery_token,
+            );
+        } else {
+            render_legacy_live_recovery(&mut sql, &database, &database_literal, tail);
+        }
     }
 
     if sql.len() > MAX_PLAN_BYTES {
@@ -776,19 +965,28 @@ fn render_online_transition(sql: &mut String, plan: &MainActivationPlan) {
         .unwrap();
     }
     let (config_payload, params_payload) = next_dynamic_marker_payloads(plan);
-    render_marker_upsert(sql, "Config", &config_payload, 57213);
-    render_marker_upsert(sql, "Params", &params_payload, 57214);
+    let stamp = if plan.platform_timestamps.is_some() {
+        "@now"
+    } else {
+        "DATEADD(year,2000,SYSUTCDATETIME())"
+    };
+    render_marker_upsert(sql, "Config", &config_payload, 57213, stamp);
+    render_marker_upsert(sql, "Params", &params_payload, 57214, stamp);
 }
 
 fn render_expected_table(sql: &mut String, variable: &str, rows: &[MainStorageRow]) {
-    writeln!(sql, "DECLARE @{variable} TABLE (FileName nvarchar(4000) NOT NULL, PartNo int NOT NULL, DataSize bigint NOT NULL, Digest varbinary(32) NOT NULL, PRIMARY KEY(FileName,PartNo));").unwrap();
+    writeln!(sql, "DECLARE @{variable} TABLE (FileName nvarchar(4000) NOT NULL, PartNo int NOT NULL, Creation varchar(27) NOT NULL, Modified varchar(27) NOT NULL, Attributes int NOT NULL, DataSize bigint NOT NULL, ByteLength bigint NOT NULL, Digest varbinary(32) NOT NULL, PRIMARY KEY(FileName,PartNo));").unwrap();
     for row in rows {
         writeln!(
             sql,
-            "INSERT @{variable} VALUES (N'{}',{}, {},0x{});",
+            "INSERT @{variable} VALUES (N'{}',{},'{}','{}',{},{},{},0x{});",
             quote_string(&row.file_name),
             row.part_no,
+            quote_string(&row.creation),
+            quote_string(&row.modified),
+            row.attributes,
             row.data_size,
+            row.binary_data.len(),
             hex(&row.sha256())
         )
         .unwrap();
@@ -796,11 +994,11 @@ fn render_expected_table(sql: &mut String, variable: &str, rows: &[MainStorageRo
 }
 
 fn render_exact_set_assertion(sql: &mut String, table: &str, expected: &str, code: u32) {
-    writeln!(sql, "IF EXISTS (SELECT FileName,PartNo,CONVERT(bigint,DataSize),HASHBYTES('SHA2_256',BinaryData) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) EXCEPT SELECT FileName,PartNo,DataSize,Digest FROM @{expected}) OR EXISTS (SELECT FileName,PartNo,DataSize,Digest FROM @{expected} EXCEPT SELECT FileName,PartNo,CONVERT(bigint,DataSize),HASHBYTES('SHA2_256',BinaryData) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK)) THROW {code}, '{table} exact snapshot drifted', 1;").unwrap();
+    writeln!(sql, "IF EXISTS (SELECT FileName,PartNo,CONVERT(varchar(27),Creation,121),CONVERT(varchar(27),Modified,121),CONVERT(int,Attributes),CONVERT(bigint,DataSize),CONVERT(bigint,DATALENGTH(BinaryData)),HASHBYTES('SHA2_256',BinaryData) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) EXCEPT SELECT FileName,PartNo,Creation,Modified,Attributes,DataSize,ByteLength,Digest FROM @{expected}) OR EXISTS (SELECT FileName,PartNo,Creation,Modified,Attributes,DataSize,ByteLength,Digest FROM @{expected} EXCEPT SELECT FileName,PartNo,CONVERT(varchar(27),Creation,121),CONVERT(varchar(27),Modified,121),CONVERT(int,Attributes),CONVERT(bigint,DataSize),CONVERT(bigint,DATALENGTH(BinaryData)),HASHBYTES('SHA2_256',BinaryData) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK)) THROW {code}, '{table} exact snapshot drifted', 1;").unwrap();
 }
 
 fn render_selected_assertion(sql: &mut String, table: &str, expected: &str, code: u32) {
-    writeln!(sql, "IF EXISTS (SELECT E.FileName,E.PartNo FROM @{expected} E LEFT JOIN dbo.{table} T WITH (UPDLOCK,HOLDLOCK) ON T.FileName=E.FileName AND T.PartNo=E.PartNo AND CONVERT(bigint,T.DataSize)=E.DataSize AND HASHBYTES('SHA2_256',T.BinaryData)=E.Digest WHERE T.FileName IS NULL) THROW {code}, '{table} selected snapshot drifted', 1;").unwrap();
+    writeln!(sql, "IF EXISTS (SELECT E.FileName,E.PartNo FROM @{expected} E LEFT JOIN dbo.{table} T WITH (UPDLOCK,HOLDLOCK) ON T.FileName=E.FileName AND T.PartNo=E.PartNo AND CONVERT(varchar(27),T.Creation,121)=E.Creation AND CONVERT(varchar(27),T.Modified,121)=E.Modified AND CONVERT(int,T.Attributes)=E.Attributes AND CONVERT(bigint,T.DataSize)=E.DataSize AND CONVERT(bigint,DATALENGTH(T.BinaryData))=E.ByteLength AND HASHBYTES('SHA2_256',T.BinaryData)=E.Digest WHERE T.FileName IS NULL) THROW {code}, '{table} selected snapshot drifted', 1;").unwrap();
 }
 
 fn render_marker_assertion(
@@ -810,7 +1008,7 @@ fn render_marker_assertion(
     code: u32,
 ) {
     match marker {
-        Some(row) => writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'DynamicallyUpdated') <> 1 OR (SELECT COUNT_BIG(*) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(bigint,DataSize)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW {code}, '{table}.DynamicallyUpdated drifted', 1;", row.data_size, hex(&row.sha256())).unwrap(),
+        Some(row) => writeln!(sql, "IF (SELECT COUNT_BIG(*) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'DynamicallyUpdated') <> 1 OR (SELECT COUNT_BIG(*) FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 AND CONVERT(varchar(27),Creation,121)='{}' AND CONVERT(varchar(27),Modified,121)='{}' AND CONVERT(int,Attributes)={} AND CONVERT(bigint,DataSize)={} AND DATALENGTH(BinaryData)={} AND HASHBYTES('SHA2_256',BinaryData)=0x{}) <> 1 THROW {code}, '{table}.DynamicallyUpdated drifted', 1;", quote_string(&row.creation), quote_string(&row.modified), row.attributes, row.data_size, row.binary_data.len(), hex(&row.sha256())).unwrap(),
         None => writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.{table} WITH (UPDLOCK,HOLDLOCK) WHERE FileName=N'DynamicallyUpdated') THROW {code}, 'unexpected {table}.DynamicallyUpdated row', 1;").unwrap(),
     }
 }
@@ -855,9 +1053,9 @@ fn online_history_refusal(mode: MainActivationMode, evidence: &str) -> String {
     )
 }
 
-fn render_marker_upsert(sql: &mut String, table: &str, payload: &[u8], code: u32) {
+fn render_marker_upsert(sql: &mut String, table: &str, payload: &[u8], code: u32, stamp: &str) {
     let data = hex(payload);
-    writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.{table} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0) UPDATE dbo.{table} SET Modified=DATEADD(year,2000,SYSUTCDATETIME()),DataSize={},BinaryData=0x{} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 ELSE INSERT dbo.{table} (FileName,Creation,Modified,Attributes,DataSize,BinaryData,PartNo) VALUES (N'DynamicallyUpdated',DATEADD(year,2000,SYSUTCDATETIME()),DATEADD(year,2000,SYSUTCDATETIME()),0,{},0x{},0);", payload.len(), data, payload.len(), data).unwrap();
+    writeln!(sql, "IF EXISTS (SELECT 1 FROM dbo.{table} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0) UPDATE dbo.{table} SET Modified={stamp},DataSize={},BinaryData=0x{} WHERE FileName=N'DynamicallyUpdated' AND PartNo=0 ELSE INSERT dbo.{table} (FileName,Creation,Modified,Attributes,DataSize,BinaryData,PartNo) VALUES (N'DynamicallyUpdated',{stamp},{stamp},0,{},0x{},0);", payload.len(), data, payload.len(), data).unwrap();
     writeln!(
         sql,
         "IF @@ROWCOUNT <> 1 THROW {code}, '{table}.DynamicallyUpdated upsert failed', 1;"
@@ -915,6 +1113,36 @@ fn render_catch(sql: &mut String, live_database: Option<(&str, &str)>) {
 }
 
 fn render_live_recovery(
+    sql: &mut String,
+    database: &str,
+    database_literal: &str,
+    tail_log_output: &str,
+    recovery_token: &str,
+) {
+    let tail = quote_string(tail_log_output);
+    let backup_name = format!("ibcmd-rs:live:{recovery_token}:1");
+    writeln!(sql, "CHECKPOINT;").unwrap();
+    writeln!(sql, "USE [master];").unwrap();
+    writeln!(sql, "BEGIN TRY").unwrap();
+    writeln!(sql, "DECLARE @LiveFirstAccessChanged bit=0;").unwrap();
+    // Promotion and cycle 1 commit independently. The guarded continuation owns cycle 2.
+    writeln!(sql, "ALTER DATABASE {database} SET SINGLE_USER WITH ROLLBACK IMMEDIATE; SET @LiveFirstAccessChanged=1;").unwrap();
+    writeln!(sql, "BACKUP LOG {database} TO DISK=N'{tail}' WITH NORECOVERY, INIT, COMPRESSION, CHECKSUM, NAME=N'{backup_name}';").unwrap();
+    writeln!(sql, "RESTORE DATABASE {database} WITH RECOVERY;").unwrap();
+    writeln!(
+        sql,
+        "ALTER DATABASE {database} SET MULTI_USER; SET @LiveFirstAccessChanged=0;"
+    )
+    .unwrap();
+    writeln!(sql, "END TRY").unwrap();
+    writeln!(sql, "BEGIN CATCH").unwrap();
+    writeln!(sql, "IF @LiveFirstAccessChanged=1 AND DB_ID(N'{database_literal}') IS NOT NULL AND DATABASEPROPERTYEX(N'{database_literal}','Status') <> N'RESTORING' ALTER DATABASE {database} SET MULTI_USER;").unwrap();
+    writeln!(sql, "IF DB_ID(N'{database_literal}') IS NOT NULL AND DATABASEPROPERTYEX(N'{database_literal}','Status') = N'RESTORING' BEGIN DECLARE @LiveRecoveryMessage nvarchar(2048)=N'live activation left database restoring; run RESTORE DATABASE {database} WITH RECOVERY; original error: '+ERROR_MESSAGE(); THROW 57250,@LiveRecoveryMessage,1; END;").unwrap();
+    writeln!(sql, "THROW;").unwrap();
+    writeln!(sql, "END CATCH;").unwrap();
+}
+
+fn render_legacy_live_recovery(
     sql: &mut String,
     database: &str,
     database_literal: &str,
@@ -1074,7 +1302,7 @@ fn is_existing_body_target(name: &str) -> bool {
         && (suffix.is_empty() || suffix.bytes().all(|byte| byte.is_ascii_digit()))
 }
 
-fn generation_from_versions(blob: &[u8]) -> Result<Uuid, MainActivationError> {
+pub(crate) fn generation_from_versions(blob: &[u8]) -> Result<Uuid, MainActivationError> {
     let mut decoder = DeflateDecoder::new(blob).take((MAX_INFLATED_VERSIONS_BYTES + 1) as u64);
     let mut plain = Vec::new();
     decoder
@@ -1436,11 +1664,218 @@ mod tests {
     }
 
     #[test]
+    fn the_parity_sql_runs_in_the_online_transaction_before_the_stage_is_consumed() {
+        let parity = "UPDATE dbo._ConfigChngR SET _MessageNo = NULL; -- parity\n";
+        let plan = fixture(MainActivationMode::Online).with_parity_sql(parity.to_owned());
+        let sql = render_main_activation_sql("lab", &plan, None).unwrap().sql;
+        let upsert = sql
+            .find("Params.DynamicallyUpdated upsert failed")
+            .expect("the markers are written");
+        let at = sql.find(parity).expect("the parity sql is in the script");
+        let consumed = sql.find("DELETE FROM dbo.ConfigSave;").unwrap();
+        // after the rows and the markers, while ConfigSave still holds the stage, inside the
+        // transaction the postconditions and the commit close
+        assert!(upsert < at && at < consumed, "{upsert} {at} {consumed}");
+        assert!(at < sql.find("COMMIT TRANSACTION;").unwrap());
+        // only the online publication takes it: the ordinary ones fold the overlay away and
+        // replace rows in place, which is the exclusive apply's script
+        for mode in [
+            MainActivationMode::Exclusive,
+            MainActivationMode::Live,
+            MainActivationMode::Worker,
+        ] {
+            let plan = fixture(mode).with_parity_sql(parity.to_owned());
+            let sql = render_main_activation_sql("lab", &plan, Some(r"C:\tail.trn"))
+                .or_else(|_| render_main_activation_sql("lab", &plan, None))
+                .unwrap()
+                .sql;
+            assert!(!sql.contains(parity), "{mode:?}");
+        }
+        // an empty fragment is no fragment, and an unchanged stage writes nothing at all
+        let plain = render_main_activation_sql("lab", &fixture(MainActivationMode::Online), None)
+            .unwrap()
+            .sql;
+        let empty = fixture(MainActivationMode::Online).with_parity_sql("  \n".to_owned());
+        assert_eq!(
+            render_main_activation_sql("lab", &empty, None).unwrap().sql,
+            plain
+        );
+        assert!(!plain.contains("parity"));
+    }
+
+    #[test]
+    fn the_markers_are_stamped_in_utc_unless_the_plan_brings_the_platforms_timestamps() {
+        let plain = render_main_activation_sql("lab", &fixture(MainActivationMode::Online), None)
+            .unwrap()
+            .sql;
+        assert!(plain.contains("SYSUTCDATETIME()"));
+        assert!(!plain.contains("@now"));
+        let declarations = "DECLARE @now datetime2(6) = SYSDATETIME(); -- platform\n";
+        let stamped = render_main_activation_sql(
+            "lab",
+            &fixture(MainActivationMode::Online).with_platform_timestamps(declarations.to_owned()),
+            None,
+        )
+        .unwrap()
+        .sql;
+        // declared before the first row is written, used for both markers, and no UTC left
+        let declared = stamped.find(declarations).unwrap();
+        let first_write = stamped
+            .find("DELETE FROM dbo.Config WHERE FileName=N'root'")
+            .unwrap();
+        assert!(declared < first_write);
+        assert!(!stamped.contains("SYSUTCDATETIME()"));
+        assert_eq!(stamped.matches("Modified=@now").count(), 2);
+        assert!(stamped.contains("VALUES (N'DynamicallyUpdated',@now,@now,0,"));
+        // the ordinary modes take no such thing
+        let exclusive = render_main_activation_sql(
+            "lab",
+            &fixture(MainActivationMode::Exclusive)
+                .with_platform_timestamps(declarations.to_owned()),
+            None,
+        )
+        .unwrap()
+        .sql;
+        assert!(!exclusive.contains("@now"));
+    }
+
+    #[test]
+    fn a_consumed_stage_row_is_part_of_the_exact_stage_and_published_nowhere() {
+        let deleted = row("deleted", b"0".to_vec());
+        let plan =
+            fixture(MainActivationMode::Online).with_consumed_stage_rows(vec![deleted.clone()]);
+        let sql = render_main_activation_sql("lab", &plan, None).unwrap().sql;
+        // asserted with the stage (the ConfigSave the transaction expects holds it), emptied with it (6 rows: 5 + 1)
+        assert!(sql.contains(&format!(
+            "INSERT @ExpectedStage VALUES (N'deleted',0,'{}','{}',{},{},{},0x{})",
+            quote_string(&deleted.creation),
+            quote_string(&deleted.modified),
+            deleted.attributes,
+            deleted.data_size,
+            deleted.binary_data.len(),
+            hex(&deleted.sha256())
+        )));
+        assert!(sql.contains("IF @@ROWCOUNT <> 6 THROW 57220, 'ConfigSave cleanup drifted', 1;"));
+        // and neither moved, aliased nor expected in Config afterwards
+        assert!(!sql.contains("deleted_dynupdate_"));
+        assert!(!sql.contains("FileName=N'deleted' AND PartNo=0"));
+        assert!(
+            !plan
+                .alias_rows()
+                .iter()
+                .any(|alias| alias.contains("deleted"))
+        );
+        assert_eq!(plan.dry_run_report().staged_rows, 5);
+        let plain = render_main_activation_sql("lab", &fixture(MainActivationMode::Online), None)
+            .unwrap()
+            .sql;
+        assert!(plain.contains("IF @@ROWCOUNT <> 5 THROW 57220"));
+    }
+
+    #[test]
+    fn online_noop_consumes_the_exact_stage_without_parity_or_marker_writes() {
+        let active = fixture(MainActivationMode::Online).active_rows;
+        let plan = prepare_main_activation(
+            MainActivationMode::Online,
+            active.clone(),
+            MainActivationSnapshot {
+                config_rows: active,
+                config_dynamically_updated: None,
+                params_dynamically_updated: None,
+            },
+            &[BODY.to_owned(), format!("{BODY}.0")],
+            true,
+        )
+        .unwrap()
+        .with_consumed_stage_rows(vec![row("deleted", b"0".to_vec())])
+        .with_precondition_sql("IF EXISTS (SELECT 1 FROM dbo.Params WITH (UPDLOCK, HOLDLOCK) WHERE FileName=N'stale-si') THROW 57305, 'pending service drifted', 1;".to_owned())
+        .with_parity_sql("UPDATE dbo.Files SET BinaryData=0x01; -- must not run".to_owned())
+        .with_platform_timestamps("DECLARE @now datetime2(6) = SYSDATETIME();".to_owned());
+        assert!(plan.is_no_op());
+        let sql = render_main_activation_sql("lab", &plan, None).unwrap().sql;
+        assert!(sql.contains("INSERT @ExpectedStage VALUES (N'deleted'"));
+        assert!(sql.contains("DELETE FROM dbo.ConfigSave;"));
+        assert!(sql.contains("IF @@ROWCOUNT <> 6 THROW 57205"));
+        let guard = sql.find("pending service drifted").unwrap();
+        assert!(sql.find("BEGIN TRANSACTION").unwrap() < guard);
+        assert!(sql.find("THROW 57204").unwrap() < guard);
+        assert!(guard < sql.find("DELETE FROM dbo.ConfigSave;").unwrap());
+        assert!(!sql.contains("must not run"));
+        assert!(!sql.contains("DECLARE @now"));
+        assert!(!sql.contains("INSERT dbo.Config"));
+        assert!(!sql.contains("UPDATE dbo.Params"));
+        assert!(!sql.contains("DELETE FROM dbo.Config WHERE"));
+    }
+
+    #[test]
+    fn the_alias_rows_of_a_publication_are_named_as_the_transition_writes_them() {
+        let plan = fixture(MainActivationMode::Online);
+        assert_eq!(
+            plan.alias_rows(),
+            vec![
+                format!("{BODY}_dynupdate_{NEW}"),
+                format!("{BODY}_dynupdate_{NEW}.0"),
+                format!("versions_dynupdate_{NEW}"),
+            ]
+        );
+        assert!(plan.dynamic_history().is_empty());
+        // and each of them is a row of the script
+        let sql = render_main_activation_sql("lab", &plan, None).unwrap().sql;
+        for alias in plan.alias_rows() {
+            assert!(sql.contains(&format!("N'{alias}'")), "{alias}");
+        }
+    }
+
+    #[test]
+    fn live_noop_stage_cleanup_is_inside_the_master_pending_guard() {
+        let base = fixture(MainActivationMode::Live);
+        let noop = prepare_main_activation(
+            MainActivationMode::Live,
+            base.active_rows.clone(),
+            MainActivationSnapshot {
+                config_rows: base.active_rows.clone(),
+                config_dynamically_updated: None,
+                params_dynamically_updated: None,
+            },
+            &[BODY.to_owned(), format!("{BODY}.0")],
+            true,
+        )
+        .unwrap();
+        assert!(noop.is_no_op());
+        for checkpoint in [false, true] {
+            let mut script = render_main_activation_sql("lab", &noop, None).unwrap();
+            protect_live_script("lab", checkpoint, &mut script);
+            let delete = script.sql.find("DELETE FROM dbo.ConfigSave").unwrap();
+            assert!(script.sql.find("sp_getapplock").unwrap() < delete);
+            assert!(script.sql.find("THROW 57269").unwrap() < delete);
+            assert!(delete < script.sql.find("sp_releaseapplock").unwrap());
+            assert!(!script.sql.contains("BACKUP LOG"));
+        }
+    }
+
+    #[test]
+    fn default_live_keeps_the_legacy_two_cycle_sql_readiness_contract() {
+        let sql = render_main_activation_sql(
+            "lab",
+            &fixture(MainActivationMode::Live),
+            Some(r"F:\tail.trn"),
+        )
+        .unwrap()
+        .sql;
+        assert_eq!(sql.matches("BACKUP LOG [lab]").count(), 2);
+        assert!(sql.contains("THROW 57234"));
+        assert!(sql.contains("@LiveExpected1cConnections"));
+        assert!(sql.contains("NORECOVERY, NOINIT"));
+        assert!(!sql.contains("ibcmd-rs:live:"));
+    }
+
+    #[test]
     fn live_promotes_ordinary_rows_then_runs_guarded_tail_recovery() {
-        let script = render_main_activation_sql(
+        let script = render_main_activation_checkpoint(
             "lab]db",
             &fixture(MainActivationMode::Live),
             Some(r"C:\tail's\generation.trn"),
+            false,
         )
         .unwrap();
         let promotion = script
@@ -1462,34 +1897,21 @@ mod tests {
             .match_indices("RESTORE DATABASE [lab]]db] WITH RECOVERY")
             .map(|(index, _)| index)
             .collect::<Vec<_>>();
-        assert_eq!(single_users.len(), 2);
-        assert_eq!(backups.len(), 2);
-        assert_eq!(recoveries.len(), 3);
+        assert_eq!(single_users.len(), 1);
+        assert_eq!(backups.len(), 1);
+        assert_eq!(recoveries.len(), 2);
         assert!(promotion < single_users[0]);
         assert!(single_users[0] < backups[0] && backups[0] < recoveries[0]);
-        assert!(recoveries[0] < single_users[1]);
-        assert!(single_users[1] < backups[1] && backups[1] < recoveries[1]);
-        assert!(script.sql.contains("program_name=N'1CV83 Server'"));
-        assert!(script.sql.contains("DATEADD(millisecond,4000"));
-        assert!(script.sql.contains("WAITFOR DELAY '00:00:00.100'"));
-        assert!(
-            script
-                .sql
-                .contains("did not recover before the live activation deadline")
-        );
-        assert!(!script.sql.contains("WAITFOR DELAY '00:00:05'"));
+        assert!(!script.sql.contains("@LiveExpected1cConnections"));
+        assert!(!script.sql.contains("57234"));
+        assert!(!script.sql.contains("NOINIT"));
         assert!(script.sql.contains("sys.dm_os_file_exists"));
         assert!(script.sql.contains("file_is_a_directory=1"));
         assert!(script.sql.contains("C:\\tail''s\\generation.trn"));
         assert!(
             script
                 .sql
-                .contains("WITH NORECOVERY, INIT, COMPRESSION, CHECKSUM")
-        );
-        assert!(
-            script
-                .sql
-                .contains("WITH NORECOVERY, NOINIT, COMPRESSION, CHECKSUM")
+                .contains("WITH NORECOVERY, INIT, COMPRESSION, CHECKSUM, NAME=")
         );
         for (index, _) in script.sql.match_indices("BACKUP LOG") {
             let statement = &script.sql[index..index + script.sql[index..].find(';').unwrap()];
@@ -1504,7 +1926,7 @@ mod tests {
                 .sql
                 .contains("live activation left database restoring")
         );
-        assert!(script.report.live_session_switch_expected);
+        assert!(!script.report.live_session_switch_expected);
         assert!(script.report.requires_tail_log_artifact);
         assert!(!script.report.existing_sessions_retain_generation);
         assert_eq!(
@@ -1856,11 +2278,9 @@ mod tests {
         let guard = script.sql.find("SHA2_256").unwrap();
         let mutation = script.sql.find("DELETE FROM dbo.Config WHERE").unwrap();
         assert!(guard < mutation);
-        assert!(
-            script
-                .sql
-                .contains("EXCEPT SELECT FileName,PartNo,DataSize,Digest")
-        );
+        assert!(script.sql.contains(
+            "EXCEPT SELECT FileName,PartNo,Creation,Modified,Attributes,DataSize,ByteLength,Digest"
+        ));
         assert!(script.sql.contains("ConfigSave exact snapshot drifted"));
     }
 
@@ -1980,8 +2400,138 @@ mod tests {
         let plan = fixture(MainActivationMode::Online);
         let report = plan.dry_run_report();
         assert_eq!(report.recovery_token.len(), 64);
-        assert_eq!(plan.recovery().overwritten_config_rows.len(), 5);
+        assert_eq!(plan.recovery().overwritten_config_rows.len(), 2);
+        assert_eq!(plan.recovery().retained_config_rows.len(), 3);
         assert_eq!(report.touched_tables, ["Config", "ConfigSave", "Params"]);
+    }
+
+    #[test]
+    fn online_recovery_distinguishes_replaced_rows_from_retained_preimages() {
+        let plan = fixture(MainActivationMode::Online);
+        let recovery = plan.recovery();
+        assert_eq!(
+            recovery
+                .overwritten_config_rows
+                .iter()
+                .map(|row| row.file_name.as_str())
+                .collect::<Vec<_>>(),
+            ["root", "version"]
+        );
+        assert_eq!(
+            recovery.retained_config_rows,
+            plan.active_rows
+                .iter()
+                .filter(|row| !matches!(row.file_name.as_str(), "root" | "version"))
+                .cloned()
+                .collect::<Vec<_>>()
+        );
+        let report = plan.dry_run_report();
+        assert_eq!(
+            report.dynamic_aliases,
+            [
+                format!("{BODY}_dynupdate_{NEW}"),
+                format!("{BODY}_dynupdate_{NEW}.0"),
+                format!("versions_dynupdate_{NEW}")
+            ]
+        );
+        assert_eq!(
+            report.dynamic_markers,
+            ["Config.DynamicallyUpdated", "Params.DynamicallyUpdated"]
+        );
+        let decoded: MainActivationRecoverySnapshot =
+            serde_json::from_slice(&serde_json::to_vec(recovery).unwrap()).unwrap();
+        assert_eq!(&decoded, recovery);
+    }
+
+    #[test]
+    fn no_op_recovery_does_not_claim_config_replacements_or_new_aliases() {
+        let base = fixture(MainActivationMode::Online);
+        let plan = prepare_main_activation(
+            MainActivationMode::Online,
+            base.active_rows.clone(),
+            MainActivationSnapshot {
+                config_rows: base.active_rows.clone(),
+                config_dynamically_updated: None,
+                params_dynamically_updated: None,
+            },
+            &[BODY.to_owned(), format!("{BODY}.0")],
+            true,
+        )
+        .unwrap();
+        assert!(plan.is_no_op());
+        assert!(plan.recovery().overwritten_config_rows.is_empty());
+        assert_eq!(plan.recovery().retained_config_rows, base.active_rows);
+        assert!(plan.dry_run_report().dynamic_aliases.is_empty());
+        assert!(plan.dry_run_report().dynamic_markers.is_empty());
+    }
+
+    #[test]
+    fn live_recovery_serializes_exactly_as_the_historical_token_input() {
+        #[derive(Serialize)]
+        struct LegacySnapshot<'a> {
+            old_generation: &'a str,
+            new_generation: &'a str,
+            overwritten_config_rows: &'a [MainStorageRow],
+            prior_config_dynamically_updated: &'a Option<MainStorageRow>,
+            prior_params_dynamically_updated: &'a Option<MainStorageRow>,
+            staged_rows: &'a [MainStorageRow],
+        }
+        let plan = fixture(MainActivationMode::Live);
+        let current = plan.recovery();
+        let legacy = LegacySnapshot {
+            old_generation: &current.old_generation,
+            new_generation: &current.new_generation,
+            overwritten_config_rows: &plan.active_rows,
+            prior_config_dynamically_updated: &current.prior_config_dynamically_updated,
+            prior_params_dynamically_updated: &current.prior_params_dynamically_updated,
+            staged_rows: &current.staged_rows,
+        };
+        let bytes = serde_json::to_vec(&legacy).unwrap();
+        assert_eq!(serde_json::to_vec(current).unwrap(), bytes);
+        assert_eq!(
+            plan.dry_run_report().recovery_token,
+            hex(&Sha256::digest(&bytes))
+        );
+        let historical: MainActivationRecoverySnapshot = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(&historical, current);
+        assert!(current.retained_config_rows.is_empty());
+    }
+
+    #[test]
+    fn header_only_drift_is_bound_to_recovery_and_sql_before_any_write() {
+        let base = fixture(MainActivationMode::Online);
+        for field in ["creation", "modified", "attributes"] {
+            let mut active = base.active_rows.clone();
+            match field {
+                "creation" => active[0].creation = "4026-10-01 01:02:03.004".to_owned(),
+                "modified" => active[0].modified = "4026-10-01 01:02:04.007".to_owned(),
+                _ => active[0].attributes = 17,
+            }
+            let plan = prepare_main_activation(
+                MainActivationMode::Online,
+                base.staged_rows.clone(),
+                MainActivationSnapshot {
+                    config_rows: active,
+                    config_dynamically_updated: None,
+                    params_dynamically_updated: None,
+                },
+                &base.changed_targets,
+                true,
+            )
+            .unwrap();
+            assert_ne!(
+                plan.dry_run_report().recovery_token,
+                base.dry_run_report().recovery_token
+            );
+            let sql = render_main_activation_sql("lab", &plan, None).unwrap().sql;
+            let cas = sql.find("Config selected snapshot drifted").unwrap();
+            let write = sql.find("DELETE FROM dbo.Config WHERE").unwrap();
+            assert!(cas < write);
+            assert!(sql[..cas].contains("CONVERT(varchar(27),T.Creation,121)=E.Creation"));
+            assert!(sql[..cas].contains("CONVERT(varchar(27),T.Modified,121)=E.Modified"));
+            assert!(sql[..cas].contains("CONVERT(int,T.Attributes)=E.Attributes"));
+            assert!(sql[..cas].contains("DATALENGTH(T.BinaryData)"));
+        }
     }
 
     #[test]
@@ -2023,7 +2573,7 @@ mod tests {
                 .all(|name| name.contains(&format!("_dynupdate_{generation}")))
         );
         assert_eq!(
-            online.dynamic_markers,
+            online.dynamic_marker_actions,
             [
                 "Config.DynamicallyUpdated: written",
                 "Params.DynamicallyUpdated: written"

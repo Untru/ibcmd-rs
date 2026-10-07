@@ -1,0 +1,186 @@
+   Compiling ibcmd-rs v0.4.0 (F:\ibcmd\src\ibcmd-rs-05-dynamic-wave2)
+warning: type `config_rows::ConfigRow` is more private than the item `base_indexes_from_rows`
+   --> src\mssql_dump\extension\mod.rs:758:1
+    |
+758 | / pub(crate) fn base_indexes_from_rows(
+759 | |     rows: &[super::ConfigRow],
+760 | |     source_version: InfobaseConfigSourceVersion,
+761 | | ) -> ResolvedIndexes {
+    | |____________________^ function `base_indexes_from_rows` is reachable at visibility `pub(crate)`
+    |
+note: but type `config_rows::ConfigRow` is only usable at visibility `pub(in crate::mssql_dump)`
+   --> src\mssql_dump\config_rows.rs:11:1
+    |
+ 11 | pub(super) struct ConfigRow {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    = note: `#[warn(private_interfaces)]` on by default
+
+warning: method `chain_ids` is never used
+   --> src\compiler\bodies\dynamic_list.rs:293:19
+    |
+151 | impl FieldMap {
+    | ------------- method in this implementation
+...
+293 |     pub(crate) fn chain_ids(&self, path: &ListPath) -> Option<Vec<String>> {
+    |                   ^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: variant `Root` is never constructed
+    --> src\metadata_owner_graph.rs:1432:5
+     |
+1431 | pub(crate) enum OwnerGraphReference {
+     |                 ------------------- variant in this enum
+1432 |     Root,
+     |     ^^^^
+     |
+     = note: `OwnerGraphReference` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: variants `ChildUuidSyntax` and `ChildUuidNilUuid` are never constructed
+    --> src\metadata_owner_graph.rs:1517:5
+     |
+1495 | pub(crate) enum OwnerGraphDiagnosticKind {
+     |                 ------------------------ variants in this enum
+...
+1517 |     ChildUuidSyntax,
+     |     ^^^^^^^^^^^^^^^
+1518 |     ChildUuidNilUuid,
+     |     ^^^^^^^^^^^^^^^^
+     |
+     = note: `OwnerGraphDiagnosticKind` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: constant `FORM_COMMAND_CHANGE_UUID` is never used
+     --> src\module_blob.rs:17476:7
+      |
+17476 | const FORM_COMMAND_CHANGE_UUID: &str = "6886601d-276c-4d3f-af0a-05c586025608";
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FORM_COMMAND_COPY_UUID` is never used
+     --> src\module_blob.rs:17477:7
+      |
+17477 | const FORM_COMMAND_COPY_UUID: &str = "342c531d-dc73-458a-8ac4-6a746916a33b";
+      |       ^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FORM_COMMAND_CREATE_UUID` is never used
+     --> src\module_blob.rs:17478:7
+      |
+17478 | const FORM_COMMAND_CREATE_UUID: &str = "4f834c38-add1-45e4-a9f3-cefe3efac5c9";
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: constant `FORM_COMMAND_CUSTOMIZE_FORM_UUID` is never used
+     --> src\module_blob.rs:17479:7
+      |
+17479 | const FORM_COMMAND_CUSTOMIZE_FORM_UUID: &str = "198ea630-fda2-4cda-8a23-f999f4c67ee6";
+      |       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `compared` and `identical` are never read
+   --> src\mssql\delta_stage.rs:106:9
+    |
+104 | pub(super) struct DeltaStats {
+    |                   ---------- fields in this struct
+105 |     /// Files of the tree the target's export compared with, and of them the ones it reproduces.
+106 |     pub compared: usize,
+    |         ^^^^^^^^
+107 |     pub identical: usize,
+    |         ^^^^^^^^^
+    |
+    = note: `DeltaStats` has derived impls for the traits `Clone` and `Debug`, but these are intentionally ignored during dead code analysis
+
+warning: function `format_exchange_plan_content_xml` is never used
+    --> src\mssql_dump\mod.rs:8258:4
+     |
+8258 | fn format_exchange_plan_content_xml(items: &[ExchangePlanContentItem]) -> String {
+     |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: associated function `from_base64` is never used
+  --> src\mssql_dump\cas.rs:80:8
+   |
+66 | impl CasHash {
+   | ------------ associated function in this implementation
+...
+80 |     fn from_base64(value: &str) -> std::result::Result<Self, CasGraphError> {
+   |        ^^^^^^^^^^^
+
+warning: function `parse_count` is never used
+   --> src\mssql_dump\cas.rs:763:4
+    |
+763 | fn parse_count(value: &str) -> std::result::Result<usize, CasGraphError> {
+    |    ^^^^^^^^^^^
+
+warning: function `parse_quoted_string` is never used
+   --> src\mssql_dump\cas.rs:775:4
+    |
+775 | fn parse_quoted_string(value: &str) -> Option<String> {
+    |    ^^^^^^^^^^^^^^^^^^^
+
+warning: method `len` is never used
+   --> src\mssql_dump\extension\mod.rs:538:19
+    |
+438 | impl ExtensionContext {
+    | --------------------- method in this implementation
+...
+538 |     pub(crate) fn len(&self) -> usize {
+    |                   ^^^
+
+warning: variant `Hidden` is never constructed
+  --> src\mssql_dump\extension\properties.rs:30:5
+   |
+15 | pub(crate) enum Meaning {
+   |                 ------- variant in this enum
+...
+30 |     Hidden(&'static str),
+   |     ^^^^^^
+   |
+   = note: `Meaning` has derived impls for the traits `Debug` and `Clone`, but these are intentionally ignored during dead code analysis
+
+warning: methods `diagnostic_code` and `diagnostic_reason` are never used
+    --> src\mssql_dump\form_body.rs:2139:19
+     |
+2136 | impl FormSchemaWriteError {
+     | ------------------------- methods in this implementation
+...
+2139 |     pub(super) fn diagnostic_code(&self) -> &'static str {
+     |                   ^^^^^^^^^^^^^^^
+...
+2170 |     pub(super) fn diagnostic_reason(&self) -> &'static str {
+     |                   ^^^^^^^^^^^^^^^^^
+
+warning: function `form_root_child_items_tail_start_for` is never used
+     --> src\mssql_dump\form_body.rs:12394:4
+      |
+12394 | fn form_root_child_items_tail_start_for(
+      |    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: fields `information_register_field_refs` and `form_owner_reference` are never read
+     --> src\mssql_dump\form_body.rs:29579:5
+      |
+29576 | pub(super) struct FormCommandInterfaceParseContext<'a> {
+      |                   -------------------------------- fields in this struct
+...
+29579 |     information_register_field_refs: &'a InformationRegisterFieldReferenceIndex,
+      |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+29580 |     information_register_master_dimensions: &'a InformationRegisterMasterDimensionIndex,
+29581 |     form_owner_reference: Option<&'a str>,
+      |     ^^^^^^^^^^^^^^^^^^^^
+
+warning: function `resolve_information_register_field_reference` is never used
+     --> src\mssql_dump\form_body.rs:30348:15
+      |
+30348 | pub(super) fn resolve_information_register_field_reference<'a>(
+      |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: function `parse_and_render_form_gantt_chart_settings_for_test` is never used
+     --> src\mssql_dump\form_body.rs:38152:15
+      |
+38152 | pub(super) fn parse_and_render_form_gantt_chart_settings_for_test(text: &str) -> Option<String> {
+      |               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+warning: `ibcmd-rs` (lib test) generated 20 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2m 03s
+     Running unittests src\lib.rs (target\debug\deps\ibcmd_rs-a63d78f7957f3bf5.exe)
+
+running 2 tests
+test mssql_config_apply::recovery::tests::dynamic_params_recovery_rejects_unbound_metadata_and_missing_or_duplicate_coverage ... ok
+test mssql_config_apply::recovery::tests::immutable_dynamic_params_recovery_preserves_a_through_transient_b_missing_parts_and_headers ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 3673 filtered out; finished in 0.08s

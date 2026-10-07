@@ -239,6 +239,11 @@ const ROOT_CLASSES: &[(&str, &str)] = &[
     ("cc9df798-7c94-4616-97d2-7aa0b7bc515e", "XDTOPackage"),
 ];
 
+/// Canonical top-level collection identities already used by the name reader.
+pub(crate) fn root_class_kinds() -> &'static [(&'static str, &'static str)] {
+    ROOT_CLASSES
+}
+
 /// The root row (the configuration's own row) -> the kind of every
 /// top-level object it lists, by uuid.
 pub fn root_kinds(root: &Brace) -> HashMap<String, &'static str> {

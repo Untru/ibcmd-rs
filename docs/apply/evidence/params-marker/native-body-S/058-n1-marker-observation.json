@@ -1,0 +1,5 @@
+{
+  "ExitCode": 1,
+  "Stdout": "",
+  "Stderr": "Traceback (most recent call last):\r\n  File \"F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\observe_marker_n1_body_resume_v1.py\", line 57, in <module>\r\n    run()\r\n    ~~~^^\r\n  File \"F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\observe_marker_n1_body_resume_v1.py\", line 54, in run\r\n    print(json.dumps(report, ensure_ascii=False))\r\n    ~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\n  File \"C:\\Program Files\\Python313\\Lib\\encodings\\cp1251.py\", line 19, in encode\r\n    return codecs.charmap_encode(input,self.errors,encoding_table)[0]\r\n           ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\r\nUnicodeEncodeError: 'charmap' codec can't encode character '\\ufeff' in position 2949: character maps to <undefined>\r\n"
+}

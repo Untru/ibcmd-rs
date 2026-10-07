@@ -1,0 +1,6 @@
+{
+  "ExitCode": 1,
+  "Stdout": "",
+  "Stderr": "Exception: F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-runtime-v3\\compact7_prior_archive.ps1:69\r\nLine |\r\n  69 |  : ase) -ge 0){throw 'case5 saved PID/reused PID/root process present; n :\r\n     |                ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\r\n     | case5 saved PID/reused PID/root process present; no archive\r\n",
+  "ended_utc": "2026-10-02T06:50:55.2883651Z"
+}

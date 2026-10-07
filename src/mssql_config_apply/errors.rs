@@ -129,6 +129,29 @@ impl fmt::Display for ExclusiveAccessUnprovable {
 
 impl std::error::Error for ExclusiveAccessUnprovable {}
 
+/// The platform of the database has no dynamic apply (`mssql.config.apply.dynamic` is not declared
+/// supported for its profile): `--dynamic=force` is named as not served, as an option is. Nothing was
+/// written.
+#[derive(Debug, Clone)]
+pub struct DynamicUnsupported {
+    /// The profile that was asked, `platform-8.5.1.1150`.
+    pub platform: String,
+    /// Why, from the profile registry.
+    pub reason: String,
+}
+
+impl fmt::Display for DynamicUnsupported {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "the dynamic apply is not available for {}: {}",
+            self.platform, self.reason
+        )
+    }
+}
+
+impl std::error::Error for DynamicUnsupported {}
+
 /// A restructuring is about to write and the operator has not said how to go
 /// back: the old tables are dropped inside the transaction, and the recovery
 /// artifact keeps the `Config` rows and the cache rows only. Nothing was

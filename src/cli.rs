@@ -179,6 +179,8 @@ pub enum Commands {
     MssqlActivationDiff(MssqlActivationDiffArgs),
     /// Publish an already staged non-structural main-configuration change without native ibcmd.
     MssqlActivateStagedMain(MssqlActivateStagedMainArgs),
+    /// Continue a recorded live switch; ambiguous artifacts and active RAS sessions refuse.
+    MssqlLiveContinue(crate::mssql_live_continue::LiveContinueArgs),
     /// Tell whether the ConfigSave of a database (with --tree: a source tree against the database) needs the platform's own apply, a restructuring; read-only.
     MssqlApplyCheck(crate::apply_check::cli::MssqlApplyCheckArgs),
     /// Tell whether the change from one XML tree to another needs the platform's own apply.
@@ -2220,6 +2222,15 @@ pub enum MssqlMainActivationModeArg {
 
 #[derive(Debug, Clone, Args)]
 pub struct MssqlActivateStagedMainArgs {
+    /// Experimental idle-only split/continue checkpoint; already-staged activation only.
+    /// Source apply refuses this option before any external process or staging.
+    #[arg(long)]
+    pub live_checkpoint: bool,
+
+    /// Store the LIVE snapshot in verified adjacent binary files instead of JSON byte arrays.
+    #[arg(long, requires = "live_checkpoint")]
+    pub live_compact_recovery: bool,
+
     /// Exact native MSSQL platform layout.
     #[arg(long)]
     pub platform_profile: MssqlNativePlatformProfile,
@@ -2415,6 +2426,11 @@ pub struct MssqlConfigApplyArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct MssqlApplySourceChangeArgs {
+    /// Experimental idle-only split/continue checkpoint; already-staged activation only.
+    /// Source apply refuses this option before any external process or staging.
+    #[arg(long)]
+    pub live_checkpoint: bool,
+
     /// Exact native MSSQL platform layout. Without --platform (which must name
     /// this build or its release) the XML format is this build's.
     #[arg(long)]
@@ -6721,5 +6737,38 @@ mod tests {
             args.platform_profile,
             MssqlNativePlatformProfile::Platform8_5_1_1150
         );
+    }
+
+    #[test]
+    fn compact_live_recovery_requires_an_explicit_checkpoint() {
+        let base = vec![
+            "ibcmd-rs",
+            "mssql-activate-staged-main",
+            "--platform-profile",
+            "platform-8.3.27.2214",
+            "--cluster-id",
+            "11111111-1111-1111-1111-111111111111",
+            "--infobase-id",
+            "22222222-2222-2222-2222-222222222222",
+            "--database",
+            "owned_lab",
+            "--mode",
+            "live",
+        ];
+        let mut compact = base.clone();
+        compact.push("--live-compact-recovery");
+        assert!(Cli::try_parse_from(&compact).is_err());
+        compact.push("--live-checkpoint");
+        let Commands::MssqlActivateStagedMain(args) =
+            Cli::try_parse_from(&compact).unwrap().command
+        else {
+            panic!("wrong command")
+        };
+        assert!(args.live_checkpoint && args.live_compact_recovery);
+        let Commands::MssqlActivateStagedMain(args) = Cli::try_parse_from(base).unwrap().command
+        else {
+            panic!("wrong command")
+        };
+        assert!(!args.live_checkpoint && !args.live_compact_recovery);
     }
 }

@@ -142,15 +142,19 @@ pub(crate) fn compile_tree_edit(
     if diff.changed.is_empty() && diff.added.is_empty() && diff.removed.is_empty() {
         return Ok(None);
     }
-    let root_children_only = diff.changed.iter().any(|path| path == "Configuration.xml")
+    let mut version_edit = None;
+    let root_edit_supported = diff.changed.iter().any(|path| path == "Configuration.xml")
         && match (
             std::fs::read_to_string(base_export.0.join("Configuration.xml")),
             std::fs::read_to_string(input_dir.join("Configuration.xml")),
         ) {
-            (Ok(active_root), Ok(tree_root)) => root_children_only_change(&active_root, &tree_root),
+            (Ok(active_root), Ok(tree_root)) => {
+                version_edit = root_version_edit(&active_root, &tree_root);
+                root_children_only_change(&active_root, &tree_root) || version_edit.is_some()
+            }
             _ => false,
         };
-    let refused = structural_refusals(&diff, root_children_only);
+    let refused = structural_refusals(&diff, root_edit_supported);
     if !refused.is_empty() {
         bail!(
             "these changes are not loaded (activation restructures nothing, so an edit of what a \
@@ -169,7 +173,30 @@ pub(crate) fn compile_tree_edit(
             )
         })
         .collect::<HashMap<_, _>>();
-    let edit = compile_edit(input_dir, base_rows, &diff, &keys)
+    // The generic configuration patcher edits its header, not Version. Keep
+    // the root out of that compile and replace only its evidenced scalar.
+    let compile_diff = TreeDiff {
+        changed: diff
+            .changed
+            .iter()
+            .filter(|path| version_edit.is_none() || path.as_str() != "Configuration.xml")
+            .cloned()
+            .collect(),
+        added: diff.added.clone(),
+        removed: diff.removed.clone(),
+    };
+    let version_row = if let Some((old, new)) = &version_edit {
+        let key = keys
+            .get("Configuration.xml")
+            .context("the active export does not name the root row")?;
+        let packed = base_rows
+            .get(key)
+            .context("the active image has no root row")?;
+        Some((key.clone(), patch_root_version(packed, key, old, new)?))
+    } else {
+        None
+    };
+    let mut edit = compile_edit(input_dir, base_rows, &compile_diff, &keys)
         .map_err(|error| {
             let text = error.to_string();
             if text.contains("has already run in this process") {
@@ -183,6 +210,10 @@ pub(crate) fn compile_tree_edit(
             }
         })
         .context("failed to compile the changed objects")?;
+    if let Some((key, packed)) = version_row {
+        edit.rows.insert(key, packed);
+        edit.prefixes.insert("Configuration.xml".to_owned());
+    }
 
     let image = proposed_image(active, &edit.rows, &edit.dropped)?;
     verify_export(
@@ -459,12 +490,12 @@ fn list_paths(paths: &[String]) -> String {
 /// publishes rows and restructures nothing, so an edit that changes what an
 /// object's table holds (a descriptor of a family that owns one, an object or
 /// a body added or removed) belongs to the platform's own load. Each is named
-/// with the reason. `root_children_only` says the root descriptor differs from
-/// the active one in the `<ChildObjects>` lines of table-less families alone.
-pub(crate) fn structural_refusals(diff: &TreeDiff, root_children_only: bool) -> Vec<String> {
+/// with the reason. The root is accepted only after comparing it with the
+/// active export: table-less child lists alone, or its Version text alone.
+pub(crate) fn structural_refusals(diff: &TreeDiff, root_edit_supported: bool) -> Vec<String> {
     let mut refused = Vec::new();
     let mut check = |path: &str, moved: Option<&str>| {
-        if let Some(reason) = refusal(path, moved, root_children_only) {
+        if let Some(reason) = refusal(path, moved, root_edit_supported) {
             refused.push(format!("{path} ({reason})"));
         }
     };
@@ -484,7 +515,7 @@ fn is_tableless_family(family: &str) -> bool {
     TABLELESS_FAMILIES.iter().any(|(dir, _)| *dir == family)
 }
 
-fn refusal(path: &str, moved: Option<&str>, root_children_only: bool) -> Option<&'static str> {
+fn refusal(path: &str, moved: Option<&str>, root_edit_supported: bool) -> Option<&'static str> {
     if path == CONFIG_DUMP_INFO {
         return None;
     }
@@ -492,7 +523,7 @@ fn refusal(path: &str, moved: Option<&str>, root_children_only: bool) -> Option<
     if let Some(moved) = moved {
         // An object of a table-less family comes or goes with its descriptor
         // and its bodies (the root's child list follows, see
-        // `root_children_only`); the module of a form is a part of the form's
+        // `root_children_only_change`); the module of a form is a part of the form's
         // body row.
         match segments.as_slice() {
             [family, name] if is_tableless_family(family) && name.ends_with(".xml") => {
@@ -509,7 +540,7 @@ fn refusal(path: &str, moved: Option<&str>, root_children_only: bool) -> Option<
         });
     }
     if path == "Configuration.xml" {
-        return if root_children_only {
+        return if root_edit_supported {
             None
         } else {
             Some("the root descriptor")
@@ -567,9 +598,190 @@ pub(crate) fn root_children_only_change(active: &str, tree: &str) -> bool {
     }
 }
 
+/// A canonical root descriptor changes only its dotted numeric Version,
+/// preserving the active version's component count. Every other byte,
+/// including adopted state, identity and child lists, must remain unchanged.
+fn root_version_edit(active: &str, tree: &str) -> Option<(String, String)> {
+    fn version_and_mask(text: &str) -> Option<(String, String)> {
+        let xml = ibcmd_xml::XmlReader::from_slice(text.as_bytes()).ok()?;
+        fn elements(node: &ibcmd_xml::XmlElement) -> Vec<&ibcmd_xml::XmlElement> {
+            node.children()
+                .iter()
+                .filter_map(|child| match child {
+                    ibcmd_xml::XmlNode::Element(element) => Some(element),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        }
+        if xml.root().name().raw() != "MetaDataObject" {
+            return None;
+        }
+        let configurations = elements(xml.root())
+            .into_iter()
+            .filter(|node| node.name().raw() == "Configuration")
+            .collect::<Vec<_>>();
+        let [configuration] = configurations.as_slice() else {
+            return None;
+        };
+        let properties = elements(configuration)
+            .into_iter()
+            .filter(|node| node.name().raw() == "Properties")
+            .collect::<Vec<_>>();
+        let [properties] = properties.as_slice() else {
+            return None;
+        };
+        let versions = elements(properties)
+            .into_iter()
+            .filter(|node| node.name().raw() == "Version")
+            .collect::<Vec<_>>();
+        let [version] = versions.as_slice() else {
+            return None;
+        };
+        if !version.attributes().is_empty() || !elements(version).is_empty() {
+            return None;
+        }
+        // Noncanonical tags or a second Version elsewhere cannot provide a
+        // different masking range from the semantic property above.
+        let open = "<Version>";
+        let close = "</Version>";
+        if text.matches(open).count() != 1 || text.matches(close).count() != 1 {
+            return None;
+        }
+        let start = text.find(open)? + open.len();
+        let end = start + text[start..].find(close)?;
+        let value = &text[start..end];
+        let semantic = version
+            .children()
+            .iter()
+            .filter_map(|child| match child {
+                ibcmd_xml::XmlNode::Text(text) => Some(text.value()),
+                _ => None,
+            })
+            .collect::<String>();
+        if semantic != value {
+            return None;
+        }
+        let components = value.split('.').collect::<Vec<_>>();
+        if components.len() < 2
+            || components
+                .iter()
+                .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+        {
+            return None;
+        }
+        Some((
+            value.to_owned(),
+            format!("{}{}", &text[..start], &text[end..]),
+        ))
+    }
+    match (version_and_mask(active), version_and_mask(tree)) {
+        (Some((old, a)), Some((new, b))) => {
+            (old != new && old.split('.').count() == new.split('.').count() && a == b)
+                .then_some((old, new))
+        }
+        _ => None,
+    }
+}
+
+/// The native 8.3.27 extension properties tuple stores Version in member15.
+/// Preserve the complete root envelope and adopted header verbatim.
+/// Called only after a complete active-image export validates its class
+/// sequence and adopted layout; the proposed image is exported again too.
+fn patch_root_version(packed: &[u8], key: &str, old: &str, new: &str) -> Result<Vec<u8>> {
+    use crate::module_blob::{inflate_raw, scan_braced_fields};
+    if old == new
+        || old.split('.').count() != new.split('.').count()
+        || [old, new].iter().any(|value| {
+            value.split('.').count() < 2
+                || value
+                    .split('.')
+                    .any(|part| part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit()))
+        })
+    {
+        bail!("unsupported extension Version format change");
+    }
+    let mut text =
+        String::from_utf8(inflate_raw(packed)?).context("the extension root is not UTF-8")?;
+    let start = text
+        .find('{')
+        .context("the extension root has no envelope")?;
+    if !text[..start].trim_matches('\u{feff}').trim().is_empty() {
+        bail!("unsupported extension root prefix");
+    }
+    let root = scan_braced_fields(&text, start)?;
+    if root.len() != 11 || &text[root[0].clone()] != "2" || &text[root[2].clone()] != "7" {
+        bail!("unsupported extension root envelope");
+    }
+    let identity = scan_braced_fields(&text, root[1].start)?;
+    if identity.len() != 1 || text[identity[0].clone()] != *key {
+        bail!("extension root identity differs from its storage key");
+    }
+    let section = scan_braced_fields(&text, root[3].start)?;
+    if section.len() != 2 || uuid::Uuid::parse_str(&text[section[0].clone()]).is_err() {
+        bail!("unsupported extension root properties section");
+    }
+    let payload = scan_braced_fields(&text, section[1].start)?;
+    if payload.len() != 28 || &text[payload[0].clone()] != "1" || &text[payload[2].clone()] != "25"
+    {
+        bail!("unsupported extension root properties payload");
+    }
+    let properties = scan_braced_fields(&text, payload[1].start)?;
+    // 68 is the layout discriminator, not its field count. This native
+    // sample contains 60 members after that discriminator.
+    if properties.len() != 61 || &text[properties[0].clone()] != "68" {
+        bail!("unsupported extension root properties layout (expected layout 68, 60 members)");
+    }
+    let version = properties[15].clone();
+    if text[version.clone()] != format!("\"{old}\"") {
+        bail!("extension root Version differs from the active source");
+    }
+    text.replace_range(version, &format!("\"{new}\""));
+    crate::module_blob::deflate_raw(text.as_bytes())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_root_version_patch_preserves_adoption_and_all_other_bytes() {
+        use crate::module_blob::{deflate_raw, inflate_raw};
+        const BASE: &str =
+            include_str!("../tests/fixtures/native-evidence/extension-root-version/base.txt");
+        const NATIVE: &str = include_str!(
+            "../tests/fixtures/native-evidence/extension-root-version/native-version1.txt"
+        );
+        let key = "771688e2-4830-4129-94b9-8b18fb96ae8f";
+        let packed = deflate_raw(BASE.as_bytes()).unwrap();
+        let result = patch_root_version(&packed, key, "1.7.0.0", "1.7.0.1").unwrap();
+        assert_eq!(
+            inflate_raw(&result).unwrap(),
+            BASE.replace("\"1.7.0.0\"", "\"1.7.0.1\"").as_bytes()
+        );
+        // Native's own import additionally reorders adoption pairs and
+        // refreshes its footer; its Version uses this same member.
+        let native = deflate_raw(NATIVE.as_bytes()).unwrap();
+        assert!(patch_root_version(&native, key, "1.7.0.1", "1.7.0.2").is_ok());
+        assert!(patch_root_version(&packed, key, "0.0.0.0", "1.7.0.1").is_err());
+        assert!(patch_root_version(&packed, "wrong-key", "1.7.0.0", "1.7.0.1").is_err());
+        assert!(patch_root_version(&packed, key, "1.7.0.0", "1.7.1").is_err());
+        assert!(patch_root_version(&packed, key, "1.7.0.0", "1.7.0.\"1").is_err());
+        for malformed in [
+            BASE.replace("{68,", "{67,"),
+            BASE[..BASE.len() / 2].to_owned(),
+            format!("unknown{BASE}"),
+        ] {
+            assert!(
+                patch_root_version(
+                    &deflate_raw(malformed.as_bytes()).unwrap(),
+                    key,
+                    "1.7.0.0",
+                    "1.7.0.1"
+                )
+                .is_err()
+            );
+        }
+    }
 
     fn diff(changed: &[&str], added: &[&str], removed: &[&str]) -> TreeDiff {
         let own = |v: &[&str]| v.iter().map(|s| (*s).to_owned()).collect();
@@ -743,5 +955,49 @@ mod tests {
             "другой",
         );
         assert!(!root_children_only_change(&base, &with_comment));
+    }
+    #[test]
+    fn version_edits_preserve_every_other_root_property_and_the_existing_format() {
+        let root = "<MetaDataObject><Configuration uuid=\"root\"><Properties><ObjectBelonging>Adopted</ObjectBelonging><Name>ServiceDesk</Name><Version>1.7.0.0</Version><Unknown>keep</Unknown></Properties><ChildObjects><Catalog>C</Catalog></ChildObjects></Configuration></MetaDataObject>";
+        let changed = root.replace("1.7.0.0", "1.7.0.1");
+        assert!(root_version_edit(root, &changed).is_some());
+        assert_eq!(
+            structural_refusals(
+                &diff(&["Configuration.xml", "Catalogs/C.xml"], &[], &[]),
+                true
+            )
+            .len(),
+            1
+        );
+        assert!(structural_refusals(&diff(&["Configuration.xml"], &[], &[]), true).is_empty());
+        for edit in [
+            changed.replace("<Name>ServiceDesk</Name>", "<Name>Other</Name>"),
+            changed.replace("<Unknown>keep</Unknown>", "<Unknown>change</Unknown>"),
+            changed.replace("<Catalog>C</Catalog>", "<Catalog>D</Catalog>"),
+            changed.replace("Adopted", "Own"),
+            changed.replace("uuid=\"root\"", "uuid=\"other\""),
+            changed.replace(
+                "<Version>1.7.0.1</Version>",
+                "<Version>1.7.0.1</Version><Version>2.0.0.0</Version>",
+            ),
+            changed.replace("<Version>1.7.0.1</Version>", "<Version/>"),
+            changed.replace("1.7.0.1", "1.7.1"),
+            changed.replace("1.7.0.1", "1.7.0.x"),
+            changed.replace("1.7.0.1", "1.7..1"),
+            changed.replace("1.7.0.1", " 1.7.0.1"),
+            changed.replace("<Version>", "<Version flag=\"x\">"),
+            changed.replace("</Configuration>", ""),
+        ] {
+            assert!(root_version_edit(root, &edit).is_none(), "{edit}");
+            assert_eq!(
+                structural_refusals(
+                    &diff(&["Configuration.xml"], &[], &[]),
+                    root_version_edit(root, &edit).is_some()
+                )
+                .len(),
+                1
+            );
+        }
+        assert!(root_version_edit(root, root).is_none());
     }
 }

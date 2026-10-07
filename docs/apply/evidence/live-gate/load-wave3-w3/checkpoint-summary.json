@@ -1,0 +1,72 @@
+{
+  "physical_mapping_com_validated": 1434,
+  "confirmed_journal_commits": 641,
+  "posted_physical_commits": 641,
+  "physical_commits_without_confirmed_journal": [],
+  "cohorts": [
+    {
+      "label": "f5-1-a",
+      "confirmed": 183,
+      "reports": 183,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926463277182
+    },
+    {
+      "label": "f5-1-b",
+      "confirmed": 179,
+      "reports": 179,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926463276650
+    },
+    {
+      "label": "f5-1-c",
+      "confirmed": 175,
+      "reports": 175,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926463276981
+    },
+    {
+      "label": "f5-1-fresh",
+      "confirmed": 22,
+      "reports": 22,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926463675156
+    },
+    {
+      "label": "f5-2-old-a",
+      "confirmed": 29,
+      "reports": 29,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926464029519
+    },
+    {
+      "label": "f5-2-old-b",
+      "confirmed": 29,
+      "reports": 29,
+      "errors": [],
+      "unreturned_attempts": [],
+      "last_operation_utc_millis_year1": 63926464034997
+    },
+    {
+      "label": "f5-2-old-c",
+      "confirmed": 24,
+      "reports": 24,
+      "errors": [],
+      "unreturned_attempts": [
+        {
+          "attempt": "25",
+          "journal_result": "unknown",
+          "physical": null
+        }
+      ],
+      "last_operation_utc_millis_year1": 63926464035311
+    }
+  ],
+  "warm_readiness_established": false,
+  "zero_error_claim": false
+}

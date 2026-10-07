@@ -1,0 +1,12 @@
+{
+  "started_utc": "2026-10-01T22:23:24.1326379Z",
+  "executable": "python",
+  "deadline_seconds": 60,
+  "arguments": [
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\tools\\compare_full_snapshots.py",
+    "--before",
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_native_v4_postfailed\\inventory.json",
+    "--after",
+    "F:\\ibcmd\\lab\\05\\wave3\\platform85\\snapshots\\ext_version_settled_backup_before_v5\\inventory.json"
+  ]
+}

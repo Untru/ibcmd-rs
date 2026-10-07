@@ -24,7 +24,7 @@ use sha1::{Digest, Sha1};
 
 use super::config_rows::BinaryConfigRow;
 use super::fetch::{
-    BCP_INLINE_QUERY_MAX_CHARS, fetch_binary_rows, run_sql_capture_tsv,
+    BCP_INLINE_QUERY_MAX_CHARS, fetch_binary_rows, run_sql_capture_tsv_with_policy,
     split_selected_file_names_for_bcp_query,
 };
 use crate::sql::{SqlBackend, SqlExec};
@@ -458,11 +458,12 @@ fn preflight_cas_fetch(
                 }
             }
             SqlBackend::Tools(tools) => {
-                let stdout = run_sql_capture_tsv(
+                let stdout = run_sql_capture_tsv_with_policy(
                     &tools.sqlcmd,
                     sql.server(),
                     sql.user(),
                     sql.password(),
+                    sql.trust_server_certificate(),
                     &query,
                 )?;
                 parse_cas_fetch_stats(&stdout)?
@@ -805,6 +806,43 @@ mod tests {
     use flate2::write::DeflateEncoder;
 
     use super::*;
+
+    #[test]
+    fn tools_cas_preflight_obeys_certificate_policy_in_actual_arguments() {
+        use super::super::fetch::{begin_subprocess_journal, current_subprocess_calls};
+        use crate::sql::{SqlLogin, SqlTarget, SqlTools};
+        for trust in [false, true] {
+            let missing = std::env::temp_dir()
+                .join(format!("ibcmd-cas-tool-missing-{}", uuid::Uuid::new_v4()));
+            let sql = SqlExec::with_tools(
+                SqlTarget {
+                    server: "must-not-connect".into(),
+                    database: None,
+                    login: SqlLogin::Integrated,
+                    trust_server_certificate: trust,
+                },
+                SqlTools {
+                    sqlcmd: missing.clone(),
+                    bcp: missing,
+                },
+            );
+            let guard =
+                begin_subprocess_journal("<password-source:none>", "fake", "db", None).unwrap();
+            let hashes = BTreeSet::from(["e1a4957cd700e47cea9ad20e66d489f9e5b0bac2".to_owned()]);
+            assert!(
+                preflight_cas_fetch(&sql, "db", MssqlStorageTable::ConfigCas, &hashes, 1024)
+                    .is_err()
+            );
+            let calls = current_subprocess_calls();
+            assert_eq!(calls.len(), 1);
+            assert_eq!(calls[0].arguments.iter().any(|x| x == "-C"), trust);
+            assert_eq!(calls[0].status, "failed");
+            assert!(calls[0].exit_code.is_none());
+            guard
+                .finish_failed(&anyhow::anyhow!("intentional missing tool"))
+                .unwrap();
+        }
+    }
 
     fn deflate(value: &[u8]) -> Vec<u8> {
         let mut encoder = DeflateEncoder::new(Vec::new(), Compression::fast());

@@ -1,0 +1,24 @@
+{
+  "left": "F:\\ibcmd\\lab\\05\\wave2\\extensions\\baseline_verified\\ServiceDesk",
+  "right": "F:\\ibcmd\\lab\\05\\ext\\native\\8327\\ServiceDesk",
+  "ignored": [
+    "ConfigDumpInfo.xml"
+  ],
+  "left_files": 464,
+  "right_files": 464,
+  "equal": 464,
+  "changed": [],
+  "left_only": [],
+  "right_only": [],
+  "config_dump_info": {
+    "exact": true,
+    "equal_after_blanking_only_configVersion": true,
+    "left_configVersion_count": 430,
+    "right_configVersion_count": 430,
+    "different_configVersion_values": 0
+  },
+  "left_version": "1.7.0.0",
+  "left_configuration_sha256": "bfb239788632d32f7660944e4bcb4fd82f94520884c2e81e846555fb7d48ca4d",
+  "right_version": "1.7.0.0",
+  "right_configuration_sha256": "bfb239788632d32f7660944e4bcb4fd82f94520884c2e81e846555fb7d48ca4d"
+}

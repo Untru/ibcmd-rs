@@ -1,0 +1,664 @@
+{
+  "verdict": "SCOPED ACTUAL SCIENCE PASS",
+  "cases": [
+    {
+      "case": "comment",
+      "root_certificate_sha256": "4CB987AB31F5A4C3E9325360AA9B41B2DE29C570C8FC7E2DB39705525BCC2A0D",
+      "closure_pins": 153,
+      "candidate_pins": 74,
+      "historical_pins": 598,
+      "original": {
+        "scope": "ONE actual root-scheduled OWN comment native-STAGED Apply observer",
+        "manifest_sha256": "836F2D59D411F09F6836C1BA3B7E310D59630A83C4A4641248AA732B58BC73FE",
+        "controller_sha256": "96F21D7AA7DD434825FAB1929585273257FC19A2FD40CFF329D30D25C04144B2",
+        "preparation_sha256": "A6BCB0B78BFA86A598C99EA0D07B7C1D38BF4886944B0052C264F84B67688FF1",
+        "root_review_sha256": "6E5AD95F7B34808BA320102AC007D3A5FB9271F44B0684A15E383181832DF1CE",
+        "peer_review_sha256": "92DA5E6FF152DB27B094653448143B346C659DA643CC8C398CB8691AC9A1A644",
+        "source_head": "80de2fdf766cbbe1144e70ab3e406e191658a471",
+        "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\control_own_staged_twins_v1.ps1",
+          "-Case",
+          "comment",
+          "-ManifestSha",
+          "836F2D59D411F09F6836C1BA3B7E310D59630A83C4A4641248AA732B58BC73FE",
+          "-Publication",
+          "approved",
+          "-Execute"
+        ],
+        "maximum_observer_seconds": 28800,
+        "parent_pid": 82788,
+        "pid": 90840,
+        "birth_utc": "2026-10-02T21:22:58.0093925Z",
+        "execution_state": "known_terminal",
+        "direct_child_exit_proved": true,
+        "both_original_pipes_proved": true,
+        "exit": 0,
+        "signals": 0,
+        "release_attempted": false,
+        "retry_attempted": false,
+        "cim_birth_utc": "2026-10-02T21:22:58.0093920Z",
+        "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\control_own_staged_twins_v1.ps1 -Case comment -ManifestSha 836F2D59D411F09F6836C1BA3B7E310D59630A83C4A4641248AA732B58BC73FE -Publication approved -Execute",
+        "command_sha256": "03E885738AFB54BCBEE7C274D9E902C1870DFEBAE8A9154A551ADB01184D04D6"
+      },
+      "identity": {
+        "whole_identity": {
+          "database_name": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "database_id": 81,
+          "created": "2026-10-03 00:23:10.980",
+          "database_guid": "8AD521A2-1E9E-4055-ACDB-50D02C4D8DCD",
+          "family_guid": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+          "fork_guid": "589376FE-61CB-4E03-97B0-5C5CA8C5CEAF",
+          "state_desc": "ONLINE",
+          "user_access_desc": "MULTI_USER",
+          "recovery_model_desc": "SIMPLE"
+        },
+        "whole_restore_lineage": {
+          "restore_history_id": 8971,
+          "restore_date": "2026-10-03 00:23:10.970",
+          "restore_type": "D",
+          "restore_replace": false,
+          "recovery": true,
+          "backup_uuid": "ABAF660E-7A1D-4E34-B03D-E2D1DDC916BC",
+          "source_database": "ibcmd_rs_05_marker_w3_n1_comment_d_v1_c9e54c",
+          "family_guid": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+          "physical_device_name": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-comment-d-resume-v1-comment-c-staged-v5.bak",
+          "restore_count": 1
+        },
+        "target_GUID_not_source_GUID_assumed": true
+      },
+      "known_zero_children": 50,
+      "native_lease": {
+        "raw_base64": "dHJhY2s9bWFya2VyLW93bi1jb21tZW50LXN0YWdlMS0zYTcxZTkgc2luY2U9MjAyNi0xMC0wM1QwMDoyNDowNA0K",
+        "sha256": "772158A57E6E94E14073A9A3F9C83281600E7B99B552D8D129A3A2FC33FF46AA",
+        "track": "marker-own-comment-stage1-3a71e9",
+        "known_acquire_exit": 0
+      },
+      "final": {
+        "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+        "native_potential": false,
+        "drop_attempted": false,
+        "bound_names": [],
+        "worker_used": false,
+        "uncertain": false,
+        "release_attempted": true,
+        "restore_potential": false,
+        "restore_confirmed": true
+      },
+      "snapshots": [
+        {
+          "tag": "own-native-staged-comment-v1-initial",
+          "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "rows": 23035,
+          "bytes": 104663588,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-comment-v1-afterverify",
+          "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "rows": 23035,
+          "bytes": 104663588,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-comment-v1-apply-prequeue",
+          "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "rows": 23035,
+          "bytes": 104663588,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-comment-v1-apply-postqueue",
+          "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "rows": 23035,
+          "bytes": 104663588,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-comment-v1-applied",
+          "database": "ibcmd_rs_05_marker_w3_own_comment_stage1_20261002_3a71e9",
+          "rows": 23029,
+          "bytes": 104321702,
+          "wholepacks_fullheaders_eachrowSHA": true
+        }
+      ],
+      "typed_native_stage": {
+        "selected_scalar": "comment",
+        "descriptor_genuinely_changed": true,
+        "all_other_known_descriptor_fields_equal": true,
+        "staged_rows": 5,
+        "changed_version_entries": [
+          "16b3681c-426d-4d6f-9ffe-588a23974222",
+          "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+          "root",
+          "version",
+          "versions"
+        ],
+        "body_text_info_payloads_unchanged": true,
+        "companion_physical_comparison": {
+          "text_and_info_payloads_byte_equal": true,
+          "whole_inflated_equal": false,
+          "raw_equal": false,
+          "raw_SHA": [
+            "6fcb2ce0feece206a59f9c80c3e38476902c566c9fa241ac5db22043f619453c",
+            "90b156ceaf940322440ccc1757826520d81c0d27f837a510a8f3423c48ce9dd6"
+          ],
+          "inflated_SHA": [
+            "a73e78834bce5310cfc4baf74e809e900983dca3e8a6bcf79ab882ddd3f31fa8",
+            "09b6789dadebe4b0162d4d4baf9af2e4799736701721108a96ae1741d7875e98"
+          ],
+          "changed_inflated_offsets": [
+            102,
+            103,
+            104,
+            105,
+            110,
+            111,
+            112,
+            113,
+            708,
+            709,
+            710,
+            711,
+            716,
+            717,
+            718,
+            719
+          ],
+          "allowed_header_offsets": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            708,
+            709,
+            710,
+            711,
+            712,
+            713,
+            714,
+            715,
+            716,
+            717,
+            718,
+            719,
+            720,
+            721,
+            722,
+            723
+          ],
+          "physical_element_headers": [
+            {
+              "name": "info",
+              "offset": 102,
+              "active_header_hex": "b03cea9668450200b03cea96684502000000000069006e0066006f0000000000",
+              "staged_header_hex": "10936da86845020010936da8684502000000000069006e0066006f0000000000",
+              "active_opaque_stamp_u64_le": [
+                639265464270000,
+                639265464270000
+              ],
+              "staged_opaque_stamp_u64_le": [
+                639265758090000,
+                639265758090000
+              ]
+            },
+            {
+              "name": "text",
+              "offset": 708,
+              "active_header_hex": "b03cea9668450200b03cea966845020000000000740065007800740000000000",
+              "staged_header_hex": "10936da86845020010936da86845020000000000740065007800740000000000",
+              "active_opaque_stamp_u64_le": [
+                639265464270000,
+                639265464270000
+              ],
+              "staged_opaque_stamp_u64_le": [
+                639265758090000,
+                639265758090000
+              ]
+            }
+          ],
+          "timestamp_calendar_semantics_proven": false,
+          "opaque_field_scope": "existing format15 reader preserves first16 header bytes; no calendar or cryptographic interpretation",
+          "normalizations": []
+        },
+        "normalizations": []
+      },
+      "five_payloads_transferred": true,
+      "marker156_collected": true,
+      "OWN_apply_delta": {
+        "Config": {
+          "added": 0,
+          "removed": 0,
+          "changed": 5,
+          "exact": 9836
+        },
+        "ConfigCAS": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 12797
+        },
+        "ConfigCASSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "ConfigSave": {
+          "added": 0,
+          "removed": 5,
+          "changed": 0,
+          "exact": 0
+        },
+        "Files": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "exact": 352
+        },
+        "Params": {
+          "added": 0,
+          "removed": 1,
+          "changed": 0,
+          "exact": 38
+        }
+      },
+      "OWN_vs_native_delta": {
+        "Config": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 9841
+        },
+        "ConfigCAS": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 12797
+        },
+        "ConfigCASSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "ConfigSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "Files": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "exact": 352
+        },
+        "Params": {
+          "added": 0,
+          "removed": 0,
+          "changed": 20,
+          "exact": 18
+        }
+      },
+      "actual_OWN_Params_changes": [],
+      "auxiliary_all10_exact_vs_preimage_and_native": true,
+      "all_science_reports_recomputed_equal": true
+    },
+    {
+      "case": "synonym",
+      "root_certificate_sha256": "2D996C3F762E53907B9644B5E5C3D0426C57381753163CE2E1F1724D6FC13B1B",
+      "closure_pins": 153,
+      "candidate_pins": 74,
+      "historical_pins": 510,
+      "original": {
+        "scope": "ONE actual root-scheduled OWN synonym native-STAGED Apply observer",
+        "manifest_sha256": "E85ADDB7106ABBC4181A10C22610A76DE63A1C9B2CB779AE8C4F809E8C8F9542",
+        "controller_sha256": "96F21D7AA7DD434825FAB1929585273257FC19A2FD40CFF329D30D25C04144B2",
+        "preparation_sha256": "BCD0AE2BFAC3F5A5FC431A098E91FBCB3F1A64A0E6BB5ED8A5830E0A33020D3C",
+        "root_review_sha256": "6E5AD95F7B34808BA320102AC007D3A5FB9271F44B0684A15E383181832DF1CE",
+        "peer_review_sha256": "92DA5E6FF152DB27B094653448143B346C659DA643CC8C398CB8691AC9A1A644",
+        "source_head": "80de2fdf766cbbe1144e70ab3e406e191658a471",
+        "executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+        "arguments": [
+          "-NoProfile",
+          "-File",
+          "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\control_own_staged_twins_v1.ps1",
+          "-Case",
+          "synonym",
+          "-ManifestSha",
+          "E85ADDB7106ABBC4181A10C22610A76DE63A1C9B2CB779AE8C4F809E8C8F9542",
+          "-Publication",
+          "approved",
+          "-Execute"
+        ],
+        "maximum_observer_seconds": 28800,
+        "parent_pid": 80508,
+        "pid": 81060,
+        "birth_utc": "2026-10-02T21:23:36.2102097Z",
+        "execution_state": "known_terminal",
+        "direct_child_exit_proved": true,
+        "both_original_pipes_proved": true,
+        "exit": 0,
+        "signals": 0,
+        "release_attempted": false,
+        "retry_attempted": false,
+        "cim_birth_utc": "2026-10-02T21:23:36.2102090Z",
+        "command": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\params-marker\\tools\\control_own_staged_twins_v1.ps1 -Case synonym -ManifestSha E85ADDB7106ABBC4181A10C22610A76DE63A1C9B2CB779AE8C4F809E8C8F9542 -Publication approved -Execute",
+        "command_sha256": "A2840474F170D3B67B6622A6825534D96ECFAE6553A9C0DF9D41B06CC4CAB6A7"
+      },
+      "identity": {
+        "whole_identity": {
+          "database_name": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "database_id": 82,
+          "created": "2026-10-03 00:23:49.393",
+          "database_guid": "54831978-5049-44DE-8F79-0D3D86E0A647",
+          "family_guid": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+          "fork_guid": "635C316E-7E71-483F-B1E8-BEC9627D93B4",
+          "state_desc": "ONLINE",
+          "user_access_desc": "MULTI_USER",
+          "recovery_model_desc": "SIMPLE"
+        },
+        "whole_restore_lineage": {
+          "restore_history_id": 8972,
+          "restore_date": "2026-10-03 00:23:49.387",
+          "restore_type": "D",
+          "restore_replace": false,
+          "recovery": true,
+          "backup_uuid": "EE3B3831-0FE8-4B5B-BBCB-C045F6CDC4B3",
+          "source_database": "ibcmd_rs_05_marker_w3_n1_synonym_d_v1_c9e54c",
+          "family_guid": "F983A0CD-5F73-4C71-A197-CD58FB079188",
+          "physical_device_name": "F:\\ibcmd\\lab\\05\\wave3\\params-marker\\baselines\\n1-synonym-d-v5-synonym-y-staged-v4.bak",
+          "restore_count": 1
+        },
+        "target_GUID_not_source_GUID_assumed": true
+      },
+      "known_zero_children": 50,
+      "native_lease": {
+        "known_acquire_exit": 0,
+        "track": "marker-own-synonym-stage1-7b253c",
+        "raw_base64": "dHJhY2s9bWFya2VyLW93bi1zeW5vbnltLXN0YWdlMS03YjI1M2Mgc2luY2U9MjAyNi0xMC0wM1QwMDoyNDozOQ0K",
+        "sha256": "F35D5190A6A0DC11B1F0534C6EABBD06C82ECC4F585CC23FCAE58C26E4D4773F"
+      },
+      "final": {
+        "release_attempted": true,
+        "worker_used": false,
+        "bound_names": [],
+        "restore_potential": false,
+        "native_potential": false,
+        "drop_attempted": false,
+        "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+        "restore_confirmed": true,
+        "uncertain": false
+      },
+      "snapshots": [
+        {
+          "tag": "own-native-staged-synonym-v1-initial",
+          "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "rows": 23035,
+          "bytes": 104663573,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-synonym-v1-afterverify",
+          "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "rows": 23035,
+          "bytes": 104663573,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-synonym-v1-apply-prequeue",
+          "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "rows": 23035,
+          "bytes": 104663573,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-synonym-v1-apply-postqueue",
+          "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "rows": 23035,
+          "bytes": 104663573,
+          "wholepacks_fullheaders_eachrowSHA": true
+        },
+        {
+          "tag": "own-native-staged-synonym-v1-applied",
+          "database": "ibcmd_rs_05_marker_w3_own_synonym_stage1_20261002_7b253c",
+          "rows": 23029,
+          "bytes": 104323592,
+          "wholepacks_fullheaders_eachrowSHA": true
+        }
+      ],
+      "typed_native_stage": {
+        "selected_scalar": "synonym",
+        "descriptor_genuinely_changed": true,
+        "all_other_known_descriptor_fields_equal": true,
+        "staged_rows": 5,
+        "changed_version_entries": [
+          "16b3681c-426d-4d6f-9ffe-588a23974222",
+          "16b3681c-426d-4d6f-9ffe-588a23974222.0",
+          "root",
+          "version",
+          "versions"
+        ],
+        "body_text_info_payloads_unchanged": true,
+        "companion_physical_comparison": {
+          "text_and_info_payloads_byte_equal": true,
+          "whole_inflated_equal": false,
+          "raw_equal": false,
+          "raw_SHA": [
+            "6fcb2ce0feece206a59f9c80c3e38476902c566c9fa241ac5db22043f619453c",
+            "1d6814aff206aa85ba081685dfd574942c6622e8d49a0d0d911096859da837b4"
+          ],
+          "inflated_SHA": [
+            "a73e78834bce5310cfc4baf74e809e900983dca3e8a6bcf79ab882ddd3f31fa8",
+            "26fd6f8ce6ec5b93149b2e0bad9e1d0b639edb7c58930bebe1d736f043f23f0c"
+          ],
+          "changed_inflated_offsets": [
+            102,
+            103,
+            104,
+            105,
+            110,
+            111,
+            112,
+            113,
+            708,
+            709,
+            710,
+            711,
+            716,
+            717,
+            718,
+            719
+          ],
+          "allowed_header_offsets": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            708,
+            709,
+            710,
+            711,
+            712,
+            713,
+            714,
+            715,
+            716,
+            717,
+            718,
+            719,
+            720,
+            721,
+            722,
+            723
+          ],
+          "physical_element_headers": [
+            {
+              "name": "info",
+              "offset": 102,
+              "active_header_hex": "b03cea9668450200b03cea96684502000000000069006e0066006f0000000000",
+              "staged_header_hex": "60d362aa6845020060d362aa684502000000000069006e0066006f0000000000",
+              "active_opaque_stamp_u64_le": [
+                639265464270000,
+                639265464270000
+              ],
+              "staged_opaque_stamp_u64_le": [
+                639265790940000,
+                639265790940000
+              ]
+            },
+            {
+              "name": "text",
+              "offset": 708,
+              "active_header_hex": "b03cea9668450200b03cea966845020000000000740065007800740000000000",
+              "staged_header_hex": "60d362aa6845020060d362aa6845020000000000740065007800740000000000",
+              "active_opaque_stamp_u64_le": [
+                639265464270000,
+                639265464270000
+              ],
+              "staged_opaque_stamp_u64_le": [
+                639265790940000,
+                639265790940000
+              ]
+            }
+          ],
+          "timestamp_calendar_semantics_proven": false,
+          "opaque_field_scope": "existing format15 reader preserves first16 header bytes; no calendar or cryptographic interpretation",
+          "normalizations": []
+        },
+        "normalizations": []
+      },
+      "five_payloads_transferred": true,
+      "marker156_collected": true,
+      "OWN_apply_delta": {
+        "Config": {
+          "added": 0,
+          "removed": 0,
+          "changed": 5,
+          "exact": 9836
+        },
+        "ConfigCAS": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 12797
+        },
+        "ConfigCASSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "ConfigSave": {
+          "added": 0,
+          "removed": 5,
+          "changed": 0,
+          "exact": 0
+        },
+        "Files": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "exact": 352
+        },
+        "Params": {
+          "added": 0,
+          "removed": 1,
+          "changed": 2,
+          "exact": 36
+        }
+      },
+      "OWN_vs_native_delta": {
+        "Config": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 9841
+        },
+        "ConfigCAS": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 12797
+        },
+        "ConfigCASSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "ConfigSave": {
+          "added": 0,
+          "removed": 0,
+          "changed": 0,
+          "exact": 0
+        },
+        "Files": {
+          "added": 0,
+          "removed": 0,
+          "changed": 1,
+          "exact": 352
+        },
+        "Params": {
+          "added": 0,
+          "removed": 0,
+          "changed": 20,
+          "exact": 18
+        }
+      },
+      "actual_OWN_Params_changes": [
+        {
+          "name": "1a621f0f-5568-4183-bd9f-f6ef670e7090.si",
+          "raw_SHA_changed": true,
+          "changed_header_fields": [
+            "creation",
+            "modified",
+            "data_size"
+          ]
+        },
+        {
+          "name": "siVersions",
+          "raw_SHA_changed": true,
+          "changed_header_fields": [
+            "modified"
+          ]
+        }
+      ],
+      "auxiliary_all10_exact_vs_preimage_and_native": true,
+      "all_science_reports_recomputed_equal": true
+    }
+  ],
+  "limits": [
+    "Already-native-STAGED clone and OWN exclusive apply only; no compiler/import/session proof",
+    "Fullphysical parity is not claimed: genuine Params fullheader/payload and MobileVersion Files differences are retained",
+    "No marker policy/matrix general admission inferred from these two cases",
+    "No SQL/resources/native/writes to runtime evidence, no producer analyzer rerun by reviewer"
+  ]
+}

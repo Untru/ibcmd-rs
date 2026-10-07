@@ -695,7 +695,10 @@ pub fn export_extension_image_to_source(
             ));
         }
         if entry.disposition == StorageExportDisposition::Supported {
-            adjust_form_files(output_dir, entry, &context)?;
+            if let Err(error) = adjust_form_files(output_dir, entry, &context, &plan) {
+                fail_outputs(output_dir, entry, error);
+                continue;
+            }
         }
         if !adopted_rows.contains_key(&entry.logical_name)
             || entry.disposition != StorageExportDisposition::Supported
@@ -703,12 +706,7 @@ pub fn export_extension_image_to_source(
             continue;
         }
         if let Err(error) = project_outputs(output_dir, entry, &context) {
-            entry.disposition = StorageExportDisposition::Failed;
-            entry.message = Some(format!("{error:#}"));
-            for output in std::mem::take(&mut entry.outputs) {
-                // A file the platform would print differently is not left behind.
-                let _ = std::fs::remove_file(output_dir.join(output));
-            }
+            fail_outputs(output_dir, entry, error);
         }
     }
     entries.extend(refused);
@@ -719,6 +717,15 @@ pub fn export_extension_image_to_source(
         entries,
     );
     Ok(report)
+}
+
+fn fail_outputs(output_dir: &Path, entry: &mut StorageExportEntryReport, error: anyhow::Error) {
+    entry.disposition = StorageExportDisposition::Failed;
+    entry.message = Some(format!("{error:#}"));
+    for output in std::mem::take(&mut entry.outputs) {
+        // An approximate form or projection is never left as a successful output.
+        let _ = std::fs::remove_file(output_dir.join(output));
+    }
 }
 
 /// The reference indexes of the configuration the extensions of `database`
@@ -954,6 +961,7 @@ fn adjust_form_files(
     output_dir: &Path,
     entry: &StorageExportEntryReport,
     context: &ExtensionContext,
+    plan: &StorageExportPlan,
 ) -> Result<()> {
     let adopted = entry
         .logical_name
@@ -974,8 +982,18 @@ fn adjust_form_files(
         if let Some(upgraded) = form::upgrade_items(&adjusted) {
             adjusted = upgraded;
         }
-        if adopted && let Some(called) = form::add_call_types(&adjusted) {
-            adjusted = called;
+        if adopted {
+            let record = plan
+                .records()
+                .iter()
+                .find(|record| record.logical_name() == entry.logical_name)
+                .context("the adopted form's storage body is missing")?;
+            let packed = record.packed_payload()?;
+            let body = crate::module_blob::parse_form_body_blob(&packed)
+                .context("the adopted form's storage body is not readable")?;
+            if let Some(called) = form::add_call_types(&adjusted, &body.layout)? {
+                adjusted = called;
+            }
         }
         if old_root && !adjusted.contains("dcssch:") {
             adjusted = without_schema_namespace(&adjusted);

@@ -1,0 +1,12 @@
+PASS copied actual-package compact7 fixedDB/UUID case upper
+PASS copied actual-package compact7 fixedDB/UUID case lower
+PASS copied actual-package compact7 fixedDB/UUID case mixed
+PASS copied actual-package compact7 fixedDB/UUID case foreign-db5
+PASS copied actual-package compact7 fixedDB/UUID case malformed-operation
+PASS copied actual-package compact7 fixedDB/UUID case malformed-cluster_id
+PASS copied actual-package compact7 fixedDB/UUID case malformed-infobase_id
+PASS copied actual-package compact7 fixedDB/UUID case malformed-database_guid
+PASS copied actual-package compact7 fixedDB/UUID case malformed-family_guid
+PASS copied actual-package compact7 fixedDB/UUID case malformed-recovery_fork
+PASS copied actual-package compact7 fixedDB/UUID case foreign-valid-guid
+PASS original compact5 package/storage bytes unchanged; native/SQL/process actions0; compact7 actual runtime UNMEASURED

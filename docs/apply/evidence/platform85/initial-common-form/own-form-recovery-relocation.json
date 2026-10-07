@@ -1,0 +1,47 @@
+{
+  "destination": "F:/ibcmd/lab/05/wave3/platform85/recovery/own-form-81b02040df96404f",
+  "source": "C:\\Users\\Pavel\\AppData\\Local\\Temp\\ibcmd-rs\\config-apply-recovery\\ibcmd_rs_05_p85_w3_own_form_20261001-81b02040df96404f",
+  "files": [
+    {
+      "relative": "\\appended_existing_rows.tsv",
+      "length": 34,
+      "sha256": "ECEE26AAD28E1C1AC5B2F297CCDB494980F058D7C68AAD46841011A0BAE4B820"
+    },
+    {
+      "relative": "\\change_registrations_before.tsv",
+      "length": 44,
+      "sha256": "AF6F5245FA122E6CAD37C3C803E05B70018688937A2C5A0DE276BCB6922043D7"
+    },
+    {
+      "relative": "\\config_replaced.tsv",
+      "length": 821,
+      "sha256": "9D514DC23B5636C6D0AFB1C3AFE24D379B859BA182DA2B5780D3B004FFA0256E"
+    },
+    {
+      "relative": "\\manifest.json",
+      "length": 462,
+      "sha256": "ED6566485C0D21DD2499F128027452201959AAFC05D623BD5E69FF3EC38DEC2B"
+    },
+    {
+      "relative": "\\MobileVersions.dat.before",
+      "length": 37009,
+      "sha256": "C109A2C259ED1B827E4674548570CDF7492A54019C541F8FE306EDB8316E3701"
+    },
+    {
+      "relative": "\\README.txt",
+      "length": 3382,
+      "sha256": "713066D249152D5F48A65D6E158128BB6263F33DAD4206557690315D7019A0F2"
+    },
+    {
+      "relative": "\\rows.pack",
+      "length": 346387,
+      "sha256": "A29A972A9BA7BF1B597E11C3526AD029D1A34F225D681E3CED6CE9721CDF4555"
+    },
+    {
+      "relative": "\\special_rows.tsv",
+      "length": 50,
+      "sha256": "B07338A68D69BBE5FECADCDAB19FDDA6B7A7A2C2C7ACACFECD97E4241D2804A7"
+    }
+  ],
+  "all_file_hashes_exact": true
+}

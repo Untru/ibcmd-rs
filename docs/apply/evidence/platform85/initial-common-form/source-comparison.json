@@ -1,0 +1,12 @@
+{
+  "report": "F:\\ibcmd\\lab\\05\\wave3\\platform85\\logs\\form-b-native-own-source-diff.json",
+  "report_sha256": "3599346f9233793b3cd66cc8fb6011b3b18e5fc4defda166471d71d2eb7f2397",
+  "summary": {
+    "left_only": 0,
+    "right_only": 0,
+    "different": 0,
+    "unchanged": 12336
+  },
+  "normalizations": [],
+  "all_per_file_hashes_equal": true
+}

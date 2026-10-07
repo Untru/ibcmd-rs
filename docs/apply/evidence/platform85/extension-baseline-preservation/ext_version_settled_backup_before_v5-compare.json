@@ -1,0 +1,5 @@
+{
+  "ExitCode": 0,
+  "Stdout": "PASS six storage full header/payload inventories + eight auxiliary row multisets exact; zero normalization\r\n",
+  "Stderr": ""
+}

@@ -1,0 +1,14 @@
+{
+  "sha256": "44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38",
+  "sbom_sha": "DDBEC54C27B2F447AD6E3DD4EB4250DCC9DE66A4BCCF67D9B0867714DC975B89",
+  "targeted_packaging2_pass": true,
+  "nested_stdin_smoke_pass": true,
+  "original16_run_pass": false,
+  "native_repeat": false,
+  "verification": "14 original PASS + two unchanged packaging checks repeated with valid closed stdin",
+  "source_clean": true,
+  "original14_checks": "final-combined-v3",
+  "binary": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-packaging-v5\\ibcmd-rs-7aebba15-release.exe",
+  "source_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "sbom": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\final-packaging-v5\\x86_64-pc-windows-msvc.sbom.cdx.json"
+}

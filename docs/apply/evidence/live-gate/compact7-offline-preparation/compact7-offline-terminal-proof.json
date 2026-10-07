@@ -1,0 +1,161 @@
+{
+  "scope": "Terminal OFFLINE checkpoint only, not PREEXEC/runtime-ready. No case7 lifecycle/acquire/DB/native commands executed.",
+  "runtime_executed": false,
+  "source_parent": "ead72cfb676c1dcacf467a88a87a16f5993e1b3e",
+  "manifest": "F:\\ibcmd\\lab\\05\\wave3\\coordinator\\compact7-frozen-files-v2.json",
+  "manifest_sha256": "30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E",
+  "pins": 58,
+  "ps_parsers": 36,
+  "pure_suites": [
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_locks.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_locks.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_locks-terminal.txt",
+      "sha256": "BBA116A0E3D5B46943C915B377946FEFAF6E29359AF4032A9988313D42348370",
+      "pass_lines": 23
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_safety_v2.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_safety_v2.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_safety_v2-terminal.txt",
+      "sha256": "5724BBE335A97D516A789E1FAF3A3A1237A6C0EE7C2431CD42EE9667D46EEDDD",
+      "pass_lines": 28
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_acquire_v2.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_acquire_v2.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_acquire_v2-terminal.txt",
+      "sha256": "FFF34348A24D6D8FA88FA25DE97C32F042C93DA871AEF7916BE66DFC29B7F70E",
+      "pass_lines": 5
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_prior_archive.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_prior_archive.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_prior_archive-terminal.txt",
+      "sha256": "8B665F0CA115590A0D20DAA7BD8F8DACD430259DEA16D1F887903E75470E2D52",
+      "pass_lines": 14
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_close.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_close.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_close-terminal.txt",
+      "sha256": "ABA65E2E53960BC54605398BD27C30F3408593537488222C02F6A2B2E2D18BA7",
+      "pass_lines": 11
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_postconditions.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_postconditions.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_postconditions-terminal.txt",
+      "sha256": "CE8CF93DB978126655161E55E06BD79B5E1446C134C8AEBC95B17D70DF00DAA2",
+      "pass_lines": 9
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_header_v2.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_header_v2.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_header_v2-terminal.txt",
+      "sha256": "5990CE0BBDD14187F429B490E6A4E947E5FA8ED9B1C03B7DEF877E7ADE737941",
+      "pass_lines": 7
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_receipts.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_receipts.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_receipts-terminal.txt",
+      "sha256": "61B60A0589BB236E2BEF14E02393287BE841D9A37CCFD5CB3DEA046F885B5F52",
+      "pass_lines": 7
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_invalid_control_v2.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_invalid_control_v2.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_invalid_control_v2-terminal.txt",
+      "sha256": "A9EC28A5128C8D2FEA581DBAB66286CCF1966FAE5D3C272C1DC5B5053D56D171",
+      "pass_lines": 2
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_closure_v2.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_closure_v2.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_closure_v2-terminal.txt",
+      "sha256": "68AFB599B7523FF329991F9FD1BE569706B73654C793D02872752DD7E6A14E86",
+      "pass_lines": 7
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_recovery.py",
+      "command": "C:/Program Files/Python313/python.exe F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_recovery.py",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_recovery-terminal.txt",
+      "sha256": "5A505B31B8243EE0D6EE25F3AC0339772BB7636366ECA877EA75606BB01390C7",
+      "pass_lines": 14
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_uuid.py",
+      "command": "C:/Program Files/Python313/python.exe F:\\ibcmd\\lab\\05\\wave3\\load\\test_compact7_uuid.py",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_compact7_uuid-terminal.txt",
+      "sha256": "6FB154710F6A1A0C4A2712DF06C48A569088127CD7441E961C1160422ACC760A",
+      "pass_lines": 12
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_process.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_process.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_process-terminal.txt",
+      "sha256": "DA3560C0E4C411EF828C98183175CB938F107A59CFC8B0B7428E5EED7FC2767A",
+      "pass_lines": 14
+    },
+    {
+      "script": "F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_receipt_context.ps1",
+      "command": "C:/Program Files/PowerShell/7/pwsh.exe -NoProfile -File F:\\ibcmd\\lab\\05\\wave3\\load\\compact7-tools\\live\\test_receipt_context.ps1",
+      "exit_code": 0,
+      "log": "F:\\ibcmd\\lab\\05\\wave3\\load\\logs\\test_receipt_context-terminal.txt",
+      "sha256": "A577617C3FB8B7E6D9AB09728F4076E3277B279DD84405CD0A03E8526ED8EA87",
+      "pass_lines": 2
+    }
+  ],
+  "preserved_inputs": {
+    "compact6-frozen-files-v2.json": {
+      "sha256": "D26E884FB0C84580C69B03BCCAD1B867922DC5633E33A53E0EAA09BF2658C7B2",
+      "members": 54
+    },
+    "compact6-frozen-files-v1.json": {
+      "sha256": "B6F7B923EDEC3936FFF248BC3C24A1631289EF51E05960937E39675B2E6CED85",
+      "members": 52
+    },
+    "compact5-frozen-files-v4.json": {
+      "sha256": "ACE8EBAC47FAED24E25F72B9EC14DC7174FECE3F825F065AE67502F45598ED4D",
+      "members": 45
+    },
+    "final-combined-v2-frozen.json": {
+      "sha256": "9EA2B4AFA4EB08A6C3F47F12B423D5AA5EB8E729C5CB63C70867DDCFDC60E716",
+      "members": 40
+    },
+    "compact6-runtime-resource-proof.json": {
+      "sha256": "72D05BACA921E350773C05CDD5F1616A18FE0961282FB81CC3950EAAB0B1E450",
+      "members": 613
+    },
+    "compact5-runtime-failure-proof.json": {
+      "sha256": "57A48A22E1DF3110A5947AEFBE55ACC762BF6B25BA693E95F90B4CD46BF04813",
+      "members": 285
+    }
+  },
+  "case7_runtime_directories_created": {
+    "compact7-temp": false,
+    "compact7-child-receipts": false,
+    "compact7-lock-proofs": false
+  },
+  "runtime_withheld": true,
+  "required_next_freeze": [
+    "effective pwsh/Python/native1C/rac/ragent/rmngr/rphost hashes and PATH",
+    "root+peer PREEXEC and fresh scheduling after controlled baseline validation"
+  ],
+  "binary_source": "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+  "binary_sha256": "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0"
+}

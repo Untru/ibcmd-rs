@@ -1,0 +1,10 @@
+{
+  "original_restore_confirmed": true,
+  "native_potential": false,
+  "database": "ibcmd_rs_05_marker_w3_seed_c9e54c",
+  "no_restore_in_resume": true,
+  "worker_used": false,
+  "bound_names": [],
+  "uncertain": false,
+  "drop_attempted": false
+}

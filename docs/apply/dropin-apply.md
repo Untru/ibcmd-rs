@@ -99,15 +99,16 @@ is printed `ace0cf403b6f514885ba295e568663f600000000`).
 
 ## What is served
 
-The drop-in serves the exclusive apply only. The default of the platform, `--dynamic=auto`, is
+The drop-in serves the exclusive apply and, for `--dynamic=force`, the dynamic apply of a small stage
+([`dropin-dynamic.md`](dropin-dynamic.md)). The default of the platform, `--dynamic=auto`, is
 served because it *is* the exclusive apply whenever the exclusive lock can be taken (n10 against
 n11), and the platform run against a database always takes it, since it sees no session.
 
 | Platform | ibcmd-rs |
 |---|---|
 | default options | exclusive apply |
-| `--dynamic=auto`, `disable`, `prompt` | exclusive apply (the platform, run against a database, never asks and never updates dynamically when nobody blocks the lock) |
-| `--dynamic=force` | `Параметр `--dynamic=force` команды `infobase config apply` не поддерживается в этой версии ibcmd-rs (планируется в следующих)`, exit 1 (the result differs: overlay rows) |
+| `--dynamic=auto`, `disable`, `prompt` | exclusive apply (the platform, run against a database, never asks and never updates dynamically when nobody blocks the lock); with sessions connected: the refusal below, never a dynamic update the user did not ask for. `auto` and `prompt` add the line `можно применить динамически: --dynamic=force` when the stage would qualify |
+| `--dynamic=force` | the dynamic apply (`dropin-dynamic.md`): a small stage of common-module and common-form bodies is published as a generation beside the active rows while sessions stay connected; any other stage `требуется штатный config apply: <reasons>` (exit 1); a platform without `mssql.config.apply.dynamic` (8.5.1.1150, 8.3.27.1989) `Параметр `--dynamic=force` ... не поддерживается для платформы ...` (exit 1) |
 | `--force`, `-F` | accepted; the own apply raises no warning that needs confirming |
 | `--session-terminate=disable` (default) | with other sessions connected: the refusal below; else the apply |
 | `--session-terminate=force`, `prompt` | with nobody connected: accepted, nothing to end. With sessions connected: `Параметр `--session-terminate=force` команды ... не поддерживается в этой версии ibcmd-rs`, the list of sessions, exit 1 (this version ends no session) |

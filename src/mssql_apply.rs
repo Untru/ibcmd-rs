@@ -3,7 +3,7 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
@@ -61,6 +61,26 @@ pub struct MssqlApplySourceChangeTimings {
 pub fn apply_source_change(
     args: &MssqlApplySourceChangeArgs,
 ) -> Result<MssqlApplySourceChangeReport> {
+    apply_source_change_inner(args, None)
+}
+
+pub(crate) fn apply_source_change_managed(
+    args: &MssqlApplySourceChangeArgs,
+    session: &mut crate::mssql_managed_worker::NativeManagedWorker,
+) -> Result<MssqlApplySourceChangeReport> {
+    apply_source_change_inner(args, Some(session))
+}
+
+fn apply_source_change_inner(
+    args: &MssqlApplySourceChangeArgs,
+    mut managed: Option<&mut crate::mssql_managed_worker::NativeManagedWorker>,
+) -> Result<MssqlApplySourceChangeReport> {
+    if args.live_checkpoint {
+        bail!(
+            "--live-checkpoint is only supported by mssql-activate-staged-main; concurrent source staging is not established, so source apply refused before staging"
+        );
+    }
+
     let total_started = Instant::now();
     // Declared policy first: an unsupported build must not reach rac, sqlcmd or
     // the source tree.
@@ -68,6 +88,8 @@ pub fn apply_source_change(
         args.platform_profile.require_extension_write_supported()?;
     } else {
         args.platform_profile.require_main_write_supported()?;
+    }
+    if args.extension.is_none() {
         require_supported_main_source_cohort(args)?;
         preflight_tail_log(args)?;
         crate::mssql_main_activation::preflight_interrupt_sessions(
@@ -76,15 +98,16 @@ pub fn apply_source_change(
         )
         .map_err(anyhow::Error::new)?;
     }
+    if args.live_checkpoint
+        && args.platform_profile
+            != crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_3_27_2214
+    {
+        bail!("live continuation checkpoint is measured on platform-8.3.27.2214 only");
+    }
     // The argument checks come before the verification, which costs two rac
     // calls and a SQL probe (#409 F-6).
     if !args.dry_run && !args.allow_non_lab {
         bail!("--allow-non-lab acknowledgement is required for source activation");
-    }
-    if args.extension.is_none() && !args.sqlcmd_trust_cert {
-        bail!(
-            "main source apply requires explicit --sqlcmd-trust-cert because the legacy main SQL runner trusts the server certificate"
-        );
     }
     if args.extension.is_some()
         && matches!(
@@ -94,8 +117,7 @@ pub fn apply_source_change(
     {
         bail!("live/worker activation is not supported for extensions; use online or exclusive");
     }
-    let profile_verification = crate::mssql_platform_profile::verify_mssql_native_profile(
-        args.platform_profile,
+    let verification_options =
         crate::mssql_platform_profile::MssqlNativeProfileVerificationOptions {
             sqlcmd: args.sqlcmd.as_deref(),
             rac: &args.rac,
@@ -110,19 +132,15 @@ pub fn apply_source_change(
             sql_pwd: args.sql_pwd.as_deref(),
             sql_pwd_env: &args.sql_pwd_env,
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
-        },
-    )?;
-    if matches!(args.mode, MssqlMainActivationModeArg::Worker) && !args.dry_run {
-        crate::mssql_worker_switch::prepare_dedicated_worker(
-            &crate::mssql_worker_switch::WorkerSwitchOptions {
-                rac: args.rac.clone(),
-                ras_endpoint: args.ras_endpoint.clone(),
-                cluster_id: profile_verification.verified_cluster_id,
-                infobase_id: profile_verification.verified_infobase_id,
-                timeout: Duration::from_secs(10),
-            },
-        )?;
-    }
+        };
+    let profile_verification = if let Some(session) = managed.as_deref_mut() {
+        session.verify_target_profile(args.platform_profile, verification_options)?
+    } else {
+        crate::mssql_platform_profile::verify_mssql_native_profile(
+            args.platform_profile,
+            verification_options,
+        )?
+    };
 
     let source_root = fs::canonicalize(&args.source_root)
         .with_context(|| format!("failed to canonicalize {}", args.source_root.display()))?;
@@ -173,39 +191,42 @@ pub fn apply_source_change(
     )? {
         generation
     } else {
-        let report = crate::mssql_dump::dump_config(&MssqlDumpConfigArgs {
-            rows_dir: None,
-            model_export: false,
-            legacy_export: false,
-            sqlcmd: args.sqlcmd.clone(),
-            bcp_executable: args.bcp_executable.clone(),
-            runtime_journal: None,
-            server: args.server.clone(),
-            sql_user: args.sql_user.clone(),
-            sql_pwd: args.sql_pwd.clone(),
-            sql_pwd_env: args.sql_pwd_env.clone(),
-            database: args.database.clone(),
-            output_dir: active_root.clone(),
-            overwrite: false,
-            include_config_save: false,
-            main_configuration: false,
-            file_names: selected_storage_file_names.clone(),
-            file_name_lists: Vec::new(),
-            objects: Vec::new(),
-            inflate: false,
-            extract_module_text: true,
-            extract_metadata_xml: true,
-            require_complete_root_metadata: false,
-            require_complete_source_assets: false,
-            collect_all_source_asset_diagnostics: false,
-            platform: None,
-            source_version: args.source_version,
-            no_binary_rows: true,
-            write_binary_rows: false,
-            write_manifest: false,
-            base: None,
-            sync: false,
-        })?;
+        let report = crate::mssql_dump::dump_config_with_sql(
+            &MssqlDumpConfigArgs {
+                rows_dir: None,
+                model_export: false,
+                legacy_export: false,
+                sqlcmd: args.sqlcmd.clone(),
+                bcp_executable: args.bcp_executable.clone(),
+                runtime_journal: None,
+                server: args.server.clone(),
+                sql_user: args.sql_user.clone(),
+                sql_pwd: args.sql_pwd.clone(),
+                sql_pwd_env: args.sql_pwd_env.clone(),
+                database: args.database.clone(),
+                output_dir: active_root.clone(),
+                overwrite: false,
+                include_config_save: false,
+                main_configuration: false,
+                file_names: selected_storage_file_names.clone(),
+                file_name_lists: Vec::new(),
+                inflate: false,
+                extract_module_text: true,
+                extract_metadata_xml: true,
+                require_complete_root_metadata: false,
+                require_complete_source_assets: false,
+                collect_all_source_asset_diagnostics: false,
+                platform: None,
+                source_version: args.source_version,
+                objects: Vec::new(),
+                no_binary_rows: true,
+                write_binary_rows: false,
+                write_manifest: false,
+                base: None,
+                sync: false,
+            },
+            Some(main_read_sql(args)?),
+        )?;
         ensure_bounded_export_complete(
             &active_root,
             &bounded_source_paths,
@@ -285,6 +306,13 @@ pub fn apply_source_change(
             },
         });
     }
+    if let Some(session) = managed.as_deref_mut() {
+        if !args.dry_run {
+            session.require_source_target(args)?;
+        }
+    } else {
+        preflight_classified_worker_source(args.mode, args.dry_run, &classified)?;
+    }
     if args.extension.is_none() {
         preflight_main_publication(args)?;
     }
@@ -325,84 +353,94 @@ pub fn apply_source_change(
 
     let path_prefix = owner_prefix(&selected_path)?;
     let staging_started = Instant::now();
-    let staging = if let Some(extension) = args.extension.as_deref() {
-        let load_args = MssqlLoadExtensionArgs {
-            platform_profile: args.platform_profile,
-            rac: args.rac.clone(),
-            ras_endpoint: args.ras_endpoint.clone(),
-            cluster_id: args.cluster_id,
-            infobase_id: args.infobase_id,
-            infobase_user: args.infobase_user.clone(),
-            infobase_pwd: args.infobase_pwd.clone(),
-            sqlcmd: args.sqlcmd.clone(),
-            bcp_executable: args.bcp_executable.clone(),
-            server: args.server.clone(),
-            sql_user: args.sql_user.clone(),
-            sql_pwd: args.sql_pwd.clone(),
-            sql_pwd_env: args.sql_pwd_env.clone(),
-            database: args.database.clone(),
-            extension: Some(extension.to_owned()),
-            all_extensions: false,
-            input_dir: proposed_root.clone(),
-            path_prefix: vec![path_prefix.clone()],
-            replace_staging: true,
-            dry_run: args.dry_run,
-            allow_non_lab: args.allow_non_lab,
-            sqlcmd_trust_cert: args.sqlcmd_trust_cert,
-            platform: None,
-            source_version: args.source_version,
-        };
-        // This command stages and publishes together, so the publisher's
-        // registry requirement is verified before the first staged row.
-        crate::mssql_extension_load::require_publishable_extension_registry(&load_args)?;
-        serde_json::to_value(crate::mssql_extension_load::load_extensions(&load_args)?)?
-    } else if args.dry_run {
-        if args.sql_user.is_some() {
-            bail!(
-                "main dry-run with SQL authentication is not yet supported by the parity auditor"
-            );
-        }
-        serde_json::to_value(crate::mssql::audit_source_parity(
-            &MssqlAuditSourceParityArgs {
-                server: args.server.clone(),
-                database: args.database.clone(),
-                source_root: proposed_root.clone(),
+    let build_stage = || -> Result<Value> {
+        let staging = if let Some(extension) = args.extension.as_deref() {
+            let load_args = MssqlLoadExtensionArgs {
+                platform_profile: args.platform_profile,
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args.cluster_id,
+                infobase_id: args.infobase_id,
+                infobase_user: args.infobase_user.clone(),
+                infobase_pwd: args.infobase_pwd.clone(),
                 sqlcmd: args.sqlcmd.clone(),
-                batch_size: Some(1),
-                platform: None,
-                source_version: Some(args.source_version),
-                path_prefix: vec![path_prefix.clone()],
-                output: None,
-            },
-        )?)?
-    } else {
-        serde_json::to_value(crate::mssql::stage_source_objects(
-            &MssqlStageSourceObjectsArgs {
+                bcp_executable: args.bcp_executable.clone(),
                 server: args.server.clone(),
                 sql_user: args.sql_user.clone(),
                 sql_pwd: args.sql_pwd.clone(),
                 sql_pwd_env: args.sql_pwd_env.clone(),
                 database: args.database.clone(),
-                source_root: proposed_root.clone(),
-                sqlcmd: args.sqlcmd.clone(),
-                replace_config_save: true,
-                allow_non_lab: args.allow_non_lab,
-                batch_size: Some(1),
-                platform: None,
-                source_version: Some(args.source_version),
+                extension: Some(extension.to_owned()),
+                all_extensions: false,
+                input_dir: proposed_root.clone(),
                 path_prefix: vec![path_prefix.clone()],
-                files: Vec::new(),
-                script_output: None,
-                script_only: false,
-                bulk: false,
-                // One object: a bulk read of every Config row would cost more
-                // than the handful of per-object queries it replaces.
-                per_row: true,
-                bcp_executable: None,
-                base_free: false,
-                verify: false,
-            },
-        )?)?
+                replace_staging: true,
+                dry_run: args.dry_run,
+                allow_non_lab: args.allow_non_lab,
+                sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+                platform: None,
+                source_version: args.source_version,
+            };
+            // This command stages and publishes together, so the publisher's
+            // registry requirement is verified before the first staged row.
+            crate::mssql_extension_load::require_publishable_extension_registry(&load_args)?;
+            serde_json::to_value(crate::mssql_extension_load::load_extensions(&load_args)?)?
+        } else if args.dry_run {
+            if args.sql_user.is_some() {
+                bail!(
+                    "main dry-run with SQL authentication is not yet supported by the parity auditor"
+                );
+            }
+            serde_json::to_value(crate::mssql::audit_source_parity_with_sql(
+                &MssqlAuditSourceParityArgs {
+                    server: args.server.clone(),
+                    database: args.database.clone(),
+                    source_root: proposed_root.clone(),
+                    sqlcmd: args.sqlcmd.clone(),
+                    batch_size: Some(1),
+                    platform: None,
+                    source_version: Some(args.source_version),
+                    path_prefix: vec![path_prefix.clone()],
+                    output: None,
+                },
+                Some(main_read_sql(args)?),
+            )?)?
+        } else {
+            serde_json::to_value(crate::mssql::stage_source_objects_with_sql(
+                &MssqlStageSourceObjectsArgs {
+                    server: args.server.clone(),
+                    sql_user: args.sql_user.clone(),
+                    sql_pwd: args.sql_pwd.clone(),
+                    sql_pwd_env: args.sql_pwd_env.clone(),
+                    database: args.database.clone(),
+                    source_root: proposed_root.clone(),
+                    sqlcmd: args.sqlcmd.clone(),
+                    replace_config_save: true,
+                    allow_non_lab: args.allow_non_lab,
+                    batch_size: Some(1),
+                    platform: None,
+                    source_version: Some(args.source_version),
+                    path_prefix: vec![path_prefix.clone()],
+                    files: Vec::new(),
+                    script_output: None,
+                    script_only: false,
+                    bulk: false,
+                    // One object: a bulk read of every Config row would cost more
+                    // than the handful of per-object queries it replaces.
+                    per_row: true,
+                    bcp_executable: None,
+                    base_free: false,
+                    verify: false,
+                },
+                Some(main_read_sql(args)?),
+            )?)?
+        };
+        Ok(staging)
+    };
+    let staging = if let Some(session) = managed.as_deref_mut().filter(|_| !args.dry_run) {
+        session.stage_source(build_stage)?
+    } else {
+        build_stage()?
     };
     if args.dry_run && args.extension.is_none() {
         ensure_main_dry_run_stageable(&staging)?;
@@ -410,6 +448,13 @@ pub fn apply_source_change(
     let staging_ms = staging_started.elapsed().as_millis();
 
     let activation_started = Instant::now();
+    let mut activate_main = |activation_args: &MssqlActivateStagedMainArgs, profile| {
+        if let Some(session) = managed.as_deref_mut() {
+            crate::mssql::activate_staged_main_managed_verified(activation_args, profile, session)
+        } else {
+            crate::mssql::activate_staged_main_verified(activation_args, profile)
+        }
+    };
     let activation = if args.dry_run {
         None
     } else if let Some(extension) = args.extension.as_deref() {
@@ -442,35 +487,35 @@ pub fn apply_source_change(
             )?,
         )?)
     } else {
-        Some(serde_json::to_value(
-            crate::mssql::activate_staged_main_verified(
-                &MssqlActivateStagedMainArgs {
-                    platform_profile: args.platform_profile,
-                    sqlcmd_trust_cert: args.sqlcmd_trust_cert,
-                    sqlcmd: args.sqlcmd.clone(),
-                    bcp_executable: args.bcp_executable.clone(),
-                    server: args.server.clone(),
-                    sql_user: args.sql_user.clone(),
-                    sql_pwd: args.sql_pwd.clone(),
-                    sql_pwd_env: args.sql_pwd_env.clone(),
-                    database: args.database.clone(),
-                    mode: args.mode,
-                    dry_run: false,
-                    allow_non_lab: args.allow_non_lab,
-                    script_output: args.script_output.clone(),
-                    recovery_output: args.recovery_output.clone(),
-                    tail_log_output: args.tail_log_output.clone(),
-                    interrupt_sessions: args.interrupt_sessions,
-                    rac: args.rac.clone(),
-                    ras_endpoint: args.ras_endpoint.clone(),
-                    cluster_id: args.cluster_id,
-                    infobase_id: args.infobase_id,
-                    infobase_user: args.infobase_user.clone(),
-                    infobase_pwd: args.infobase_pwd.clone(),
-                },
-                profile_verification.clone(),
-            )?,
-        )?)
+        Some(serde_json::to_value(activate_main(
+            &MssqlActivateStagedMainArgs {
+                live_checkpoint: false,
+                live_compact_recovery: false,
+                platform_profile: args.platform_profile,
+                sqlcmd_trust_cert: args.sqlcmd_trust_cert,
+                sqlcmd: args.sqlcmd.clone(),
+                bcp_executable: args.bcp_executable.clone(),
+                server: args.server.clone(),
+                sql_user: args.sql_user.clone(),
+                sql_pwd: args.sql_pwd.clone(),
+                sql_pwd_env: args.sql_pwd_env.clone(),
+                database: args.database.clone(),
+                mode: args.mode,
+                dry_run: false,
+                allow_non_lab: args.allow_non_lab,
+                script_output: args.script_output.clone(),
+                recovery_output: args.recovery_output.clone(),
+                tail_log_output: args.tail_log_output.clone(),
+                interrupt_sessions: args.interrupt_sessions,
+                rac: args.rac.clone(),
+                ras_endpoint: args.ras_endpoint.clone(),
+                cluster_id: args.cluster_id,
+                infobase_id: args.infobase_id,
+                infobase_user: args.infobase_user.clone(),
+                infobase_pwd: args.infobase_pwd.clone(),
+            },
+            profile_verification.clone(),
+        )?)?)
     };
     let activation_ms = activation_started.elapsed().as_millis();
 
@@ -555,7 +600,18 @@ pub fn apply_source_change(
 }
 
 pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    if args.live_checkpoint {
+        bail!(
+            "--live-checkpoint is only supported by mssql-activate-staged-main; source watch refused before staging"
+        );
+    }
+
     args.platform_profile.require_main_write_supported()?;
+    crate::mssql_worker_switch::preflight_worker_execution(
+        activation_mode(args.mode),
+        args.dry_run,
+        false,
+    )?;
     require_supported_main_source_cohort(args)?;
     crate::mssql_platform_profile::verify_mssql_native_profile(
         args.platform_profile,
@@ -597,8 +653,12 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
     let selected_path = normalize_relative_path(&args.source_path)?;
     let paths = selected_source_closure_paths(&source_root, &selected_path)?;
     let mut observed = source_closure_fingerprint(&source_root, &paths)?;
-    let mut stamp = source_closure_stamp(&source_root, &paths).ok();
-    let mut ticks_since_hash = 0_u32;
+    let mut fingerprint_cache = SourceWatchFingerprint {
+        metadata: source_closure_metadata(&source_root, &paths)?,
+        digest: observed,
+        last_full_read: Instant::now(),
+        needs_full_read: false,
+    };
     let debounce = Duration::from_millis(args.watch_debounce_ms.clamp(50, 10_000));
     let mut changed_at = None;
     eprintln!(
@@ -609,22 +669,7 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
 
     loop {
         thread::sleep(Duration::from_millis(100));
-        // Hash the closure only when a file's size or modification time
-        // moved, or once every two seconds as a backstop for a write that
-        // keeps both; reading every file every 100 ms costs a whole closure
-        // of I/O per tick (Untru/ibcmd-rs#409, F-14).
-        let current_stamp = source_closure_stamp(&source_root, &paths).ok();
-        ticks_since_hash += 1;
-        if changed_at.is_none()
-            && current_stamp.is_some()
-            && current_stamp == stamp
-            && ticks_since_hash < WATCH_FULL_HASH_TICKS
-        {
-            continue;
-        }
-        stamp = current_stamp;
-        ticks_since_hash = 0;
-        let current = match source_closure_fingerprint(&source_root, &paths) {
+        let current = match fingerprint_cache.sample(&source_root, &paths, Instant::now()) {
             Ok(value) => value,
             Err(error) => {
                 eprintln!("watch fingerprint error: {error:#}");
@@ -685,26 +730,6 @@ fn require_supported_main_source_cohort(args: &MssqlApplySourceChangeArgs) -> Re
     Ok(())
 }
 
-/// Ticks of the watch loop (100 ms each) between two full hashes of an
-/// unchanged-looking closure.
-const WATCH_FULL_HASH_TICKS: u32 = 20;
-
-/// Size and modification time of every watched file, in `paths` order.
-fn source_closure_stamp(
-    source_root: &Path,
-    paths: &[String],
-) -> Result<Vec<(u64, Option<std::time::SystemTime>)>> {
-    paths
-        .iter()
-        .map(|relative| {
-            let path = source_root.join(path_from_slashes(relative));
-            let metadata = fs::metadata(&path)
-                .with_context(|| format!("failed to stat watched source {}", path.display()))?;
-            Ok((metadata.len(), metadata.modified().ok()))
-        })
-        .collect()
-}
-
 fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u8; 32]> {
     let mut digest = Sha256::new();
     for relative in paths {
@@ -717,6 +742,64 @@ fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u
         digest.update(&bytes);
     }
     Ok(digest.finalize().into())
+}
+
+// Metadata is an inexpensive change hint, never proof that content is unchanged.
+// A periodic full read catches edits with preserved size and modification time.
+const WATCH_FULL_READ_INTERVAL: Duration = Duration::from_secs(1);
+
+#[derive(PartialEq, Eq)]
+struct SourceWatchMetadata {
+    length: u64,
+    modified: SystemTime,
+}
+
+fn source_closure_metadata(root: &Path, paths: &[String]) -> Result<Vec<SourceWatchMetadata>> {
+    paths
+        .iter()
+        .map(|relative| {
+            let path = root.join(path_from_slashes(relative));
+            let metadata = fs::metadata(&path)
+                .with_context(|| format!("failed to stat watched source {}", path.display()))?;
+            anyhow::ensure!(metadata.is_file(), "watched source is not a regular file");
+            Ok(SourceWatchMetadata {
+                length: metadata.len(),
+                modified: metadata.modified()?,
+            })
+        })
+        .collect()
+}
+
+struct SourceWatchFingerprint {
+    metadata: Vec<SourceWatchMetadata>,
+    digest: [u8; 32],
+    last_full_read: Instant,
+    needs_full_read: bool,
+}
+
+impl SourceWatchFingerprint {
+    fn sample(&mut self, root: &Path, paths: &[String], now: Instant) -> Result<[u8; 32]> {
+        let metadata = match source_closure_metadata(root, paths) {
+            Ok(value) => value,
+            Err(error) => {
+                self.needs_full_read = true;
+                return Err(error);
+            }
+        };
+        if self.needs_full_read
+            || metadata != self.metadata
+            || now.saturating_duration_since(self.last_full_read) >= WATCH_FULL_READ_INTERVAL
+        {
+            self.needs_full_read = true;
+            let digest = source_closure_fingerprint(root, paths)?;
+            // Commit cache state only after the complete read succeeds.
+            self.metadata = metadata;
+            self.digest = digest;
+            self.last_full_read = now;
+            self.needs_full_read = false;
+        }
+        Ok(self.digest)
+    }
 }
 
 fn export_active_managed_form_fast(
@@ -1192,8 +1275,7 @@ fn main_read_sql(args: &MssqlApplySourceChangeArgs) -> Result<SqlExec> {
     } else {
         None
     };
-    // The main activation's reads trusted the certificate (bcp -u) on the
-    // --sqlcmd path as well.
+    // Export, parity preparation, staging and activation share this policy.
     SqlExec::from_options(SqlOptions {
         sqlcmd: args.sqlcmd.as_deref(),
         bcp: args.bcp_executable.as_deref(),
@@ -1201,8 +1283,20 @@ fn main_read_sql(args: &MssqlApplySourceChangeArgs) -> Result<SqlExec> {
         user: args.sql_user.as_deref(),
         password: password.as_deref(),
         password_env: &args.sql_pwd_env,
-        trust_server_certificate: true,
+        trust_server_certificate: args.sqlcmd_trust_cert,
     })
+}
+
+fn preflight_classified_worker_source(
+    mode: MssqlMainActivationModeArg,
+    dry_run: bool,
+    classified: &crate::mssql_source_change::SourceActivationInput,
+) -> Result<()> {
+    crate::mssql_worker_switch::preflight_worker_execution(
+        activation_mode(mode),
+        dry_run,
+        classified.is_no_op(),
+    )
 }
 
 fn activation_mode(
@@ -1469,6 +1563,9 @@ impl Drop for TemporaryApplyRoot {
 }
 
 #[cfg(test)]
+mod certificate_policy_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::mssql_platform_profile::MssqlNativePlatformProfile;
@@ -1496,6 +1593,7 @@ mod tests {
     #[test]
     fn runtime_profile_verification_fails_before_active_export() {
         let args = MssqlApplySourceChangeArgs {
+            live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
             sqlcmd: Some(PathBuf::from("must-not-run-sqlcmd")),
             bcp_executable: Some(PathBuf::from("must-not-run-bcp")),
@@ -1531,7 +1629,26 @@ mod tests {
         // the source tree are touched.
         assert!(error.to_string().contains("explicitly unsupported"));
 
+        let checkpoint = MssqlApplySourceChangeArgs {
+            live_checkpoint: true,
+            mode: MssqlMainActivationModeArg::Live,
+            ..args.clone()
+        };
+        assert!(
+            apply_source_change(&checkpoint)
+                .unwrap_err()
+                .to_string()
+                .contains("refused before staging")
+        );
+        assert!(
+            watch_source_changes(&checkpoint)
+                .unwrap_err()
+                .to_string()
+                .contains("refused before staging")
+        );
+
         let evidenced = MssqlApplySourceChangeArgs {
+            live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_3_27_2214,
             ..args
         };
@@ -1550,8 +1667,52 @@ mod tests {
     }
 
     #[test]
+    fn classified_worker_source_preserves_real_no_op_and_refuses_changed_body() {
+        let inventory = |body: &[u8]| {
+            SourceInventory::from_files(vec![
+                SourceFileDigest::for_bytes("CommonModules/Work.xml", b"metadata").unwrap(),
+                SourceFileDigest::for_bytes("CommonModules/Work/Ext/Module.bsl", body).unwrap(),
+            ])
+            .unwrap()
+        };
+        let active = inventory(b"Function Value() Export\nReturn 1;\nEndFunction");
+        let same = inventory(b"Function Value() Export\nReturn 1;\nEndFunction");
+        let changed = inventory(b"Function Value() Export\nReturn 2;\nEndFunction");
+        for (proposed, expected_no_op) in [(&same, true), (&changed, false)] {
+            let plan = classify_source_change(
+                &active,
+                proposed,
+                "CommonModules/Work/Ext/Module.bsl",
+                ActivationTarget::Main,
+                ActivationMode::Exclusive,
+            )
+            .unwrap();
+            assert_eq!(plan.is_no_op(), expected_no_op);
+            assert_eq!(plan.changed_paths().is_empty(), expected_no_op);
+            let result = preflight_classified_worker_source(
+                MssqlMainActivationModeArg::Worker,
+                false,
+                &plan,
+            );
+            if expected_no_op {
+                result.unwrap();
+            } else {
+                assert!(
+                    result
+                        .unwrap_err()
+                        .to_string()
+                        .contains("complete loaded-infobase")
+                );
+            }
+            preflight_classified_worker_source(MssqlMainActivationModeArg::Worker, true, &plan)
+                .unwrap();
+        }
+    }
+
+    #[test]
     fn runtime_profile_verification_fails_before_watch_reads_missing_source() {
         let args = MssqlApplySourceChangeArgs {
+            live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
             sqlcmd: Some(PathBuf::from("must-not-run-sqlcmd")),
             bcp_executable: Some(PathBuf::from("must-not-run-bcp")),
@@ -1586,12 +1747,17 @@ mod tests {
         assert!(error.to_string().contains("explicitly unsupported"));
 
         let evidenced = MssqlApplySourceChangeArgs {
+            live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_3_27_2214,
             ..args
         };
-        let runtime_error =
-            watch_source_changes(&evidenced).expect_err("runtime verification must still run");
-        assert!(runtime_error.to_string().contains("failed to launch rac"));
+        let runtime_error = watch_source_changes(&evidenced)
+            .expect_err("unproved worker ownership must refuse before any external process");
+        assert!(
+            runtime_error
+                .to_string()
+                .contains("complete loaded-infobase")
+        );
     }
 
     const OLD: &str = "719baa18-69ed-439a-8962-1de53d98e05e";
@@ -1747,17 +1913,104 @@ mod tests {
     }
 
     #[test]
-    fn watched_source_stamp_moves_with_size_and_fails_on_a_missing_file() {
-        let root = std::env::temp_dir().join(format!("ibcmd-rs-stamp-{}", Uuid::new_v4()));
-        fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("Module.bsl"), "v1").unwrap();
+    fn watch_cache_periodically_catches_same_size_same_timestamp_edit() {
+        let root = std::env::temp_dir().join(format!("ibcmd-rs-watch-cache-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let file = root.join("Module.bsl");
+        fs::write(&file, "v1").unwrap();
         let paths = vec!["Module.bsl".to_owned()];
-        let first = source_closure_stamp(&root, &paths).unwrap();
-        assert_eq!(source_closure_stamp(&root, &paths).unwrap(), first);
-        fs::write(root.join("Module.bsl"), "v1 and more").unwrap();
-        assert_ne!(source_closure_stamp(&root, &paths).unwrap(), first);
-        fs::remove_file(root.join("Module.bsl")).unwrap();
-        assert!(source_closure_stamp(&root, &paths).is_err());
-        fs::remove_dir_all(root).unwrap();
+        let now = Instant::now();
+        let first = source_closure_fingerprint(&root, &paths).unwrap();
+        let mut cache = SourceWatchFingerprint {
+            metadata: source_closure_metadata(&root, &paths).unwrap(),
+            digest: first,
+            last_full_read: now,
+            needs_full_read: false,
+        };
+        for tick in 1..10 {
+            assert_eq!(
+                cache
+                    .sample(&root, &paths, now + Duration::from_millis(tick * 100))
+                    .unwrap(),
+                first
+            );
+            assert_eq!(cache.last_full_read, now, "idle polling reread contents");
+        }
+        let modified = fs::metadata(&file).unwrap().modified().unwrap();
+        fs::write(&file, "v2").unwrap();
+        fs::File::options()
+            .write(true)
+            .open(&file)
+            .unwrap()
+            .set_times(fs::FileTimes::new().set_modified(modified))
+            .unwrap();
+        assert!(source_closure_metadata(&root, &paths).unwrap() == cache.metadata);
+        assert_ne!(
+            cache
+                .sample(&root, &paths, now + WATCH_FULL_READ_INTERVAL)
+                .unwrap(),
+            first
+        );
+        let canonical = fs::canonicalize(&root).unwrap();
+        assert_eq!(
+            canonical.parent(),
+            Some(fs::canonicalize(std::env::temp_dir()).unwrap().as_path())
+        );
+        assert!(
+            canonical
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ibcmd-rs-watch-cache-")
+        );
+        fs::remove_dir_all(canonical).unwrap();
+    }
+
+    #[test]
+    fn watch_cache_read_failure_requires_a_fresh_successful_digest() {
+        let root = std::env::temp_dir().join(format!("ibcmd-rs-watch-cache-{}", Uuid::new_v4()));
+        fs::create_dir(&root).unwrap();
+        let file = root.join("Module.bsl");
+        fs::write(&file, "v1").unwrap();
+        let paths = vec!["Module.bsl".to_owned()];
+        let now = Instant::now();
+        let first = source_closure_fingerprint(&root, &paths).unwrap();
+        let mut cache = SourceWatchFingerprint {
+            metadata: source_closure_metadata(&root, &paths).unwrap(),
+            digest: first,
+            last_full_read: now,
+            needs_full_read: false,
+        };
+        fs::remove_file(&file).unwrap();
+        assert!(
+            cache
+                .sample(&root, &paths, now + Duration::from_millis(100))
+                .is_err()
+        );
+        assert!(cache.needs_full_read);
+        assert_eq!(cache.digest, first);
+        fs::write(&file, "v2").unwrap();
+        assert_ne!(
+            cache
+                .sample(&root, &paths, now + Duration::from_millis(200))
+                .unwrap(),
+            first
+        );
+        assert!(!cache.needs_full_read);
+        let canonical = fs::canonicalize(&root).unwrap();
+        assert_eq!(
+            canonical.parent(),
+            Some(fs::canonicalize(std::env::temp_dir()).unwrap().as_path())
+        );
+        assert!(
+            canonical
+                .file_name()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .starts_with("ibcmd-rs-watch-cache-")
+        );
+        fs::remove_dir_all(canonical).unwrap();
     }
 }

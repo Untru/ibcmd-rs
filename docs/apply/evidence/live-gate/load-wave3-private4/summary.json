@@ -1,0 +1,1684 @@
+{
+  "physical_rows": 153,
+  "confirmed_commits": 153,
+  "confirmed_reports": 153,
+  "unreturned_operations": [
+    {
+      "label": "private4-load-4-old-a",
+      "attempt": 45,
+      "start": "63926481392132|private4-load-4-old-a|operation-start|1|LIVE-live1|LIVE-live1|attempt=45;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "private4-load-4-old-b",
+      "attempt": 40,
+      "start": "63926481392225|private4-load-4-old-b|operation-start|4|LIVE-live1|LIVE-live1|attempt=40;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "private4-load-4-old-c",
+      "attempt": 35,
+      "start": "63926481392192|private4-load-4-old-c|operation-start|6|LIVE-live1|LIVE-live1|attempt=35;commit_not_established=1",
+      "physical_at_final_readback": null
+    }
+  ],
+  "physical_commits_without_receipt": {},
+  "emitted_errors": [],
+  "cohorts": [
+    {
+      "label": "private4-load-4-new-a",
+      "starts": 15,
+      "confirmed_commits": 15,
+      "confirmed_reports": 15,
+      "markers": [
+        [
+          "LIVE-f5-4",
+          "LIVE-f5-4"
+        ]
+      ],
+      "unreturned": [],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:57:24.232000+00:00",
+          "attempt": 1,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "4dad32ca-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:24.885000+00:00",
+          "attempt": 2,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "4dad32dd-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:25.921000+00:00",
+          "attempt": 3,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "4dad32f0-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:26.925000+00:00",
+          "attempt": 4,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "4dad33b4-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:27.930000+00:00",
+          "attempt": 5,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953182-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:28.970000+00:00",
+          "attempt": 6,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539531a8-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:29.956000+00:00",
+          "attempt": 7,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539531ce-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:30.985000+00:00",
+          "attempt": 8,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539531f4-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:31.986000+00:00",
+          "attempt": 9,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953382-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:33.003000+00:00",
+          "attempt": 10,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953474-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:34.014000+00:00",
+          "attempt": 11,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539534ad-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:35.022000+00:00",
+          "attempt": 12,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539534e6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:36.066000+00:00",
+          "attempt": 13,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "5395351f-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:37.077000+00:00",
+          "attempt": 14,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953558-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:38.134000+00:00",
+          "attempt": 15,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a49442-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    },
+    {
+      "label": "private4-load-4-new-b",
+      "starts": 12,
+      "confirmed_commits": 12,
+      "confirmed_reports": 12,
+      "markers": [
+        [
+          "LIVE-f5-4",
+          "LIVE-f5-4"
+        ]
+      ],
+      "unreturned": [],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:57:28.449000+00:00",
+          "attempt": 1,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953195-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:29.346000+00:00",
+          "attempt": 2,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539531bb-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:30.337000+00:00",
+          "attempt": 3,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539531e1-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:31.362000+00:00",
+          "attempt": 4,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953207-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:32.389000+00:00",
+          "attempt": 5,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953461-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:33.383000+00:00",
+          "attempt": 6,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "5395349a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:34.387000+00:00",
+          "attempt": 7,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539534d3-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:35.406000+00:00",
+          "attempt": 8,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "5395350c-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:36.430000+00:00",
+          "attempt": 9,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953545-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:37.451000+00:00",
+          "attempt": 10,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "5395357e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:38.476000+00:00",
+          "attempt": 11,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a49468-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:39.480000+00:00",
+          "attempt": 12,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a4948e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    },
+    {
+      "label": "private4-load-4-new-c",
+      "starts": 9,
+      "confirmed_commits": 9,
+      "confirmed_reports": 9,
+      "markers": [
+        [
+          "LIVE-f5-4",
+          "LIVE-f5-4"
+        ]
+      ],
+      "unreturned": [],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:57:33.283000+00:00",
+          "attempt": 1,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953487-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:34.201000+00:00",
+          "attempt": 2,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539534c0-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:35.224000+00:00",
+          "attempt": 3,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "539534f9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:36.241000+00:00",
+          "attempt": 4,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "53953532-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:37.242000+00:00",
+          "attempt": 5,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "5395356b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:38.285000+00:00",
+          "attempt": 6,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a49455-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:39.307000+00:00",
+          "attempt": 7,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a4947b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:40.311000+00:00",
+          "attempt": 8,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a494a1-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:57:41.327000+00:00",
+          "attempt": 9,
+          "client": "LIVE-f5-4",
+          "server": "LIVE-f5-4",
+          "uuid": "59a494b4-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    },
+    {
+      "label": "private4-load-4-old-a",
+      "starts": 45,
+      "confirmed_commits": 44,
+      "confirmed_reports": 44,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "private4-load-4-old-a",
+          "attempt": 45,
+          "start": "63926481392132|private4-load-4-old-a|operation-start|1|LIVE-live1|LIVE-live1|attempt=45;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:55:41.931000+00:00",
+          "attempt": 1,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "0f9dedd8-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:42.483000+00:00",
+          "attempt": 2,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "0f9dedeb-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:43.497000+00:00",
+          "attempt": 3,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "0f9dedfe-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:44.533000+00:00",
+          "attempt": 4,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03cf1-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:45.541000+00:00",
+          "attempt": 5,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03ddc-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:46.542000+00:00",
+          "attempt": 6,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03f4b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:47.571000+00:00",
+          "attempt": 7,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03f71-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:48.661000+00:00",
+          "attempt": 8,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03f97-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:49.599000+00:00",
+          "attempt": 9,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03fbd-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:50.640000+00:00",
+          "attempt": 10,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f041a5-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:51.645000+00:00",
+          "attempt": 11,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f0423d-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:52.636000+00:00",
+          "attempt": 12,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f04276-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:53.703000+00:00",
+          "attempt": 13,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f042af-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:54.728000+00:00",
+          "attempt": 14,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffde57-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:55.706000+00:00",
+          "attempt": 15,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffde90-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:56.710000+00:00",
+          "attempt": 16,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdec9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:57.740000+00:00",
+          "attempt": 17,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf02-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:58.759000+00:00",
+          "attempt": 18,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf3b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:59.760000+00:00",
+          "attempt": 19,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf74-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:00.783000+00:00",
+          "attempt": 20,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdfad-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:01.812000+00:00",
+          "attempt": 21,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdfe6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:02.806000+00:00",
+          "attempt": 22,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe01f-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:03.814000+00:00",
+          "attempt": 23,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe058-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:04.834000+00:00",
+          "attempt": 24,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb480-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:05.872000+00:00",
+          "attempt": 25,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb4b9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:06.897000+00:00",
+          "attempt": 26,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb4f2-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:07.892000+00:00",
+          "attempt": 27,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb52b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:08.906000+00:00",
+          "attempt": 28,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb564-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:09.943000+00:00",
+          "attempt": 29,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb59d-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:16.934000+00:00",
+          "attempt": 30,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622455-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:18.066000+00:00",
+          "attempt": 31,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862247b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:19.079000+00:00",
+          "attempt": 32,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286224b3-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:20.067000+00:00",
+          "attempt": 33,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286224d9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:21.109000+00:00",
+          "attempt": 34,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622511-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:22.113000+00:00",
+          "attempt": 35,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622524-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:23.137000+00:00",
+          "attempt": 36,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862254a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:24.141000+00:00",
+          "attempt": 37,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622582-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:25.160000+00:00",
+          "attempt": 38,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286225a8-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:26.246000+00:00",
+          "attempt": 39,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4603b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:27.250000+00:00",
+          "attempt": 40,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46061-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:28.266000+00:00",
+          "attempt": 41,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4609a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:29.330000+00:00",
+          "attempt": 42,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec460d3-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:30.247000+00:00",
+          "attempt": 43,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4610c-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:31.254000+00:00",
+          "attempt": 44,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46145-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    },
+    {
+      "label": "private4-load-4-old-b",
+      "starts": 40,
+      "confirmed_commits": 39,
+      "confirmed_reports": 39,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "private4-load-4-old-b",
+          "attempt": 40,
+          "start": "63926481392225|private4-load-4-old-b|operation-start|4|LIVE-live1|LIVE-live1|attempt=40;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:55:47.169000+00:00",
+          "attempt": 1,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03f5e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:48.050000+00:00",
+          "attempt": 2,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03f84-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:49.086000+00:00",
+          "attempt": 3,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03faa-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:50.112000+00:00",
+          "attempt": 4,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f03fe2-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:51.110000+00:00",
+          "attempt": 5,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f0422a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:52.123000+00:00",
+          "attempt": 6,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f04250-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:53.124000+00:00",
+          "attempt": 7,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f04289-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:54.138000+00:00",
+          "attempt": 8,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f042d5-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:55.159000+00:00",
+          "attempt": 9,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffde7d-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:56.193000+00:00",
+          "attempt": 10,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdeb6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:57.241000+00:00",
+          "attempt": 11,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdeef-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:58.226000+00:00",
+          "attempt": 12,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf28-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:59.230000+00:00",
+          "attempt": 13,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf61-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:00.231000+00:00",
+          "attempt": 14,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf9a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:01.247000+00:00",
+          "attempt": 15,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdfd3-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:02.295000+00:00",
+          "attempt": 16,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe00c-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:03.279000+00:00",
+          "attempt": 17,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe045-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:04.283000+00:00",
+          "attempt": 18,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe07e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:05.341000+00:00",
+          "attempt": 19,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb4a6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:06.392000+00:00",
+          "attempt": 20,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb4df-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:07.358000+00:00",
+          "attempt": 21,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb518-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:08.344000+00:00",
+          "attempt": 22,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb551-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:09.395000+00:00",
+          "attempt": 23,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb58a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:10.418000+00:00",
+          "attempt": 24,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb5d5-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:11.428000+00:00",
+          "attempt": 25,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb5fb-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:12.465000+00:00",
+          "attempt": 26,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb621-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:13.492000+00:00",
+          "attempt": 27,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb647-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:14.513000+00:00",
+          "attempt": 28,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb67f-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:15.576000+00:00",
+          "attempt": 29,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862241d-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:22.214000+00:00",
+          "attempt": 30,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622537-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:23.213000+00:00",
+          "attempt": 31,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862255d-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:24.234000+00:00",
+          "attempt": 32,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622595-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:25.236000+00:00",
+          "attempt": 33,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286225bb-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:26.280000+00:00",
+          "attempt": 34,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4604e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:27.331000+00:00",
+          "attempt": 35,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46087-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:28.407000+00:00",
+          "attempt": 36,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec460c0-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:29.341000+00:00",
+          "attempt": 37,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec460f9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:30.338000+00:00",
+          "attempt": 38,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46132-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:31.355000+00:00",
+          "attempt": 39,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4616b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    },
+    {
+      "label": "private4-load-4-old-c",
+      "starts": 35,
+      "confirmed_commits": 34,
+      "confirmed_reports": 34,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "private4-load-4-old-c",
+          "attempt": 35,
+          "start": "63926481392192|private4-load-4-old-c|operation-start|6|LIVE-live1|LIVE-live1|attempt=35;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ],
+      "operations": [
+        {
+          "utc": "2026-10-01T19:55:52.224000+00:00",
+          "attempt": 1,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f04263-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:53.127000+00:00",
+          "attempt": 2,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f0428a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:54.150000+00:00",
+          "attempt": 3,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "15f042c2-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:55.159000+00:00",
+          "attempt": 4,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffde6a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:56.193000+00:00",
+          "attempt": 5,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdea3-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:57.240000+00:00",
+          "attempt": 6,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdedc-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:58.226000+00:00",
+          "attempt": 7,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf15-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:55:59.230000+00:00",
+          "attempt": 8,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf4e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:00.223000+00:00",
+          "attempt": 9,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdf87-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:01.241000+00:00",
+          "attempt": 10,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdfc0-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:02.305000+00:00",
+          "attempt": 11,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffdff9-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:03.279000+00:00",
+          "attempt": 12,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe032-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:04.280000+00:00",
+          "attempt": 13,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "1bffe06b-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:05.329000+00:00",
+          "attempt": 14,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb493-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:06.400000+00:00",
+          "attempt": 15,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb4cc-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:07.351000+00:00",
+          "attempt": 16,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb505-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:08.352000+00:00",
+          "attempt": 17,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb53e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:09.366000+00:00",
+          "attempt": 18,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb577-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:10.391000+00:00",
+          "attempt": 19,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb5c2-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:11.402000+00:00",
+          "attempt": 20,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb5e8-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:12.436000+00:00",
+          "attempt": 21,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb60e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:13.475000+00:00",
+          "attempt": 22,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb634-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:14.497000+00:00",
+          "attempt": 23,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "220bb66c-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:15.573000+00:00",
+          "attempt": 24,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862240a-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:16.518000+00:00",
+          "attempt": 25,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622442-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:17.497000+00:00",
+          "attempt": 26,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "28622468-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:18.560000+00:00",
+          "attempt": 27,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2862248e-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:19.536000+00:00",
+          "attempt": 28,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286224c6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:20.556000+00:00",
+          "attempt": 29,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "286224ec-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:27.326000+00:00",
+          "attempt": 30,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46074-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:28.319000+00:00",
+          "attempt": 31,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec460ad-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:29.355000+00:00",
+          "attempt": 32,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec460e6-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:30.294000+00:00",
+          "attempt": 33,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec4611f-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        },
+        {
+          "utc": "2026-10-01T19:56:31.314000+00:00",
+          "attempt": 34,
+          "client": "LIVE-live1",
+          "server": "LIVE-live1",
+          "uuid": "2ec46158-bdd2-11f1-8f5e-ac361be9dbd1",
+          "report_ok": true
+        }
+      ]
+    }
+  ],
+  "old_completed_after_phase1_return": [],
+  "phase1_return_utc": "2026-10-01T19:56:35.8225653Z",
+  "scope": "case4 matching426 DEBUG loaded retained phase1/strict own reconnect; no warm readiness or native activation comparator",
+  "binary_source": "426c61731c73f242142d4d13a7b948ac83d97d66",
+  "script_source": "8babc8b9ab49d88b722a9768e6903b49f8505e56",
+  "tail_proofs": {
+    "refusal": {
+      "equal": true,
+      "after": "E821EEF0F522E9916892A02218F0DBEE67CDDBA22208D5C935D12074FDC08C71",
+      "before": "E821EEF0F522E9916892A02218F0DBEE67CDDBA22208D5C935D12074FDC08C71"
+    },
+    "noop": {
+      "equal": true,
+      "after": "38C9658620190598EC6F15AF63DF3F6B014CF5A249476F41221A924500D3610A",
+      "before": "38C9658620190598EC6F15AF63DF3F6B014CF5A249476F41221A924500D3610A"
+    }
+  },
+  "storage_comparisons": {
+    "simple-before→simple-after": {
+      "Config": {
+        "before_rows": 9841,
+        "after_rows": 9841,
+        "full_headers_and_data_sha_equal": true
+      },
+      "ConfigSave": {
+        "before_rows": 5,
+        "after_rows": 5,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Params": {
+        "before_rows": 37,
+        "after_rows": 37,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Files": {
+        "before_rows": 353,
+        "after_rows": 353,
+        "full_headers_and_data_sha_equal": true
+      }
+    },
+    "copyonly-before→copyonly-after": {
+      "Config": {
+        "before_rows": 9841,
+        "after_rows": 9841,
+        "full_headers_and_data_sha_equal": true
+      },
+      "ConfigSave": {
+        "before_rows": 5,
+        "after_rows": 5,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Params": {
+        "before_rows": 37,
+        "after_rows": 37,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Files": {
+        "before_rows": 353,
+        "after_rows": 353,
+        "full_headers_and_data_sha_equal": true
+      }
+    },
+    "warm-before→warm-after": {
+      "Config": {
+        "before_rows": 9841,
+        "after_rows": 9841,
+        "full_headers_and_data_sha_equal": true
+      },
+      "ConfigSave": {
+        "before_rows": 0,
+        "after_rows": 0,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Params": {
+        "before_rows": 37,
+        "after_rows": 37,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Files": {
+        "before_rows": 353,
+        "after_rows": 353,
+        "full_headers_and_data_sha_equal": true
+      }
+    },
+    "noop-before→noop-after": {
+      "Config": {
+        "before_rows": 9841,
+        "after_rows": 9841,
+        "full_headers_and_data_sha_equal": true
+      },
+      "ConfigSave": {
+        "before_rows": 0,
+        "after_rows": 0,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Params": {
+        "before_rows": 37,
+        "after_rows": 37,
+        "full_headers_and_data_sha_equal": true
+      },
+      "Files": {
+        "before_rows": 353,
+        "after_rows": 353,
+        "full_headers_and_data_sha_equal": true
+      }
+    }
+  },
+  "owned_header_counts": [
+    1,
+    2
+  ],
+  "compact_readback": {
+    "database": "ibcmd_rs_05_load_w3_private4_20261001",
+    "compact_format": 2,
+    "legacy_live_format": 1,
+    "pack_sha256": "533a8bd5512dfa2226e4e166d910999e8434650f4b2c7cbb54a619618f6c12d1",
+    "manifest_sha256": "abd2ce7d4a00b8188bf8f4ce070a63d6fc035af8c6daf2631bd5fc202bce6d31",
+    "live_sha256": "403bd0f94d2171d04784a6a7cb9b27e4ff57ec29fdd4d80d59b2939109c5b615",
+    "storage_sha256": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "verified_full_header_rows": 10,
+    "token": "289EB456E0A972F4D9F948AF03D92005919AC600B79DD7645B8B0A7E6B429457",
+    "no_sql_or_undo": true
+  },
+  "cleanup": {
+    "resources_may_need_exact_owned_cleanup": false,
+    "guarded_stop_clean": true,
+    "registration_state": "unregistered",
+    "no_purge": true,
+    "worker_lease_held_or_unconfirmed": false,
+    "database_default60_cleanup_pending": true
+  },
+  "raw_sha256": {
+    "snapshots\\private4-physical-documents.txt": "444aeb8051f125f620eb2ea655a61c38468b78396d847935a545e79ae21def24",
+    "private4-load-4-r1.trn": "38c9658620190598ec6f15af63df3f6b014cf5a249476f41221a924500d3610a",
+    "obs\\private4-load-4-new-a.log": "925f6e89c5679fa86e14334fea188d898f71933ada5d9ae1432681d7989e7373",
+    "obs\\private4-load-4-new-b.log": "cb79ee3bdd87dafe3214074d33f2d2ac850a8b8d376234413f8187fac71b11b7",
+    "obs\\private4-load-4-new-c.log": "cbbfca4a4b5c0ff3a1d70cc41acef9f143e680838456d4b729ea3bf85ef3fb24",
+    "obs\\private4-load-4-old-a.log": "c50e33a937a815aadacc8b1f2e3dc8359a0346e9ae495b010f5e955121d74020",
+    "obs\\private4-load-4-old-b.log": "813cf04ad0646878cb4ceafd7484b51928266e9dc787c430c21860c3f479369f",
+    "obs\\private4-load-4-old-c.log": "f20aef8fdb40179f18a95469b39f8a34411853c7587222b35d1fd410d4e85d0c",
+    "snapshots\\private4-load-4-complete-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "snapshots\\private4-load-4-copyonly-after-storage.txt": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "snapshots\\private4-load-4-copyonly-before-storage.txt": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "snapshots\\private4-load-4-load-before-storage.txt": "6c5d6f96db7e9fecb6b9986aad51d26c98723efeb3115e499aee32a32a7fb9d4",
+    "snapshots\\private4-load-4-noop-after-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "snapshots\\private4-load-4-noop-before-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "snapshots\\private4-load-4-pending-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "snapshots\\private4-load-4-simple-after-storage.txt": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "snapshots\\private4-load-4-simple-before-storage.txt": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "snapshots\\private4-load-4-staged-storage.txt": "e2cfc0c3ea278e13f6fa6e4d56fbda9abf15fbb742b43764451aea56737b0869",
+    "snapshots\\private4-load-4-warm-after-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "snapshots\\private4-load-4-warm-before-storage.txt": "401f5a918728a43e2b8b5e8b792410358e13c6de9bef498dfc15a04a9f1daf0f",
+    "logs\\private4-load-4-activate-1.command.json": "7d548a9850062699b826d158630370e5bde980a51d66867ba0c436b07e835462",
+    "logs\\private4-load-4-activate-1.result.json": "931fba0645a54596ae5ae83477073b0cfb58ee9dd16c865e58c04b409c2e67d6",
+    "logs\\private4-load-4-activity.json": "d70d827e910cd6679c9aef01075d8842267413e8140d532143d0d1b526e292eb",
+    "logs\\private4-load-4-backup-hashes.json": "b0bf3561dddb5099079858fb1163c2dcb0b4b651e626150e5c26449217bba70d",
+    "logs\\private4-load-4-checkpoint.json": "6af3eb95b6b349c04916867d2664f6425f5437b67395086e6183a3c9be1a8ae9",
+    "logs\\private4-load-4-compact-readback.command.json": "b108a942eaec302535c9c10fa984028d5792a564824f7fda9be769ddada029f1",
+    "logs\\private4-load-4-compact-readback.json": "7151b17470a7d89e0f6e534ff9113126a5dc850a18b5855357b4d4a95d35b773",
+    "logs\\private4-load-4-compact-readback.result.json": "631112ee3b4881c649bdae28a109e5cb44c5f83af2a339df8ccc7be83bfa73eb",
+    "logs\\private4-load-4-complete-snapshot.command.json": "b2a87954a1d5181d6db32ce3d6cf43886c40cec339fc4733db54527bc5b8c332",
+    "logs\\private4-load-4-complete-snapshot.result.json": "fc36b9db98f1faeb4ac946ba43d49401293f2f4b53d231074a92aab2b6b59560",
+    "logs\\private4-load-4-continue-native-lock.command.json": "42d7a3004efd430aca5dd076ef1ad23166f7f4d59a2d21bec0c83fbd7fe74a0f",
+    "logs\\private4-load-4-continue-native-lock.result.json": "6ff2402711f96f79b9841e1734df5393ac88bc7c3534a0420068a01f29dae3cb",
+    "logs\\private4-load-4-continue.command.json": "82c73c3a980dd78d4fa2056eba29faa638031ae1e90fb49ff5a07cf512265731",
+    "logs\\private4-load-4-continue.result.json": "3b37c224912c6588fca532c7f0d40fead422fbfad7bdc17e363902c350b28dbd",
+    "logs\\private4-load-4-copyonly-after-snapshot.command.json": "fdc1537ad96de8f78b7ecdd7b7ff911051d661216d5f865d4048d422572e8a63",
+    "logs\\private4-load-4-copyonly-after-snapshot.result.json": "577308ebe5a23ddc840867021c89e9fef781428bcbb0b5a28291555c63d99835",
+    "logs\\private4-load-4-copyonly-backup.command.json": "fb801b97eb385cd4eea7a9df83889255004278cc8b3ca96554e33131adf0cbe6",
+    "logs\\private4-load-4-copyonly-backup.result.json": "7e43290ec8c2c524808e31908342a7b724caeeaa112bdfa86f7bde9b3659477e",
+    "logs\\private4-load-4-copyonly-before-copyonly-after-storage-comparison.json": "20d5ee2b85dcf1393d7e701bcdac4481878777a44035bdc3d7ee1e754f36cc79",
+    "logs\\private4-load-4-copyonly-before-snapshot.command.json": "2959b3ee6129b7e72602bf6c8705027eefaaf6d828117578043a3b525bba9e01",
+    "logs\\private4-load-4-copyonly-before-snapshot.result.json": "d28af20ea6f7c7ce83929aa0b19496293e83bf5d926265a38649e64cc1b88482",
+    "logs\\private4-load-4-copyonly-lock.command.json": "fb609bdae5feb3105d02648dfa6c62ec1ee6082a961dfcb060375b9d5d2fae58",
+    "logs\\private4-load-4-copyonly-lock.result.json": "3e3dedbe231ecbbe7de0dd80d7a38089ce699cc77b06b39c75cd934db035c487",
+    "logs\\private4-load-4-full-backup.command.json": "198a8a48693b193e56fcab175aec1a110d96af2ae478340e057766e645657c6b",
+    "logs\\private4-load-4-full-backup.result.json": "52c741a4f15073564cac95bb84c1070cbbebe4321996166847be77944a9d10a2",
+    "logs\\private4-load-4-full-header.command.json": "51bcb1d98bd582140f3017d8d77c2baf778b490f111bd87a0639b664d813c367",
+    "logs\\private4-load-4-full-header.result.json": "4a3d8e1a90008775f7d23bbb6bd21671f2776cdb83bbcc9338c69dfc4dbb2cab",
+    "logs\\private4-load-4-full-lock.command.json": "d0aaf7044c562c3e6bff914c2c6fd05cf6a58e19c67b559eabca1dc776048fa8",
+    "logs\\private4-load-4-full-lock.result.json": "68072cd25a3d04fa5352ba4db40d5e37254fac0d2194aa5b72ab9e8313480719",
+    "logs\\private4-load-4-header-1.command.json": "5ec944f7383e297eb1fedad55aff3574e378feb2e08d7f7bb38430cc4aa09af1",
+    "logs\\private4-load-4-header-1.result.json": "80bbed95f1e50b87b77c8dc2e72d5a07ccc89746058bf55a887da18bc2e03d24",
+    "logs\\private4-load-4-header-2.command.json": "49e440cb3602be2ff1b3a8539e29f21a22d84c0aba2adee410b8ac1634b4e12d",
+    "logs\\private4-load-4-header-2.result.json": "4b6e4add99bb64519d221dc02127dabaa696adaf21acb3140f5b1dbbbd95fcb4",
+    "logs\\private4-load-4-import.command.json": "d9d08c2f1cb2bd6f5f3cc6bf2c4646f870d2bd67919e708d6bb7fadcc839f19f",
+    "logs\\private4-load-4-import.result.json": "5f151a13042580a3c62934973e2ee7e9c58ce931471138c76868481c4b34e9b3",
+    "logs\\private4-load-4-load-before-snapshot.command.json": "c9a801899dcd2ebf08a8a406b216442746455bd5f08dfbb2ab80bfbc56b7f249",
+    "logs\\private4-load-4-load-before-snapshot.result.json": "45c360b73d9e76c11f3f6aa4327f4ff806dd94bfcbf424d7aae7eb409693cd70",
+    "logs\\private4-load-4-negative-copyonly-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\private4-load-4-negative-copyonly-activate.command.json": "f97d0e31aae2b6bc6519a669bf07605d603c9e7e955555284f7ff77097c7961a",
+    "logs\\private4-load-4-negative-copyonly-activate.result.json": "5e76a994a1eef7574c82aae25a5ec34aa2d95e5085b5d9bea1d3f3295d9f4df1",
+    "logs\\private4-load-4-negative-copyonly.command.json": "00c492a8add1dd090edd7364903ceabbf284807aea6931b0526cb8b9fe51b470",
+    "logs\\private4-load-4-negative-copyonly.result.json": "c8578ed1ce023d0aad224f124ea41753440396f29085c15c910c40a15ce5ee8c",
+    "logs\\private4-load-4-negative-simple-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\private4-load-4-negative-simple-activate.command.json": "a00206f88ac97d685ed4d0ed1c609987f92943864a2f67a3d066e657d86fb5c3",
+    "logs\\private4-load-4-negative-simple-activate.result.json": "4f9bb6869b88916edd79c93c652faa881d8fae95013e880f15db58a3c812f432",
+    "logs\\private4-load-4-negative-simple.command.json": "e1d3c3f548830328c0408ebc74c4db2d55e19a28d1fe82c180f92698e8ed3949",
+    "logs\\private4-load-4-negative-simple.result.json": "16b5b2808b358ec98c6313223413799a2171eb7f7d584131d57a05e8f85d7de2",
+    "logs\\private4-load-4-new-a-binding.command.json": "21efa892f8247525ecf5c2cb1bf4385f95178027bbf167328be30784ac65da22",
+    "logs\\private4-load-4-new-a-binding.result.json": "a6093d2b5c6e3d8fae4b59c162f0fa825fcee8aad89fe4e180cae3a5ace3d062",
+    "logs\\private4-load-4-new-a-start.command.json": "296d96bd9d252cb0f7150b9fe9122e87a1092e665d33bc7cc1588586b445eae8",
+    "logs\\private4-load-4-new-a-start.result.json": "c71255d93c199ca52f541bf022dc81bc381e5ef9772389e68e8f154965af754f",
+    "logs\\private4-load-4-new-b-binding.command.json": "d3eb5e02a071cfe35dec03aa7903ac5de3e82c3f06e9c81e705ac81a868cf04e",
+    "logs\\private4-load-4-new-b-binding.result.json": "c7bac96fbb6bcc4e708d2ec48de1cc00bb648f9e89ea95d92b6c91ea02b38574",
+    "logs\\private4-load-4-new-b-start.command.json": "35ff69716394a657ceffa28d6a6e13f192b8c693385e2df2b2f8ce664ea4733c",
+    "logs\\private4-load-4-new-b-start.result.json": "2af21ad84020c585f585e4903a173e227fad43246afe65451a34799efe39218b",
+    "logs\\private4-load-4-new-c-binding.command.json": "44c53cb9bd918a6b98730e7618c4cea8f3e960de714e7c361a16249914773419",
+    "logs\\private4-load-4-new-c-binding.result.json": "e4d031180e054b5f13e8837b8089f3eab4a13bef44622928d874019336a6a45e",
+    "logs\\private4-load-4-new-c-start.command.json": "9a8306f15fd4769fddc1b91510262e1794b1adaa2af627ff9cc50d776da50b24",
+    "logs\\private4-load-4-new-c-start.result.json": "95d00ad01fffb4374b2257168f8a4df6f56f250e2042c00b576e0322b200395a",
+    "logs\\private4-load-4-new-close-empty-after.command.json": "7ee1a9a447bc516a848eb6ac24fe67f1f38bcbe0424a5ce20b2af676b5db8f79",
+    "logs\\private4-load-4-new-close-empty-after.result.json": "81a97269276e3f427903abfa4d38a5281a78071a044588b51fbc904f3b155b28",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-inventory-0.command.json": "bb14290c0299c4b818c378915f901e7f137bce788aaabd0aab5e101df1c69c73",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-inventory-0.result.json": "35dc621bf6168aa0fb326354967640fd4828bc8a177f244ed10b9fcde35e9200",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-stop.command.json": "5e751a78b4001cd064a77f18130ee73d20020c166abfa47748e8e39372ac7b6c",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-stop.result.json": "a0edbf75a710f58946ca2958acd2e76f0e889265c7c713379d658c6f228326d1",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-terminate.command.json": "6adab52744d12de34d8deca3f9526e8b96401111b262ad6ce997f8b25c7e7a4e",
+    "logs\\private4-load-4-new-close-private4-load-4-new-a-terminate.result.json": "11d407cc076a1615737e2e79e7829150b082e095e4af825cb915f79233a2dd4b",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-inventory-0.command.json": "4c8c8607f0742ed1216954c33ca16b063db82e416186405f11f35902a3e0025f",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-inventory-0.result.json": "e6c3f677172beb8e69e15037e62502884e676e05084c85827499a35a7941f76a",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-stop.command.json": "6852ba4d8d870bdb902b95175b7d44aeb6e04476ed9e5fd3e4ea061aeb7bea0d",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-stop.result.json": "b9af175b7a2cc1368f9d78abb84a5054f88aca0e4affc44e44a589830a0e20d8",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-terminate.command.json": "ee645ccbe78bcd5da90057505915d09b507e0b867200bc237e07ad907b968270",
+    "logs\\private4-load-4-new-close-private4-load-4-new-b-terminate.result.json": "da79290651f1ffc278126771543a4c677afa4a29623c5c281a0ce648f4f1d78e",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-inventory-0.command.json": "09e5814e0e47764458eeb45808fa32a661fbbb684ed1b69bfe64094551d76dbb",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-inventory-0.result.json": "fc2c114b7ebf72010a74558a841e4f8e5a098f0293dca3c3098f80f4165b73ac",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-stop.command.json": "dc6cb69b1dfe8cc5984c356f89dc791ae774125ab1b6a4db1be58c28c9f508bd",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-stop.result.json": "55af481800cb31891815273853b868e1c5c9123c9bc02a6e4d81208f61fec2ca",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-terminate.command.json": "c31ca269a121778d84edff29f89a918be512a606cfbf063eeaf976ce0001acbd",
+    "logs\\private4-load-4-new-close-private4-load-4-new-c-terminate.result.json": "7c5ff2015e92cc9388e4c48d2b4784bc6a8bf6e0240085ce1e699d95f3d704f2",
+    "logs\\private4-load-4-new-empty.command.json": "8659699d266e63b6a55c8eafe24a652f67908c758dfc708b46baefa26ec118e5",
+    "logs\\private4-load-4-new-empty.result.json": "d5f8d3155f21c1e7b479d393287cf63a478a1d59ab0b10b893bfe36a323616d8",
+    "logs\\private4-load-4-noop-after-snapshot.command.json": "e804089f943db4b8ce7632903433c382a62e82fca58c4a95ec44fcdee5a41c79",
+    "logs\\private4-load-4-noop-after-snapshot.result.json": "9c29b0c31200bf4857c194477e7725be0deb0d9db85856ac8085da2c8aa34649",
+    "logs\\private4-load-4-noop-before-noop-after-storage-comparison.json": "d27f8a7f826398688e0f2f2b932a86e9b20b76853a3a3f77bd7eb37405cb74f4",
+    "logs\\private4-load-4-noop-before-snapshot.command.json": "5cf55d4e52156dbd457c61eb26e2c5f1f25d40c791315933107e59098b09aa35",
+    "logs\\private4-load-4-noop-before-snapshot.result.json": "39236dcde49b516259cdf95569e969d11cb7b58c01b26528a16fde6312998929",
+    "logs\\private4-load-4-noop-native-lock.command.json": "150d50a898507f8a392a272094314425fa1e7f72410f4ccba2a6716a75b35db0",
+    "logs\\private4-load-4-noop-native-lock.result.json": "b3ae275715c4ec8f2429fbcc8d11ec059c916cbde77bd71a383a0182efe6d521",
+    "logs\\private4-load-4-noop-tail.json": "6065783d9d63ce3910924e529aa76fa94f72f5a98d44bc579d59ce061230ea5c",
+    "logs\\private4-load-4-noop.command.json": "84a99b2f7a063f72a6e9d61e63fdb55d203711415695d98d96a58764be141649",
+    "logs\\private4-load-4-noop.result.json": "a12e36e4ca6e450c01f10caeb23a2c7ed0e9fe06fc2f8adc6845b8a00546eede",
+    "logs\\private4-load-4-old-a-binding.command.json": "389c2fccc79dbc8b995d6d369169f37b178fb6798441ee4d11d7aac3e3325bc2",
+    "logs\\private4-load-4-old-a-binding.result.json": "11c1535f9f162a71f35fcc9a339a48a66ab47de71070741a82c086c97765be2d",
+    "logs\\private4-load-4-old-a-start.command.json": "83d2a907a69906134c6827c7d221c9d9cf43b1cabeba1781674a1cc9eb194ddb",
+    "logs\\private4-load-4-old-a-start.result.json": "c31a58ebd0bf159052ccab8e74f83a61b3d5a377e92438e1b76dca06769d66bb",
+    "logs\\private4-load-4-old-b-binding.command.json": "462bf375d174d9d824c9b3b307135466fedabd5d26fedadf452beb3510c842a1",
+    "logs\\private4-load-4-old-b-binding.result.json": "038b12063d6f599cad7a3e223d4977861097b01d1a4ab16b963c3782f31542f0",
+    "logs\\private4-load-4-old-b-start.command.json": "02b7c9df827e41fa7e409a67d59ea622dfc38f1eabecb91155d41a5b31d23e6d",
+    "logs\\private4-load-4-old-b-start.result.json": "71863c4c70c568f27f128f4a300664bbd1f2ce64330470449cc690c4766a596c",
+    "logs\\private4-load-4-old-c-binding.command.json": "2b94184153e7bb9d6b8e7bfd19fa547550b154edf799ddd4bb3258b60b8fda99",
+    "logs\\private4-load-4-old-c-binding.result.json": "0af215c15aaa26c00deaf1ed8eacafd91ca6196bbfaf539717652fd6e14de75c",
+    "logs\\private4-load-4-old-c-start.command.json": "747e14abc4712bee3a9400f386d38bbd85b43cdb9d2b0c78ab9161c6f39e83f3",
+    "logs\\private4-load-4-old-c-start.result.json": "cd8682d9e9f10bdbd8d4aaf32949359ba0651460bcc908e70732adedb0ca2fd7",
+    "logs\\private4-load-4-old-close-empty-after.command.json": "c2ba483eee1065da62ecfcd5734b0cb81830f112e9ba8a2bd16ec8990450ae35",
+    "logs\\private4-load-4-old-close-empty-after.result.json": "1057cc807a8e0cc329b76f808d635970c8a8911e1bd1e81e0e0c0890b99a3dd3",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-inventory-0.command.json": "edfd2642476f540f617a7185ec2c671d8965f2673790def0badd6c2b435f00a8",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-inventory-0.result.json": "f4a75add437206468ba7eb23da1cd01e353f922d0bbd4621a3db258dcf937c13",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-stop.command.json": "60cefa601df8f45ad054d8ca43e7779887eb3f7455f35782c68868c22f446422",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-stop.result.json": "431429b5a05018fa0cd2e8c13b1d555471f3de921045792353a1b3c610ef7c35",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-terminate.command.json": "fe7498ed234d4af0af6de7c14fa14ec5c224aac5fcc36400e978aa676e057663",
+    "logs\\private4-load-4-old-close-private4-load-4-old-a-terminate.result.json": "cef4ec02c90263b3ef82bcc96e4f3f9df7b4208b88b96294e226ad64d87d6097",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-inventory-0.command.json": "abcfe1c4b96182547627e89b4d420348f4adc79f759d49daabba3c6e5c96bd8f",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-inventory-0.result.json": "3a1de8b3ab250e1bd6bc4547f7451df75e5df26b28d85e0b4c8d9055521d7c7a",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-stop.command.json": "e1ceff94a13568e7834f62bbb00e9fab0e06a77a35c203563923b7f9e23e7afa",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-stop.result.json": "d26c1e02920de8a95cd6593fbe680e22b7f3f0b617693c8318ccf936aae92164",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-terminate.command.json": "149d6cb24690b0a0ad1093fd6f4b526b563dd41cc2f899723138d4b45abde3c6",
+    "logs\\private4-load-4-old-close-private4-load-4-old-b-terminate.result.json": "c97339b1fff23ed4ce2181aa1efe2f2c9b5a976ca03b907c1bc4242c531cfbdd",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-inventory-0.command.json": "da71c59bf70748cd851337d5af62a216a55f89d3fd9211d7406be2977d818fa8",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-inventory-0.result.json": "8c7e6e955b01d7547a218ad94e03fd8e1a451fc84b0fb4dfc0179e87439f744a",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-stop.command.json": "653a75186bd1c927448f26f3f4067ffac02b1e691ad56477d71dcc5cc844a2f1",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-stop.result.json": "2e124dc9d06d80d6f0a218b587ed8aaeeea8a04bb8758258956e661b6ae6e904",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-terminate.command.json": "5c3f20500418a731d8e348066cdfeff53b7c38c70878c255e31909357d3f3f29",
+    "logs\\private4-load-4-old-close-private4-load-4-old-c-terminate.result.json": "d034cbfe0465dbd74c093d2341ca4b5413ef8cd3248dcd4dd54c5e41563c2858",
+    "logs\\private4-load-4-old-empty.command.json": "7be339f1edace731c7d8fd9d4bdb26c4b49cfb8641e2d709ff543938a7951888",
+    "logs\\private4-load-4-old-empty.result.json": "12e401f9457f03fa996c7196f83fc041485220124f123ddd0ca60391da1bfe99",
+    "logs\\private4-load-4-pending-snapshot.command.json": "eefbd11b3d53640ccfe53c51c11082cf71445dea5ccc147b13cec7b509d054db",
+    "logs\\private4-load-4-pending-snapshot.result.json": "e938f9b58d2327d5a2e5cc8b5102ea35c863306616a8dcb43d3cedce3004d82f",
+    "logs\\private4-load-4-postreturn-0.command.json": "062c1ce5ee0b4fb4dfb8aeed8f1101b61fc9ecb3f03ce445291e8f900a379042",
+    "logs\\private4-load-4-postreturn-0.result.json": "264c5de5b9994587d1fc97a393d885b7d36431d601ccffcb76fd8da66b8f990d",
+    "logs\\private4-load-4-postreturn-1.command.json": "b3fe947d74f1c473a05cee8cbe138d2cae8a62a5547a1d18020d638fba71d3e2",
+    "logs\\private4-load-4-postreturn-1.result.json": "af7ddf2c548e1c2336fd4fdc4b5088ab190ce5a6bd3df0a0810894bc4d3a54f0",
+    "logs\\private4-load-4-postreturn-2.command.json": "502c743c30f5b1e2beea95e3627671d097b0aa74869ff0beb18d2f368aedce3d",
+    "logs\\private4-load-4-postreturn-2.result.json": "8fa40f1a74d5c9d43e549af5a128f2431342aa777dbbbe6f971430a2a8cb3a48",
+    "logs\\private4-load-4-private4-load-4-old-a-windows.command.json": "6c6ad9de4ad218012ed47dd07885710be44b188cd6b47cbf5f95e76c1fb25c2b",
+    "logs\\private4-load-4-private4-load-4-old-a-windows.result.json": "78e9519ea96f4ea008f446e224b3a12b3404925b5315f5682f4c4602f14432c6",
+    "logs\\private4-load-4-private4-load-4-old-b-windows.command.json": "73c5018b533f164bfc17a81f537f97603c9eea3264d35bdb4524d356ab35b889",
+    "logs\\private4-load-4-private4-load-4-old-b-windows.result.json": "8cda7a40b5384d2ed5e6d24b973807f6bc41746a82c5b835ebb43a3c605b2dd0",
+    "logs\\private4-load-4-private4-load-4-old-c-windows.command.json": "9cda71fb86b614636456dcb40eed6c037a5a3c68440050e43a81b87a98861cd4",
+    "logs\\private4-load-4-private4-load-4-old-c-windows.result.json": "9b4f6033c7f707aa8e2d09de5f7c77d6676e7b734c01905541a9635c41875aa1",
+    "logs\\private4-load-4-r1-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\private4-load-4-r1-activate.command.json": "84c31fe8d9301e73d9fe5b9a106e47ba6b0be3122e0c33023dbb12696b4ad2ae",
+    "logs\\private4-load-4-r1-activate.result.json": "670c34fc5ceee8c91b44bf490d649d85b9ae9d60509a7f198f76c72bf36ccd4a",
+    "logs\\private4-load-4-refusal-tail.json": "b8501177fd044add6d98f1ba9fc93395213dfcbe99927dc45e7eedaa2dc850a1",
+    "logs\\private4-load-4-simple-after-snapshot.command.json": "0ec6f1d02b7296506ca43ec34aa51c44a0c0a941bd79655bd1319f9dc74ffa00",
+    "logs\\private4-load-4-simple-after-snapshot.result.json": "13d1dc9b6cfcd80c350f106d414bc44e512b4d3d93621e7e5ff7a7f054d3a6ae",
+    "logs\\private4-load-4-simple-before-simple-after-storage-comparison.json": "ad3ef00fd4aff7d80d69ab840df1b125c75eac4f539eef11f254a0fdc49a4f1a",
+    "logs\\private4-load-4-simple-before-snapshot.command.json": "82fc81b5077e86761905bda4c43edf4b08c13ca68085a332656a609e85ce4367",
+    "logs\\private4-load-4-simple-before-snapshot.result.json": "1398ac948f91ba8f51020314599f3c255515cc65f7fae2a88fb882650bc0cffd",
+    "logs\\private4-load-4-staged-snapshot.command.json": "7d34ee6018a99b8a416d7c9fa8f99f49733ea10cebffaeb66d3641b7835fab26",
+    "logs\\private4-load-4-staged-snapshot.result.json": "c89254a0827a2630a730a7dc7bb02f1c6c3adfadd410a8f81da1b4d6325be783",
+    "logs\\private4-load-4-warm-after-snapshot.command.json": "f2c5eaf83ab8055947fc38d6ce3748bc48cd6538b606db12cd60eea59c2bc08c",
+    "logs\\private4-load-4-warm-after-snapshot.result.json": "ac074a06060351dcc03feca7836d897b6ed64d9f9ed58080deebcf1e372f33f7",
+    "logs\\private4-load-4-warm-before-snapshot.command.json": "69144e62cd25517d498df5e4fd6d7518c023dcb52aca0c504fa222b66b48a98a",
+    "logs\\private4-load-4-warm-before-snapshot.result.json": "02a083328c494fcc9fd21a6e20399e04adc9c6464054bd9f7bec79a3272b92ae",
+    "logs\\private4-load-4-warm-before-warm-after-storage-comparison.json": "decb4fbb66a2ccce750c8eeed18531dd52089d35beec4ba5176b2d804a01ea03",
+    "logs\\private4-load-4-warm-refusal-native-lock.command.json": "be1bbc0e1f00f56fa4c1c1b5c1fe576ff130aa5cde6326ce182098967f8c476c",
+    "logs\\private4-load-4-warm-refusal-native-lock.result.json": "b4255f3c5ba9f8cd047d5f75729caff69caaa6a8c7359d2b52cba25cb593ce6a",
+    "logs\\private4-load-4-warm-refusal.command.json": "d4d0a6d58e6d97418ca2b89878afb3bffb1ffd5d937d2a1a32b002af0f2cbf67",
+    "logs\\private4-load-4-warm-refusal.result.json": "1036b65ba04783cdb9b500dac894b154043519533686270151178508987953b6"
+  },
+  "limits": [
+    "old unreturned calls remain unknown until final physical readback; absent document does not establish a returned report",
+    "old cohort stalled; no same-session refresh, zero-error, adaptive readiness or throughput claim",
+    "standalone compact recovery format2 and legacy LIVE format1 measured; compact LIVE format2 from later source455 was not used",
+    "UUID SQL byte mapping independently established against earlier1434 W2 BSP receipts; no extra COM readback here",
+    "Files may change operationally; equality is measured per snapshot pair, not assumed",
+    "no generic recovery undo or five loaded LIVE switches claimed"
+  ]
+}

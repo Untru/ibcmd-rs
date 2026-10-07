@@ -293,13 +293,13 @@ Review findings (2026-09-29, "report, do not fix"; severity = effect on a user o
 | F-9 | medium-high | The `live` preflight checks the recovery model, the state and the tail-file name, not the log chain or the destination directory. With `FULL` but no full backup the transaction commits and `BACKUP LOG` then fails with `4214`; the database is online with the new generation in the ordinary rows and no session switch. The design says a failure before a successful tail backup "leaves the database online and returns the bounded row recovery artifact"; the artifact path is not in the error. **Fixed in 0.5 (#409), section 6.7:** the log chain, the tail directory and the account's right to write there are checked before the stage, and again at the head of the script. | `mssql_main_activation.rs:342-348`, `402-406`; `mssql_live_gate.rs` | `live/live-v6-nochain.err`, `live/break-log-chain.sql`; `evidence/live-gate/f9f10-red.log`, `f9f10-green.log` |
 | F-10 | medium | `live` kills every connection of the database with `ROLLBACK IMMEDIATE`: no session preflight, no warning. In-flight server transactions are rolled back and their clients get an unrecoverable error; a client that touches the database in the window shows a modal error and loses unsaved data on restart. It is the documented design, but the command has no `--force`-style acknowledgement beyond `--allow-non-lab`. **Fixed in 0.5 (#409), section 6.7:** sessions with an open transaction or a running request are refused (named in the report) unless the operator gives `--interrupt-sessions`; checked again inside the promotion transaction before its `COMMIT`. | `mssql_main_activation.rs:595-599`, `610-614`; `mssql_live_gate.rs` | section 4.3; `evidence/live-gate/f9f10-red.log`, `f9f10-green.log` |
 | F-15 | medium | **Fixed in 0.5 (#409), section 6.5.** With an active generation every read of `Config` is a derived table over the **whole** table (`CASE` over the file name), so a bounded read costs a full scan and a memory grant: 4 762 logical reads and 34.5 s elapsed under load against 3 reads and 1 ms for the plain read (`RESOURCE_SEMAPHORE` wait); the bounded export of one object took 250-300 s instead of 2 s. | `mssql_dump/dynamic_generation.rs:167-190` | `online/overlay-query.sql`, `online/online-v2-dry.meta.txt` |
-| F-8 | low-medium | **Write fixed in 0.5 (#409):** the artifact is written to a temporary file, flushed, and hard-linked into place, so a crash leaves no truncated file; the row fields, the byte encoding and the online removal script remain. Was: the recovery artifact does not keep `Creation`/`Modified`/`Attributes` of the overwritten rows (empty strings, `0`) and stores bytes as a JSON array of numbers; it is written non-atomically with a read-then-write check, so a crash leaves a truncated file that a repeat refuses to overwrite. For `online` it lists the ordinary rows that were *not* overwritten and has no script that removes the aliases and markers. | `mssql_dump/mod.rs:1016-1021`; `mssql.rs:1123-1136` | `online/online-v1.recovery-summary.txt` |
-| F-7 | low | **Fixed in 0.5 (#409):** the markers and the extension `ConfigCASSave` rows are written with `DATEADD(year,2000,SYSUTCDATETIME())`, as every other row the tool writes already was. Was: rows the tool writes carry `2026-...` timestamps (the staging copy, the markers via `SYSUTCDATETIME()`), native rows `4026-...` (year offset 2000). Sessions accepted the rows, so it is not shown to matter. | `mssql_main_activation.rs:515-523`; staging | `online/online-v1.diff.md` |
-| F-11 | low | **Output fixed in 0.5 (#409):** `rac process turn-off` runs with its stdout and stderr captured (shown in the error when it fails), so the report stays one JSON document; the dedicated-process check and the timeout remain. Was: worker: "dedicated" is decided from `rac connection list` only; an idle infobase loaded by the process but without a connection is invisible. `rac process turn-off` inherits stdout/stderr, so its output can enter the JSON stream. 10 s timeout, 100 ms poll of a call that takes 1.7-5.4 s under load. | `mssql_worker_switch.rs:130-150`, `79-88`, `91-116` | code, section 4.4 |
-| F-12 | low | `--infobase-pwd` goes to `rac` on the command line (visible to other local users); reads always trust the server certificate (`trust_server_certificate: true`), so `--sqlcmd-trust-cert` is a ceremony for the main path. | `mssql_platform_profile.rs:217-222`; `mssql_apply.rs:664`, `1140`; `mssql.rs:7375`; `mssql_dump/mod.rs:2152` | code |
-| F-13 | low | **Fixed in 0.5 (#409):** the activation report's `touched_tables` has one arm, and two new fields name what the script writes: `published_config_rows` (an online run's `_dynupdate_` aliases, the ordinary names otherwise; one function, `published_file_name`, names them for the script, its postconditions and the report) and `dynamic_markers` (`Config.DynamicallyUpdated: written` / `deleted`). Was: `tables_changed` is built by a branch with two identical arms and does not list the alias rows or the markers of an online run. | `mssql_apply.rs:450-475` | code |
-| F-14 | low | **Fixed in 0.5 (#409):** every path comparison of `mssql_source_change.rs` uses one Unicode case-fold key, and the watch loop checks size and modification time every 100 ms, hashing the closure only when they move (or every 2 s as a backstop). Was: two path comparisons disagree (ASCII case fold against Unicode lower-case); the watch loop hashes the whole closure every 100 ms. | `mssql_source_change.rs:994-1005`; `mssql_apply.rs:558-566` | code |
-| F-16 | info | `overlay_active_dynamic_module` (the older alias reader) is unreachable for an aliased object since the export overlay was added: the export fails first (F-1). Two mechanisms for one job. | `mssql_apply.rs:1116-1215` | code |
+| F-8 | low-medium | Historical row/header and publication defects are repaired: full physical preimages/CAS, actual overwritten versus retained ONLINE rows, synchronized no-clobber standalone compact package and opt-in compact LIVE envelope are included. Legacy LIVE tokens remain compatible. Actual compact LIVE continuation control and generic guarded undo are still open; no power-loss durability claim. | `mssql_dump/mod.rs`; `mssql_recovery_artifact.rs`; `mssql_live_artifact.rs` | [Standalone recovery](evidence/live-gate/compact-recovery-2026-10-01.md), [compact LIVE](evidence/live-gate/compact-live-recovery-2026-10-01.md) |
+| F-7 | low | Historical timestamp difference: the merged plain dynamic marker writer now uses the platform year offset of 2000; verified platform stamps remain authoritative for staged rows. This source correction requires current merged-code verification and does not turn historical session observations into a new native parity measurement. | `mssql_main_activation.rs`; staging | `online/online-v1.diff.md`; current integration gates pending |
+| F-11 | low | Generic WORKER execution now refuses incomplete loaded/history ownership before staging or artifact publication. No RAC preparation/signal is performed. Source no-op and dry-run behavior remain available; worker watch refuses at startup. Positive general worker ownership remains open; earlier private-cluster measurements do not authorize this product path. | `mssql_worker_switch.rs`; `mssql_source_change.rs`; `mssql.rs` | [Current refusal boundary](evidence/live-gate/worker-f11-refusal-2026-10-01.md); section 4.4 is historical |
+| F-12 | low | Partial: direct staged-main activation and high-level source apply carry the requested certificate policy through capture, active export, staging, dry-run preparation and execution; see [policy propagation](evidence/live-gate/certificate-policy-2026-10-01.md). Source apply no longer requires trust. Standalone legacy export/stage defaults and RAC password command-line handling remain open. | `mssql.rs`; `mssql_apply.rs`; `mssql_dump/mod.rs`; `mssql_platform_profile.rs` | backend/argument and actual preparation read-handle regressions; no live certificate-chain matrix |
+| F-13 | low | Historical identical-branch defect is absent from the current code. Exclusive promotion carries the own apply's actual `tables_touched`, including registration and Files tables. Online reporting remains at table granularity (`ConfigSave`, `Config`, `Params`); selected source names are not a complete per-row alias/marker mutation ledger. | `mssql_apply.rs`, `tables_touched_by_config_apply` and report construction | Existing exclusive-report regression passed in the current 3729-test run; full per-row reporting is unclaimed |
+| F-14 | low | Historical: two path comparisons disagreed (ASCII case fold against Unicode lower-case), and watch hashed the whole closure every 100 ms. Root containment now uses the existing Unicode inventory key. Watch polls metadata every 100 ms and reads content on hints or a mandatory one-second interval; preserved size/time edits are still detected. See [path consistency](evidence/live-gate/online-recovery-preimages-2026-10-01.md) and [watch cadence evidence](evidence/live-gate/watch-read-cadence-2026-10-01.md). | `mssql_source_change.rs`; `mssql_apply.rs` | focused regressions; no native watch throughput claim |
+| F-16 | info | Historical duplicate body overlay removed: `active_dynamic_generation` only names the active generation, while the bounded export supplies the effective body. It does not rewrite the exported selected body. | `mssql_apply.rs`, `active_dynamic_generation` | Current source review; see the F-1/F-16 explanation below |
 | F-17 | info | OpenSpec `add-mssql-live-generation-switch` task 7 (readiness gate) is checked but has no evidence with the gate; the recorded live run is the fixed five-second delay it replaced. | `add-mssql-live-generation-switch/tasks.md` | section 4.3 |
 
 ### 6.1 Fixed in 0.5 (#409): F-2 and F-1
@@ -661,14 +661,59 @@ probe hint), `mssql_main_activation` (the gate before the transaction, the check
 
 **Not fixed here (F-5, next).** On the worker lab cluster the switch ends at the readiness gate (`57234`) even with no user session and no load, in the old tool and in the new one (the `clean` case of both logs; also `sessions` and `accepted`): the gate expects back the `1CV83 Server` connections it counted before cycle 1, that includes the idle ones the working process holds for the infobase (opened by the tool's own RAS verification, F-3), and an idle process does not reconnect without a call. Section 4.3 measured the same abort under load; F-5 gets its own section.
 
+### 6.8 Experimental 0.5 checkpoint (#409 F-5): explicit staged activation and continuation
+
+The existing `--mode live` default keeps its legacy two-cycle SQL reconnection wait, including error `57234`. The new split route is **opt-in**: `mssql-activate-staged-main --mode live --live-checkpoint`. It requires the built-in SQL client, SQL Server build `17.0.1135.8` (the locally measured 59-column `RESTORE HEADERONLY` layout), and verified platform `8.3.27.2214`. These restrictions are checked before promotion/cycle 1. `mssql-apply-source-change` and its watch route refuse `--live-checkpoint` before processes, export, compilation or staging; a pinned source-to-promotion executor has not been implemented.
+
+The default legacy LIVE format-1 manifest must fit the same 64 MiB bound used by standalone continuation; an oversized pretty-JSON snapshot refuses before promotion/cycle 1. The opt-in route saves its ordinary recovery snapshot plus `<recovery-stem>.live.json` **before** SQL execution. The manifest binds the SQL server, database GUID, family and recovery fork, exact SQL engine build, original verified RAS cluster/infobase, supported platform profile and storage fingerprint, tail-log path, staged row hashes, generation snapshot and SHA-256 recovery token. Promotion and cycle 1 run under a session-owned exclusive application lock in `master`, shared with continuation. Both log sets carry token-bound cycle names. The ordinary F-9/F-10 and marker/alias refusals still apply.
+
+Direct staged-main activation additionally accepts `--live-compact-recovery`
+with `--live-checkpoint`. Preserve the format-2 LIVE envelope, its adjacent
+`ibcmd-live-<token>.recovery.json`, the content-addressed binary pack and the
+tail file together. The envelope and sidecar are each bounded to 2 MiB; the
+pack is bounded to 96 MiB and existing per-row/row-set budgets remain in force.
+Continuation verifies and reconstructs the same token-bound artifact before
+connecting to SQL; it also still reads legacy format1. High-level source apply
+does not expose this option. File/dispatch compatibility is independently
+reviewed, but actual compact LIVE continuation/recovery remains unmeasured.
+See [the format and acceptance boundary](evidence/live-gate/compact-live-recovery-2026-10-01.md).
+
+Readiness currently accepts only an **empty RAS user-session inventory**. The current RAS agent build must still be exactly `8.3.27.2214`, the storage profile must match the saved fingerprint, and the original MSSQL registration is rechecked against the recorded SQL database before inventory and twice before attempting cycle 2; each RAS call has a five-second deadline. Version and identity responses remain strict UTF-8. Session inventory is bounded raw output: only a successful response with empty stderr and ASCII-whitespace-only stdout admits cycle 2. Any nonempty output, including OEM user names and hibernating sessions, refuses. Idle SQL handles of the cluster are not users and do not drive this decision. Any user session, ambiguous output, wrong binding or timeout leaves cycle 1 retained and reports `continuation_required`. The SQL active-work check repeats under the master lock immediately before the second interruption; refusal correctly says the committed promotion/cycle 1 is retained. Active/warm cohort readiness remains unimplemented: this is not an acceptance of F-5 under load.
+
+The boundary is explicit: active SQL work refuses before artifact publication and cycle 1; an SQL-idle but connected RAS user can pass promotion/cycle 1 and then block cycle 2. Closing a thin-client process can leave its RAS session hibernating. End the exact owned session through normal administration before continuation; the tool does not terminate it automatically. Recovery tokens compare the exact SHA-256 independently of hex letter case, retaining the original token spelling and backup names produced by the renderer.
+
+After ending the owned user sessions, resume with the saved manifest:
+
+```powershell
+ibcmd-rs mssql-live-continue --artifact F:\lab\recovery.live.json `
+  --server localhost --database <same-database> --allow-non-lab `
+  --rac '<same-build-rac>' --ras-endpoint <verified-endpoint>
+```
+
+Continuation validates identity, clean `ConfigSave`, unchanged published staged bytes and marker-free storage. Under the same lock, `RESTORE HEADERONLY ... WITH CHECKSUM` must show exactly one owned cycle-1 log set, with valid checksums, GUIDs, fork, completion and LSNs, before an append. An intervening log backup refuses append. Exactly two sets are accepted only when both token-bound names and their contiguous backup chain match; this is a validated `already_complete` result and executes no third cycle. Missing, foreign, malformed, unsupported or ambiguous state refuses. A preflight refusal does not change database access mode; cleanup changes it only after this command's own transition. After append the final header/state validation repeats. A transport or verification failure reports completion as uncertain (`cycle_2_executed: null`), never falsely as `false`; inspect the retained files before retry.
+
+A named unfinished checkpoint also blocks default LIVE activation and the source-tree bulk/per-row mutation scripts **under that lock, before target writes**. The pending-history guard looks for the matching named cycle 2, so an unrelated later log backup does not hide cycle 1. This protects these wrapped paths, not every storage-import, standalone stage or administrative command. Preserve SQL backup history and the retained manifest/tail; arbitrary writes, restore, backup-history deletion or other tools invalidate the checkpoint's assumptions. The application lock coordinates this tool's covered paths and cannot prevent an administrator from acting outside them.
+
+The restored research kit is in `scripts/apply-lab/live`; new output defaults to `F:\ibcmd\lab\05\wave1\live`. `obs.ps1 -Srvr localhost:2541 -LabRoot <own-lab>` also supports the existing service83 cluster. Read [checkpoint evidence and remaining work](evidence/live-gate/checkpoint-2026-10-01.md), [real native/RAS measurements](evidence/live-gate/native-ras-2026-10-01.md) and [historical F-5 measurements](evidence/live-gate/f5-findings-2026-09-30.md). The historical measurements establish **client=old/server=new** after cycle 2 until client restart; neither route promises client-code refresh or zero database dialogs. L2 is partial, L5 under warm/load readiness remains open, and #409 remains open.
+
 ## 7. Recovery
 
-**ONLINE** (nothing is deleted by the tool). To go back to the state before generation N: in one transaction delete from
-`Config` the rows `<uuid>_dynupdate_<gN>` and `<uuid>_dynupdate_<gN>.0` of the module named in the run's `recovery.json`
-(`staged_rows`, the two GUID rows) and `versions_dynupdate_<gN>`, then set the two markers back to the previous payload
-(`prior_config_dynamically_updated`, `prior_params_dynamically_updated` in the artifact; delete them when the artifact says
-`null`). New sessions then load the previous generation; open ones keep whatever they loaded. There is no script for it
-(F-8); the transaction has to be written by hand and has not been run.
+The standalone recovery output now uses a format-2 JSON manifest and its adjacent
+`ibcmd-recovery-<sha256>.pack`. Preserve both files. The manifest names every row,
+its full header, offset, length and digest; the pack retains the original bytes.
+It is published and checked before SQL can run. Historical files are retained;
+the separate `.live.json` checkpoint and its token encoding remain unchanged.
+See [compact recovery evidence and limits](evidence/live-gate/compact-recovery-2026-10-01.md).
+
+**ONLINE** recovery must account for new aliases, the overwritten ordinary
+`root`/`version` rows, and both history markers. Only `overwritten_config_rows`
+are replacement preimages; `retained_config_rows` describe ordinary rows that
+publication preserved. Never restore those retained rows over a later
+configuration. A safe undo must first verify the exact published generation,
+headers and bytes, then remove only its aliases and restore replacement
+preimages and prior markers in one transaction. Checksums alone do not establish
+database ownership or authorize this operation. A generic guarded undo remains
+open (F-8); this manual recovery has not been run.
 
 **A refused apply leaves `ConfigSave` staged** (F-3, any failure after staging; the refusals that need no staged row
 - a marker base with an ordinary mode, disagreeing markers, the tail-log argument - come before the stage since 0.5, F-2).
@@ -676,9 +721,7 @@ Run `mssql-activate-staged-main` with the same mode (for exclusive see F-3), or 
 staging replaces `ConfigSave`).
 
 **LIVE after `57234`** (database `ONLINE`, promotion committed, tail file holds cycle 1): the sessions are in a mixed
-state until every old session ends, or until the second cycle is run by hand, from `master`, the statements of
-`live/manual-second-cycle.sql` (same tail file, `NOINIT`); it can fail with `924` (repeat) and shows the sessions a
-DB error dialog. **After `57250`** (database `RESTORING`): `RESTORE DATABASE [<db>] WITH RECOVERY;`. The `.trn` is part of the
+state until every old session ends. The historical manual second-cycle experiment can show a database dialog; blindly repeating it caused an unknown cluster/COM hang. Legacy artifacts lack the new token-bound manifest and are not automatically resumable by section 6.8. Inspect the retained state before any manual recovery. **After `57250`** (database `RESTORING`): `RESTORE DATABASE [<db>] WITH RECOVERY;`. The `.trn` is part of the
 log chain: keep it (62 MB for the first cycle after a full backup in the measured runs, 3-6 MB for later ones).
 
 **Split or stale generations after any aborted live/worker:** end all sessions of the infobase (a fresh session then sees
@@ -700,6 +743,11 @@ one generation, measured), or restart the working process (worker: the tool's ow
   database connection: sessions with open work are refused unless `--interrupt-sessions` is given (F-10).
 - `worker` needs exactly one dedicated `rphost` for the infobase, RAS and `rac` on the same host.
 - The observed BSP client shows a modal message after a lost database connection; nothing here changes that.
+- The drop-in's `infobase config apply --dynamic=force` (#347, [`dropin-dynamic.md`](dropin-dynamic.md)) runs the `online`
+  transition unchanged with two additions a plan can carry: the writes the platform's `force` makes besides the rows (the
+  change registrations and `MobileVersions.dat`, `MainActivationPlan::with_parity_sql`) and the platform's timestamps for the
+  markers (`with_platform_timestamps`; the plans of this file's own commands keep UTC). Its twin against the platform's `force`
+  is in `evidence/dropin-dynamic/acceptance.md`.
 
 ## 9. Evidence and how to repeat
 

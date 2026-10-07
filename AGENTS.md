@@ -5,6 +5,16 @@ import between XML and a Microsoft SQL Server database). What it does and how
 to run it: `README.md`. History and the full command reference:
 `docs/HISTORY.md`. Merge and release gates: `docs/release-criteria.md`.
 
+## Visible work tracking
+
+The user's working board is https://github.com/users/Untru/projects/9.
+Before taking an issue or dispatching an implementer, the coordinator updates
+its project Status to In progress and records the owner/current scope in Agent.
+Update the board at each state transition and verify the values by reading
+them back. Local plans and GitHub status labels do not replace project fields.
+Put reviewable PRs in In review; incomplete issue acceptance remains open.
+Do not mark future work started merely because it has a proposed owner.
+
 ## Releases
 
 **Mandatory before every release:** go through the release's GitHub milestone

@@ -1,18 +1,18 @@
-//! Fail-closed 1C worker-process handoff for development live activation.
+//! Worker handoff is refused until complete loaded-infobase ownership is proved.
+//!
+//! Current connections do not enumerate idle or formerly registered loaded
+//! infobases. A supplied RAS endpoint therefore cannot authorize process turn-off.
 
-use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read as _;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::thread;
-use std::time::{Duration, Instant};
+use std::path::PathBuf;
+use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use serde::Serialize;
 use uuid::Uuid;
 
-const ZERO_UUID: &str = "00000000-0000-0000-0000-000000000000";
-const MAX_RAC_OUTPUT_BYTES: usize = 8 * 1024 * 1024;
+use crate::mssql_main_activation::MainActivationMode;
+
+const UNSUPPORTED_OWNERSHIP: &str = "worker activation is unsupported: complete loaded-infobase and process-lifetime ownership is not established; connection lists and idle SQL handles cannot authorize worker turn-off";
 
 #[derive(Debug, Clone)]
 pub struct WorkerSwitchOptions {
@@ -31,252 +31,130 @@ pub struct WorkerSwitchReport {
 }
 
 #[derive(Debug, Clone)]
-pub struct WorkerSwitchPlan {
-    old_process: String,
-}
+pub struct WorkerSwitchPlan;
 
-pub fn prepare_dedicated_worker(options: &WorkerSwitchOptions) -> Result<WorkerSwitchPlan> {
-    let before = list_connections(options)?;
-    let target = options.infobase_id.hyphenated().to_string();
-    let target_processes = before
-        .iter()
-        .filter(|entry| entry.get("infobase").is_some_and(|value| value == &target))
-        .filter_map(|entry| entry.get("process").cloned())
-        .collect::<BTreeSet<_>>();
-    if target_processes.len() != 1 {
-        bail!(
-            "worker activation requires exactly one process serving infobase {}; observed {}",
-            target,
-            target_processes.len()
-        );
-    }
-    let old_process = target_processes.into_iter().next().unwrap();
-    validate_process_is_dedicated(&before, &old_process, &target)?;
-    Ok(WorkerSwitchPlan { old_process })
-}
-
-pub fn switch_dedicated_worker(
-    options: &WorkerSwitchOptions,
-    plan: &WorkerSwitchPlan,
-) -> Result<WorkerSwitchReport> {
-    let started = Instant::now();
-    let target = options.infobase_id.hyphenated().to_string();
-    let current = list_connections(options)?;
-    let target_processes = current
-        .iter()
-        .filter(|entry| entry.get("infobase").is_some_and(|value| value == &target))
-        .filter_map(|entry| entry.get("process").cloned())
-        .collect::<BTreeSet<_>>();
-    if target_processes != BTreeSet::from([plan.old_process.clone()]) {
-        bail!(
-            "worker assignment changed after preflight; SQL was committed but no worker was turned off"
-        );
-    }
-    validate_process_is_dedicated(&current, &plan.old_process, &target).context(
-        "worker assignment changed after preflight; SQL was committed but no worker was turned off",
-    )?;
-    let old_process = plan.old_process.clone();
-
-    let mut turn_off = Command::new(&options.rac)
-        .args([
-            "process".to_owned(),
-            "turn-off".to_owned(),
-            format!("--cluster={}", options.cluster_id.hyphenated()),
-            format!("--process={old_process}"),
-            options.ras_endpoint.clone(),
-        ])
-        // The command's report is one JSON document on stdout: rac's own
-        // output is captured, not inherited (#409 F-11), and shown only when
-        // the turn-off fails.
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .with_context(|| format!("failed to start {}", options.rac.display()))?;
-    let stdout = drain(turn_off.stdout.take());
-    let stderr = drain(turn_off.stderr.take());
-
-    let deadline = Instant::now() + options.timeout;
-    while Instant::now() < deadline {
-        if let Some(status) = turn_off
-            .try_wait()
-            .context("failed to poll rac process turn-off")?
-            && !status.success()
-        {
-            bail!(
-                "rac process turn-off failed with status {:?}: stdout={} stderr={}",
-                status.code(),
-                joined(stdout),
-                joined(stderr)
-            );
-        }
-        let current = list_connections(options)?;
-        if let Some(new_process) = current.iter().find_map(|entry| {
-            (entry.get("infobase") == Some(&target))
-                .then(|| entry.get("process"))
-                .flatten()
-                .filter(|process| *process != &old_process)
-                .cloned()
-        }) {
-            return Ok(WorkerSwitchReport {
-                old_process,
-                new_process,
-                switch_ms: started.elapsed().as_millis(),
-            });
-        }
-        thread::sleep(Duration::from_millis(100));
-    }
-    if turn_off.try_wait()?.is_none() {
-        let _ = turn_off.kill();
-        let _ = turn_off.wait();
-    }
-    bail!(
-        "worker process {} was turned off, but infobase {} did not attach to a replacement within {} ms",
-        old_process,
-        target,
-        options.timeout.as_millis()
-    )
-}
-
-/// Reads a child's pipe to its end on its own thread, so a child that
-/// writes more than a pipe holds never blocks; keeps the first
-/// `MAX_RAC_OUTPUT_BYTES`.
-fn drain<R: std::io::Read + Send + 'static>(pipe: Option<R>) -> thread::JoinHandle<Vec<u8>> {
-    thread::spawn(move || {
-        let mut kept = Vec::new();
-        if let Some(mut pipe) = pipe {
-            let _ = pipe
-                .by_ref()
-                .take(MAX_RAC_OUTPUT_BYTES as u64)
-                .read_to_end(&mut kept);
-            let _ = std::io::copy(&mut pipe, &mut std::io::sink());
-        }
-        kept
-    })
-}
-
-fn joined(output: thread::JoinHandle<Vec<u8>>) -> String {
-    String::from_utf8_lossy(&output.join().unwrap_or_default())
-        .trim()
-        .to_owned()
-}
-
-fn validate_process_is_dedicated(
-    connections: &[BTreeMap<String, String>],
-    process: &str,
-    target: &str,
+/// Source orchestration calls this after read-only classification and its no-op
+/// return, before staging source or publishing recovery. Standalone
+/// activation calls it once the read-only plan establishes whether it is a no-op,
+/// before script/recovery publication or SQL mutation. Dry runs and guarded
+/// no-op stage consumption perform no worker signal and retain their behavior.
+pub fn preflight_worker_execution(
+    mode: MainActivationMode,
+    dry_run: bool,
+    no_op: bool,
 ) -> Result<()> {
-    let foreign_infobases = connections
-        .iter()
-        .filter(|entry| entry.get("process").is_some_and(|value| value == process))
-        .filter_map(|entry| entry.get("infobase"))
-        .filter(|infobase| infobase.as_str() != ZERO_UUID && infobase.as_str() != target)
-        .cloned()
-        .collect::<BTreeSet<_>>();
-    if !foreign_infobases.is_empty() {
-        bail!(
-            "worker activation refuses shared process {}; foreign infobases: {}",
-            process,
-            foreign_infobases.into_iter().collect::<Vec<_>>().join(",")
-        );
+    if mode == MainActivationMode::Worker && !dry_run && !no_op {
+        bail!(UNSUPPORTED_OWNERSHIP);
     }
     Ok(())
 }
 
-fn list_connections(options: &WorkerSwitchOptions) -> Result<Vec<BTreeMap<String, String>>> {
-    let text = run_rac(
-        &options.rac,
-        [
-            "connection".to_owned(),
-            "list".to_owned(),
-            format!("--cluster={}", options.cluster_id.hyphenated()),
-            options.ras_endpoint.clone(),
-        ],
-    )?;
-    Ok(parse_rac_blocks(&text))
+pub fn prepare_dedicated_worker(_options: &WorkerSwitchOptions) -> Result<WorkerSwitchPlan> {
+    bail!(UNSUPPORTED_OWNERSHIP)
 }
 
-fn run_rac<I>(executable: &Path, args: I) -> Result<String>
-where
-    I: IntoIterator<Item = String>,
-{
-    let output = Command::new(executable)
-        .args(args)
-        .output()
-        .with_context(|| format!("failed to start {}", executable.display()))?;
-    if output.stdout.len() > MAX_RAC_OUTPUT_BYTES || output.stderr.len() > MAX_RAC_OUTPUT_BYTES {
-        bail!("rac output exceeded {} bytes", MAX_RAC_OUTPUT_BYTES);
-    }
-    if !output.status.success() {
-        bail!(
-            "rac failed with status {:?}: stdout={} stderr={}",
-            output.status.code(),
-            String::from_utf8_lossy(&output.stdout),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
-}
-
-fn parse_rac_blocks(text: &str) -> Vec<BTreeMap<String, String>> {
-    let mut blocks = Vec::new();
-    let mut current = BTreeMap::new();
-    for line in text.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            if !current.is_empty() {
-                blocks.push(std::mem::take(&mut current));
-            }
-            continue;
-        }
-        if let Some((key, value)) = line.split_once(':') {
-            current.insert(
-                key.trim().to_owned(),
-                value.trim().trim_matches('"').to_owned(),
-            );
-        }
-    }
-    if !current.is_empty() {
-        blocks.push(current);
-    }
-    blocks
+/// Defensive boundary for a caller holding an old/prepared plan. This function
+/// starts no utility and sends no server signal, even if SQL already committed.
+pub fn switch_dedicated_worker(
+    _options: &WorkerSwitchOptions,
+    _plan: &WorkerSwitchPlan,
+) -> Result<WorkerSwitchReport> {
+    bail!(
+        "{UNSUPPORTED_OWNERSHIP}; no worker was turned off; if activation SQL already committed, inspect retained recovery before retry"
+    )
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn rac_output_is_captured_to_its_end_and_bounded() {
-        let small = drain(Some(std::io::Cursor::new(
-            b" process turned off \n".to_vec(),
-        )));
-        assert_eq!(joined(small), "process turned off");
-        let large = vec![b'x'; MAX_RAC_OUTPUT_BYTES + 10];
-        let kept = drain(Some(std::io::Cursor::new(large))).join().unwrap();
-        assert_eq!(kept.len(), MAX_RAC_OUTPUT_BYTES);
-        assert_eq!(joined(drain(None::<std::io::Empty>)), "");
+    fn unavailable_endpoint() -> WorkerSwitchOptions {
+        WorkerSwitchOptions {
+            rac: PathBuf::from("must-not-spawn-worker-rac-does-not-exist"),
+            ras_endpoint: "must-not-connect".into(),
+            cluster_id: Uuid::nil(),
+            infobase_id: Uuid::nil(),
+            timeout: Duration::ZERO,
+        }
     }
 
     #[test]
-    fn parses_rac_connection_blocks_without_localized_values() {
-        let parsed = parse_rac_blocks(
-            "connection : a\nprocess : p1\ninfobase : base\n\nconnection : b\nprocess : p2\ninfobase : 00000000-0000-0000-0000-000000000000\n",
-        );
-        assert_eq!(parsed.len(), 2);
-        assert_eq!(parsed[0].get("process").map(String::as_str), Some("p1"));
-        assert_eq!(
-            parsed[1].get("infobase").map(String::as_str),
-            Some(ZERO_UUID)
+    fn unsupported_worker_ownership_refuses_without_starting_nonexistent_rac() {
+        let error = prepare_dedicated_worker(&unavailable_endpoint()).unwrap_err();
+        assert_eq!(error.to_string(), UNSUPPORTED_OWNERSHIP);
+        let error =
+            switch_dedicated_worker(&unavailable_endpoint(), &WorkerSwitchPlan).unwrap_err();
+        assert!(error.to_string().starts_with(UNSUPPORTED_OWNERSHIP));
+        assert!(error.to_string().contains("no worker was turned off"));
+        assert!(
+            error
+                .to_string()
+                .contains("if activation SQL already committed")
         );
     }
 
     #[test]
-    fn dedicated_process_gate_rejects_foreign_infobase() {
-        let parsed = parse_rac_blocks(
-            "connection : a\nprocess : p1\ninfobase : target\n\nconnection : b\nprocess : p1\ninfobase : foreign\n",
+    fn unsupported_worker_ownership_preserves_other_modes_dry_run_and_no_op() {
+        for mode in [
+            MainActivationMode::Exclusive,
+            MainActivationMode::Online,
+            MainActivationMode::Live,
+            MainActivationMode::Worker,
+        ] {
+            for dry_run in [false, true] {
+                for no_op in [false, true] {
+                    let result = preflight_worker_execution(mode, dry_run, no_op);
+                    assert_eq!(
+                        result.is_err(),
+                        mode == MainActivationMode::Worker && !dry_run && !no_op
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_worker_ownership_dispatch_precedes_staging_and_artifact_publication() {
+        let source = include_str!("mssql_apply.rs");
+        let apply = source.split("pub fn apply_source_change(").nth(1).unwrap();
+        assert!(apply.find("classify_source_change(").unwrap() < apply.find("if no_op {").unwrap());
+        assert!(
+            apply.find("if no_op {").unwrap()
+                < apply.find("preflight_classified_worker_source(").unwrap()
         );
-        assert!(validate_process_is_dedicated(&parsed, "p1", "target").is_err());
-        assert!(validate_process_is_dedicated(&parsed[..1], "p1", "target").is_ok());
+        assert!(
+            !apply
+                .split("let source_root")
+                .next()
+                .unwrap()
+                .contains("prepare_dedicated_worker(")
+        );
+        assert!(
+            apply.find("preflight_classified_worker_source(").unwrap()
+                < apply
+                    .find("crate::mssql::stage_source_objects")
+                    .expect("main source staging must remain guarded")
+        );
+        let watch = source.split("pub fn watch_source_changes(").nth(1).unwrap();
+        assert!(
+            watch.find("preflight_worker_execution(").unwrap()
+                < watch.find("verify_mssql_native_profile(").unwrap()
+        );
+        let activation = include_str!("mssql.rs")
+            .split("pub fn activate_staged_main(")
+            .nth(1)
+            .unwrap();
+        assert!(
+            activation.find("preflight_worker_execution(").unwrap()
+                < activation.find("let artifact_root").unwrap()
+        );
+        assert!(
+            activation.find("preflight_worker_execution(").unwrap()
+                < activation.find("write_new_or_identical(").unwrap()
+        );
+        assert!(
+            activation.find("preflight_worker_execution(").unwrap()
+                < activation.find("run_sql_file(").unwrap()
+        );
     }
 }

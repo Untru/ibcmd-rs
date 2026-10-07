@@ -17761,7 +17761,7 @@ const FORM_EXCLUDED_COMMAND_SLOT: usize = 48;
 
 /// The graphical scheme's own command identifiers, each named by the seeds
 /// `parse_form_excluded_commands` records.
-const FORM_GRAPHICAL_SCHEME_COMMANDS: &[(&str, &'static str)] = &[
+const FORM_GRAPHICAL_SCHEME_COMMANDS: &[(&str, &str)] = &[
     ("ea0bafc6-647c-46eb-bb8b-6417593546cc", "AlignBottom"),
     ("1c7ec5be-53a6-43cc-8bc8-9a73ca72a44e", "AlignCenter"),
     ("c4ac110c-99d4-4c75-882e-f2a5b9c199ad", "AlignLeft"),
@@ -38545,7 +38545,7 @@ const MAX_FORM_PLANNER_ITEMS: usize = 4096;
 const MAX_FORM_PLANNER_TIME_SCALE_LEVELS: usize = 16;
 /// The time unit shared by `<pl:periodicVariantUnit>` and a scale level's
 /// `<measure>`; every ordinal was named by a seed that spells it.
-const FORM_PLANNER_TIME_UNITS: &[(&str, &'static str)] = &[
+const FORM_PLANNER_TIME_UNITS: &[(&str, &str)] = &[
     ("5", "Second"),
     ("10", "Minute"),
     ("20", "Hour"),
@@ -38556,8 +38556,7 @@ const FORM_PLANNER_TIME_UNITS: &[(&str, &'static str)] = &[
     ("70", "Year"),
 ];
 /// The `BWAValue` header switches: a boolean with an `auto` state of its own.
-const FORM_PLANNER_BWA_VALUES: &[(&str, &'static str)] =
-    &[("0", "false"), ("1", "true"), ("2", "auto")];
+const FORM_PLANNER_BWA_VALUES: &[(&str, &str)] = &[("0", "false"), ("1", "true"), ("2", "auto")];
 /// The chart namespace the platform spells inline on every direct child of
 /// `<pl:timeScale>` and on the scale level itself.
 const FORM_PLANNER_CHART_NAMESPACE_ATTR: &str = r#" xmlns="http://v8.1c.ru/8.2/data/chart""#;

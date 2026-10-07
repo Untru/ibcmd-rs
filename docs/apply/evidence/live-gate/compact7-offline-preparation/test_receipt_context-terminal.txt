@@ -1,0 +1,2 @@
+PASS exact owned context F:\ibcmd\lab\05\wave3\load\compact7-child-receipts
+PASS foreign/relative/reparse/missing refusal; realStarts=realSignals=SQLcalls=registryWrites=0

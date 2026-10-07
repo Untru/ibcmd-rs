@@ -24,6 +24,10 @@ pub const CAPABILITY_MAIN_WRITE: &str = "mssql.main.write";
 /// The own exclusive `config apply` (`mssql-config-apply`): a stage that needs no
 /// restructuring moved from `ConfigSave` into `Config` in one transaction.
 pub const CAPABILITY_CONFIG_APPLY: &str = "mssql.config.apply";
+/// The dynamic (online) `config apply` of the drop-in (`--dynamic=force`): a small delta stage
+/// published as a generation while sessions are connected, with the writes the platform's own
+/// `force` makes besides (`docs/apply/dropin-dynamic.md`).
+pub const CAPABILITY_CONFIG_APPLY_DYNAMIC: &str = "mssql.config.apply.dynamic";
 /// Capability that admits extension writes for a platform profile.
 pub const CAPABILITY_EXTENSION_WRITE: &str = "mssql.extension.write";
 /// Profile fingerprint key for `IBVersion`/`PlatformVersionReq`.
@@ -96,6 +100,66 @@ impl MssqlNativePlatformProfile {
         self.require_capability(CAPABILITY_CONFIG_APPLY)
     }
 
+    /// The dynamic apply requires that its generation, its change registrations and
+    /// `MobileVersions.dat` were compared with the native `--dynamic=force` on this build.
+    /// 8.5.1.1150 admission is additionally restricted by the dynamic planner to
+    /// its measured initial five-row CommonModule or module-only CommonForm cohort.
+    pub fn require_config_apply_dynamic_supported(self) -> Result<()> {
+        self.require_capability(CAPABILITY_CONFIG_APPLY_DYNAMIC)
+    }
+
+    /// Native 8.5.1.1150 re-stamps only the final block of its signed `root`
+    /// payload even on a body-only import. This does not admit another root,
+    /// unsigned/signed conversion, or a different payload layout. Callers must
+    /// still bind both complete physical rows and judge the staged metadata.
+    pub fn accepts_dynamic_root_restamp(self, stored: &[u8], staged: &[u8]) -> bool {
+        if self != Self::Platform8_5_1_1150 {
+            return false;
+        }
+        fn parts(bytes: &[u8]) -> Option<(Uuid, Vec<u8>)> {
+            // Bound the complete inflated row before parsing; measured native
+            // rows are 222 bytes and have no whitespace outside the braces.
+            if bytes.len() > 300 {
+                return None;
+            }
+            let text =
+                std::str::from_utf8(bytes.strip_prefix(b"\xef\xbb\xbf").unwrap_or(bytes)).ok()?;
+            let inner = text.strip_prefix('{')?.strip_suffix('}')?;
+            let mut fields = inner.splitn(3, ',');
+            if fields.next()? != "2" {
+                return None;
+            }
+            let identity = fields.next()?;
+            let uuid = Uuid::parse_str(identity).ok()?;
+            if uuid.hyphenated().to_string() != identity {
+                return None;
+            }
+            let encoded = fields.next()?;
+            // Bound before decoding: the measured 128-byte payload is 172
+            // base64 characters; native CR/LF wrapping is the only extra data.
+            if encoded.len() > 256
+                || encoded.chars().any(|c| {
+                    !(c.is_ascii_alphanumeric() || matches!(c, '+' | '/' | '=' | '\r' | '\n'))
+                })
+            {
+                return None;
+            }
+            let payload = crate::module_blob::decode_base64_mime(encoded)?;
+            let canonical: String = encoded
+                .chars()
+                .filter(|c| !matches!(c, '\r' | '\n'))
+                .collect();
+            (payload.len() == 128 && crate::module_blob::encode_base64(&payload) == canonical)
+                .then_some((uuid, payload))
+        }
+        match (parts(stored), parts(staged)) {
+            (Some((old_id, old)), Some((new_id, new))) => {
+                old_id == new_id && old[..112] == new[..112]
+            }
+            _ => false,
+        }
+    }
+
     /// Extension mutation requires an evidenced CAS/registry protocol.
     pub fn require_extension_write_supported(self) -> Result<()> {
         self.require_capability(CAPABILITY_EXTENSION_WRITE)
@@ -155,7 +219,149 @@ pub fn verify_mssql_native_profile(
     claimed: MssqlNativePlatformProfile,
     options: MssqlNativeProfileVerificationOptions<'_>,
 ) -> Result<MssqlNativeProfileVerification> {
-    let agent_build = read_rac_agent_build(options.rac, options.ras_endpoint)?;
+    verify_mssql_native_profile_with_auth(claimed, options, None)
+}
+
+/// Internal credentials created by the owned creator. This is neither a
+/// serialized ownership proof nor a public endpoint-adoption switch.
+pub(crate) struct ManagedRacReadAuth<'a> {
+    pub agent_user: &'a str,
+    pub agent_password: &'a str,
+    pub cluster_user: &'a str,
+    pub cluster_password: &'a str,
+}
+
+impl ManagedRacReadAuth<'_> {
+    fn arguments(&self, agent: bool) -> Vec<String> {
+        let (prefix, user, password) = if agent {
+            ("agent", self.agent_user, self.agent_password)
+        } else {
+            ("cluster", self.cluster_user, self.cluster_password)
+        };
+        vec![
+            format!("--{prefix}-user={user}"),
+            format!("--{prefix}-pwd={password}"),
+        ]
+    }
+
+    fn redact(&self, value: &str) -> String {
+        redact_managed_secrets(value, &[self.agent_password, self.cluster_password])
+    }
+}
+
+fn redact_managed_secrets(value: &str, secrets: &[&str]) -> String {
+    let mut secrets: Vec<_> = secrets
+        .iter()
+        .copied()
+        .filter(|secret| !secret.is_empty())
+        .collect();
+    // A shorter password may be a prefix of another credential.
+    secrets.sort_by_key(|secret| std::cmp::Reverse(secret.len()));
+    secrets
+        .into_iter()
+        .fold(value.to_owned(), |message, secret| {
+            message.replace(secret, "[redacted]")
+        })
+}
+
+pub(crate) fn verify_mssql_native_profile_managed_observation(
+    claimed: MssqlNativePlatformProfile,
+    options: MssqlNativeProfileVerificationOptions<'_>,
+    authentication: &ManagedRacReadAuth<'_>,
+    agent_version: &str,
+    registration: &str,
+) -> Result<MssqlNativeProfileVerification> {
+    let secrets = [
+        authentication.agent_password,
+        authentication.cluster_password,
+        options.infobase_pwd.unwrap_or_default(),
+        options.sql_pwd.unwrap_or_default(),
+    ];
+    let result = (|| -> Result<_> {
+        if options.sqlcmd.is_some() {
+            bail!("managed profile requires the built-in SQL client");
+        }
+        let cluster_id = options
+            .cluster_id
+            .context("managed profile cluster UUID absent")?;
+        let infobase_id = options
+            .infobase_id
+            .context("managed profile infobase UUID absent")?;
+        require_registered_database(
+            &parse_rac_blocks(registration),
+            &infobase_id.to_string(),
+            options.server,
+            options.database,
+        )?;
+        let build = parse_rac_agent_build(agent_version)?;
+        let probe = parse_probe(&run_probe(&options)?)?;
+        verify_probe(
+            claimed,
+            &build,
+            probe,
+            RasDatabaseBinding {
+                cluster_id,
+                infobase_id,
+            },
+        )
+    })();
+    result
+        // Native failure text can echo argv. Redact the complete error chain.
+        .map_err(|error| {
+            anyhow!(
+                "{}",
+                redact_managed_secrets(&format!("{error:#}"), &secrets)
+            )
+        })
+}
+
+#[cfg(test)]
+mod managed_auth_tests {
+    use super::*;
+
+    #[test]
+    fn managed_auth_uses_separate_agent_cluster_flags_and_redacts_all_credentials() {
+        let auth = ManagedRacReadAuth {
+            agent_user: "generated-agent",
+            agent_password: "abc",
+            cluster_user: "generated-cluster",
+            cluster_password: "abcdef",
+        };
+        assert_eq!(
+            auth.arguments(true),
+            ["--agent-user=generated-agent", "--agent-pwd=abc"]
+        );
+        assert_eq!(
+            auth.arguments(false),
+            ["--cluster-user=generated-cluster", "--cluster-pwd=abcdef"]
+        );
+        assert_eq!(
+            auth.redact("native echoed abcdef then abc"),
+            "native echoed [redacted] then [redacted]"
+        );
+        assert_eq!(
+            redact_managed_secrets(
+                "abc/abcdef/IBpassword/SQLpassword",
+                &["abc", "abcdef", "IBpassword", "SQLpassword", ""]
+            ),
+            "[redacted]/[redacted]/[redacted]/[redacted]"
+        );
+    }
+}
+
+fn verify_mssql_native_profile_with_auth(
+    claimed: MssqlNativePlatformProfile,
+    options: MssqlNativeProfileVerificationOptions<'_>,
+    authentication: Option<&ManagedRacReadAuth<'_>>,
+) -> Result<MssqlNativeProfileVerification> {
+    let agent_build = if let Some(authentication) = authentication {
+        let mut args = vec!["agent".to_owned(), "version".to_owned()];
+        args.extend(authentication.arguments(true));
+        args.push(options.ras_endpoint.to_owned());
+        parse_rac_agent_build(&run_rac_bounded(options.rac, args)?)?
+    } else {
+        read_rac_agent_build(options.rac, options.ras_endpoint)?
+    };
     let binding = verify_ras_infobase_binding(
         options.rac,
         options.ras_endpoint,
@@ -165,6 +371,7 @@ pub fn verify_mssql_native_profile(
         options.infobase_id,
         options.infobase_user,
         options.infobase_pwd,
+        authentication,
     )?;
     let output = run_probe(&options)?;
     verify_probe(claimed, &agent_build, parse_probe(&output)?, binding)
@@ -185,7 +392,7 @@ fn read_rac_agent_build(rac: &Path, ras_endpoint: &str) -> Result<String> {
     parse_rac_agent_build(&output.stdout)
 }
 
-fn parse_rac_agent_build(output: &str) -> Result<String> {
+pub(crate) fn parse_rac_agent_build(output: &str) -> Result<String> {
     let builds = output
         .split(|character: char| !(character.is_ascii_digit() || character == '.'))
         .filter(|token| {
@@ -210,6 +417,7 @@ fn verify_ras_infobase_binding(
     infobase_id: Option<Uuid>,
     infobase_user: Option<&str>,
     infobase_pwd: Option<&str>,
+    authentication: Option<&ManagedRacReadAuth<'_>>,
 ) -> Result<RasDatabaseBinding> {
     let cluster_id = cluster_id.ok_or_else(|| {
         anyhow!("native MSSQL write verification requires --cluster-id to bind RAS to SQL")
@@ -231,6 +439,9 @@ fn verify_ras_infobase_binding(
         ));
     } else if infobase_pwd.is_some() {
         bail!("--infobase-pwd requires --infobase-user");
+    }
+    if let Some(authentication) = authentication {
+        args.extend(authentication.arguments(false));
     }
     args.push(ras_endpoint.to_owned());
     let registration = run_rac_bounded(rac, args)?;
@@ -687,7 +898,20 @@ fn bounded_output(command: &mut Command) -> Result<BoundedOutput> {
     let stderr = child.stderr.take().expect("piped stderr is present");
     let stdout_reader = std::thread::spawn(move || read_bounded(stdout));
     let stderr_reader = std::thread::spawn(move || read_bounded(stderr));
-    let status = child.wait()?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait()? {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            let _ = stdout_reader.join();
+            let _ = stderr_reader.join();
+            bail!("native profile/RAS probe exceeded its 20-second deadline");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    };
     let stdout = stdout_reader
         .join()
         .map_err(|_| anyhow!("stdout reader panicked"))??;
@@ -916,6 +1140,51 @@ pub fn verify_mssql_storage_profile(
 mod tests {
     use super::*;
 
+    #[test]
+    fn dynamic_85_root_restamp_uses_native_bounded_rows_and_refuses_other_layouts() {
+        let profile = MssqlNativePlatformProfile::Platform8_5_1_1150;
+        let old = include_bytes!("../tests/fixtures/platform85-dynamic/root-active.native.bin");
+        let new = include_bytes!("../tests/fixtures/platform85-dynamic/root-staged.native.bin");
+        assert_ne!(old, new);
+        assert!(profile.accepts_dynamic_root_restamp(old, new));
+        assert!(
+            !MssqlNativePlatformProfile::Platform8_3_27_2214.accepts_dynamic_root_restamp(old, new)
+        );
+        assert!(
+            !MssqlNativePlatformProfile::Platform8_3_27_1989.accepts_dynamic_root_restamp(old, new)
+        );
+        let new = std::str::from_utf8(new).unwrap();
+        for invalid in [
+            new.replacen("{2,", "{3,", 1),
+            new.replacen("66193438", "76193438", 1),
+            new.replacen("66193438-abc5", "66193438-ABC5", 1),
+            new.replacen("PiyN", "QiyN", 1),
+            format!(
+                "{{2,66193438-abc5-410b-a1f1-a204102d1a62,{}}}",
+                crate::module_blob::encode_base64(&[0; 112])
+            ),
+            format!(
+                "{{2,66193438-abc5-410b-a1f1-a204102d1a62,{}}}",
+                crate::module_blob::encode_base64(&[0; 144])
+            ),
+            format!(
+                "{{2,66193438-abc5-410b-a1f1-a204102d1a62,{}}}",
+                "A".repeat(1024)
+            ),
+            "{2,66193438-abc5-410b-a1f1-a204102d1a62,}".to_owned(),
+            format!("\u{2003}{new}"),
+            format!("{new}\u{2003}"),
+            format!("{}{new}", " ".repeat(4096)),
+            format!("{new}{}", "\r\n".repeat(2048)),
+        ] {
+            assert!(
+                !profile.accepts_dynamic_root_restamp(old, invalid.as_bytes()),
+                "{invalid}"
+            );
+        }
+        assert!(!profile.accepts_dynamic_root_restamp(b"invalid", new.as_bytes()));
+    }
+
     // What `rac` printed on the lab cluster (8.3.27.2214) for the clone that
     // the tool's own verification had opened: one RAS connection, two worker
     // processes.
@@ -1115,6 +1384,33 @@ mod tests {
             .require_config_apply_supported()
             .expect_err("an undeclared capability must fail closed");
         assert!(undeclared.to_string().contains("is not declared"));
+    }
+
+    #[test]
+    fn initial_85_dynamic_capability_does_not_enable_other_builds_or_activation_modes() {
+        let exact = MssqlNativePlatformProfile::Platform8_5_1_1150;
+        exact.require_config_apply_dynamic_supported().unwrap();
+        // Main activation owns ONLINE/LIVE/WORKER; they remain closed even
+        // though the separately guarded drop-in dynamic publication is admitted.
+        assert!(exact.require_main_write_supported().is_err());
+        assert!(exact.require_extension_write_supported().is_err());
+        exact.require_config_apply_supported().unwrap(); // released 0.4 policy
+
+        MssqlNativePlatformProfile::Platform8_3_27_2214
+            .require_config_apply_dynamic_supported()
+            .unwrap();
+        assert!(
+            MssqlNativePlatformProfile::Platform8_3_27_1989
+                .require_config_apply_dynamic_supported()
+                .is_err()
+        );
+        for unknown in ["platform-8.5.1.1529", "platform-8.5.1.1151", "platform-8.5"] {
+            assert!(<MssqlNativePlatformProfile as ValueEnum>::from_str(unknown, false).is_err());
+        }
+        // The same schema never proves a different server executable build.
+        assert!(verify_probe(exact, "8.5.1.1529", evidenced_probe(), test_binding()).is_err());
+        assert!(verify_probe(exact, "8.3.27.2214", evidenced_probe(), test_binding()).is_err());
+        assert!(verify_probe(exact, "8.5.1.1150", evidenced_probe(), test_binding()).is_ok());
     }
 
     #[test]

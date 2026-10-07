@@ -1,0 +1,110 @@
+[
+  {
+    "process_creation": "2026-10-01T17:02:11.8557510+03:00",
+    "pid": 104444,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"base1;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\base1.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "aa7b07f5-e1e9-45d7-a999-004a3ccac4ed",
+    "ras_started_at": "2026-10-01T17:02:14",
+    "journal_open": "63926460139715|base1|open|1|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "1",
+    "label": "base1",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:02:21.3101130+03:00",
+    "pid": 99700,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"base2;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\base2.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "f164b3b6-b7c2-4bd2-89f5-ac80df81afae",
+    "ras_started_at": "2026-10-01T17:02:22",
+    "journal_open": "63926460144253|base2|open|4|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "4",
+    "label": "base2",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:02:25.7617430+03:00",
+    "pid": 92368,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"base3;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\base3.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "f17b9447-5fe0-483f-95ff-768e5dca3e7c",
+    "ras_started_at": "2026-10-01T17:02:26",
+    "journal_open": "63926460148716|base3|open|6|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "6",
+    "label": "base3",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:13:46.2947090+03:00",
+    "pid": 100256,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"native2-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\native2-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "80fd1605-84c9-4f24-9d2f-c5029505cd73",
+    "ras_started_at": "2026-10-01T17:13:47",
+    "journal_open": "63926460834339|native2-new|open|16|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "16",
+    "label": "native2-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:07:27.6958710+03:00",
+    "pid": 89284,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"own1-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\own1-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "1db6cf17-5eff-4767-87bf-194200facc88",
+    "ras_started_at": "2026-10-01T17:07:29",
+    "journal_open": "63926460455651|own1-new|open|7|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "7",
+    "label": "own1-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:09:02.3162530+03:00",
+    "pid": 82532,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"own2-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\own2-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "8e13eb7a-5667-40f4-b23b-aa0b5dee8da4",
+    "ras_started_at": "2026-10-01T17:09:04",
+    "journal_open": "63926460550121|own2-new|open|9|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "9",
+    "label": "own2-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:09:24.7033890+03:00",
+    "pid": 91848,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"own3-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\own3-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "9996c587-1584-4e1e-bef5-2826b7e4b606",
+    "ras_started_at": "2026-10-01T17:09:26",
+    "journal_open": "63926460572834|own3-new|open|11|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "11",
+    "label": "own3-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:09:46.5440210+03:00",
+    "pid": 93384,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"own4-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\own4-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "25a1d579-d18b-451a-85a3-b17cbbdd8eea",
+    "ras_started_at": "2026-10-01T17:09:48",
+    "journal_open": "63926460594370|own4-new|open|13|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "13",
+    "label": "own4-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  },
+  {
+    "process_creation": "2026-10-01T17:10:09.7595340+03:00",
+    "pid": 76684,
+    "command_line": "\"C:\\Program Files\\1cv8\\8.3.27.2214\\bin\\1cv8c.exe\" ENTERPRISE /S\"localhost:2541\\ibcmd_rs_05_load_w3_work_20261001\" /N\"Администратор\" /P\"\" /Execute\"F:\\ibcmd\\lab\\05\\wave3\\load\\observer\\IbcmdRsObserver.epf\" /C\"own5-new;poll;F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\\" /DisableStartupMessages /DisableStartupDialogs /L ru /Out\"F:\\ibcmd\\lab\\05\\wave3\\load\\obs\\own5-new.client-out.txt\" -NoTruncate",
+    "epf_sha256": "3003D387D9BAF074FC1952FE3969D6F323297ED3EAC071F17CE548AC9D4CCB4A",
+    "session_uuid": "f9e9de1b-5116-49b3-b061-fcc36b9251df",
+    "ras_started_at": "2026-10-01T17:10:11",
+    "journal_open": "63926460617766|own5-new|open|15|||bounded=600s;doc=_ДемоСчетНаОплатуПокупателю;report=_ДемоОтчетПоСчетамНаОплатуГлобальный",
+    "session_id": "15",
+    "label": "own5-new",
+    "infobase_uuid": "910a5f6b-e788-4dbe-a6f9-aad6d808bd89"
+  }
+]

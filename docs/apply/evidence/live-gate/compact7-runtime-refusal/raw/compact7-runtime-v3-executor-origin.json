@@ -1,0 +1,31 @@
+{
+  "arguments": [
+    "-NoProfile",
+    "-File",
+    "F:/ibcmd/lab/05/wave3/load/compact7-runtime-v3/compact7_lifetime_v2.ps1",
+    "-Binary",
+    "F:/ibcmd/lab/05/wave3/coordinator/ibcmd-rs-fbf2d743-debug.exe",
+    "-SourceHead",
+    "fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2",
+    "-BinarySha256",
+    "81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0",
+    "-ManifestSha256",
+    "30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E",
+    "-ControllerHead",
+    "ad9f1e2dbda5de78a09af6a5fc06f6f775708922",
+    "-RuntimeManifestSha256",
+    "781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A"
+  ],
+  "birth_ticks": 639265199813721143,
+  "expected_executable": "C:/Program Files/PowerShell/7/pwsh.exe",
+  "executor_pid": 95692,
+  "launch_utc": "2026-10-02T06:39:41.8727187Z",
+  "parent_pid": 95692,
+  "command_line": "\"C:\\Program Files\\PowerShell\\7\\pwsh.exe\" -NoProfile -File F:/ibcmd/lab/05/wave3/load/compact7-runtime-v3/compact7_lifetime_v2.ps1 -Binary F:/ibcmd/lab/05/wave3/coordinator/ibcmd-rs-fbf2d743-debug.exe -SourceHead fbf2d7437b8cdcd184ae49bc96acdb2115ac97d2 -BinarySha256 81CC4526E860EDB9412D60ECFBDF2EED71376D40DBE2ADA648D4CCFFD7077AE0 -ManifestSha256 30F33F9BC97B11524412F87E72B12061A7D2C4D19C4D40CCB01B4F2224B63D8E -ControllerHead ad9f1e2dbda5de78a09af6a5fc06f6f775708922 -RuntimeManifestSha256 781CFD57A8E27E918D7D1FF167692A11F46A1E76173878E8835F171C6C87202A",
+  "actual_executable": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+  "native_authorized_one_attempt": true,
+  "birth_utc": "2026-10-02T06:39:41.3721143Z",
+  "cim_birth_utc": "2026-10-02T06:39:41.3721140Z",
+  "timeout_seconds": 7200,
+  "controller_pid": 101168
+}

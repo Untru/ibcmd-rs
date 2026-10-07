@@ -688,6 +688,10 @@ fn run() -> Result<()> {
             let report = ibcmd_rs::mssql::activate_staged_main(&args)?;
             println!("{}", serde_json::to_string_pretty(&report)?);
         }
+        Commands::MssqlLiveContinue(args) => {
+            let report = ibcmd_rs::mssql_live_continue::run(&args)?;
+            println!("{}", serde_json::to_string_pretty(&report)?);
+        }
         Commands::MssqlApplyCheck(args) => {
             std::process::exit(ibcmd_rs::apply_check::cli::run_mssql_apply_check(&args)?)
         }

@@ -123,6 +123,19 @@ const JOURNAL_FORMS: &str = "ec81ad10-ca07-11d5-b9a5-0050bae0a95d";
 
 const SEQUENCE_DIMENSIONS: &str = "437488c0-35e2-11d6-a3c7-0050bae0a776";
 
+/// Existing canonical collection classes for body-owning register families.
+pub(crate) fn owned_body_classes(kind: &str) -> Option<Vec<(&'static str, &'static str)>> {
+    let form = match kind {
+        "InformationRegister" => IR_FORMS,
+        "AccumulationRegister" => ACCUM_FORMS,
+        "AccountingRegister" => ACCOUNTING_FORMS,
+        "CalculationRegister" => CALC_FORMS,
+        "DocumentJournal" => JOURNAL_FORMS,
+        _ => return None,
+    };
+    Some(vec![(form, "Form"), (TEMPLATES, "Template")])
+}
+
 // ---------------------------------------------------------------------------
 // Standard attribute markers by kind.
 

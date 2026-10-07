@@ -74,6 +74,133 @@ pub(crate) fn write_native_moxel_body(
     Ok(layout(&body).replace('\n', "\r\n"))
 }
 
+/// A target-aware template patch must validate the complete compressed row,
+/// including an unchanged companion, before retaining any of its bytes.
+pub(crate) fn inflate_template_patch(blob: &[u8]) -> Result<Vec<u8>> {
+    const LIMIT: usize = 8 * 1024 * 1024;
+    ensure!(blob.len() <= LIMIT, "template compressed row exceeds 8 MiB");
+    let mut decoder = flate2::Decompress::new(false);
+    let mut plain = Vec::new();
+    let mut chunk = [0u8; 8192];
+    loop {
+        let before_in = decoder.total_in();
+        let before_out = decoder.total_out();
+        let capacity = chunk.len().min(LIMIT + 1 - plain.len());
+        let status = decoder.decompress(
+            &blob[before_in as usize..],
+            &mut chunk[..capacity],
+            flate2::FlushDecompress::None,
+        )?;
+        let produced = (decoder.total_out() - before_out) as usize;
+        plain.extend_from_slice(&chunk[..produced]);
+        ensure!(plain.len() <= LIMIT, "template decoded row exceeds 8 MiB");
+        if status == flate2::Status::StreamEnd {
+            ensure!(
+                decoder.total_in() == blob.len() as u64,
+                "template trailing compressed bytes"
+            );
+            return Ok(plain);
+        }
+        ensure!(
+            decoder.total_in() != before_in || produced != 0,
+            "template incomplete DEFLATE stream"
+        );
+    }
+}
+
+pub(crate) fn preserve_identical_template_blob(base: &[u8], compiled: &[u8]) -> Result<Vec<u8>> {
+    let base_plain = inflate_template_patch(base)?;
+    let compiled_plain = inflate_template_patch(compiled)?;
+    Ok(if base_plain == compiled_plain {
+        base
+    } else {
+        compiled
+    }
+    .to_vec())
+}
+
+/// Native partial spreadsheet imports retain the stored language flags, which
+/// the XML does not publish. A base-free XML import still uses the writer's
+/// evidenced defaults. Only an exactly equal decoded language setting can
+/// inherit the old record; an intentional language edit keeps the new record.
+pub(crate) fn preserve_spreadsheet_language(base: &[u8], compiled: &[u8]) -> Result<Vec<u8>> {
+    use crate::compiler::families::native::{outline, required_list, required_token};
+    use crate::module_blob::scan_braced_fields;
+    const HEADER: &[u8] = b"MOXCEL\0\x08\0\x01\0\x0c\0";
+    const BOM: &[u8] = b"\xef\xbb\xbf";
+    fn language(
+        plain: &[u8],
+    ) -> Result<(
+        &str,
+        std::ops::Range<usize>,
+        Vec<crate::compiler::families::native::NativeValue>,
+    )> {
+        super::mxl::decode_inflated_compatible_mxl(plain)?;
+        ensure!(
+            plain.starts_with(HEADER),
+            "template language patch requires the native MOXCEL header"
+        );
+        let body = &plain[HEADER.len()..];
+        ensure!(
+            body.starts_with(BOM),
+            "template language patch requires UTF-8 BOM"
+        );
+        let parsed = outline(body, 4, 0)?;
+        ensure!(
+            parsed.head[0].as_token() == Some("8")
+                && parsed.head[1].as_token() == Some("1")
+                && parsed.head[2].as_token() == Some("12"),
+            "unmeasured template language root revision"
+        );
+        let values = required_list(&parsed.head[3], "template language")?;
+        let count = required_token(&values[3], "template language count")?.parse::<usize>()?;
+        ensure!(
+            count <= 64 && values.len() == count * 3 + 5,
+            "unmeasured template language shape"
+        );
+        ensure!(
+            matches!(values[2].as_token(), Some("0" | "1"))
+                && matches!(values.last().and_then(|v| v.as_token()), Some("0" | "1")),
+            "unmeasured template language flags"
+        );
+        ensure!(
+            values[0].as_text().is_some()
+                && values[1].as_text().is_some()
+                && values[4..values.len() - 1]
+                    .iter()
+                    .all(|v| v.as_text().is_some()),
+            "unmeasured template language settings"
+        );
+        let settings = values
+            .iter()
+            .enumerate()
+            .filter(|(i, _)| *i != 2 && *i != values.len() - 1)
+            .map(|(_, v)| v.clone())
+            .collect();
+        let text = std::str::from_utf8(&body[BOM.len()..])?;
+        let spans = scan_braced_fields(text, 0)?;
+        Ok((text, spans[3].clone(), settings))
+    }
+    let base_plain = inflate_template_patch(base)?;
+    let compiled_plain = inflate_template_patch(compiled)?;
+    let (base_text, base_range, base_settings) = language(&base_plain)?;
+    let (compiled_text, compiled_range, compiled_settings) = language(&compiled_plain)?;
+    if base_settings != compiled_settings
+        || base_text[base_range.clone()] == compiled_text[compiled_range.clone()]
+    {
+        return Ok(compiled.to_vec());
+    }
+    let mut text = compiled_text.to_owned();
+    text.replace_range(compiled_range, &base_text[base_range]);
+    let mut patched = compiled_plain[..HEADER.len() + BOM.len()].to_vec();
+    patched.extend_from_slice(text.as_bytes());
+    ensure!(
+        patched.len() <= 8 * 1024 * 1024,
+        "template patched row exceeds 8 MiB"
+    );
+    crate::module_blob::deflate_raw(&patched)
+}
+
 // ---------------------------------------------------------------------------
 // XML tree
 // ---------------------------------------------------------------------------
@@ -2977,6 +3104,133 @@ mod tests {
     use std::collections::BTreeMap;
 
     use super::*;
+
+    fn patch_fixture(name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/template-physical-preservation")
+                .join(name),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn template_patch_preserves_three_native_descriptor_companions_exactly() {
+        for id in [
+            "2eeea138-481c-4fde-9e8a-709d751cc469",
+            "33f66222-3f4e-4535-8ce6-43eae5bed791",
+            "ae1192da-f17d-4527-b9cb-4f4cce810985",
+        ] {
+            let base = patch_fixture(&format!("{id}.baseline.bin"));
+            let old_own = patch_fixture(&format!("{id}.OWN.bin"));
+            let xml = patch_fixture(&format!("{id}.xml"));
+            let packed = crate::module_blob::pack_simple_metadata_blob_from_xml_with_source(
+                &base, &xml, None,
+            )
+            .unwrap();
+            // RED: the old writer re-deflated an unchanged descriptor.
+            assert_ne!(old_own, base);
+            assert_eq!(
+                inflate_template_patch(&packed.blob).unwrap(),
+                inflate_template_patch(&base).unwrap()
+            );
+            assert_eq!(
+                preserve_identical_template_blob(&base, &packed.blob).unwrap(),
+                base
+            );
+            // An actual descriptor edit must keep the freshly compiled bytes.
+            let changed = String::from_utf8(xml)
+                .unwrap()
+                .replace("<Comment/>", "<Comment>edited</Comment>");
+            let packed = crate::module_blob::pack_simple_metadata_blob_from_xml_with_source(
+                &base,
+                changed.as_bytes(),
+                None,
+            )
+            .unwrap();
+            assert_ne!(
+                inflate_template_patch(&packed.blob).unwrap(),
+                inflate_template_patch(&base).unwrap()
+            );
+            assert_eq!(
+                preserve_identical_template_blob(&base, &packed.blob).unwrap(),
+                packed.blob
+            );
+        }
+    }
+
+    #[test]
+    fn template_patch_retains_native_spreadsheet_language_without_losing_the_body_edit() {
+        let base = patch_fixture("spreadsheet.baseline.bin");
+        let old_own = patch_fixture("spreadsheet.OWN.bin");
+        let native = patch_fixture("spreadsheet.native.bin");
+        let own_plain = inflate_template_patch(&old_own).unwrap();
+        let native_plain = inflate_template_patch(&native).unwrap();
+        let compiled =
+            super::super::mxl::compile_evidenced_mxl(&patch_fixture("spreadsheet.xml"), None, None)
+                .unwrap();
+        assert_eq!(inflate_template_patch(&compiled).unwrap(), own_plain);
+        assert_ne!(own_plain, native_plain); // actual pre-fix compiler output
+        let result = preserve_spreadsheet_language(&base, &compiled).unwrap();
+        assert_eq!(inflate_template_patch(&result).unwrap(), native_plain);
+        assert_ne!(
+            inflate_template_patch(&result).unwrap(),
+            inflate_template_patch(&base).unwrap()
+        );
+        // Both inputs are retained native rows too: already-correct output stays raw-identical.
+        assert_eq!(
+            preserve_spreadsheet_language(&base, &native).unwrap(),
+            native
+        );
+    }
+
+    #[test]
+    fn template_patch_language_edit_is_not_replaced_with_the_old_setting() {
+        let base = patch_fixture("spreadsheet.baseline.bin");
+        let own = patch_fixture("spreadsheet.OWN.bin");
+        let text = String::from_utf8(inflate_template_patch(&own).unwrap()).unwrap();
+        let changed = text.replacen("{\"ru\",\"ru\",1,1,", "{\"en\",\"ru\",1,1,", 1);
+        assert_ne!(changed, text);
+        let changed = crate::module_blob::deflate_raw(changed.as_bytes()).unwrap();
+        assert_eq!(
+            preserve_spreadsheet_language(&base, &changed).unwrap(),
+            changed
+        );
+        let malformed = text.replacen("{\"ru\",\"ru\",1,1,", "{\"ru\",\"ru\",2,1,", 1);
+        let malformed = crate::module_blob::deflate_raw(malformed.as_bytes()).unwrap();
+        assert!(preserve_spreadsheet_language(&base, &malformed).is_err());
+        assert!(preserve_spreadsheet_language(&malformed, &own).is_err());
+    }
+
+    #[test]
+    fn template_patch_complete_stream_and_budgets_apply_even_to_identical_rows() {
+        use std::io::Write;
+        let plain = inflate_template_patch(&patch_fixture("spreadsheet.native.bin")).unwrap();
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&plain).unwrap();
+        encoder.flush().unwrap();
+        let unfinished = encoder.get_ref().clone();
+        // The complete MOXCEL plaintext has already been emitted, without StreamEnd.
+        assert_eq!(crate::module_blob::inflate_raw(&unfinished).unwrap(), plain);
+        assert!(preserve_identical_template_blob(&unfinished, &unfinished).is_err());
+        assert!(preserve_spreadsheet_language(&unfinished, &unfinished).is_err());
+        let complete = encoder.finish().unwrap();
+        assert_eq!(inflate_template_patch(&complete).unwrap(), plain);
+        for end in 0..complete.len() {
+            assert!(inflate_template_patch(&complete[..end]).is_err());
+        }
+        let mut trailing = complete.clone();
+        trailing.push(0);
+        assert!(preserve_identical_template_blob(&trailing, &trailing).is_err());
+        assert!(preserve_spreadsheet_language(&complete, &trailing).is_err());
+        let oversize = crate::module_blob::deflate_raw(&vec![b'a'; 8 * 1024 * 1024 + 1]).unwrap();
+        assert!(preserve_identical_template_blob(&oversize, &oversize).is_err());
+        assert!(preserve_spreadsheet_language(&oversize, &complete).is_err());
+        assert!(inflate_template_patch(&vec![0; 8 * 1024 * 1024 + 1]).is_err());
+        let unknown = crate::module_blob::deflate_raw(b"not a spreadsheet").unwrap();
+        assert!(preserve_spreadsheet_language(&unknown, &complete).is_err());
+    }
 
     fn crlf(text: &str) -> String {
         text.replace('\n', "\r\n")

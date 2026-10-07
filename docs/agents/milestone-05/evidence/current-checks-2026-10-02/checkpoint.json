@@ -1,0 +1,108 @@
+{
+  "scope": "Historical source 7aebba15: original14 PASS + targeted2 PASS; no claim original single16 PASS or milestone acceptance",
+  "source_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "source_unchanged_in_current_docs_commits": true,
+  "original16_run_pass": false,
+  "composite_current_checks_pass": true,
+  "binary_sha256": "44513F752CB946644C856B69D740189A045452682989C6E7FC955A59035D0E38",
+  "source_certificate_root_peer_pass": true,
+  "D2_native_activation_unproved": true,
+  "milestone_complete": false,
+  "pins": [
+    {
+      "file": "final-combined-v3-frozen.json",
+      "bytes": 10221,
+      "sha256": "3332F76CED461F354B66412152AB55C5D6F35533385D80220D28D87CF0BFA531"
+    },
+    {
+      "file": "final-combined-v3-launch-terminal.json",
+      "bytes": 119,
+      "sha256": "CC2122179D640BE6740755D018C3B1F0ECC81EFC6C318023B219D28DE824BBF3"
+    },
+    {
+      "file": "final-packaging-v5-frozen.json",
+      "bytes": 3117,
+      "sha256": "4E8D065CB0067235B0DE39341409A4853CA21A21E58D700398C082DBACDEB6D3"
+    },
+    {
+      "file": "final-packaging-v5-process.ps1",
+      "bytes": 6863,
+      "sha256": "E04B4445F1BAE4E300BBB5A252D648294C78A6588E21F640476D6AED827E70D4"
+    },
+    {
+      "file": "review-final-packaging-v5-s1-mix.json",
+      "bytes": 1176,
+      "sha256": "0739F42780DFC5B19705586D71629B614F8CA186C38A3F8E3645603F531BF7B0"
+    },
+    {
+      "file": "final-combined-v3/outcome.json",
+      "bytes": 532,
+      "sha256": "F162E367B4700A4A73344A072C7CB80428B4C227D5B80B701655721C0A025049"
+    },
+    {
+      "file": "final-combined-v3/summary.txt",
+      "bytes": 377,
+      "sha256": "3EA7645057018BBFFD1C997438285E55535640B886457006A9FF180AD991E32B"
+    },
+    {
+      "file": "final-combined-v3/gates.json",
+      "bytes": 451,
+      "sha256": "4018EC60008E3ABFBDE46F7D7C7BEFB7CA1FFC785253053C746C59054880C9B0"
+    },
+    {
+      "file": "final-combined-v3/heavy-release.json",
+      "bytes": 132,
+      "sha256": "734F6DB64A989C98BCB905216435BB6CFB926F23D60B810CE835DF7B6B0C75AE"
+    },
+    {
+      "file": "final-combined-v3/sbom.log",
+      "bytes": 1251,
+      "sha256": "36B9C81BBFA05F7FA69A9116A64BCA05390A4BA184A5289D8F7DAFF0CD1CD001"
+    },
+    {
+      "file": "final-combined-v3/audit-release.log",
+      "bytes": 1070,
+      "sha256": "6B51423CC5929A98377E3409C14D465C0EA3D629BFB792B1D1857C1D6BC5B1C4"
+    },
+    {
+      "file": "final-combined-v3/test-root-lib.log",
+      "bytes": 356107,
+      "sha256": "A340E87B5A55CCDDFE50E96B3203CA32A3F26D13BC47E963B46C205C06A8D442"
+    },
+    {
+      "file": "final-packaging-v5/binary-provenance.json",
+      "bytes": 754,
+      "sha256": "E162E0915E88EFED2A7C1500479B360D1DB819E004CEE4511D44706460DCBE2D"
+    },
+    {
+      "file": "final-packaging-v5/nested-stdin-smoke-command.json",
+      "bytes": 95,
+      "sha256": "908FD913F2CC5F4BC611DC8EB9C37DE17BFFD6BBEDE433CDD2EA722C2571AC75"
+    },
+    {
+      "file": "final-packaging-v5/sbom-command.json",
+      "bytes": 55,
+      "sha256": "0FE5BA17A6F8617D1ACDA877A3B2EFE2DE4A20D60995A70700ECB503E6236B22"
+    },
+    {
+      "file": "final-packaging-v5/audit-release-command.json",
+      "bytes": 164,
+      "sha256": "EEBCAFD0FA75F9B08A382F0AFB9A15FB62FC075A82E288CBE86FF77C8BCACD3C"
+    },
+    {
+      "file": "final-packaging-v5/x86_64-pc-windows-msvc.sbom.cdx.json",
+      "bytes": 79908,
+      "sha256": "DDBEC54C27B2F447AD6E3DD4EB4250DCC9DE66A4BCCF67D9B0867714DC975B89"
+    },
+    {
+      "file": "review-D2-source-certificate-root-v2.json",
+      "bytes": 353,
+      "sha256": "39F01DA186BCE111B6DB40D4CDD1D65AA84E8DE1E83C6D547853CA2023B0FF8B"
+    },
+    {
+      "file": "review-D2-source-certificate-7AC02-s1-mix.json",
+      "bytes": 594,
+      "sha256": "86B73793380F45AABE57EBB0F281B6380C71660A18DCFC4EBA32B2F9660B2E45"
+    }
+  ]
+}

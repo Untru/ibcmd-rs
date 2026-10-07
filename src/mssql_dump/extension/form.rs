@@ -10,54 +10,82 @@
 
 const EOL: &str = "\r\n";
 
-/// The call type written with every handler of an adopted form.
-const CALL_TYPE: &str = " callType=\"Before\"";
+/// Reads call types from the stored event blocks of an adopted form without
+/// BaseForm. Commands retain the evidenced Before convention. Unknown event
+/// blocks or ambiguous bindings fail instead of inventing Before.
+pub(crate) fn add_call_types(xml: &str, layout: &str) -> anyhow::Result<Option<String>> {
+    use super::super::{
+        form_event_name_from_identifier, form_extension, scan_1c_braced_value,
+        split_1c_braced_fields,
+    };
+    use anyhow::{Context, bail};
 
-/// Writes `callType="Before"` on the event and command handlers of an adopted
-/// form that carries no base form record (one on record: the common form
-/// `СвязанныеДокументы` of the БСП 8.3.27 ServiceDesk, six commands and three
-/// events, all `Before`). A form with a base form record gets its call types
-/// from the event blocks of its body, with the base form, from the form writer
-/// itself (`form_extension::form_adoption`).
-pub(crate) fn add_call_types(xml: &str) -> Option<String> {
-    let lines: Vec<&str> = xml.split(EOL).collect();
-    let limit = lines
-        .iter()
-        .position(|line| line.starts_with("\t<BaseForm"))
-        .unwrap_or(lines.len());
-    // A form with a base form record has its call types written with it.
-    if limit != lines.len() {
-        return None;
+    let document = ibcmd_xml::XmlReader::from_slice(xml.as_bytes())
+        .context("the adopted form XML is invalid")?;
+    if document.root().children().iter().any(|node| matches!(node, ibcmd_xml::XmlNode::Element(element) if element.name().local() == "BaseForm")) {
+        return Ok(None);
     }
-    let mut changed = false;
-    let mut rewritten = Vec::with_capacity(lines.len());
-    for (index, line) in lines.iter().enumerate() {
-        if index < limit {
-            let trimmed = line.trim_start_matches('\t');
-            let indent = &line[..line.len() - trimmed.len()];
-            if let Some(rest) = trimmed.strip_prefix("<Action>") {
-                rewritten.push(format!("{indent}<Action{CALL_TYPE}>{rest}"));
-                changed = true;
-                continue;
-            }
-            if let Some(rest) = trimmed.strip_prefix("<Event name=\"")
-                && let Some(quote) = rest.find('"')
-                && rest[quote + 1..].starts_with('>')
-            {
-                rewritten.push(format!(
-                    "{indent}<Event name=\"{}\"{CALL_TYPE}{}",
-                    &rest[..quote],
-                    &rest[quote + 1..]
-                ));
-                changed = true;
-                continue;
-            }
+    // A recognizable event head must have the complete evidenced tail. The
+    // permissive legacy scanner alone would skip malformed/unknown tails.
+    for (start, _) in layout.match_indices('{') {
+        let Some(end) = scan_1c_braced_value(layout, start) else {
+            continue;
+        };
+        let block = &layout[start..end];
+        let Some(fields) = split_1c_braced_fields(block, 0) else {
+            continue;
+        };
+        let Some(identifier) = fields.get(1) else {
+            continue;
+        };
+        if form_event_name_from_identifier(identifier.trim().trim_matches('"')).is_some()
+            && fields
+                .first()
+                .is_some_and(|count| count.trim().parse::<usize>().is_ok())
+            && form_extension::parse_form_event_block(block).is_none()
+        {
+            bail!("unsupported or malformed adopted form event block for {identifier}");
         }
-        rewritten.push((*line).to_owned());
     }
-    changed.then(|| rewritten.join(EOL))
+    let call_types = form_extension::form_event_call_types(layout);
+    let mut pending = vec![document.root()];
+    while let Some(node) = pending.pop() {
+        pending.extend(node.children().iter().filter_map(|child| match child {
+            ibcmd_xml::XmlNode::Element(element) => Some(element),
+            _ => None,
+        }));
+        if node.name().local() != "Event" {
+            continue;
+        }
+        let attr = |name: &str| {
+            node.attributes().iter().find_map(|attr| match attr.kind() {
+                ibcmd_xml::AttributeKind::Ordinary(key) if key.raw() == name => Some(attr.value()),
+                _ => None,
+            })
+        };
+        let event = attr("name").context("form event has no name")?;
+        let handler = node
+            .children()
+            .iter()
+            .filter_map(|child| match child {
+                ibcmd_xml::XmlNode::Text(text) => Some(text.value()),
+                ibcmd_xml::XmlNode::CData(text) => Some(text.value()),
+                _ => None,
+            })
+            .collect::<String>();
+        let stored = call_types.get(event, &handler).with_context(|| {
+            format!("adopted form event {event}/{handler} has no unambiguous stored call type")
+        })?;
+        if attr("callType").is_some_and(|xml_type| xml_type != stored) {
+            bail!("adopted form event {event}/{handler} contradicts its stored call type");
+        }
+    }
+    let rewritten = form_extension::with_action_call_types(&form_extension::with_event_call_types(
+        xml,
+        &call_types,
+    ));
+    Ok((rewritten != xml).then_some(rewritten))
 }
-
 /// The value of an XML attribute in the text of a start tag.
 fn attribute<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let marker = format!(" {name}=\"");
@@ -477,7 +505,7 @@ mod tests {
         let xml = crlf(
             "<Form>\n\t<Events>\n\t\t<Event name=\"OnCreateAtServer\">Обработчик</Event>\n\t</Events>\n\t<Commands>\n\t\t<Command name=\"К\" id=\"1\">\n\t\t\t<Action>Действие</Action>\n\t\t</Command>\n\t</Commands>\n</Form>",
         );
-        let adjusted = add_call_types(&xml).unwrap();
+        let adjusted = add_call_types(&xml, "{1,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,\"Обработчик\",1,0,9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b,0,1}").unwrap().unwrap();
         assert!(
             adjusted.contains("<Event name=\"OnCreateAtServer\" callType=\"Before\">Обработчик")
         );
@@ -490,6 +518,72 @@ mod tests {
         let xml = crlf(
             "<Form>\n\t<Events>\n\t\t<Event name=\"OnOpen\">Обработчик</Event>\n\t</Events>\n\t<BaseForm version=\"2.20\">\n\t</BaseForm>\n</Form>",
         );
-        assert!(add_call_types(&xml).is_none());
+        assert!(add_call_types(&xml, "").unwrap().is_none());
+    }
+
+    #[test]
+    fn no_base_form_uses_native_before_after_and_override_codes() {
+        let xml = crlf(
+            "<Form>\n\t<Events>\n\t\t<Event name=\"OnCreateAtServer\">ПриСозданииНаСервере</Event>\n\t</Events>\n</Form>",
+        );
+        for (call_type, block) in [
+            (
+                "Before",
+                include_str!(
+                    "../../../tests/fixtures/native-evidence/extension-form-interceptors/before.block.txt"
+                ),
+            ),
+            (
+                "After",
+                include_str!(
+                    "../../../tests/fixtures/native-evidence/extension-form-interceptors/after.block.txt"
+                ),
+            ),
+            (
+                "Override",
+                include_str!(
+                    "../../../tests/fixtures/native-evidence/extension-form-interceptors/override.block.txt"
+                ),
+            ),
+        ] {
+            let actual = add_call_types(&xml, block.trim()).unwrap().unwrap();
+            assert!(
+                actual.contains(&format!("callType=\"{call_type}\"")),
+                "{actual}"
+            );
+        }
+    }
+
+    #[test]
+    fn malformed_and_unknown_stored_interceptors_are_refused() {
+        const EVENT: &str = "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b";
+        let xml = "<Form><Events><Event name=\"OnCreateAtServer\">Handler</Event></Events></Form>";
+        for tail in ["3,1", "0,2,\"Handler\",3", "0,0", "0,2", "0,1,extra"] {
+            let block = format!("{{1,{EVENT},\"Handler\",1,0,{EVENT},{tail}}}");
+            assert!(add_call_types(xml, &block).is_err(), "{block}");
+        }
+        assert!(add_call_types(xml, "").is_err());
+    }
+
+    #[test]
+    fn conflicting_xml_and_ambiguous_bindings_are_refused() {
+        const EVENT: &str = "9f2e5ddb-3492-4f5d-8f0d-416b8d1d5c5b";
+        let block = format!("{{1,{EVENT},\"Handler\",1,0,{EVENT},0,1}}");
+        let xml = "<Form><Events><Event name=\"OnCreateAtServer\" callType=\"After\">Handler</Event></Events></Form>";
+        assert!(add_call_types(xml, &block).is_err());
+        let xml = xml.replace(" callType=\"After\"", "");
+        let ambiguous = format!("{block}{{1,{EVENT},\"Handler\",1,0,{EVENT},2,1}}");
+        assert!(add_call_types(&xml, &ambiguous).is_err());
+    }
+
+    #[test]
+    fn one_handler_can_have_different_call_types_for_two_events() {
+        let layout =
+            "{2,OnOpen,\"Shared\",BeforeClose,\"\",1,0,OnOpen,0,1,BeforeClose,0,2,\"Shared\",1}";
+        let xml = "<Form><Events><Event name=\"OnOpen\">Shared</Event><Event name=\"BeforeClose\">Shared</Event></Events><Commands><Command><Action>Run</Action></Command></Commands></Form>";
+        let actual = add_call_types(xml, layout).unwrap().unwrap();
+        assert!(actual.contains("name=\"OnOpen\" callType=\"Before\">Shared"));
+        assert!(actual.contains("name=\"BeforeClose\" callType=\"After\">Shared"));
+        assert!(actual.contains("<Action callType=\"Before\">Run</Action>"));
     }
 }

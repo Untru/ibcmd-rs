@@ -1,0 +1,836 @@
+{
+  "scope": "isolated native disabled-dynamic and current3ff loaded checkpoint/owned reconnect, not warm admission",
+  "physical_rows": 401,
+  "confirmed_commits": 400,
+  "confirmed_reports": 400,
+  "unreturned_operations": [
+    {
+      "label": "isolated-chain-3-new-b",
+      "attempt": 14,
+      "start": "63926469545422|isolated-chain-3-new-b|operation-start|3|LIVE-f5-3|LIVE-f5-3|attempt=14;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "isolated-chain-3-old-a",
+      "attempt": 28,
+      "start": "63926469285776|isolated-chain-3-old-a|operation-start|1|LIVE-native1|LIVE-native1|attempt=28;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "isolated-chain-3-old-b",
+      "attempt": 23,
+      "start": "63926469285978|isolated-chain-3-old-b|operation-start|3|LIVE-native1|LIVE-native1|attempt=23;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "isolated-chain-3-old-c",
+      "attempt": 18,
+      "start": "63926469286178|isolated-chain-3-old-c|operation-start|5|LIVE-native1|LIVE-native1|attempt=18;commit_not_established=1",
+      "physical_at_final_readback": null
+    },
+    {
+      "label": "isolated-native-old-b",
+      "attempt": 32,
+      "start": "63926468657813|isolated-native-old-b|operation-start|4|LIVE-live1|LIVE-live1|attempt=32;commit_not_established=1",
+      "physical_at_final_readback": {
+        "uuid": "8c2586d4-bdb4-11f1-8f5e-ac361be9dbd1",
+        "posted": "01"
+      }
+    }
+  ],
+  "physical_commits_without_receipt": {
+    "ibcmd-rs-load:isolated-native-old-b:32": {
+      "uuid": "8c2586d4-bdb4-11f1-8f5e-ac361be9dbd1",
+      "posted": "01"
+    }
+  },
+  "emitted_errors": [],
+  "native_child_utc": [
+    "2026-10-01T16:23:57.7954776Z",
+    "2026-10-01T16:24:01.7755415Z"
+  ],
+  "native_completed_during_child": 11,
+  "native_completed_after_child": 31,
+  "own_phase1_return_utc": "2026-10-01T16:34:49.9240986Z",
+  "own_old_completed_after_phase1_return": 0,
+  "cohorts": [
+    {
+      "label": "isolated-3-old-a",
+      "starts": 29,
+      "confirmed_commits": 29,
+      "confirmed_reports": 29,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-3-old-b",
+      "starts": 27,
+      "confirmed_commits": 27,
+      "confirmed_reports": 27,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-3-old-c",
+      "starts": 24,
+      "confirmed_commits": 24,
+      "confirmed_reports": 24,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-chain-3-new-a",
+      "starts": 17,
+      "confirmed_commits": 17,
+      "confirmed_reports": 17,
+      "markers": [
+        [
+          "LIVE-f5-3",
+          "LIVE-f5-3"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-chain-3-new-b",
+      "starts": 14,
+      "confirmed_commits": 13,
+      "confirmed_reports": 13,
+      "markers": [
+        [
+          "LIVE-f5-3",
+          "LIVE-f5-3"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "isolated-chain-3-new-b",
+          "attempt": 14,
+          "start": "63926469545422|isolated-chain-3-new-b|operation-start|3|LIVE-f5-3|LIVE-f5-3|attempt=14;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ]
+    },
+    {
+      "label": "isolated-chain-3-new-c",
+      "starts": 10,
+      "confirmed_commits": 10,
+      "confirmed_reports": 10,
+      "markers": [
+        [
+          "LIVE-f5-3",
+          "LIVE-f5-3"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-chain-3-old-a",
+      "starts": 28,
+      "confirmed_commits": 27,
+      "confirmed_reports": 27,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "isolated-chain-3-old-a",
+          "attempt": 28,
+          "start": "63926469285776|isolated-chain-3-old-a|operation-start|1|LIVE-native1|LIVE-native1|attempt=28;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ]
+    },
+    {
+      "label": "isolated-chain-3-old-b",
+      "starts": 23,
+      "confirmed_commits": 22,
+      "confirmed_reports": 22,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "isolated-chain-3-old-b",
+          "attempt": 23,
+          "start": "63926469285978|isolated-chain-3-old-b|operation-start|3|LIVE-native1|LIVE-native1|attempt=23;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ]
+    },
+    {
+      "label": "isolated-chain-3-old-c",
+      "starts": 18,
+      "confirmed_commits": 17,
+      "confirmed_reports": 17,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "isolated-chain-3-old-c",
+          "attempt": 18,
+          "start": "63926469286178|isolated-chain-3-old-c|operation-start|5|LIVE-native1|LIVE-native1|attempt=18;commit_not_established=1",
+          "physical_at_final_readback": null
+        }
+      ]
+    },
+    {
+      "label": "isolated-full-3-old-a",
+      "starts": 29,
+      "confirmed_commits": 29,
+      "confirmed_reports": 29,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-full-3-old-b",
+      "starts": 29,
+      "confirmed_commits": 29,
+      "confirmed_reports": 29,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-full-3-old-c",
+      "starts": 24,
+      "confirmed_commits": 24,
+      "confirmed_reports": 24,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-native-new-a",
+      "starts": 16,
+      "confirmed_commits": 16,
+      "confirmed_reports": 16,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-native-new-b",
+      "starts": 12,
+      "confirmed_commits": 12,
+      "confirmed_reports": 12,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-native-new-c",
+      "starts": 9,
+      "confirmed_commits": 9,
+      "confirmed_reports": 9,
+      "markers": [
+        [
+          "LIVE-native1",
+          "LIVE-native1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-native-old-a",
+      "starts": 35,
+      "confirmed_commits": 35,
+      "confirmed_reports": 35,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": []
+    },
+    {
+      "label": "isolated-native-old-b",
+      "starts": 32,
+      "confirmed_commits": 31,
+      "confirmed_reports": 31,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": [
+        {
+          "label": "isolated-native-old-b",
+          "attempt": 32,
+          "start": "63926468657813|isolated-native-old-b|operation-start|4|LIVE-live1|LIVE-live1|attempt=32;commit_not_established=1",
+          "physical_at_final_readback": {
+            "uuid": "8c2586d4-bdb4-11f1-8f5e-ac361be9dbd1",
+            "posted": "01"
+          }
+        }
+      ]
+    },
+    {
+      "label": "isolated-native-old-c",
+      "starts": 29,
+      "confirmed_commits": 29,
+      "confirmed_reports": 29,
+      "markers": [
+        [
+          "LIVE-live1",
+          "LIVE-live1"
+        ]
+      ],
+      "unreturned": []
+    }
+  ],
+  "raw_sha256": {
+    "snapshots\\isolated-physical-documents.txt": "28167a50cc1ccea45070cd5802430a040ccaa923b9ceb25a08b65c82ea4776b8",
+    "isolated-chain-3-r1.trn": "f947a12b653599b4de3538d0ffd11689b9d00ae94729c49c791e7b62d7712a11",
+    "obs\\isolated-3-old-a.log": "a65336c988fd7367442d5e78a2c927ceed98e0d874442e5f4a2acf4bdd857bd5",
+    "obs\\isolated-3-old-b.log": "5f4ec75bda03e42dc0484edf5eb9331188d61fec6ebc39be38543d66b2f79671",
+    "obs\\isolated-3-old-c.log": "c7712656021519805b613f055249db883e6acc1cfd5d94b2d623aae192c16e01",
+    "obs\\isolated-chain-3-new-a.log": "ee1c5474e431438994b1d83d784f881f78551854c161f56fed9c293855263134",
+    "obs\\isolated-chain-3-new-b.log": "f740ee2633a487ee6005ac577bae7e2c3c9592cfda5008beffe7c1f7664ffe0f",
+    "obs\\isolated-chain-3-new-c.log": "edd8b420ae11d7c0cb3b224256c35e3e77a52be2133887adda3c969f742efeb4",
+    "obs\\isolated-chain-3-old-a.log": "ffbe25f1153a486af44a28dad5c198a22d6690c20c28382ec26cb8988618a7ed",
+    "obs\\isolated-chain-3-old-b.log": "e5e33251defa21a3e9ac9a23a34419eab0aae8eff99220effb1e1f37aa1aec3d",
+    "obs\\isolated-chain-3-old-c.log": "7a530d4c4dcf9bc1584eb1b78c0a7eb97f8e4ba1ba4b8b115fa7a030b53ffa2d",
+    "obs\\isolated-full-3-old-a.log": "5aeb92a9fc8f4732fadbaba3e94980a21d25acadbee6cb816d40e048eecc8c9f",
+    "obs\\isolated-full-3-old-b.log": "346f3dbfad39a2e76791998971a77fa26711871abc1b0b3f843c1cbf85788fb0",
+    "obs\\isolated-full-3-old-c.log": "65c24fdecb0b41b91d183c81f397ad12433a1e96581afee079f3570a5fd054c5",
+    "obs\\isolated-native-new-a.log": "8164a0c8d337176d82daa0a4aad2d939bd4218f3e251353170689f09b58a766e",
+    "obs\\isolated-native-new-b.log": "e05f0902aa1ba0cbd9a277dc5a54066833ae850a403fc21af18cdacdd547b307",
+    "obs\\isolated-native-new-c.log": "8e8736142655e9967eb4aba9ab030f19494fa53e2a1ace4b9c6445437804f506",
+    "obs\\isolated-native-old-a.log": "815373e7ec0ac8d0b5377e178efa1653bd71cfaee5a7cadb6902732dda2042ef",
+    "obs\\isolated-native-old-b.log": "cc00a0a3ba4fe7e7ca65b9d60a6e49f6d854e0b6e0df70f292eefff68238338c",
+    "obs\\isolated-native-old-c.log": "8ed67c2490c0ef4c4e4d2ea84f252a5a381e68626e79781018c4f19116985cf0",
+    "logs\\isolated-3-activate-1.command.json": "0f75295ccd0d9f1792eeee33ddc700f82a4d8533b377067db8aaf60fcf2d8694",
+    "logs\\isolated-3-activate-1.result.json": "96738dfa98038759cd7ebabf8e5826aa34e4549bc9b8417f7714b1cdbc2859c1",
+    "logs\\isolated-3-error.txt": "d943b8c00c8a19b392dcfce9cf514c1e196143a5927866efa5b089b4c9f772f2",
+    "logs\\isolated-3-failure-close-empty-after.command.json": "a9708871edcfe29e9580e1c7b1b18ca701bd0d5917b3dfb4564dc995ab5e3ebc",
+    "logs\\isolated-3-failure-close-empty-after.result.json": "deb52f79d414936b61cc631109358ee5b67a12bf66e105fc33e088036ca8f4af",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-inventory-0.command.json": "e52c10b94cd1ace7947922c765ffa68fabfbd8c06c3814df77922a3a3fb1542e",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-inventory-0.result.json": "d0a4b74aeb256102e819e3a83792ff7b5c0a8090f57e91144b8eb546987cbb1f",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-inventory-1.command.json": "10d086b5bb18a02a6cec12e69f520acc229e28f3fecdbcaa6dfa56d906ecdfc5",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-inventory-1.result.json": "822312f7e0e237a2837a1e658cd1d03aef3279cf021d1a572ec4cad37fefe8bb",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-stop.command.json": "8c9469c8fa5640352a485e2d44607e33ba31e86cab1c70679127e0ddfbf2b740",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-stop.result.json": "7243b127c37df4ccd602ba25a2d86607d32f0df26e1836d21596867834a6d04f",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-terminate.command.json": "c2047c5a17ef30cc904c4fc550034bd28a21e24cbb78b687fd0486fa09f9cad9",
+    "logs\\isolated-3-failure-close-isolated-3-old-a-terminate.result.json": "21c5acf3161d2a6e7be9db35475f0474be1f4fbbf939a205202c247674a76668",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-inventory-0.command.json": "ddb2b20bac2b1a896f6506d56b863dff454fccac3455e23d363943e9721657f0",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-inventory-0.result.json": "1692924fcc967a0c1fa18f94e3f93e4499d87784cdd21ad4121567182f6e7613",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-stop.command.json": "fa0cfdae0a00710a42fa01f31eaf573868fe868c6939983a46233453da182153",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-stop.result.json": "2a5e9e572e3b26872902d55ac9dc1624b5824ed2014646a3d51ee23f03855221",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-terminate.command.json": "0747084cb4050619b68b22a6c08d0eda465a6d599f1edd17157985c8e5b2b442",
+    "logs\\isolated-3-failure-close-isolated-3-old-b-terminate.result.json": "c1df1fe4539e409d9353351914befabe47421eb1af604d9a40a3221e8ad35299",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-inventory-0.command.json": "ecf6f800ab7e77f17f8544aa15ae8c215ca3321ab39ce4993cdd6164f5cf2a92",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-inventory-0.result.json": "48598a9558028a2c21f8a1f3b928d763c00f9ee4fd61614f6f7004826fa62a2b",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-stop.command.json": "01d7d68539acd0a7308dc9bbf2a14fdf51f20f0b4ae4f34c55dac12ea64628a0",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-stop.result.json": "7c7a078dba21276e5d33e5ddc30abcf716eb3fe2483698990745ed71150c0ad2",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-terminate.command.json": "bf019ef15c15e9539e1ff972579797fdcb3df93f4bebc667a9ab8acc88dc3960",
+    "logs\\isolated-3-failure-close-isolated-3-old-c-terminate.result.json": "33d30d1e382c8f12931f05adf18e4cf5807b76d44bcbca5a10ee3597eb434942",
+    "logs\\isolated-3-harness.command.json": "ea28ed5310ff486122651a44813399a3098ae69671fd2bc481a1b42f46b535ac",
+    "logs\\isolated-3-harness.result.json": "aac10255d34f4cac11dbd4aa3bfa0e74aebbc59739b0d73dc86b400198c74019",
+    "logs\\isolated-3-harness.stdout.txt": "2e91b11265ef16c87d3d842e0846b6a4ff22b86021fe81824b884b78a556f428",
+    "logs\\isolated-3-import.command.json": "0d62cbc7f76fdd86c012a73bc33703cc82ee20e1d7fb1cde7a5c963ecddf058e",
+    "logs\\isolated-3-import.result.json": "faaaa7a3226233c3a8069c65417b65e48bcd627593ff53fd0fa918ff2a1ba507",
+    "logs\\isolated-3-load-before-snapshot.command.json": "1608812a8d66bb95e49f3d24d11be5fab16410c33a90ae431407e0a97fd4357f",
+    "logs\\isolated-3-load-before-snapshot.result.json": "f80301ee75c649b1205c8010fe264f3507317822e82d00df11407c1fc3c93aa5",
+    "logs\\isolated-3-old-a-binding.command.json": "c65e035affb3551edf0fa60b0e5ec00b63649f68f71ba3b7ff3d2e974bdb09d4",
+    "logs\\isolated-3-old-a-binding.result.json": "9cb14d3363cefe8e0e58cbc1ba4c75a58adcd8d1c625e7dd292a897b01731198",
+    "logs\\isolated-3-old-a-start.command.json": "39bcbc7c1c4847ef7745f1b605038ab677ee56a8f878e4877df90e5b7ca41a24",
+    "logs\\isolated-3-old-a-start.result.json": "f8e496b92eb115ccf866716c77fbd9ed85e58ac937ad906014684f2438af4aeb",
+    "logs\\isolated-3-old-b-binding.command.json": "1c8e682ff0bd23d1e8bdda2beaa293d180b289ff0ef7301593c4650eefd6a8a1",
+    "logs\\isolated-3-old-b-binding.result.json": "9003183a671f99d17d66b826f70f49758bc838e1660218abf7c7109e97cd31ff",
+    "logs\\isolated-3-old-b-start.command.json": "6cb8ef9465b2f04126f5282639682beb0eadf8d35211803a56a27e1fdfb4a52f",
+    "logs\\isolated-3-old-b-start.result.json": "58c1d23313b8072d95e8ff71966702994f14bf62db572d78cd01999c67ab1cad",
+    "logs\\isolated-3-old-c-binding.command.json": "69781f3f8e2fd09e4a124a089d80db02e3aafb68abb66b7475b4b708a309568f",
+    "logs\\isolated-3-old-c-binding.result.json": "9e963e02329ce1b7babcf62eb7b5e476001993a05b032301e5e31d29e9e9f023",
+    "logs\\isolated-3-old-c-start.command.json": "06bf27b7536e405c59cf0918597add8b4466be67186182d1d8ac96d74b34b334",
+    "logs\\isolated-3-old-c-start.result.json": "8eea0c2d5867517d8a056a5cd56f0fec71db02d0276766a87d8d352b53f670e1",
+    "logs\\isolated-3-old-empty.command.json": "322001cde11b91199d9c401905ca5a64b25b46a39bd2cb4f6f2d5957d2c6695f",
+    "logs\\isolated-3-old-empty.result.json": "0ad4e02f0e27f63147784d6388165edf0b1b590a829683c4ce0f927e0f189f9e",
+    "logs\\isolated-3-r1-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\isolated-3-r1-activate.command.json": "3fc89102d733a94d48cce81c6bd38c3415ac013e46291ef3d9457f17bcf66f05",
+    "logs\\isolated-3-r1-activate.result.json": "fcbc87185439fcb2dd6ff0d82234b970b59cd2345349acece965c469e0b4394e",
+    "logs\\isolated-3-refused-simple-compare.json": "976277b87f380f954cad6475a6c913fd3c5f3d458e5db306e2d36a3e346012b1",
+    "logs\\isolated-3-staged-snapshot.command.json": "63103429ccb21483c8fa063d815ddeb11d2ee1c5bfeda262e219f4dc9b7969b2",
+    "logs\\isolated-3-staged-snapshot.result.json": "f84604987fa02bf8785e73d4d052866d94fdad91b88301547e6134799579f266",
+    "logs\\isolated-chain-3-activate-1.command.json": "7406ef3e8e98eb1425cc35f4a0ea7983691ce62973bacecce82ececb97ed1e3a",
+    "logs\\isolated-chain-3-activate-1.result.json": "ccdb8a5223efc263d81c7f4cc985f83a21c29ac23d44ff74490c1f609f2dcce5",
+    "logs\\isolated-chain-3-activity.json": "d996ae280be43eb9ba6e550015999c2579f4a1d9c7e29db356dbbff054758268",
+    "logs\\isolated-chain-3-checkpoint.json": "a6db22ce8c495bb10c1d92864f3ef7cbb93c0b8e3aea0274dc4a0fc2d82db6c3",
+    "logs\\isolated-chain-3-complete-snapshot.command.json": "abf6a9937a33cc9e122a340ebc0e13cbf356053167abc32316f56d1d6499bcad",
+    "logs\\isolated-chain-3-complete-snapshot.result.json": "f7f3b28cbcdecd0a3cffd1f1ced5ed11ca9cad1bd52cfdd508a3b6959c4903d0",
+    "logs\\isolated-chain-3-continue-lock.command.json": "63436e4402f56d3401b7d64c9ed4eba74de9e62e8d656d2fd072813d2013e7a8",
+    "logs\\isolated-chain-3-continue-lock.result.json": "922cc3af56372612402571bea3c4fcdaf32b1f48d48a63dbd9d9189528fc9a67",
+    "logs\\isolated-chain-3-continue.command.json": "27014b9a851b4069257ba859617f3e35f19ec43b45c1862debcef1643fba76ae",
+    "logs\\isolated-chain-3-continue.result.json": "dad9ad90b00ecf5caf95de0f54595d032d90d88a71417801b2f83cdd4d087d4f",
+    "logs\\isolated-chain-3-harness.command.json": "f75e837da8c95e143f9dcaf5e9e3bdb16e8b045eaed04d501026325ad3fa4567",
+    "logs\\isolated-chain-3-harness.result.json": "0b6f63341b5b4ecc810435536a3ff84a8a27eb4a7564f5ef8e17c4f71a32a837",
+    "logs\\isolated-chain-3-harness.stdout.txt": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "logs\\isolated-chain-3-header-1.command.json": "fd2b8b9ef3676241455f469ad5f8fec54727667100fb4cb9ee38633a85bbc02c",
+    "logs\\isolated-chain-3-header-1.result.json": "30bc4de855df81eae688279b914993a6f6f2bc1b8cb5ebc1f793d42061987f1f",
+    "logs\\isolated-chain-3-header-2.command.json": "18fc5071e8bbac524bb6bada5d6666fa22a7fb58ac173e520b3bc145a24ffa43",
+    "logs\\isolated-chain-3-header-2.result.json": "97e8f251802f2629d5d68d341a046e03b14ac18efa8fafd21562076cb343d3a2",
+    "logs\\isolated-chain-3-import.command.json": "9c3d80ab698042adb7491064adddf09f7290475276c127930be4ad71f0eff198",
+    "logs\\isolated-chain-3-import.result.json": "aa3fe3bf4c457e6a6862d1b00b1dd97cfa0e353bbb3269216dd8673d3e7b4ec5",
+    "logs\\isolated-chain-3-isolated-chain-3-old-a-windows.command.json": "924bb4766d89cb276014eef468b6abe0dc4b2c390d634ed29a0ea147274cd61f",
+    "logs\\isolated-chain-3-isolated-chain-3-old-a-windows.result.json": "34476835fac6889f10e0bbe1fb0749b123dc6c998f132c402daff28a1ce1b951",
+    "logs\\isolated-chain-3-isolated-chain-3-old-b-windows.command.json": "c0ff8618cbabbcdfac024edb1761cb27b90ba032debdca685ead3bec9d00a100",
+    "logs\\isolated-chain-3-isolated-chain-3-old-b-windows.result.json": "8a92b46de723e49a7c496eebc6a9e1f3f391b3ec8360193152a4c0429d8cafb6",
+    "logs\\isolated-chain-3-isolated-chain-3-old-c-windows.command.json": "bbcb04adb4ec17829f0fc4b409671426f8b6efd05d8cad581daaf7bd54733750",
+    "logs\\isolated-chain-3-isolated-chain-3-old-c-windows.result.json": "580f0a9b2d71a0af6385d9a11dbd0a44f9b29226e77ab92e901068063e7e9f54",
+    "logs\\isolated-chain-3-load-before-snapshot.command.json": "b8b4905bf3f302764f3d9ad4551ea944407c426e5cd713365d0648ba1f9f339c",
+    "logs\\isolated-chain-3-load-before-snapshot.result.json": "e0bef88ac607be02fc01ff1eb6ea28fef63f7454862a276b5efc47fa6929641e",
+    "logs\\isolated-chain-3-new-a-binding.command.json": "d8e1f87a3fe72e7b6df57e4fff9a37c315821b7a3be45af45d587671d5d52968",
+    "logs\\isolated-chain-3-new-a-binding.result.json": "ffee558cda8d53ea89018a286d9574d2d2df64da0f6763fbfc0ef6b494ecea25",
+    "logs\\isolated-chain-3-new-a-start.command.json": "8c3aaafc7772482f64361a5b13df695f2f5f83d4dc9cbd40a56596a2bf05143e",
+    "logs\\isolated-chain-3-new-a-start.result.json": "d02d0c11e9ce16bc3ffb619d5b17a16864e77ef32ac666a262cd9bb787f9849e",
+    "logs\\isolated-chain-3-new-b-binding.command.json": "086373df0dc41ad2bfd8c8090a564bd2c64a9e8872397d55b23e0396976b5c77",
+    "logs\\isolated-chain-3-new-b-binding.result.json": "6461d37cb23d9c7807fc8f3866718f4814d379e62e54c917b340dbbfeec5f99d",
+    "logs\\isolated-chain-3-new-b-start.command.json": "01b2c7aca450dec0b47344e49487272f976f4975a522e398d9135c526bb4f116",
+    "logs\\isolated-chain-3-new-b-start.result.json": "49f707a638e4f1f48921b03e6e30d6d06b908b948cf8ee2a8e8ec7dbc97f627d",
+    "logs\\isolated-chain-3-new-c-binding.command.json": "375c0ddeb1e52bcf19d1bf71c94d338e9e8ebe91aa8c98b91d9682bf9f1233fa",
+    "logs\\isolated-chain-3-new-c-binding.result.json": "49e69e0e732f586649b3db99b2dc42d250566f6e8137e20b6175be88e2daf1a2",
+    "logs\\isolated-chain-3-new-c-start.command.json": "919ee5a32503204b7d7a1462b3ab03b52d2ec8f28bc27945f4d04309276e29d0",
+    "logs\\isolated-chain-3-new-c-start.result.json": "c4ee6b786cb2b02dc3605251b8f1277930737e6e147e8e408178ceda128b200e",
+    "logs\\isolated-chain-3-new-close-empty-after.command.json": "d2c846c307af401cb88e32afac731d78b8884387e67e395c6afb4b7f4b1f3832",
+    "logs\\isolated-chain-3-new-close-empty-after.result.json": "61e193cd8b3543bcb156ca721494b49e414a1eeac32222316b29599e95aceea1",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-inventory-0.command.json": "3cb7c6aad4ba33a653889e5bdf3ea8f085e8d9bbd03a9949be0280b4ab33f4a0",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-inventory-0.result.json": "256cd03ca60f7a76597b36b5fa3c0b97a75709be6775cc447dc2a5e5741f10da",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-stop.command.json": "7d97f8101b66e11bdd7279f6bda031b4400765aef0787bc1111bd6fbf380913a",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-stop.result.json": "7de46bef1d1455da72be542f4ec9571c425522075a81c5da8e068a4ddb8ed522",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-terminate.command.json": "e80835db8b340dcc16e18117b78115fbcff23c7aa148fbc2de49a0ea9c773588",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-a-terminate.result.json": "7d58cd6a2d0ab086fe8f77bff8c191f600f42e86da9d6e34dce966c56abd8534",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-inventory-0.command.json": "00e13f694541903f017601ca37dbbafb8cf450b44edfe5be85ada4738a4e0304",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-inventory-0.result.json": "05c1b10767ada2d432aefade52caa4ae5ed8118810e3d0fa93c380c538ba52fe",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-stop.command.json": "1fcd0514c21d3660dce58509a8a3f5aa11cb2a5c5698b75b0e3ad463245db8a6",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-stop.result.json": "197e2d01947211d4070443ee5f8d4a43650446f9820e471cd7efbefba02f0039",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-terminate.command.json": "5ed3bdebcc46edaecb49017129432197feb4999be4a445909ca9ffb1f3c0779b",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-b-terminate.result.json": "208193279f0dc797a78edf5768e57f36ed9037395976102305e88fdcd922ff8b",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-inventory-0.command.json": "f6697df2d6daabc47ba69218345d3fa7d4a65f3c454aff8aa15a4b98677d6f24",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-inventory-0.result.json": "c5b7fc72a94c1f371956c37592b2f1b7036fc4dc16dbf60bfe199960db5a43c5",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-stop.command.json": "0326bfedd18009391b7f6f9902df9291884eb4dd2c9df569ec7cb4096883b8ef",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-stop.result.json": "07c4b88961781487af1eb2ed987be64211fa8f698f1c77b224198efc3ddc8a5b",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-terminate.command.json": "b8a5964c3a57291c07954a7a9df5cdc12500eff9f1fd5d679b7fb094928ca5dc",
+    "logs\\isolated-chain-3-new-close-isolated-chain-3-new-c-terminate.result.json": "f304505b8cd122420b73e920bdc4e326b675e941158d90632429bc33fd3c5935",
+    "logs\\isolated-chain-3-new-empty.command.json": "8b62dca8563fa56ef455dc745a7c7d9f6581a79e75bceecd420cbb0d26d8b70c",
+    "logs\\isolated-chain-3-new-empty.result.json": "53cca8ea9e40b1ee72d441186ba0a0fb5cfcef12bec5f1343ae75203e90db25b",
+    "logs\\isolated-chain-3-noop-tail.json": "43d057f0e91da971d7433ff92948f1d545deacbeb4ced06438413b22fae6ddf9",
+    "logs\\isolated-chain-3-noop.command.json": "750f9b0fa5b08dfbe5b9d99051dbaf5d45ea780059d5241022b48463232c45ec",
+    "logs\\isolated-chain-3-noop.result.json": "6d0923203cae3803c96a06630e47b976b1efa5565e015f5aa06c3bf0d3f5c488",
+    "logs\\isolated-chain-3-old-a-binding.command.json": "6ec31ce8dde8076d65fca85f9fc34a0cbf86dc64502b48bdf39b45d025e5ce8a",
+    "logs\\isolated-chain-3-old-a-binding.result.json": "18d22532e6e955ef205c17a882fe346343208d11d7bf76adc67d8e3cfcd71e23",
+    "logs\\isolated-chain-3-old-a-start.command.json": "5daa72a46ad3d70ffae2c9cae1e48787befdf96592a3bc93b81e9e71f05b3476",
+    "logs\\isolated-chain-3-old-a-start.result.json": "9935600db675b1a56e2e29e7a60228fd453d42adda58bf18e310beadd9c2c761",
+    "logs\\isolated-chain-3-old-b-binding.command.json": "b2418ec304fd94095c669f06c4272e147930a1e87b9292c3435d4a6748f363ae",
+    "logs\\isolated-chain-3-old-b-binding.result.json": "37f4dccae826c3383fabfc4682cfd8c65ab157220a132564894168591443ae37",
+    "logs\\isolated-chain-3-old-b-start.command.json": "9112ac90ebea63d4a6e2f36b5c417f9fd5ec2e68c587a453059a084dabec839f",
+    "logs\\isolated-chain-3-old-b-start.result.json": "54f9c6e52a57abcb7fa7b563ddb3c71fb0c20e879847c76a9e78696ea2bdf440",
+    "logs\\isolated-chain-3-old-c-binding.command.json": "7c71aacc23269e2c3163ebc0d03e221fd1ba19ea8797c07b8975c1e287b18418",
+    "logs\\isolated-chain-3-old-c-binding.result.json": "516f63b00a739fab1f6b63e6a7d234d84c637ddba6f6356b3de27de829330813",
+    "logs\\isolated-chain-3-old-c-start.command.json": "1dfaa8111e2d3e1472228fa8eab8c87883dea59723080d8e209c3c7c66075e80",
+    "logs\\isolated-chain-3-old-c-start.result.json": "deaef6785be31187ccc70b98d8ddeac01fc4a2096472c75f68b04190224cf124",
+    "logs\\isolated-chain-3-old-close-empty-after.command.json": "2d433f91b3329c9013efb0f0cb27590c828a6b686603f84b7facd403dd75adaa",
+    "logs\\isolated-chain-3-old-close-empty-after.result.json": "6236de1eda51904c6b22cdb4f9288d4997b8cfd183ef332d476f7622f41aec7d",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-inventory-0.command.json": "7e1ec4b4ed1edb356c474bc37fdee564568340c29967cbe17e07b9f8d2f75f03",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-inventory-0.result.json": "c35342ba61fb269d18dd95377504ba4cdbf263075e4881cef354e4792b7204b4",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-stop.command.json": "4177461161e378d2d75b7dc8fafb6d96535eb459efa8968265dcbcac3e7afb09",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-stop.result.json": "720715907e8f79006ec35d4cfae50ecb0f599c7430a398b2902da346ecf1be30",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-terminate.command.json": "c76baed20c80e66049c3344b04d55934e5dc8b201fe153b7c2c37f03a63b19e2",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-a-terminate.result.json": "dbf7e2118c12de45d7dd4be2e5afaff5e529c71f325ac547bf79c2de1746f765",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-inventory-0.command.json": "c3d6cb9814d0d86533ba79ab071d8d780459eedf443fc3afcfc5ba90d80d7331",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-inventory-0.result.json": "3d1dee2cd76fadf73d10198af0b0db3229a8b43eeacc4c294bb033382e08e482",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-stop.command.json": "78c4857da681ec3e7a3736d66bc0445ca20038f24c0b0e3367975b2a6f064719",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-stop.result.json": "fe9cce39a7e377f6bd6d873ca0c607a05289b11644e7967372f18c7c2176167f",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-terminate.command.json": "07ec527c418b1d620f86a310513bfaafc09a5033fc60606c51f97055687c4c98",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-b-terminate.result.json": "0621a38d37081218d72cacfc60c15880a11934880a6e57642adb53c8ba892a2e",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-inventory-0.command.json": "fa8df8be68623ec35b811c76f40284dd84427cef3e54afd2876c97294f1149c6",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-inventory-0.result.json": "1b202165cd2c634847a2714ef29d3fc2835a36f2877332a4cc6c295b5b39e992",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-stop.command.json": "e52b38e04bd30beb9c31111f9eb8fdb4b2ef0beeda4b0f5fd2bc9ee4f21c2a4e",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-stop.result.json": "abc5f6e8ba637c6c9b938c581398ef7c269bd6bb9c015464411ffba5d18a7ed3",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-terminate.command.json": "55a7ec9e92adf53ca3f79acf0121aab1f61f6e43d99579660e89864d07df309e",
+    "logs\\isolated-chain-3-old-close-isolated-chain-3-old-c-terminate.result.json": "c7316fd16fb847ae51961ad409bf2edb1480a3eb5da7c03bb46ccec328dccfc8",
+    "logs\\isolated-chain-3-old-empty.command.json": "534a9a98bbdcd64d6746eee79d8ec4a2fbf94a4b156d31a2227655afa6060b2f",
+    "logs\\isolated-chain-3-old-empty.result.json": "266362a7cd51fb6f46c4f101e0d443080b8f02f7404e2442e88d0f86a6d66c74",
+    "logs\\isolated-chain-3-pending-snapshot.command.json": "c8bfcaaf97bae712c4d5aa31b82145932a1757ee64bfe7cad4140f41fa870fab",
+    "logs\\isolated-chain-3-pending-snapshot.result.json": "221261f08e44c56893dee65a915949a481be90b8b8e27fdf4d9b7a6ccd0475d2",
+    "logs\\isolated-chain-3-postreturn-0.command.json": "790de139c102289e20dbf727002198029fcfc07e9740954f518df298da6aa062",
+    "logs\\isolated-chain-3-postreturn-0.result.json": "2f352a662d1432d9f12638475f66d6c89ba95687ca5384f1304c560cdbb79c84",
+    "logs\\isolated-chain-3-postreturn-1.command.json": "86e90d464b8a3ff4db699942906d4e2055e642cc5180b43114ddc351e72db096",
+    "logs\\isolated-chain-3-postreturn-1.result.json": "4d126a58d12035f110db6042454e1819e28d0598d9b3068bb40b7c9e9721664f",
+    "logs\\isolated-chain-3-postreturn-2.command.json": "847d2c64a29c74c425f07258d0107034c1ed2ef1cb77897dfc5750be00f2d5fd",
+    "logs\\isolated-chain-3-postreturn-2.result.json": "e72591c486710c2c9403af1b34cf12c30fa30778f1c55827485e14b508bb828f",
+    "logs\\isolated-chain-3-r1-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\isolated-chain-3-r1-activate.command.json": "53083544640aedf505fdb6b371c84edb0600bb795364689d94b9e7f3217ce070",
+    "logs\\isolated-chain-3-r1-activate.result.json": "81a731591af16b02407d160f07aac32fb73f42839f0401ce67209ea432a20286",
+    "logs\\isolated-chain-3-refusal-tail.json": "2c61645e304c44f115ad486c34d7e57f124e0a6727b689dddc5428a33086fb81",
+    "logs\\isolated-chain-3-resume-harness.command.json": "dfc22ac2df9df7e239c9c0ed4afbbfd9574a32eb294563e7da92f2c9846c6cc9",
+    "logs\\isolated-chain-3-resume-harness.result.json": "fb519037d7e099871b91391edc36e451a6fd01dddf7d63ecbf408bcffea8a615",
+    "logs\\isolated-chain-3-resume-harness.stdout.txt": "ab392f465a8c0d7525bd1c39fe8b7d9be9a2b8968661e15adef89f3b39f90be6",
+    "logs\\isolated-chain-3-staged-snapshot.command.json": "53cfb7b4f8324eaacda3080128479bef8842c0ebbeaa67d09a9731c04df0a31c",
+    "logs\\isolated-chain-3-staged-snapshot.result.json": "3df37bb587e05e733dfdf7eb877cfbad08ab8880ff6f56dd3234679d5cd70c62",
+    "logs\\isolated-chain-3-warm-refusal.command.json": "517cd1efe5ad02994e4fba8d2cd6f79dc8868e25c7f38c30988bedc2e833201a",
+    "logs\\isolated-chain-3-warm-refusal.result.json": "2ee6971163ec705d0d5d8a7007c7730fc6c1e3ef3c5c667b7f77e06d2f2c8ca8",
+    "logs\\isolated-final-session-empty.txt": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "logs\\isolated-final-stop.result.json": "ce8a3b5a67898f37b02750f2a99bbc9a78bd5194b01c0ba3048eead8a39751b1",
+    "logs\\isolated-first-stop.result.json": "ce8a3b5a67898f37b02750f2a99bbc9a78bd5194b01c0ba3048eead8a39751b1",
+    "logs\\isolated-full-3-activate-1.command.json": "9ea3b70b6a497e3795ad9d4d0bc322cfb1d62c8d1f606b95caea8ae4373f1cc7",
+    "logs\\isolated-full-3-activate-1.result.json": "0516e7fc53b1fc480a4af10602c217cf192b7ffcea24682faa4f56167ab28504",
+    "logs\\isolated-full-3-error.txt": "b1d24836efb65caf95edac5b0eacc516177ab170332d3477ada49b07b315200f",
+    "logs\\isolated-full-3-failure-close-empty-after.command.json": "d60acaeeeecb05fb3a4548669c635e25d1a83eade252038559850ca736d96e4c",
+    "logs\\isolated-full-3-failure-close-empty-after.result.json": "3c8d118c36d197d54c263e08f8911ce5b064d6876527aa95115336052133676b",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-inventory-0.command.json": "8b13ba6b16c8f45b2c92c61ec045cff35e063b381f772835e437f6083b8adce5",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-inventory-0.result.json": "e26b6c9293811fde52ca2a10c5ddfca02c3a44362827292ad9812661eea34397",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-stop.command.json": "e754d44f4b5bce9709924fb4e241fddfa3349d0e5d0c55b96d12107cfe1893eb",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-stop.result.json": "68e84fe5a1ea9a1926d74d9abf97125b3b4774dd0850cbcc2bbf21eccdac6654",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-terminate.command.json": "c7483b2452352bcbd8e45e3e60ff16be3c4e6c90d34ccb2cf013fa1148d0b30f",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-a-terminate.result.json": "6c641106e867ed5f75ebbf965c6249ad2c59a22c103f093d087bab27c13227f9",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-inventory-0.command.json": "2b04cb21072ff92a8d986b8f78523a6d2ca636a33d563c6f80824e5e510f77ac",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-inventory-0.result.json": "09eb9461aa5a92df8603651811e22d95a389242a2d2c3539204f85b9beac5794",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-stop.command.json": "42ba8fa793c6a43bfeb3169c809ce0944563c6ad42e274b725495d96cf795826",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-stop.result.json": "7e88a3af7b93ecae309581cdcfbf80f662356e6a03276efed8a4e85261f4c283",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-terminate.command.json": "dbc1127f4c4b7a4e95d06c25fa48e908d067392e078cca8cedbd299a0b382494",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-b-terminate.result.json": "d15962a055119b7b82f1267b23bd93dbb240d714a5db1e6bb44f8e60eff35220",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-inventory-0.command.json": "dc34b20a7a71dcc024ac7fa7ed60356e41f9f842d77c7dd51a7362a0db6e0a72",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-inventory-0.result.json": "038201fa346795292a3d63cf9ac1c4ce0bf10823e804f67bb4d4046276614e3b",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-stop.command.json": "dd3aab1741c0f3f59305633a0c029bcac2379a72c63e06ceefc53526ecb53650",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-stop.result.json": "d2dafb74c8ad911faee1057933268356465a08986df53f996213c994149be62e",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-terminate.command.json": "e93c1c769ec6235df05d82e92a90582d798afd1653adda9e94f771d4b10615ad",
+    "logs\\isolated-full-3-failure-close-isolated-full-3-old-c-terminate.result.json": "a48f4c1d0a15906647290dbf347200290f6e2a81388dd544a2ac3078c6794a24",
+    "logs\\isolated-full-3-harness.command.json": "1308040d1bd841f0e231e8e3acf688856a666eead7e4c80482b1f23b2b6f16b8",
+    "logs\\isolated-full-3-harness.result.json": "628e8de812561f194c378d49a4369c51dc42c17492d1f77c4f77e33e7b0427db",
+    "logs\\isolated-full-3-harness.stdout.txt": "0b4504c0cbf7289374505f863f1a3dd87567a21292091915ea2e28da236d6d0e",
+    "logs\\isolated-full-3-import.command.json": "b6faa673f1dcaeb9c1647de8cb796df782e026861902896375c4ceb9096a5b5d",
+    "logs\\isolated-full-3-import.result.json": "2c0f1154b7e3c108ac10e58b2ed1dcd456a4cce8311b5b4dd20c6d099133a962",
+    "logs\\isolated-full-3-load-before-snapshot.command.json": "61b1b6af4945c54072f101e203fbe1e1c255e2888912c841b9a8fe4fe0411147",
+    "logs\\isolated-full-3-load-before-snapshot.result.json": "d8b3605f373d7bf5f0bf5610dc53121a5ed44ef40209cc1abb2fdc5aba090146",
+    "logs\\isolated-full-3-old-a-binding.command.json": "7e4204578baf58f9496658332cebbc8f617f37910750a5728d76a6ce69a554fa",
+    "logs\\isolated-full-3-old-a-binding.result.json": "66d7fa14494356018fb819d96b477e50eadf0f5317b1b55bb694d12a392e91ee",
+    "logs\\isolated-full-3-old-a-start.command.json": "984f1a0c26d8ec552442b80296e57243ed0be70dd71321a805ec9b43db5cf1cb",
+    "logs\\isolated-full-3-old-a-start.result.json": "93951120de15668d7d16e51a3f34c98264607b1971b86b0cdcaabe96e0cd937a",
+    "logs\\isolated-full-3-old-b-binding.command.json": "54d1d8c059748e379789147839964db3c45ee766a5b4384242d452cdf06bd1a0",
+    "logs\\isolated-full-3-old-b-binding.result.json": "f00d091e959428ce44372c469f67176b5189b1b7916287c792f83ac52cbfec8d",
+    "logs\\isolated-full-3-old-b-start.command.json": "796e97ae83b1082baf13a2cad52ffb89c9459a79ec4b0c606ae4b8965eb73c20",
+    "logs\\isolated-full-3-old-b-start.result.json": "bf056feb6eceb079259fc1ad38595b42fc31cc1699e7534c89b4456e8a3b4267",
+    "logs\\isolated-full-3-old-c-binding.command.json": "20cfa7146aa418a53d3d18eba8be027b66a72dafde8cf1f5b8045a1fa5dd82a8",
+    "logs\\isolated-full-3-old-c-binding.result.json": "57f1a9abc5a79b9dbce668e68c1784ca9d89e42f84290891fd4e1229eab63171",
+    "logs\\isolated-full-3-old-c-start.command.json": "a76ea813d950c0caea9ad0252f8d92b60dae47e67481a6f5ee28efb1cd93f60f",
+    "logs\\isolated-full-3-old-c-start.result.json": "df30c4ceeb66aba67a54b3ed8b04e0ea087570eca40cb5e7cf6e6e438bfc83a3",
+    "logs\\isolated-full-3-old-empty.command.json": "92727d9497caa5dc25100f6e5be39be418c0e31ae5aead52a6cc926b52b80915",
+    "logs\\isolated-full-3-old-empty.result.json": "9829d1b629289b008ece68410ec078a613a6d669f6ac9aece13ce09a0c9229ed",
+    "logs\\isolated-full-3-r1-activate-lock.json": "fe8fe397ca901a153e203363f15c8a2ecb7dd6a681da43c4276396627ea693b3",
+    "logs\\isolated-full-3-r1-activate.command.json": "dd926464f71e5cc1909ee465699a2481e0c63c7cde5e294db2293a42ec6736d1",
+    "logs\\isolated-full-3-r1-activate.result.json": "2a12c914fef99b3764a74f727476a0b512ba0b87fd78c12d700caf37fda183c7",
+    "logs\\isolated-full-3-refusal-compare.json": "f786b9d4013fb4502a5fa63e71b2af072516853318b5c2581d5b1b4df6cadf04",
+    "logs\\isolated-full-3-staged-snapshot.command.json": "ac953454d5900720019432cd8f9868efe39af4ee4e01fd7ad1f8ab3b3024dbdd",
+    "logs\\isolated-full-3-staged-snapshot.result.json": "2a4cdf446235ab0942507f99c8326f0f10f75e16ecbcdbecb4341bedc377b86f",
+    "logs\\isolated-full-before.result.json": "8efc15c183d23f5c78a62327059b4650495ef70bba4402b142e83359e88d82fe",
+    "logs\\isolated-native-activity-0.command.json": "448e70e2efca88c5c5ef078607df7a5cbc216d8505fd83279d7f57d388d3d261",
+    "logs\\isolated-native-activity-0.result.json": "492ce1c6e360f702392c614e45f612d44632cdf518c858e97d28164beaa8f8b0",
+    "logs\\isolated-native-activity-1.command.json": "ef3fc0d689b7fa7e20b1b8e85917908743c9df6712902809c278a42c305546cb",
+    "logs\\isolated-native-activity-1.result.json": "ffd90630032e5155a83b2dd01832952c35e99dc171d33d604cbd981ca4fa9e51",
+    "logs\\isolated-native-activity-2.command.json": "a3067d363a13953c7fb075727e98f4adfaffd182505a2169c22f27024dbeada9",
+    "logs\\isolated-native-activity-2.result.json": "2b2104da7bee382446eb925e7ed968ad6a5ababfbd912339a1d5f9eee49b5a23",
+    "logs\\isolated-native-activity.json": "9ac071d4f9cb564c4621cec049ec66070669831b3cb899131096af3b65df39d0",
+    "logs\\isolated-native-apply-child.command.json": "fe117ba78d31df729938608763ffb86218dc7383b2d0efbd44b3950dba229c3a",
+    "logs\\isolated-native-apply-child.result.json": "0277cf6488368019bc6aeac8cf7adf09e18bf5ed779c368ae9aca161fc4435b5",
+    "logs\\isolated-native-apply-lock.command.json": "b495ebba28877388bd3f22832909398556e6f4314a246e5dcc6d2c987ab9d67e",
+    "logs\\isolated-native-apply-lock.result.json": "f99bd89dadb708e84f92f16471fbe1f43bdc773d51d3370c44c0fab0a163175a",
+    "logs\\isolated-native-complete-snapshot.command.json": "a44f1f62b5d658068bbe8f6e2550e32e6b310525964d98a242e502cf97280d03",
+    "logs\\isolated-native-complete-snapshot.result.json": "90083e403bf9b32686fe30398f8033ff15630196c15eedd1fda6509eb5861721",
+    "logs\\isolated-native-harness.command.json": "e467aadb235cbbffe4074a719868faa9142ddc3bb406551a709389ecf53d7348",
+    "logs\\isolated-native-harness.result.json": "5e61dd176e56faa5d3c2f465bc668e6121ad1900ca9009b8a75918fe069cac45",
+    "logs\\isolated-native-harness.stdout.txt": "2eecf3d6b08340d31bd772659dfdfd3052e5d8fb81d9e234a073ba944f0c87fa",
+    "logs\\isolated-native-import-child.command.json": "4dea41e02f77a2e2bd843e7090390cd7d721a56afc0d929284646f51e541da1d",
+    "logs\\isolated-native-import-child.result.json": "30155725f0bd62a9eaccb0f5caa1345928d3282b5ba326d2bad41d210040c956",
+    "logs\\isolated-native-import-lock.command.json": "836a7ba4b857997c945931a85cd21e921ee00873c5400d741477119742fdff71",
+    "logs\\isolated-native-import-lock.result.json": "e9ad73a75b7c9b67a24205a4e0ffb077e14390a73fc95b3b67b246bb44f1dd0e",
+    "logs\\isolated-native-journal-preliminary.json": "92e5e3cbc26cb3b15abd7bac69addf22498a2c4ced612a53b7b774c27199b841",
+    "logs\\isolated-native-load-before-snapshot.command.json": "10d7f01457cd69bae6e6fa20e0c765ce2655e57439fae55e548444e6d3eae32e",
+    "logs\\isolated-native-load-before-snapshot.result.json": "51be28bc4de7bb9ebe8790d3a433b0ec1ebb49b87323d98a0f327d947d3f9d6f",
+    "logs\\isolated-native-new-a-binding.command.json": "9ebbd156ce9ea42de0a73cdb85215b21561d53e119738169f083ea5a8861f6b6",
+    "logs\\isolated-native-new-a-binding.result.json": "e6751485723760ca017b308e48b8aced8aa488793ca0bba061e93f93113295fb",
+    "logs\\isolated-native-new-a-start.command.json": "6e66efdce51bfb530043a778e0ab1fe61404bfb98cc03cff099cc69e3e99b083",
+    "logs\\isolated-native-new-a-start.result.json": "02fc1f36eb03c6782e3fbc6fe2041a2f5c611f25ac6e25da45055ac2c4364185",
+    "logs\\isolated-native-new-b-binding.command.json": "1060c31f26cf056a9f961d49d53ce545193fcac88c2dd2b85f849fd32002c327",
+    "logs\\isolated-native-new-b-binding.result.json": "6a0919742b0b95a6118a6018a73cc0ce2917affea1e9fbb8ec22f4d7b292c7e4",
+    "logs\\isolated-native-new-b-start.command.json": "8204562d443a092395a12cc9cde77520bb71a6cdc2c7beb87e518b9557bbc600",
+    "logs\\isolated-native-new-b-start.result.json": "25f99018b0c5f3f84578fe5f0f3c06e88216afbe69c21b4be59c9dd75af81557",
+    "logs\\isolated-native-new-c-binding.command.json": "032420d22e1229b09699b986f2426c630a00aa13bdae6ee513e20cbab9366089",
+    "logs\\isolated-native-new-c-binding.result.json": "4f72ec43801ba17de5a9027bc8236109d8e933de37e6042863eb56c12a961c12",
+    "logs\\isolated-native-new-c-start.command.json": "509f4e56ddcd4dfafea5593258aba354dc0f99f87b7c0152a3a2e8004a2293e2",
+    "logs\\isolated-native-new-c-start.result.json": "9eceec87efa9732ef4dec59744e875da046aef291671312a4c5851f8ca697c27",
+    "logs\\isolated-native-new-close-empty-after.command.json": "129dd079d0f72e6711eadd02203adbfb62d42f3967abfaef48cf7d67ba5fe1c2",
+    "logs\\isolated-native-new-close-empty-after.result.json": "c44e6a9a9a7f91e0cd573e0fe3b632c80dba241dd3f0f2a2dda9a2df4c51e44a",
+    "logs\\isolated-native-new-close-isolated-native-new-a-inventory-0.command.json": "b64cb01bbc2f3653ea2ddcf106b329f281c35a164e912c9491a89666898bd15d",
+    "logs\\isolated-native-new-close-isolated-native-new-a-inventory-0.result.json": "be71463d00de17ca513fcf81ffa7cc4f71d0d297ba15683528104e364cca2e5b",
+    "logs\\isolated-native-new-close-isolated-native-new-a-stop.command.json": "40f68b93c8c3df4234eb71ff6882ec7220fba2b64e3cd1558b8536fe6ba47da3",
+    "logs\\isolated-native-new-close-isolated-native-new-a-stop.result.json": "0c02bfab4847ab2817aa75a1707f54e89b5971ca76f900aa1295959445d74197",
+    "logs\\isolated-native-new-close-isolated-native-new-a-terminate.command.json": "e712acd7bcadb3d3ba9f54a4bb65927dcb4fb1213743acff5297d34d72828f79",
+    "logs\\isolated-native-new-close-isolated-native-new-a-terminate.result.json": "54120554fedb3a14ea6f1b5d6697c5da916dd156c675ff2ecd9d172767c9fb50",
+    "logs\\isolated-native-new-close-isolated-native-new-b-inventory-0.command.json": "9fe3f8347317fca6f3908ec428f0661c351f7c44a1d8414dafc5f45f90b8e291",
+    "logs\\isolated-native-new-close-isolated-native-new-b-inventory-0.result.json": "83e61111e20d7c8b0b4fd582b6784b5c189c5a5359ca4e3067b7a2b37b2d3916",
+    "logs\\isolated-native-new-close-isolated-native-new-b-stop.command.json": "7589b07bd4c993a6a037ff699f054cb36fe79a92263c0135dcd11df02d967c3f",
+    "logs\\isolated-native-new-close-isolated-native-new-b-stop.result.json": "37b2e3dafe6d799e95930d521d0924a4e764fe2a7eff77dc31689ae214caeff8",
+    "logs\\isolated-native-new-close-isolated-native-new-b-terminate.command.json": "2c7733f72e65eaec92bae36e24b0dc9b7315758e19a3fbdffcdc5156628f36ca",
+    "logs\\isolated-native-new-close-isolated-native-new-b-terminate.result.json": "5e28e26d0d2c4cb24ae13b17c38bdb22feace4434ac49538e16c0d36e2e656c4",
+    "logs\\isolated-native-new-close-isolated-native-new-c-inventory-0.command.json": "a7eb11ee9184aae3d91c360ce59161264b81cfd2bca808f1a75cfbf38dbe4415",
+    "logs\\isolated-native-new-close-isolated-native-new-c-inventory-0.result.json": "cac21f19c3ff7c2d8a92c932ae6a37b7bafc5db6a03ebf8859722a1529f23282",
+    "logs\\isolated-native-new-close-isolated-native-new-c-stop.command.json": "cb54cc27284d463a3faafd87fec0a42183ccee1eda232f91b376f0d0815c1e83",
+    "logs\\isolated-native-new-close-isolated-native-new-c-stop.result.json": "36b74308e1ea5c565c7cfeb6ea1ceed6d208d2d18f59e0e1704b64c6f85efa13",
+    "logs\\isolated-native-new-close-isolated-native-new-c-terminate.command.json": "856eecfed51a95005cb8d26d14a96dc0a70dc4b1e1e13c99425b74f2e8560227",
+    "logs\\isolated-native-new-close-isolated-native-new-c-terminate.result.json": "1eaacb1fda38021a766994f22b732a14162ee20f43d6d70a698bdb5bc5437c4b",
+    "logs\\isolated-native-new-empty.command.json": "654124cd7b222a0069cde531a27c9de58931048cedf01f07156d63ecb507b338",
+    "logs\\isolated-native-new-empty.result.json": "c896133b3a158518b23da96271ab1d97e4815c15fc382b87e6faf8808335292a",
+    "logs\\isolated-native-old-a-binding.command.json": "d7370310b727bfa917a2a18f9d7a31013db0be32a55f735cdcf866af7d62c714",
+    "logs\\isolated-native-old-a-binding.result.json": "a6de5f8a1af3053793a4e5709d3efadd41733462a371f76b9064aa767f6d7aca",
+    "logs\\isolated-native-old-a-start.command.json": "b78697a105b4b2dc82961b42495e98ddfa6059074d080edb1918b722df279c52",
+    "logs\\isolated-native-old-a-start.result.json": "036237ec8988e4c0160858a26f64bec4f6480cd5267af14cf0eab4697148662b",
+    "logs\\isolated-native-old-b-binding.command.json": "0d6d8610af98062bf440e91468b5ad49905b42a13312d138978397d3ce1b630e",
+    "logs\\isolated-native-old-b-binding.result.json": "6486fdb9213eebad1cadfb1f64059c220d7baea7f4ed024af0c0faaad8f70a40",
+    "logs\\isolated-native-old-b-start.command.json": "50bd560c8a0fb129cbd36e93e640fc4fc4b4d5262c48787c7b4b30958559a908",
+    "logs\\isolated-native-old-b-start.result.json": "620bcbffadf89fabe7e56fe332cb69f2625a9a5d53fe5e73ac11bd8d77a561cd",
+    "logs\\isolated-native-old-c-binding.command.json": "8c9356d50e574a0378e447fb764b482eebb2dc85ccaa23ff516faaa84b36ef47",
+    "logs\\isolated-native-old-c-binding.result.json": "b0c14556d3ccca85e6034fb7a38285d81b2977af82e68bf65b7ff3b6425d4ef4",
+    "logs\\isolated-native-old-c-start.command.json": "2a18b6efafd3fd714be71e1288b9e373a5519df9d8e8476436232ed5ff8b8ef7",
+    "logs\\isolated-native-old-c-start.result.json": "ac2368ec3ccb9011878931a05fd6b99c85e8c2abe7d3e51c35226d073dc9a537",
+    "logs\\isolated-native-old-close-empty-after.command.json": "5c1c921b04f59fdc8784bf802c02af4cd3842c254eab86e395505284448b607a",
+    "logs\\isolated-native-old-close-empty-after.result.json": "c2feb1f64584a29a008386106ea84639f6b1d46dd76fee4fc9d93b06171db22b",
+    "logs\\isolated-native-old-close-isolated-native-old-a-inventory-0.command.json": "6839a5c82727aed052b21c6494d37b6821746078c5efa73bb3e5e9d5af97039e",
+    "logs\\isolated-native-old-close-isolated-native-old-a-inventory-0.result.json": "cf91136a4d5ff22201c5016c98b3f617e71b7ec808c7a7795017f64ba1438226",
+    "logs\\isolated-native-old-close-isolated-native-old-a-stop.command.json": "b1838be05f4bb616f2ff9e8b0bab5363a51ed2d0712a0a5abddf69762d7c2424",
+    "logs\\isolated-native-old-close-isolated-native-old-a-stop.result.json": "f924c7469a44f5e66e20b3b275180218cb6ace91b246b2a0a0584ae560c6ea6b",
+    "logs\\isolated-native-old-close-isolated-native-old-a-terminate.command.json": "d76712b54414b403f9840896d17edd2219e5ddb4e804b4474ef513a6389e42dc",
+    "logs\\isolated-native-old-close-isolated-native-old-a-terminate.result.json": "5143de03889ab1bfa3b5892e1d0e4f072d52376a4abf5503edc5607e12311772",
+    "logs\\isolated-native-old-close-isolated-native-old-b-inventory-0.command.json": "bf7bd0df240f8fc6a117a41654ea3ba6fa0c12d8a34c1ee79cbd7a4cc364ba18",
+    "logs\\isolated-native-old-close-isolated-native-old-b-inventory-0.result.json": "5652d650b83c2eb120e126623520a30a3baab1862af9b2d577f9007a4068bf65",
+    "logs\\isolated-native-old-close-isolated-native-old-b-stop.command.json": "2fca5057847b73aacdd387cb5d4f707b00ca34797c124cbc80ef4fb0ce2fb060",
+    "logs\\isolated-native-old-close-isolated-native-old-b-stop.result.json": "7174e243abdc473be17c036a2780d308ea499e104fa0d160d2aa9e799afa11c3",
+    "logs\\isolated-native-old-close-isolated-native-old-b-terminate.command.json": "7e7fddb0fd733d1216b10a489300eb38265a7af7a2761fc8af1e45183393cae1",
+    "logs\\isolated-native-old-close-isolated-native-old-b-terminate.result.json": "70ad826d7801df0bc60a84797ba9519afb50f55fe8975ec213ad087ae13abd83",
+    "logs\\isolated-native-old-close-isolated-native-old-c-inventory-0.command.json": "4476749f1965483993134245a24010b5d042695d710aa5c5bb872073163d2eec",
+    "logs\\isolated-native-old-close-isolated-native-old-c-inventory-0.result.json": "c9e193b5baeeb81cdda58566de0e0a58d553c9ead45be1c3a4b606457b5cd058",
+    "logs\\isolated-native-old-close-isolated-native-old-c-inventory-1.command.json": "a557b8106228a38f935509288d045344d9cdcca17e727f6e85385e9ee857d914",
+    "logs\\isolated-native-old-close-isolated-native-old-c-inventory-1.result.json": "89ffb15956f7847715f48647390c467d925f191cf6048260f451adb6dfcec85b",
+    "logs\\isolated-native-old-close-isolated-native-old-c-stop.command.json": "0d65a9b6e881f9403d01798689b9b4f5f13608d099de8d383a2bfccff87ab4d6",
+    "logs\\isolated-native-old-close-isolated-native-old-c-stop.result.json": "f383634c44e765a9fac83ac55f6140eff45685684678e3f89d1af81e2e70e578",
+    "logs\\isolated-native-old-close-isolated-native-old-c-terminate.command.json": "9ee7aaf142e390250f62043bef5b9a0078097cc98c4927d9a5500a51dcf8f141",
+    "logs\\isolated-native-old-close-isolated-native-old-c-terminate.result.json": "5e94a3995547bd8b37eb1c19062d99bec468b0523f38587f964bcbb4058c276b",
+    "logs\\isolated-native-old-empty.command.json": "5dfd8fd8840012a8ca3f56de9509e989802f165377c3aefe3b732d96b82f205e",
+    "logs\\isolated-native-old-empty.result.json": "0c583add7c4869afc132d53d26bf740fb2342afcfcad64620b10abbced18e89a",
+    "logs\\isolated-native-post-native-snapshot.command.json": "9606a08ab494fae956498aba82196fc1318d4b4a3fa1c65235dc097dae7cf3a9",
+    "logs\\isolated-native-post-native-snapshot.result.json": "1563d447e5114c6cf228bb3af4aa9ba7445931294c05dd5e8719eff8de5eeedc",
+    "logs\\isolated-native-settled-check.json": "83bb71397194d93d38705575a159bff05f653fde6d46e221e4b0820d7e0ee1f4",
+    "logs\\isolated-native-staged-snapshot.command.json": "a0d063663150861dbee1204693ea3457802b12a0735eab2eccc2c9c74dfaed7c",
+    "logs\\isolated-native-staged-snapshot.result.json": "c1f813c4985777f3b2febbdf11ee48f4203365fe055cfa22e5f9aa2865552783",
+    "logs\\isolated-ordinary-full-before.result.json": "c1c9b69bfebc7abc6ae98ded8c81becc97b9086d1407eb3685e560a72ebca59f",
+    "logs\\isolated-physical-document-readback.result.json": "ef9af1a1af01e0b1c9afe582b820691cd137c636924e7d23f79a4a10010df165",
+    "logs\\isolated-reconciliation-negatives.json": "4caff9be19c19eafa9e5a240fde4532e67b88b8053bc75bb5724bd5adfe7ee4b",
+    "logs\\isolated-reconciliation-source.txt": "58917fa390853f9ddfb9107d7da2d39aed21956cce0e532deeaf1b450c16ccaf",
+    "logs\\isolated-register.result.json": "8dd6a3d3770e3d0fb4720a017df9512aa2b05fa74739b45f59e225957f904d95",
+    "logs\\isolated-registration.raw.txt": "a40dac25287a276c5f5f84d28c9aaf2acbdbed935ac08455448c30cfd900a461",
+    "logs\\isolated-restore.command.json": "9830ff06fdbdabed7faa9bd5d49838dd3a76c0b4c3bfebc38326f1268113855d",
+    "logs\\isolated-restore.result.json": "bed4e48c7a006dd72b629c2b8225bb5b570de1ea9b0f65e677860bae267acfef",
+    "logs\\isolated-start-late-owned.json": "c79a3d432b778a430f0a27682c33ca5df5690a167bbd40e350d0b94add3a32a6",
+    "logs\\isolated-start-retry.command.json": "47054b1eff4239d40e948bd100f54fbf9d5eca3e35a24899e34b7da91bfe0b96",
+    "logs\\isolated-start-retry.result.json": "8a2378f917dbfcf069bf16d4efaf62a5f379a83c024d2a11ba7bc8a640f8679c",
+    "logs\\isolated-start.result.json": "57c3cb7f81283d727ab0f69aa7b06b72401fa1ac6e204d9eab8a98643a24a25e",
+    "logs\\isolated-unregister.result.json": "abbce3074277d52fd9a8abc1bfe5227ca3f2c5b8fdadfba23022cafb85a8d889",
+    "logs\\isolated-worker-acquire.txt": "21b93a73056b2cb077620a9929a5f73737266ff6183cd2bc66fa4a77e808c387",
+    "snapshots\\isolated-3-current-owned.json": "460263eb716725f594379f7aeeea47c37ced77b04de5ef47163abe00ffffe2c1",
+    "snapshots\\isolated-3-load-before-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-load-before-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-3-load-before-ras.json": "4552fd8da4a14e33986dee64d8c0a6bf2f807d5d16add51c60718b4aad839d56",
+    "snapshots\\isolated-3-load-before-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-load-before-sql-users.txt": "bb7c9abbc875680050ab3e614cf96ea8ca95b894f729751540d8024c35a36d46",
+    "snapshots\\isolated-3-load-before-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-load-before-storage.txt": "c8d93d7c27e627f5ad8efe8d3019b82c21dca946d45905f85e713198404d89eb",
+    "snapshots\\isolated-3-refused-simple-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-refused-simple-markers.txt": "85757108c50c94ddf1b307c190044a13c9c5909fccfbef55da9def967aeaeec4",
+    "snapshots\\isolated-3-refused-simple-ras.json": "bb3da621808034aca2c71aeff719a3f8ffdc71bb3a3a4a5d7bdbbe82b7edac21",
+    "snapshots\\isolated-3-refused-simple-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-refused-simple-sql-users.txt": "bb7c9abbc875680050ab3e614cf96ea8ca95b894f729751540d8024c35a36d46",
+    "snapshots\\isolated-3-refused-simple-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-refused-simple-storage.txt": "4626c07005549187be98133dd8c04a4ef17333d506f851645079344aa8e9e29b",
+    "snapshots\\isolated-3-staged-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-staged-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-3-staged-ras.json": "4a5019de5acd5d1537ac27e35f60b861dd5ddc2a1499149429612e1ba7e9b921",
+    "snapshots\\isolated-3-staged-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-staged-sql-users.txt": "bb7c9abbc875680050ab3e614cf96ea8ca95b894f729751540d8024c35a36d46",
+    "snapshots\\isolated-3-staged-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-3-staged-storage.txt": "b89fa68e1846696c210f37338cb187ccd21b64225aac611e2cb3dd2218a61d1a",
+    "snapshots\\isolated-chain-3-complete-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-complete-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-chain-3-complete-ras.json": "bb3da621808034aca2c71aeff719a3f8ffdc71bb3a3a4a5d7bdbbe82b7edac21",
+    "snapshots\\isolated-chain-3-complete-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-complete-sql-users.txt": "691192f83156cef3e11be188590522e8b21f978d242ff6016269bfafb77dc167",
+    "snapshots\\isolated-chain-3-complete-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-complete-storage.txt": "55a6d681c65b80bc546568254070a53202fb917433aa4c20e554fabf4f06ec67",
+    "snapshots\\isolated-chain-3-current-owned.json": "71a572dae6c7bec0880d27beaca4fd9eb56d3d090b9396d512ff8d1f0c8551c3",
+    "snapshots\\isolated-chain-3-load-before-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-load-before-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-chain-3-load-before-ras.json": "931cb209483ed92ef9e6ee0ebef134dd1076f7da901a2995b7011d186afea974",
+    "snapshots\\isolated-chain-3-load-before-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-load-before-sql-users.txt": "a8ef3a7d57d1b8cd4537bdf50422e6dd982806140b6a6a25a229afd785a1fd76",
+    "snapshots\\isolated-chain-3-load-before-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-load-before-storage.txt": "0263010c1a718a2e6142788f682cc2324e03ef1707d3874af4532ba08955583a",
+    "snapshots\\isolated-chain-3-new-owned.json": "71a572dae6c7bec0880d27beaca4fd9eb56d3d090b9396d512ff8d1f0c8551c3",
+    "snapshots\\isolated-chain-3-old-owned.json": "09076df5ccca1e6f4c000089b23fa276c46f1626984be0cf6385c6492ad3b4a3",
+    "snapshots\\isolated-chain-3-pending-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-pending-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-chain-3-pending-ras.json": "203725e85c7a99b7a589e2a0faf4d1bca6faa5794e36d2a017aca674619a2c0a",
+    "snapshots\\isolated-chain-3-pending-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-pending-sql-users.txt": "0b256bc378b5770e22d7db4f8e5c6081fac247e82b48d3323afc0360e65a5b34",
+    "snapshots\\isolated-chain-3-pending-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-pending-storage.txt": "55a6d681c65b80bc546568254070a53202fb917433aa4c20e554fabf4f06ec67",
+    "snapshots\\isolated-chain-3-staged-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-staged-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-chain-3-staged-ras.json": "fb5eada9853d70dc29b98bd30a6fdd67c93af4ba2152f6d863264269f19f455b",
+    "snapshots\\isolated-chain-3-staged-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-staged-sql-users.txt": "a8ef3a7d57d1b8cd4537bdf50422e6dd982806140b6a6a25a229afd785a1fd76",
+    "snapshots\\isolated-chain-3-staged-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-chain-3-staged-storage.txt": "d56ec92fa3b96fc7af02cdcaa38f6dbd6cd7ef791cebc7dc8a15d7a8b734f9af",
+    "snapshots\\isolated-full-3-current-owned.json": "e909a64f602944a121acbc804734be463ccdcb03e0a24655c0d4a22e5776a067",
+    "snapshots\\isolated-full-3-load-before-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-load-before-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-full-3-load-before-ras.json": "5a7577f0258745060e06a743e2e758422a9d61d97172de5396971f935444a684",
+    "snapshots\\isolated-full-3-load-before-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-load-before-sql-users.txt": "a8ef3a7d57d1b8cd4537bdf50422e6dd982806140b6a6a25a229afd785a1fd76",
+    "snapshots\\isolated-full-3-load-before-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-load-before-storage.txt": "b89fa68e1846696c210f37338cb187ccd21b64225aac611e2cb3dd2218a61d1a",
+    "snapshots\\isolated-full-3-staged-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-staged-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-full-3-staged-ras.json": "528b8b747652661c475e822f00448b57c1606b5ba569aeb4a286cd94a435bdc7",
+    "snapshots\\isolated-full-3-staged-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-staged-sql-users.txt": "a8ef3a7d57d1b8cd4537bdf50422e6dd982806140b6a6a25a229afd785a1fd76",
+    "snapshots\\isolated-full-3-staged-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-full-3-staged-storage.txt": "0263010c1a718a2e6142788f682cc2324e03ef1707d3874af4532ba08955583a",
+    "snapshots\\isolated-native-complete-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-complete-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-native-complete-ras.json": "bb3da621808034aca2c71aeff719a3f8ffdc71bb3a3a4a5d7bdbbe82b7edac21",
+    "snapshots\\isolated-native-complete-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-complete-sql-users.txt": "9990a62c6481c43c9bf100a21577433810b1dfbc6aa03300279d28b4e754c0b9",
+    "snapshots\\isolated-native-complete-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-complete-storage.txt": "c8d93d7c27e627f5ad8efe8d3019b82c21dca946d45905f85e713198404d89eb",
+    "snapshots\\isolated-native-current-owned.json": "58b729ed28a31bc4b53b620cad8bf4a0310e30ed8bc350aa8f54b7400e562c36",
+    "snapshots\\isolated-native-load-before-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-load-before-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-native-load-before-ras.json": "117184f7089c34a18d37ce0f6d44d332b3c49992bef19c597ff55d99401fefe0",
+    "snapshots\\isolated-native-load-before-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-load-before-sql-users.txt": "45c835e8a9a29f50a6eb2c778a988d2b9f8141f834ad95e7ffeeb36dce456d12",
+    "snapshots\\isolated-native-load-before-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-load-before-storage.txt": "7a9c041431fd3ed6a0271fed4e6ca7b6adfed179ca1134facda2d53e4abf952c",
+    "snapshots\\isolated-native-new-owned.json": "58b729ed28a31bc4b53b620cad8bf4a0310e30ed8bc350aa8f54b7400e562c36",
+    "snapshots\\isolated-native-old-owned.json": "8d15508d42d784ede7e9faaa1e0b2dcb0490e8fe640b2b4a08687d8ba4c586b7",
+    "snapshots\\isolated-native-post-native-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-post-native-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-native-post-native-ras.json": "88b904f1216e3cf820c0d30a3b5cd9e7ce4df35a0777905beaee49bfa10f934f",
+    "snapshots\\isolated-native-post-native-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-post-native-sql-users.txt": "008797572c74cbc3f9862563c813cdacffc6add46dafbb18e52805e724336e13",
+    "snapshots\\isolated-native-post-native-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-post-native-storage.txt": "c8d93d7c27e627f5ad8efe8d3019b82c21dca946d45905f85e713198404d89eb",
+    "snapshots\\isolated-native-staged-markers.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-staged-markers.txt": "63148755e772d161a532958b739f4fa3b0fb3749cb46d6f58c76dacfa3fb02a0",
+    "snapshots\\isolated-native-staged-ras.json": "4bb9ee7d46b35abfbf9468aa27f18d7782f011ab3d5479317f3faed1f6255c32",
+    "snapshots\\isolated-native-staged-sql-users.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-staged-sql-users.txt": "008797572c74cbc3f9862563c813cdacffc6add46dafbb18e52805e724336e13",
+    "snapshots\\isolated-native-staged-storage.stderr": "7eb70257593da06f682a3ddda54a9d260d4fc514f645237f5ca74b08f8da61a6",
+    "snapshots\\isolated-native-staged-storage.txt": "87577f9a4db1208fc198ba2b37c3ecbb753cf121e2c1658a79648c5b5339ebe0"
+  },
+  "limits": [
+    "SQL UUID byte mapping inherited and independently established against all1434 W2 COM receipts on same schema; no additional COM readback here",
+    "physical unknown-commit reconciliation is final point-in-time readback only",
+    "DEBUG timing is not release performance",
+    "no generation is inferred from RAS activity/counters or idle SQL handles",
+    "script keyword/setup failures retained; first exit0 is not acceptance"
+  ],
+  "cli": {
+    "source_head": "3ff022dd112215a660769bf0a839afd4198c3769",
+    "profile": "debug, no default features; functional timings only",
+    "sha256": "B99D34D7EF884C90F1C6681D1562E4C2E5ADF7B0CED42A70C4C5A75321AC59F1"
+  },
+  "epf_sha256": "6E4A29C045346CEBA9BA364418D9CCCAD02ECEC1811DAD29D9FDE530AD31C3C7",
+  "tail_proofs": {
+    "refusal": {
+      "equal": true,
+      "before": "0B44667ED1CF8ABBE5400294550F5E17BFF77DECCD5A48710E80E39CEB51DB5A",
+      "after": "0B44667ED1CF8ABBE5400294550F5E17BFF77DECCD5A48710E80E39CEB51DB5A"
+    },
+    "noop": {
+      "equal": true,
+      "before": "F947A12B653599B4DE3538D0FFD11689B9D00AE94729C49C791E7B62D7712A11",
+      "after": "F947A12B653599B4DE3538D0FFD11689B9D00AE94729C49C791E7B62D7712A11"
+    }
+  },
+  "command_provenance": {
+    "isolated-native-harness": {
+      "script": "F:/ibcmd/lab/05/wave3/load/isolated_native_control.ps1",
+      "sha256": "B93F4288E0BECF1C2C4298612A9836CE71B310D446A4AD44F44986BCF5D121E7",
+      "command": "pwsh -NoProfile -File isolated_native_control.ps1",
+      "source_binding": "62342c04 kit; workload EPF ce34; root3ff DEBUG functional CLI",
+      "started_utc": "2026-10-01T16:23:20.5015996Z"
+    },
+    "isolated-chain-3-harness": {
+      "profile": "DEBUG timing limitation",
+      "script": "F:/ibcmd/lab/05/wave3/load/isolated_checkpoint_chain.ps1",
+      "started_utc": "2026-10-01T16:34:10.6827149Z",
+      "case": 3,
+      "sha256": "E3AE88015FB20B7B6B8520C455B84F022057E878DAF09326CA55F270CE6D2116",
+      "cli_source": "3ff022dd112215a660769bf0a839afd4198c3769"
+    },
+    "isolated-chain-3-resume-harness": {
+      "script": "F:/ibcmd/lab/05/wave3/load/isolated_resume_chain.ps1",
+      "started_utc": "2026-10-01T16:38:09.5946273Z",
+      "pending_artifact": "isolated-chain-3-r1.recovery.live.json",
+      "sha256": "A3019E0DF38712A3CC182E7D9AB9E142D44403CEA188FDA9A201D4B22F24EEF3",
+      "scope": "resume only, no new phase1"
+    }
+  },
+  "raw_root": "F:\\ibcmd\\lab\\05\\wave3\\load"
+}

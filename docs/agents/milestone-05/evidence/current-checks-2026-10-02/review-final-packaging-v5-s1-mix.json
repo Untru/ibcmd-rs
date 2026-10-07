@@ -1,0 +1,23 @@
+{
+  "scope": "Independent immutable packaging V5 static/delta/actual pure mock review; no Execute/acquire/native/build/actual packaging",
+  "verdict": "PASS",
+  "manifest_sha256": "4E8D065CB0067235B0DE39341409A4853CA21A21E58D700398C082DBACDEB6D3",
+  "members": 14,
+  "original_members": 40,
+  "all_pin_bytes_sha_no_reparse": true,
+  "parsers": true,
+  "source_head": "7aebba150e20c9b47b5956f4ca09e6cc62b28bef",
+  "source_clean": true,
+  "v4_red": "Successful Start then Close fault dropped started flag/uncertainty; reproduced with pure mock",
+  "v5_fixed": "started/PID/birth and unproved output pipes precede Close; original live child uncertainty/receipt retained",
+  "actual_pure": "PASS stdin Close fault retains original started child/receipt uncertainty; no real process/filesystem/SQL/signals",
+  "other_scope": "14 original PASS +2 known stdin failures guard, source/current binary/original40, nested EOF smoke intent/package-only/freshF/no source or broad gate rerun scope coherent; no additional confirmed P1/P2.",
+  "real_mutations": {
+    "signals": 0,
+    "DB": 0,
+    "Execute": 0,
+    "acquires": 0,
+    "builds": 0,
+    "native": 0
+  }
+}

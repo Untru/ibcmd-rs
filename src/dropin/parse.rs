@@ -949,12 +949,8 @@ fn parse_apply(scan: &Scan) -> Result<Invocation, Refusal> {
         )));
     }
     let common = common(scan)?;
-    if dynamic == DynamicMode::Force {
-        return Err(Refusal::UnsupportedOption {
-            option: "--dynamic=force".to_string(),
-            command,
-        });
-    }
+    // `--dynamic=force` is served (docs/apply/dropin-dynamic.md): the request carries it and the
+    // apply decides, from the platform and the stage, whether it can be carried out.
     Ok(Invocation::Apply(ApplyRequest {
         common,
         force: scan.has(Opt::Force),
@@ -1914,6 +1910,7 @@ mod tests {
             ("auto", DynamicMode::Auto),
             ("disable", DynamicMode::Disable),
             ("prompt", DynamicMode::Prompt),
+            ("force", DynamicMode::Force),
         ] {
             let request = apply(&["config", "apply", &format!("--dynamic={word}")]);
             assert_eq!(request.dynamic, mode, "{word}");
@@ -2072,13 +2069,10 @@ mod tests {
     #[test]
     fn what_apply_does_not_serve_is_named() {
         let command = "infobase config apply".to_string();
-        // the dynamic update is the platform's, the apply here is exclusive
+        // `--dynamic=force` is served now: it parses, with the other words, and the apply judges the stage
         assert_eq!(
-            parse(&["config", "apply", "--dynamic=force"]),
-            Err(Refusal::UnsupportedOption {
-                option: "--dynamic=force".to_string(),
-                command: command.clone()
-            })
+            apply(&["config", "apply", "--dynamic=force"]).dynamic,
+            DynamicMode::Force
         );
         for list in [
             vec!["config", "apply", "--extension=E"],

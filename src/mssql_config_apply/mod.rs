@@ -22,6 +22,10 @@
 //! - [`apply_staged_configuration`] runs the script and checks the result.
 
 pub mod check_gate;
+pub mod dynamic;
+mod dynamic_metadata;
+mod dynamic_overlay;
+pub mod dynamic_platform85;
 pub mod errors;
 pub mod gate;
 pub mod model;
@@ -48,8 +52,8 @@ use crate::sql::{ScriptVariables, SqlClient, SqlExec, SqlParam, SqlValue};
 
 use check_gate::ApplyCheckGate;
 pub use errors::{
-    BackupRequired, ExclusiveAccessRefused, ExclusiveAccessUnprovable, NativeCommand,
-    NeedsNativeApply,
+    BackupRequired, DynamicUnsupported, ExclusiveAccessRefused, ExclusiveAccessUnprovable,
+    NativeCommand, NeedsNativeApply,
 };
 use gate::{ConservativeGate, GateInput, GateVerdict, StructuralGate, StructurePhase};
 use model::{RowMeta, hex_lower, quote_ident, quote_string};
@@ -70,6 +74,20 @@ pub enum Exclusivity {
     /// The caller has proved it another way (for instance with `rac session
     /// list`); the script does not look.
     Assumed,
+    /// The dynamic apply ([`dynamic`]) publishes while sessions are connected and asks for no
+    /// exclusive access.
+    NotRequired,
+}
+
+/// How the stage was applied.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApplyMode {
+    /// The rows replace the active ones in place, with the database to itself.
+    Exclusive,
+    /// The rows are published as a dynamic (online) generation beside the active ones
+    /// (`--dynamic=force`, [`dynamic`]).
+    Dynamic,
 }
 
 /// Which overwritten rows the recovery artifact keeps the bytes of.
@@ -297,6 +315,24 @@ pub struct DynamicSummary {
     pub alias_rows: usize,
 }
 
+/// What a dynamic apply published ([`dynamic`]).
+#[derive(Debug, Clone, Serialize)]
+pub struct DynamicPublication {
+    /// The generation this apply made (the one the `versions` row it staged names).
+    pub generation: String,
+    /// The generation that was active before it.
+    pub previous_generation: String,
+    /// The history after it, oldest first: the `DynamicallyUpdated` markers list it. The next
+    /// exclusive apply folds all of it into the ordinary rows.
+    pub history: Vec<String>,
+    /// The rows this apply wrote beside the active ones (`<name>_dynupdate_<generation>`).
+    pub alias_rows: Vec<String>,
+    /// The service rows replaced in place (`root`, `version`).
+    pub replaced_in_place: Vec<String>,
+    /// The generations past which the report warns that the overlay is growing ([`dynamic::WARN_GENERATIONS`]).
+    pub warn_after_generations: usize,
+}
+
 /// The change registrations of the exchange-plan nodes (docs/apply/own-apply.md, "Exchange plans").
 #[derive(Debug, Clone, Serialize)]
 pub struct RegistrationSummary {
@@ -345,6 +381,8 @@ fn is_zero_ms(millis: &u128) -> bool {
 #[derive(Debug, Clone, Serialize)]
 pub struct ConfigApplyReport {
     pub schema_version: u32,
+    /// `exclusive` (the rows replaced in place) or `dynamic` (a generation published beside them).
+    pub mode: ApplyMode,
     pub database: String,
     pub platform_profile: String,
     pub storage_schema_sha256: String,
@@ -358,7 +396,11 @@ pub struct ConfigApplyReport {
     pub active_generation: Option<String>,
     pub new_generation: Option<String>,
     pub stage: Option<StageSummary>,
+    /// The overlay an exclusive apply folded.
     pub dynamic: Option<DynamicSummary>,
+    /// The generation a dynamic apply published.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub published: Option<DynamicPublication>,
     pub gate: Option<GateVerdict>,
     /// The restructuring the gate let through and the script runs in its transaction.
     pub structure: Option<StructurePhase>,
@@ -468,6 +510,140 @@ fn read_blob(
         Some(SqlValue::Binary(bytes)) => Ok(Some(bytes)),
         Some(other) => bail!("{table}.{name} is not binary: {other:?}"),
     }
+}
+
+/// No row of an unfinished operation (`commit`, `dynamicCommit`, `dbStruFinal`, `convertPhase`,
+/// `erase_save`, `deleted`, `*.new`) in `Config`, and none but the stage's own list of removals in
+/// `ConfigSave`: what is left over is `config repair`'s to finish. `db` is the quoted database name.
+pub(crate) fn require_no_unfinished_operation(client: &dyn SqlClient, db: &str) -> Result<()> {
+    let unfinished = sqlgen::UNFINISHED_NAMES
+        .iter()
+        .map(|name| format!("N'{}'", quote_string(name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    // In `ConfigSave` a row `deleted` is not a marker of an unfinished
+    // operation but the stage's own list of removals (the platform's import
+    // writes one to every stage): it is judged below.
+    let unfinished_in_save = sqlgen::UNFINISHED_NAMES
+        .iter()
+        .filter(|name| **name != "deleted")
+        .map(|name| format!("N'{}'", quote_string(name)))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let left_over = scalar_i64(
+        client,
+        &format!(
+            "SELECT (SELECT COUNT_BIG(*) FROM {db}.dbo.Config WHERE FileName IN ({unfinished}) OR FileName LIKE N'%.new') + (SELECT COUNT_BIG(*) FROM {db}.dbo.ConfigSave WHERE FileName IN ({unfinished_in_save}) OR FileName LIKE N'%.new')"
+        ),
+    )?;
+    if left_over != 0 {
+        return Err(NeedsNativeApply::repair(format!(
+            "{left_over} row(s) of an unfinished operation (commit / dynamicCommit / dbStruFinal / convertPhase / erase_save / deleted / *.new) are recorded in Config or ConfigSave; run the native `ibcmd infobase config repair` first"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// No dynamic-update overlay in `Params` and a schema storage at rest. `db` is the quoted database name.
+pub(crate) fn require_settled_storage(client: &dyn SqlClient, db: &str) -> Result<()> {
+    // An overlay of a dynamic update in Params (a `.si` row under an alias name)
+    // is folded by the native apply's `.si` promotion; this apply only folds
+    // `Config`, so it leaves such a database to the native one.
+    let params_overlays = scalar_i64(
+        client,
+        &format!(
+            "SELECT COUNT_BIG(*) FROM {db}.dbo.Params WHERE FileName LIKE {}",
+            sqlgen::ALIAS_PATTERN
+        ),
+    )?;
+    if params_overlays != 0 {
+        return Err(NeedsNativeApply::apply(format!(
+            "Params holds {params_overlays} dynamic-update overlay row(s) (names with _dynupdate_): run the native `ibcmd infobase config apply`"
+        ))
+        .into());
+    }
+    require_schema_settled(client, db)
+}
+
+/// The schema must be settled even when the bounded dynamic path accepts measured Params aliases.
+pub(crate) fn require_schema_settled(client: &dyn SqlClient, db: &str) -> Result<()> {
+    // The schema storage of a settled infobase is at Status 100; the native apply
+    // walks it through 200, 400 and 500 and back, so any other value is an
+    // interrupted operation.
+    let unsettled = scalar_i64(
+        client,
+        &format!("SELECT COUNT_BIG(*) FROM {db}.dbo.SchemaStorage WHERE Status <> 100"),
+    )?;
+    if unsettled != 0 {
+        return Err(NeedsNativeApply::repair(format!(
+            "SchemaStorage is not settled ({unsettled} row(s) with Status other than 100): an interrupted restructuring or apply; run the native `ibcmd infobase config repair` first"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
+/// `Files.MobileVersions.dat`: every apply, exclusive or dynamic, puts a fresh GUID at the head of the
+/// ring (the platform does, so mobile clients see a new version). The rewrite the script makes and the
+/// bytes it replaces (for the recovery artifact). A database without a `_YearOffset` table gets
+/// unshifted timestamps, and one without the file no rewrite; both are said in the report.
+pub(crate) fn plan_mobile_versions(
+    client: &dyn SqlClient,
+    database: &str,
+    report: &mut ConfigApplyReport,
+) -> Result<(Vec<FilesRewrite>, Option<Vec<u8>>)> {
+    let db = quote_ident(database)?;
+    let has_year_offset = scalar_i64(
+        client,
+        &format!(
+            "SELECT CASE WHEN OBJECT_ID(N'{db}.dbo._YearOffset', N'U') IS NULL THEN 0 ELSE 1 END"
+        ),
+    )? == 1;
+    if !has_year_offset {
+        report.warnings.push(
+            "the database has no _YearOffset table; Files rows get unshifted timestamps".to_owned(),
+        );
+    }
+    let mut files_rewrites = Vec::new();
+    let mut mobile_before = None;
+    let mobile_metas = read_row_metas(
+        client,
+        &format!(
+            "SELECT {ROW_COLUMNS} FROM {db}.dbo.Files WHERE FileName = N'MobileVersions.dat' ORDER BY PartNo"
+        ),
+    )?;
+    match mobile_metas.as_slice() {
+        [] => report.warnings.push(
+            "Files.MobileVersions.dat is absent; mobile clients get no new version".to_owned(),
+        ),
+        [meta] if meta.part == 0 => {
+            let current = read_blob(client, database, "Files", "MobileVersions.dat")?
+                .ok_or_else(|| anyhow!("Files.MobileVersions.dat vanished"))?;
+            let next = versions::mobile_versions_prepend(&current, Uuid::new_v4())?;
+            files_rewrites.push(FilesRewrite {
+                file_name: "MobileVersions.dat".to_owned(),
+                old_data_size: meta.data_size,
+                old_sha256_hex: meta.sha256.to_ascii_uppercase(),
+                new_bytes: next,
+            });
+            mobile_before = Some(current);
+        }
+        _ => bail!("Files.MobileVersions.dat has several parts"),
+    }
+    Ok((files_rewrites, mobile_before))
+}
+
+/// The exchange-plan nodes as the script's literals.
+pub(crate) fn node_literals(nodes: &[objects::RegistrationNode]) -> Vec<NodeLiteral> {
+    nodes
+        .iter()
+        .map(|node| NodeLiteral {
+            plan: node.plan,
+            type_hex: node.type_ref.clone(),
+            reference_hex: node.reference.clone(),
+        })
+        .collect()
 }
 
 /// The list in a stage's `deleted` row: `<BOM><count>,"<row name>",<flag>,...`
@@ -702,6 +878,50 @@ pub fn other_sessions(
     Ok(sessions)
 }
 
+/// The report of a plan that has looked at nothing yet.
+pub(crate) fn blank_report(
+    options: &ConfigApplyOptions,
+    storage: &crate::mssql_platform_profile::MssqlStorageVerification,
+    mode: ApplyMode,
+) -> ConfigApplyReport {
+    ConfigApplyReport {
+        schema_version: 1,
+        mode,
+        database: options.database.clone(),
+        platform_profile: storage.claimed_platform_profile.clone(),
+        storage_schema_sha256: storage.storage_schema_sha256.clone(),
+        dry_run: options.dry_run,
+        rehearsal: options.rehearse,
+        executed: false,
+        nothing_to_apply: false,
+        exclusivity: if mode == ApplyMode::Dynamic {
+            Exclusivity::NotRequired
+        } else {
+            options.exclusivity
+        },
+        active_generation: None,
+        new_generation: None,
+        stage: None,
+        dynamic: None,
+        published: None,
+        gate: None,
+        structure: None,
+        backup: None,
+        registrations: None,
+        new_objects: None,
+        removals: None,
+        synonym_records: 0,
+        tables_touched: Vec::new(),
+        not_written: Vec::new(),
+        warnings: Vec::new(),
+        script_sha256: None,
+        script_path: None,
+        recovery_dir: None,
+        recovery_token: None,
+        timings: ApplyTimings::default(),
+    }
+}
+
 /// The plan and the script, built from a read-only look at the database.
 pub struct ConfigApplyPlan {
     pub report: ConfigApplyReport,
@@ -745,36 +965,7 @@ pub fn plan_with_gate(
         client,
         &format!("SELECT {ROW_COLUMNS} FROM {db}.dbo.ConfigSave ORDER BY FileName, PartNo"),
     )?;
-    let mut report = ConfigApplyReport {
-        schema_version: 1,
-        database: options.database.clone(),
-        platform_profile: storage.claimed_platform_profile.clone(),
-        storage_schema_sha256: storage.storage_schema_sha256.clone(),
-        dry_run: options.dry_run,
-        rehearsal: options.rehearse,
-        executed: false,
-        nothing_to_apply: false,
-        exclusivity: options.exclusivity,
-        active_generation: None,
-        new_generation: None,
-        stage: None,
-        dynamic: None,
-        gate: None,
-        structure: None,
-        backup: None,
-        registrations: None,
-        new_objects: None,
-        removals: None,
-        synonym_records: 0,
-        tables_touched: Vec::new(),
-        not_written: Vec::new(),
-        warnings: Vec::new(),
-        script_sha256: None,
-        script_path: None,
-        recovery_dir: None,
-        recovery_token: None,
-        timings: ApplyTimings::default(),
-    };
+    let mut report = blank_report(options, &storage, ApplyMode::Exclusive);
     if staged.is_empty() {
         report.nothing_to_apply = true;
         timings.inventory_ms = ms(started);
@@ -804,32 +995,7 @@ pub fn plan_with_gate(
             "SELECT {ROW_COLUMNS} FROM {db}.dbo.Config WHERE FileName = N'DynamicallyUpdated' OR FileName LIKE N'%\\_dynupdate\\_%' ESCAPE N'\\' ORDER BY FileName, PartNo"
         ),
     )?;
-    let unfinished = sqlgen::UNFINISHED_NAMES
-        .iter()
-        .map(|name| format!("N'{}'", quote_string(name)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    // In `ConfigSave` a row `deleted` is not a marker of an unfinished
-    // operation but the stage's own list of removals (the platform's import
-    // writes one to every stage): it is judged below.
-    let unfinished_in_save = sqlgen::UNFINISHED_NAMES
-        .iter()
-        .filter(|name| **name != "deleted")
-        .map(|name| format!("N'{}'", quote_string(name)))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let left_over = scalar_i64(
-        client,
-        &format!(
-            "SELECT (SELECT COUNT_BIG(*) FROM {db}.dbo.Config WHERE FileName IN ({unfinished}) OR FileName LIKE N'%.new') + (SELECT COUNT_BIG(*) FROM {db}.dbo.ConfigSave WHERE FileName IN ({unfinished_in_save}) OR FileName LIKE N'%.new')"
-        ),
-    )?;
-    if left_over != 0 {
-        return Err(NeedsNativeApply::repair(format!(
-            "{left_over} row(s) of an unfinished operation (commit / dynamicCommit / dbStruFinal / convertPhase / erase_save / deleted / *.new) are recorded in Config or ConfigSave; run the native `ibcmd infobase config repair` first"
-        ))
-        .into());
-    }
+    require_no_unfinished_operation(client, &db)?;
     // The change registrations exist with their file lists or not at all.
     let has_change_registrations = scalar_i64(
         client,
@@ -961,35 +1127,7 @@ pub fn plan_with_gate(
             }
         }
     }
-    // An overlay of a dynamic update in Params (a `.si` row under an alias name)
-    // is folded by the native apply's `.si` promotion; this apply only folds
-    // `Config`, so it leaves such a database to the native one.
-    let params_overlays = scalar_i64(
-        client,
-        &format!(
-            "SELECT COUNT_BIG(*) FROM {db}.dbo.Params WHERE FileName LIKE {}",
-            sqlgen::ALIAS_PATTERN
-        ),
-    )?;
-    if params_overlays != 0 {
-        return Err(NeedsNativeApply::apply(format!(
-            "Params holds {params_overlays} dynamic-update overlay row(s) (names with _dynupdate_): run the native `ibcmd infobase config apply`"
-        ))
-        .into());
-    }
-    // The schema storage of a settled infobase is at Status 100; the native apply
-    // walks it through 200, 400 and 500 and back, so any other value is an
-    // interrupted operation.
-    let unsettled = scalar_i64(
-        client,
-        &format!("SELECT COUNT_BIG(*) FROM {db}.dbo.SchemaStorage WHERE Status <> 100"),
-    )?;
-    if unsettled != 0 {
-        return Err(NeedsNativeApply::repair(format!(
-            "SchemaStorage is not settled ({unsettled} row(s) with Status other than 100): an interrupted restructuring or apply; run the native `ibcmd infobase config repair` first"
-        ))
-        .into());
-    }
+    require_settled_storage(client, &db)?;
     timings.inventory_ms = ms(started);
 
     let active: HashMap<(String, i32), RowMeta> = replaced
@@ -1275,45 +1413,8 @@ pub fn plan_with_gate(
         bail!("ConfigSave changed while the plan was being made");
     }
 
-    let has_year_offset = scalar_i64(
-        client,
-        &format!(
-            "SELECT CASE WHEN OBJECT_ID(N'{db}.dbo._YearOffset', N'U') IS NULL THEN 0 ELSE 1 END"
-        ),
-    )? == 1;
-    if !has_year_offset {
-        report.warnings.push(
-            "the database has no _YearOffset table; Files rows get unshifted timestamps".to_owned(),
-        );
-    }
-
     // Files.MobileVersions.dat: a fresh GUID at the head.
-    let mut files_rewrites = Vec::new();
-    let mut mobile_before = None;
-    let mobile_metas = read_row_metas(
-        client,
-        &format!(
-            "SELECT {ROW_COLUMNS} FROM {db}.dbo.Files WHERE FileName = N'MobileVersions.dat' ORDER BY PartNo"
-        ),
-    )?;
-    match mobile_metas.as_slice() {
-        [] => report.warnings.push(
-            "Files.MobileVersions.dat is absent; mobile clients get no new version".to_owned(),
-        ),
-        [meta] if meta.part == 0 => {
-            let current = read_blob(client, database, "Files", "MobileVersions.dat")?
-                .ok_or_else(|| anyhow!("Files.MobileVersions.dat vanished"))?;
-            let next = versions::mobile_versions_prepend(&current, Uuid::new_v4())?;
-            files_rewrites.push(FilesRewrite {
-                file_name: "MobileVersions.dat".to_owned(),
-                old_data_size: meta.data_size,
-                old_sha256_hex: meta.sha256.to_ascii_uppercase(),
-                new_bytes: next,
-            });
-            mobile_before = Some(current);
-        }
-        _ => bail!("Files.MobileVersions.dat has several parts"),
-    }
+    let (files_rewrites, mobile_before) = plan_mobile_versions(client, database, &mut report)?;
 
     // The `Params` rows to rewrite: the search information of new objects.
     // The `.ui` rows (the platform's configuration-licensing records) are never
@@ -1503,14 +1604,7 @@ pub fn plan_with_gate(
     } else {
         &created_nodes
     };
-    let nodes = node_source
-        .iter()
-        .map(|node| NodeLiteral {
-            plan: node.plan,
-            type_hex: node.type_ref.clone(),
-            reference_hex: node.reference.clone(),
-        })
-        .collect::<Vec<_>>();
+    let nodes = node_literals(node_source);
     report.not_written = vec![
         "Params .ui rows (the platform's configuration-licensing records, track ui #340): never written; the native apply re-encrypts two of them on every apply".to_owned(),
     ];
@@ -1585,6 +1679,7 @@ pub fn plan_with_gate(
         plan_node_counts: registration.node_counts.clone(),
         extra_changed_objects: registration.extra_objects.clone(),
         appended_files,
+        appended_registration_ids: None,
         consumed_names,
         consumed_row_count,
         dropped_rows,
@@ -1741,7 +1836,10 @@ pub fn apply_with_gate(
                 .inputs
                 .as_ref()
                 .map_or(&[][..], |inputs| inputs.params_rewrites.as_slice()),
+            bound_params_preimages: None,
             backup: plan.report.backup.as_ref(),
+            dynamic_generation: None,
+            appended_existing_rows: &[],
         },
     )?;
     plan.report.recovery_dir = Some(dir);
