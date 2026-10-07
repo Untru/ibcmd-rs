@@ -905,9 +905,10 @@ fn bootstrap_compile_failure(
                 format!(
                     "source tree cannot be bootstrapped: {error}. \
                      This command used the limited legacy bootstrap compiler. \
-                     For native XML trees, build newer source from master after PR #422 \
-                     (published v0.4.0 lacks the cf bootstrap --base-free option), then try \
+                     For native XML trees, try \
                      ibcmd-rs cf bootstrap --base-free --platform <version> <source-dir> <output.cf>. \
+                     The --base-free option requires a build from sources newer than v0.4.0; \
+                     published v0.4.0 lacks this option. \
                      The following diagnostics retain the exact rejected file and rule."
                 ),
             ),

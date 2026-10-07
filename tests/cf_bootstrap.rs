@@ -228,7 +228,7 @@ fn unsupported_source_prevents_publication() {
         guidance.contains("limited legacy bootstrap compiler"),
         "{guidance}"
     );
-    assert!(guidance.contains("master after PR #422"), "{guidance}");
+    assert!(guidance.contains("sources newer than v0.4.0"), "{guidance}");
     assert!(guidance.contains("v0.4.0 lacks"), "{guidance}");
     assert!(
         guidance.contains("ibcmd-rs cf bootstrap --base-free --platform <version>"),
@@ -239,7 +239,12 @@ fn unsupported_source_prevents_publication() {
     let detail = &report["errors"][1];
     assert_eq!(detail["code"], "unconsumed_source");
     assert_eq!(detail["element"], "unsupported.dat");
-    assert!(detail["message"].as_str().unwrap().contains("unsupported.dat"));
+    assert!(
+        detail["message"]
+            .as_str()
+            .unwrap()
+            .contains("unsupported.dat")
+    );
     assert_eq!(report["errors"].as_array().unwrap().len(), 2);
     assert!(report["publication"].is_null());
     assert!(!cf.exists());
