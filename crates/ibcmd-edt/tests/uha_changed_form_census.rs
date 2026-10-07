@@ -413,15 +413,15 @@ fn census_metadata_matches_production_common_attributes_and_compatibility() {
     ];
     configuration.objects.push(common);
 
-    let mut body = read_form(
-        FormDialect::Edt,
-        br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:form="http://g5.1c.ru/v8/dt/form">
-<attributes><name>List</name><valueType><types>DynamicList</types></valueType>
-<view><common>true</common></view><edit><common>true</common></edit>
-<extInfo xsi:type="form:DynamicListExtInfo"><autoFillAvailableFields>true</autoFillAvailableFields></extInfo>
-</attributes></form:Form>"#,
-    )
-    .unwrap();
+    let form_xml = concat!(
+        "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\">\r\n",
+        "<attributes><name>List</name><valueType><types>DynamicList</types></valueType>\r\n",
+        "<view><common>true</common></view><edit><common>true</common></edit>\r\n",
+        "<extInfo xsi:type=\"form:DynamicListExtInfo\"><autoFillAvailableFields>true</autoFillAvailableFields></extInfo>\r\n",
+        "</attributes></form:Form>\r\n"
+    );
+    let mut body = read_form(FormDialect::Edt, form_xml.as_bytes()).unwrap();
     let list = body.data_attributes[0].dynamic_list.as_mut().unwrap();
     list.main_table = Some(format!("Catalog.{owner_name}"));
     list.custom_query = false;
