@@ -130,6 +130,100 @@ fn assert_cycle(body: &FormBody, config: &Configuration, version: FormatVersion)
 }
 
 #[test]
+fn date_and_number_child_providers_preserve_unknown_and_complete_edited_roundtrip() {
+    for minor in [20, 21] {
+        let version = FormatVersion::new(2, minor);
+        let mut body = form(version, true);
+        body.data_attributes[0]
+            .dynamic_list
+            .as_mut()
+            .unwrap()
+            .main_table = Some("AccumulationRegister.Source".into());
+        let mut config = metadata();
+        let mut source = MetadataObject::new(
+            ObjectKind::new("AccumulationRegister"),
+            "Source",
+            Uuid([1; 16]),
+        );
+        for (name, ty) in [
+            ("Reference", "CatalogRef.Target"),
+            ("When", "Date"),
+            ("Amount", "Number"),
+            ("MixedDate", "Date"),
+            ("MixedNumber", "Number"),
+        ] {
+            child(&mut source, name, ty);
+        }
+        source.children[2].kind = ObjectKind::new("AccumulationRegister.Resource");
+        for field in &mut source.children[3..] {
+            let PropertyValue::Type(ty) = &mut field.properties[0].1 else {
+                panic!()
+            };
+            ty.parts.push(TypeRef {
+                id: "CatalogRef.Target".into(),
+                qualifier: None,
+            });
+        }
+        config.objects[0] = source;
+        child(&mut config.objects[1], "When", "Date");
+        child(&mut config.objects[1], "Amount", "Number");
+        let paths = [
+            "List.When",
+            "List.Amount",
+            "List.When.DateParts.Year",
+            "List.Amount.PercentOverall",
+            "List.Reference.When.DateParts.Year",
+            "List.Reference.Amount.PercentOverall",
+            "Items.Rows.CurrentData.When.DateParts.Year",
+            "Items.Rows.CurrentData.Amount.PercentOverall",
+            "List.MixedDate.DateParts.Year",
+            "List.MixedNumber.PercentOverall",
+            "List.MixedDate.Known",
+            "List.MixedNumber.Known",
+            "Items.Rows.CurrentData.MixedDate.DateParts.Year",
+            "Items.Rows.CurrentData.MixedNumber.PercentOverall",
+            "List.Reference.Known.Missing",
+        ];
+        add_paths(&mut body, &paths, version);
+        let original_paths = emitted_paths(&assert_cycle(&body, &config, version));
+        let mut expected = vec!["List".to_owned(), "OtherList".to_owned()];
+        expected.extend(paths.into_iter().map(str::to_owned));
+        *expected.last_mut().unwrap() = "~List.Reference.Known.Missing".into();
+        assert_eq!(
+            original_paths, expected,
+            "provider uncertainty must not change actual leaves or invent unavailable children"
+        );
+        // CURRENT Date→Boolean edits prove an empty child roster. Native origin
+        // markers still must not replace the complete authored/edited path IR.
+        let PropertyValue::Type(ty) = &mut config.objects[0].children[1].properties[0].1 else {
+            panic!()
+        };
+        ty.parts[0].id = "Boolean".into();
+        assert!(
+            emitted_paths(&assert_cycle(&body, &config, version))
+                .contains(&"~List.When.DateParts.Year".to_owned())
+        );
+        assert!(
+            emitted_paths(&assert_cycle(&body, &config, version))
+                .contains(&"~Items.Rows.CurrentData.When.DateParts.Year".to_owned())
+        );
+        let PropertyValue::Type(ty) = &mut config.objects[0].children[1].properties[0].1 else {
+            panic!()
+        };
+        ty.parts[0].id = "Date".into();
+        body.items[4]
+            .properties
+            .iter_mut()
+            .find(|(id, _)| *id == ff::F_DATA_PATH)
+            .unwrap()
+            .1 = PropertyValue::Ref("List.When.OtherExpression.Child".into());
+        let edited = emitted_paths(&assert_cycle(&body, &config, version));
+        assert!(edited.contains(&"List.When.OtherExpression.Child".to_owned()));
+        assert!(!edited.contains(&"List.When.DateParts.Year".to_owned()));
+    }
+}
+
+#[test]
 fn nested_default_list_paths_resolve_current_declared_reference_members_without_depth_caps() {
     for minor in [20, 21] {
         let version = FormatVersion::new(2, minor);

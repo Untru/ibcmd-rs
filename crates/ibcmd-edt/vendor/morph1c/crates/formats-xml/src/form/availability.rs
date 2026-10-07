@@ -1472,8 +1472,9 @@ fn field_type(value: Option<&PropertyValue>) -> ReferenceField {
         field.type_ids.insert(part.id.clone());
         if let Some(target) = reference_type(&part.id) {
             field.targets.insert(target);
-        } else if !part.is_dbview_scalar() {
-            // TypeSet/DefinedType/provider expansion needs its actual registry.
+        } else if !part.has_complete_dbview_leaf_roster() {
+            // Date expressions, Number resources, TypeSet/DefinedType and other
+            // provider expansion need their actual registry and restrictions.
             // Unknown is not a negative lookup or an invented all-fields node.
             field.unknown_type = true;
         }
@@ -1884,6 +1885,85 @@ mod reference_child_tests {
         })
         .unwrap()
     }
+    #[test]
+    fn provider_expanded_primitive_children_retain_unknown_across_current_owners() {
+        let mut metadata = metadata();
+        metadata.objects[0].children.extend([
+            attribute("AccumulationRegister.Attribute", "When", &["Date"]),
+            attribute("AccumulationRegister.Resource", "Amount", &["Number"]),
+            attribute(
+                "AccumulationRegister.Attribute",
+                "MixedDate",
+                &["Date", "CatalogRef.Target"],
+            ),
+            attribute(
+                "AccumulationRegister.Attribute",
+                "MixedNumber",
+                &["Number", "CatalogRef.Target"],
+            ),
+        ]);
+        metadata.objects[1].children.extend([
+            attribute("Catalog.Attribute", "When", &["Date"]),
+            attribute("Catalog.Attribute", "Amount", &["Number"]),
+        ]);
+        let mut body = body();
+        let mut table = FormItem::new(FormControlKind::new("Table"), "Rows", 1);
+        table.properties.push((
+            morph1c_core::spec::forms::controls::table::F_DATA_PATH,
+            PropertyValue::Ref("List".into()),
+        ));
+        body.items.push(table);
+        for minor in [20, 21] {
+            for path in [
+                "List.When",
+                "List.Amount",
+                "List.Reference.When",
+                "List.Reference.Amount",
+                "List.MixedDate.KnownChild",
+                "List.MixedNumber.KnownChild",
+                "Items.Rows.CurrentData.When",
+            ] {
+                assert_eq!(
+                    lookup(&metadata, &body, minor, path),
+                    Some(false),
+                    "actual current leaf/member: {path}"
+                );
+            }
+            for path in [
+                "List.When.DateParts.Year",
+                "List.Amount.PercentOverall",
+                "List.Reference.When.DateParts.Year",
+                "List.Reference.Amount.PercentOverall",
+                "Items.Rows.CurrentData.When.DateParts.Year",
+                "Items.Rows.CurrentData.Amount.PercentOverall",
+                "List.MixedDate.DateParts.Year",
+                "List.MixedNumber.PercentOverall",
+                "Items.Rows.CurrentData.MixedDate.DateParts.Year",
+            ] {
+                assert_eq!(
+                    lookup(&metadata, &body, minor, path),
+                    None,
+                    "unproved expression/resource provider: {path}"
+                );
+            }
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.Reference.KnownChild.Missing"),
+                Some(true),
+                "proved empty String roster remains negative"
+            );
+            // CURRENT replacement with a proved leaf invalidates the previous
+            // provider possibility; retaining unknown must not be a stale cache.
+            metadata.objects[0].children[1] =
+                attribute("AccumulationRegister.Attribute", "When", &["Boolean"]);
+            assert_eq!(
+                lookup(&metadata, &body, minor, "List.When.DateParts.Year"),
+                Some(true)
+            );
+            metadata.objects[0].children[1] =
+                attribute("AccumulationRegister.Attribute", "When", &["Date"]);
+        }
+    }
+
     #[test]
     fn current_default_list_reference_child_graph_positive_negative_and_deep() {
         let mut metadata = metadata();

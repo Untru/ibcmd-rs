@@ -175,15 +175,14 @@ pub struct TypeRef {
 }
 
 impl TypeRef {
-    /// Primitive database-view values have no reference-member provider.
-    /// Other type identities require their actual CURRENT type registry.
-    pub fn is_dbview_scalar(&self) -> bool {
+    /// Primitive types with a complete empty database-view child roster.
+    /// Date expressions and Number resource fields need their actual CURRENT
+    /// provider; no metadata object does not establish an empty child set.
+    pub fn has_complete_dbview_leaf_roster(&self) -> bool {
         matches!(
             self.id.as_str(),
             "String"
-                | "Number"
                 | "Boolean"
-                | "Date"
                 | "Undefined"
                 | "Null"
                 | "UUID"
