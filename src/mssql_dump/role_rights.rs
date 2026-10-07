@@ -1,4 +1,8 @@
 use super::*;
+use ibcmd_schema::configuration_rights::{
+    CONFIGURATION_MODE_GROUP_ANCHOR, CONFIGURATION_RIGHT_ORDER,
+    EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START, EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID,
+};
 
 pub(super) struct RoleRights {
     pub(super) set_for_new_objects: bool,
@@ -746,8 +750,7 @@ pub(super) fn role_standard_attribute_descriptor(
     }
 }
 
-/// Right UUIDs the platform writes on the Configuration root that carry no
-/// name in `ROLE_RIGHT_NAMES`.
+/// Configuration-root rights suppressed when equal to setForNewObjects.
 ///
 /// Measured over the ERP УХ role corpus (2026-08-24, 1,679 roles whose Rights
 /// blob has a Configuration-object entry): the UUID occurs in every one of
@@ -755,10 +758,9 @@ pub(super) fn role_standard_attribute_descriptor(
 /// `setForNewObjects` flag — which is exactly the condition under which
 /// `role_rights_for_xml` never prints a Configuration-root right at all (see
 /// its doc comment). It is therefore structurally invisible in every
-/// observed byte of output, on any value it takes. Parsing tolerates it
-/// only while the equality holds, because no observed byte proves what name
-/// the platform would print if it ever didn't: a role where the value
-/// diverges from the flag is refused rather than guessed.
+/// observed byte of output. The later ITK witness names a diverging value
+/// ExclusiveModeTerminationAtSessionStart; that shared schema name and UUID
+/// are now also available to the base-free writer.
 ///
 /// The list used to hold a second uuid, `3762abec-…`. Документооборот КОРП
 /// 3.0.21.3 writes that one *diverging* from the flag on
@@ -767,10 +769,7 @@ pub(super) fn role_standard_attribute_descriptor(
 /// the bytes put it, and the whole role -- which this refusal used to
 /// discard -- is exported again.
 const CONFIGURATION_ROOT_TOLERATED_UNNAMED_RIGHT_UUIDS: [&str; 1] =
-    ["4df6d046-3bf8-4dda-991c-53ba664296a5"];
-
-/// The name the platform prints for that uuid once it diverges from the flag.
-const EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START: &str = "ExclusiveModeTerminationAtSessionStart";
+    [EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START_UUID];
 
 /// True for the six Configuration-root rights that pick the client's launch
 /// mode (thin/thick client window mode, analytics client). Unlike every
@@ -780,14 +779,7 @@ pub(super) fn is_configuration_mode_right(name: &str) -> bool {
     CONFIGURATION_MODE_RIGHT_NAMES.contains(&name)
 }
 
-pub(crate) const CONFIGURATION_MODE_RIGHT_NAMES: [&str; 6] = [
-    "MainWindowModeNormal",
-    "MainWindowModeWorkplace",
-    "MainWindowModeEmbeddedWorkplace",
-    "MainWindowModeFullscreenWorkplace",
-    "MainWindowModeKiosk",
-    "AnalyticsSystemClient",
-];
+pub(crate) use ibcmd_schema::configuration_rights::CONFIGURATION_MODE_RIGHT_NAMES;
 
 /// True for the Configuration root's own name (`Configuration.<Name>`), the
 /// one object every role's Rights blob may carry administrative (client
@@ -897,31 +889,33 @@ pub(super) fn parse_configuration_root_object_rights(
             });
             entries.splice(insert_at..insert_at, synthesized);
         }
-        6 => {
-            // Present, they print where the platform's canonical order puts
-            // them too -- immediately before `SaveUserData`, in the order of
-            // `CONFIGURATION_MODE_RIGHT_NAMES` -- whatever order the blob
-            // stores them in: a real extension stores seven roles with
-            // `AnalyticsSystemClient` before `MobileClient` and the window
-            // modes after `Output`, and 8.3.27.2214 prints them canonically.
-            if let Some(save_user_data) = save_user_data_index {
-                let save_user_data_name = entries[save_user_data].name.clone();
-                let (mut modes, rest): (Vec<_>, Vec<_>) = std::mem::take(&mut entries)
-                    .into_iter()
-                    .partition(|entry| is_configuration_mode_right(&entry.name));
-                entries = rest;
-                modes.sort_by_key(|entry| {
-                    CONFIGURATION_MODE_RIGHT_NAMES
-                        .iter()
-                        .position(|name| *name == entry.name)
-                });
-                let insert_at = entries
-                    .iter()
-                    .position(|entry| entry.name == save_user_data_name)?;
-                entries.splice(insert_at..insert_at, modes);
-            }
-        }
+        6 => {}
         _ => return None, // partial presence: an unproven shape
+    }
+
+    // Stored window modes may be scrambled or synthesized above. Native
+    // XML places them before SaveUserData, followed by the termination right
+    // if it differs from the role's default. Move the whole group so a
+    // termination pair stored before the modes cannot split this sequence.
+    if entries
+        .iter()
+        .any(|entry| entry.name == CONFIGURATION_MODE_GROUP_ANCHOR)
+    {
+        let (mut ordered, rest): (Vec<_>, Vec<_>) =
+            std::mem::take(&mut entries).into_iter().partition(|entry| {
+                is_configuration_mode_right(&entry.name)
+                    || entry.name == EXCLUSIVE_MODE_TERMINATION_AT_SESSION_START
+            });
+        entries = rest;
+        ordered.sort_by_key(|entry| {
+            CONFIGURATION_RIGHT_ORDER
+                .iter()
+                .position(|name| *name == entry.name)
+        });
+        let insert_at = entries
+            .iter()
+            .position(|entry| entry.name == CONFIGURATION_MODE_GROUP_ANCHOR)?;
+        entries.splice(insert_at..insert_at, ordered);
     }
 
     Some(entries)
@@ -1247,13 +1241,15 @@ pub(super) fn parse_role_restriction_templates(
 }
 
 pub(crate) fn role_right_name(uuid: &str) -> Option<&'static str> {
-    ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied()
+    ibcmd_schema::configuration_rights::termination_right_name(uuid)
+        .or_else(|| ROLE_RIGHT_NAMES_BY_UUID.get(uuid).copied())
 }
 
 /// The right uuid a `Rights.xml` right name stands for: the same table read
 /// the other way. Every name in it is unique, so the inverse is exact.
 pub(crate) fn role_right_uuid(name: &str) -> Option<&'static str> {
-    ROLE_RIGHT_UUIDS_BY_NAME.get(name).copied()
+    ibcmd_schema::configuration_rights::termination_right_uuid(name)
+        .or_else(|| ROLE_RIGHT_UUIDS_BY_NAME.get(name).copied())
 }
 
 static ROLE_RIGHT_NAMES_BY_UUID: LazyLock<HashMap<&'static str, &'static str>> =

@@ -26,7 +26,7 @@
 //! [`FormRootExtInfo::events`]: crate::ir::FormRootExtInfo::events
 //! [`DynamicListExt::events`]: crate::ir::DynamicListExt::events
 
-use crate::ir::FormEvent;
+use crate::ir::{FormEvent, Uuid};
 
 /// Платформенные guid ФОРМ-уровневых типов событий — FD-намайнено по всем 876 телам форм SSL
 /// (`{N,(guid,"Handler")×N,1,0,(guid,0,1)×N}`, записи отсортированы по guid; каждый набор
@@ -296,10 +296,8 @@ pub fn table_event_guid(name: &str) -> Option<&'static str> {
 /// Слить два локуса обработчиков в ОДИН Designer-`<Events>`: устойчивая сортировка по guid
 /// типа события (правило намайнено по 11 485 формам, контрпримеров 0).
 ///
-/// `None` ⇒ хотя бы одно имя НЕ витнессировано: порядок такого события НЕИЗВЕСТЕН, и он НЕ
-/// угадывается (§1.0). Вызывающий обязан деградировать до сохранения исходного порядка —
-/// cf-энкодер на таком имени всё равно даёт типизированный отказ, так что «неизвестное имя»
-/// не может дожить до отгруженной конфигурации.
+/// `None` ⇒ имя не имеет зарегистрированной или явно заданной UUID-идентичности.
+/// Его порядок неизвестен и не угадывается: вызывающий сохраняет исходный порядок.
 fn merge_by_guid<'a>(
     own: &'a [FormEvent],
     ext: &'a [FormEvent],
@@ -313,14 +311,43 @@ fn merge_by_guid<'a>(
     if ext.is_empty() {
         return Some(own.iter().collect());
     }
-    let mut keyed: Vec<(&'static str, &'a FormEvent)> = Vec::with_capacity(own.len() + ext.len());
+    let mut keyed: Vec<(Uuid, &'a FormEvent)> = Vec::with_capacity(own.len() + ext.len());
     for ev in own.iter().chain(ext.iter()) {
-        keyed.push((guid(&ev.name)?, ev));
+        let identity = match guid(&ev.name) {
+            Some(known) => known,
+            None => ev.name.as_str(),
+        };
+        keyed.push((event_order_key(identity)?, ev));
     }
     // Устойчиво: равных guid в одном `<Events>` не бывает (cf-реестр такое отвергает), но
     // устойчивость делает слияние ДЕТЕРМИНИРОВАННЫМ.
     keyed.sort_by_key(|(g, _)| *g);
     Some(keyed.into_iter().map(|(_, e)| e).collect())
+}
+
+/// SDK root handlers can retain a literal event UUID alongside symbolic names
+/// (UH83/85 Document Лот and СтрокаПланаЗакупок). Only the exact 8-4-4-4-12
+/// hexadecimal spelling supplies its own identity; unknown symbolic names still
+/// retain the caller's fallback order. Names and handlers are never rewritten.
+fn event_order_key(value: &str) -> Option<Uuid> {
+    let text = value.as_bytes();
+    if text.len() != 36 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    let mut digit = 0;
+    for (position, byte) in text.iter().copied().enumerate() {
+        if matches!(position, 8 | 13 | 18 | 23) {
+            if byte != b'-' {
+                return None;
+            }
+            continue;
+        }
+        let nibble = (byte as char).to_digit(16)? as u8;
+        bytes[digit / 2] |= nibble << if digit % 2 == 0 { 4 } else { 0 };
+        digit += 1;
+    }
+    Some(Uuid(bytes))
 }
 
 /// Единый корневой `<Events>` формы: `body.events` ⊕ `root_ext_info.events` в платформенном

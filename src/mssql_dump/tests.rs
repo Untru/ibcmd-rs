@@ -79845,6 +79845,7 @@ fn a_characteristic_without_a_source_reads_and_prints_empty() {
 }
 
 // Tests of the onecdec fork, kept apart from the upstream file.
+mod configuration_rights_436;
 mod onecdec;
 
 /// Evidence: 1C:Документооборот's `Catalogs/ЗаписиРабочегоКалендаря` forms
