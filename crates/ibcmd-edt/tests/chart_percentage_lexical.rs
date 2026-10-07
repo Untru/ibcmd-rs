@@ -154,9 +154,14 @@ fn fractional_scientific_signed_zero_and_nonfinite_values_preserve_typed_domain(
                 .collect::<String>();
             let body = form(read_chart_sidecar(&source(&content)).unwrap(), version);
             let (native, _) = through_native(&body, version);
-            for (_, value) in percent_payload(&native) {
-                assert_eq!(value, native_text);
-            }
+            assert_eq!(
+                percent_payload(&native),
+                PERCENT_FIELDS
+                    .into_iter()
+                    .map(|name| (name.to_owned(), native_text.to_owned()))
+                    .collect::<Vec<_>>(),
+                "all three percentage fields must survive for {input}"
+            );
         }
     }
 }
