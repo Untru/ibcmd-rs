@@ -370,7 +370,9 @@ fn bind_form(
 #[test]
 fn census_metadata_matches_production_common_attributes_and_compatibility() {
     use formats_xml::form::{FormDialect, read_form, write_form_with_context};
-    use morph1c_core::ir::{FormControlKind, FormItem, ObjectKind, PropertyValue, Token, Uuid};
+    use morph1c_core::ir::{
+        FormControlKind, FormItem, ObjectKind, PropertyValue, Token, TypeSpec, Uuid, ValueSpec,
+    };
     use morph1c_core::spec::forms::controls::form_field::F_DATA_PATH;
     use morph1c_core::spec::metadata::{
         common_attribute as ca, configuration::F_COMPATIBILITY_MODE,
@@ -398,6 +400,28 @@ fn census_metadata_matches_production_common_attributes_and_compatibility() {
     let mut common =
         MetadataObject::new(ObjectKind::new("CommonAttribute"), "Shared", Uuid([2; 16]));
     common.properties = vec![
+        (ca::F_TYPE, PropertyValue::Type(TypeSpec { parts: vec![] })),
+        (
+            ca::F_MIN_VALUE,
+            PropertyValue::Value(ValueSpec {
+                kind: Default::default(),
+                scalar: None,
+            }),
+        ),
+        (
+            ca::F_MAX_VALUE,
+            PropertyValue::Value(ValueSpec {
+                kind: Default::default(),
+                scalar: None,
+            }),
+        ),
+        (
+            ca::F_FILL_VALUE,
+            PropertyValue::Value(ValueSpec {
+                kind: Default::default(),
+                scalar: None,
+            }),
+        ),
         (ca::F_AUTO_USE, PropertyValue::Enum(Token::new("DontUse"))),
         (
             ca::F_DATA_SEPARATION,
