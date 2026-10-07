@@ -262,15 +262,49 @@ fn time_scale_level(node: &XmlNode) -> Result<String> {
     let format = localized(c.required("format")?)?;
     let labels = c.required("labels")?;
     let mut l = Cursor::new(labels, "")?;
+    // Dated labels ahead of the ticks: `(<key>,{5,{0},{1,0},{"U"},<lineColor>,
+    // <textColor>,{1,{1,0},0}})` each, the shape the exporter's
+    // `form_planner_labels_xml` reads (empty unformatted text only).
+    // Управление задачами `Reports/узПланированиеПроекта/Forms/
+    // ФормаУправляемая` carries two.
+    let mut label_records = Vec::new();
+    while let Some(label) = l.optional("label") {
+        let mut f = Cursor::new(label, "")?;
+        let key = date(f.required("key")?)?;
+        let text = f.required("text")?;
+        ensure!(
+            text.children.is_empty() && text.text.trim().is_empty(),
+            "a planner scale label with text is not measured"
+        );
+        ensure!(
+            leaf(f.required("textFormatted")?)?.trim() == "false",
+            "a formatted planner scale label is not measured"
+        );
+        let line_color = color(f.required("lineColor")?)?;
+        let text_color = color(f.required("textColor")?)?;
+        f.finish()?;
+        label_records.push(format!(
+            "{key},{{5,{{0}},{{1,0}},{{\"U\"}},{line_color},{text_color},{{1,{{1,0}},0}}}}"
+        ));
+    }
     let ticks = integer(l.required("ticks")?)?;
     l.finish()?;
+    let labels = if label_records.is_empty() {
+        format!("{{0,{{1,0,{ticks}}}}}")
+    } else {
+        format!(
+            "{{0,{{1,{},{},{ticks}}}}}",
+            label_records.len(),
+            label_records.join(",")
+        )
+    };
     let back_color = color(c.required("backColor")?)?;
     let text_color = color(c.required("textColor")?)?;
     let show_periodical = boolean(c.required("showPereodicalLabels")?)?;
     c.finish()?;
     Ok(format!(
         "{{8,{measure},{interval},{show},{line},{scale_color},{day_rule},{format},\
-         {{0,{{1,0,{ticks}}}}},{back_color},{text_color},{show_periodical}}}"
+         {labels},{back_color},{text_color},{show_periodical}}}"
     ))
 }
 

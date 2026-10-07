@@ -5486,54 +5486,63 @@ fn writes_common_module_text_to_source_layout_when_metadata_is_present() {
 
 #[test]
 fn writes_binary_common_module_body_to_source_layout() {
-    let root = std::env::temp_dir().join(format!(
-        "ibcmd-rs-mssql-dump-test-{}",
-        uuid::Uuid::new_v4().hyphenated()
+    let protected_with_text = deflate_for_test(&v8_container_for_test(
+        1,
+        &[
+            ("image", b"compiled-image".as_slice()),
+            ("info", b"info"),
+            ("text", &[0xd2, 0xc6, 0x98, 0xff]),
+        ],
     ));
-    fs::create_dir_all(&root).unwrap();
-    let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
-    let metadata = deflate_for_test(
+    for body in [binary_module_blob_for_test(1), protected_with_text] {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-mssql-dump-test-{}",
+            uuid::Uuid::new_v4().hyphenated()
+        ));
+        fs::create_dir_all(&root).unwrap();
+        let uuid = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+        let metadata = deflate_for_test(
             format!(
                 "\u{feff}{{1,\r\n{{12,\r\n{{3,\r\n{{1,0,{uuid}}},\"BinaryModule\",{{0}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}}\r\n}}\r\n}},0}}"
             )
             .as_bytes(),
         );
-    let body = binary_module_blob_for_test(1);
-    let rows = vec![
-        ConfigRow {
-            file_name: uuid.to_string(),
-            part_no: 0,
-            data_size: metadata.len() as i64,
-            binary_hex: encode_hex_for_test(&metadata),
-        },
-        ConfigRow {
-            file_name: format!("{uuid}.0"),
-            part_no: 0,
-            data_size: body.len() as i64,
-            binary_hex: encode_hex_for_test(&body),
-        },
-    ];
+        let rows = vec![
+            ConfigRow {
+                file_name: uuid.to_string(),
+                part_no: 0,
+                data_size: metadata.len() as i64,
+                binary_hex: encode_hex_for_test(&metadata),
+            },
+            ConfigRow {
+                file_name: format!("{uuid}.0"),
+                part_no: 0,
+                data_size: body.len() as i64,
+                binary_hex: encode_hex_for_test(&body),
+            },
+        ];
 
-    let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
+        let dumped = dump_table_rows(&root, "Config", rows, false, true, true).unwrap();
 
-    assert_eq!(dumped.module_text_rows, 0);
-    assert_eq!(dumped.source_asset_rows, 1);
-    assert_eq!(
-        fs::read(root.join("CommonModules/BinaryModule/Ext/Module.bin")).unwrap(),
-        inflate_raw_deflate(&body).unwrap()
-    );
-    let body_row = dumped
-        .rows
-        .iter()
-        .find(|row| row.file_name == format!("{uuid}.0"))
-        .unwrap();
-    assert_eq!(
-        body_row.source_asset_path.as_deref(),
-        Some("CommonModules/BinaryModule/Ext/Module.bin")
-    );
-    assert!(body_row.module_text_path.is_none());
+        assert_eq!(dumped.module_text_rows, 0);
+        assert_eq!(dumped.source_asset_rows, 1);
+        assert_eq!(
+            fs::read(root.join("CommonModules/BinaryModule/Ext/Module.bin")).unwrap(),
+            inflate_raw_deflate(&body).unwrap()
+        );
+        let body_row = dumped
+            .rows
+            .iter()
+            .find(|row| row.file_name == format!("{uuid}.0"))
+            .unwrap();
+        assert_eq!(
+            body_row.source_asset_path.as_deref(),
+            Some("CommonModules/BinaryModule/Ext/Module.bin")
+        );
+        assert!(body_row.module_text_path.is_none());
 
-    let _ = fs::remove_dir_all(root);
+        let _ = fs::remove_dir_all(root);
+    }
 }
 
 #[test]
@@ -9025,9 +9034,13 @@ fn extracts_form_command_set_multiple_excluded_commands() {
 
     let form_xml = extract_form_body_xml(&form_body, &BTreeMap::new()).unwrap();
 
-    assert!(form_xml.contains("<ExcludedCommand>Change</ExcludedCommand>"));
-    assert!(form_xml.contains("<ExcludedCommand>Copy</ExcludedCommand>"));
-    assert!(form_xml.contains("<ExcludedCommand>Create</ExcludedCommand>"));
+    // The body declares no attribute, so no main attribute: the list row
+    // commands it excludes are not written (ЛИМС КОРП
+    // `Catalogs/лимсЛабораторноеОборудование/Forms/
+    // ФормаВыбораОборудованияВСтатусеВработеНаДатуПоМетодикеИИзмерению`).
+    assert!(!form_xml.contains("<ExcludedCommand>Change</ExcludedCommand>"));
+    assert!(!form_xml.contains("<ExcludedCommand>Copy</ExcludedCommand>"));
+    assert!(!form_xml.contains("<ExcludedCommand>Create</ExcludedCommand>"));
 }
 
 #[test]
@@ -9136,9 +9149,6 @@ fn extracts_form_command_set_dynamic_list_standard_commands() {
         "Abort",
         "Cancel",
         "CancelSearch",
-        "Change",
-        "Copy",
-        "Create",
         "DynamicListStandardSettings",
         "Find",
         "FindByCurrentValue",
@@ -29559,6 +29569,7 @@ fn form_body_writes_collapse_items_by_importance_variant_behind_mobile_device_co
     // not the reverse this writer used to assume for want of a
     // counter-example.
     let properties = FormBodyProperties {
+        scale: None,
         collapse_items_by_importance_variant: Some("Use"),
         mobile_device_command_bar_content: vec!["КоманднаяПанель".to_string()],
         ..FormBodyProperties::default()
@@ -38600,6 +38611,10 @@ fn moxel_value_type_descriptors_decode_by_their_pattern() {
         ),
         ("{\"Pattern\",{\"D\",\"D\"}}", "<v8:DateFractions>Date<"),
         ("{\"Pattern\",{\"D\"}}", "<v8:DateFractions>DateTime<"),
+        (
+            "{\"Pattern\",{\"#\",e61ef7b8-f3e1-4f4b-8ac7-676e90524997}}",
+            "d4p1:CatalogRef</v8:TypeSet>",
+        ),
         (
             "{\"Pattern\",{\"#\",fcd1e4a9-753c-4260-96ee-6b847c186dc5}}",
             "d4p1:DocumentRef.РаспределениеНДС</v8:Type>",
@@ -49026,7 +49041,7 @@ fn extracts_configuration_xml_with_native_scalar_properties() {
 },"CF",1,
 {0},{0},{0},{0},{0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,"Vendor ""Name""","1.2.3","https://updates.example.invalid/",0,
 {0,0},0,
-{0,0},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
+{0,0},1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
 {0,0},0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,
 {0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,00000000-0000-0000-0000-000000000000,0,
 {0,0},{0,0},0,"",80320}
@@ -49103,7 +49118,7 @@ fn extracts_configuration_xml_with_default_style_and_language_refs() {
 },"",1,
 {0},{0},{0},{0},{0},@STYLE_UUID@,@LANGUAGE_UUID@,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,"Vendor","1.2.3","",0,
 {0,0},0,
-{0,0},0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
+{0,0},1,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,80327,
 {0,0},0,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,
 {0},00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,0,00000000-0000-0000-0000-000000000000,0,
 {0,0},{0,0},0,"",80320}
@@ -49172,6 +49187,8 @@ fn extracts_configuration_xml_with_localized_info_properties() {
     fields[9] = style_uuid.to_string();
     fields[10] = zero_uuid.to_string();
     fields[13] = "0".to_string();
+    // Field 21 is the run mode (`1` managed), field 3 the script variant.
+    fields[21] = "1".to_string();
     fields[14] = "\"Vendor\"".to_string();
     fields[15] = "\"1.2.3\"".to_string();
     fields[16] = "\"\"".to_string();
@@ -49257,6 +49274,8 @@ fn extracts_configuration_xml_with_default_role_refs() {
     fields[9] = zero_uuid.to_string();
     fields[10] = zero_uuid.to_string();
     fields[13] = "0".to_string();
+    // Field 21 is the run mode (`1` managed), field 3 the script variant.
+    fields[21] = "1".to_string();
     fields[14] = "\"Vendor\"".to_string();
     fields[15] = "\"1.2.3\"".to_string();
     fields[16] = "\"\"".to_string();
@@ -58325,6 +58344,50 @@ fn validates_platform_proven_task_assignee_native_shape() {
     );
     assert_eq!(native_xml.matches("\t\t\t<Command uuid=").count(), 4);
     assert!(!native_xml.contains("\t\t\t<Template>"));
+}
+
+#[test]
+fn parses_legacy_v16_data_processor_header() {
+    let id = "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa";
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let text = format!(
+        "{{1,{{16,{nil},{nil},{{0,{{1,{{0,0,{id}}},\"Legacy\",{{0}},\"\",0,0}}}},{nil},1,0,{nil},{nil},{nil},{{0}},{{0}}}},0}}"
+    );
+    let empty = BTreeMap::new();
+    assert_eq!(
+        metadata_source_for_text(16, &text, id),
+        Some(("DataProcessor", "DataProcessors"))
+    );
+    let properties = parse_data_processor_properties_from_text(
+        &text,
+        id,
+        &empty,
+        &BTreeSet::new(),
+        &empty,
+        &empty,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+    )
+    .expect("legacy data processor header");
+    assert!(properties.use_standard_commands);
+    assert!(!properties.include_help_in_contents);
+    assert!(properties.default_form.is_none());
+    let extracted = extract_metadata_source_xml_with_refs(
+        &deflate_for_test(text.as_bytes()),
+        id,
+        &empty,
+        &empty,
+        &empty,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        InfobaseConfigSourceVersion::V2_20,
+    )
+    .expect("legacy data processor export");
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("DataProcessors/Legacy.xml")
+    );
 }
 
 #[test]
@@ -69880,6 +69943,7 @@ fn form_document_properties_trail_command_set_and_precede_show_title() {
     // precedes the trio (2 each) -- so the writer puts the two window switches
     // ahead of the trio and this synthetic form sees `ShowTitle` there.
     let properties = FormBodyProperties {
+        scale: None,
         command_set_excluded_commands: vec!["Form.Command"],
         scaling_mode: Some("Normal"),
         command_bar_location: Some("Top"),
@@ -74539,7 +74603,8 @@ fn a_root_bound_platform_type_name_is_one_fact_for_every_reader() {
     // every other one.
     for (_, reference) in FORM_BUILTIN_TYPE_REFERENCES
         .iter()
-        .chain(DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES.iter())
+        .copied()
+        .chain(ibcmd_schema::metadata_storage_facts::data_processor_builtin_type_references())
     {
         assert!(
             !reference.starts_with("cfg:")
@@ -78925,6 +78990,89 @@ fn renders_gantt_chart_with_elements_not_init_to_platform_proven_xml() {
             "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-ganttchart-remainder/native/dlitelnost-otlozhennogo-obnovleniya-object.xml"
         ),
     );
+}
+
+#[test]
+fn renders_gantt_chart_with_four_time_scale_levels_to_native_xml() {
+    assert_platform_proven_moxel_gantt_chart(
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object-payload.txt"
+        ),
+        include_str!(
+            "../../tests/fixtures/native-evidence/8.3.27.2214/moxel-gantt-multiple-levels/object.xml"
+        ),
+    );
+}
+
+#[test]
+fn restricted_unused_nil_form_data_parameter_is_omitted() {
+    let mut settings = form_body::FormListSettings {
+        data_parameters: Some("\t<dcsset:dataParameters>\r\n\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\t\t\t<dcscor:use>false</dcscor:use>\r\n\t\t\t<dcscor:parameter>Project</dcscor:parameter>\r\n\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n\t\t</dcscor:item>\r\n\t</dcsset:dataParameters>\r\n".into()),
+        ..Default::default()
+    };
+    let state = "<Parameter><dcssch:name>Project</dcssch:name><dcssch:value xsi:nil=\"true\"/><dcssch:useRestriction>true</dcssch:useRestriction></Parameter>";
+    let original = settings.clone();
+    form_body::reconcile_form_list_settings_data_parameter_values(&mut settings, Some(state));
+    assert_eq!(
+        settings.data_parameters.as_deref(),
+        Some("\t<dcsset:dataParameters/>\r\n")
+    );
+    let mut used = original.clone();
+    used.data_parameters = used
+        .data_parameters
+        .map(|s| s.replace("<dcscor:use>false", "<dcscor:use>true"));
+    form_body::reconcile_form_list_settings_data_parameter_values(&mut used, Some(state));
+    assert!(used.data_parameters.unwrap().contains("xsi:nil"));
+    let mut unrestricted = original;
+    form_body::reconcile_form_list_settings_data_parameter_values(
+        &mut unrestricted,
+        Some(&state.replace(
+            "<dcssch:useRestriction>true",
+            "<dcssch:useRestriction>false",
+        )),
+    );
+    assert!(unrestricted.data_parameters.unwrap().contains("xsi:nil"));
+}
+
+#[test]
+fn legacy_v12_form_descriptor_is_not_a_common_module() {
+    let uuid = "c4fb174e-ddf9-4d98-b643-102fdeb0dd41";
+    let text = format!(
+        "{{1,{{12,{{3,{{1,0,{uuid}}},\"LegacyForm\",{{1,\"ru\",\"Form\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},0,1,{{2,{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,1}},{{\"#\",1708fdaa-cbce-4289-b373-07a5a74bee91,2}}}}}},0}}"
+    );
+    let row = metadata_text_row_from_text(uuid, text.clone()).unwrap();
+    assert_eq!(row.kind.as_deref(), Some("Form"));
+    assert_eq!(row.folder, None);
+    assert!(is_direct_code14_form_metadata_text(&text, uuid));
+    assert!(matches!(
+        parse_declared_form_type(&text, uuid),
+        Some(DeclaredFormType::Managed)
+    ));
+    let properties = parse_form_metadata_properties_from_text(&text, "Form", uuid);
+    assert_eq!(
+        properties.use_purposes,
+        vec!["PlatformApplication", "MobilePlatformApplication"]
+    );
+    let forms = BTreeMap::from([(
+        uuid.to_string(),
+        FormSourceReference {
+            relative_path: PathBuf::from("Catalogs/Probe/Forms/LegacyForm.xml"),
+            kind: "Form",
+        },
+    )]);
+    let extracted = extract_metadata_source_xml(
+        &deflate_for_test(text.as_bytes()),
+        uuid,
+        &BTreeMap::new(),
+        &forms,
+        &BTreeMap::new(),
+    )
+    .unwrap();
+    assert_eq!(extracted.relative_path, forms[uuid].relative_path);
+    let xml = String::from_utf8(extracted.xml).unwrap();
+    assert!(xml.contains(&format!(r#"<Form uuid="{uuid}">"#)));
+    assert!(xml.contains("<FormType>Managed</FormType>"));
+    assert!(!xml.contains("<CommonModule"));
 }
 
 #[test]

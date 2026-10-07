@@ -10,6 +10,7 @@ mod dialect;
 mod form_choice_parameters;
 pub mod metadata;
 mod node;
+pub mod palette;
 mod reader;
 pub mod source_tree;
 mod writer;

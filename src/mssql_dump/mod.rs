@@ -51,6 +51,7 @@ use crate::module_blob::{
 };
 use crate::parallel;
 
+mod legacy_child;
 mod characteristics {
     //! Strict physical decoder for the shared canonical Characteristics model.
 
@@ -698,8 +699,8 @@ mod characteristics {
                         CharacteristicsReferenceKind::FieldUuid,
                     )
                 })?;
-                let path =
-                    resolve_exchange_plan_index_reference(&uuid, object_refs).ok_or_else(|| {
+                let Some(path) = resolve_exchange_plan_index_reference(&uuid, object_refs) else {
+                    let uuid = ObjectUuid::parse(&uuid).map_err(|_| {
                         unresolved(
                             family,
                             item_index,
@@ -708,6 +709,8 @@ mod characteristics {
                             CharacteristicsReferenceKind::FieldUuid,
                         )
                     })?;
+                    return Ok(CharacteristicField::Unresolved(uuid));
+                };
                 if !CharacteristicsPhysicalSchema::owns_field(source.path(), &path) {
                     return Err(malformed_field(
                         family,
@@ -1302,7 +1305,6 @@ const PLANNER_TYPE_REFERENCE: &str = "pl:Planner";
 // name whose prefix the metadata-root document fixes stays here: `Chart` at
 // depth 7. SettingsComposer stays on its stricter owner-wide admission path
 // below.
-const DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[(CHART_TYPE_UUID, "d7p1:Chart")];
 const MAX_METADATA_CHOICE_PARAMETER_VALUE_DEPTH: usize = 64;
 // Platform collection type IDs, stable across independent infobases.
 const CATALOG_TABULAR_ATTRIBUTE_GROUP_UUID: &str = "888744e1-b616-11d4-9436-004095e12fc7";
@@ -6236,19 +6238,20 @@ fn form_metadata_file_names(rows: &[ConfigRow]) -> BTreeSet<String> {
 }
 
 fn is_direct_code14_form_metadata_text(text: &str, uuid: &str) -> bool {
-    if parse_metadata_object_code(text) != Some(14) {
+    if !matches!(parse_metadata_object_code(text), Some(12 | 14)) {
         return false;
     }
     let Some(fields) = metadata_object_fields(text) else {
         return false;
     };
-    fields.len() == 6
-        && fields.first().map(|field| field.trim()) == Some("14")
-        && metadata_header_field_index(&fields, uuid) == Some(1)
+    ibcmd_schema::metadata_storage_facts::direct_form_header_layout(
+        fields.first().map(|field| field.trim()),
+        fields.len(),
+    ) && metadata_header_field_index(&fields, uuid) == Some(1)
         && information_register_bool(fields[2]).is_some()
         && information_register_bool(fields[3]).is_some()
         && direct_form_application_purposes_are_valid(fields[4])
-        && information_register_bool(fields[5]).is_some()
+        && (fields.len() == 5 || information_register_bool(fields[5]).is_some())
 }
 
 fn direct_form_application_purposes_are_valid(value: &str) -> bool {
@@ -7336,13 +7339,15 @@ fn parse_business_process_flowchart_blob(
     let inflated = inflate_raw_deflate(bytes).ok()?;
     let text = String::from_utf8(inflated).ok()?;
     // An 8.5 flowchart differs from its 8.3.27 spelling only in its colour and
-    // font tuples (BSP `BusinessProcesses/Задание`, member for member).
-    let text = if source_version == InfobaseConfigSourceVersion::V2_21 {
+    // font tuples (BSP `BusinessProcesses/Задание`, member for member). The
+    // stored spelling does not follow the XML being written: a configuration
+    // exported as 2.20 can hold flowcharts in the 8.5 tuples (20 of one 8.3.27
+    // corpus, `BusinessProcesses/Задание` among them), so the down-conversion
+    // runs on every text -- an 8.3.27 text carries none of those tuples.
+    let _ = source_version;
+    let text =
         form::layout_8_5_1::down_convert_primitives_8_5_1_text(text.trim_start_matches('\u{feff}'))
-            .ok()?
-    } else {
-        text
-    };
+            .unwrap_or(text);
     parse_business_process_flowchart_text_with_types(
         text.trim_start_matches('\u{feff}'),
         object_refs,
@@ -8335,6 +8340,61 @@ fn parse_flowchart_activity_addressing_attributes(
     }
     attributes.sort_by(|left, right| left.reference.cmp(&right.reference));
     Some(attributes)
+}
+
+/// Puts every activity's addressing attributes in the order the task declares
+/// them, which is the order the platform publishes. The parse sorts them by
+/// name, which matched the Russian configurations of the stand and not ERP WE
+/// English (`Task.PerformerTask`: `AdditionalAddressingObject`, `Performer`,
+/// `MainAddressingObject`, `PerformerRole`, as in `Tasks/PerformerTask.xml`).
+/// The declaration order is where each attribute's uuid stands in the task's
+/// own metadata row; a task or attribute the rows do not place keeps the
+/// name order.
+pub(super) fn order_flowchart_addressing_attributes(
+    flowchart: &mut BusinessProcessFlowchart,
+    object_refs: &BTreeMap<String, String>,
+    texts: &BTreeMap<&str, &MetadataTextRow>,
+) {
+    let uuid_of = |reference: &str| {
+        object_refs
+            .iter()
+            .find(|(_, name)| name.as_str() == reference)
+            .map(|(uuid, _)| uuid.clone())
+    };
+    for item in &mut flowchart.items {
+        let attributes = &mut item.properties.addressing_attributes;
+        let Some(owner) = attributes
+            .first()
+            .and_then(|attribute| flowchart_task_addressing_attribute_owner(&attribute.reference))
+        else {
+            continue;
+        };
+        let Some(text) = uuid_of(&format!("Task.{owner}"))
+            .and_then(|uuid| texts.get(uuid.as_str()).map(|row| row.text.as_str()))
+        else {
+            continue;
+        };
+        let positions = attributes
+            .iter()
+            .map(|attribute| {
+                // The attribute's own header `{1,0,<uuid>}`: the bare uuid also
+                // stands earlier, in the task's own properties.
+                uuid_of(&attribute.reference).and_then(|uuid| text.find(&format!("1,0,{uuid}}}")))
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(positions) = positions else {
+            continue;
+        };
+        let mut indexed = std::mem::take(attributes)
+            .into_iter()
+            .zip(positions)
+            .collect::<Vec<_>>();
+        indexed.sort_by_key(|(_, position)| *position);
+        *attributes = indexed
+            .into_iter()
+            .map(|(attribute, _)| attribute)
+            .collect();
+    }
 }
 
 fn flowchart_task_addressing_attribute_owner(reference: &str) -> Option<&str> {
@@ -11797,8 +11857,118 @@ fn parse_indexed_generated_types_from_text(
             &header.name,
         );
     }
+    push_indexed_tabular_section_generated_types(&mut entries, text, &header.name);
 
     Some(entries)
+}
+
+/// The two generated types of every tabular section of an owner, so a form
+/// attribute typed by one is written by name. ЛИМС КОРП
+/// `Documents/лимсПретензия/Forms/ФормаДокумента` declares a column of type
+/// `cfg:DocumentTabularSection.лимсПретензия.ОтветственныеЗаАнализ` and the
+/// platform writes that name; without the entry the export wrote the bare
+/// type id. The DCS resolution is left as it was (`KeepId`).
+fn push_indexed_tabular_section_generated_types(
+    entries: &mut Vec<IndexedGeneratedType>,
+    text: &str,
+    owner_name: &str,
+) {
+    const OWNER_KINDS: [(&str, &str); 10] = [
+        ("cfg:CatalogRef.", "Catalog"),
+        ("cfg:DocumentRef.", "Document"),
+        (
+            "cfg:ChartOfCharacteristicTypesRef.",
+            "ChartOfCharacteristicTypes",
+        ),
+        ("cfg:ChartOfAccountsRef.", "ChartOfAccounts"),
+        ("cfg:ChartOfCalculationTypesRef.", "ChartOfCalculationTypes"),
+        ("cfg:ExchangePlanRef.", "ExchangePlan"),
+        ("cfg:BusinessProcessRef.", "BusinessProcess"),
+        ("cfg:TaskRef.", "Task"),
+        ("cfg:DataProcessorObject.", "DataProcessor"),
+        ("cfg:ReportObject.", "Report"),
+    ];
+    let Some(kind) = entries.iter().find_map(|entry| {
+        OWNER_KINDS.iter().find_map(|(prefix, kind)| {
+            (entry.reference.strip_prefix(prefix) == Some(owner_name)).then_some(*kind)
+        })
+    }) else {
+        return;
+    };
+    let bytes = text.as_bytes();
+    let mut found = Vec::new();
+    let mut from = 0;
+    while let Some(offset) = text[from..]
+        .find(ibcmd_schema::metadata_storage_facts::GeneratedTabularSectionLayout::RECORD_START)
+    {
+        let start = from + offset;
+        from = start + 4;
+        let Some(end) = matching_1c_brace(bytes, start) else {
+            continue;
+        };
+        let Some(fields) = split_1c_braced_fields(&text[start..=end], 0) else {
+            continue;
+        };
+        if !ibcmd_schema::metadata_storage_facts::GeneratedTabularSectionLayout::record_is_valid(
+            &fields,
+        ) {
+            continue;
+        }
+        let ids = fields[1..5]
+            .iter()
+            .map(|field| parse_uuid_field(field))
+            .collect::<Option<Vec<_>>>();
+        let Some(ids) = ids else { continue };
+        let Some(name) = split_1c_braced_fields(fields[5].trim(), 0)
+            .filter(|outer| ibcmd_schema::metadata_storage_facts::GeneratedTabularSectionLayout::header_wrapper_is_valid(outer))
+            .and_then(|outer| split_1c_braced_fields(outer[1].trim(), 0))
+            .filter(|header| ibcmd_schema::metadata_storage_facts::GeneratedTabularSectionLayout::header_is_valid(header))
+            .and_then(|header| parse_information_register_quoted_string(header.get(2)?))
+        else {
+            continue;
+        };
+        found.push((ids, name));
+    }
+    for (ids, name) in found {
+        for (type_id, prefix) in [(&ids[0], "TabularSection"), (&ids[2], "TabularSectionRow")] {
+            entries.push(IndexedGeneratedType {
+                type_id: type_id.clone(),
+                reference: format!("cfg:{kind}{prefix}.{owner_name}.{name}"),
+                dcs_policy: GeneratedTypeDcsPolicy::KeepId,
+            });
+        }
+    }
+}
+
+/// The offset of the `}` that closes the `{` at `start`, skipping quoted
+/// strings (whose `""` is an escaped quote).
+fn matching_1c_brace(bytes: &[u8], start: usize) -> Option<usize> {
+    let mut depth = 0usize;
+    let mut quoted = false;
+    let mut index = start;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if quoted {
+            if byte == b'"' {
+                if bytes.get(index + 1) == Some(&b'"') {
+                    index += 1;
+                } else {
+                    quoted = false;
+                }
+            }
+        } else if byte == b'"' {
+            quoted = true;
+        } else if byte == b'{' {
+            depth += 1;
+        } else if byte == b'}' {
+            depth = depth.checked_sub(1)?;
+            if depth == 0 {
+                return Some(index);
+            }
+        }
+        index += 1;
+    }
+    None
 }
 
 fn parse_indexed_recalculation_generated_types_from_text(
@@ -12865,7 +13035,8 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let xml = format_recalculation_source_xml(header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if object_code == 12 {
+    let direct_code14_form = is_direct_code14_form_metadata_text(text, uuid);
+    if object_code == 12 && !direct_code14_form {
         let header = row.header.as_ref()?;
         let flags = parse_common_module_flags_from_text(text, uuid)?;
         let relative_path = PathBuf::from("CommonModules")
@@ -12874,7 +13045,7 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let xml = format_common_module_source_xml(&header, &flags, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    if object_code == 16 {
+    if object_code == 16 && row.kind.as_deref() == Some("Constant") {
         let header = row.header.as_ref()?;
         let constant =
             parse_constant_properties_from_text(text, uuid, type_index, object_refs, form_refs)?;
@@ -12984,7 +13155,6 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             format_functional_option_source_xml(header, &properties, source_version).into_bytes();
         return Some(ExtractedMetadataSourceXml { relative_path, xml });
     }
-    let direct_code14_form = is_direct_code14_form_metadata_text(text, uuid);
     if is_form_metadata_text(text, uuid) || direct_code14_form {
         let header = row.header.as_ref()?;
         let form_ref = form_refs.get(uuid);
@@ -14443,11 +14613,13 @@ fn parse_exchange_plan_child_objects(
                 type_index,
                 object_refs,
                 form_refs,
-            )?;
+            );
+            let child = child?;
             strict_metadata_child_identity_is_unique(&child, &mut child_uuids, &mut root_names)
                 .then_some(child)
         })
-        .collect::<Option<Vec<_>>>()?;
+        .collect::<Option<Vec<_>>>();
+    let mut child_objects = child_objects?;
 
     let generic_sections = parse_attribute_tabular_section_child_objects(
         "ExchangePlan",
@@ -14475,7 +14647,8 @@ fn parse_exchange_plan_child_objects(
         form_refs,
         &mut child_uuids,
         &mut root_names,
-    )?;
+    );
+    let sections = sections?;
     child_objects.extend(sections);
     Some((child_objects, emit_empty_child_objects))
 }
@@ -14628,11 +14801,16 @@ fn parse_strict_tabular_sections(
         }
         let wrapper = split_information_register_braced_fields(item.first()?)?;
         match owner_kind {
+            // A modern plan may still keep a section in the two-member
+            // envelope, which stores no `LineNumberLength` and means the
+            // default 5: ЛИМС КОРП `ExchangePlans/
+            // СинхронизацияДанныхЧерезУниверсальныйФормат` (owner version 37)
+            // stores all four sections that way and the platform writes
+            // `<LineNumberLength>5</LineNumberLength>` on each.
             "ExchangePlan" if exchange_plan_modern_layout => {
-                if wrapper.len() != 3
-                    || wrapper.first()?.trim() != "1"
-                    || wrapper.get(2)?.trim() != "5"
-                {
+                if !ibcmd_schema::metadata_storage_facts::modern_exchange_plan_section_envelope(
+                    &wrapper,
+                ) {
                     return None;
                 }
             }
@@ -16274,9 +16452,17 @@ fn parse_information_register_owner_fields<'a>(
     }
 
     let owner = split_information_register_braced_fields(root.get(1)?)?;
-    if owner.len() != 39 || owner.first()?.trim() != "33" {
-        return None;
-    }
+    // Older owners stop before the slots later versions append: version 30
+    // lacks the last two data-history slots, version 29 all three, version
+    // 27 also both totals-slice flags. Two 8.3.27 corpora dump the missing
+    // ones as `false`, `false`, `DontUse`, `false`, `false`.
+    let missing = match (owner.len(), owner.first()?.trim()) {
+        (39, "33") => 0,
+        (37, "30") => 2,
+        (36, "29") => 3,
+        (34, "27") => 5,
+        _ => return None,
+    };
     let generated_type_ids = owner[1..15]
         .iter()
         .map(|field| {
@@ -16328,6 +16514,7 @@ fn parse_information_register_owner_fields<'a>(
     let mut logical = Vec::with_capacity(25);
     logical.extend(header_wrapper);
     logical.extend(owner[16..].iter().copied());
+    logical.extend(["0", "0", "0", "0", "0"][5 - missing..].iter().copied());
     Some(InformationRegisterOwnerFields {
         logical: logical.try_into().ok()?,
     })
@@ -16526,23 +16713,18 @@ fn parse_information_register_standard_attribute_bag(
     value: &str,
 ) -> Option<InformationRegisterStandardAttributeBag<'_>> {
     let fields = split_information_register_braced_fields(value)?;
-    let has_type_reduction_mode = match (
-        fields.first().map(|field| field.trim()),
-        fields.get(1).map(|field| field.trim()),
-        fields.len(),
-    ) {
-        (Some("13"), Some("24"), 50) => false,
-        // Revision 13 with the type-reduction key already present: a real
-        // extension's tabular sections (8.3.27.2214 prints its
-        // `TypeReductionMode` as for revision 14).
-        (Some("14" | "13"), Some("25"), 52) => true,
-        _ => return None,
-    };
+    let layout = ibcmd_schema::metadata_storage_facts::InformationRegisterStandardAttributeLayout::from_fields(&fields)?;
+    let has_type_reduction_mode = layout.has_type_reduction_mode;
+    let absent = layout.absent_defaults;
     let expected_keys = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
         .iter()
         .enumerate()
-        .filter_map(|(index, key)| (has_type_reduction_mode || index != 5).then_some(*key));
+        .filter_map(|(index, key)| (has_type_reduction_mode || index != 5).then_some(*key))
+        .filter(|key| absent.iter().all(|(absent_key, _)| absent_key != key));
     let mut values = BTreeMap::new();
+    for (key, value) in absent {
+        values.insert(key.to_string(), *value);
+    }
     for (pair, expected_key) in fields[2..].chunks_exact(2).zip(expected_keys) {
         if !information_register_uuid_matches(pair[0], expected_key)
             || values.insert(expected_key.to_string(), pair[1]).is_some()
@@ -18613,14 +18795,17 @@ fn parse_register_include_help_in_contents(
     fields: &[&str],
     uuid: &str,
 ) -> Option<bool> {
-    match kind {
-        "AccumulationRegister" => Some(false),
-        "AccountingRegister" => {
-            let header_index = metadata_header_field_index(fields, uuid)?;
-            parse_1c_bool_field(fields.get(header_index + 2).copied())
-        }
-        _ => None,
+    let layout = ibcmd_schema::metadata_storage_facts::register_include_help_layout(kind)?;
+    let header_index = metadata_header_field_index(fields, uuid)?;
+    if fields.len() < header_index + layout.minimum_fields_after_header {
+        return layout.absent_or_malformed_default;
     }
+    parse_1c_bool_field(
+        fields
+            .get(header_index + layout.offset_after_header)
+            .copied(),
+    )
+    .or(layout.absent_or_malformed_default)
 }
 
 fn parse_register_presentations(
@@ -19005,6 +19190,15 @@ fn register_child_object_tag(kind: &str, text: &str, marker_start: usize) -> Opt
         }
         if is_offset_inside_metadata_object_code(text, marker_start, 7) {
             return Some("Resource");
+        }
+        // Version 30 registers wrap a resource in `{6, …}` (one 8.3.27
+        // corpus), so the collection class names the family instead.
+        for (tag, markers) in
+            ibcmd_schema::metadata_storage_facts::information_register_child_collections()
+        {
+            if refs::is_offset_inside_any_list_marker(text, marker_start, markers) {
+                return Some(*tag);
+            }
         }
     }
     if kind == "AccountingRegister"
@@ -21020,6 +21214,36 @@ fn parse_information_register_child_payload(
     Some(value)
 }
 
+/// Older information-register child wrappers respelled as the current ones.
+///
+/// One 8.3.27 corpus (version 29 and 30 owners) writes a resource as
+/// `{5, common, indexing, fts}` or `{6, common, indexing, fts, history}`, an
+/// attribute as `{2, common, indexing, fts}` and a dimension as `{6, common,
+/// master, deny, indexing, main filter, fts}`: the current `{7}`, `{4}` and
+/// `{9}` layouts, the version 29 ones without the trailing data-history slot,
+/// which the platform dumps as `Use`.
+fn information_register_child_fields_current<'a>(fields: &[&'a str]) -> Option<Vec<&'a str>> {
+    let mut current = fields.to_vec();
+    let marker = match (fields.first()?.trim(), fields.len()) {
+        ("5", 4) => {
+            current.push("1");
+            "7"
+        }
+        ("6", 5) => "7",
+        ("2", 4) => {
+            current.push("1");
+            "4"
+        }
+        ("6", 7) => {
+            current.push("1");
+            "9"
+        }
+        _ => return Some(current),
+    };
+    current[0] = marker;
+    Some(current)
+}
+
 fn parse_information_register_child_payload_from_fields(
     fields: &[&str],
     child_header: &MetadataHeader,
@@ -21030,6 +21254,7 @@ fn parse_information_register_child_payload_from_fields(
     form_refs: &BTreeMap<String, FormSourceReference>,
     preserve_raw_data_paths: bool,
 ) -> Option<(Vec<ConstantValueType>, MetadataChildProperties)> {
+    let fields = &information_register_child_fields_current(fields)?[..];
     let value_types = parse_information_register_child_value_types_from_fields(
         fields,
         child_header,
@@ -21140,6 +21365,7 @@ fn parse_information_register_child_value_types_from_fields(
     tag: &str,
     type_index: &BTreeMap<String, String>,
 ) -> Option<Vec<ConstantValueType>> {
+    let fields = &information_register_child_fields_current(fields)?[..];
     let (expected_tag, common_field) = match (fields.first()?.trim(), fields.len()) {
         ("7", 5) | ("8", 7) => ("Resource", fields.get(1)?),
         ("4", 5) | ("5", 7) => ("Attribute", fields.get(1)?),
@@ -27002,6 +27228,29 @@ fn metadata_reference_collection_len(value: &str) -> Option<usize> {
     Some(count)
 }
 
+/// `CodeLength` of a catalog whose `CodeType` is `String`, read off its owner
+/// record; `None` for a numeric code or a record this reader cannot place.
+pub(super) fn catalog_string_code_length(text: &str, uuid: &str) -> Option<usize> {
+    let header = parse_metadata_header_from_text(text, uuid)?;
+    let mut diagnostic = None;
+    let owner_graph = decode_owner_graph_for_family_parser(
+        owner_graph::OwnerGraphFamily::Catalog,
+        text,
+        &header,
+        &mut diagnostic,
+    )?;
+    let fields = &owner_graph.owner_fields;
+    if !ibcmd_schema::metadata_storage_facts::catalog_code_is_string(parse_exchange_plan_u32(
+        fields.get(18)?,
+    )?) {
+        return None;
+    }
+    usize::try_from(parse_exchange_plan_u32(
+        fields.get(CATALOG_OWNER_FIELD_CODE_LENGTH)?,
+    )?)
+    .ok()
+}
+
 fn parse_strict_catalog_properties_from_text(
     text: &str,
     uuid: &str,
@@ -28755,12 +29004,9 @@ fn parse_document_properties_from_text(
             // (`0`) and `Day` 1 (`4`, `uh`'s
             // `Documents/РеестрСведенийНеобходимыхДляНазначенияИВыплатыПособий`).
             // Codes the corpus never writes stay refused.
-            number_periodicity: match fields.get(13)?.trim() {
-                "0" => "Nonperiodical",
-                "1" => "Year",
-                "4" => "Day",
-                _ => return None,
-            },
+            number_periodicity: ibcmd_schema::metadata_storage_facts::document_number_periodicity(
+                fields.get(13)?,
+            )?,
             check_unique: information_register_bool(fields.get(14)?)?,
             autonumbering: information_register_bool(fields.get(15)?)?,
         },
@@ -32148,7 +32394,9 @@ fn parse_data_processor_properties_from_text(
 ) -> Option<DataProcessorProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = metadata_object_fields(text)?;
-    if fields.first().map(|value| value.trim()) != Some("17") {
+    if !ibcmd_schema::metadata_storage_facts::data_processor_owner_revision(
+        fields.first().map(|value| value.trim()),
+    ) {
         return None;
     }
 
@@ -35930,7 +36178,6 @@ const STYLE_BODY_FONT_TAG: &str = "7";
 /// only style body on the 8.5 stand), and after the declared items one record
 /// `{1,{0,<colour>}}` that the export prints as the item `FirstBrand`.
 const STYLE_BODY_TAG_8_5_1: &str = "2";
-const STYLE_BODY_COLOR_TAG_8_5_1: &str = "4";
 const STYLE_BODY_FONT_TAG_8_5_1: &str = "8";
 /// The only font form a style body is evidenced to carry: a reference to a
 /// style item (`kind="StyleItem"`). `Absolute` and `WindowsFont` bodies would
@@ -36037,6 +36284,10 @@ fn parse_style_body_items(
     if items.len() != declared_count {
         return None;
     }
+    // `{0}` is a brand record with no colour (`Styles/Основной` of a
+    // configuration stored by 8.5), which writes nothing.
+    let brand =
+        brand.filter(|record| ibcmd_schema::metadata_storage_facts::style_brand_has_color(record));
     if let Some(brand) = brand {
         // `{1,{0,<colour>}}`: one colour, item 0.
         let record = split_1c_braced_fields(brand, 0)?;
@@ -36168,11 +36419,11 @@ fn parse_style_body_color_value(
 ) -> Option<String> {
     let fields = split_1c_braced_fields(value, 0)?;
     if layout_8_5_1 {
-        // `{4,<variant>,{<code>},0}`.
-        if fields.first()?.trim() != STYLE_BODY_COLOR_TAG_8_5_1
-            || fields.len() != 4
-            || fields.get(3)?.trim() != "0"
-        {
+        // `{4,<variant>,{<code>},0}`, or with the variant repeated in the
+        // last member -- the shape every other 8.5 colour tuple takes and the
+        // one `Styles/Основной` of a configuration stored by 8.5 carries
+        // (`{4,3,{-1},3}`, 161 items).
+        if !ibcmd_schema::metadata_storage_facts::style_color_85_layout(&fields) {
             return None;
         }
     } else if fields.first()?.trim() != STYLE_BODY_COLOR_TAG {
@@ -36961,13 +37212,7 @@ fn form_builtin_type_reference(type_id: &str) -> Option<&'static str> {
 }
 
 fn data_processor_builtin_type_reference(type_id: &str) -> Option<&'static str> {
-    DATA_PROCESSOR_BUILTIN_TYPE_REFERENCES
-        .iter()
-        .find_map(|(candidate, reference)| {
-            candidate
-                .eq_ignore_ascii_case(type_id)
-                .then_some(*reference)
-        })
+    ibcmd_schema::metadata_storage_facts::data_processor_builtin_type_reference(type_id)
         .or_else(|| platform_reference_family_type_reference(type_id))
 }
 
@@ -38042,10 +38287,16 @@ fn format_configuration_source_xml(
         // So the evidenced default is proven for this tuple, and a
         // configuration that actually differs fails the range check and never
         // reaches this branch.
-        insert.push_str(
-            ibcmd_schema::configuration_properties_evidenced_default_block_policy()
-                .script_variant_segment(),
-        );
+        // The script variant now has its coordinate (field 3, read into
+        // `script_variant`); the evidenced default stands for Russian only.
+        if properties.script_variant == Some("English") {
+            push_optional_simple_property_xml(&mut insert, "ScriptVariant", Some("English"));
+        } else {
+            insert.push_str(
+                ibcmd_schema::configuration_properties_evidenced_default_block_policy()
+                    .script_variant_segment(),
+            );
+        }
     } else {
         push_optional_simple_property_xml(&mut insert, "ScriptVariant", properties.script_variant);
     }
@@ -45409,6 +45660,11 @@ fn metadata_type_xml_namespace_attr(value_type: &ConstantValueType) -> &'static 
             if reference == "d7p1:Chart" =>
         {
             r#" xmlns:d7p1="http://v8.1c.ru/8.2/data/chart""#
+        }
+        ConstantValueType::Reference { reference }
+        | ConstantValueType::ReferenceTypeSet { reference } => {
+            ibcmd_xml::metadata::data_processor_builtin_type_namespace_attribute(reference)
+                .unwrap_or_default()
         }
         _ => "",
     }

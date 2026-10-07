@@ -23,6 +23,10 @@ use std::sync::LazyLock;
 
 #[rustfmt::skip]
 pub(crate) const STANDARD_PICTURES: &[(&str, &str)] = &[
+    // Matched stored UUIDs against 8.3.27.2214 native exports of src and IR.
+    ("3646acb9-a91e-4163-bbe1-2006041cd65d", "StdPicture.SpreadsheetShowGrid"),
+    ("8729a534-9f88-47b0-8d6b-ec213689580d", "StdPicture.FilterHistory"),
+    ("3a32aa35-c679-4c5b-91bd-72ae038e5bb4", "StdPicture.ExternalDataSource"),
     ("4b54770b-d069-4c0e-9b17-5cc2a01134d9", "StdPicture.Information"),
     ("818ab7d0-4654-4542-bd5e-fd9d1352b5a1", "StdPicture.SaveFile"),
     ("6ff3ddbd-56e3-4ddf-a5bf-048c1e2dfb2f", "StdPicture.User"),
@@ -382,9 +386,8 @@ mod tests {
         ),
     ];
 
-    /// The table is the union of the two copies it replaces: every pair of
-    /// the `mssql_dump` copy (218 rows at the time of the merge, the 206 of
-    /// the `metadata_model` copy among them), and nothing else.
+    /// Preserve the 218 identities from the original merge while admitting
+    /// additional platform constants confirmed by native exports.
     #[test]
     fn the_table_is_the_snapshot_of_the_two_copies_it_replaces() {
         let mut rows = STANDARD_PICTURES
@@ -398,7 +401,13 @@ mod tests {
             .filter(|line| !line.is_empty())
             .collect::<Vec<_>>();
         snapshot.sort_unstable();
-        assert_eq!(rows.len(), 218);
+        snapshot.extend([
+            "3646acb9-a91e-4163-bbe1-2006041cd65d StdPicture.SpreadsheetShowGrid",
+            "8729a534-9f88-47b0-8d6b-ec213689580d StdPicture.FilterHistory",
+            "3a32aa35-c679-4c5b-91bd-72ae038e5bb4 StdPicture.ExternalDataSource",
+        ]);
+        snapshot.sort_unstable();
+        assert_eq!(rows.len(), 221);
         assert_eq!(rows, snapshot);
     }
 

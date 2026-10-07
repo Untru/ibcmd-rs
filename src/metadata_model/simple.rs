@@ -342,6 +342,8 @@ fn event_name(event: &str) -> Result<String> {
         "OnSendDataToMaster" => "ПриОтправкеДанныхГлавному",
         "OnSendDataToSlave" => "ПриОтправкеДанныхПодчиненному",
         "OnSendNodeDataToSlave" => "ПриОтправкеДанныхУзлаПодчиненному",
+        // Документооборот 3.0 `EventSubscriptions/ЗадачаКомплексногоПроцессаПриВыполнении`.
+        "OnExecute" => "ПриВыполнении",
         "" => return Ok(String::new()),
         other => bail!("unknown subscription event {other}"),
     };

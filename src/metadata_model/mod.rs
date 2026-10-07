@@ -162,7 +162,8 @@ pub fn localized(element: Option<&Element>) -> Brace {
 
 /// XML text -> the stored string: the XML carries a line break as a bare LF,
 /// the row as CRLF (every multi-line string of the 4 932 BSP descriptor rows
-/// is CRLF-only).
+/// is CRLF-only). Idempotent: some paths apply it twice. A CR LF the string
+/// itself holds arrives already spelled `\r\r\n` (`MetadataXml::parse`).
 pub fn native_text(text: &str) -> String {
     if !text.contains('\n') {
         return text.to_string();

@@ -35,21 +35,6 @@ const INDEX_TYPE_UUID: &str = "4b3b32e1-14f6-4ce8-b4c4-1bc85a74237e";
 /// Type uuid of one indexed-field reference inside a record.
 const FIELD_TYPE_UUID: &str = "07c5e7a4-56de-47f1-9895-724a499e8a8c";
 
-/// Standard fields addressed by a negative code instead of a uuid.
-///
-/// One global table, not one per owner family: every code observed in the
-/// corpus names the same field wherever it appears, so a per-family table would
-/// be two tables saying the same thing. UT 11.5.27.75 spells out all four --
-/// `AccumulationRegister.ВыручкаИСебестоимостьПродаж` writes `Period`,
-/// `Recorder` and `LineNumber` for `-2`, `-3` and `-4`, and
-/// `Document.ЗаявкаНаЗакупку.Товары` writes `Ref` for `-5`.
-const STANDARD_FIELDS: &[(&str, &str)] = &[
-    ("-2", "Period"),
-    ("-3", "Recorder"),
-    ("-4", "LineNumber"),
-    ("-5", "Ref"),
-];
-
 const HEADER: &str = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
 <AdditionalIndexes xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" \
 xmlns:v8=\"http://v8.1c.ru/8.1/data/core\" \
@@ -97,7 +82,11 @@ fn resolve_table(
 }
 
 /// Field name for one `{"#",<field type>,{1,<slot>}}` reference.
-fn resolve_field(field: &str, object_refs: &BTreeMap<String, String>) -> Result<String> {
+fn resolve_field(
+    field: &str,
+    owner_kind: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<String> {
     let fields = split_1c_braced_fields(field.trim(), 0)
         .ok_or_else(|| anyhow!("additional-index field is not a braced value"))?;
     let type_uuid = fields
@@ -129,21 +118,32 @@ fn resolve_field(field: &str, object_refs: &BTreeMap<String, String>) -> Result<
             })?;
             Ok(leaf.to_string())
         }
-        [code] => STANDARD_FIELDS
-            .iter()
-            .find(|(marker, _)| *marker == code.trim())
-            .map(|(_, name)| (*name).to_string())
-            .ok_or_else(|| {
-                anyhow!(
-                    "additional-index standard-field code {} is not in the evidenced table",
-                    code.trim()
-                )
-            }),
+        [code] => {
+            use ibcmd_schema::metadata_child_storage_facts::AdditionalIndexStandardFieldFamily;
+            let family = AdditionalIndexStandardFieldFamily::for_owner(owner_kind);
+            family
+                .field_name(code)
+                .map(str::to_string)
+                .ok_or_else(|| match family {
+                    AdditionalIndexStandardFieldFamily::Catalog => anyhow!(
+                        "additional-index catalog standard-field code {} is not known",
+                        code.trim()
+                    ),
+                    AdditionalIndexStandardFieldFamily::RegisterOrTabularSection => anyhow!(
+                        "additional-index standard-field code {} is not in the evidenced table",
+                        code.trim()
+                    ),
+                })
+        }
         _ => Err(anyhow!("additional-index field slot has an unknown shape")),
     }
 }
 
-fn resolve_field_list(list: &str, object_refs: &BTreeMap<String, String>) -> Result<Vec<String>> {
+fn resolve_field_list(
+    list: &str,
+    owner_kind: &str,
+    object_refs: &BTreeMap<String, String>,
+) -> Result<Vec<String>> {
     let fields = split_1c_braced_fields(list.trim(), 0)
         .ok_or_else(|| anyhow!("additional-index field list is not a braced value"))?;
     let count = fields
@@ -159,7 +159,7 @@ fn resolve_field_list(list: &str, object_refs: &BTreeMap<String, String>) -> Res
     fields
         .iter()
         .skip(1)
-        .map(|field| resolve_field(field, object_refs))
+        .map(|field| resolve_field(field, owner_kind, object_refs))
         .collect()
 }
 
@@ -224,8 +224,8 @@ pub(super) fn parse_additional_indexes(
             id,
             name,
             table: resolve_table(&table_uuid, owner, object_refs)?,
-            indexed_fields: resolve_field_list(body[2], object_refs)?,
-            additional_fields: resolve_field_list(body[3], object_refs)?,
+            indexed_fields: resolve_field_list(body[2], &owner.kind, object_refs)?,
+            additional_fields: resolve_field_list(body[3], &owner.kind, object_refs)?,
         });
     }
     Ok(indexes)

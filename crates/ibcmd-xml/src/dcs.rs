@@ -2993,6 +2993,17 @@ fn parse_dcs_conditional_selection(
             "conditional-appearance selection namespace or attributes are unsupported",
         ));
     }
+    if selection
+        .children()
+        .iter()
+        .filter(|node| matches!(node, XmlNode::Element(_)))
+        .count()
+        > 1
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selection has multiple items",
+        ));
+    }
     let Some(selected_item) = one_direct_element_child(selection)? else {
         return Ok(DcsChildParseOutcome::Unsupported(
             "empty conditional-appearance selection is unsupported",
@@ -3007,6 +3018,17 @@ fn parse_dcs_conditional_selection(
     {
         return Ok(DcsChildParseOutcome::Unsupported(
             "conditional-appearance selection item is unsupported",
+        ));
+    }
+    if selected_item
+        .children()
+        .iter()
+        .filter(|node| matches!(node, XmlNode::Element(_)))
+        .count()
+        > 1
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "conditional-appearance selection item has multiple children",
         ));
     }
     let Some(field) = one_direct_element_child(selected_item)? else {
@@ -3039,6 +3061,17 @@ fn parse_dcs_appearance_value(
     if !xml_element_uses_namespace(appearance, root, policy.namespace_uri()) {
         return Ok(DcsChildParseOutcome::Unsupported(
             "appearance container namespace is unsupported",
+        ));
+    }
+    if appearance
+        .children()
+        .iter()
+        .filter(|node| matches!(node, XmlNode::Element(_)))
+        .count()
+        > 1
+    {
+        return Ok(DcsChildParseOutcome::Unsupported(
+            "appearance has multiple parameter items",
         ));
     }
     let Some(item) = one_direct_element_child(appearance)? else {
@@ -5702,6 +5735,24 @@ mod tests {
     }
 
     #[test]
+    fn multiple_conditional_fields_and_parameters_are_cohort_refusals() {
+        let document = XmlReader::from_slice(
+            br#"<selection xmlns="http://v8.1c.ru/8.1/data-composition-system/settings"><item><field>A</field></item><item><field>B</field></item></selection>"#,
+        ).unwrap();
+        assert!(matches!(
+            parse_dcs_conditional_selection(document.root(), document.root()).unwrap(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+        let document = XmlReader::from_slice(
+            br#"<appearance xmlns="http://v8.1c.ru/8.1/data-composition-system/settings"><item/><item/></appearance>"#,
+        ).unwrap();
+        assert!(matches!(
+            parse_dcs_appearance_value(document.root(), document.root()).unwrap(),
+            DcsChildParseOutcome::Unsupported(_)
+        ));
+    }
+
+    #[test]
     fn form_attributes_conditional_appearance_fixture_round_trips_both_wrappers() {
         let form = decode_base64_fixture(include_str!(
             "../../../tests/fixtures/native-evidence/8.3.27.2214/dcs-form-attributes-conditional-appearance/native-form.xml.b64"
@@ -6173,5 +6224,327 @@ mod tests {
                 parse_form_list_settings_conditional_appearances(form(child).as_bytes()).is_err()
             );
         }
+    }
+}
+
+/// Reconciles settings parameter values with the schema's nil defaults.
+/// Only the affected items are edited: all unchanged XML, prefixes and CRLF
+/// formatting remain byte-for-byte source owned.
+pub fn reconcile_form_list_settings_data_parameters(
+    fragment: &str,
+    server_state_xml: Option<&str>,
+) -> Option<String> {
+    let xml = server_state_xml.unwrap_or_default();
+    let restricted_names =
+        form_server_state_nil_parameter_names(xml, FormSchemaParameterFlag::UseRestriction);
+    let fragment = reconcile_nil_data_parameter_items(fragment, &restricted_names, true);
+    let parameter_names =
+        form_server_state_nil_parameter_names(xml, FormSchemaParameterFlag::ValueListAllowed);
+    let mut fragment = reconcile_nil_data_parameter_items(&fragment, &parameter_names, false);
+    if fragment
+        .replace("<dcsset:dataParameters>", "")
+        .replace("</dcsset:dataParameters>", "")
+        .trim()
+        .is_empty()
+    {
+        if let Some(start) = fragment.find("<dcsset:dataParameters>") {
+            fragment = format!("{}<dcsset:dataParameters/>\r\n", &fragment[..start]);
+        } else {
+            return None;
+        }
+    }
+    Some(fragment)
+}
+
+#[derive(Clone, Copy)]
+enum FormSchemaParameterFlag {
+    UseRestriction,
+    ValueListAllowed,
+}
+impl FormSchemaParameterFlag {
+    fn local_name(self) -> &'static [u8] {
+        match self {
+            Self::UseRestriction => b"useRestriction",
+            Self::ValueListAllowed => b"valueListAllowed",
+        }
+    }
+}
+
+fn form_server_state_nil_parameter_names(
+    xml: &str,
+    flag: FormSchemaParameterFlag,
+) -> std::collections::BTreeSet<String> {
+    #[derive(Default)]
+    struct ParameterState {
+        name: Option<String>,
+        nil_default: bool,
+        flag_enabled: bool,
+        flag_text: String,
+    }
+
+    fn local_name(name: &[u8]) -> &[u8] {
+        name.rsplit(|byte| *byte == b':').next().unwrap_or(name)
+    }
+
+    fn has_true_nil_attribute(event: &quick_xml::events::BytesStart<'_>) -> bool {
+        event
+            .attributes()
+            .with_checks(false)
+            .flatten()
+            .any(|attribute| {
+                local_name(attribute.key.as_ref()) == b"nil" && attribute.value.as_ref() == b"true"
+            })
+    }
+
+    let mut reader = quick_xml::Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut parameter = None::<ParameterState>;
+    #[derive(Clone, Copy)]
+    enum ParameterTextTarget {
+        Name,
+        Flag,
+    }
+    let mut text_target = None::<ParameterTextTarget>;
+    let mut names = std::collections::BTreeSet::new();
+    loop {
+        match reader.read_event() {
+            Ok(QuickXmlEvent::Start(event)) => match local_name(event.name().as_ref()) {
+                b"Parameter" => parameter = Some(ParameterState::default()),
+                b"name" if parameter.is_some() => {
+                    if let Some(parameter) = parameter.as_mut() {
+                        parameter.name = Some(String::new());
+                    }
+                    text_target = Some(ParameterTextTarget::Name);
+                }
+                name if name == flag.local_name() && parameter.is_some() => {
+                    text_target = Some(ParameterTextTarget::Flag)
+                }
+                b"value" if parameter.is_some() && has_true_nil_attribute(&event) => {
+                    if let Some(parameter) = parameter.as_mut() {
+                        parameter.nil_default = true;
+                    }
+                }
+                _ => {}
+            },
+            Ok(QuickXmlEvent::Empty(event)) => {
+                if local_name(event.name().as_ref()) == b"value"
+                    && has_true_nil_attribute(&event)
+                    && let Some(parameter) = parameter.as_mut()
+                {
+                    parameter.nil_default = true;
+                }
+            }
+            Ok(QuickXmlEvent::Text(event)) if text_target.is_some() => {
+                let Ok(encoded) = std::str::from_utf8(event.as_ref()) else {
+                    return std::collections::BTreeSet::new();
+                };
+                let Ok(value) = quick_xml::escape::unescape(encoded) else {
+                    return std::collections::BTreeSet::new();
+                };
+                if let Some(parameter) = parameter.as_mut() {
+                    match text_target {
+                        Some(ParameterTextTarget::Name) => {
+                            parameter.name.get_or_insert_default().push_str(&value)
+                        }
+                        Some(ParameterTextTarget::Flag) => parameter.flag_text.push_str(&value),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(QuickXmlEvent::GeneralRef(event)) if text_target.is_some() => {
+                let Ok(reference) = std::str::from_utf8(event.as_ref()) else {
+                    return std::collections::BTreeSet::new();
+                };
+                let encoded = format!("&{reference};");
+                let Ok(value) = quick_xml::escape::unescape(&encoded) else {
+                    return std::collections::BTreeSet::new();
+                };
+                if let Some(parameter) = parameter.as_mut() {
+                    match text_target {
+                        Some(ParameterTextTarget::Name) => {
+                            parameter.name.get_or_insert_default().push_str(&value)
+                        }
+                        Some(ParameterTextTarget::Flag) => parameter.flag_text.push_str(&value),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(QuickXmlEvent::CData(event)) if text_target.is_some() => {
+                let Ok(value) = std::str::from_utf8(event.as_ref()) else {
+                    return std::collections::BTreeSet::new();
+                };
+                if let Some(parameter) = parameter.as_mut() {
+                    match text_target {
+                        Some(ParameterTextTarget::Name) => {
+                            parameter.name.get_or_insert_default().push_str(value)
+                        }
+                        Some(ParameterTextTarget::Flag) => parameter.flag_text.push_str(value),
+                        _ => {}
+                    }
+                }
+            }
+            Ok(QuickXmlEvent::End(event)) => match local_name(event.name().as_ref()) {
+                name if name == b"name" || name == flag.local_name() => {
+                    if name == flag.local_name()
+                        && let Some(parameter) = parameter.as_mut()
+                    {
+                        parameter.flag_enabled = parameter.flag_text.trim() == "true";
+                    }
+                    text_target = None;
+                }
+                b"Parameter" => {
+                    if let Some(parameter) = parameter.take()
+                        && parameter.nil_default
+                        && parameter.flag_enabled
+                        && let Some(name) = parameter.name
+                    {
+                        names.insert(name.trim().to_string());
+                    }
+                    text_target = None;
+                }
+                _ => {}
+            },
+            Ok(QuickXmlEvent::Eof) => break,
+            Ok(_) => {}
+            Err(_) => return std::collections::BTreeSet::new(),
+        }
+    }
+    names
+}
+
+fn reconcile_nil_data_parameter_items(
+    fragment: &str,
+    parameter_names: &std::collections::BTreeSet<String>,
+    omit_restricted_item: bool,
+) -> String {
+    const ITEM_OPEN: &str = r#"<dcscor:item xsi:type="dcsset:SettingsParameterValue">"#;
+    const ITEM_CLOSE: &str = "</dcscor:item>";
+    const PARAMETER_OPEN: &str = "<dcscor:parameter>";
+    const PARAMETER_CLOSE: &str = "</dcscor:parameter>";
+    const NIL_VALUE: &str = r#"<dcscor:value xsi:nil="true"/>"#;
+
+    let mut output = String::with_capacity(fragment.len());
+    let mut remainder = fragment;
+    while let Some(item_start) = remainder.find(ITEM_OPEN) {
+        output.push_str(&remainder[..item_start]);
+        let item_remainder = &remainder[item_start..];
+        let Some(item_end) = item_remainder
+            .find(ITEM_CLOSE)
+            .map(|offset| offset + ITEM_CLOSE.len())
+        else {
+            output.push_str(item_remainder);
+            return output;
+        };
+        let item = &item_remainder[..item_end];
+        let parameter_name = item
+            .find(PARAMETER_OPEN)
+            .map(|offset| offset + PARAMETER_OPEN.len())
+            .and_then(|start| {
+                item[start..]
+                    .find(PARAMETER_CLOSE)
+                    .map(|length| &item[start..start + length])
+            })
+            .and_then(|encoded| quick_xml::escape::unescape(encoded).ok())
+            .map(|value| value.into_owned());
+        if parameter_name
+            .as_ref()
+            .is_some_and(|name| parameter_names.contains(name))
+            && let Some(value_start) = item.find(NIL_VALUE)
+        {
+            if omit_restricted_item {
+                if item.contains("<dcscor:use>false</dcscor:use>") {
+                    let line_start = output.rfind('\n').map_or(0, |offset| offset + 1);
+                    if output[line_start..]
+                        .bytes()
+                        .all(|byte| matches!(byte, b' ' | b'\t'))
+                    {
+                        output.truncate(line_start);
+                    }
+                    remainder = item_remainder[item_end..]
+                        .strip_prefix("\r\n")
+                        .unwrap_or(&item_remainder[item_end..]);
+                    continue;
+                }
+                output.push_str(item);
+                remainder = &item_remainder[item_end..];
+                continue;
+            }
+            let line_start = item[..value_start]
+                .rfind('\n')
+                .map_or(0, |offset| offset + 1);
+            let value_end = value_start + NIL_VALUE.len();
+            if item[line_start..value_start]
+                .bytes()
+                .all(|byte| matches!(byte, b' ' | b'\t'))
+            {
+                let line_end = if item[value_end..].starts_with("\r\n") {
+                    value_end + 2
+                } else if item[value_end..].starts_with('\n') {
+                    value_end + 1
+                } else {
+                    value_end
+                };
+                output.push_str(&item[..line_start]);
+                output.push_str(&item[line_end..]);
+            } else {
+                output.push_str(item);
+            }
+        } else {
+            output.push_str(item);
+        }
+        remainder = &item_remainder[item_end..];
+    }
+    output.push_str(remainder);
+    output
+}
+
+#[cfg(test)]
+mod form_data_parameters_reconciliation_tests {
+    use super::reconcile_form_list_settings_data_parameters;
+
+    #[test]
+    fn unchanged_fragments_retain_exact_source_bytes() {
+        let fragment = "\t<dcsset:dataParameters>\r\n\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\"><dcscor:parameter>X</dcscor:parameter><dcscor:value xsi:nil=\"true\"/></dcscor:item>\r\n\t</dcsset:dataParameters>\r\n";
+        assert_eq!(
+            reconcile_form_list_settings_data_parameters(fragment, None).as_deref(),
+            Some(fragment)
+        );
+        assert_eq!(
+            reconcile_form_list_settings_data_parameters(fragment, Some("<broken")).as_deref(),
+            Some(fragment)
+        );
+    }
+
+    #[test]
+    fn restricted_unused_items_and_allowed_nil_values_have_distinct_outcomes() {
+        let fragment = "\t<dcsset:dataParameters>\r\n\t\t<dcscor:item xsi:type=\"dcsset:SettingsParameterValue\">\r\n\t\t\t<dcscor:parameter>A&amp;B</dcscor:parameter>\r\n\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n\t\t\t<dcscor:use>false</dcscor:use>\r\n\t\t</dcscor:item>\r\n\t</dcsset:dataParameters>\r\n";
+        let schema = |flag| {
+            format!(
+                "<schema><Parameter><name>A&amp;B</name><value xsi:nil=\"true\"/><{flag}>true</{flag}></Parameter></schema>"
+            )
+        };
+        assert_eq!(
+            reconcile_form_list_settings_data_parameters(fragment, Some(&schema("useRestriction")))
+                .unwrap(),
+            "\t<dcsset:dataParameters/>\r\n"
+        );
+        let allowed = reconcile_form_list_settings_data_parameters(
+            fragment,
+            Some(&schema("valueListAllowed")),
+        )
+        .unwrap();
+        assert_eq!(
+            allowed,
+            fragment.replace("\t\t\t<dcscor:value xsi:nil=\"true\"/>\r\n", "")
+        );
+        let valued = fragment.replace(
+            "<dcscor:value xsi:nil=\"true\"/>",
+            "<dcscor:value>7</dcscor:value>",
+        );
+        assert_eq!(
+            reconcile_form_list_settings_data_parameters(&valued, Some(&schema("useRestriction")))
+                .as_deref(),
+            Some(valued.as_str())
+        );
     }
 }
