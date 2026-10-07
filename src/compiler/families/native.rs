@@ -337,6 +337,151 @@ pub(crate) fn parse_optional_bom(input: &[u8]) -> Result<NativeValue, NativeErro
     }
 }
 
+/// Validate a complete descriptor using the canonical lexical scanner while
+/// borrowing only its own metadata UUID. Ordinary storage comparisons need no
+/// syntax tree or format-independent size/depth ceiling. The explicit stack
+/// retains three field shapes per open list; every frame/node owns an input
+/// byte, so the input itself bounds work and retained structural state.
+/// Existing cohort parsers and their resource limits are unchanged.
+pub(crate) fn descriptor_own_uuid(input: &[u8]) -> Result<Option<&str>, NativeError> {
+    #[derive(Clone, Copy)]
+    enum Field<'a> {
+        Token(&'a str),
+        Text,
+        Identity(Option<&'a str>),
+        Other,
+    }
+    struct Frame<'a> {
+        start: usize,
+        len: usize,
+        head: [Field<'a>; 3],
+        need_value: bool,
+    }
+    impl<'a> Frame<'a> {
+        fn add(&mut self, field: Field<'a>) -> Result<(), NativeError> {
+            if self.len < self.head.len() {
+                self.head[self.len] = field;
+            }
+            self.len = self.len.checked_add(1).ok_or(NativeError::NodeOverflow)?;
+            self.need_value = false;
+            Ok(())
+        }
+        fn identity(&self) -> Option<&'a str> {
+            if self.len == 3
+                && matches!(self.head[1], Field::Token("0"))
+                && let Field::Token(uuid) = self.head[2]
+            {
+                Some(uuid)
+            } else {
+                None
+            }
+        }
+        fn own_uuid(&self) -> Option<&'a str> {
+            if self.len == 9
+                && matches!(self.head[0], Field::Token("3"))
+                && matches!(self.head[2], Field::Text)
+                && let Field::Identity(uuid) = self.head[1]
+            {
+                uuid
+            } else {
+                None
+            }
+        }
+    }
+    let mut parser = NativeParser::new(input);
+    parser.offset = if input.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    let mut frames: Vec<Frame<'_>> = Vec::new();
+    let mut own: Option<(usize, &str)> = None;
+    let mut root_complete = false;
+    loop {
+        parser.whitespace();
+        if root_complete {
+            return if parser.offset == input.len() {
+                Ok(own.map(|(_, uuid)| uuid))
+            } else {
+                Err(NativeError::TrailingBytes)
+            };
+        }
+        let need_value = frames.last().is_none_or(|frame| frame.need_value);
+        if need_value {
+            let byte = *input.get(parser.offset).ok_or(NativeError::UnexpectedEnd)?;
+            // The canonical list grammar permits an empty list, and empty
+            // tokens after the first delimiter, but forbids a trailing comma.
+            if byte == b'}' && frames.last().is_some_and(|frame| frame.len == 0) {
+                parser.offset += 1;
+                let frame = frames.pop().expect("an open empty list");
+                if let Some(parent) = frames.last_mut() {
+                    parent.add(Field::Identity(frame.identity()))?;
+                } else {
+                    root_complete = true;
+                }
+                continue;
+            }
+            if byte == b'}' && !frames.is_empty() {
+                return Err(NativeError::TrailingComma);
+            }
+            parser.bump_node(0)?; // Input-derived node count, no recursive depth.
+            let field = if byte == b'{' {
+                frames
+                    .try_reserve(1)
+                    .map_err(|error| NativeError::Payload(error.to_string()))?;
+                frames.push(Frame {
+                    start: parser.offset,
+                    len: 0,
+                    head: [Field::Other; 3],
+                    need_value: true,
+                });
+                parser.offset += 1;
+                continue;
+            } else if byte == b',' && frames.last().is_some_and(|frame| frame.len > 0) {
+                Field::Token("")
+            } else if byte == b'"' {
+                parser.skip_text()?;
+                Field::Text
+            } else {
+                let start = parser.offset;
+                parser.skip_token()?;
+                Field::Token(
+                    std::str::from_utf8(&input[start..parser.offset])
+                        .map_err(|_| NativeError::InvalidUtf8)?,
+                )
+            };
+            if let Some(frame) = frames.last_mut() {
+                frame.add(field)?;
+            } else {
+                root_complete = true;
+            }
+        } else {
+            match input.get(parser.offset) {
+                Some(b',') => {
+                    parser.offset += 1;
+                    frames.last_mut().expect("an open list").need_value = true;
+                }
+                Some(b'}') => {
+                    parser.offset += 1;
+                    let frame = frames.pop().expect("an open list");
+                    if let Some(uuid) = frame.own_uuid()
+                        && own.is_none_or(|(start, _)| frame.start < start)
+                    {
+                        own = Some((frame.start, uuid));
+                    }
+                    if let Some(parent) = frames.last_mut() {
+                        parent.add(Field::Identity(frame.identity()))?;
+                    } else {
+                        root_complete = true;
+                    }
+                }
+                Some(_) => return Err(NativeError::ExpectedDelimiter),
+                None => return Err(NativeError::UnexpectedEnd),
+            }
+        }
+    }
+}
+
 pub(crate) fn parse_without_bom(input: &[u8]) -> Result<NativeValue, NativeError> {
     let total =
         input
@@ -1079,6 +1224,44 @@ impl Error for NativeError {}
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn borrowed_descriptor_scanner_keeps_canonical_grammar_and_ancestor_header_order() {
+        for text in [
+            "{}",
+            "{1,,2}",
+            "{\"a\"\"b\",{0},#base64:QUJD\r\nRA==}",
+            "{,1}",
+            "{1,}",
+            "{1,,}",
+            "{1 2}",
+            "{1}tail",
+            "{\"unterminated}",
+            "{#base64:Q===}",
+            "{#base64:QUJD R===}",
+            "{#base64:QUJD\r\nRA==,1}",
+        ] {
+            assert_eq!(
+                super::descriptor_own_uuid(text.as_bytes()).is_ok(),
+                super::parse_optional_bom(text.as_bytes()).is_ok(),
+                "{text}"
+            );
+        }
+        let outer = "16b3681c-426d-4d6f-9ffe-588a23974222";
+        let inner = "26b3681c-426d-4d6f-9ffe-588a23974222";
+        let child = format!("{{3,{{1,0,{inner}}},\"Inner\",{{0}},\"\",0,0,0,0}}");
+        let text = format!("{{3,{{1,0,{outer}}},\"Outer\",{child},\"\",0,0,0,0}}");
+        assert_eq!(
+            super::descriptor_own_uuid(text.as_bytes()).unwrap(),
+            Some(outer)
+        );
+        let deep = format!("{}{text}{}", "{".repeat(2048), "}".repeat(2048));
+        assert_eq!(
+            super::descriptor_own_uuid(deep.as_bytes()).unwrap(),
+            Some(outer)
+        );
+        assert!(super::parse_optional_bom(deep.as_bytes()).is_err());
+        assert!(super::descriptor_own_uuid(b"{\"bad\xff\"}").is_err());
+    }
     use super::*;
 
     #[test]

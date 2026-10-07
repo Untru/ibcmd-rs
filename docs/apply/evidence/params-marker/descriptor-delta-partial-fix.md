@@ -20,7 +20,7 @@ would discard already observed behavior.
 The comparison uses the newest matching descriptor alias in the declared,
 validated dynamic history, falling back to the ordinary descriptor. It does
 not normalize whitespace, BOMs, text, headers or metadata properties. Complete
-raw-deflate consumption, bounded decoding, the known descriptor parser and its
+raw-deflate consumption, the canonical descriptor grammar and its
 own UUID must all succeed. Multipart descriptors, malformed or foreign UUIDs,
 unsupported alias inventories and undecodable streams refuse OWN planning.
 Creation still passes through the existing structural admission gates.
@@ -36,9 +36,22 @@ drift aborts the transaction through the existing pending-inventory guard.
 The descriptor capture and effective-alias helpers reuse the preserved
 `feat/05-params-marker` investigation, historical commit
 `f1963df0654275ad25821954c3cbda3e1c1a6d92`; this patch adds production binding,
-planner regressions and transaction integration. The capture retains finite
-resource budgets shared by active and staged reads. Exceeding a budget is an
-explicit refusal, not a claim that arbitrary configurations are covered.
+planner regressions and transaction integration. The ordinary marker decision
+adds no fixed row-count, per-row byte, decoded-size or aggregate stage ceiling.
+Each DEFLATE stream is validated/measured in fixed scratch space before exactly
+its actual decoded size is reserved. Only one active/staged pair is retained
+at a time. The canonical borrowed descriptor scanner keeps three field shapes
+per open list, uses an explicit stack and an input-derived node count, and
+allocates no complete descriptor tree. Allocation failures and corrupt streams
+remain errors; they never fall back to marker deletion. Existing independent
+measured dynamic-cohort admission gates remain unchanged.
+
+Ordinary descriptor lookup uses a name map. Exact ordinary preimage selection
+uses a correlated join to the already-guarded ConfigSave inventory, avoiding an
+ever-growing SQL `IN` expression. Full row header/digest guards remain before
+all mutation. Regressions include 129 descriptors whose decoded total exceeds
+32 MiB, an actual compressed and decoded descriptor row exceeding 32 MiB, and
+deep descriptors exceeding the default cohort parser's depth bound.
 
 The SOURCE regressions cover recompression, genuine decoded changes, malformed
 streams, header drift, effective alias selection and generated-guard ordering.

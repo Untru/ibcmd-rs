@@ -3,13 +3,13 @@
 //! genuine Comment/Synonym changes still collect it. The remaining #418 matrix
 //! is open; no row-count boundary or wider service-information parity is claimed.
 
-use crate::metadata_model::export::names::own_header;
-use crate::mssql_main_activation::{MAX_PLAN_BYTES, MAX_ROW_BYTES, MAX_ROWS};
+use crate::compiler::families::native::descriptor_own_uuid;
 use crate::sql::SqlClient;
 use anyhow::{Result, ensure};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
+#[cfg(test)]
 use super::dynamic_metadata;
 use super::dynamic_overlay;
 use super::model::RowMeta;
@@ -26,20 +26,57 @@ fn canonical_descriptor(name: &str) -> Result<Uuid> {
     Ok(id)
 }
 
-/// One budget shared across all active AND staged descriptor reads.
-pub(super) struct Budget {
-    compressed: usize,
-    plain: usize,
-    rows: usize,
-}
-impl Default for Budget {
-    fn default() -> Self {
-        Self {
-            compressed: MAX_PLAN_BYTES,
-            plain: MAX_PLAN_BYTES,
-            rows: MAX_ROWS * 2,
+/// Validate a complete DEFLATE stream in fixed scratch space, then allocate
+/// exactly its measured decoded length. No format-independent size ceiling or
+/// aggregate stage budget is added to the ordinary storage path.
+fn inflate_complete(bytes: &[u8]) -> Result<Vec<u8>> {
+    fn pass(bytes: &[u8], mut emit: impl FnMut(&[u8]) -> Result<()>) -> Result<usize> {
+        let mut decoder = flate2::Decompress::new(false);
+        let mut scratch = [0u8; 8192];
+        let mut length = 0usize;
+        loop {
+            let before_in = decoder.total_in();
+            let before_out = decoder.total_out();
+            let offset = usize::try_from(before_in)?;
+            let status = decoder.decompress(
+                &bytes[offset..],
+                &mut scratch,
+                flate2::FlushDecompress::None,
+            )?;
+            let produced = usize::try_from(decoder.total_out() - before_out)?;
+            length = length
+                .checked_add(produced)
+                .ok_or_else(|| anyhow::anyhow!("decoded length overflow"))?;
+            emit(&scratch[..produced])?;
+            if status == flate2::Status::StreamEnd {
+                ensure!(
+                    decoder.total_in() == bytes.len() as u64,
+                    "descriptor has trailing compressed data"
+                );
+                return Ok(length);
+            }
+            ensure!(
+                decoder.total_in() != before_in || produced != 0,
+                "descriptor has incomplete DEFLATE stream"
+            );
         }
     }
+    let length = pass(bytes, |_| Ok(()))?;
+    let mut plain = Vec::new();
+    plain.try_reserve_exact(length)?;
+    let measured = pass(bytes, |chunk| {
+        ensure!(
+            chunk.len() <= length - plain.len(),
+            "descriptor decoded length changed"
+        );
+        plain.extend_from_slice(chunk);
+        Ok(())
+    })?;
+    ensure!(
+        measured == length && plain.len() == length,
+        "descriptor decoded length changed"
+    );
+    Ok(plain)
 }
 
 /// Immutable judged bytes with the complete inventoried physical header.
@@ -48,7 +85,7 @@ pub(super) struct Descriptor {
     plain: Vec<u8>,
 }
 impl Descriptor {
-    fn validate_meta(id: &str, meta: &RowMeta, budget: &Budget) -> Result<()> {
+    fn validate_meta(id: &str, meta: &RowMeta) -> Result<()> {
         canonical_descriptor(id)?;
         let name = meta.name.to_ascii_lowercase();
         if name != id {
@@ -61,34 +98,26 @@ impl Descriptor {
             meta.part == 0
                 && meta.attributes == 0
                 && meta.data_size == meta.byte_len
-                && (0..=MAX_ROW_BYTES as i64).contains(&meta.byte_len),
+                && meta.byte_len >= 0,
             "unmeasured descriptor header"
         );
         ensure!(
             meta.sha256.len() == 64 && meta.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
             "invalid descriptor digest"
         );
-        ensure!(
-            budget.rows > 0 && meta.byte_len as usize <= budget.compressed,
-            "aggregate descriptor read budget exceeded"
-        );
         Ok(())
     }
-    fn capture(id: &str, meta: &RowMeta, bytes: &[u8], budget: &mut Budget) -> Result<Self> {
-        Self::validate_meta(id, meta, budget)?;
+    fn capture(id: &str, meta: &RowMeta, bytes: &[u8]) -> Result<Self> {
+        Self::validate_meta(id, meta)?;
         let id = canonical_descriptor(id)?;
         dynamic_overlay::bound_blob(meta, bytes)?;
-        let plain = dynamic_metadata::inflate_limit(bytes, budget.plain)?;
-        let row = dynamic_metadata::descriptor_plain(&plain)?;
-        let (own_id, _) =
-            own_header(&row).ok_or_else(|| anyhow::anyhow!("descriptor has no own header"))?;
+        let plain = inflate_complete(bytes)?;
+        let own_id = descriptor_own_uuid(&plain)?
+            .ok_or_else(|| anyhow::anyhow!("descriptor has no own header"))?;
         ensure!(
-            canonical_descriptor(&own_id)? == id,
+            canonical_descriptor(&own_id.to_ascii_lowercase())? == id,
             "descriptor own header differs from requested identity"
         );
-        budget.compressed -= bytes.len();
-        budget.plain -= plain.len();
-        budget.rows -= 1;
         Ok(Self { id, plain })
     }
     /// Server-side full header/digest/length filter precedes transfer. Exactly
@@ -99,13 +128,12 @@ impl Descriptor {
         table: &str,
         id: &str,
         meta: &RowMeta,
-        budget: &mut Budget,
     ) -> Result<Self> {
         ensure!(
             matches!(table, "Config" | "ConfigSave"),
             "invalid descriptor storage table"
         );
-        Self::validate_meta(id, meta, budget)?;
+        Self::validate_meta(id, meta)?;
         let mut bytes = None;
         client.read_rows(
             &format!(
@@ -123,7 +151,6 @@ impl Descriptor {
             id,
             meta,
             &bytes.ok_or_else(|| anyhow::anyhow!("descriptor changed after inventory"))?,
-            budget,
         )
     }
     pub(super) fn same_content(&self, other: &Self) -> Result<bool> {
@@ -149,10 +176,6 @@ fn predicate(meta: &RowMeta) -> String {
 /// orphan rows. Caller binds the marker bytes that produced this history.
 fn validate_inventory(rows: &[RowMeta], history: &[Uuid]) -> Result<()> {
     ensure!(
-        rows.len() <= MAX_ROWS && history.len() <= MAX_ROWS,
-        "alias inventory exceeds bound"
-    );
-    ensure!(
         history.iter().collect::<HashSet<_>>().len() == history.len()
             && history.iter().all(|id| !id.is_nil()),
         "invalid descriptor history"
@@ -162,22 +185,14 @@ fn validate_inventory(rows: &[RowMeta], history: &[Uuid]) -> Result<()> {
         .map(|id| id.hyphenated().to_string())
         .collect::<Vec<_>>();
     let mut keys = HashSet::new();
-    let mut total = 0usize;
     for row in rows {
         ensure!(
             row.part == 0
                 && row.attributes == 0
                 && row.data_size == row.byte_len
-                && (0..=MAX_ROW_BYTES as i64).contains(&row.byte_len)
+                && row.byte_len >= 0
                 && keys.insert(row.key()),
             "duplicate or unmeasured alias row"
-        );
-        total = total
-            .checked_add(row.byte_len as usize)
-            .ok_or_else(|| anyhow::anyhow!("alias size overflow"))?;
-        ensure!(
-            total <= MAX_PLAN_BYTES,
-            "alias inventory aggregate bound exceeded"
         );
         let ordinary = dynamic_overlay::ordinary_alias_name(&row.name, &generations)?;
         ensure!(
@@ -202,35 +217,53 @@ fn validate_inventory(rows: &[RowMeta], history: &[Uuid]) -> Result<()> {
 /// Latest descriptor alias from the *ordered, validated* publication history.
 /// The ordinary physical row is only the fallback. A stage reverting to that
 /// physical row can still change the descriptor published by a pending alias.
-pub(super) fn effective_descriptor<'a>(
+#[cfg(test)]
+fn effective_descriptor<'a>(
     ordinary: Option<&'a RowMeta>,
     descriptor: &str,
     aliases: &'a [RowMeta],
     history: &[Uuid],
 ) -> Result<Option<&'a RowMeta>> {
-    canonical_descriptor(descriptor)?;
-    validate_inventory(aliases, history)?;
-    for generation in history.iter().rev() {
-        let name = format!("{descriptor}_dynupdate_{}", generation.hyphenated());
-        let rows = aliases
-            .iter()
-            .filter(|row| row.name.eq_ignore_ascii_case(&name))
-            .collect::<Vec<_>>();
-        if !rows.is_empty() {
-            ensure!(
-                rows.len() == 1 && rows[0].part == 0,
-                "effective descriptor is missing, duplicated or multipart"
-            );
-            return Ok(Some(rows[0]));
+    DescriptorHistory::new(aliases, history)?.effective(ordinary, descriptor)
+}
+
+/// Validate history once and index physical aliases, rather than rescanning
+/// the complete inventory for every ordinary staged descriptor.
+struct DescriptorHistory<'a> {
+    aliases: HashMap<String, &'a RowMeta>,
+    generations: Vec<Uuid>,
+}
+impl<'a> DescriptorHistory<'a> {
+    fn new(aliases: &'a [RowMeta], history: &[Uuid]) -> Result<Self> {
+        validate_inventory(aliases, history)?;
+        Ok(Self {
+            aliases: aliases
+                .iter()
+                .map(|row| (row.name.to_ascii_lowercase(), row))
+                .collect(),
+            generations: history.to_vec(),
+        })
+    }
+    fn effective(
+        &self,
+        ordinary: Option<&'a RowMeta>,
+        descriptor: &str,
+    ) -> Result<Option<&'a RowMeta>> {
+        canonical_descriptor(descriptor)?;
+        for generation in self.generations.iter().rev() {
+            let name = format!("{descriptor}_dynupdate_{}", generation.hyphenated());
+            if let Some(row) = self.aliases.get(&name) {
+                return Ok(Some(*row));
+            }
         }
+        if let Some(row) = ordinary {
+            ensure!(
+                row.name.eq_ignore_ascii_case(descriptor) && row.part == 0,
+                "ordinary descriptor identity differs"
+            );
+        }
+        Ok(ordinary)
     }
-    if let Some(row) = ordinary {
-        ensure!(
-            row.name.eq_ignore_ascii_case(descriptor) && row.part == 0,
-            "ordinary descriptor identity differs"
-        );
-    }
-    Ok(ordinary)
 }
 
 pub(super) struct PlanInput<'a> {
@@ -256,7 +289,7 @@ fn storage_header(meta: &RowMeta) -> Result<()> {
         meta.part == 0
             && meta.attributes == 0
             && meta.data_size == meta.byte_len
-            && (0..=MAX_ROW_BYTES as i64).contains(&meta.byte_len)
+            && meta.byte_len >= 0
             && meta.sha256.len() == 64
             && meta.sha256.bytes().all(|b| b.is_ascii_hexdigit()),
         "unsupported marker-decision storage header"
@@ -349,7 +382,7 @@ pub(super) fn plan(input: PlanInput<'_>) -> Result<Decision> {
         .filter(|row| !row.name.eq_ignore_ascii_case("DynamicallyUpdated"))
         .cloned()
         .collect::<Vec<_>>();
-    validate_inventory(&aliases, &input.history.generations)?;
+    let descriptor_history = DescriptorHistory::new(&aliases, &input.history.generations)?;
     let descriptor_names = descriptors
         .iter()
         .map(|row| row.name.to_ascii_lowercase())
@@ -364,54 +397,37 @@ pub(super) fn plan(input: PlanInput<'_>) -> Result<Decision> {
         .filter(|row| descriptor_names.contains(&row.name.to_ascii_lowercase()))
         .cloned()
         .collect::<Vec<_>>();
-    let mut ordinary_names = HashSet::new();
+    let mut ordinary_by_name = HashMap::new();
     for row in &ordinary {
         ensure!(
-            row.part == 0 && ordinary_names.insert(row.name.to_ascii_lowercase()),
+            row.part == 0
+                && ordinary_by_name
+                    .insert(row.name.to_ascii_lowercase(), row)
+                    .is_none(),
             "duplicate or multipart ordinary descriptor"
         );
     }
     let mut pairs = Vec::new();
     for staged in descriptors {
         let name = staged.name.to_ascii_lowercase();
-        let base = ordinary
-            .iter()
-            .find(|row| row.name.eq_ignore_ascii_case(&name));
-        let active = effective_descriptor(base, &name, &aliases, &input.history.generations)?;
+        let base = ordinary_by_name.get(&name).copied();
+        let active = descriptor_history.effective(base, &name)?;
         pairs.push((staged, active));
     }
 
-    // Reserve every deciding header before transferring the first descriptor.
-    let mut budget = Budget::default();
-    let mut compressed = 0usize;
-    let mut rows = 0usize;
+    // Validate all deciding headers before transfer; do not cap the stage's
+    // row count or aggregate bytes. Decoded bodies live only for this pair.
     for (staged, active) in &pairs {
         for meta in std::iter::once(*staged).chain(active.iter().copied()) {
-            Descriptor::validate_meta(&staged.name.to_ascii_lowercase(), meta, &budget)?;
-            compressed = compressed
-                .checked_add(meta.byte_len as usize)
-                .ok_or_else(|| anyhow::anyhow!("descriptor budget overflow"))?;
-            rows += 1;
+            Descriptor::validate_meta(&staged.name.to_ascii_lowercase(), meta)?;
         }
     }
-    ensure!(
-        compressed <= budget.compressed && rows <= budget.rows,
-        "aggregate descriptor read budget exceeded"
-    );
     let mut changed = false;
     for (staged, active) in pairs {
         let id = staged.name.to_ascii_lowercase();
-        let after = Descriptor::read(
-            input.client,
-            input.db,
-            "ConfigSave",
-            &id,
-            staged,
-            &mut budget,
-        )?;
+        let after = Descriptor::read(input.client, input.db, "ConfigSave", &id, staged)?;
         if let Some(active) = active {
-            let before =
-                Descriptor::read(input.client, input.db, "Config", &id, active, &mut budget)?;
+            let before = Descriptor::read(input.client, input.db, "Config", &id, active)?;
             changed |= !before.same_content(&after)?;
         } else {
             changed = true; // Creation remains governed by the existing structural gate.
@@ -433,18 +449,12 @@ pub(super) fn plan(input: PlanInput<'_>) -> Result<Decision> {
         "ordinary versions inventory differs"
     );
     let version_bytes = read_storage_value(input.client, input.db, &version_metas[0])?;
-    dynamic_metadata::inflate(&version_bytes)?;
+    let version_plain = inflate_complete(&version_bytes)?;
     ensure!(
-        super::versions::parse_versions(&version_bytes)? == *input.active_versions,
+        super::versions::parse_versions_plain(&version_plain)? == *input.active_versions,
         "ordinary version map changed while planning"
     );
 
-    let names = descriptor_names
-        .iter()
-        .map(|name| format!("N'{}'", quote_string(name)))
-        .collect::<Vec<_>>();
-    let mut names = names;
-    names.sort();
     let mut guard_sql = String::from("-- Params marker semantic decision preimages\n");
     guard_sql.push_str(&dynamic_overlay::guard("ConfigSave", "1=1", input.staged));
     guard_sql.push_str(&dynamic_overlay::guard(
@@ -454,8 +464,8 @@ pub(super) fn plan(input: PlanInput<'_>) -> Result<Decision> {
     ));
     guard_sql.push_str(&dynamic_overlay::guard(
         "Config",
-        &format!("FileName IN ({})", names.join(", ")),
-        &ordinary,
+        "EXISTS (SELECT 1 FROM dbo.ConfigSave staged WHERE staged.FileName = dbo.Config.FileName)",
+        input.replaced,
     ));
     guard_sql.push_str(&dynamic_overlay::guard(
         "Config",
@@ -482,10 +492,11 @@ mod tests {
 
     const ID: &str = "16b3681c-426d-4d6f-9ffe-588a23974222";
     fn same_descriptor_content(active: &[u8], staged: &[u8]) -> Result<bool> {
-        let mut budget = Budget::default();
-        Descriptor::capture(ID, &blob_meta(ID, active), active, &mut budget)?.same_content(
-            &Descriptor::capture(ID, &blob_meta(ID, staged), staged, &mut budget)?,
-        )
+        Descriptor::capture(ID, &blob_meta(ID, active), active)?.same_content(&Descriptor::capture(
+            ID,
+            &blob_meta(ID, staged),
+            staged,
+        )?)
     }
     fn blob_meta(name: &str, bytes: &[u8]) -> RowMeta {
         let mut header = meta(name);
@@ -574,29 +585,14 @@ mod tests {
     }
 
     #[test]
-    fn foreign_uuid_and_aggregate_decoded_budget_refuse_even_valid_native_payloads() {
+    fn foreign_uuid_header_drift_and_unsupported_flags_refuse() {
         let foreign = "26b3681c-426d-4d6f-9ffe-588a23974222";
-        assert!(
-            Descriptor::capture(
-                foreign,
-                &blob_meta(foreign, OLD),
-                OLD,
-                &mut Budget::default()
-            )
-            .is_err()
-        );
-        let mut budget = Budget {
-            compressed: 1024,
-            plain: 577,
-            rows: 2,
-        };
-        Descriptor::capture(ID, &blob_meta(ID, OLD), OLD, &mut budget).unwrap();
-        assert!(Descriptor::capture(ID, &blob_meta(ID, STAGED), STAGED, &mut budget).is_err());
+        assert!(Descriptor::capture(foreign, &blob_meta(foreign, OLD), OLD,).is_err());
         let header = blob_meta(ID, OLD);
-        assert!(Descriptor::capture(ID, &header, STAGED, &mut Budget::default()).is_err());
+        assert!(Descriptor::capture(ID, &header, STAGED).is_err());
         let mut flags = header;
         flags.attributes = 1;
-        assert!(Descriptor::capture(ID, &flags, OLD, &mut Budget::default()).is_err());
+        assert!(Descriptor::capture(ID, &flags, OLD).is_err());
     }
 
     #[test]
@@ -719,7 +715,9 @@ mod tests {
         let replaced = client
             .storage
             .iter()
-            .filter(|(table, meta, _)| *table == "Config" && meta.name == ID)
+            .filter(|(table, meta, _)| {
+                *table == "Config" && matches!(classify_name(&meta.name), RowName::Descriptor(_))
+            })
             .map(|(_, meta, _)| meta.clone())
             .collect::<Vec<_>>();
         let version = &client
@@ -795,6 +793,86 @@ mod tests {
         let mut drift = planner_fixture(STAGED);
         drift.storage[1].1.sha256 = "0".repeat(64);
         assert!(fixture_plan(&drift).is_err());
+    }
+
+    fn large_descriptor(id: &str, length: usize, entropy: bool) -> Vec<u8> {
+        use std::io::Write;
+        let mut plain = format!("\u{feff}{{3,{{1,0,{id}}},\"Object\",{{0}},\"").into_bytes();
+        let alphabet = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+        let mut state = 0x1c05_4180_0abc_def1u64;
+        for _ in 0..length {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            plain.push(if entropy {
+                alphabet[(state & 63) as usize]
+            } else {
+                b'A'
+            });
+        }
+        plain.extend_from_slice(b"\",0,0,00000000-0000-0000-0000-000000000000,0}");
+        let mut encoder =
+            flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+        encoder.write_all(&plain).unwrap();
+        encoder.finish().unwrap()
+    }
+
+    #[test]
+    fn ordinary_planner_accepts_more_than_128_descriptors_and_32mib_decoded_total() {
+        let mut client = planner_fixture(STAGED);
+        client
+            .storage
+            .retain(|(_, meta, _)| !matches!(classify_name(&meta.name), RowName::Descriptor(_)));
+        let mut decoded_total = 0usize;
+        for index in 1..=129 {
+            let id = Uuid::from_u128(index).hyphenated().to_string();
+            let bytes = large_descriptor(&id, 260 * 1024, false);
+            decoded_total += inflate_complete(&bytes).unwrap().len();
+            client
+                .storage
+                .push(("Config", blob_meta(&id, &bytes), bytes.clone()));
+            client
+                .storage
+                .push(("ConfigSave", blob_meta(&id, &bytes), bytes));
+        }
+        assert!(decoded_total > 32 * 1024 * 1024);
+        let decision = fixture_plan(&client).unwrap();
+        assert!(!decision.clear);
+        assert!(
+            decision
+                .guard_sql
+                .contains("EXISTS (SELECT 1 FROM dbo.ConfigSave staged")
+        );
+        assert!(!decision.guard_sql.contains("FileName IN ("));
+        for (_, meta, _) in &client.storage {
+            assert!(decision.guard_sql.contains(&meta.name));
+        }
+    }
+
+    #[test]
+    fn ordinary_descriptor_accepts_actual_compressed_and_decoded_row_over_32mib() {
+        let bytes = large_descriptor(ID, 48 * 1024 * 1024, true);
+        assert!(
+            bytes.len() > 32 * 1024 * 1024,
+            "actual compressed row crosses former aggregate and per-row caps"
+        );
+        let meta = blob_meta(ID, &bytes);
+        let descriptor = Descriptor::capture(ID, &meta, &bytes).unwrap();
+        assert!(descriptor.plain.len() > 32 * 1024 * 1024);
+        assert_eq!(descriptor_own_uuid(&descriptor.plain).unwrap(), Some(ID));
+        let generation = "bd4ea842-aee4-41ee-94cc-ede196546578";
+        let mut alias = meta;
+        alias.name = format!("{ID}_dynupdate_{generation}");
+        let versions =
+            versions::deflate_row(format!("{{1,1,\"\",{generation}}}").as_bytes()).unwrap();
+        validate_inventory(
+            &[
+                alias,
+                blob_meta(&format!("versions_dynupdate_{generation}"), &versions),
+            ],
+            &[Uuid::parse_str(generation).unwrap()],
+        )
+        .unwrap();
     }
     #[test]
     fn planner_uses_latest_published_descriptor_and_guards_older_aliases() {
@@ -886,31 +964,13 @@ mod tests {
                 rows,
                 expected: header.clone(),
             };
-            assert!(
-                Descriptor::read(
-                    &client,
-                    "[owned]",
-                    "Config",
-                    ID,
-                    &header,
-                    &mut Budget::default()
-                )
-                .is_err()
-            );
+            assert!(Descriptor::read(&client, "[owned]", "Config", ID, &header,).is_err());
         }
         let client = CaptureClient {
             rows: vec![OLD.to_vec()],
             expected: header.clone(),
         };
-        Descriptor::read(
-            &client,
-            "[owned]",
-            "Config",
-            ID,
-            &header,
-            &mut Budget::default(),
-        )
-        .unwrap();
+        Descriptor::read(&client, "[owned]", "Config", ID, &header).unwrap();
         let sql = dynamic_overlay::guard(
             "Config",
             &format!("FileName = N'{ID}'"),
@@ -930,7 +990,7 @@ mod tests {
         }
         let mut alias = header;
         alias.name = format!("{ID}_dynupdate_06cb0442-0c47-4fad-986a-f08f28287c1b");
-        Descriptor::capture(ID, &alias, OLD, &mut Budget::default()).unwrap();
+        Descriptor::capture(ID, &alias, OLD).unwrap();
         assert!(
             dynamic_overlay::guard(
                 "Config",
