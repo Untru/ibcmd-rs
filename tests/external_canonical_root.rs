@@ -148,6 +148,39 @@ fn external_root_both_families_and_editions_preserve_full_xml_graph_and_scope() 
                     encode_external_root(&returned(&encoded, version), &profile(version)).unwrap(),
                     encoded
                 );
+                // These are independently typed slots, not a universal inequality rule.
+                // This XML-only control makes no fresh native header claim.
+                let coincident = String::from_utf8(bytes.clone())
+                    .unwrap()
+                    .replace(MAIN, OBJECT)
+                    .into_bytes();
+                let coincident_envelope = returned(&coincident, version);
+                let coincident_binding = coincident_envelope.external_source_binding().unwrap();
+                assert_eq!(
+                    coincident_binding.identity().main_uuid,
+                    coincident_envelope.root().identity().uuid()
+                );
+                let coincident_scope =
+                    ibcmd_rs::compiler::artifact::ArtifactScope::from_source_identity(
+                        coincident_binding.identity(),
+                    )
+                    .unwrap();
+                assert_eq!(coincident_scope.main_uuid(), coincident_scope.root_uuid());
+                let coincident_encoded =
+                    encode_external_root(&coincident_envelope, &profile(version)).unwrap();
+                assert_eq!(coincident_encoded, coincident);
+                assert_complete(
+                    &returned(&coincident_encoded, version),
+                    &coincident_envelope,
+                );
+                assert_eq!(
+                    encode_external_root(
+                        &returned(&coincident_encoded, version),
+                        &profile(version)
+                    )
+                    .unwrap(),
+                    coincident_encoded
+                );
             }
         }
     }
@@ -272,7 +305,6 @@ fn external_unknown_duplicate_namespace_identity_and_undeclared_references_refus
             let unknown_class = "90000000-0000-4000-8000-000000000438";
             let invalid=[
                 source.replace(kind.class_id(),unknown_class),
-                source.replace(OBJECT,MAIN),
                 source.replace(TYPE,"00000000-0000-0000-0000-000000000000"),
                 source.replace(VALUE,TYPE),
                 source.replace("category=\"Object\"","category=\"Manager\""),

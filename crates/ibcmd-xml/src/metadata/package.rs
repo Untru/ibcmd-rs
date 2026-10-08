@@ -169,11 +169,9 @@ impl ExternalSourceBinding {
         let contained = identity
             .contained
             .ok_or(MetadataDecodeError::Missing("external contained identity"))?;
-        if ExternalArtifactKind::from_class_id(&contained.class_id.to_string()) != Some(kind)
-            || contained.object_id == identity.main_uuid
-        {
+        if ExternalArtifactKind::from_class_id(&contained.class_id.to_string()) != Some(kind) {
             return Err(MetadataDecodeError::InvalidEnvelope(
-                "external class or main/contained identity relation differs",
+                "external class differs from source kind",
             ));
         }
         Ok(Self { kind, identity })
