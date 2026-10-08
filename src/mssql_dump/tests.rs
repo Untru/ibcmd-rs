@@ -80264,7 +80264,7 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
         payload.push((*marker).to_owned());
         let attributes = exact_register_standard_attributes_for_test(definitions);
         payload.push(format!(
-            "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
+            "{{3,{{1,0}},\"authored section\",0,0,{attributes},{{1,0}}}}"
         ));
     }
     let present = parse_chart_root_standard_tabular_sections(
