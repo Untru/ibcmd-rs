@@ -610,3 +610,629 @@ fn independent_literal_comparison_keeps_bom_crlf_properties_and_eof() {
     property[offset] = b'X';
     assert_eq!(first_raw_difference(&original, &property), Some(offset));
 }
+
+// Appended A1.3/A1.4 controls. All preceding thirteen controls remain byte-identical.
+const SECOND_SET: &str = "99999999-9999-4999-8999-999999999999";
+
+fn metadata_reference(target: &str) -> Brace {
+    l(vec![
+        Brace::str("#"),
+        a(facts::METADATA_REF),
+        l(vec![a(1), a(target)]),
+    ])
+}
+
+// This cleanroom row exercises the existing owner-facts projection, not a full native codec.
+// Unmapped body/version semantics deliberately remain Partial in every graph.
+fn observed_catalog_record() -> Brace {
+    use ibcmd_rs::metadata_model::{md_base, xml::Element};
+    use ibcmd_rs::restructure::caches::slots::RecordMap;
+    let map = RecordMap::new("Catalog", 57).unwrap();
+    let length = map
+        .names
+        .values()
+        .copied()
+        .chain(map.generated.iter().map(|(_, i)| i + 1))
+        .chain(std::iter::once(map.header))
+        .max()
+        .unwrap()
+        + 1;
+    let mut record = vec![a(0); length];
+    record[0] = a(57);
+    for (ordinal, (_, position)) in map.generated.iter().enumerate() {
+        record[*position] = a(uuid::Uuid::from_u128(100 + ordinal as u128 * 2));
+        record[*position + 1] = a(uuid::Uuid::from_u128(101 + ordinal as u128 * 2));
+    }
+    let props = Element {
+        name: "Properties".into(),
+        children: vec![Element {
+            name: "Name".into(),
+            text: CHILD.into(),
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    record[map.header] = l(vec![a(0), md_base(CHILD, &props)]);
+    l(vec![a(1), l(record), a(0)])
+}
+
+fn facts_fixture() -> (Files, ProjectionInputs, Brace, Brace) {
+    use ibcmd_rs::restructure::caches::{
+        root,
+        slots::{RecordMap, owner_record},
+        type_index::{Entry, Section, TypeIndex, TypeSlot},
+    };
+    let files = Files::new();
+    let mut descriptor = observed_catalog_record();
+    let (_, tag) = owner_record(&descriptor).unwrap();
+    let map = RecordMap::new("Catalog", tag).unwrap();
+    let position = map.names["Owners"];
+    fields(&mut descriptor, 1)[position] = l(vec![
+        a(0),
+        a(2),
+        metadata_reference(ROOT),
+        metadata_reference(ROOT),
+    ]);
+    let parsed = facts::ObjectFacts::parse("Catalog", &descriptor).unwrap();
+    let type_id = parsed.generated[0].type_id.clone();
+    let index = TypeIndex {
+        sections: vec![Section {
+            class: root::CATALOG_CLASS.into(),
+            entries: vec![Entry {
+                object: CHILD.into(),
+                types: parsed
+                    .generated
+                    .iter()
+                    .enumerate()
+                    .map(|(ordinal, d)| TypeSlot {
+                        type_id: d.type_id.clone(),
+                        value_id: d.value_id.clone(),
+                        index: ordinal as u32,
+                    })
+                    .collect(),
+            }],
+        }],
+    };
+    let mut trees = fixture();
+    trees[0].as_list_mut().unwrap()[1] = l(vec![a(2), a(CLASS), a(root::CATALOG_CLASS)]);
+    fields(&mut trees[0], 2)[10] = a(1); // second seven-member record's class index
+    trees[1] = sets(&[SET, SECOND_SET]);
+    for at in [2, 4] {
+        let pattern = fields(&mut trees[1], 1)[at].as_list_mut().unwrap();
+        pattern[1] = l(vec![Brace::str("#"), a(&type_id)]);
+    }
+    trees[2] = help(&[
+        (SET, vec![(23, a(0))]),
+        (SECOND_SET, vec![(23, a(0))]),
+        (CHILD, vec![(7, Brace::str("unchanged current property"))]),
+        (
+            NIL_UUID,
+            vec![
+                (23, links(&[SECOND_SET, SET])),
+                (24, links(&[SET, SECOND_SET])),
+            ],
+        ),
+    ]);
+    let mut manifest = files.manifest(0);
+    for (row, tree) in manifest.rows.iter_mut().zip(trees) {
+        let bytes = serialize_row(&tree);
+        let Locator::Plain { path } = &row.locator else {
+            unreachable!()
+        };
+        fs::write(path, &bytes).unwrap();
+        row.stored_length = bytes.len() as u64;
+        row.packed_length = bytes.len() as u64;
+        row.plain_length = bytes.len() as u64;
+        row.stored_sha256 = hash(&bytes);
+        row.packed_sha256 = hash(&bytes);
+        row.plain_sha256 = hash(&bytes);
+    }
+    (
+        files,
+        ProjectionInputs::load(manifest, SOURCE).unwrap(),
+        descriptor,
+        ibcmd_rs::metadata_model::brace::parse_row(&index.render()).unwrap(),
+    )
+}
+
+fn additional_manifest(
+    files: &Files,
+    descriptor: &Brace,
+    index: Option<&Brace>,
+) -> diagnostic::FactsManifestV1 {
+    use diagnostic::{FactRole, FactRowBinding, FactsManifestV1};
+    let make = |role, filename: &str, table: &str, tree: &Brace| {
+        let bytes = serialize_row(tree);
+        let path = files.root.join(format!("fact-{filename}"));
+        fs::write(&path, &bytes).unwrap();
+        FactRowBinding {
+            role,
+            origin: RowOrigin {
+                case: "generated".into(),
+                stage: "current".into(),
+                table: table.into(),
+                filename: filename.into(),
+                part: 0,
+                version: "own-facts-version".into(),
+            },
+            file: FileBinding {
+                path,
+                length: bytes.len() as u64,
+                sha256: hash(&bytes),
+            },
+        }
+    };
+    let mut rows = vec![make(
+        FactRole::Descriptor {
+            owner: CHILD.into(),
+        },
+        CHILD,
+        "Config",
+        descriptor,
+    )];
+    if let Some(index) = index {
+        rows.push(make(
+            FactRole::TypeIndex,
+            "2203278d-ef4f-4f68-98f1-feb257d53ecc.si",
+            "Params",
+            index,
+        ));
+    }
+    FactsManifestV1 {
+        schema: "cache-insertion-trace-facts-v1".into(),
+        source_head: SOURCE.into(),
+        case: "generated".into(),
+        stage: "current".into(),
+        rows,
+    }
+}
+
+#[test]
+fn source_bound_facts_keep_shared_reference_occurrences_physical_slots_and_separate_nil_observations()
+ {
+    use diagnostic::{FactInputs, NilActionKind, ObservationEvent, Target, TypeMemberFact};
+    let (files, base, descriptor, index) = facts_fixture();
+    let inputs = FactInputs::load(
+        &base,
+        additional_manifest(&files, &descriptor, Some(&index)),
+    )
+    .unwrap();
+    assert_eq!(inputs.raw(0), Some(serialize_row(&descriptor).as_slice()));
+    let graph = inputs.project(&base).unwrap();
+    assert_eq!(graph.descriptors.len(), 1);
+    let own = &graph.descriptors[0];
+    assert_eq!(own.owner, CHILD);
+    assert_eq!(own.kind, "Catalog");
+    assert_eq!(own.tag, 57);
+    assert_eq!(graph.type_index.as_ref().unwrap().sections.len(), 1);
+    assert!(
+        own.slots
+            .windows(2)
+            .all(|pair| pair[0].position < pair[1].position)
+    );
+    assert_eq!(own.facts.uuid, CHILD);
+    assert_eq!(graph.generated.len(), own.facts.generated.len());
+    for declaration in &graph.generated {
+        assert_eq!(declaration.owner, CHILD);
+        assert_eq!(
+            declaration.class,
+            ibcmd_rs::restructure::caches::root::CATALOG_CLASS
+        );
+        assert!((declaration.category_index as usize) < own.facts.generated.len());
+        assert_eq!(
+            index.at(&declaration.occurrence.path),
+            Some(&a(&declaration.type_id))
+        );
+        assert_eq!(
+            declaration.occurrence.source.filename,
+            "2203278d-ef4f-4f68-98f1-feb257d53ecc.si"
+        );
+    }
+    let owners_slot = own.slots.iter().find(|slot| slot.name == "Owners").unwrap();
+    assert_eq!(
+        descriptor.at(&[1, owners_slot.position]),
+        Some(&owners_slot.value)
+    );
+    assert!(
+        graph
+            .events
+            .iter()
+            .any(|e| matches!(e, ObservationEvent::TypeSetVisit {
+        member: TypeMemberFact::Primitive { tag, raw }, first_in_domain: None, ..
+    } if tag == "S" && raw == &l(vec![Brace::str("S"), a(1024), a(1)])))
+    );
+    let references: Vec<_> = graph
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ObservationEvent::ReferenceVisit {
+                owner,
+                owner_identity_proven,
+                slot,
+                target:
+                    Target::Metadata {
+                        uuid,
+                        registry_ordinal,
+                    },
+                first_in_domain,
+                occurrence,
+            } => Some((
+                owner,
+                owner_identity_proven,
+                slot,
+                uuid,
+                registry_ordinal,
+                first_in_domain,
+                occurrence,
+            )),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(references.len(), 2);
+    for (owner, proven, slot, target, ordinal, _, occurrence) in &references {
+        assert_eq!(owner.as_str(), CHILD);
+        assert!(**proven);
+        assert_eq!(**slot, Some("Owners"));
+        assert_eq!(target.as_str(), ROOT);
+        assert_eq!(**ordinal, Some(0));
+        assert_eq!(
+            descriptor.at(&occurrence.path),
+            Some(&metadata_reference(ROOT))
+        );
+        assert_eq!(occurrence.plain_sha256, hash(&serialize_row(&descriptor)));
+    }
+    assert!(*references[0].5);
+    assert!(!*references[1].5);
+    assert_ne!(references[0].6.path, references[1].6.path);
+    let type_visits: Vec<_> = graph
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ObservationEvent::TypeSetVisit {
+                member: TypeMemberFact::Generated(Target::TypeId { declaration, .. }),
+                first_in_domain,
+                ..
+            } => Some((declaration, first_in_domain)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(type_visits.len(), 2);
+    assert!(
+        type_visits
+            .iter()
+            .all(|(declaration, _)| declaration.is_some())
+    );
+    assert_eq!(
+        (*type_visits[0].1, *type_visits[1].1),
+        (Some(true), Some(false))
+    );
+    let nil_links: Vec<_> = graph
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ObservationEvent::NilAction {
+                action: NilActionKind::ObservedSetLink,
+                set,
+                ..
+            } => set.as_deref(),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(nil_links, vec![SECOND_SET, SET]); // original property23 order, no sorting seed
+    assert_eq!(
+        graph
+            .events
+            .iter()
+            .filter(|e| matches!(e, ObservationEvent::OwnerVisit { .. }))
+            .count(),
+        2
+    );
+    assert!(
+        graph
+            .events
+            .iter()
+            .all(|e| !matches!(e, ObservationEvent::EmitKey { .. }))
+    );
+    assert!(graph.candidate.is_none() && graph.first_visit_authority.is_none());
+    assert_eq!(graph.pending_atoms, ["A1.5", "A1.6", "A1.7"]);
+    assert_eq!(
+        graph.graph_completeness,
+        diagnostic::GraphCompleteness::Partial
+    );
+    assert_eq!(graph.trace_status, diagnostic::TraceStatus::NotIdentified);
+}
+
+#[test]
+fn missing_unknown_and_nested_reference_facts_never_become_no_refs_or_type_authority() {
+    use diagnostic::{FactInputs, ObservationEvent, Target};
+    let (files, base, mut descriptor, _) = facts_fixture();
+    let map = ibcmd_rs::restructure::caches::slots::RecordMap::new("Catalog", 57).unwrap();
+    fields(&mut descriptor, 1)[map.names["Owners"]] =
+        l(vec![Brace::str("#"), a(CLASS), metadata_reference(ROOT)]);
+    let graph = FactInputs::load(&base, additional_manifest(&files, &descriptor, None))
+        .unwrap()
+        .project(&base)
+        .unwrap();
+    for reason in [
+        "missing-type-index",
+        "missing-descriptor",
+        "unknown-tagged-reference-or-value",
+        "unresolved-type-id-member",
+    ] {
+        assert!(graph.partial.iter().any(|p| p.reason == reason), "{reason}");
+    }
+    assert!(graph.events.iter().any(|event| matches!(event, ObservationEvent::ReferenceVisit { target: Target::Unknown { raw }, .. } if raw == descriptor.at(&[1, map.names["Owners"]]).unwrap())));
+    assert!(graph.events.iter().any(|event| matches!(event, ObservationEvent::ReferenceVisit { target: Target::Metadata { uuid, registry_ordinal: Some(0) }, .. } if uuid == ROOT)));
+    assert!(graph.candidate.is_none() && graph.first_visit_authority.is_none());
+}
+
+#[test]
+fn current_type_index_counts_nil_duplicates_owner_class_and_descriptor_pairs_refuse() {
+    use diagnostic::FactInputs;
+    let (files, base, descriptor, index) = facts_fixture();
+    FactInputs::load(
+        &base,
+        additional_manifest(&files, &descriptor, Some(&index)),
+    )
+    .unwrap()
+    .project(&base)
+    .unwrap();
+    for mutation in 0..10 {
+        let mut mutant = index.clone();
+        let body = fields(&mut mutant, 1);
+        match mutation {
+            0 => body[0] = a(999),
+            1 => body[1] = a(NIL_UUID),
+            2 => body[3] = a(ROOT),
+            3 => body[1] = a(CLASS),
+            4 => body[4] = a(usize::MAX),
+            5 => body[5] = a(NIL_UUID),
+            6 => body[6] = a(NIL_UUID),
+            7 => body[8] = body[5].clone(),
+            8 => body[9] = body[6].clone(),
+            _ => body[10] = body[7].clone(),
+        }
+        assert!(
+            FactInputs::load(
+                &base,
+                additional_manifest(&files, &descriptor, Some(&mutant))
+            )
+            .unwrap()
+            .project(&base)
+            .is_err(),
+            "mutation {mutation}"
+        );
+    }
+    let mut mutant = descriptor.clone();
+    fields(&mut mutant, 1)[1] = a(TYPE); // syntactically valid but different actual generated pair
+    assert!(
+        FactInputs::load(&base, additional_manifest(&files, &mutant, Some(&index)))
+            .unwrap()
+            .project(&base)
+            .is_err()
+    );
+}
+
+#[test]
+fn descriptor_identity_counts_and_known_reference_shape_are_closed_before_facts() {
+    use diagnostic::FactInputs;
+    let (files, base, descriptor, index) = facts_fixture();
+    let map = ibcmd_rs::restructure::caches::slots::RecordMap::new("Catalog", 57).unwrap();
+    for mutation in 0..7 {
+        let mut mutant = descriptor.clone();
+        match mutation {
+            0 => mutant.as_list_mut().unwrap()[2] = a(999),
+            1 => {
+                fields(&mut mutant, 1)[map.header].as_list_mut().unwrap()[1]
+                    .as_list_mut()
+                    .unwrap()[1]
+                    .as_list_mut()
+                    .unwrap()[2] = a(ROOT)
+            }
+            2 => {
+                fields(&mut mutant, 1)[map.header].as_list_mut().unwrap()[1]
+                    .as_list_mut()
+                    .unwrap()[2] = Brace::str("other-name")
+            }
+            3 => fields(&mut mutant, 1)[map.names["Owners"]] = metadata_reference(NIL_UUID),
+            4 => {
+                fields(&mut mutant, 1)[map.names["Owners"]] = l(vec![
+                    Brace::str("#"),
+                    a(facts::METADATA_REF),
+                    l(vec![a(1), a(ROOT), a(99)]),
+                ])
+            }
+            5 => {
+                fields(&mut mutant, 1)[map.names["Owners"]] = l(vec![
+                    Brace::str("wrong-tag"),
+                    a(facts::METADATA_REF),
+                    l(vec![a(1), a(ROOT)]),
+                ])
+            }
+            _ => {
+                fields(&mut mutant, 1)[map.header].as_list_mut().unwrap()[1]
+                    .as_list_mut()
+                    .unwrap()[3] = l(vec![a(usize::MAX)])
+            }
+        }
+        assert!(
+            FactInputs::load(&base, additional_manifest(&files, &mutant, Some(&index)))
+                .unwrap()
+                .project(&base)
+                .is_err(),
+            "mutation {mutation}"
+        );
+    }
+}
+
+#[test]
+fn fact_ledger_mixed_duplicate_alias_and_late_drift_are_not_inferred_from_paths() {
+    use diagnostic::{FactInputs, FactRole};
+    let (files, base, descriptor, index) = facts_fixture();
+    let manifest = additional_manifest(&files, &descriptor, Some(&index));
+    for mutation in 0..6 {
+        let mut mutant = manifest.clone();
+        match mutation {
+            0 => mutant.stage = "other-stage".into(),
+            1 => mutant.rows[0].origin.case = "other-case".into(),
+            2 => mutant.rows[0].origin.part = 1,
+            3 => mutant.rows.push(mutant.rows[0].clone()),
+            4 => mutant.rows[0].role = FactRole::Descriptor { owner: ROOT.into() },
+            _ => mutant.rows[1].file = mutant.rows[0].file.clone(),
+        }
+        assert!(
+            FactInputs::load(&base, mutant).is_err(),
+            "mutation {mutation}"
+        );
+    }
+    let loaded = FactInputs::load(&base, manifest.clone()).unwrap();
+    loaded.project(&base).unwrap();
+    fs::write(
+        &manifest.rows[0].file.path,
+        b"late different current descriptor",
+    )
+    .unwrap();
+    assert!(loaded.project(&base).is_err());
+}
+
+fn rebound_base(
+    files: &Files,
+    original: &ProjectionInputs,
+    role: RowRole,
+    tree: &Brace,
+) -> ProjectionInputs {
+    let originals: Vec<_> = [RowRole::Registry, RowRole::TypeSets, RowRole::HelpProps]
+        .into_iter()
+        .map(|role| (role, original.raw(role).to_vec()))
+        .collect();
+    let mut manifest = files.manifest(0);
+    for (binding, (current_role, mut bytes)) in manifest.rows.iter_mut().zip(originals) {
+        if current_role == role {
+            bytes = serialize_row(tree);
+        }
+        let Locator::Plain { path } = &binding.locator else {
+            unreachable!()
+        };
+        fs::write(path, &bytes).unwrap();
+        binding.stored_length = bytes.len() as u64;
+        binding.packed_length = bytes.len() as u64;
+        binding.plain_length = bytes.len() as u64;
+        binding.stored_sha256 = hash(&bytes);
+        binding.packed_sha256 = hash(&bytes);
+        binding.plain_sha256 = hash(&bytes);
+    }
+    ProjectionInputs::load(manifest, SOURCE).unwrap()
+}
+
+#[test]
+fn generated_value_id_is_not_a_type_id_and_unknown_primitive_payload_is_retained() {
+    use diagnostic::{FactInputs, ObservationEvent, Target, TypeMemberFact};
+    let (files, base, descriptor, index) = facts_fixture();
+    let values = facts::ObjectFacts::parse("Catalog", &descriptor).unwrap();
+    let value_id = values.generated[0].value_id.clone();
+    let mut sets = ibcmd_rs::metadata_model::brace::parse_row(base.raw(RowRole::TypeSets)).unwrap();
+    let pattern = fields(&mut sets, 1)[2].as_list_mut().unwrap();
+    pattern[1] = l(vec![Brace::str("#"), a(&value_id)]);
+    let unknown = l(vec![Brace::str("B"), Brace::str("unexpected qualifier")]);
+    pattern.push(unknown.clone());
+    let base = rebound_base(&files, &base, RowRole::TypeSets, &sets);
+    let graph = FactInputs::load(
+        &base,
+        additional_manifest(&files, &descriptor, Some(&index)),
+    )
+    .unwrap()
+    .project(&base)
+    .unwrap();
+    assert!(graph.generated.iter().any(|d| d.value_id == value_id));
+    assert!(graph.events.iter().any(|e| matches!(e, ObservationEvent::TypeSetVisit { member: TypeMemberFact::Generated(Target::TypeId { uuid, declaration: None }), .. } if uuid == &value_id)));
+    assert!(graph.events.iter().any(|e| matches!(e, ObservationEvent::TypeSetVisit { member: TypeMemberFact::Unknown { raw }, .. } if raw == &unknown)));
+    assert!(
+        graph
+            .partial
+            .iter()
+            .any(|p| p.reason == "unknown-primitive-or-member-shape")
+    );
+    assert!(
+        graph
+            .partial
+            .iter()
+            .any(|p| p.reason == "unresolved-type-id-member")
+    );
+}
+
+#[test]
+fn design_time_instance_value_and_unresolved_metadata_edges_do_not_gain_generated_value_authority()
+{
+    use diagnostic::{FactInputs, ObservationEvent, Target};
+    let (files, base, mut descriptor, index) = facts_fixture();
+    let parsed = facts::ObjectFacts::parse("Catalog", &descriptor).unwrap();
+    let type_id = parsed.generated[0].type_id.clone();
+    let value_id = parsed.generated[0].value_id.clone();
+    let map = ibcmd_rs::restructure::caches::slots::RecordMap::new("Catalog", 57).unwrap();
+    let instance = l(vec![
+        Brace::str("#"),
+        a(ibcmd_rs::metadata_model::types::DESIGN_TIME_REF_TYPE),
+        l(vec![a(0), a(&type_id), a(&value_id)]),
+    ]);
+    fields(&mut descriptor, 1)[map.names["Owners"]] =
+        l(vec![a(0), a(2), instance, metadata_reference(TYPE)]);
+    let graph = FactInputs::load(
+        &base,
+        additional_manifest(&files, &descriptor, Some(&index)),
+    )
+    .unwrap()
+    .project(&base)
+    .unwrap();
+    assert!(graph.events.iter().any(|e| matches!(e, ObservationEvent::ReferenceVisit { target: Target::DesignTimeValue { type_id: actual_type, value_id: actual_value, type_declaration: Some(_) }, .. } if actual_type == &type_id && actual_value == &value_id)));
+    assert!(graph.partial.iter().any(|p| p.reason == "design-time-instance-value-not-resolved-by-generated-value-index"));
+    assert!(
+        graph
+            .partial
+            .iter()
+            .any(|p| p.reason == "unresolved-metadata-reference")
+    );
+    assert!(graph.candidate.is_none() && graph.first_visit_authority.is_none());
+}
+
+#[test]
+fn retained_fact_input_rejects_another_valid_base_and_unknown_layout_stays_partial() {
+    use diagnostic::{FactInputs, ObservationEvent};
+    let (files, base, descriptor, index) = facts_fixture();
+    let retained = FactInputs::load(
+        &base,
+        additional_manifest(&files, &descriptor, Some(&index)),
+    )
+    .unwrap();
+    retained.project(&base).unwrap();
+    let (_other_files, other_base, _, _) = facts_fixture();
+    assert!(retained.project(&other_base).is_err());
+    let mut registry =
+        ibcmd_rs::metadata_model::brace::parse_row(base.raw(RowRole::Registry)).unwrap();
+    fields(&mut registry, 2)[10] = a(0); // valid unknown nonnil class from the declared registry
+    let base = rebound_base(&files, &base, RowRole::Registry, &registry);
+    let graph = FactInputs::load(&base, additional_manifest(&files, &descriptor, None))
+        .unwrap()
+        .project(&base)
+        .unwrap();
+    assert!(graph.descriptors.is_empty());
+    assert!(
+        graph
+            .partial
+            .iter()
+            .any(|p| p.reason == "unsupported-descriptor-class-or-record-map")
+    );
+    assert!(graph.events.iter().any(|e| matches!(
+        e,
+        ObservationEvent::ReferenceVisit {
+            owner_identity_proven: false,
+            ..
+        }
+    )));
+    assert!(graph.candidate.is_none() && graph.first_visit_authority.is_none());
+    // This is a reserved contract variant, never produced by the current observed graph.
+    assert!(
+        !graph
+            .events
+            .contains(&ObservationEvent::EmitKey { key: CHILD.into() })
+    );
+}
