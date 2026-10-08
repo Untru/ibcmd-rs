@@ -213,6 +213,7 @@ pub struct NodeLiteral {
 /// Everything the script is rendered from.
 #[derive(Debug, Clone, Default)]
 pub struct ScriptInputs {
+    pub(crate) source_preimages: Option<super::dynamic::SourceOwnerPreimages>,
     pub database: String,
     /// The client process: its own sessions do not count as "other".
     pub client_pid: u32,
@@ -403,6 +404,9 @@ pub fn render_apply_script(input: &ScriptInputs) -> Result<String> {
             "SELECT TOP (1) @touch = FileName FROM dbo.{table} WITH (TABLOCKX, HOLDLOCK) ORDER BY FileName;"
         )
         .unwrap();
+    }
+    if let Some(original) = &input.source_preimages {
+        sql.push_str(&original.precondition_sql(&input.database)?);
     }
     if input.reset_change_registrations {
         writeln!(
@@ -1165,6 +1169,7 @@ mod tests {
 
     fn inputs() -> ScriptInputs {
         ScriptInputs {
+            source_preimages: None,
             database: "db]x".to_owned(),
             client_pid: 4242,
             rehearse: false,
@@ -1209,6 +1214,22 @@ mod tests {
             removed: Fingerprint::default(),
             structure_sql: None,
         }
+    }
+
+    #[test]
+    fn exclusive_source_initial_preimages_are_checked_under_locks_before_publication() {
+        let mut input = inputs();
+        input.source_preimages = Some(super::super::dynamic::SourceOwnerPreimages::test_fixture(
+            &input.database,
+        ));
+        let sql = render_apply_script(&input).unwrap();
+        let locks = sql
+            .find("FROM dbo.Files WITH (TABLOCKX, HOLDLOCK)")
+            .unwrap();
+        let initial = sql.find("-- initial source dependency preimages").unwrap();
+        let publication = sql.find("INSERT dbo.Config").unwrap();
+        assert!(locks < initial && initial < publication);
+        assert!(sql[initial..publication].contains("HASHBYTES('SHA2_256', BinaryData)"));
     }
 
     #[test]
