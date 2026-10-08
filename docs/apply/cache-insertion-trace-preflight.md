@@ -37,22 +37,23 @@ literal comparator considers BOM, CRLF, property bytes, and EOF. It does not
 generate a candidate sequence from the expected row. Cache ordinals and source
 record ordinals remain observations; neither establishes insertion order.
 
-Progress for the seven-atom design:
+SOURCE component delivery for the seven-atom design (native acceptance remains separate):
 
 - [x] A1.1 input-ledger/count/duplicate/owner preflight source delivered.
 - [x] A1.2 complete key-origin coverage source delivered.
 - [x] A1.3 bounded source owner/typed-input observations; graph gaps remain explicit.
 - [x] A1.4 separate observation event contract; insertion authority remains absent.
-- [ ] A1.5 candidate rendering and complete per-event difference report.
+- [x] A1.5 explicit diagnostic proposal rendering and complete per-event differences.
 - [ ] A1.6 remaining graph/event/model controls.
-- [ ] A1.7 retained corpus manifest/run/report.
+- [x] A1.7 closed retained-corpus manifest, runner, report and completion protocol.
 
-Every result reports `GraphCompleteness::Partial`, `TraceStatus::NotIdentified`,
-three pending atoms A1.5–A1.7 in the facts component, `candidate: None`,
-and `first_visit_authority: None`. The original coverage-only result retains
-its original five pending atoms for API compatibility. Unknown semantic values
-are preserved, not promoted to an empty successful reference graph. These
-statuses remain true even when key coverage is complete.
+The base facts API retains `GraphCompleteness::Partial`, `TraceStatus::NotIdentified`,
+its original three pending-atom labels A1.5–A1.7, `candidate: None`, and
+`first_visit_authority: None`. The original coverage-only API likewise retains
+its five pending labels for compatibility. The appended comparison and runner
+below do not promote these base observations to native insertion authority.
+Unknown semantic values remain preserved; complete key coverage does not
+establish complete graph semantics or a native insertion trace.
 
 The ordinary generated controls cover actual rosters through 2377 entries,
 positive payload preservation, empty/mismatched/overflow counts, duplicates,
@@ -68,9 +69,9 @@ its owned build/FIFO context:
 cargo test --locked --offline --test cache_insertion_trace -- --test-threads=2
 ```
 
-The design's proposed ignored retained-corpus command does not exist yet.
-No corpus/runtime/native acceptance is implied by source delivery or by
-passing generated preflight controls. Issue #403 remains open.
+The implemented ignored retained-corpus command and its reviewed manifest/output
+protocol are described below. Generated preflight controls alone do not establish
+retained-corpus completion or native acceptance. Issue #403 remains open.
 
 
 The facts component accepts an explicit `FactsManifestV1` containing additional
