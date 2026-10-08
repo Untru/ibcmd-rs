@@ -337,13 +337,14 @@ fn whole_configuration_uses_same_current_plan_and_restores_root_with_rich_paths(
             .body;
         assert_eq!(before, semantic(body));
         let edt = tempfile::tempdir().unwrap();
-        with_roundtrip_target(profile, || write_config(Format::Edt, &restored, edt.path()))
-            .unwrap();
+        let edt_src = edt_project_source(edt.path(), profile);
+        with_roundtrip_target(profile, || write_config(Format::Edt, &restored, &edt_src)).unwrap();
         let again = with_source_version(Some(profile), || {
-            read_config(Format::Edt, edt.path(), &ConvertOptions::default())
+            read_config(Format::Edt, &edt_src, &ConvertOptions::default())
         })
         .unwrap()
         .0;
+        assert_eq!(again.source_version, Some(profile));
         let body = &again
             .objects
             .iter()
@@ -438,6 +439,24 @@ fn load_native(path: &std::path::Path, profile: FormatVersion) -> morph1c_core::
     .unwrap()
     .0
 }
+fn edt_project_source(project: &std::path::Path, profile: FormatVersion) -> std::path::PathBuf {
+    // Whole EDT reads obtain their real profile from PROJECT.PMF, not a form
+    // sidecar or the caller's ambient scope. Complete that authored project
+    // envelope before reread rather than relaxing closed resource validation.
+    let runtime = morph1c_core::version::VERSION_TABLE
+        .iter()
+        .find(|pair| pair.format == profile)
+        .unwrap()
+        .platform;
+    let dt_inf = project.join("DT-INF");
+    std::fs::create_dir_all(&dt_inf).unwrap();
+    std::fs::write(
+        dt_inf.join("PROJECT.PMF"),
+        format!("Manifest-Version: 1.0\r\nRuntime-Version: {runtime}\r\n\r\n"),
+    )
+    .unwrap();
+    project.join("src")
+}
 fn bar_field(profile: FormatVersion, independent_extension: bool) -> FormBody {
     let field = if independent_extension {
         concat!("<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id><type>None</type>",
@@ -466,12 +485,14 @@ fn assert_whole_cycle(
     let restored = load_native(native.path(), profile);
     assert_eq!(before, semantic(present_body(&restored)));
     let edt = tempfile::tempdir().unwrap();
-    with_roundtrip_target(profile, || write_config(Format::Edt, &restored, edt.path())).unwrap();
+    let edt_src = edt_project_source(edt.path(), profile);
+    with_roundtrip_target(profile, || write_config(Format::Edt, &restored, &edt_src)).unwrap();
     let restored = with_source_version(Some(profile), || {
-        read_config(Format::Edt, edt.path(), &ConvertOptions::default())
+        read_config(Format::Edt, &edt_src, &ConvertOptions::default())
     })
     .unwrap()
     .0;
+    assert_eq!(restored.source_version, Some(profile));
     assert_eq!(before, semantic(present_body(&restored)));
     let next = tempfile::tempdir().unwrap();
     with_roundtrip_target(profile, || {
@@ -601,9 +622,21 @@ fn root_bar_rich_path_restoration_uses_complete_current_metadata_and_standalone_
             extra_paths: vec!["Other.B".into(), "Next.C".into()],
         });
         let mut cfg = config_with_form(&body);
+        // These owners must be complete native metadata, not graph-only stubs.
+        // Reuse all canonical properties from the verified owned Catalog fixture
+        // under new identities before defining the conversion's authored input.
+        let catalog_properties = cfg
+            .objects
+            .iter()
+            .find(|o| o.kind.as_str() == "Catalog")
+            .unwrap()
+            .properties
+            .clone();
         let mut source = MetadataObject::new(ObjectKind::new("Catalog"), "Source", Uuid([31; 16]));
+        source.properties = catalog_properties.clone();
         metadata_child(&mut source, "Reference", "CatalogRef.Target", 32);
         let mut target = MetadataObject::new(ObjectKind::new("Catalog"), "Target", Uuid([33; 16]));
+        target.properties = catalog_properties;
         metadata_child(&mut target, "Known", "Boolean", 34);
         cfg.objects.extend([source, target]);
         let context = FormProjectionContext::new(&cfg).unwrap();
