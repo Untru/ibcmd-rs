@@ -44,9 +44,11 @@ const SCENARIOS: &[&str] = &[
 fn main() {
     let args: Vec<_> = std::env::args().collect();
     match args.get(1).map(String::as_str) {
-        Some("helper") => helper(&args[2], Path::new(&args[3])),
-        Some("scenario") => scenario(&args[2], Path::new(&args[3])),
-        None => {
+        Some("--ibcmd-managed-helper") => helper(&args[2], Path::new(&args[3])),
+        Some("--ibcmd-managed-scenario") => scenario(&args[2], Path::new(&args[3])),
+        // Cargo forwards filters and libtest flags to harness-free targets.
+        // Namespaced private flags keep ordinary filters such as helper/scenario valid.
+        _ => {
             if !cfg!(windows) {
                 println!("managed original-handle controls require Windows; no runtime claim");
                 return;
@@ -57,7 +59,7 @@ fn main() {
             for name in SCENARIOS {
                 let marker = directory.join(name);
                 let mut outer = Command::new(std::env::current_exe().unwrap());
-                outer.arg("scenario").arg(name).arg(&marker);
+                outer.arg("--ibcmd-managed-scenario").arg(name).arg(&marker);
                 // Actual accepted original/BOTH outer collector; no output/wait/join.
                 assert!(
                     rac_process::bounded_bytes(&mut outer, Duration::from_secs(12))
@@ -71,7 +73,6 @@ fn main() {
             }
             println!("{} actual managed command scenarios PASS", SCENARIOS.len());
         }
-        _ => panic!("unknown test role"),
     }
 }
 
@@ -81,7 +82,7 @@ fn scenario(name: &str, marker: &Path) {
     let mut originals = Vec::new();
     let arguments = |role: &str, path: &Path| {
         vec![
-            "helper".into(),
+            "--ibcmd-managed-helper".into(),
             role.into(),
             path.to_string_lossy().into_owned(),
         ]
@@ -260,7 +261,7 @@ fn helper(role: &str, marker: &Path) {
         "inherited-stdout" | "inherited-stderr" => {
             let mut holder = Command::new(std::env::current_exe().unwrap());
             holder
-                .arg("helper")
+                .arg("--ibcmd-managed-helper")
                 .arg("hold")
                 .arg(marker.with_extension("holder"));
             holder.stdin(Stdio::null());

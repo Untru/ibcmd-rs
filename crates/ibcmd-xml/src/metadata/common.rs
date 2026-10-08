@@ -2015,10 +2015,7 @@ pub(super) fn namespace_uri_for_prefix<'a>(
     prefix: &str,
     uris: &'a ResolvedNamespaces,
 ) -> Option<&'a str> {
-    uris.scopes
-        .get(&element_key(element))
-        .and_then(|scope| scope.get(prefix))
-        .map(Rc::as_ref)
+    uris.qname_uri(element, prefix)
 }
 
 pub(super) fn resolve_namespaces(

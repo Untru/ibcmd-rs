@@ -1016,7 +1016,7 @@ pub(crate) fn activate_staged_main_verified(
     args: &MssqlActivateStagedMainArgs,
     profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
 ) -> Result<MssqlActivateStagedMainReport> {
-    activate_staged_main_verified_inner(args, profile_verification, None)
+    activate_staged_main_verified_inner(args, profile_verification, None, None)
 }
 
 /// No user JSON/endpoint can call this path with a lifetime capability. Only
@@ -1044,13 +1044,25 @@ pub(crate) fn activate_staged_main_managed(
             sqlcmd_trust_cert: args.sqlcmd_trust_cert,
         },
     )?;
-    activate_staged_main_verified_inner(args, profile, Some(session))
+    activate_staged_main_verified_inner(args, profile, Some(session), None)
+}
+
+/// Only source apply supplies the same original dependency proof captured
+/// before its export. No CLI/JSON caller supplies a precondition SQL string.
+pub(crate) fn activate_staged_main_source_verified(
+    args: &MssqlActivateStagedMainArgs,
+    profile: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+    managed: Option<&mut crate::mssql_managed_worker::NativeManagedWorker>,
+    original: &crate::mssql_config_apply::dynamic::SourceOwnerPreimages,
+) -> Result<MssqlActivateStagedMainReport> {
+    activate_staged_main_verified_inner(args, profile, managed, Some(original))
 }
 
 fn activate_staged_main_verified_inner(
     args: &MssqlActivateStagedMainArgs,
     profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
     mut managed: Option<&mut crate::mssql_managed_worker::NativeManagedWorker>,
+    source_preimages: Option<&crate::mssql_config_apply::dynamic::SourceOwnerPreimages>,
 ) -> Result<MssqlActivateStagedMainReport> {
     args.platform_profile.require_main_write_supported()?;
     if args.interrupt_sessions && !matches!(args.mode, MssqlMainActivationModeArg::Live) {
@@ -1141,8 +1153,14 @@ fn activate_staged_main_verified_inner(
         plan
     };
     if plan.is_carried_out_by_config_apply() {
-        return activate_by_config_apply(args, &sql, &plan, profile_verification);
+        return activate_by_config_apply(args, &sql, &plan, profile_verification, source_preimages);
     }
+    let plan = if let Some(original) = source_preimages {
+        original.require_current(&sql, &args.database)?;
+        plan.with_precondition_sql(original.precondition_sql(&args.database)?)
+    } else {
+        plan
+    };
     if matches!(args.mode, MssqlMainActivationModeArg::Live)
         && args
             .tail_log_output
@@ -1380,7 +1398,7 @@ pub(crate) fn activate_staged_main_managed_verified(
     session: &mut crate::mssql_managed_worker::NativeManagedWorker,
 ) -> Result<MssqlActivateStagedMainReport> {
     session.require_activation_target(args)?;
-    activate_staged_main_verified_inner(args, profile, Some(session))
+    activate_staged_main_verified_inner(args, profile, Some(session), None)
 }
 
 /// What a main activation plans from, as stored: the exact `ConfigSave` image, the `Config` rows of the
@@ -1449,6 +1467,7 @@ fn activate_by_config_apply(
     sql: &SqlExec,
     plan: &MainActivationPlan,
     profile_verification: crate::mssql_platform_profile::MssqlNativeProfileVerification,
+    source_preimages: Option<&crate::mssql_config_apply::dynamic::SourceOwnerPreimages>,
 ) -> Result<MssqlActivateStagedMainReport> {
     let report = plan.dry_run_report();
     let artifact_root = std::env::temp_dir().join("ibcmd-rs");
@@ -1479,13 +1498,14 @@ fn activate_by_config_apply(
         &report.recovery_token,
     )?;
 
-    let options = config_apply_options(
+    let mut options = config_apply_options(
         &args.database,
         args.platform_profile,
         args.dry_run,
         &script,
         plan.own_ras_processes(),
     );
+    options.source_preimages = source_preimages.cloned();
     let applied = crate::mssql_config_apply::apply_staged_configuration(sql, &options)?;
     Ok(MssqlActivateStagedMainReport {
         database: args.database.clone(),
@@ -4052,11 +4072,17 @@ fn stage_source_objects_patch(
             metadata_xmls
                 .par_iter()
                 .map(|xml| {
-                    prepare_metadata_object_stage(&sql, &args.database, xml.clone(), Some(&source))
-                        .map_err(|error| patch_refusal::ObjectFailure {
-                            xml: xml.clone(),
-                            error,
-                        })
+                    prepare_metadata_object_stage_for_files(
+                        &sql,
+                        &args.database,
+                        xml.clone(),
+                        Some(&source),
+                        selection.map(|selection| (args.source_root.as_path(), selection)),
+                    )
+                    .map_err(|error| patch_refusal::ObjectFailure {
+                        xml: xml.clone(),
+                        error,
+                    })
                 })
                 .collect::<Vec<_>>()
         })?
@@ -5146,6 +5172,16 @@ fn prepare_metadata_object_stage(
     xml_path: PathBuf,
     source: Option<&MetadataSourceContext>,
 ) -> Result<PreparedMetadataObjectStage> {
+    prepare_metadata_object_stage_for_files(sql, database, xml_path, source, None)
+}
+
+fn prepare_metadata_object_stage_for_files(
+    sql: &SqlExec,
+    database: &str,
+    xml_path: PathBuf,
+    source: Option<&MetadataSourceContext>,
+    selection: Option<(&Path, &files_stage::FilesSelection)>,
+) -> Result<PreparedMetadataObjectStage> {
     let xml = fs::read(&xml_path)
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
     let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
@@ -5180,15 +5216,38 @@ fn prepare_metadata_object_stage(
             object_id
         ));
     }
-    let body_rows = prepare_metadata_body_rows(
-        sql,
-        database,
-        &xml_path,
-        &xml,
-        &packed_metadata.properties,
-        source,
-        &axes,
-    )?;
+    let body_files = selection
+        .map(|(root, selection)| selection.measured_body_files(root, &xml_path))
+        .transpose()?
+        .flatten();
+    let body_rows = if let Some(files) = body_files {
+        let root = selection.expect("body files belong to a selection").0;
+        if template {
+            prepare_metadata_kind_body_rows(
+                sql,
+                database,
+                &xml_path,
+                &xml,
+                &packed_metadata.properties,
+                source,
+                &axes,
+            )?
+        } else {
+            // The native module roles are independently compiled. No help,
+            // predefined, interface or other module body is read or rewritten.
+            prepare_measured_selected_module_rows(root, &files, &properties, &axes)?
+        }
+    } else {
+        prepare_metadata_body_rows(
+            sql,
+            database,
+            &xml_path,
+            &xml,
+            &packed_metadata.properties,
+            source,
+            &axes,
+        )?
+    };
 
     Ok(PreparedMetadataObjectStage {
         object_id,
@@ -5200,6 +5259,48 @@ fn prepare_metadata_object_stage(
         metadata_blob_sha256: packed_metadata.output_sha256,
         body_rows,
     })
+}
+
+fn prepare_measured_selected_module_rows(
+    root: &Path,
+    files: &[String],
+    properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let registry = crate::compiler::families::assets::SourceAssetRegistry;
+    files
+        .iter()
+        .map(|file| {
+            anyhow::ensure!(
+                crate::mssql_source_change::measured_main_source_path(file),
+                "selected module path has no measured lifetime cohort"
+            );
+            let (_, relative) = file
+                .split_once("/Ext/")
+                .ok_or_else(|| anyhow!("selected module has no Ext boundary"))?;
+            let asset = format!("Ext/{relative}");
+            let route = registry
+                .route_by_relative_path(&properties.kind, &asset)
+                .ok_or_else(|| anyhow!("selected module has no exact owner storage route"))?;
+            anyhow::ensure!(
+                matches!(
+                    route.role(),
+                    crate::compiler::families::assets::SourceAssetRole::ObjectModule
+                        | crate::compiler::families::assets::SourceAssetRole::ManagerModule
+                ),
+                "selected metadata body is not an independently measured module"
+            );
+            let path = root.join(file.split('/').collect::<PathBuf>());
+            let body_id = format!("{}{}", properties.uuid, route.suffix());
+            let packed = pack_module_body_source(&path, &body_id, axes)?;
+            Ok(PreparedMetadataBodyStage {
+                body_id,
+                path,
+                blob: packed.blob,
+                blob_sha256: packed.output_sha256,
+            })
+        })
+        .collect()
 }
 
 /// The writers `prepare_metadata_body_rows` runs, in its order: the kind's
@@ -13866,6 +13967,62 @@ mod tests {
         assert!(row.reason.contains("without reading active Config rows"));
 
         let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn measured_selected_module_compiles_without_reading_invalid_sibling_bodies() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-rs-family345-selected-{}",
+            uuid::Uuid::new_v4()
+        ));
+        let ext = root.join("Catalogs/Products/Ext");
+        fs::create_dir_all(&ext).unwrap();
+        let text = b"Procedure OnWrite()\nEndProcedure";
+        fs::write(ext.join("ObjectModule.bsl"), text).unwrap();
+        // A selected directory fails at the real file read. Arbitrary bytes
+        // are not a justified negative for the legacy ModuleText codec.
+        fs::create_dir(ext.join("ManagerModule.bsl")).unwrap();
+        fs::write(ext.join("Help.xml"), b"unreadable unrelated help").unwrap();
+        let properties = test_simple_metadata_properties(
+            "Catalog",
+            "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa",
+            "Products",
+        );
+        let selected = vec!["Catalogs/Products/Ext/ObjectModule.bsl".to_owned()];
+        let rows = super::prepare_measured_selected_module_rows(
+            &root,
+            &selected,
+            &properties,
+            &test_compile_axes(),
+        )
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].body_id, "aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa.0");
+        assert_eq!(
+            module_blob_text_sha256(&rows[0].blob).unwrap(),
+            hex_sha256(text)
+        );
+        let bad = vec!["Catalogs/Products/Ext/ManagerModule.bsl".to_owned()];
+        assert!(
+            super::prepare_measured_selected_module_rows(
+                &root,
+                &bad,
+                &properties,
+                &test_compile_axes()
+            )
+            .is_err()
+        );
+        let unmeasured = vec!["InformationRegisters/R/Ext/RecordSetModule.bsl".to_owned()];
+        assert!(
+            super::prepare_measured_selected_module_rows(
+                &root,
+                &unmeasured,
+                &properties,
+                &test_compile_axes()
+            )
+            .is_err()
+        );
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
