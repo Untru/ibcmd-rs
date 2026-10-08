@@ -270,6 +270,12 @@ fn whole_configuration_uses_same_current_plan_and_restores_root_with_rich_paths(
             with_roundtrip_target(profile, || write_form(FormDialect::Edt, &original)).unwrap();
         let xml = String::from_utf8(xml)
             .unwrap()
+            // The empty emitted form has no xsi values. The newly authored
+            // typed field requires this namespace before its baseline is read.
+            .replace(
+                "<form:Form ",
+                "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" ",
+            )
             .replace("</form:Form>", &format!("{field}</form:Form>"));
         original = read(xml.as_bytes(), FormDialect::Edt, profile);
         original.items[0]
@@ -412,6 +418,19 @@ fn present_body(cfg: &morph1c_core::ir::Configuration) -> &FormBody {
         .form_bodies[0]
         .body
 }
+fn complete_standalone_picture_context(body: &mut FormBody) {
+    // attach_form_body is a sidecar pass. read_config completion resolves
+    // CURRENT CommonPicture defaults and binds the canonical picture model.
+    // These fixtures declare no CommonPicture: use that real empty context
+    // and the same production owners before comparing complete typed IR.
+    formats_xml::form::resolve_common_picture_transparency(
+        body,
+        &std::collections::BTreeMap::new(),
+        false,
+    )
+    .unwrap();
+    formats_xml::form::bind_picture_semantics(body, Uuid([7; 16]), false).unwrap();
+}
 fn load_native(path: &std::path::Path, profile: FormatVersion) -> morph1c_core::ir::Configuration {
     with_source_version(Some(profile), || {
         read_config(Format::Designer, path, &ConvertOptions::default())
@@ -507,6 +526,7 @@ fn root_bar_event_descendants_validate_original_wire_before_typed_restoration() 
             )
         })
         .unwrap();
+        complete_standalone_picture_context(&mut returned.form_bodies[0].body);
         assert_eq!(before, semantic(&returned.form_bodies[0].body));
         let mut edited = serialized.clone();
         edited.auto_command_bar.as_mut().unwrap().items[0].events[0].handler =
@@ -534,6 +554,24 @@ fn metadata_child(owner: &mut MetadataObject, name: &str, ty: &str, uuid: u8) {
             }],
         }),
     ));
+    // A real Catalog.Attribute descriptor requires these three undefined
+    // values. Define the full authored fixture before conversion and baseline.
+    for name in ["minValue", "maxValue", "fillValue"] {
+        let id = morph1c_core::spec::registry::spec_for(&kind)
+            .unwrap()
+            .fields()
+            .iter()
+            .find(|f| f.name == name)
+            .unwrap()
+            .id;
+        child.properties.push((
+            id,
+            PropertyValue::Value(morph1c_core::ir::value::ValueSpec {
+                kind: Default::default(),
+                scalar: None,
+            }),
+        ));
+    }
     owner.children.push(child);
 }
 #[test]
@@ -610,6 +648,7 @@ fn root_bar_rich_path_restoration_uses_complete_current_metadata_and_standalone_
             )
         })
         .unwrap();
+        complete_standalone_picture_context(&mut reread.form_bodies[0].body);
         assert_eq!(semantic(&body), semantic(&reread.form_bodies[0].body));
         // A context-free restoration cannot reproduce this actual forward artifact.
         let mut no_context = obj.clone();
@@ -736,6 +775,7 @@ fn same_destination_updates_remove_owned_root_companions_and_preserve_unrelated_
             )
         })
         .unwrap();
+        complete_standalone_picture_context(&mut obj.form_bodies[0].body);
         assert_eq!(before, semantic(&obj.form_bodies[0].body));
     }
 }
@@ -836,5 +876,81 @@ fn same_destination_rejects_foreign_or_unknown_owned_resources_before_publicatio
                 .unwrap()
                 .is_some()
         );
+    }
+}
+
+#[test]
+fn owned_annotation_spans_preserve_bom_unicode_and_adjacent_markup_exactly() {
+    for minor in [20, 21] {
+        let profile = FormatVersion::new(2, minor);
+        let cfg = config_with_form(&fixture(profile, true, false));
+        let root_uuid = cfg
+            .objects
+            .iter()
+            .find(|o| o.kind.as_str() == "Configuration")
+            .map(|o| o.uuid);
+        let generated = formats_xml::form::prepare_native_form_write_plan(&cfg, profile)
+            .unwrap()
+            .manifest
+            .unwrap();
+        let generated_text = String::from_utf8(generated.clone()).unwrap();
+        let start = generated_text
+            .find("<!-- ibcmd-configuration-semantics:")
+            .unwrap();
+        let end = start + generated_text[start..].find("-->").unwrap() + 3;
+        let comment = &generated_text[start..end];
+        let plain = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" version=\"2.{minor}\"><!-- чужое --><ConfigVersions/><Other>Кириллица</Other></ConfigDumpInfo>");
+        for existing_bom in [false, true] {
+            let mut existing = if existing_bom {
+                b"\xef\xbb\xbf".to_vec()
+            } else {
+                vec![]
+            };
+            existing.extend_from_slice(plain.as_bytes());
+            for current_bom in [false, true] {
+                let current = if current_bom {
+                    generated.as_slice()
+                } else {
+                    generated
+                        .strip_prefix(b"\xef\xbb\xbf")
+                        .unwrap_or(&generated)
+                };
+                let installed = formats_xml::form::update_native_data_path_annotation(
+                    Some(&existing),
+                    Some(current),
+                    profile,
+                    root_uuid,
+                )
+                .unwrap()
+                .unwrap();
+                let expected_text =
+                    plain.replace("</ConfigDumpInfo>", &format!("{comment}</ConfigDumpInfo>"));
+                let mut expected = if existing_bom {
+                    b"\xef\xbb\xbf".to_vec()
+                } else {
+                    vec![]
+                };
+                expected.extend_from_slice(expected_text.as_bytes());
+                assert_eq!(installed, expected);
+                let removed = formats_xml::form::update_native_data_path_annotation(
+                    Some(&installed),
+                    None,
+                    profile,
+                    root_uuid,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(removed, existing, "only the exact comment span may change");
+                let replaced = formats_xml::form::update_native_data_path_annotation(
+                    Some(&installed),
+                    Some(current),
+                    profile,
+                    root_uuid,
+                )
+                .unwrap()
+                .unwrap();
+                assert_eq!(replaced, installed);
+            }
+        }
     }
 }

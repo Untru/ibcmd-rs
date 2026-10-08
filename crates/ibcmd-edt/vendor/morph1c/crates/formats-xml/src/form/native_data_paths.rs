@@ -584,11 +584,24 @@ pub fn update_native_data_path_annotation(
         let mut close = None;
         let mut empty_root = None;
         loop {
-            let start = usize::try_from(reader.buffer_position())
+            let event_start = usize::try_from(reader.buffer_position())
                 .map_err(|_| error("actual XML offset overflow"))?;
             let event = reader.read_event().map_err(|e| error(e.to_string()))?;
-            let end = usize::try_from(reader.buffer_position())
+            let event_end = usize::try_from(reader.buffer_position())
                 .map_err(|_| error("actual XML offset overflow"))?;
+            // Slice Reader strips a BOM without adding it to buffer_position.
+            // Bind markup ranges to the actual consumed input slice, not its
+            // parser-relative counter. Text lookahead is not used as a span.
+            let end = bytes
+                .len()
+                .checked_sub(reader.get_ref().len())
+                .ok_or_else(|| error("actual XML input cursor underflow"))?;
+            let origin = end
+                .checked_sub(event_end)
+                .ok_or_else(|| error("actual XML cursor before parser offset"))?;
+            let start = event_start
+                .checked_add(origin)
+                .ok_or_else(|| error("actual XML offset overflow"))?;
             match event {
                 Event::Start(_) => depth += 1,
                 Event::Empty(root) if depth == 0 => {
@@ -609,6 +622,12 @@ pub fn update_native_data_path_annotation(
                         .map_err(|e| error(e.to_string()))?
                         .trim();
                     if text.starts_with(FAMILY) {
+                        if bytes.get(start..start + 4) != Some(b"<!--")
+                            || end < 3
+                            || bytes.get(end - 3..end) != Some(b"-->")
+                        {
+                            return Err(error("owned annotation input span differs from markup"));
+                        }
                         owned = Some(start..end);
                     }
                 }
