@@ -32,6 +32,9 @@
 //! `ChildObjects`/`languages` — спек-СВОЙСТВА через from-root кодеки `formats-xml`.
 
 use crate::ir::value::{PropertyValue, Token, ValueKind};
+/// Password-style fields enter the DCS form-field provider after this
+/// CURRENT project compatibility boundary; it is independent of XML dialect.
+pub const PASSWORD_FIELDS_COMPATIBILITY_BOUNDARY: [u32; 3] = [8, 3, 11];
 use crate::ir::FieldId;
 use crate::spec::common::{EntitySpec, FieldSpec, Normalize};
 

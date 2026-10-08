@@ -174,6 +174,24 @@ pub struct TypeRef {
     pub qualifier: Option<TypeQualifier>,
 }
 
+impl TypeRef {
+    /// Primitive types with a complete empty database-view child roster.
+    /// Date expressions and Number resource fields need their actual CURRENT
+    /// provider; no metadata object does not establish an empty child set.
+    pub fn has_complete_dbview_leaf_roster(&self) -> bool {
+        matches!(
+            self.id.as_str(),
+            "String"
+                | "Boolean"
+                | "Undefined"
+                | "Null"
+                | "UUID"
+                | "BinaryData"
+                | "ValueStorage"
+        )
+    }
+}
+
 /// Квалификатор примитивной компоненты — РОВНО один из видов, соответствующий
 /// примитиву. Типобезопасный enum (а не `Vec<(String,Value)>`): нельзя положить
 /// квалификатор не того вида и нельзя случайно расхождение default-омиссии между

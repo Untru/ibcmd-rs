@@ -13,6 +13,25 @@ use crate::ir::FieldId;
 use crate::spec::common::{FieldSpec, Normalize};
 
 // --- Базовые поля (общие Resource/Attribute/Dimension), порядок = Designer DENSE ---
+/// Metadata families whose reference child roster is covered by the canonical
+/// standard-field registry and CURRENT declared fields/tabular sections.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReferenceChildRosterFamily {
+    Catalog,
+    Document,
+    Enum,
+}
+impl ReferenceChildRosterFamily {
+    pub fn for_kind(kind: &str) -> Option<Self> {
+        match kind {
+            "Catalog" => Some(Self::Catalog),
+            "Document" => Some(Self::Document),
+            "Enum" => Some(Self::Enum),
+            _ => None,
+        }
+    }
+}
+
 /// `synonym` — локализ., Default [].
 pub const F_SYNONYM: FieldId = FieldId(1);
 /// `comment` — Default "".

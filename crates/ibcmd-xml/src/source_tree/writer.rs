@@ -76,10 +76,13 @@ pub fn publish_new_with_limits(
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 /// Atomically renames a caller-validated staged directory without replacement.
 #[doc(hidden)]
 pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
+    // Rustix maps NOREPLACE to Linux RENAME_NOREPLACE and macOS RENAME_EXCL.
+    // An unavailable exclusive primitive returns an error; there is no
+    // replacing-rename fallback after the caller's destination pre-check.
     rustix::fs::renameat_with(
         rustix::fs::CWD,
         source,
@@ -99,7 +102,7 @@ pub fn rename_directory_new(source: &Path, dest: &Path) -> std::io::Result<()> {
     renamore::rename_exclusive(source, dest)
 }
 
-#[cfg(not(any(windows, target_os = "linux")))]
+#[cfg(not(any(windows, target_os = "linux", target_os = "macos")))]
 /// Refuses atomic publication on systems without an exclusive rename primitive.
 #[doc(hidden)]
 pub fn rename_directory_new(_source: &Path, _dest: &Path) -> std::io::Result<()> {
@@ -131,6 +134,59 @@ impl Drop for Temp {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn exclusive_publication_moves_complete_directory_to_absent_destination() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-directory-publish-success-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let staged = root.join("stage");
+        let destination = root.join("output");
+        fs::create_dir(&staged).unwrap();
+        fs::create_dir(staged.join("nested")).unwrap();
+        fs::write(staged.join("new.bin"), b"new payload").unwrap();
+        fs::write(staged.join("nested/body.bin"), b"complete body").unwrap();
+        rename_directory_new(&staged, &destination).unwrap();
+        assert!(!staged.exists());
+        assert_eq!(
+            fs::read(destination.join("new.bin")).unwrap(),
+            b"new payload"
+        );
+        assert_eq!(
+            fs::read(destination.join("nested/body.bin")).unwrap(),
+            b"complete body"
+        );
+        fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[test]
+    fn exclusive_publication_preserves_existing_directory_and_file() {
+        let root = std::env::temp_dir().join(format!(
+            "ibcmd-directory-publish-collision-{}",
+            std::process::id()
+        ));
+        fs::create_dir(&root).unwrap();
+        let staged = root.join("stage");
+        let destination = root.join("output");
+        fs::create_dir(&staged).unwrap();
+        fs::write(staged.join("new.bin"), b"new payload").unwrap();
+        fs::create_dir(&destination).unwrap();
+        fs::write(destination.join("original.bin"), b"original payload").unwrap();
+        assert!(rename_directory_new(&staged, &destination).is_err());
+        assert_eq!(
+            fs::read(destination.join("original.bin")).unwrap(),
+            b"original payload"
+        );
+        assert!(!destination.join("new.bin").exists());
+        let file = root.join("existing.bin");
+        fs::write(&file, b"original file").unwrap();
+        assert!(rename_directory_new(&staged, &file).is_err());
+        assert_eq!(fs::read(&file).unwrap(), b"original file");
+        assert_eq!(fs::read(staged.join("new.bin")).unwrap(), b"new payload");
+        fs::remove_dir_all(&root).unwrap();
+    }
+
     #[test]
     fn final_publication_never_replaces_newly_created_empty_directory() {
         let root = std::env::temp_dir().join(format!(
