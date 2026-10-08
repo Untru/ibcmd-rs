@@ -41437,13 +41437,11 @@ fn format_document_journal_source_xml(
         );
         xml.insert_str(index, &properties);
     }
-    if !document_journal.columns.is_empty() {
-        let mut columns = String::new();
-        for column in &document_journal.columns {
-            push_document_journal_column_xml(&mut columns, column);
-        }
-        insert_metadata_child_objects_xml(&mut xml, "DocumentJournal", &columns);
+    let mut columns = String::new();
+    for column in &document_journal.columns {
+        push_document_journal_column_xml(&mut columns, column);
     }
+    insert_metadata_child_objects_or_empty_xml(&mut xml, "DocumentJournal", &columns);
     xml
 }
 
@@ -45121,6 +45119,8 @@ fn format_http_service_source_xml(
         if let Some(index) = xml.find(owner_end) {
             xml.insert_str(index, &child_xml);
         }
+    } else {
+        insert_metadata_child_objects_or_empty_xml(&mut xml, "HTTPService", "");
     }
     xml
 }
@@ -45292,6 +45292,7 @@ fn format_integration_service_source_xml(
         xml.insert_str(index, &insert);
     }
     if properties.channels.is_empty() {
+        insert_metadata_child_objects_or_empty_xml(&mut xml, "IntegrationService", "");
         return xml;
     }
     let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
