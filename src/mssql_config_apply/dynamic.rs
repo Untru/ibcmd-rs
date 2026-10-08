@@ -63,6 +63,213 @@ use super::{
 /// The number of generations past which the report warns that the overlay grows.
 pub const WARN_GENERATIONS: usize = 50;
 
+/// Original reference graph and selected bodies read BEFORE a source export.
+/// Private fields prevent callers from supplying SQL or manufacturing a newer
+/// post-stage snapshot. The raw originals remain owned through publication.
+#[derive(Debug, Clone)]
+pub(crate) struct SourceOwnerPreimages {
+    database: String,
+    groups: Vec<SourcePreimageGroup>,
+}
+
+#[derive(Debug, Clone)]
+struct SourcePreimageGroup {
+    table: &'static str,
+    filter: String,
+    rows: Vec<RowMeta>,
+    originals: Vec<Vec<u8>>,
+}
+
+impl SourcePreimageGroup {
+    fn marker(&self) -> Option<&[u8]> {
+        self.rows
+            .iter()
+            .position(|row| row.name.eq_ignore_ascii_case("DynamicallyUpdated"))
+            .map(|index| self.originals[index].as_slice())
+    }
+}
+
+impl SourceOwnerPreimages {
+    #[cfg(test)]
+    pub(crate) fn test_fixture(database: &str) -> Self {
+        let client = tests::source_dependency_fixture();
+        Self::capture_client(&client, database, &tests::source_dependency_names()).unwrap()
+    }
+    pub(crate) fn capture(sql: &SqlExec, database: &str, selected: &[String]) -> Result<Self> {
+        Self::capture_client(require_client(sql)?, database, selected)
+    }
+
+    fn capture_client(client: &dyn SqlClient, database: &str, selected: &[String]) -> Result<Self> {
+        let db = quote_ident(database)?;
+        let mut requested = HashSet::new();
+        let mut bodies = Vec::new();
+        let mut unique = HashSet::new();
+        for name in selected {
+            if !unique.insert(name.to_ascii_lowercase()) {
+                bail!("duplicate source dependency name");
+            }
+            match classify_name(name) {
+                RowName::Descriptor(owner) => {
+                    requested.insert(owner.to_ascii_lowercase());
+                }
+                RowName::Body { owner, suffix } => {
+                    requested.insert(owner.to_ascii_lowercase());
+                    bodies.push((owner.to_ascii_lowercase(), suffix.to_owned()));
+                }
+                _ => bail!("untyped source dependency {name}"),
+            }
+        }
+        if bodies.is_empty() {
+            bail!("source dependency closure has no body");
+        }
+        // The complete ordinary descriptor inventory is the reference graph
+        // used by full-root export, including unchanged owners and children.
+        let selected_filter = selected
+            .iter()
+            .map(|name| format!("N'{}'", super::model::quote_string(name)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let filter = format!(
+            "FileName = N'root' OR (LEN(FileName) = 36 AND TRY_CONVERT(uniqueidentifier, FileName) IS NOT NULL) OR FileName IN ({selected_filter})"
+        );
+        let mut budget = GraphBudget::default();
+        let mut groups = Vec::new();
+        for (table, filter) in [
+            ("Config", filter),
+            ("Config", dynamic_overlay::CONFIG_FILTER.to_owned()),
+            ("Params", "FileName = N'DynamicallyUpdated'".to_owned()),
+        ] {
+            let rows = read_source_preimage_rows(client, &db, table, &filter)?;
+            budget.reserve(&rows)?;
+            let mut originals = Vec::new();
+            for row in &rows {
+                originals.push(dynamic_overlay::read_bound_blob(client, &db, table, row)?);
+            }
+            groups.push(SourcePreimageGroup {
+                table,
+                filter,
+                rows,
+                originals,
+            });
+        }
+        let proof = Self {
+            database: database.to_owned(),
+            groups,
+        };
+        let ordinary = &proof.groups[0].rows;
+        for name in selected {
+            if ordinary
+                .iter()
+                .filter(|row| row.name.eq_ignore_ascii_case(name))
+                .count()
+                != 1
+            {
+                bail!("selected source dependency is missing or multipart: {name}");
+            }
+        }
+        let history =
+            versions::parse_dynamic_history(proof.groups[1].marker(), proof.groups[2].marker())?;
+        let history_names = history
+            .generations
+            .iter()
+            .map(|id| id.hyphenated().to_string())
+            .collect::<Vec<_>>();
+        let (owners, graph) = object_kinds(
+            client,
+            database,
+            &requested,
+            &proof.groups[1].rows,
+            &history_names,
+        )?;
+        for row in &graph {
+            if !ordinary.contains(row) {
+                bail!("owner graph changed after initial source inventory");
+            }
+        }
+        for (owner, suffix) in bodies {
+            if !owners.admits(&owner) || owners.role(&owner, &suffix).is_none() {
+                bail!("source body has no measured original owner/role: {owner}.{suffix}");
+            }
+        }
+        proof.require_current_client(client, database)?;
+        Ok(proof)
+    }
+
+    pub(crate) fn require_current(&self, sql: &SqlExec, database: &str) -> Result<()> {
+        self.require_current_client(require_client(sql)?, database)
+    }
+
+    fn require_current_client(&self, client: &dyn SqlClient, database: &str) -> Result<()> {
+        if self.database != database {
+            bail!("source dependency proof belongs to a different database");
+        }
+        let db = quote_ident(database)?;
+        for group in &self.groups {
+            let current = read_source_preimage_rows(client, &db, group.table, &group.filter)?;
+            require_same_source_inventory(&group.rows, &current)?;
+            for (row, original) in group.rows.iter().zip(&group.originals) {
+                dynamic_overlay::bound_blob(row, original)?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn precondition_sql(&self, database: &str) -> Result<String> {
+        if self.database != database {
+            bail!("source dependency proof belongs to a different database");
+        }
+        let mut sql = "-- initial source dependency preimages\n".to_owned();
+        for group in &self.groups {
+            for (row, original) in group.rows.iter().zip(&group.originals) {
+                dynamic_overlay::bound_blob(row, original)?;
+            }
+            sql.push_str(&dynamic_overlay::guard(
+                group.table,
+                &group.filter,
+                &group.rows,
+            ));
+        }
+        Ok(sql)
+    }
+}
+
+fn require_same_source_inventory(original: &[RowMeta], current: &[RowMeta]) -> Result<()> {
+    if original != current {
+        bail!("initial source dependency headers/data/inventory changed");
+    }
+    Ok(())
+}
+
+fn read_source_preimage_rows(
+    client: &dyn SqlClient,
+    db: &str,
+    table: &str,
+    filter: &str,
+) -> Result<Vec<RowMeta>> {
+    let rows = read_row_metas(
+        client,
+        &format!(
+            "SELECT TOP ({}) {ROW_COLUMNS} FROM {db}.dbo.{table} WHERE {filter} ORDER BY FileName, PartNo",
+            dynamic_metadata::MAX_GRAPH_ROWS + 1
+        ),
+    )?;
+    let mut budget = GraphBudget::default();
+    budget.reserve(&rows)?;
+    let mut seen = HashSet::new();
+    for row in &rows {
+        if row.part != 0
+            || row.attributes != 0
+            || row.data_size != row.byte_len
+            || !seen.insert(row.key())
+            || row.sha256.len() != 64
+            || !row.sha256.bytes().all(|b| b.is_ascii_hexdigit())
+        {
+            bail!("unmeasured source dependency header");
+        }
+    }
+    Ok(rows)
+}
+
 /// The reasons listed in a refusal before "и ещё N".
 const REASONS_SHOWN: usize = 8;
 
@@ -1756,6 +1963,595 @@ fn owners_of(staged: &[RowMeta]) -> std::collections::BTreeMap<String, Vec<Strin
 mod tests {
     use super::*;
 
+    pub(super) struct SourceDependencyProbe {
+        rows: std::sync::Mutex<Vec<(RowMeta, Vec<u8>)>>,
+        corrupt_blob: std::sync::atomic::AtomicBool,
+        pending: std::sync::Mutex<Vec<(RowMeta, Vec<u8>)>>,
+        params: std::sync::Mutex<Vec<(RowMeta, Vec<u8>)>>,
+        blob_reads: std::sync::Mutex<Vec<(String, String)>>,
+    }
+
+    pub(super) fn source_dependency_names() -> Vec<String> {
+        vec![
+            "00000000-0000-4000-8000-000000000002".into(),
+            "00000000-0000-4000-8000-000000000002.0".into(),
+        ]
+    }
+
+    pub(super) fn source_dependency_fixture() -> SourceDependencyProbe {
+        let configuration = "00000000-0000-4000-8000-000000000001";
+        let owner = source_dependency_names()[0].clone();
+        let class = crate::metadata_model::export::names::root_class_kinds()
+            .iter()
+            .find(|(_, kind)| *kind == "Catalog")
+            .unwrap()
+            .0;
+        let blobs = vec![
+            (
+                "root".to_owned(),
+                versions::deflate_row(format!("{{2,{configuration},0}}").as_bytes()).unwrap(),
+            ),
+            (
+                configuration.to_owned(),
+                versions::deflate_row(format!("{{{class},1,{owner}}}").as_bytes()).unwrap(),
+            ),
+            (
+                owner.clone(),
+                b"original descriptor retained by export".to_vec(),
+            ),
+            (format!("{owner}.0"), b"original module body".to_vec()),
+        ];
+        let rows = blobs
+            .into_iter()
+            .map(|(name, bytes)| {
+                let mut row = meta(&name, &hex_lower(&Sha256::digest(&bytes)));
+                row.data_size = bytes.len() as i64;
+                row.byte_len = row.data_size;
+                (row, bytes)
+            })
+            .collect();
+        SourceDependencyProbe {
+            rows: std::sync::Mutex::new(rows),
+            corrupt_blob: false.into(),
+            pending: std::sync::Mutex::new(Vec::new()),
+            params: std::sync::Mutex::new(Vec::new()),
+            blob_reads: std::sync::Mutex::new(Vec::new()),
+        }
+    }
+
+    impl SqlClient for SourceDependencyProbe {
+        fn dbms(&self) -> crate::sql::Dbms {
+            crate::sql::Dbms::SqlServer
+        }
+        fn max_connections(&self) -> usize {
+            1
+        }
+        fn run_script(&self, _: &str, _: ScriptVariables) -> Result<()> {
+            panic!("readonly memory endpoint")
+        }
+        fn execute(&self, _: &str, _: &[crate::sql::SqlParam<'_>]) -> Result<u64> {
+            panic!("readonly memory endpoint")
+        }
+        fn query_json(&self, _: &str) -> Result<Option<String>> {
+            panic!("readonly memory endpoint")
+        }
+        fn write_rows(
+            &self,
+            _: &str,
+            _: &[&str],
+            _: &[Vec<crate::sql::SqlParam<'_>>],
+        ) -> Result<u64> {
+            panic!("readonly memory endpoint")
+        }
+        fn read_rows(
+            &self,
+            query: &str,
+            _: &[crate::sql::SqlParam<'_>],
+            each: &mut dyn FnMut(crate::sql::SqlRow) -> Result<()>,
+        ) -> Result<()> {
+            use crate::sql::{SqlRow, SqlValue};
+            let blob = query.starts_with("SELECT TOP (2) BinaryData");
+            let table = if query.contains("dbo.Params") {
+                "Params"
+            } else {
+                assert!(query.contains("dbo.Config"), "unexpected table: {query}");
+                "Config"
+            };
+            let mut candidates = if table == "Params" {
+                self.params.lock().unwrap().clone()
+            } else if query.contains("LIKE N'%!_dynupdate!_%'") {
+                self.pending.lock().unwrap().clone()
+            } else {
+                let mut ordinary = self.rows.lock().unwrap().clone();
+                if blob {
+                    ordinary.extend(self.pending.lock().unwrap().clone());
+                }
+                ordinary
+            };
+            candidates.sort_by(|(a, _), (b, _)| (&a.name, a.part).cmp(&(&b.name, b.part)));
+            for (row, bytes) in candidates {
+                let whole_group = !blob
+                    && (query.contains("LEN(FileName)")
+                        || query.contains("LIKE N'%!_dynupdate!_%'"));
+                let by_name = query.contains(&format!("N'{}'", row.name));
+                if !whole_group && !by_name {
+                    continue;
+                }
+                let values = if blob {
+                    // Match the actual read_bound_blob causal predicates, then
+                    // record every requested original before returning bytes.
+                    assert!(query.contains(&format!("PartNo = {}", row.part)));
+                    assert!(
+                        query.contains(&format!("CONVERT(bigint, DataSize) = {}", row.data_size))
+                    );
+                    assert!(query.contains(&format!("DATALENGTH(BinaryData) = {}", row.byte_len)));
+                    assert!(query.contains(&format!("0x{}", row.sha256)));
+                    self.blob_reads
+                        .lock()
+                        .unwrap()
+                        .push((table.to_owned(), row.name.clone()));
+                    let raw = if self.corrupt_blob.load(std::sync::atomic::Ordering::Relaxed) {
+                        b"wrong original".to_vec()
+                    } else {
+                        bytes
+                    };
+                    vec![SqlValue::Binary(raw)]
+                } else {
+                    vec![
+                        SqlValue::Text(row.name),
+                        SqlValue::Int(row.part.into()),
+                        SqlValue::Int(row.data_size),
+                        SqlValue::Int(row.byte_len),
+                        SqlValue::Int(row.attributes.into()),
+                        SqlValue::Text(row.creation),
+                        SqlValue::Text(row.modified),
+                        SqlValue::Text(row.sha256),
+                    ]
+                };
+                each(SqlRow {
+                    result_set: 0,
+                    values,
+                })?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn source_dependency_capture_retains_original_graph_and_body_before_export() {
+        let client = source_dependency_fixture();
+        let proof =
+            SourceOwnerPreimages::capture_client(&client, "lab", &source_dependency_names())
+                .unwrap();
+        proof.require_current_client(&client, "lab").unwrap();
+        assert_eq!(proof.groups[0].originals.len(), 4);
+        let sql = proof.precondition_sql("lab").unwrap();
+        assert!(
+            sql.contains("Attributes = 0")
+                && sql.contains("Creation, 121")
+                && sql.contains("Modified, 121")
+        );
+        for row in &proof.groups[0].rows {
+            assert!(sql.contains(&format!("0x{}", row.sha256)));
+        }
+        assert!(sql.contains("LEN(FileName)") && sql.contains("TRY_CONVERT(uniqueidentifier"));
+        assert!(sql.contains("dbo.Params WITH (UPDLOCK, HOLDLOCK)"));
+        assert!(proof.precondition_sql("different").is_err());
+    }
+
+    #[test]
+    fn source_dependency_proof_refuses_original_header_data_and_inventory_drift() {
+        for fault in 0..8 {
+            let client = source_dependency_fixture();
+            let proof =
+                SourceOwnerPreimages::capture_client(&client, "lab", &source_dependency_names())
+                    .unwrap();
+            let mut rows = client.rows.lock().unwrap();
+            match fault {
+                0 => rows[2].0.modified.push('1'),
+                1 => rows[2].0.creation.push('1'),
+                2 => rows[2].0.attributes = 1,
+                3 => rows[2].0.sha256 = "f".repeat(64),
+                4 => rows[3].0.sha256 = "e".repeat(64),
+                5 => {
+                    rows.remove(2);
+                }
+                6 => {
+                    let duplicate = rows[2].clone();
+                    rows.push(duplicate);
+                }
+                _ => rows[2].0.data_size += 1,
+            }
+            drop(rows);
+            assert!(
+                proof.require_current_client(&client, "lab").is_err(),
+                "fault {fault}"
+            );
+        }
+    }
+
+    #[test]
+    fn source_dependency_capture_refuses_missing_role_duplicate_and_unbound_bytes() {
+        let client = source_dependency_fixture();
+        client
+            .corrupt_blob
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(
+            SourceOwnerPreimages::capture_client(&client, "lab", &source_dependency_names())
+                .is_err()
+        );
+        for names in [
+            vec![source_dependency_names()[0].clone()],
+            vec![
+                source_dependency_names()[1].clone(),
+                source_dependency_names()[1].clone(),
+            ],
+            vec!["00000000-0000-4000-8000-000000000002.99".into()],
+        ] {
+            assert!(
+                SourceOwnerPreimages::capture_client(&source_dependency_fixture(), "lab", &names)
+                    .is_err()
+            );
+        }
+        let wrong_role = source_dependency_fixture();
+        wrong_role.rows.lock().unwrap()[3].0.name =
+            "00000000-0000-4000-8000-000000000002.99".into();
+        let names = vec![
+            source_dependency_names()[0].clone(),
+            "00000000-0000-4000-8000-000000000002.99".into(),
+        ];
+        let error = SourceOwnerPreimages::capture_client(&wrong_role, "lab", &names).unwrap_err();
+        assert!(
+            error.to_string().contains("measured original owner/role"),
+            "{error:#}"
+        );
+    }
+
+    fn source_dependency_row(name: &str, bytes: Vec<u8>) -> (RowMeta, Vec<u8>) {
+        let mut row = meta(name, &hex_lower(&Sha256::digest(&bytes)));
+        row.data_size = bytes.len() as i64;
+        row.byte_len = row.data_size;
+        (row, bytes)
+    }
+
+    const SOURCE_COVERAGE_GENERATION: &str = "00000000-0000-4000-8000-000000000090";
+    const SOURCE_COVERAGE_ORDINARY: &str = "00000000-0000-4000-8000-000000000091";
+
+    fn source_dependency_pending(client: &SourceDependencyProbe, originals: &[String]) {
+        let ordinary = client.rows.lock().unwrap();
+        let mut pending = client.pending.lock().unwrap();
+        pending.push(source_dependency_row(
+            "DynamicallyUpdated",
+            format!("{{1,1,{SOURCE_COVERAGE_GENERATION}}}").into_bytes(),
+        ));
+        for name in originals {
+            let bytes = ordinary
+                .iter()
+                .find(|(row, _)| row.name == *name)
+                .unwrap()
+                .1
+                .clone();
+            let alias = match name.rsplit_once('.') {
+                Some((owner, suffix)) => {
+                    format!("{owner}_dynupdate_{SOURCE_COVERAGE_GENERATION}.{suffix}")
+                }
+                None => format!("{name}_dynupdate_{SOURCE_COVERAGE_GENERATION}"),
+            };
+            pending.push(source_dependency_row(&alias, bytes));
+        }
+        client.params.lock().unwrap().push(source_dependency_row(
+            "DynamicallyUpdated",
+            format!("{{0,2,{SOURCE_COVERAGE_ORDINARY},{SOURCE_COVERAGE_GENERATION}}}").into_bytes(),
+        ));
+    }
+
+    #[test]
+    fn source_dependency_nonempty_pending_and_params_keep_original_guard_on_mutation() {
+        for group_index in [1, 2] {
+            for target in 0..if group_index == 1 { 3 } else { 1 } {
+                for fault in 0..4 {
+                    let client = source_dependency_fixture();
+                    source_dependency_pending(&client, &source_dependency_names());
+                    let proof = SourceOwnerPreimages::capture_client(
+                        &client,
+                        "lab",
+                        &source_dependency_names(),
+                    )
+                    .unwrap();
+                    assert_eq!(proof.groups[1].rows.len(), 3);
+                    assert_eq!(proof.groups[2].rows.len(), 1);
+                    proof.require_current_client(&client, "lab").unwrap();
+                    // The actual Params predicate selects ONLY this exact marker.
+                    // A new unrelated Params row is outside the bound inventory.
+                    client.params.lock().unwrap().push(source_dependency_row(
+                        "UnrelatedParamsRow",
+                        b"outside marker inventory".to_vec(),
+                    ));
+                    proof.require_current_client(&client, "lab").unwrap();
+                    let original_sql = proof.precondition_sql("lab").unwrap();
+                    assert!(!original_sql.contains("UnrelatedParamsRow"));
+                    for original_row in &proof.groups[group_index].rows {
+                        assert!(original_sql.contains(&format!("0x{}", original_row.sha256)));
+                    }
+                    assert!(original_sql.contains("LIKE N'%!_dynupdate!_%'"));
+                    let mut changed = if group_index == 1 {
+                        client.pending.lock().unwrap()
+                    } else {
+                        client.params.lock().unwrap()
+                    };
+                    match fault {
+                        0 => {
+                            let name = changed[target].0.name.clone();
+                            changed[target] =
+                                source_dependency_row(&name, b"different original bytes".to_vec());
+                        }
+                        1 => changed[target].0.modified.push('1'),
+                        2 => {
+                            changed.remove(target);
+                        }
+                        _ => {
+                            let mut extra = changed[target].clone();
+                            if group_index == 1 {
+                                extra.0.name.push_str("_dynupdate_phantom");
+                            } else {
+                                // SAME Params marker name really matches FileName;
+                                // an extra part is an in-filter phantom, refused.
+                                extra.0.part = 1;
+                            }
+                            changed.push(extra);
+                        }
+                    }
+                    drop(changed);
+                    assert!(
+                        proof.require_current_client(&client, "lab").is_err(),
+                        "group {group_index} fault {fault}"
+                    );
+                    assert_eq!(
+                        proof.precondition_sql("lab").unwrap(),
+                        original_sql,
+                        "drift cannot replace the original proof by a fresh snapshot"
+                    );
+                }
+            }
+        }
+    }
+
+    fn source_dependency_native_template(
+        case: &serde_json::Value,
+    ) -> (SourceDependencyProbe, Vec<String>) {
+        let client = source_dependency_fixture();
+        let configuration = "00000000-0000-4000-8000-000000000001";
+        let parent = case["parent"].as_str().unwrap();
+        let owner = case["owner"].as_str().unwrap();
+        let body = case["row"].as_str().unwrap();
+        let kind = case["kind"].as_str().unwrap();
+        let class = crate::metadata_model::export::names::root_class_kinds()
+            .iter()
+            .find(|(_, candidate)| *candidate == kind)
+            .unwrap()
+            .0;
+        let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/dynamic-metadata-native");
+        let mut rows = client.rows.lock().unwrap();
+        rows.clear();
+        rows.push(source_dependency_row(
+            "root",
+            versions::deflate_row(format!("{{2,{configuration},0}}").as_bytes()).unwrap(),
+        ));
+        rows.push(source_dependency_row(
+            configuration,
+            versions::deflate_row(format!("{{{class},1,{parent}}}").as_bytes()).unwrap(),
+        ));
+        for name in [parent, owner, body] {
+            rows.push(source_dependency_row(
+                name,
+                std::fs::read(directory.join(format!("{name}.bin"))).unwrap(),
+            ));
+        }
+        drop(rows);
+        (
+            client,
+            vec![parent.to_owned(), owner.to_owned(), body.to_owned()],
+        )
+    }
+
+    #[test]
+    fn source_dependency_native_templates_capture_matching_aliases_and_refuse_conflicts() {
+        let manifest: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/dynamic-metadata-native/manifest.json"
+        ))
+        .unwrap();
+        let cases: Vec<_> = manifest["cases"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|case| case["family"] == "templates")
+            .collect();
+        assert_eq!(cases.len(), 3);
+        for case in cases {
+            let (client, selected) = source_dependency_native_template(case);
+            source_dependency_pending(&client, &selected);
+            let proof = SourceOwnerPreimages::capture_client(&client, "lab", &selected).unwrap();
+            assert_eq!(proof.groups[0].rows.len(), 5);
+            assert_eq!(proof.groups[1].rows.len(), 4);
+            assert_eq!(proof.groups[2].rows.len(), 1);
+            proof.require_current_client(&client, "lab").unwrap();
+            let sql = proof.precondition_sql("lab").unwrap();
+            for group in &proof.groups {
+                for (row, bytes) in group.rows.iter().zip(&group.originals) {
+                    assert_eq!(row.sha256, hex_lower(&Sha256::digest(bytes)));
+                    assert!(sql.contains(&format!("0x{}", row.sha256)));
+                }
+            }
+            for (position, reason) in [
+                (1, "pending ownership/property change"),
+                (2, "pending owned descriptor/property change"),
+            ] {
+                let (conflict, names) = source_dependency_native_template(case);
+                source_dependency_pending(&conflict, &names);
+                let mut pending = conflict.pending.lock().unwrap();
+                let name = pending[position].0.name.clone();
+                pending[position] = source_dependency_row(
+                    &name,
+                    versions::deflate_row(b"different pending descriptor/property bytes").unwrap(),
+                );
+                drop(pending);
+                let error =
+                    SourceOwnerPreimages::capture_client(&conflict, "lab", &names).unwrap_err();
+                assert!(
+                    error.to_string().contains(reason),
+                    "{}: {error:#}",
+                    case["role"]
+                );
+            }
+            let (drift, names) = source_dependency_native_template(case);
+            source_dependency_pending(&drift, &names);
+            let original = SourceOwnerPreimages::capture_client(&drift, "lab", &names).unwrap();
+            let before = original.precondition_sql("lab").unwrap();
+            let mut rows = drift.rows.lock().unwrap();
+            rows[2].0.creation.push('1');
+            drop(rows);
+            assert!(original.require_current_client(&drift, "lab").is_err());
+            assert_eq!(original.precondition_sql("lab").unwrap(), before);
+        }
+    }
+
+    fn source_dependency_blob_reads(client: &SourceDependencyProbe, table: &str) -> usize {
+        client
+            .blob_reads
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(actual, _)| actual == table)
+            .count()
+    }
+
+    #[test]
+    fn source_dependency_full_capture_row_boundary_refuses_before_ordinary_blob() {
+        for total in [
+            dynamic_metadata::MAX_GRAPH_ROWS,
+            dynamic_metadata::MAX_GRAPH_ROWS + 1,
+        ] {
+            let client = source_dependency_fixture();
+            let mut rows = client.rows.lock().unwrap();
+            for index in rows.len()..total {
+                let name = format!("00000000-0000-4000-9000-{index:012x}");
+                rows.push(source_dependency_row(&name, Vec::new()));
+            }
+            drop(rows);
+            let result =
+                SourceOwnerPreimages::capture_client(&client, "lab", &source_dependency_names());
+            if total == dynamic_metadata::MAX_GRAPH_ROWS {
+                let proof = result.unwrap();
+                assert_eq!(proof.groups[0].rows.len(), total);
+                assert_eq!(
+                    source_dependency_blob_reads(&client, "Config"),
+                    total + 2,
+                    "all ordinary originals plus actual root/config ownership reads"
+                );
+                proof.require_current_client(&client, "lab").unwrap();
+            } else {
+                let error = result.unwrap_err();
+                assert!(error.to_string().contains("row/byte budget"), "{error:#}");
+                assert_eq!(source_dependency_blob_reads(&client, "Config"), 0);
+            }
+        }
+    }
+
+    fn source_dependency_pad_ordinary_bytes(client: &SourceDependencyProbe, bytes: usize) {
+        let mut rows = client.rows.lock().unwrap();
+        let mut remaining = bytes;
+        for index in 0..2 {
+            let size = remaining.min(MAX_ROW_BYTES);
+            let name = format!("00000000-0000-4000-a000-{index:012x}");
+            rows.push(source_dependency_row(&name, vec![b'x'; size]));
+            remaining -= size;
+        }
+        assert_eq!(remaining, 0);
+    }
+
+    #[test]
+    fn source_dependency_full_capture_byte_boundary_and_pending_cumulative_refusal() {
+        for cumulative in [false, true] {
+            for excess in [0usize, 1] {
+                let client = source_dependency_fixture();
+                if cumulative {
+                    source_dependency_pending(&client, &source_dependency_names());
+                }
+                let ordinary_bytes: usize = client
+                    .rows
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(_, bytes)| bytes.len())
+                    .sum();
+                let pending_bytes: usize = client
+                    .pending
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(_, bytes)| bytes.len())
+                    .sum();
+                let params_bytes: usize = client
+                    .params
+                    .lock()
+                    .unwrap()
+                    .iter()
+                    .map(|(_, bytes)| bytes.len())
+                    .sum();
+                // For cumulative excess the pending group itself crosses the limit,
+                // after a real bounded ordinary capture; Params is not reached.
+                let target_padding = if cumulative && excess == 1 {
+                    dynamic_metadata::MAX_GRAPH_BYTES + 1 - ordinary_bytes - pending_bytes
+                } else {
+                    dynamic_metadata::MAX_GRAPH_BYTES + excess
+                        - ordinary_bytes
+                        - pending_bytes
+                        - params_bytes
+                };
+                source_dependency_pad_ordinary_bytes(&client, target_padding);
+                let result = SourceOwnerPreimages::capture_client(
+                    &client,
+                    "lab",
+                    &source_dependency_names(),
+                );
+                if excess == 0 {
+                    let proof = result.unwrap();
+                    let actual_bytes: usize = proof
+                        .groups
+                        .iter()
+                        .flat_map(|g| &g.originals)
+                        .map(Vec::len)
+                        .sum();
+                    assert_eq!(actual_bytes, dynamic_metadata::MAX_GRAPH_BYTES);
+                    proof.require_current_client(&client, "lab").unwrap();
+                } else {
+                    let error = result.unwrap_err();
+                    assert!(error.to_string().contains("row/byte budget"), "{error:#}");
+                    let reads = client.blob_reads.lock().unwrap();
+                    if cumulative {
+                        assert_eq!(
+                            reads.len(),
+                            6,
+                            "only six ordinary blobs acquired before pending reservation"
+                        );
+                        assert!(
+                            reads.iter().all(|(table, name)| table == "Config"
+                                && name != "DynamicallyUpdated"
+                                && !name.contains("_dynupdate_")),
+                            "no blob from the refused pending group, nor Params"
+                        );
+                    } else {
+                        assert!(
+                            reads.is_empty(),
+                            "ordinary over-budget headers refuse before their first blob"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
     struct PendingRows {
         ordinary: Vec<RowMeta>,
         ordinary_blob: Vec<u8>,
@@ -2881,6 +3677,26 @@ mod tests {
             largest: MAX_ROW_BYTES as i64 + 1,
         };
         assert_eq!(size_reasons(over).len(), 3);
+    }
+
+    #[test]
+    fn a_small_complete_cohort_over_128_is_not_admitted_by_byte_budget_alone() {
+        let reasons = size_reasons(StageSize {
+            rows: 129,
+            bytes: 4096,
+            largest: 512,
+        });
+        assert_eq!(reasons.len(), 1);
+        assert!(reasons[0].contains("129 rows"));
+        assert!(reasons[0].contains("at most 128"));
+        assert!(
+            size_reasons(StageSize {
+                rows: 128,
+                bytes: 4096,
+                largest: 512
+            })
+            .is_empty()
+        );
     }
 
     #[test]
