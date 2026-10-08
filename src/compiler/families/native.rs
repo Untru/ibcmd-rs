@@ -337,6 +337,32 @@ pub(crate) fn parse_optional_bom(input: &[u8]) -> Result<NativeValue, NativeErro
     }
 }
 
+/// Validate a complete source row against a family-proved nesting shape before
+/// materializing its tree. Uses the canonical lexical scanner, retains no body,
+/// and imposes no plaintext-byte ceiling. Default/cohort APIs stay unchanged.
+pub(crate) fn validate_descriptor_layout(
+    input: &[u8],
+    maximum_value_depth: usize,
+) -> Result<(), NativeError> {
+    let mut parser = NativeParser::new(input);
+    parser.max_depth = maximum_value_depth;
+    parser.offset = if input.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    parser.whitespace();
+    if parser.input.get(parser.offset) != Some(&b'{') {
+        return Err(NativeError::InvalidToken);
+    }
+    parser.skip_value(0)?;
+    parser.whitespace();
+    if parser.offset != input.len() {
+        return Err(NativeError::TrailingBytes);
+    }
+    Ok(())
+}
+
 /// Validate a complete descriptor using the canonical lexical scanner while
 /// borrowing only its own metadata UUID. Ordinary storage comparisons need no
 /// syntax tree or format-independent size/depth ceiling. The explicit stack
@@ -658,6 +684,7 @@ struct NativeParser<'a> {
     offset: usize,
     nodes: usize,
     max_nodes: usize,
+    max_depth: usize,
 }
 
 impl<'a> NativeParser<'a> {
@@ -667,6 +694,7 @@ impl<'a> NativeParser<'a> {
             offset: 0,
             nodes: 0,
             max_nodes: node_bound(input),
+            max_depth: MAX_NATIVE_DEPTH,
         }
     }
 
@@ -701,7 +729,7 @@ impl<'a> NativeParser<'a> {
     }
 
     fn bump_node(&mut self, depth: usize) -> Result<(), NativeError> {
-        if depth > MAX_NATIVE_DEPTH {
+        if depth > self.max_depth {
             return Err(NativeError::DepthExceeded);
         }
         self.nodes = self.nodes.checked_add(1).ok_or(NativeError::NodeOverflow)?;

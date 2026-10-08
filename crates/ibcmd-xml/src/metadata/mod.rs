@@ -7,6 +7,7 @@ mod common;
 mod common_objects;
 mod constant;
 mod defined_type;
+mod external_data_source;
 mod fallback;
 mod functional_option;
 mod functional_options_parameter;
@@ -37,6 +38,7 @@ pub use common_objects::{
 };
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
+pub use external_data_source::decode_empty_external_data_source;
 pub use functional_option::register_functional_option_codec;
 pub use functional_options_parameter::register_functional_options_parameter_codec;
 pub use hierarchical_objects::{
