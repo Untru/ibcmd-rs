@@ -13,6 +13,7 @@ mod functional_options_parameter;
 mod hierarchical_objects;
 mod language;
 mod order;
+mod package;
 mod register_objects;
 mod registry;
 mod services;
@@ -45,6 +46,7 @@ pub use hierarchical_objects::{
 };
 pub use language::register_language_codec;
 pub use order::{MetadataOrderError, order_metadata_features, order_produced_type_values};
+pub use package::{PackageIntent, inspect_package_intent};
 pub use register_objects::{
     register_accounting_register_codec, register_accumulation_register_codec,
     register_calculation_register_codec, register_chart_of_accounts_codec,
