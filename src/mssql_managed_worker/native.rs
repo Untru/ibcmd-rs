@@ -899,25 +899,22 @@ impl NativeRuntime {
         }
     }
 
-    fn execute(&mut self, tool: &Tool, argv: &[String]) -> Result<(i32, Vec<u8>, Vec<u8>)> {
-        tool.check()?;
-        if self.failed {
-            bail!("managed native lifetime already unproved");
-        }
-        let timeout = self.startup_remaining()?;
-        if self.collectors.len() >= 1024 {
-            bail!("managed original command custody bound; retain lifetime");
-        }
-        self.collectors
-            .push(OriginalChild::spawn(&tool.path, argv)?);
-        let index = self.collectors.len() - 1;
-        let result = self.collectors[index].completed(timeout);
-        if result.is_err() {
-            self.failed = true;
-        }
-        let value = result?;
-        self.startup_remaining()?;
-        Ok(value)
+    fn execute<T>(
+        &mut self,
+        tool: &Tool,
+        argv: &[String],
+        policy: impl FnOnce((i32, Vec<u8>, Vec<u8>)) -> Result<T>,
+    ) -> Result<T> {
+        let deadline = super::command::deadline(self.startup_deadline, self.options.timeout)?;
+        super::command::run(
+            &mut self.failed,
+            &mut self.collectors,
+            &tool.path,
+            argv,
+            deadline,
+            || tool.check(),
+            policy,
+        )
     }
 
     fn startup_remaining(&self) -> Result<Duration> {
@@ -932,11 +929,7 @@ impl NativeRuntime {
             "-Command".into(),
             script,
         ];
-        let (exit, out, err) = self.execute(&tool, &argv)?;
-        if exit != 0 || !err.is_empty() {
-            bail!("managed observation utility failed; output redacted");
-        }
-        String::from_utf8(out).context("managed observation must be strict UTF-8")
+        self.execute(&tool, &argv, super::command::strict_text)
     }
 
     fn census(&mut self) -> Result<Vec<CensusIdentity>> {
@@ -1030,12 +1023,8 @@ impl NativeRuntime {
         }
         argv.push(format!("localhost:{}", self.options.ras_port));
         let tool = self.rac.clone();
-        let (exit, out, err) = self.execute(&tool, &argv)?;
         // Never propagate native text containing credentials or command lines.
-        if exit != 0 || !err.is_empty() {
-            bail!("managed RAC command failed; arguments/output redacted");
-        }
-        String::from_utf8(out).context("managed RAC response must be strict UTF-8")
+        self.execute(&tool, &argv, super::command::strict_text)
     }
 
     fn bootstrap(&mut self, journal: &mut Journal) -> Result<()> {
@@ -1296,12 +1285,14 @@ impl authentication::Io for NativeAdminIo<'_> {
         argv.push(format!("localhost:{}", self.runtime.options.ras_port));
         self.runtime.require_private_endpoint()?;
         let tool = self.runtime.rac.clone();
-        let (exit, stdout, stderr) = self.runtime.execute(&tool, &argv)?;
-        Ok(authentication::Receipt {
-            exit,
-            stdout,
-            stderr,
-        })
+        self.runtime
+            .execute(&tool, &argv, |(exit, stdout, stderr)| {
+                Ok(authentication::Receipt {
+                    exit,
+                    stdout,
+                    stderr,
+                })
+            })
     }
     fn record(&mut self, event: &'static str, value: serde_json::Value) -> Result<()> {
         self.journal.append(event, value)
