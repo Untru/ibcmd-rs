@@ -60,6 +60,16 @@ class MarkerBoundary(unittest.TestCase):
             with self.assertRaises(SystemExit):
                 audit.forbidden_binary_markers(data)
 
+    def test_nonnull_program_payloads_cannot_alias_debug_or_escape_file_bounds(self):
+        for kind in (3, 2, 4, 7, 0x6fffffff):
+            for offset in (400, (1 << 64) - 1):
+                data = self.elf_fixture()
+                struct.pack_into("<I", data, 560, kind)
+                struct.pack_into("<Q", data, 568, offset)
+                struct.pack_into("<Q", data, 592, 8)
+                with self.assertRaises(SystemExit):
+                    audit.forbidden_binary_markers(data)
+
     def test_source_ids_are_accepted_but_do_not_mask_any_runtime_marker(self):
         project = b" ".join(audit.EDT_SOURCE_IDS)
         self.assertEqual(audit.forbidden_binary_markers(project), [])

@@ -107,8 +107,12 @@ def elf_debug_info_ranges(data: bytes) -> list[tuple[int, int]]:
         protected.append(span(phoff, phcount * phstride))
         for index in range(phcount):
             header = phoff + index * phstride
-            if field("I", header) == 1:
-                allocated.append(span(field("Q", header + 8), field("Q", header + 32)))
+            kind = field("I", header)
+            if kind != 0:
+                segment = span(field("Q", header + 8), field("Q", header + 32))
+                protected.append(segment)
+                if kind == 1:
+                    allocated.append(segment)
     if any(a < d_end and d < a_end for d, d_end in debug for a, a_end in allocated):
         raise SystemExit("debug_info overlaps loadable ELF bytes")
     if any(a < d_end and d < a_end for d, d_end in debug for a, a_end in protected):

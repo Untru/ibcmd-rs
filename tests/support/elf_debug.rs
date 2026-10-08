@@ -103,12 +103,13 @@ pub fn exclude_debug_info(bytes: &mut [u8]) -> Result<(), &'static str> {
         )?);
         for index in 0..phcount {
             let header = phoff + index * phstride;
-            if u32::from_le_bytes(read(bytes, header)?) == 1 {
-                allocated.push(range(
-                    bytes,
-                    word(bytes, header + 8)?,
-                    word(bytes, header + 32)?,
-                )?);
+            let kind = u32::from_le_bytes(read(bytes, header)?);
+            if kind != 0 {
+                let segment = range(bytes, word(bytes, header + 8)?, word(bytes, header + 32)?)?;
+                protected.push(segment);
+                if kind == 1 {
+                    allocated.push(segment);
+                }
             }
         }
     }
@@ -203,6 +204,22 @@ mod tests {
             let before = bytes.clone();
             assert!(exclude_debug_info(&mut bytes).is_err());
             assert_eq!(bytes, before);
+        }
+    }
+
+    #[test]
+    fn nonnull_program_payloads_cannot_alias_debug_or_escape_file_bounds() {
+        // INTERP, DYNAMIC, NOTE, TLS and an unknown non-null segment.
+        for kind in [3u32, 2, 4, 7, 0x6fff_ffff] {
+            for offset in [400u64, u64::MAX] {
+                let mut bytes = IMAGE.to_vec();
+                bytes[560..564].copy_from_slice(&kind.to_le_bytes());
+                bytes[568..576].copy_from_slice(&offset.to_le_bytes());
+                bytes[592..600].copy_from_slice(&8u64.to_le_bytes());
+                let before = bytes.clone();
+                assert!(exclude_debug_info(&mut bytes).is_err());
+                assert_eq!(bytes, before);
+            }
         }
     }
 }
