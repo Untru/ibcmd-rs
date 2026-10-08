@@ -11,14 +11,28 @@ use std::{
 };
 
 use ibcmd_cf::payload::{PayloadEncoding, encode_payload};
+use ibcmd_core::artifact::ProfileId;
+use ibcmd_core::diagnostic::{ObjectPath, PathSegment, PropertyPath};
+use ibcmd_core::identity::{LogicalIdentity, ObjectUuid};
 use ibcmd_core::limits::ResourceLimits;
+use ibcmd_core::model::{
+    CanonicalConfiguration, CanonicalObject, CanonicalObjectParts, MetadataKind,
+};
+use ibcmd_core::provenance::{CanonicalAnchor, SourceProvenance};
+use ibcmd_core::validate::validate_configuration;
+use ibcmd_rs::compiler::graph::{ObjectStorageRoute, build_bootstrap_graph};
+use ibcmd_rs::compiler::identity::collect_bootstrap_identities;
+use ibcmd_rs::compiler::root::{
+    ConfigurationBodyProperties, compile_configuration_body, compile_root,
+};
+use ibcmd_rs::compiler::version::{SpecialEntryProfile, compile_version};
+use ibcmd_rs::profile_registry::load_bundled_profile_registry;
 use ibcmd_v8::writer::{Format15Document, Format15Element, write_format15_to_vec};
 use serde_json::Value;
 
 const CONFIG: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 const OPAQUE: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb.0";
 const SECOND_OPAQUE: &str = "cccccccc-cccc-4ccc-8ccc-cccccccccccc.0";
-const ZERO: &str = "00000000-0000-0000-0000-000000000000";
 const FIRST_VERSION: &str = "11111111-1111-4111-8111-111111111111";
 const NEXT_VERSION: &str = "22222222-2222-4222-8222-222222222222";
 
@@ -57,13 +71,51 @@ fn packed(name: &str, text: &str) -> Format15Element {
     Format15Element::named(name, Some(payload))
 }
 
-fn configuration(name: &str) -> Format15Element {
-    packed(
-        CONFIG,
-        &format!(
-            "{{2,{{{CONFIG}}},{{3,{{1,0,{CONFIG}}},\"{name}\",{{1,\"en\",\"Offline demo\"}},\"\",0,0,{ZERO},0}}}}"
-        ),
+/// Use the production clean-room compiler's complete seven-section root, not
+/// a permissive fallback header that cannot own a ConfigDumpInfo inventory.
+fn canonical_configuration_entries(name: &str) -> Vec<Format15Element> {
+    let profile_id = ProfileId::parse("platform-8.3.27.1989").unwrap();
+    let path = ObjectPath::new(vec![PathSegment::name("Configuration").unwrap()]).unwrap();
+    let configuration = CanonicalConfiguration::new(vec![
+        CanonicalObject::new(CanonicalObjectParts::new(
+            LogicalIdentity::new(ObjectUuid::parse(CONFIG).unwrap(), path.clone()),
+            MetadataKind::new("Configuration").unwrap(),
+            SourceProvenance::new(
+                profile_id.clone(),
+                CanonicalAnchor::new(path, PropertyPath::root()),
+            ),
+        ))
+        .unwrap(),
+    ])
+    .unwrap();
+    let validated = validate_configuration(&configuration).unwrap();
+    let identities = collect_bootstrap_identities(&validated).unwrap();
+    let graph = build_bootstrap_graph(
+        &identities,
+        profile_id.clone(),
+        vec![ObjectStorageRoute::new(identities.configuration_uuid(), vec![]).unwrap()],
     )
+    .unwrap();
+    let profiles = load_bundled_profile_registry().unwrap();
+    let profile = SpecialEntryProfile::from_effective(profiles.get(&profile_id).unwrap()).unwrap();
+    let properties = ConfigurationBodyProperties::minimal(name, profile.compatibility());
+    [
+        compile_root(&graph, &profile).unwrap(),
+        compile_version(&graph, &profile).unwrap(),
+        compile_configuration_body(&identities, &graph, &profile, &properties).unwrap(),
+    ]
+    .into_iter()
+    .map(|entry| {
+        Format15Element::named(
+            entry.target().key().as_str(),
+            Some(entry.outcome().compiled_payload().unwrap().bytes().to_vec()),
+        )
+    })
+    .collect()
+}
+
+fn configuration(name: &str) -> Format15Element {
+    canonical_configuration_entries(name).pop().unwrap()
 }
 
 fn archive(name: &str, opaque: bool) -> Vec<u8> {
@@ -83,24 +135,16 @@ fn versioned_archive(
     let versions = format!(
         "{{1,4,\"\",00000000-0000-0000-0000-{generation:012},\"{CONFIG}\",{config_version},\"{OPAQUE}\",{FIRST_VERSION},\"{SECOND_OPAQUE}\",{body_version}}}"
     );
-    write_format15_to_vec(&Format15Document::new(
-        7,
-        vec![
-            // A CF versions inventory includes all three service rows even
-            // though its explicit pairs name only ordinary entries. Omitting
-            // root/version is structural corruption, not an opaque export.
-            packed("root", &format!("\u{feff}{{2,{CONFIG},}}")),
-            packed("version", "\u{feff}{\r\n{216,0,\r\n{80327,0}\r\n}\r\n}"),
-            configuration(name),
-            packed(OPAQUE, "unrecognized unchanged clean-room body"),
-            packed(
-                SECOND_OPAQUE,
-                &format!("unrecognized clean-room body {body_version}"),
-            ),
-            packed("versions", &versions),
-        ],
-    ))
-    .unwrap()
+    let mut elements = canonical_configuration_entries(name);
+    elements.extend([
+        packed(OPAQUE, "unrecognized unchanged clean-room body"),
+        packed(
+            SECOND_OPAQUE,
+            &format!("unrecognized clean-room body {body_version}"),
+        ),
+        packed("versions", &versions),
+    ]);
+    write_format15_to_vec(&Format15Document::new(7, elements)).unwrap()
 }
 
 fn run(input: &Path, tree: &Path, profile: &str, flags: &[&str]) -> Output {
@@ -289,6 +333,12 @@ fn resaved_incremental_and_full_updates_all_check_the_complete_current_image() {
         assert_ne!(fs::read(&base).unwrap(), fs::read(&input).unwrap());
         let control = temp.0.join(format!("{scenario}-control"));
         indexed(&base, &control, "2.21");
+        assert!(
+            fs::read_to_string(control.join("ConfigDumpInfo.xml"))
+                .unwrap()
+                .contains("name=\"Configuration.OfflineDemo\""),
+            "the clean-room base must expose its canonical Configuration owner"
+        );
         let default = success(run(&input, &control, "2.21", &["--update"]));
         assert_eq!(
             default["update"]["mode"], expected_mode,
