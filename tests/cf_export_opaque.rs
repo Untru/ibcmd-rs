@@ -334,9 +334,9 @@ fn resaved_incremental_and_full_updates_all_check_the_complete_current_image() {
         let control = temp.0.join(format!("{scenario}-control"));
         indexed(&base, &control, "2.21");
         assert!(
-            fs::read_to_string(control.join("ConfigDumpInfo.xml"))
+            fs::read_to_string(control.join("Configuration.xml"))
                 .unwrap()
-                .contains("name=\"Configuration.OfflineDemo\""),
+                .contains("<Name>OfflineDemo</Name>"),
             "the clean-room base must expose its canonical Configuration owner"
         );
         let default = success(run(&input, &control, "2.21", &["--update"]));
