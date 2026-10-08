@@ -8,7 +8,7 @@ use ibcmd_core::artifact::ProfileId;
 use ibcmd_core::diagnostic::ObjectPath;
 use ibcmd_core::identity::ObjectUuid;
 use ibcmd_schema::external_data_source as schema;
-use ibcmd_xml::{XmlReader, decode_empty_external_data_source};
+use ibcmd_xml::{XmlReader, decode_empty_external_data_source, metadata::MetadataEnvelope};
 
 use super::brace::{Brace, NIL_UUID, parse_row};
 use super::common::Header;
@@ -26,14 +26,13 @@ struct Record {
 }
 
 /// Exact original source admission precedes the legacy local-name DOM.
-pub(crate) fn validate_source(xml: &[u8], version: &str) -> Result<()> {
+pub(crate) fn validate_source(xml: &[u8], version: &str) -> Result<MetadataEnvelope> {
     let document = XmlReader::from_slice(xml)?;
-    decode_empty_external_data_source(
+    Ok(decode_empty_external_data_source(
         &document,
         ProfileId::parse(&format!("xml-{version}"))?,
         ObjectPath::root(),
-    )?;
-    Ok(())
+    )?)
 }
 
 fn uuid(value: &str) -> Result<String> {
@@ -45,8 +44,9 @@ fn uuid(value: &str) -> Result<String> {
 }
 
 pub(crate) fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
-    // This path also serves decoded, host-owned DOMs in lossless audits.
-    // compile_descriptor validates original bytes before local-name decoding.
+    // Decoded host-owned DOMs have the established writer's own bindings.
+    // Original source compilation instead retains its admitted envelope and
+    // calls compile_admitted directly, without losing inherited namespaces.
     let bytes = write_document(object.element, &context.version);
     let document = XmlReader::from_slice(bytes.as_bytes())?;
     let canonical = decode_empty_external_data_source(
@@ -54,6 +54,15 @@ pub(crate) fn compile(object: &ObjectXml<'_>, context: &DescriptorContext) -> Re
         ProfileId::parse(&format!("xml-{}", context.version))?,
         ObjectPath::root(),
     )?;
+    compile_admitted(object, &canonical)
+}
+
+/// Encode the same canonical envelope admitted from the original source.
+/// Prefix bindings belong to that envelope, not the local-name object subtree.
+pub(crate) fn compile_admitted(
+    object: &ObjectXml<'_>,
+    canonical: &MetadataEnvelope,
+) -> Result<Brace> {
     let head = Header::of(object)?;
     if head.uuid != canonical.root().identity().uuid().to_string() || head.name != object.name {
         bail!("ExternalDataSource descriptor identity differs");
@@ -307,6 +316,114 @@ mod tests {
             node = &mut node.as_list_mut().unwrap()[*slot];
         }
         *node = value;
+    }
+
+    #[test]
+    fn inherited_and_scoped_namespace_aliases_keep_exact_descriptor_both_dialects() {
+        for version in ["2.20", "2.21"] {
+            let source = fixture::external_data_source(version, "Automatic", [2, 0, 1]);
+            let descriptor = |xml: &str, dialect: &str| {
+                compile_descriptor(
+                    schema::KIND,
+                    Path::new("ExternalDataSources/Source435.xml"),
+                    xml.as_bytes(),
+                    &context(dialect),
+                )
+            };
+            let expected = descriptor(&source, version).unwrap();
+            let readable = source
+                .replace("xmlns:xr=", "xmlns:r=")
+                .replace("<xr:", "<r:")
+                .replace("</xr:", "</r:");
+            let core = source
+                .replace("xmlns:v8=", "xmlns:d=")
+                .replace("<v8:", "<d:")
+                .replace("</v8:", "</d:");
+            let metadata = |xml: &str| {
+                let mut alias = xml.replace("xmlns=", "xmlns:m=");
+                for name in [
+                    "MetaDataObject",
+                    "ExternalDataSource",
+                    "InternalInfo",
+                    "Properties",
+                    "Name",
+                    "Synonym",
+                    "Comment",
+                    "DataLockControlMode",
+                    "ChildObjects",
+                ] {
+                    alias = alias
+                        .replace(&format!("<{name}"), &format!("<m:{name}"))
+                        .replace(&format!("</{name}>"), &format!("</m:{name}>"));
+                }
+                alias
+            };
+            let aliases = metadata(
+                &readable
+                    .replace("xmlns:v8=", "xmlns:d=")
+                    .replace("<v8:", "<d:")
+                    .replace("</v8:", "</d:"),
+            );
+            let r = "xmlns:r=\"http://v8.1c.ru/8.3/xcf/readable\"";
+            let d = "xmlns:d=\"http://v8.1c.ru/8.1/data/core\"";
+            let stripped = aliases
+                .replace(&format!(" {r}"), "")
+                .replace(&format!(" {d}"), "");
+            let object_scoped = stripped.replace(
+                "<m:ExternalDataSource uuid=",
+                &format!("<m:ExternalDataSource {r} {d} uuid="),
+            );
+            let container_scoped = stripped
+                .replace("<m:InternalInfo>", &format!("<m:InternalInfo {r}>"))
+                .replace("<m:Synonym>", &format!("<m:Synonym {d}>"));
+            let shadowed = container_scoped.replace(
+                "<m:MetaDataObject ",
+                "<m:MetaDataObject xmlns:r=\"urn:wrong-outer-readable\" xmlns:d=\"urn:wrong-outer-core\" ",
+            );
+            for xml in [
+                readable,
+                core,
+                metadata(&source),
+                aliases,
+                object_scoped,
+                container_scoped.clone(),
+                shadowed,
+            ] {
+                let actual = descriptor(&xml, version).unwrap();
+                assert_eq!(actual, expected, "{version}: {xml}");
+                let row = parse_row(&actual).unwrap();
+                for (ordinal, (type_id, value_id)) in fixture::PAIRS.iter().enumerate() {
+                    assert_eq!(
+                        row.at(&[1, 2 + 2 * ordinal]).unwrap().as_atom(),
+                        Some(*type_id)
+                    );
+                    assert_eq!(
+                        row.at(&[1, 3 + 2 * ordinal]).unwrap().as_atom(),
+                        Some(*value_id)
+                    );
+                }
+                let (_, output) =
+                    export_source(&serialize(&row), fixture::OBJECT_UUID, version).unwrap();
+                assert_eq!(descriptor(&output, version).unwrap(), expected);
+                let opposite = if version == "2.20" { "2.21" } else { "2.20" };
+                assert!(descriptor(&xml, opposite).is_err());
+            }
+            for malformed in [
+                container_scoped.replace(r, "xmlns:r=\"urn:foreign\""),
+                container_scoped.replace(d, "xmlns:d=\"urn:foreign\""),
+                container_scoped.replace("category=\"TablesManager\"", "category=\"Manager\""),
+                container_scoped.replace("<r:TypeId>", "<r:TypeId unexpected=\"1\">"),
+                container_scoped.replace(
+                    "</m:Properties>",
+                    "<m:Name>Duplicate</m:Name></m:Properties>",
+                ),
+            ] {
+                assert!(
+                    descriptor(&malformed, version).is_err(),
+                    "{version}: {malformed}"
+                );
+            }
+        }
     }
 
     #[test]

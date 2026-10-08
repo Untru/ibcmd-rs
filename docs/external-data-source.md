@@ -9,6 +9,12 @@ exporting only the common header loses required information.
 `ibcmd-schema::external_data_source` owns the physical layout, collection IDs,
 category names and enum mapping. The source adapter in `ibcmd-xml` reads the
 existing canonical model with actual namespace bindings and source policy.
+Original-source compilation retains that admitted canonical envelope through
+physical encoding. Root-scoped or nested aliases for the metadata, readable
+and core namespaces therefore keep their actual expanded-name meaning; the
+compiler does not reconstruct bindings from prefix spelling or reserialize the
+object subtree without its original root. The decoded host-owned DOM audit
+route still uses the established writer and the same strict canonical admission.
 The host compiler uses its established Header, Brace and XML writer. Physical
 export delegates the whole object to this codec before its general fallback.
 ScheduledJob also uses native code 2, but its direct header and three-field

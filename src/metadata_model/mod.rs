@@ -212,9 +212,14 @@ pub fn compile_descriptor(
         let document = ibcmd_xml::XmlReader::from_slice(xml)?;
         ibcmd_xml::metadata::validate_websocket_client_headers_namespaces(&document)?;
     }
-    if kind == "ExternalDataSource" {
-        external_data_source::validate_source(xml, &context.version)?;
-    }
+    let external_data_source = if kind == "ExternalDataSource" {
+        Some(external_data_source::validate_source(
+            xml,
+            &context.version,
+        )?)
+    } else {
+        None
+    };
     let doc = MetadataXml::parse(xml)?;
     let element = doc.object()?;
     let object = ObjectXml {
@@ -230,7 +235,11 @@ pub fn compile_descriptor(
             .unwrap_or_default(),
         path: xml_path,
     };
-    let tree = compile_object(&object, context)?;
+    let tree = if let Some(canonical) = external_data_source.as_ref() {
+        external_data_source::compile_admitted(&object, canonical)?
+    } else {
+        compile_object(&object, context)?
+    };
     Ok(serialize_row(&tree))
 }
 
