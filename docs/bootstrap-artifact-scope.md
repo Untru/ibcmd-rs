@@ -43,14 +43,14 @@ and `ConfigurationExtensionCompatibilityMode` do not select Extension;
 actual extension purpose/adoption/mapping markers retain the existing scoped
 namespace and duplicate checks. Identity selection does not validate or rewrite
 those property values. The ordinary/nondefault-compatibility control covers
-both XML2.20 and2.21, comparing explicit scope projection with the existing
+both XML 2.20 and 2.21, comparing explicit scope projection with the existing
 Configuration collector and exact graph inventory.
 
-This is the scoped A0 port from original commit06459188 and its2445 repaired
+This is the scoped A0 port from original commit `06459188` and repaired commit `2445af7f`
 owner context, reconciled onto the current package classifier. It does not
 merge their ConfigInfo/load/CLI changes or make those historical heads ancestors.
 The original four artifact-scope controls are retained without assertion changes.
-SOURCE readiness does not carry over old runtime results or complete issue438;
+SOURCE readiness does not carry over old runtime results or complete issue #438;
 ROOT must run fresh tests on the exact new source revision. Existing inherited
 storage/text bounds are a separately tracked later policy atom, not a new limit
 introduced by this scope layer or a claim that all external paths have no caps.

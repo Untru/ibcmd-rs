@@ -516,41 +516,42 @@ fn strict_external_symlink_and_nonregular_sources_refuse_without_following() {
         for e in tree(ExternalArtifactKind::DataProcessor, version).entries() {
             scratch.write(e.path().as_str(), e.bytes());
         }
+        let admit = || {
+            ExternalIntake::read(
+                &scratch.0,
+                profile(version),
+                path(),
+                ReaderLimits::default(),
+            )
+            .unwrap()
+        };
+        let refuse_path = |unsafe_path: PathBuf| {
+            let error = ExternalIntake::read(
+                &scratch.0,
+                profile(version),
+                path(),
+                ReaderLimits::default(),
+            )
+            .unwrap_err();
+            assert!(matches!(error, ExternalIntakeError::Input { reason, .. }
+                if reason.contains(&unsafe_path.display().to_string())));
+        };
+        admit();
         outside.write("outside.bsl", MODULE);
         fs::remove_file(scratch.0.join(MODULE_PATH)).unwrap();
         symlink(outside.0.join("outside.bsl"), scratch.0.join(MODULE_PATH)).unwrap();
-        assert!(
-            ExternalIntake::read(
-                &scratch.0,
-                profile(version),
-                path(),
-                ReaderLimits::default()
-            )
-            .is_err()
-        );
+        refuse_path(scratch.0.join(MODULE_PATH));
         assert_eq!(fs::read(outside.0.join("outside.bsl")).unwrap(), MODULE);
         fs::remove_file(scratch.0.join(MODULE_PATH)).unwrap();
+        scratch.write(MODULE_PATH, MODULE);
+        admit();
         let socket = UnixListener::bind(scratch.0.join("own.sock")).unwrap();
-        assert!(
-            ExternalIntake::read(
-                &scratch.0,
-                profile(version),
-                path(),
-                ReaderLimits::default()
-            )
-            .is_err()
-        );
+        refuse_path(scratch.0.join("own.sock"));
         drop(socket);
+        fs::remove_file(scratch.0.join("own.sock")).unwrap();
+        admit();
         symlink(&outside.0, scratch.0.join("linked-dir")).unwrap();
-        assert!(
-            ExternalIntake::read(
-                &scratch.0,
-                profile(version),
-                path(),
-                ReaderLimits::default()
-            )
-            .is_err()
-        );
+        refuse_path(scratch.0.join("linked-dir"));
     }
 }
 
