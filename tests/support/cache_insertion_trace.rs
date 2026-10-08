@@ -1696,3 +1696,7 @@ pub fn coverage(
         trace_status: TraceStatus::NotIdentified,
     })
 }
+
+// A1.5/A1.7 composition only; no source traversal policy or production consumer migration.
+#[path = "cache_insertion_comparison.rs"]
+pub mod comparison;

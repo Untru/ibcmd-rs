@@ -122,3 +122,85 @@ successful observation projection does not claim a complete reference graph,
 full family admission, native parity, or closure of #403. Subsequent A1.5–A1.7
 work and any proposed H1 still need their own source gate. Ten appended
 ordinary controls exercise this component; ROOT owns actual execution.
+
+
+## Appended comparison and closed diagnostic runner (A1.5/A1.7)
+
+The child `tests/support/cache_insertion_comparison.rs` composes the existing
+admitted readers, counted key coverage, observation graph, HelpProps renderer and
+`order::iteration_order`/`MsvcTable`. It does not migrate Slot inspection or change
+production planning, cache rows, Exact flags, parsers or hash-model policy.
+
+`compare_current(inputs, None)` reports the original payload's copied roundtrip,
+without a candidate. The separate explicitly supplied `DiagnosticProposal` is
+untrusted diagnostic input, never a source traversal generator. Before the model
+is called, every actual emitted key must appear exactly once, event IDs must be
+unique, and every key occurrence must match its CURRENT case/stage/version,
+source SHA, actual Brace path and original registry span. Batch key witnesses use
+one bound projection, not a source-file hash/Git lookup per key. The model receives
+only admitted key strings; a copied payload is rendered without editing the caller.
+An exact copied/model comparison is not independent native generation or insertion
+history authority. Distinct insertion histories may produce the same final order.
+
+Comparators separately retain complete Byte/EOF first differences, literal hashes,
+BOM/CRLF and lengths; complete key and typed property vectors; and recognized
+reference/type/empty-value/nil event endpoints including original occurrences and
+unknown raw values. Missing observations are Unavailable, never NoRefs. Event
+comparison includes provenance changes as well as typed value changes; the full
+current event vector is in the report. Covered key domains, origins, complete row
+bindings, supplementary facts, original proofs and Partial observations are retained.
+
+The named ignored `retained_closed_corpus_projection` requires all three variables:
+`IBCMD_RS_CACHE_TRACE_MANIFEST`, `IBCMD_RS_CACHE_TRACE_MANIFEST_SHA256`, and
+`IBCMD_RS_CACHE_TRACE_OUTPUT`. Manifest/output must be absolute F paths and output
+must be NEW. Missing variables fail; there is no successful skip or fallback. Its
+portable ordinary handler is also exercised by generated controls on other hosts.
+The closed outer schema `cache-trace-retained-corpus-v1` includes independently
+bound child manifests and capture witnesses, admitted source/audit owner head, and the
+compiled `include_bytes!` digests of the diagnostic helper/test/model/renderer.
+ROOT must supply the independent outer SHA and verify historical provenance before
+running. The admitted input source-owner SHA is separate from the running compiled-source identity.
+The field `input_exporter_source_head` retains the input API's name but means the
+ROOT-admitted source/audit owner: it must match capture/input/facts declarations.
+It does not recover historical producer Git from svc.json or byte hashes; if that
+producer is unknown it remains unknown. ROOT binds the selected audit owner and
+actual historical svc/blob proofs independently. The generated b74 source fixture
+is only a declared cleanroom test owner, not a capture receipt or traversal proof.
+Capture provenance is an explicitly pinned declaration, not fresh native proof.
+There is no JSON proposal field: all retained cases run with proposal None.
+
+Per ROOT's admitted locator clarification, distinct complete nonoverlapping members
+of one indexed pack are allowed. An identical read-only payload/range may be reused
+across independently bound case/stage captures; its stage versions need not be equal.
+Each stage still needs its own capture witness, input manifest and original proof
+binding. Conflicting row identities, overlapping members, duplicate roles, physical
+proof aliases (including hard links), mixed stages and proof/output/input aliasing
+refuse. This uses actual file identity on Windows/Unix, not global uniqueness of
+all pack/blob pathnames. Supplementary rows retain their own complete plain bindings.
+
+The handler revalidates every used input, writes/syncs a staged `report.json` through
+CreateNew, revalidates the source closure again, then writes/syncs
+`completion.json` bound to the report and outer hashes. `report.json` alone has
+`diagnosis_finished:false`; only a known successful ROOT handler receipt together
+with its completion companion establishes completion of the diagnostic. A failed
+or crashed run's partial output is retained and is not adopted/retried/replaced.
+Existing outputs and caller files are preserved. This is not native acceptance:
+all paths retain Partial, NotIdentified, authority null, native false and issue open.
+
+Nine appended ordinary controls and one ignored target are prepared for independent
+SOURCE review; author did not run them. ROOT may run the original ordinary target
+above after that gate, then (with its owned context and separately reviewed inputs):
+
+```powershell
+$env:IBCMD_RS_CACHE_TRACE_MANIFEST = 'F:/ROOT-reviewed/current-corpus.json'
+$env:IBCMD_RS_CACHE_TRACE_MANIFEST_SHA256 = '<independently pinned SHA256>'
+$env:IBCMD_RS_CACHE_TRACE_OUTPUT = 'F:/ROOT-reviewed/new-diagnostic-output'
+cargo test --locked --offline --test cache_insertion_trace retained_closed_corpus_projection -- --ignored --exact --nocapture
+```
+
+These paths are placeholders, not a ready retained run. The selected historical
+HelpProps ranges alone do not provide matched Registry/TypeSets source provenance.
+ROOT must bind all three same-stage rows first; weak plain-only comparisons remain
+labelled diagnostic. S4, remaining semantic graph work, any proposed H1 construction
+hypothesis and actual native exactness criteria remain separate pending work. Issue
+#403 remains open; no public product capability or release acceptance is claimed.
