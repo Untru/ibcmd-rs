@@ -10042,7 +10042,8 @@ struct ChartOfAccountsProperties {
     default_presentation: &'static str,
     standard_attributes: Vec<RegisterStandardAttribute>,
     characteristics: Characteristics,
-    standard_tabular_sections: Vec<MetadataStandardTabularSection>,
+    /// None is the exact native root `{0}`: no StandardTabularSections XML.
+    standard_tabular_sections: Option<Vec<MetadataStandardTabularSection>>,
     predefined_data_update: &'static str,
     edit_type: &'static str,
     quick_choice: bool,
@@ -10105,7 +10106,8 @@ struct ChartOfCalculationTypesProperties {
     action_period_use: bool,
     standard_attributes: Vec<RegisterStandardAttribute>,
     characteristics: Characteristics,
-    standard_tabular_sections: Vec<MetadataStandardTabularSection>,
+    /// None is the exact native root `{0}`: no StandardTabularSections XML.
+    standard_tabular_sections: Option<Vec<MetadataStandardTabularSection>>,
     predefined_data_update: &'static str,
     include_help_in_contents: bool,
     data_lock_control_mode: &'static str,
@@ -24842,11 +24844,11 @@ fn parse_chart_of_accounts_properties(
         generated_types,
         use_standard_commands: information_register_bool(fields.get(16)?)?,
         include_help_in_contents: information_register_bool(fields.get(17)?)?,
-        ext_dimension_types: if extension::active().is_some()
-            && parse_information_register_uuid(fields.get(19)?)
-                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+        ext_dimension_types: if parse_information_register_uuid(fields.get(19)?)
+            .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
         {
-            // An extension's own chart can name no plan of extra dimensions.
+            // Ordinary charts, as well as extensions, may declare no plan
+            // of extra dimensions. The nil slot writes an empty property.
             String::new()
         } else {
             parse_chart_direct_object_reference(
@@ -24877,7 +24879,7 @@ fn parse_chart_of_accounts_properties(
             "1" => "AsDescription",
             _ => return None,
         },
-        standard_attributes: parse_chart_standard_attributes(
+        standard_attributes: parse_chart_root_standard_attributes(
             fields.get(38)?,
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
@@ -24888,7 +24890,7 @@ fn parse_chart_of_accounts_properties(
             object_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_standard_tabular_sections(
+        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
             fields.get(39)?,
             CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
         )?,
@@ -25293,10 +25295,8 @@ fn parse_chart_of_calculation_types_properties(
             "2" => "OnBasePeriod",
             _ => return None,
         },
-        base_calculation_types: if extension::active().is_some()
-            && fields.get(28)?.trim() == "{0,0}"
-        {
-            // An extension's own chart can name no base calculation types.
+        base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
+            // The exact empty collection is also valid on ordinary charts.
             String::new()
         } else {
             parse_chart_wrapped_object_reference(
@@ -25306,7 +25306,7 @@ fn parse_chart_of_calculation_types_properties(
             )?
         },
         action_period_use: information_register_bool(fields.get(29)?)?,
-        standard_attributes: parse_chart_standard_attributes(
+        standard_attributes: parse_chart_root_standard_attributes(
             fields.get(43)?,
             &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
             ChartStandardAttributeVocabulary::NilOnly,
@@ -25314,7 +25314,7 @@ fn parse_chart_of_calculation_types_properties(
             object_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_standard_tabular_sections(
+        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
             fields.get(44)?,
             &[
                 (
@@ -25703,6 +25703,36 @@ enum ChartStandardAttributeVocabulary<'a> {
         owner_name: &'a str,
         metadata_object_refs: &'a BTreeMap<String, String>,
     },
+}
+
+// The ordinary chart roots store `{0}` when no standard properties are
+// overridden. Keep this admission local to the two measured owner roots;
+// the shared nested attribute parser retains its existing contract.
+fn parse_chart_root_standard_attributes(
+    value: &str,
+    definitions: &[(&str, &'static str)],
+    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RegisterStandardAttribute>> {
+    if split_information_register_braced_fields(value)
+        .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == "0")
+    {
+        return Some(Vec::new());
+    }
+    parse_chart_standard_attributes(value, definitions, vocabulary, type_index, object_refs)
+}
+
+fn parse_chart_root_standard_tabular_sections(
+    value: &str,
+    definitions: &[ChartStandardTabularSectionDefinition],
+) -> Option<Option<Vec<MetadataStandardTabularSection>>> {
+    if split_information_register_braced_fields(value)
+        .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == "0")
+    {
+        return Some(None);
+    }
+    parse_chart_standard_tabular_sections(value, definitions).map(Some)
 }
 
 fn parse_chart_standard_attributes(
@@ -39551,7 +39581,9 @@ fn format_chart_of_accounts_source_xml(
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
     properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
-    push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
+    if let Some(sections) = &chart.standard_tabular_sections {
+        push_chart_standard_tabular_sections_xml(&mut properties, sections);
+    }
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
 \t\t\t<EditType>{}</EditType>\r\n\
@@ -39731,7 +39763,9 @@ fn format_chart_of_calculation_types_source_xml(
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
     properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
-    push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
+    if let Some(sections) = &chart.standard_tabular_sections {
+        push_chart_standard_tabular_sections_xml(&mut properties, sections);
+    }
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
 \t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
@@ -44399,10 +44433,9 @@ fn parse_filter_criterion_type_pattern(
             FilterCriterionDecodeReason::Shape,
         )
     })?;
-    // A criterion the extension adopted keeps no type pattern of its own: the
-    // type stays that of the extended configuration.
-    if extension::active().is_some()
-        && fields.len() == 1
+    // Ordinary criteria may have no declared types. Adopted extension
+    // criteria use the same empty pattern to inherit the existing type.
+    if fields.len() == 1
         && fields
             .first()
             .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::pattern(value.trim()))

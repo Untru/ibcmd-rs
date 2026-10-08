@@ -53414,8 +53414,8 @@ fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
     );
     let cases = [
         (
-            "empty Pattern",
-            replace_filter_criterion_test_value(&fixture.raw, &pattern, r#"{"Pattern"}"#),
+            "missing Pattern token",
+            replace_filter_criterion_test_value(&fixture.raw, &pattern, "{}"),
         ),
         (
             "Pattern token",
@@ -80181,4 +80181,105 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             assert!(!xml.contains("name=\"RecordType\""));
         }
     }
+}
+
+#[test]
+fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
+    let index = BTreeMap::new();
+    let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
+    let attributes = parse_chart_root_standard_attributes(
+        "{0}",
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert!(attributes.is_empty());
+    // This root-only admission must not turn unproved ordinary nested
+    // standard-attribute absence into accepted/defaulted content.
+    assert!(
+        parse_chart_standard_attributes(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_attributes(
+            "{0,0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    let complete = exact_register_standard_attributes_for_test(
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+    );
+    let present = parse_chart_root_standard_attributes(
+        &complete,
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS.len()
+    );
+    for (attribute, (_, name)) in present
+        .iter()
+        .zip(CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS)
+    {
+        assert_eq!(attribute.name, *name);
+    }
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{1,{0,0}}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .is_none()
+    );
+    let mut payload = vec![
+        "0".to_owned(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+            .len()
+            .to_string(),
+    ];
+    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+        payload.push((*marker).to_owned());
+        let attributes = exact_register_standard_attributes_for_test(definitions);
+        payload.push(format!(
+            "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
+        ));
+    }
+    let present = parse_chart_root_standard_tabular_sections(
+        &format!("{{1,{{{}}}}}", payload.join(",")),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    )
+    .unwrap()
+    .expect("a complete native section remains present");
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS.len()
+    );
+    let mut xml = String::new();
+    push_chart_standard_tabular_sections_xml(&mut xml, &present);
+    assert!(xml.contains("<StandardTabularSections>"));
+    assert!(xml.contains("authored section"));
+    assert!(xml.contains("name=\"ExtDimensionTypes\""));
 }
