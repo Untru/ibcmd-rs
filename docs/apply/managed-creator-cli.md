@@ -36,7 +36,9 @@ native RAC registration protocol passes credentials in its process arguments;
 that inherited F-12 exposure remains a separate limitation.
 
 For source apply, also supply `--source-root` and `--path`, using an existing
-supported common-module or common-form body. For already-staged activation,
+measured main-configuration module, form or template body. The same source
+cohort check as ordinary source apply runs before creation; nested forms and
+unmeasured roles remain refused. For already-staged activation,
 use the same creation group without those two source arguments. The generated
 cluster and infobase UUIDs, RAC path and RAS endpoint come solely from the
 original Ready owner after registration/load. `--cluster-id`, `--infobase-id`,
