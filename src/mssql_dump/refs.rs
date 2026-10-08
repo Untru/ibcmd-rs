@@ -1,5 +1,6 @@
 use super::*;
 use ibcmd_schema::configuration_mobile::FUNCTIONALITIES as CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES;
+use ibcmd_schema::configuration_v85_projection as configuration_v85_defaults;
 
 #[allow(dead_code)]
 pub(super) fn build_metadata_command_reference_index(
@@ -3670,19 +3671,6 @@ fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(Strin
     Some((envelope.identity, header.name))
 }
 
-/// The configuration properties platform 8.5 adds, in the element order its
-/// `Configuration.xml` writes them.
-const CONFIGURATION_AUXILIARY_FORMS_8_5_1: [&str; 8] = [
-    "AuxiliaryReportForm",
-    "AuxiliaryReportVariantForm",
-    "AuxiliaryReportSettingsForm",
-    "AuxiliaryDynamicListSettingsForm",
-    "AuxiliaryDataHistoryChangeHistoryForm",
-    "AuxiliaryDataHistoryVersionDataForm",
-    "AuxiliaryDataHistoryVersionDifferencesForm",
-    "AuxiliaryCollaborationSystemUsersChoiceForm",
-];
-
 /// What 8.5 writes for the properties it adds to a configuration: read from
 /// the members an 8.5 `{76,...}` tuple appends, or the platform's defaults for
 /// a configuration still in the 8.3.27 `{68,...}` tuple.
@@ -3707,13 +3695,13 @@ fn configuration_properties_8_5_1(
         // automatic theme, data opened in dialogs, no captions, no 8.5
         // interface migration.
         return Some(ConfigurationPropertiesV8_5_1 {
-            auxiliary_forms: vec![None; CONFIGURATION_AUXILIARY_FORMS_8_5_1.len()],
-            interface_variant: "NavigationLeft",
-            theme: "Auto",
-            windows_open_variant: "OpenDataInDialogs",
+            auxiliary_forms: vec![None; configuration_v85_defaults::AUXILIARY_FORM_NAMES.len()],
+            interface_variant: configuration_v85_defaults::INTERFACE_VARIANT,
+            theme: configuration_v85_defaults::THEME,
+            windows_open_variant: configuration_v85_defaults::WINDOWS_OPEN_VARIANT,
             caption: Vec::new(),
             short_caption: Vec::new(),
-            migration_mode: "DontUse",
+            migration_mode: configuration_v85_defaults::MIGRATION_MODE,
         });
     }
     let start = text.find("{76,")?;
@@ -3785,7 +3773,7 @@ fn insert_configuration_properties_8_5_1_xml(
     }
     let mut inserts = Vec::new();
     let mut forms = String::new();
-    for (name, value) in CONFIGURATION_AUXILIARY_FORMS_8_5_1
+    for (name, value) in configuration_v85_defaults::AUXILIARY_FORM_NAMES
         .iter()
         .zip(&properties.auxiliary_forms)
     {

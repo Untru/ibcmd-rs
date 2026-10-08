@@ -8,6 +8,7 @@
 
 pub mod configuration_mobile;
 pub mod configuration_rights;
+pub mod configuration_v85_projection;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};

@@ -6,6 +6,7 @@ mod children;
 mod common;
 mod common_objects;
 mod configuration_mobile;
+mod configuration_v85_projection;
 mod constant;
 mod defined_type;
 mod fallback;
@@ -38,6 +39,7 @@ pub use common_objects::{
     register_common_picture_codec,
 };
 pub use configuration_mobile::parse_configuration_mobile_functionalities;
+pub use configuration_v85_projection::validate_older_configuration_v85_defaults;
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
 pub use functional_option::register_functional_option_codec;

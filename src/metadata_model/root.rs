@@ -410,13 +410,7 @@ const SHARE_REQUEST_TYPE_CLASS_ID: &str = "f251d17e-94e0-4f9b-974e-d642cf9cb6e4"
 fn configuration(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<Brace> {
     let properties = object.properties()?;
     let compatibility = compatibility_of(properties)?;
-    // An 8.3-compatible configuration that platform 8.5 stores in its own
-    // layout keeps the 8.5 tuple (`common::tree_stores_layout_8_5_1`).
-    let shape = if super::common::stores_layout_8_5_1(context) {
-        ConfigurationShape::V76
-    } else {
-        ConfigurationShape::for_compatibility(compatibility)
-    };
+    let shape = configuration_shape(object, context)?;
     let contained = contained_objects(object.element)?;
     let children = child_objects(object, context)?;
 
@@ -665,6 +659,20 @@ fn enum_of(
         .ok_or_else(|| anyhow!("Configuration <{name}> {text:?} has no known stored code"))
 }
 
+/// Selects the same declared native layout for lexical admission and encoding.
+/// The XML edition alone does not select a 76 tuple.
+pub(super) fn configuration_shape(
+    object: &ObjectXml<'_>,
+    context: &DescriptorContext,
+) -> Result<ConfigurationShape> {
+    let compatibility = compatibility_of(object.properties()?)?;
+    Ok(if super::common::stores_layout_8_5_1(context) {
+        ConfigurationShape::V76
+    } else {
+        ConfigurationShape::for_compatibility(compatibility)
+    })
+}
+
 fn properties_tuple(
     object: &ObjectXml<'_>,
     context: &DescriptorContext,
@@ -697,7 +705,37 @@ fn properties_tuple(
     ] {
         require_default(p, name, expected)?;
     }
-    if shape == ConfigurationShape::V76 {
+    if shape != ConfigurationShape::V76 {
+        // The compact direct model must also refuse non-default values.
+        // Public descriptor compilation independently checks expanded names
+        // and attributes before this compact model discards namespaces.
+        for (name, expected) in ibcmd_schema::configuration_v85_projection::DEFAULT_PROPERTIES {
+            let mut values = p.children_named(name);
+            if let Some(element) = values.next() {
+                if !ibcmd_schema::configuration_v85_projection::supports_xml_dialect(
+                    &context.version,
+                ) {
+                    bail!("Configuration <{name}> older-layout projection requires XML 2.21");
+                }
+                if values.next().is_some()
+                    || !element.attrs.is_empty()
+                    || !element.children.is_empty()
+                {
+                    bail!("Configuration <{name}> is not one scalar older-layout projection");
+                }
+                let expected = match expected {
+                    ibcmd_schema::ConfigurationPropertyEvidencedDefault::Empty => "",
+                    ibcmd_schema::ConfigurationPropertyEvidencedDefault::Text(text) => text,
+                    ibcmd_schema::ConfigurationPropertyEvidencedDefault::Block(_) => {
+                        bail!("Configuration <{name}> has no scalar older-layout projection")
+                    }
+                };
+                if element.text.trim() != expected {
+                    bail!("Configuration <{name}> cannot be retained in an older layout");
+                }
+            }
+        }
+    } else {
         for (name, expected) in [
             ("AuxiliaryReportForm", &[][..]),
             ("AuxiliaryReportVariantForm", &[][..]),
@@ -1203,6 +1241,74 @@ fn share_request_types(p: &Element) -> Result<Brace> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn configuration_v85_older_projection_never_discards_values_or_changes_76_pairs() {
+        let root = std::path::PathBuf::from("unused-projection-context");
+        let context = DescriptorContext {
+            root: root.clone(),
+            index: super::super::index::ConfigIndex::default(),
+            source: crate::module_blob::MetadataSourceContext::new(root),
+            version: "2.21".to_owned(),
+        };
+        let tuple = |properties: &str, shape| {
+            let xml = format!(
+                "<MetaDataObject><Configuration uuid=\"10000000-0000-4000-8000-000000000435\"><Properties><Name>Own</Name>{properties}</Properties><ChildObjects/></Configuration></MetaDataObject>"
+            );
+            let doc = MetadataXml::parse(xml.as_bytes()).unwrap();
+            let object = ObjectXml {
+                element: doc.object().unwrap(),
+                kind: "Configuration",
+                uuid: "10000000-0000-4000-8000-000000000435".to_owned(),
+                name: "Own".to_owned(),
+                path: std::path::Path::new("unused.xml"),
+            };
+            properties_tuple(
+                &object,
+                &context,
+                shape,
+                80327,
+                "20000000-0000-4000-8000-000000000001",
+            )
+        };
+        let old_defaults = "<AuxiliaryReportForm/><ClientApplicationWindowsOpenVariant>OpenDataInDialogs</ClientApplicationWindowsOpenVariant><Version85InterfaceMigrationMode>DontUse</Version85InterfaceMigrationMode><Caption/><ShortCaption/>";
+        for shape in [ConfigurationShape::V67, ConfigurationShape::V68] {
+            assert_eq!(
+                tuple(old_defaults, shape).unwrap(),
+                tuple("", shape).unwrap()
+            );
+            for changed in [
+                "<AuxiliaryReportForm>CommonForm.Own</AuxiliaryReportForm>",
+                "<Caption><item><lang>en</lang><content>Own caption</content></item></Caption>",
+                "<ClientApplicationWindowsOpenVariant>OpenDataInTabs</ClientApplicationWindowsOpenVariant>",
+                "<Version85InterfaceMigrationMode>Use</Version85InterfaceMigrationMode>",
+                "<ClientApplicationTheme/>",
+                "<AuxiliaryReportForm future=\"1\"/>",
+                "<AuxiliaryReportForm/><AuxiliaryReportForm/>",
+            ] {
+                assert!(tuple(changed, shape).is_err(), "{shape:?}: {changed}");
+            }
+        }
+        for (window, migration, code) in [
+            ("OpenDataInTabs", "Use", "0"),
+            ("OpenDataInDialogs", "DontUse", "1"),
+        ] {
+            let input = format!(
+                "<ClientApplicationWindowsOpenVariant>{window}</ClientApplicationWindowsOpenVariant><Version85InterfaceMigrationMode>{migration}</Version85InterfaceMigrationMode><Caption><item><lang>en</lang><content>Own caption</content></item></Caption><ShortCaption><item><lang>en</lang><content>Short</content></item></ShortCaption>"
+            );
+            let value = tuple(&input, ConfigurationShape::V76).unwrap();
+            let fields = value.as_list().unwrap();
+            assert_eq!(fields.len(), 77);
+            assert_eq!(fields[67].as_atom(), Some(code));
+            assert_eq!(fields[68].as_atom(), Some(code));
+            assert_eq!(
+                fields[64].as_list().unwrap()[2].as_str(),
+                Some("Own caption")
+            );
+            assert_eq!(fields[65].as_list().unwrap()[2].as_str(), Some("Short"));
+        }
+        assert!(tuple("<ClientApplicationWindowsOpenVariant>OpenDataInTabs</ClientApplicationWindowsOpenVariant><Version85InterfaceMigrationMode>DontUse</Version85InterfaceMigrationMode>", ConfigurationShape::V76).is_err());
+    }
 
     #[test]
     fn packs_compatibility_and_picks_the_shape() {

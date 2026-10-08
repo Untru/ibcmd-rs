@@ -81,3 +81,19 @@ bytes through both compilers and both current dialects. Older physical reader
 layouts and other property scopes that still admit only evidenced defaults are
 unchanged. This source atom does not establish native-platform acceptance or
 complete CFE/EPF/ERF builders.
+
+XML 2.21 also projects fourteen 8.5 properties from older Configuration
+layouts 67 and 68: eight empty auxiliary form references, empty captions,
+and the evidenced navigation, theme, window-opening and migration defaults.
+Their schema vocabulary is separate from the global Configuration default
+table and the 76 layout. Both public compilers admit this older-layout
+projection only at its exact values, after checking expanded names, attributes,
+duplicates and scalar content. A nonempty reference or caption, an unknown
+enum value, or markup refuses before publication instead of being omitted.
+The 76 compiler retains its existing caption and paired-enumeration behavior.
+
+The source XML dialect remains independent of the selected target platform and
+the native layout. XML 2.21 does not by itself select a 76 tuple. Generated
+round-trip controls preserve the complete returned XML; additional negative
+controls preserve both absent and preexisting output files. These controls do
+not establish universal native-platform acceptance for 8.5 configurations.

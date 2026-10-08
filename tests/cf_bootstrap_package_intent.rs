@@ -718,3 +718,210 @@ fn extension_purpose_and_mapping_still_refuse_with_shared_ordinary_properties() 
         }
     }
 }
+
+// Independently authored values of the old-layout XML 2.21 projection. Do not
+// build this fixture from the production policy being checked.
+fn older_v85_configuration() -> String {
+    let defaults = "<AuxiliaryReportForm/><AuxiliaryReportVariantForm/><AuxiliaryReportSettingsForm/><AuxiliaryDynamicListSettingsForm/><AuxiliaryDataHistoryChangeHistoryForm/><AuxiliaryDataHistoryVersionDataForm/><AuxiliaryDataHistoryVersionDifferencesForm/><AuxiliaryCollaborationSystemUsersChoiceForm/><MainClientApplicationWindowInterfaceVariant>NavigationLeft</MainClientApplicationWindowInterfaceVariant><ClientApplicationTheme>Auto</ClientApplicationTheme><ClientApplicationWindowsOpenVariant>OpenDataInDialogs</ClientApplicationWindowsOpenVariant><Caption/><ShortCaption/><Version85InterfaceMigrationMode>DontUse</Version85InterfaceMigrationMode>";
+    configuration()
+        .replace("version=\"2.20\"", "version=\"2.21\"")
+        .replace(
+            "<ScriptVariant>English</ScriptVariant>",
+            "<ScriptVariant>Russian</ScriptVariant>",
+        )
+        .replace("<Comment/>", &format!("<Comment/>{defaults}"))
+}
+
+fn older_v85_bootstrap(source: &Path, output: &Path, base_free: bool, version: &str) -> Output {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"));
+    command.args(["cf", "bootstrap"]);
+    if base_free {
+        command.arg("--base-free");
+    }
+    command
+        .arg(source)
+        .arg(output)
+        .args(["--source-version", version, "--storage-version", "5"])
+        .env("PATH", "")
+        .output()
+        .unwrap()
+}
+
+#[test]
+fn older_v85_projected_defaults_keep_complete_native_xml_through_both_routes() {
+    for base_free in [false, true] {
+        for alias in [false, true] {
+            let scratch = Scratch::new();
+            let xml = if alias {
+                older_v85_configuration()
+                    .replace("<Caption/>", &format!("<own:Caption xmlns:own=\"{MD}\"/>"))
+            } else {
+                older_v85_configuration()
+            };
+            let source = scratch.source("Configuration.xml", &xml);
+            let first = scratch.0.join("first.cf");
+            let report = success(older_v85_bootstrap(&source, &first, base_free, "2.21"));
+            assert_eq!(report["target_profile"], "platform-8.3.27.1989");
+            let tuple = stored_configuration_tuple(&first, &scratch.0.join("first-tuple"));
+            assert_eq!(
+                tuple[0].as_atom(),
+                Some(if base_free { "67" } else { "68" })
+            );
+            assert_mobile_tuple(&tuple, &[]);
+            let native = scratch.0.join("native");
+            export(&first, &native, "2.21");
+            let expected = fs::read(native.join("Configuration.xml")).unwrap();
+            let expected_text = std::str::from_utf8(&expected).unwrap();
+            for (name, value) in [
+                ("AuxiliaryReportForm", ""),
+                ("AuxiliaryReportVariantForm", ""),
+                ("AuxiliaryReportSettingsForm", ""),
+                ("AuxiliaryDynamicListSettingsForm", ""),
+                ("AuxiliaryDataHistoryChangeHistoryForm", ""),
+                ("AuxiliaryDataHistoryVersionDataForm", ""),
+                ("AuxiliaryDataHistoryVersionDifferencesForm", ""),
+                ("AuxiliaryCollaborationSystemUsersChoiceForm", ""),
+                (
+                    "MainClientApplicationWindowInterfaceVariant",
+                    "NavigationLeft",
+                ),
+                ("ClientApplicationTheme", "Auto"),
+                ("ClientApplicationWindowsOpenVariant", "OpenDataInDialogs"),
+                ("Caption", ""),
+                ("ShortCaption", ""),
+                ("Version85InterfaceMigrationMode", "DontUse"),
+            ] {
+                let element = if value.is_empty() {
+                    format!("<{name}/>")
+                } else {
+                    format!("<{name}>{value}</{name}>")
+                };
+                assert!(
+                    expected_text.contains(&element),
+                    "{element}: {expected_text}"
+                );
+            }
+            assert!(expected_text.contains("<AuxiliaryReportForm/>"));
+            assert!(expected_text.contains("<ClientApplicationWindowsOpenVariant>OpenDataInDialogs</ClientApplicationWindowsOpenVariant>"));
+            assert!(expected_text.contains(
+                "<Version85InterfaceMigrationMode>DontUse</Version85InterfaceMigrationMode>"
+            ));
+            let second = scratch.0.join("second.cf");
+            success(older_v85_bootstrap(&native, &second, base_free, "2.21"));
+            let returned = scratch.0.join("returned");
+            export(&second, &returned, "2.21");
+            assert_eq!(
+                fs::read(returned.join("Configuration.xml")).unwrap(),
+                expected
+            );
+            assert_mobile_tuple(
+                &stored_configuration_tuple(&second, &scratch.0.join("second-tuple")),
+                &[],
+            );
+        }
+    }
+}
+
+#[test]
+fn older_v85_nondefault_and_malformed_values_refuse_before_any_publication() {
+    let valid = older_v85_configuration();
+    let mut malformed = Vec::new();
+    for name in [
+        "AuxiliaryReportForm",
+        "AuxiliaryReportVariantForm",
+        "AuxiliaryReportSettingsForm",
+        "AuxiliaryDynamicListSettingsForm",
+        "AuxiliaryDataHistoryChangeHistoryForm",
+        "AuxiliaryDataHistoryVersionDataForm",
+        "AuxiliaryDataHistoryVersionDifferencesForm",
+        "AuxiliaryCollaborationSystemUsersChoiceForm",
+        "Caption",
+        "ShortCaption",
+    ] {
+        let empty = format!("<{name}/>");
+        for value in [
+            format!("<{name}>AuthoredValue</{name}>"),
+            format!("<{name}><Value/></{name}>"),
+            format!("<{name} future=\"true\"/>"),
+            format!("<{name} xmlns=\"urn:foreign\"/>"),
+            format!("<{name}/><{name}/>"),
+        ] {
+            malformed.push(valid.replacen(&empty, &value, 1));
+        }
+    }
+    for (name, old, new) in [
+        (
+            "MainClientApplicationWindowInterfaceVariant",
+            "NavigationLeft",
+            "NavigationTop",
+        ),
+        ("ClientApplicationTheme", "Auto", "Dark"),
+        (
+            "ClientApplicationWindowsOpenVariant",
+            "OpenDataInDialogs",
+            "OpenDataInTabs",
+        ),
+        ("Version85InterfaceMigrationMode", "DontUse", "Use"),
+    ] {
+        let original = format!("<{name}>{old}</{name}>");
+        for value in [
+            format!("<{name}>{new}</{name}>"),
+            format!("<{name}/>"),
+            format!("<{name} future=\"true\">{old}</{name}>"),
+            format!("<{name} xmlns=\"urn:foreign\">{old}</{name}>"),
+            format!("{original}{original}"),
+        ] {
+            malformed.push(valid.replacen(&original, &value, 1));
+        }
+    }
+    malformed.push(valid.replacen("<Properties>", "<Properties future=\"true\">", 1));
+    for base_free in [false, true] {
+        for xml in &malformed {
+            let scratch = Scratch::new();
+            let source = scratch.source("Configuration.xml", xml);
+            for existing in [false, true] {
+                let output = scratch
+                    .0
+                    .join(if existing { "existing.cf" } else { "fresh.cf" });
+                let previous = b"exact previous output: never replace on refusal";
+                if existing {
+                    fs::write(&output, previous).unwrap();
+                }
+                let result = older_v85_bootstrap(&source, &output, base_free, "2.21");
+                assert!(!result.status.success(), "admitted: {xml}");
+                let report: Value = serde_json::from_slice(&result.stderr).unwrap();
+                assert_eq!(report["ok"], false, "{report}");
+                assert!(report["publication"].is_null(), "{report}");
+                assert!(
+                    report["errors"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|error| error["message"].as_str().unwrap().contains("Configuration")),
+                    "{report}"
+                );
+                if existing {
+                    assert_eq!(fs::read(&output).unwrap(), previous);
+                } else {
+                    assert!(!output.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn older_v85_vocabulary_does_not_change_the_xml_2_20_contract() {
+    let xml = older_v85_configuration().replace("version=\"2.21\"", "version=\"2.20\"");
+    for base_free in [false, true] {
+        let scratch = Scratch::new();
+        let source = scratch.source("Configuration.xml", &xml);
+        let output = scratch.0.join("refused.cf");
+        assert!(
+            !older_v85_bootstrap(&source, &output, base_free, "2.20")
+                .status
+                .success()
+        );
+        assert!(!output.exists());
+    }
+}

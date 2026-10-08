@@ -31,7 +31,10 @@ use ibcmd_schema::ConfigurationPropertyEvidencedDefault;
 use ibcmd_xml::{
     AttributeKind, DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
     bundled_dialect_registry, bundled_metadata_registry,
-    metadata::{decode_configuration_envelope, parse_configuration_mobile_functionalities},
+    metadata::{
+        decode_configuration_envelope, parse_configuration_mobile_functionalities,
+        validate_older_configuration_v85_defaults,
+    },
     source_tree::{SourceKind, SourceTree},
 };
 
@@ -514,6 +517,7 @@ fn compile_source_tree_mode(
                     .map_err(|error| profile_error("special entries", error))?
                     .compatibility(),
                 extension_overlay,
+                &xml_dialect.to_string(),
             )?);
             decode_configuration_envelope(&document, source_profile.clone(), object_path)
         } else {
@@ -1337,6 +1341,7 @@ fn project_configuration(
     document: &XmlDocument,
     target_compatibility: u32,
     extension_overlay: bool,
+    source_dialect: &str,
 ) -> Result<ConfigurationProjection, BootstrapCompileError> {
     let configuration = only_child_element(document.root(), "MetaDataObject")?;
     if configuration.name().local() != "Configuration" {
@@ -1348,6 +1353,17 @@ fn project_configuration(
         BootstrapCompileError::InvalidConfiguration("Configuration has no Properties".to_owned())
     })?;
     let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    // This compiler's declared Configuration-body cohort writes the older
+    // {68,...} layout. XML 2.21's additional properties are retainable only
+    // when they equal the projection of that layout, checked before reading
+    // properties by local name. The distinct 76 writer owns its own values.
+    if !extension_overlay {
+        validate_older_configuration_v85_defaults(document, source_dialect).map_err(|error| {
+            BootstrapCompileError::InvalidConfiguration(format!(
+                "Configuration 8.5 older-layout projection: {error}"
+            ))
+        })?;
+    }
     let enabled_mobile = parse_configuration_mobile_functionalities(document).map_err(|error| {
         BootstrapCompileError::InvalidConfiguration(format!(
             "UsedMobileApplicationFunctionalities: {error}"
@@ -1512,6 +1528,14 @@ fn project_configuration(
                 reject_unless_evidenced_default(name, element)?;
                 properties.default_roles.clear();
             }
+
+            // Already validated against the actual expanded names, source
+            // dialect and exact old-layout values above. No new tuple slots
+            // or raw fragments are manufactured for these projected defaults.
+            older
+                if !extension_overlay
+                    && ibcmd_schema::configuration_v85_projection::default_property(older)
+                        .is_some() => {}
 
             // -- everything else the evidenced reference covers: the exact
             // platform default is compilable (its bytes are proven), any
@@ -2274,7 +2298,7 @@ mod tests {
 
     fn project_native_text(xml: &str) -> Result<ConfigurationProjection, BootstrapCompileError> {
         let document = XmlReader::from_slice(xml.as_bytes()).unwrap();
-        project_configuration(&document, 80_327, false)
+        project_configuration(&document, 80_327, false, "2.20")
     }
 
     fn entry(path: &str, bytes: &[u8]) -> SourceEntry {
