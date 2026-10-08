@@ -1789,7 +1789,11 @@ fn resolve_list_path(
     let fields = a.fields.as_ref()?;
     let first = cut_index(field.split('.').next()?);
     if !contains_name(fields, first) {
-        return Some(true);
+        // This roster contains result fields, not the DynamicList object's
+        // property providers (e.g. SettingsComposer.Settings.Filter[0].Date).
+        // Without a CURRENT result-field edge, a nested provider is unknown;
+        // absence from the query roster cannot prove absence from that object.
+        return (!field.contains('.')).then_some(true);
     }
     if !field.contains('.') {
         return Some(false);
@@ -1884,6 +1888,23 @@ mod reference_child_tests {
             with_availability(body, Some(&context), || Ok(resolve(path)))
         })
         .unwrap()
+    }
+    #[test]
+    fn dynamic_list_object_providers_are_not_missing_query_result_fields() {
+        let metadata = metadata();
+        let body = body();
+        for minor in [20, 21] {
+            for path in [
+                "List.SettingsComposer.Settings.Filter[0].Date",
+                "list.settingscomposer.settings.filter[1].date",
+                "List.UnknownProvider.Member",
+            ] {
+                assert_eq!(lookup(&metadata, &body, minor, path), None, "{path}");
+            }
+            assert_eq!(lookup(&metadata, &body, minor, "List.MissingResult"), Some(true));
+            assert_eq!(lookup(&metadata, &body, minor, "List.Reference.MissingChild"), Some(true));
+            assert_eq!(lookup(&metadata, &body, minor, "List.Reference.KnownChild"), Some(false));
+        }
     }
     #[test]
     fn provider_expanded_primitive_children_retain_unknown_across_current_owners() {
