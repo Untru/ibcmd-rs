@@ -25,59 +25,6 @@ use crate::metadata_model::export::{
 };
 use crate::metadata_model::xml::Element;
 
-/// The order `<ChildObjects>` lists the kinds in (the stored slots are in
-/// class-uuid order). Measured on the four corpora and the exporter's table;
-/// `Interface` and `ExternalDataSource` have no corpus and are refused.
-const CHILD_KIND_ORDER: [&str; 47] = [
-    "Language",
-    "Subsystem",
-    "StyleItem",
-    "Style",
-    "CommonPicture",
-    "SessionParameter",
-    "Role",
-    "CommonTemplate",
-    "FilterCriterion",
-    "CommonModule",
-    "CommonAttribute",
-    "ExchangePlan",
-    "XDTOPackage",
-    "WebService",
-    "HTTPService",
-    "WSReference",
-    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
-    "EventSubscription",
-    "ScheduledJob",
-    "SettingsStorage",
-    "FunctionalOption",
-    "FunctionalOptionsParameter",
-    "DefinedType",
-    "PaletteColor",
-    "Bot",
-    "CommonCommand",
-    "CommandGroup",
-    "Constant",
-    "CommonForm",
-    "Catalog",
-    "Document",
-    "DocumentNumerator",
-    "Sequence",
-    "DocumentJournal",
-    "Enum",
-    "Report",
-    "DataProcessor",
-    "InformationRegister",
-    "AccumulationRegister",
-    "ChartOfCharacteristicTypes",
-    "ChartOfAccounts",
-    "AccountingRegister",
-    "ChartOfCalculationTypes",
-    "CalculationRegister",
-    "BusinessProcess",
-    "Task",
-    "IntegrationService",
-];
-
 /// The row taken apart: its identity, the seven sections' contained objects
 /// and slots, and the properties tuple.
 struct RootRow<'a> {
@@ -399,9 +346,7 @@ fn child_objects(row: &RootRow<'_>, context: &ExportContext) -> Result<Element> 
     let mut groups = Vec::with_capacity(row.objects.len());
     let mut seen = BTreeSet::new();
     for (kind, uuids) in &row.objects {
-        let order = CHILD_KIND_ORDER
-            .iter()
-            .position(|candidate| candidate == kind)
+        let (order, _) = ibcmd_schema::configuration_root::child_xml_kind(kind)
             .ok_or_else(|| anyhow!("no corpus shows where {kind} objects are listed"))?;
         if !seen.insert(*kind) {
             bail!("two slots list {kind} objects");
@@ -526,8 +471,11 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     }
     let compatibility = version_text(compat_26);
     // The extension compatibility the platform prints: its own edition for
-    // a tuple older than the one it writes, the stored value otherwise.
-    let extension_compatibility = if shape < own_shape {
+    // an older tuple and for ordinary V76; preserve the staged V68 rule.
+    let extension_compatibility = if shape < own_shape || shape == ConfigurationShape::V76 {
+        // Ordinary V76 at stored 80327/80327 still prints 80501 when read
+        // by 8.5 (native 8.5.1.1529). The reader edition is independent of
+        // the stored compatibility used by the inverse compiler.
         platform.compatibility_mode()
     } else if staged {
         version_text(compat_43)
@@ -697,14 +645,28 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     }
 
     let interface_compatibility = match shape {
-        ConfigurationShape::V76 => match (atom(item(t, 38)?)?, atom(item(t, 62)?)?) {
-            ("3", "6") => "Version8_5EnableTaxi",
-            // A configuration 8.5.1.1529 saved from an XML 2.20 tree at
-            // compatibility 8.3.27 (`home_page/one_column_v85/input.cf`):
-            // field 38 keeps the 8.3 code and 62 repeats it.
-            ("2", "2") => "TaxiEnableVersion8_2",
-            (a, b) => bail!("interface compatibility {a}/{b} has no known name"),
-        },
+        ConfigurationShape::V76 => {
+            let first = atom(item(t, 38)?)?;
+            let second = atom(item(t, 62)?)?;
+            let codes = first.parse::<u8>().ok().zip(second.parse::<u8>().ok());
+            let mode = codes.and_then(|(a, b)| {
+                // Stored single-byte scalar coordinates, not padded numbers.
+                (first.len() == 1 && second.len() == 1)
+                    .then(|| ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_stored_codes(a, b))
+                    .flatten()
+            });
+            let mode = mode.ok_or_else(|| {
+                anyhow!("interface compatibility {first}/{second} has no known V76 pair")
+            })?;
+            if !mode.supports_xml_dialect(&context.version) {
+                bail!(
+                    "Configuration <InterfaceCompatibilityMode> {} requires XML 2.21; selected edition is {}",
+                    mode.xml_name(),
+                    context.version
+                );
+            }
+            mode.xml_name()
+        }
         _ => code(
             t,
             38,

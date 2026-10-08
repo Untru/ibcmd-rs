@@ -10042,7 +10042,8 @@ struct ChartOfAccountsProperties {
     default_presentation: &'static str,
     standard_attributes: Vec<RegisterStandardAttribute>,
     characteristics: Characteristics,
-    standard_tabular_sections: Vec<MetadataStandardTabularSection>,
+    /// None is the exact native root `{0}`: no StandardTabularSections XML.
+    standard_tabular_sections: Option<Vec<MetadataStandardTabularSection>>,
     predefined_data_update: &'static str,
     edit_type: &'static str,
     quick_choice: bool,
@@ -10105,7 +10106,8 @@ struct ChartOfCalculationTypesProperties {
     action_period_use: bool,
     standard_attributes: Vec<RegisterStandardAttribute>,
     characteristics: Characteristics,
-    standard_tabular_sections: Vec<MetadataStandardTabularSection>,
+    /// None is the exact native root `{0}`: no StandardTabularSections XML.
+    standard_tabular_sections: Option<Vec<MetadataStandardTabularSection>>,
     predefined_data_update: &'static str,
     include_help_in_contents: bool,
     data_lock_control_mode: &'static str,
@@ -13009,6 +13011,43 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         return None;
     }
     let text = row.text.as_str();
+    // Only a successfully validated extension root owns this projection.
+    // Mere process-wide context presence cannot waive ordinary refusal gates.
+    if extension::active().is_some() {
+        if let Some(xml) = extract_configuration_source_xml(
+            text,
+            uuid,
+            configuration_root_object_refs,
+            source_version,
+        ) {
+            return Some(ExtractedMetadataSourceXml {
+                relative_path: PathBuf::from("Configuration.xml"),
+                xml: xml.into_bytes(),
+            });
+        }
+    }
+    match refs::configuration_v76_interface_mode(text, uuid) {
+        Err(signature) => {
+            // A recognized owner/V76 failure cannot publish a generic root.
+            *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                MetadataSourceFailureClass::Malformed,
+                "Configuration",
+                "interface_compatibility_pair",
+                signature,
+            ));
+            return None;
+        }
+        Ok(Some(_)) if source_version != InfobaseConfigSourceVersion::V2_21 => {
+            *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                MetadataSourceFailureClass::Unsupported,
+                "Configuration",
+                "configuration_root_profile",
+                "v76_root_requires_xml_2_21",
+            ));
+            return None;
+        }
+        Ok(_) => {}
+    }
     if let Some(xml) =
         extract_configuration_source_xml(text, uuid, configuration_root_object_refs, source_version)
     {
@@ -13016,6 +13055,48 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             relative_path: PathBuf::from("Configuration.xml"),
             xml: xml.into_bytes(),
         });
+    }
+    let declared_external_data_source =
+        configuration_root_object_refs
+            .get(uuid)
+            .is_some_and(|reference| {
+                reference.starts_with(ibcmd_schema::external_data_source::FULL_NAME_PREFIX)
+            });
+    let external_data_source_candidate = row.object_code == Some(2)
+        && metadata_object_fields(text).is_some_and(|fields| {
+            fields.len() == ibcmd_schema::external_data_source::BODY_ARITY
+                && field_starts_with(fields.get(1), "{0,")
+        });
+    if declared_external_data_source
+        || external_data_source_candidate
+        || row.kind.as_deref() == Some(ibcmd_schema::external_data_source::KIND)
+    {
+        // The canonical family owns all fields/children. No later generic scan
+        // or header-only fallback is allowed to modify or replace this result.
+        match crate::metadata_model::external_data_source::export_source(
+            text,
+            uuid,
+            source_version.as_str(),
+        ) {
+            Ok((name, xml)) => {
+                let relative_path = PathBuf::from(ibcmd_schema::external_data_source::COLLECTION)
+                    .join(sanitize_source_path_segment(&name))
+                    .with_extension("xml");
+                return Some(ExtractedMetadataSourceXml {
+                    relative_path,
+                    xml: xml.into_bytes(),
+                });
+            }
+            Err(_) => {
+                *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                    MetadataSourceFailureClass::Malformed,
+                    ibcmd_schema::external_data_source::KIND,
+                    "canonical_empty_family",
+                    "invalid_or_unsupported_full_row",
+                ));
+                return None;
+            }
+        }
     }
     let object_code = row.object_code?;
     if object_code == 4
@@ -13739,6 +13820,9 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
         return Ok(extracted);
     }
 
+    if let Some(diagnostic) = owner_graph_diagnostic {
+        return Err(diagnostic);
+    }
     let (class, family, signature) = if row.file_name.contains(METADATA_NAME_SEPARATOR) {
         (
             MetadataSourceFailureClass::Unsupported,
@@ -13773,8 +13857,6 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
             "Form",
             "direct_form_owner_missing",
         )
-    } else if let Some(diagnostic) = owner_graph_diagnostic {
-        return Err(diagnostic);
     } else {
         (
             MetadataSourceFailureClass::Unknown,
@@ -24608,12 +24690,6 @@ fn parse_chart_of_accounts_properties_from_text(
     else {
         return StrictMetadataRoot::Unsupported;
     };
-    if root.first().map(|field| field.trim()) != Some("1") {
-        return StrictMetadataRoot::Unsupported;
-    }
-    if root.get(2).map(|field| field.trim()) != Some("7") {
-        return StrictMetadataRoot::Unsupported;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
@@ -24622,6 +24698,14 @@ fn parse_chart_of_accounts_properties_from_text(
     };
     if fields.first().map(|field| field.trim()) != Some("32") {
         return StrictMetadataRoot::Unsupported;
+    }
+    // The measured own-body marker commits to this complete family. A bad
+    // envelope/count must not reach the property-less legacy fallback.
+    if root.first().map(|field| field.trim()) != Some("1") {
+        return StrictMetadataRoot::Invalid;
+    }
+    if root.get(2).map(|field| field.trim()) != Some("7") {
+        return StrictMetadataRoot::Invalid;
     }
     if root.len() != 10 || fields.len() != 57 {
         return StrictMetadataRoot::Invalid;
@@ -24653,13 +24737,10 @@ fn parse_chart_of_accounts_properties_from_text(
     // required-empty: it is empty on all four charts of the stand and no
     // observation names it.
     if !collections[2].is_empty() {
-        return StrictMetadataRoot::Unsupported;
+        return StrictMetadataRoot::Invalid;
     }
 
-    // An owner the previous gate rejected outright keeps that gate's outcome
-    // when the rest of its record still does not read: the relaxation may add
-    // a complete file, never take one away.
-    let owns_commands_or_templates = !collections[0].is_empty() || !collections[1].is_empty();
+    // A known full record requires complete properties and child ownership.
     parse_chart_of_accounts_properties(
         text,
         header,
@@ -24672,11 +24753,7 @@ fn parse_chart_of_accounts_properties_from_text(
         template_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(if owns_commands_or_templates {
-        StrictMetadataRoot::Unsupported
-    } else {
-        StrictMetadataRoot::Invalid
-    })
+    .unwrap_or(StrictMetadataRoot::Invalid)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -24842,11 +24919,11 @@ fn parse_chart_of_accounts_properties(
         generated_types,
         use_standard_commands: information_register_bool(fields.get(16)?)?,
         include_help_in_contents: information_register_bool(fields.get(17)?)?,
-        ext_dimension_types: if extension::active().is_some()
-            && parse_information_register_uuid(fields.get(19)?)
-                .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
+        ext_dimension_types: if parse_information_register_uuid(fields.get(19)?)
+            .is_some_and(|uuid| information_register_uuid_is_zero(&uuid))
         {
-            // An extension's own chart can name no plan of extra dimensions.
+            // Ordinary charts, as well as extensions, may declare no plan
+            // of extra dimensions. The nil slot writes an empty property.
             String::new()
         } else {
             parse_chart_direct_object_reference(
@@ -24877,7 +24954,7 @@ fn parse_chart_of_accounts_properties(
             "1" => "AsDescription",
             _ => return None,
         },
-        standard_attributes: parse_chart_standard_attributes(
+        standard_attributes: parse_chart_root_standard_attributes(
             fields.get(38)?,
             CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
             ChartStandardAttributeVocabulary::ChartOfAccountsRoot {
@@ -24888,7 +24965,7 @@ fn parse_chart_of_accounts_properties(
             object_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_standard_tabular_sections(
+        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
             fields.get(39)?,
             CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
         )?,
@@ -25001,12 +25078,6 @@ fn parse_chart_of_calculation_types_properties_from_text(
     else {
         return StrictMetadataRoot::Unsupported;
     };
-    if root.first().map(|field| field.trim()) != Some("1") {
-        return StrictMetadataRoot::Unsupported;
-    }
-    if root.get(2).map(|field| field.trim()) != Some("5") {
-        return StrictMetadataRoot::Unsupported;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
@@ -25015,6 +25086,14 @@ fn parse_chart_of_calculation_types_properties_from_text(
     };
     if fields.first().map(|field| field.trim()) != Some("35") {
         return StrictMetadataRoot::Unsupported;
+    }
+    // The measured own-body marker commits to this complete family. A bad
+    // envelope/count must not reach the property-less legacy fallback.
+    if root.first().map(|field| field.trim()) != Some("1") {
+        return StrictMetadataRoot::Invalid;
+    }
+    if root.get(2).map(|field| field.trim()) != Some("5") {
+        return StrictMetadataRoot::Invalid;
     }
     if root.len() != 8 || fields.len() != 63 {
         return StrictMetadataRoot::Invalid;
@@ -25045,13 +25124,10 @@ fn parse_chart_of_calculation_types_properties_from_text(
         .iter()
         .any(|collection| !collection.is_empty())
     {
-        return StrictMetadataRoot::Unsupported;
+        return StrictMetadataRoot::Invalid;
     }
 
-    // An owner the previous gate rejected outright keeps that gate's outcome
-    // when the rest of its record still does not read: the relaxation may add
-    // a complete file, never take one away.
-    let owns_children = !collections[0].is_empty() || !collections[1].is_empty();
+    // A known full record requires complete properties and child ownership.
     parse_chart_of_calculation_types_properties(
         text,
         header,
@@ -25063,11 +25139,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
         form_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(if owns_children {
-        StrictMetadataRoot::Unsupported
-    } else {
-        StrictMetadataRoot::Invalid
-    })
+    .unwrap_or(StrictMetadataRoot::Invalid)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -25293,10 +25365,8 @@ fn parse_chart_of_calculation_types_properties(
             "2" => "OnBasePeriod",
             _ => return None,
         },
-        base_calculation_types: if extension::active().is_some()
-            && fields.get(28)?.trim() == "{0,0}"
-        {
-            // An extension's own chart can name no base calculation types.
+        base_calculation_types: if cct_pair_is(fields.get(28)?, "0", "0") {
+            // The exact empty collection is also valid on ordinary charts.
             String::new()
         } else {
             parse_chart_wrapped_object_reference(
@@ -25306,7 +25376,7 @@ fn parse_chart_of_calculation_types_properties(
             )?
         },
         action_period_use: information_register_bool(fields.get(29)?)?,
-        standard_attributes: parse_chart_standard_attributes(
+        standard_attributes: parse_chart_root_standard_attributes(
             fields.get(43)?,
             &CHART_OF_CALCULATION_TYPES_STANDARD_ATTRIBUTES,
             ChartStandardAttributeVocabulary::NilOnly,
@@ -25314,7 +25384,7 @@ fn parse_chart_of_calculation_types_properties(
             object_refs,
         )?,
         characteristics,
-        standard_tabular_sections: parse_chart_standard_tabular_sections(
+        standard_tabular_sections: parse_chart_root_standard_tabular_sections(
             fields.get(44)?,
             &[
                 (
@@ -25703,6 +25773,44 @@ enum ChartStandardAttributeVocabulary<'a> {
         owner_name: &'a str,
         metadata_object_refs: &'a BTreeMap<String, String>,
     },
+}
+
+// The ordinary chart roots store `{0}` when no standard properties are
+// overridden. Keep this admission local to the two measured owner roots;
+// the shared nested attribute parser retains its existing contract.
+fn parse_chart_root_standard_attributes(
+    value: &str,
+    definitions: &[(&str, &'static str)],
+    vocabulary: ChartStandardAttributeVocabulary<'_>,
+    type_index: &BTreeMap<String, String>,
+    object_refs: &BTreeMap<String, String>,
+) -> Option<Vec<RegisterStandardAttribute>> {
+    if split_information_register_braced_fields(value).is_some_and(|fields| {
+        matches!(
+            ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::from_fields(&fields),
+            Some(ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::Absent)
+        )
+    })
+    {
+        return Some(Vec::new());
+    }
+    parse_chart_standard_attributes(value, definitions, vocabulary, type_index, object_refs)
+}
+
+fn parse_chart_root_standard_tabular_sections(
+    value: &str,
+    definitions: &[ChartStandardTabularSectionDefinition],
+) -> Option<Option<Vec<MetadataStandardTabularSection>>> {
+    if split_information_register_braced_fields(value).is_some_and(|fields| {
+        matches!(
+            ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::from_fields(&fields),
+            Some(ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::Absent)
+        )
+    })
+    {
+        return Some(None);
+    }
+    parse_chart_standard_tabular_sections(value, definitions).map(Some)
 }
 
 fn parse_chart_standard_attributes(
@@ -38241,6 +38349,12 @@ fn format_configuration_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Configuration", header, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        // Configuration's registered 2.21 frame includes the palette after
+        // logform, as the canonical writer and native 8.5 export do.
+        xml = String::from_utf8(declare_palette_namespace_beside_style(xml.into_bytes()))
+            .expect("palette declaration preserves UTF-8 Configuration text");
+    }
     let mut insert = String::new();
     push_optional_simple_property_xml(&mut insert, "NamePrefix", properties.name_prefix.as_deref());
     push_optional_simple_property_xml(
@@ -38260,6 +38374,11 @@ fn format_configuration_source_xml(
             ));
         }
         insert.push_str("\t\t\t</UsePurposes>\r\n");
+    } else if properties
+        .configuration_properties_evidenced_default_block
+        .is_some()
+    {
+        push_optional_simple_property_xml(&mut insert, "UsePurposes", Some(""));
     }
     let evidenced = properties
         .configuration_properties_evidenced_default_block
@@ -38418,7 +38537,7 @@ fn format_configuration_source_xml(
         push_optional_simple_property_xml(
             &mut insert,
             "DefaultLanguage",
-            properties.default_language.as_deref(),
+            Some(properties.default_language.as_deref().unwrap_or("")),
         );
     } else {
         push_used_mobile_application_functionalities_xml(
@@ -39551,7 +39670,9 @@ fn format_chart_of_accounts_source_xml(
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
     properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
-    push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
+    if let Some(sections) = &chart.standard_tabular_sections {
+        push_chart_standard_tabular_sections_xml(&mut properties, sections);
+    }
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
 \t\t\t<EditType>{}</EditType>\r\n\
@@ -39731,7 +39852,9 @@ fn format_chart_of_calculation_types_source_xml(
     ));
     push_register_standard_attributes_xml(&mut properties, &chart.standard_attributes);
     properties.push_str(&render_metadata_characteristics_xml(&chart.characteristics).ok()?);
-    push_chart_standard_tabular_sections_xml(&mut properties, &chart.standard_tabular_sections);
+    if let Some(sections) = &chart.standard_tabular_sections {
+        push_chart_standard_tabular_sections_xml(&mut properties, sections);
+    }
     properties.push_str(&format!(
         "\t\t\t<PredefinedDataUpdate>{}</PredefinedDataUpdate>\r\n\
 \t\t\t<IncludeHelpInContents>{}</IncludeHelpInContents>\r\n\
@@ -44399,10 +44522,9 @@ fn parse_filter_criterion_type_pattern(
             FilterCriterionDecodeReason::Shape,
         )
     })?;
-    // A criterion the extension adopted keeps no type pattern of its own: the
-    // type stays that of the extended configuration.
-    if extension::active().is_some()
-        && fields.len() == 1
+    // Ordinary criteria may have no declared types. Adopted extension
+    // criteria use the same empty pattern to inherit the existing type.
+    if fields.len() == 1
         && fields
             .first()
             .is_some_and(|value| owner_graph::FilterCriterionPhysicalSchema::pattern(value.trim()))
@@ -44839,7 +44961,11 @@ fn format_filter_criterion_source_xml(
         xml.insert_str(index, &internal_info);
     }
 
-    let mut insert = format_metadata_types_xml(&properties.value_types);
+    let mut insert = if properties.value_types.is_empty() {
+        ibcmd_xml::metadata::FILTER_CRITERION_EMPTY_TYPE_XML.to_owned()
+    } else {
+        format_metadata_types_xml(&properties.value_types)
+    };
     insert.push_str(&format!(
         "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         xml_bool(properties.use_standard_commands)
@@ -46616,4 +46742,10 @@ mod catalog_tabular_section_wrapper_tests {
 }
 
 #[cfg(test)]
+mod configuration_interface_pair_tests;
+
+#[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod external_data_source_tests;

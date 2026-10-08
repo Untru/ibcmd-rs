@@ -401,6 +401,16 @@ pub(super) fn metadata_source_for_object_fields(
 ) -> Option<(&'static str, &'static str)> {
     let header_index = metadata_header_field_index(&fields, uuid);
 
+    // EDS and SettingsStorage both wrap their own header in {0,...}. A body
+    // candidate is never allowed to fall through to another code2 family:
+    // promotion requires the complete schema-owned row and exact own UUID.
+    if code == 2
+        && fields.len() == ibcmd_schema::external_data_source::BODY_ARITY
+        && field_starts_with(fields.get(1), "{0,")
+    {
+        return crate::metadata_model::external_data_source::source_family(text, uuid);
+    }
+
     match code {
         0 if header_index == Some(1)
             && ibcmd_schema::websocket_client::WebSocketClientLayout::recognizes_fields(fields) =>

@@ -79,8 +79,13 @@ pub(crate) fn header_elements(header: &Header) -> Result<[Element; 3]> {
 /// `{N,"lang","text",...}` -> `<qname><v8:item><v8:lang/><v8:content/></v8:item>...`.
 pub(crate) fn localized_element(qname: &str, node: &Brace) -> Result<Element> {
     let items = list(node)?;
-    let count = number(item(items, 0)?)? as usize;
-    if items.len() != 1 + 2 * count {
+    let count = usize::try_from(number(item(items, 0)?)?)
+        .map_err(|_| anyhow!("invalid localized string count {}", short(node)))?;
+    let expected_len = count
+        .checked_mul(2)
+        .and_then(|value| value.checked_add(1))
+        .ok_or_else(|| anyhow!("localized string count overflows {}", short(node)))?;
+    if items.len() != expected_len {
         bail!("bad localized string {}", short(node));
     }
     let mut element = el(qname);

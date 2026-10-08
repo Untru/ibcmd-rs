@@ -48793,6 +48793,33 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
                 < v20_xml.find("</Properties>").unwrap()
         );
 
+        // The same stored short record retains its TextToSpeech tail when
+        // read as XML 2.21; the reading edition does not lengthen the record.
+        let (short_20, _) =
+            parse_configuration_used_mobile_application_functionalities(&v20_text, &uuid, "2.20")
+                .unwrap();
+        let (short_21, messages) =
+            parse_configuration_used_mobile_application_functionalities(&v20_text, &uuid, "2.21")
+                .unwrap();
+        assert!(messages.is_empty());
+        assert_eq!(short_21.len(), 38);
+        assert_eq!(
+            short_21
+                .iter()
+                .map(|item| (item.name, item.use_functionality))
+                .collect::<Vec<_>>(),
+            short_20
+                .iter()
+                .map(|item| (item.name, item.use_functionality))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            short_21
+                .last()
+                .map(|item| (item.name, item.use_functionality)),
+            Some(("TextToSpeech", true))
+        );
+
         let (uuid, v21_text) = flat_configuration_mobile_text(code, field_count, &raw38);
         let v21_xml = extract_configuration_source_xml(
             &v21_text,
@@ -48818,6 +48845,12 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
     let ids38 = configuration_mobile_functionality_ids(38);
     let valid37 = configuration_mobile_raw(37, &ids37, None, Some("0"));
     let valid38 = configuration_mobile_raw(38, &ids38, None, Some("0"));
+    let incomplete36 = configuration_mobile_raw(
+        36,
+        &configuration_mobile_functionality_ids(36),
+        None,
+        Some("0"),
+    );
 
     let mut reordered = ids37.clone();
     reordered.swap(0, 1);
@@ -48895,7 +48928,13 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
         // declare the full 38 and are exported at 2.20, and every one of them
         // prints the whole block. The dialect decides whether the table's last
         // entry is printed, not how long the record may be.
-        ("2.21 count", 67, 60, valid37.as_str(), "2.21"),
+        (
+            "2.21 incomplete version-2 count",
+            67,
+            60,
+            incomplete36.as_str(),
+            "2.21",
+        ),
         ("unknown source version", 67, 60, valid37.as_str(), "9.99"),
     ] {
         let (uuid, text) = flat_configuration_mobile_text(code, field_count, raw);
@@ -53414,8 +53453,8 @@ fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
     );
     let cases = [
         (
-            "empty Pattern",
-            replace_filter_criterion_test_value(&fixture.raw, &pattern, r#"{"Pattern"}"#),
+            "missing Pattern token",
+            replace_filter_criterion_test_value(&fixture.raw, &pattern, "{}"),
         ),
         (
             "Pattern token",
@@ -65435,11 +65474,27 @@ fn register_localized_field(values: &[(&str, &str)]) -> String {
 }
 
 fn exact_register_standard_attributes_for_test(definitions: &[(&str, &str)]) -> String {
+    exact_register_standard_attributes_with_fill_for_test(definitions, None)
+}
+
+fn exact_register_standard_attributes_with_fill_for_test(
+    definitions: &[(&str, &str)],
+    fill_value: Option<&str>,
+) -> String {
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, name) in definitions {
         payload.push(format!("{{{marker}}}"));
         payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
         let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if let Some(fill_value) = fill_value {
+            let index = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+                .iter()
+                .position(|key| {
+                    *key == INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID
+                })
+                .expect("the authored property bag declares its fill-value key");
+            values[index] = fill_value.to_owned();
+        }
         if *name == "Period" {
             values[1] = information_register_standard_attribute_direct_enum_for_test(
                 INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
@@ -80181,4 +80236,125 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             assert!(!xml.contains("name=\"RecordType\""));
         }
     }
+}
+
+#[test]
+fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
+    assert_eq!(
+        parse_information_register_owner_localized_value("{0}"),
+        Some(Vec::new())
+    );
+    assert!(parse_information_register_owner_localized_value("{1,0}").is_none());
+    let index = BTreeMap::new();
+    let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
+    let attributes = parse_chart_root_standard_attributes(
+        "{0}",
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert!(attributes.is_empty());
+    // This root-only admission must not turn unproved ordinary nested
+    // standard-attribute absence into accepted/defaulted content.
+    assert!(
+        parse_chart_standard_attributes(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_attributes(
+            "{0,0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    let complete = exact_register_standard_attributes_for_test(
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+    );
+    let present = parse_chart_root_standard_attributes(
+        &complete,
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS.len()
+    );
+    for (attribute, (_, name)) in present
+        .iter()
+        .zip(CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS)
+    {
+        assert_eq!(attribute.name, *name);
+    }
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{1,{0,0}}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .is_none()
+    );
+    let mut payload = vec![
+        "0".to_owned(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+            .len()
+            .to_string(),
+    ];
+    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+        payload.push((*marker).to_owned());
+        if definitions.iter().any(|(_, name)| *name == "LineNumber") {
+            let numeric_fill = exact_register_standard_attributes_for_test(definitions);
+            assert!(
+                parse_chart_standard_attributes(
+                    &numeric_fill,
+                    definitions,
+                    vocabulary(),
+                    &index,
+                    &index,
+                )
+                .is_none(),
+                "nested chart attributes must still refuse numeric LineNumber fill"
+            );
+        }
+        let attributes =
+            exact_register_standard_attributes_with_fill_for_test(definitions, Some(r#"{"U"}"#));
+        payload.push(format!(
+            "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
+        ));
+    }
+    let present = parse_chart_root_standard_tabular_sections(
+        &format!("{{1,{{{}}}}}", payload.join(",")),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    )
+    .unwrap()
+    .expect("a complete native section remains present");
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS.len()
+    );
+    let mut xml = String::new();
+    push_chart_standard_tabular_sections_xml(&mut xml, &present);
+    assert!(xml.contains("<StandardTabularSections>"));
+    assert!(xml.contains("authored section"));
+    assert!(xml.contains("name=\"ExtDimensionTypes\""));
 }

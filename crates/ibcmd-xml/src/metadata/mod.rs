@@ -5,14 +5,18 @@ mod characteristics;
 mod children;
 mod common;
 mod common_objects;
+mod configuration_mobile;
+mod configuration_v85_projection;
 mod constant;
 mod defined_type;
+mod external_data_source;
 mod fallback;
 mod functional_option;
 mod functional_options_parameter;
 mod hierarchical_objects;
 mod language;
 mod order;
+mod package;
 mod register_objects;
 mod registry;
 mod services;
@@ -35,8 +39,11 @@ pub use common_objects::{
     register_command_group_codec, register_common_command_codec, register_common_module_codec,
     register_common_picture_codec,
 };
+pub use configuration_mobile::parse_configuration_mobile_functionalities;
+pub use configuration_v85_projection::validate_older_configuration_v85_defaults;
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
+pub use external_data_source::decode_empty_external_data_source;
 pub use functional_option::register_functional_option_codec;
 pub use functional_options_parameter::register_functional_options_parameter_codec;
 pub use hierarchical_objects::{
@@ -45,6 +52,7 @@ pub use hierarchical_objects::{
 };
 pub use language::register_language_codec;
 pub use order::{MetadataOrderError, order_metadata_features, order_produced_type_values};
+pub use package::{PackageIntent, inspect_package_intent};
 pub use register_objects::{
     register_accounting_register_codec, register_accumulation_register_codec,
     register_calculation_register_codec, register_chart_of_accounts_codec,
@@ -78,3 +86,8 @@ pub fn data_processor_builtin_type_namespace_attribute(reference: &str) -> Optio
         _ => None,
     }
 }
+
+/// A FilterCriterion with an empty type pattern keeps the Type property as
+/// a self-closing element, at the standard metadata property indentation.
+/// Populated patterns retain their existing typed children and qualifiers.
+pub const FILTER_CRITERION_EMPTY_TYPE_XML: &str = "\t\t\t<Type/>\r\n";

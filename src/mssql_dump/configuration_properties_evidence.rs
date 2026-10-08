@@ -161,32 +161,15 @@ fn typed_field(
 pub(crate) fn parse_configuration_properties_evidenced_default_block(
     fields: &[&str],
 ) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
-    parse_configuration_properties_evidenced_default_block_on(fields, false)
+    parse_configuration_properties_evidenced_default_block_on(fields, None)
 }
 
-/// The platform 8.5 reading of `InterfaceCompatibilityMode`'s stored digit.
-///
-/// 8.5.1.1150 BSP 3.2.1.356 stores `3` and its native `Configuration.xml`
-/// prints `Version8_5EnableTaxi`, where 8.3.27 prints the same digit as
-/// `Taxi`: the edition that reads the tuple decides the spelling. No other
-/// digit has been seen under 8.5, so every other one refuses.
-fn interface_compatibility_mode_xml_8_5_1(digit: u8) -> Option<&'static str> {
-    match digit {
-        b'3' => Some("Version8_5EnableTaxi"),
-        // The platform keeps the modes it had: 8.5 lists `Version8_2` and
-        // `TaxiEnableVersion8_2` beside the modes it adds.
-        b'0' => Some("Version8_2"),
-        b'2' => Some("TaxiEnableVersion8_2"),
-        _ => None,
-    }
-}
-
-/// As `parse_configuration_properties_evidenced_default_block`, read by the
-/// platform edition that wrote the tuple (`tuple_8_5_1`: the 8.5 `{76,...}` tuple,
-/// normalized to the 61-field shape).
+/// The normalized fields retain all existing default checks. A V76 caller
+/// must separately retain the typed pair from its original owner/tuple; the
+/// normalized member 38 alone cannot distinguish Taxi from Version8_5EnableTaxi.
 pub(crate) fn parse_configuration_properties_evidenced_default_block_on(
     fields: &[&str],
-    tuple_8_5_1: bool,
+    interface: Option<ibcmd_schema::configuration_root::V76InterfaceCompatibility>,
 ) -> Result<ConfigurationPropertiesEvidencedFields, ConfigurationPropertiesEvidenceError> {
     let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
     let reference = &*EVIDENCED_DEFAULT_REFERENCE_FIELDS;
@@ -225,8 +208,9 @@ pub(crate) fn parse_configuration_properties_evidenced_default_block_on(
         policy.interface_compatibility_mode_tuple_field(),
         "InterfaceCompatibilityMode",
         |digit| {
-            if tuple_8_5_1 {
-                interface_compatibility_mode_xml_8_5_1(digit)
+            if let Some(mode) = interface {
+                let (first, _) = mode.stored_codes();
+                (digit == b'0' + first).then_some(mode.xml_name())
             } else {
                 policy.interface_compatibility_mode_xml(digit)
             }

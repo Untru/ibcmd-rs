@@ -1,4 +1,6 @@
 use super::*;
+use ibcmd_schema::configuration_mobile::FUNCTIONALITIES as CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES;
+use ibcmd_schema::configuration_v85_projection as configuration_v85_defaults;
 
 #[allow(dead_code)]
 pub(super) fn build_metadata_command_reference_index(
@@ -3669,19 +3671,6 @@ fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(Strin
     Some((envelope.identity, header.name))
 }
 
-/// The configuration properties platform 8.5 adds, in the element order its
-/// `Configuration.xml` writes them.
-const CONFIGURATION_AUXILIARY_FORMS_8_5_1: [&str; 8] = [
-    "AuxiliaryReportForm",
-    "AuxiliaryReportVariantForm",
-    "AuxiliaryReportSettingsForm",
-    "AuxiliaryDynamicListSettingsForm",
-    "AuxiliaryDataHistoryChangeHistoryForm",
-    "AuxiliaryDataHistoryVersionDataForm",
-    "AuxiliaryDataHistoryVersionDifferencesForm",
-    "AuxiliaryCollaborationSystemUsersChoiceForm",
-];
-
 /// What 8.5 writes for the properties it adds to a configuration: read from
 /// the members an 8.5 `{76,...}` tuple appends, or the platform's defaults for
 /// a configuration still in the 8.3.27 `{68,...}` tuple.
@@ -3706,13 +3695,13 @@ fn configuration_properties_8_5_1(
         // automatic theme, data opened in dialogs, no captions, no 8.5
         // interface migration.
         return Some(ConfigurationPropertiesV8_5_1 {
-            auxiliary_forms: vec![None; CONFIGURATION_AUXILIARY_FORMS_8_5_1.len()],
-            interface_variant: "NavigationLeft",
-            theme: "Auto",
-            windows_open_variant: "OpenDataInDialogs",
+            auxiliary_forms: vec![None; configuration_v85_defaults::AUXILIARY_FORM_NAMES.len()],
+            interface_variant: configuration_v85_defaults::INTERFACE_VARIANT,
+            theme: configuration_v85_defaults::THEME,
+            windows_open_variant: configuration_v85_defaults::WINDOWS_OPEN_VARIANT,
             caption: Vec::new(),
             short_caption: Vec::new(),
-            migration_mode: "DontUse",
+            migration_mode: configuration_v85_defaults::MIGRATION_MODE,
         });
     }
     let start = text.find("{76,")?;
@@ -3721,9 +3710,10 @@ fn configuration_properties_8_5_1(
         return None;
     }
     // Members 61, 63 and 66-68 carry the four enumerations; 62 is the 8.5
-    // code of `InterfaceCompatibilityMode`, which is read from member 38 (the
-    // compiler, `metadata_model::root`, writes 3 and 6 for
-    // `Version8_5EnableTaxi`, 2 and 2 for `TaxiEnableVersion8_2`).
+    // code of `InterfaceCompatibilityMode`, paired with member 38 by the
+    // shared schema policy (Taxi 3/3, Version8_5EnableTaxi 3/6,
+    // TaxiEnableVersion8_2 2/2). Interface mode is decoded separately from
+    // the owner-validated stored tuple, before normalization loses member 62.
     // Two combinations are on record, so only they are read; any other
     // refuses rather than attributing codes to properties on a guess:
     // - BSP 3.2.1.356 under 8.5.1.1150: tabs, the 8.5 interface migration;
@@ -3784,7 +3774,7 @@ fn insert_configuration_properties_8_5_1_xml(
     }
     let mut inserts = Vec::new();
     let mut forms = String::new();
-    for (name, value) in CONFIGURATION_AUXILIARY_FORMS_8_5_1
+    for (name, value) in configuration_v85_defaults::AUXILIARY_FORM_NAMES
         .iter()
         .zip(&properties.auxiliary_forms)
     {
@@ -3903,6 +3893,13 @@ pub(super) fn extract_configuration_source_xml(
     if uuid_fields.first()?.trim() != uuid {
         return None;
     }
+    // Capture both coordinates from the SAME owner before normalization.
+    // Shared mode vocabulary does not prove the whole V76 root representable
+    // in XML 2.20: keep canonical profile admission and refuse partial output.
+    let interface = configuration_v76_interface_mode(text, uuid).ok()?;
+    if interface.is_some() && source_version != InfobaseConfigSourceVersion::V2_21 {
+        return None;
+    }
     let header_uuid = parse_configuration_header_uuid(text)?;
     let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
     header.uuid = uuid.to_string();
@@ -3912,14 +3909,9 @@ pub(super) fn extract_configuration_source_xml(
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
     let evidenced_property_fields = configuration_root_property_fields(text, uuid);
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
-        // The stored interface digit is numbered by the tuple that stores it:
-        // an 8.5 writer reads a `{76,...}` tuple's `3` as `Version8_5EnableTaxi`
-        // (BSP 3.2.1.356) and a `{68,...}` tuple's `2` as 8.3.27 does
-        // (`TaxiEnableVersion8_2`, ERP УХ).
-        let tuple_8_5_1 = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
         match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block_on(
             property_fields,
-            tuple_8_5_1 && source_version == InfobaseConfigSourceVersion::V2_21,
+            interface,
         ) {
             Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
             Err(
@@ -3977,6 +3969,17 @@ pub(super) fn extract_configuration_source_xml(
         // empty element over a record that declares members.
         properties.allowed_incoming_share_request_types =
             parse_configuration_allowed_incoming_share_request_types(text, uuid)?;
+        // A complete Properties projection distinguishes an empty list from
+        // an undecodable one; the legacy partial route above stays unchanged.
+        properties.use_purposes = parse_configuration_use_purposes(text, uuid)?;
+        let fields = evidenced_property_fields.as_deref()?;
+        if properties.default_language.is_none() {
+            let stored = fields.get(10)?.trim();
+            let language = parse_uuid_field(stored)?;
+            if !information_register_uuid_is_zero(&language) {
+                return None;
+            }
+        }
     }
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
         // A default style naming no style of the container cannot be spelled.
@@ -4516,6 +4519,24 @@ pub(super) fn parse_configuration_use_purposes(
 ) -> Option<Vec<&'static str>> {
     let fields = configuration_root_property_fields(text, uuid)?;
     let raw_fields = split_1c_braced_fields(fields.get(33)?.trim(), 0)?;
+    let count_token = raw_fields.first()?.trim();
+    let count = count_token.parse::<usize>().ok()?;
+    // Declared collection counts use canonical unsigned decimal spelling.
+    if count_token != count.to_string() {
+        return None;
+    }
+    if count == 0 {
+        // Only the validated native Properties owner admits the compiler's
+        // empty collection, never a partial SQL tuple or a nested decoy.
+        let layout = parse_configuration_root_layout(text, uuid)?;
+        return (raw_fields.len() == 1
+            && layout.contained_objects.first().is_some_and(|owner| {
+                owner
+                    .class_id
+                    .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+            }))
+        .then(Vec::new);
+    }
     if raw_fields.len() != 2 || raw_fields.first()?.trim() != "1" {
         return None;
     }
@@ -4529,47 +4550,6 @@ pub(super) fn parse_configuration_use_purposes(
     }
     Some(vec!["PlatformApplication"])
 }
-
-const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [
-    (0, "Biometrics"),
-    (1, "Location"),
-    (2, "BackgroundLocation"),
-    (3, "BluetoothPrinters"),
-    (4, "WiFiPrinters"),
-    (5, "Contacts"),
-    (6, "Calendars"),
-    (7, "PushNotifications"),
-    (8, "LocalNotifications"),
-    (9, "InAppPurchases"),
-    (10, "PersonalComputerFileExchange"),
-    (11, "Ads"),
-    (12, "NumberDialing"),
-    (13, "CallProcessing"),
-    (14, "CallLog"),
-    (15, "AutoSendSMS"),
-    (16, "ReceiveSMS"),
-    (17, "SMSLog"),
-    (18, "Camera"),
-    (19, "Microphone"),
-    (20, "MusicLibrary"),
-    (21, "PictureAndVideoLibraries"),
-    (22, "AudioPlaybackAndVibration"),
-    (23, "BackgroundAudioPlaybackAndVibration"),
-    (24, "InstallPackages"),
-    (25, "OSBackup"),
-    (26, "ApplicationUsageStatistics"),
-    (27, "BarcodeScanning"),
-    (32, "BackgroundAudioRecording"),
-    (33, "AllFilesAccess"),
-    (34, "Videoconferences"),
-    (35, "NFC"),
-    (36, "DocumentScanning"),
-    (37, "SpeechToText"),
-    (38, "Geofences"),
-    (39, "IncomingShareRequests"),
-    (40, "AllIncomingShareRequestsTypesProcessing"),
-    (41, "TextToSpeech"),
-];
 
 /// The OS permissions a `<app:permissionMessage>` can explain.
 ///
@@ -4702,7 +4682,13 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         ("2.17", n) if n + 1 == full => {
             parse_1c_bool_flag(trailing_field.trim())?;
         }
-        ("2.20", n) if n + 1 == full => {
+        // Both current XML editions print TextToSpeech. Its stored flag is
+        // the shorter record's tail, independently of the reading edition.
+        (dialect, n)
+            if n + 1 == full
+                && ibcmd_schema::configuration_mobile::source_functionalities(Some(dialect))
+                    .is_some_and(|roster| roster.len() == full) =>
+        {
             functionalities.push(ConfigurationMobileApplicationFunctionality {
                 name: CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[full - 1].1,
                 use_functionality: parse_1c_bool_flag(trailing_field.trim())?,
@@ -4833,7 +4819,10 @@ fn parse_configuration_mobile_application_permission_messages(
     Some(messages)
 }
 
-fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+fn configuration_root_stored_property_fields<'a>(
+    text: &'a str,
+    uuid: &str,
+) -> Option<Vec<&'a str>> {
     parse_configuration_root_layout(text, uuid)?;
     let envelope = parse_configuration_root_envelope(text)?;
     // Both footer variants reach this 60/61/77-length tuple shape and feed
@@ -4866,6 +4855,54 @@ fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<V
     if !is_configuration_root_property_header(fields.get(1)?.trim(), &object_id) {
         return None;
     }
+    Some(fields)
+}
+
+/// Exact V76 interface pair from the validated Configuration owner, never a
+/// nested textual `{76,` hit or the normalized 61-field projection.
+/// Err commits the recognized V76 family to an addressed publication refusal.
+pub(super) fn configuration_v76_interface_mode(
+    text: &str,
+    uuid: &str,
+) -> Result<Option<ibcmd_schema::configuration_root::V76InterfaceCompatibility>, &'static str> {
+    let Some(fields) = configuration_root_stored_property_fields(text, uuid) else {
+        return Ok(None);
+    };
+    if fields.first().map(|field| field.trim()) != Some("76") {
+        return Ok(None);
+    }
+    // A partial SQL/per-field root may have the same tuple tag and header,
+    // but its arbitrary section class does not own native Properties. Keep
+    // that existing dialect out of this native pair/profile authority.
+    let Some(layout) = parse_configuration_root_layout(text, uuid) else {
+        return Ok(None);
+    };
+    if !layout.contained_objects.first().is_some_and(|owner| {
+        owner
+            .class_id
+            .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+    }) {
+        return Ok(None);
+    }
+    if fields.len() != 77 {
+        return Err("invalid_v76_tuple_arity");
+    }
+    let digit = |field: &str| {
+        let bytes = field.trim().as_bytes();
+        match bytes {
+            [digit @ b'0'..=b'9'] => Some(*digit - b'0'),
+            _ => None,
+        }
+    };
+    let first = digit(fields[38]).ok_or("invalid_v76_interface_scalar")?;
+    let second = digit(fields[62]).ok_or("invalid_v76_interface_scalar")?;
+    ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_stored_codes(first, second)
+        .map(Some)
+        .ok_or("unknown_v76_interface_pair")
+}
+
+fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+    let fields = configuration_root_stored_property_fields(text, uuid)?;
     // Normalize the older and the 8.5 shapes to the canonical `{68,...}` one
     // (see `normalize_short_configuration_root_property_fields` for the
     // evidence) so `parse_configuration_properties_evidenced_default_block`'s
@@ -4988,57 +5025,6 @@ fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
 }
 
 const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
-
-const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 47] = [
-    "Language",
-    "Subsystem",
-    "StyleItem",
-    "Style",
-    "CommonPicture",
-    "SessionParameter",
-    "Role",
-    "CommonTemplate",
-    "FilterCriterion",
-    "CommonModule",
-    "CommonAttribute",
-    "ExchangePlan",
-    "XDTOPackage",
-    "WebService",
-    "HTTPService",
-    "WSReference",
-    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
-    "EventSubscription",
-    "ScheduledJob",
-    "SettingsStorage",
-    "FunctionalOption",
-    "FunctionalOptionsParameter",
-    "DefinedType",
-    // 8.5: the palette colours follow the defined types (BSP 3.2.1.356).
-    "PaletteColor",
-    "Bot",
-    "CommonCommand",
-    "CommandGroup",
-    "Constant",
-    "CommonForm",
-    "Catalog",
-    "Document",
-    "DocumentNumerator",
-    "Sequence",
-    "DocumentJournal",
-    "Enum",
-    "Report",
-    "DataProcessor",
-    "InformationRegister",
-    "AccumulationRegister",
-    "ChartOfCharacteristicTypes",
-    "ChartOfAccounts",
-    "AccountingRegister",
-    "ChartOfCalculationTypes",
-    "CalculationRegister",
-    "BusinessProcess",
-    "Task",
-    "IntegrationService",
-];
 
 /// The evidenced Configuration root envelope shared by every root consumer:
 /// `{2,{Identity},N,<section 1>...<section N>,{footer}}` — a flat field list
@@ -5399,11 +5385,7 @@ fn resolve_configuration_root_child_objects(
 }
 
 fn configuration_root_child_kind(kind: &str) -> Option<(usize, &'static str)> {
-    CONFIGURATION_ROOT_CHILD_KIND_ORDER
-        .iter()
-        .enumerate()
-        .find(|(_, candidate)| **candidate == kind)
-        .map(|(order, kind)| (order, *kind))
+    ibcmd_schema::configuration_root::child_xml_kind(kind)
 }
 
 pub(super) fn parse_configuration_localized_property(
@@ -5814,6 +5796,161 @@ pub(super) fn parse_metadata_command_reference_blob(
     };
     let header = parse_metadata_header_from_text(&text, uuid)?;
     Some((kind.to_string(), header, text))
+}
+
+#[cfg(test)]
+mod mobile_short_table_tests {
+    use super::*;
+    use crate::metadata_model::{
+        DescriptorContext,
+        brace::{Brace, parse_row, serialize},
+        compile_descriptor,
+    };
+
+    const ROOT_UUID: &str = "10000000-0000-4000-8000-000000000435";
+
+    fn compiled_root(enabled: &[u32]) -> Brace {
+        // Same complete cleanroom section envelope as the public package
+        // tests. The actual production compiler, not a hand-written tuple,
+        // selects compatibility 8.3.24's V67/37-pair physical representation.
+        let info = [
+            "9cd510cd-abfc-11d4-9434-004095e12fc7",
+            "9fcd25a0-4822-11d4-9414-008048da11f9",
+            "e3687481-0a87-462c-a166-9f34594f9bba",
+            "9de14907-ec23-4a07-96f0-85521cb6b53b",
+            "51f2d5d8-ea4d-4064-8892-82951750031e",
+            "e68182ea-4237-4383-967f-90c1e3370bc7",
+            "fb282519-d103-4dd3-bc12-cb271d631dfc",
+        ].iter().enumerate().map(|(index, class)| format!(
+            "<xr:ContainedObject><xr:ClassId>{class}</xr:ClassId><xr:ObjectId>20000000-0000-4000-8000-{:012}</xr:ObjectId></xr:ContainedObject>", index+1
+        )).collect::<String>();
+        let flags = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES.iter().map(|(id,name)| format!(
+            "<app:functionality><app:functionality>{name}</app:functionality><app:use>{}</app:use></app:functionality>", enabled.contains(id)
+        )).collect::<String>();
+        let source = format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" version=\"2.20\"><Configuration uuid=\"{ROOT_UUID}\"><InternalInfo>{info}</InternalInfo><Properties><Name>OwnShortMobile</Name><Synonym/><Comment/><DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>Russian</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode><UsedMobileApplicationFunctionalities>{flags}</UsedMobileApplicationFunctionalities></Properties><ChildObjects/></Configuration></MetaDataObject>"
+        );
+        let root = Path::new(".");
+        let path = root.join("Configuration.xml");
+        let files = [(
+            path.clone(),
+            std::sync::Arc::new(source.as_bytes().to_vec()),
+        )];
+        let context = DescriptorContext::with_files(root, "2.20", &files).unwrap();
+        parse_row(&compile_descriptor("Configuration", &path, source.as_bytes(), &context).unwrap())
+            .unwrap()
+    }
+
+    fn table(row: &mut Brace) -> &mut Vec<Brace> {
+        row.as_list_mut().unwrap()[3].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[53]
+            .as_list_mut()
+            .unwrap()
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_keeps_tail_flag_and_full_roster_both_xml_editions() {
+        let all = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for enabled in [vec![], vec![1, 18, 35, 41], all] {
+            let mut row = compiled_root(&enabled);
+            let tuple = row.at(&[3, 1, 1]).unwrap().as_list().unwrap();
+            assert_eq!(tuple[0].as_atom(), Some("67"));
+            assert_eq!(tuple.len(), 60);
+            let own = table(&mut row);
+            assert_eq!(own[0].as_atom(), Some("2"));
+            assert_eq!(own[1].as_atom(), Some("37"));
+            assert_eq!(own.len(), 40);
+            assert_eq!(
+                own[39].as_atom(),
+                Some(if enabled.contains(&41) { "1" } else { "0" })
+            );
+            let text = serialize(&row);
+            for (dialect, version) in [
+                ("2.20", InfobaseConfigSourceVersion::V2_20),
+                ("2.21", InfobaseConfigSourceVersion::V2_21),
+            ] {
+                let (actual, messages) =
+                    parse_configuration_used_mobile_application_functionalities(
+                        &text, ROOT_UUID, dialect,
+                    )
+                    .unwrap();
+                assert!(messages.is_empty());
+                let expected = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                    .iter()
+                    .map(|(id, name)| (*name, enabled.contains(id)))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|item| (item.name, item.use_functionality))
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                let xml =
+                    extract_configuration_source_xml(&text, ROOT_UUID, &BTreeMap::new(), version)
+                        .unwrap();
+                let document = ibcmd_xml::XmlReader::from_slice(xml.as_bytes()).unwrap();
+                assert_eq!(
+                    ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)
+                        .unwrap(),
+                    Some(enabled.clone())
+                );
+                assert_eq!(xml.matches("<app:functionality>").count(), 76);
+            }
+            let (older, _) = parse_configuration_used_mobile_application_functionalities(
+                &text, ROOT_UUID, "2.17",
+            )
+            .unwrap();
+            assert_eq!(older.len(), 37);
+            assert!(older.iter().all(|item| item.name != "TextToSpeech"));
+        }
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_rejects_malformed_counts_ids_flags_and_messages() {
+        let original = compiled_root(&[41]);
+        for case in 0..10 {
+            let mut row = original.clone();
+            let own = table(&mut row);
+            match case {
+                0 => own[0] = Brace::num(9),
+                1 => own[1] = Brace::num(36),
+                2 => own[1] = Brace::num(38),
+                3 => own[39] = Brace::num(2),
+                4 => own[2].as_list_mut().unwrap()[1] = Brace::num(2),
+                5 => own.swap(2, 3),
+                6 => own[3] = own[2].clone(),
+                7 => own[2].as_list_mut().unwrap()[0] = Brace::num(999),
+                8 => {
+                    own.remove(3);
+                }
+                9 => {
+                    own.push(Brace::List(vec![
+                        Brace::num(22),
+                        Brace::List(vec![Brace::num(0)]),
+                    ]));
+                }
+                _ => unreachable!(),
+            }
+            for dialect in ["2.20", "2.21"] {
+                assert!(
+                    parse_configuration_used_mobile_application_functionalities(
+                        &serialize(&row),
+                        ROOT_UUID,
+                        dialect
+                    )
+                    .is_none(),
+                    "{dialect}: malformed case{case}"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

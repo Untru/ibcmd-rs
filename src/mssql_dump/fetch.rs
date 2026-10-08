@@ -2356,6 +2356,29 @@ mod tests {
 
     #[test]
     fn tools_export_reads_obey_certificate_policy_in_actual_arguments() {
+        // Offline row fixtures are process-wide. Run the actual missing-tool
+        // calls in a fresh test process so concurrent fixtures cannot intercept
+        // them before the thread-local subprocess journal records arguments.
+        const CHILD: &str = "IBCMD_RS_ISOLATED_CERTIFICATE_POLICY_TEST";
+        if std::env::var_os(CHILD).is_none() {
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "mssql_dump::fetch::tests::tools_export_reads_obey_certificate_policy_in_actual_arguments",
+                    "--test-threads=1",
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                output.status.success() && stdout.contains("1 passed"),
+                "certificate policy test failed alone:\n{stdout}\n{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
         use crate::sql::{SqlLogin, SqlTarget, SqlTools};
         for trust in [false, true] {
             let missing = std::env::temp_dir().join(format!(

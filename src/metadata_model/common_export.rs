@@ -33,6 +33,9 @@ use crate::metadata_model::xml::Element;
 
 /// Decodes one stored row of a common kind into the object's element.
 pub(crate) fn decode(kind: &str, row: &Brace, context: &ExportContext) -> Result<Element> {
+    if kind == "ExternalDataSource" {
+        return crate::metadata_model::external_data_source::decode(row);
+    }
     let root = list(row)?;
     if atom(item(root, 0)?)? != "1" {
         bail!("not a descriptor row: {}", short(row));
@@ -799,6 +802,9 @@ fn manager_name(name: String, type_id: &Brace, value_id: &Brace) -> Result<Gener
 
 /// What a common object's row contributes to a name index.
 pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
+    if kind == "ExternalDataSource" {
+        return crate::metadata_model::external_data_source::names(row);
+    }
     let root = list(row)?;
     let fields = list(item(root, 1)?)?;
     let mut children = Vec::new();
