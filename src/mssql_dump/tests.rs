@@ -53414,8 +53414,8 @@ fn rejects_invalid_strict_filter_criterion_type_patterns_atomically() {
     );
     let cases = [
         (
-            "empty Pattern",
-            replace_filter_criterion_test_value(&fixture.raw, &pattern, r#"{"Pattern"}"#),
+            "missing Pattern token",
+            replace_filter_criterion_test_value(&fixture.raw, &pattern, "{}"),
         ),
         (
             "Pattern token",
@@ -65435,11 +65435,27 @@ fn register_localized_field(values: &[(&str, &str)]) -> String {
 }
 
 fn exact_register_standard_attributes_for_test(definitions: &[(&str, &str)]) -> String {
+    exact_register_standard_attributes_with_fill_for_test(definitions, None)
+}
+
+fn exact_register_standard_attributes_with_fill_for_test(
+    definitions: &[(&str, &str)],
+    fill_value: Option<&str>,
+) -> String {
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, name) in definitions {
         payload.push(format!("{{{marker}}}"));
         payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
         let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if let Some(fill_value) = fill_value {
+            let index = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+                .iter()
+                .position(|key| {
+                    *key == INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID
+                })
+                .expect("the authored property bag declares its fill-value key");
+            values[index] = fill_value.to_owned();
+        }
         if *name == "Period" {
             values[1] = information_register_standard_attribute_direct_enum_for_test(
                 INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
@@ -80181,4 +80197,125 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
             assert!(!xml.contains("name=\"RecordType\""));
         }
     }
+}
+
+#[test]
+fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
+    assert_eq!(
+        parse_information_register_owner_localized_value("{0}"),
+        Some(Vec::new())
+    );
+    assert!(parse_information_register_owner_localized_value("{1,0}").is_none());
+    let index = BTreeMap::new();
+    let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
+    let attributes = parse_chart_root_standard_attributes(
+        "{0}",
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert!(attributes.is_empty());
+    // This root-only admission must not turn unproved ordinary nested
+    // standard-attribute absence into accepted/defaulted content.
+    assert!(
+        parse_chart_standard_attributes(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_attributes(
+            "{0,0}",
+            CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+            vocabulary(),
+            &index,
+            &index,
+        )
+        .is_none()
+    );
+    let complete = exact_register_standard_attributes_for_test(
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+    );
+    let present = parse_chart_root_standard_attributes(
+        &complete,
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS,
+        vocabulary(),
+        &index,
+        &index,
+    )
+    .unwrap();
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS.len()
+    );
+    for (attribute, (_, name)) in present
+        .iter()
+        .zip(CHART_OF_ACCOUNTS_STANDARD_ATTRIBUTE_DEFINITIONS)
+    {
+        assert_eq!(attribute.name, *name);
+    }
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{0}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .unwrap()
+        .is_none()
+    );
+    assert!(
+        parse_chart_root_standard_tabular_sections(
+            "{1,{0,0}}",
+            CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+        )
+        .is_none()
+    );
+    let mut payload = vec![
+        "0".to_owned(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS
+            .len()
+            .to_string(),
+    ];
+    for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
+        payload.push((*marker).to_owned());
+        if definitions.iter().any(|(_, name)| *name == "LineNumber") {
+            let numeric_fill = exact_register_standard_attributes_for_test(definitions);
+            assert!(
+                parse_chart_standard_attributes(
+                    &numeric_fill,
+                    definitions,
+                    vocabulary(),
+                    &index,
+                    &index,
+                )
+                .is_none(),
+                "nested chart attributes must still refuse numeric LineNumber fill"
+            );
+        }
+        let attributes =
+            exact_register_standard_attributes_with_fill_for_test(definitions, Some(r#"{"U"}"#));
+        payload.push(format!(
+            "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
+        ));
+    }
+    let present = parse_chart_root_standard_tabular_sections(
+        &format!("{{1,{{{}}}}}", payload.join(",")),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS,
+    )
+    .unwrap()
+    .expect("a complete native section remains present");
+    assert_eq!(
+        present.len(),
+        CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS.len()
+    );
+    let mut xml = String::new();
+    push_chart_standard_tabular_sections_xml(&mut xml, &present);
+    assert!(xml.contains("<StandardTabularSections>"));
+    assert!(xml.contains("authored section"));
+    assert!(xml.contains("name=\"ExtDimensionTypes\""));
 }
