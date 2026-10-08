@@ -343,7 +343,16 @@ pub fn decode_external_named_owner(
     let (object, properties) = sections(document, kind, &uris)?;
     let uuid = ObjectUuid::parse(
         object
-            .unprefixed_attribute("uuid")
+            .attributes()
+            .iter()
+            .find_map(|attribute| match attribute.kind() {
+                AttributeKind::Ordinary(name)
+                    if name.prefix().is_none() && name.local() == "uuid" =>
+                {
+                    Some(attribute.value())
+                }
+                _ => None,
+            })
             .ok_or(MetadataDecodeError::Missing("uuid"))?,
     )
     .map_err(core)?;
