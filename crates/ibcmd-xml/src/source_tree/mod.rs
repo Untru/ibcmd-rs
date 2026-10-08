@@ -8,7 +8,7 @@ use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::sync::Arc;
 
-pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree};
+pub use reader::{ReaderLimits, SourceTreeReader, read_source_tree, read_source_tree_strict};
 #[doc(hidden)]
 pub use writer::rename_directory_new;
 pub use writer::{SourceTreeWriter, publish_new, publish_new_with_limits};

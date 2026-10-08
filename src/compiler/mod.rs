@@ -27,6 +27,7 @@ use crate::module_blob::{
 pub mod artifact;
 pub mod bodies;
 pub mod bootstrap;
+pub mod external_intake;
 pub mod families;
 pub mod graph;
 pub mod identity;
