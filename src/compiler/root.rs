@@ -1000,7 +1000,11 @@ fn push_configuration_properties(
             .iter()
             .map(|value| uuid_or_nil(*value)),
     );
-    fields.push(properties.extension_compatibility_mode.to_string());
+    // Genuine {68,...} config_compat tuples independently bind the own
+    // compatibility to field 26 and the requested extension compatibility to
+    // field 43 (21/24, 19/12, 10/27). A native export's extension property may
+    // name its reading edition; it must never overwrite the own compatibility.
+    fields.push(properties.compatibility_mode.to_string());
     fields.push("{0,0}".to_owned());
     // Tuple fields 28/29: `UseManagedFormInOrdinaryApplication` and
     // `UseOrdinaryFormInManagedApplication`. The legacy constant already
@@ -1052,7 +1056,7 @@ fn push_configuration_properties(
         "0",
     ));
     fields.push(quoted_1c(""));
-    fields.push(properties.compatibility_mode.to_string());
+    fields.push(properties.extension_compatibility_mode.to_string());
     fields.push("1".to_owned());
     fields.push("0".to_owned());
     fields.push(NIL_UUID.to_owned());
@@ -1424,6 +1428,31 @@ mod tests {
             inflate_for_test(payload.bytes()),
             format!("\u{feff}{{2,{CONFIGURATION_UUID},}}").as_bytes()
         );
+    }
+
+    #[test]
+    fn independent_configuration_compatibility_coordinates_are_not_swapped() {
+        let (identities, graph) = fixture(&[]);
+        // Independent stored coordinates measured in genuine native tuples,
+        // plus the current 8.5 reading edition of an older ordinary root.
+        for (own, extension) in [
+            (80_321, 80_324),
+            (80_319, 80_312),
+            (80_310, 80_327),
+            (80_324, 80_501),
+        ] {
+            let mut properties = ConfigurationBodyProperties::minimal("Own", own);
+            properties.extension_compatibility_mode = extension;
+            let entry =
+                compile_configuration_body(&identities, &graph, &profile(), &properties).unwrap();
+            let bytes = inflate_for_test(entry.outcome().compiled_payload().unwrap().bytes());
+            let row = crate::metadata_model::brace::parse_row(&bytes).unwrap();
+            let tuple = row.at(&[3, 1, 1]).unwrap().as_list().unwrap();
+            assert_eq!(tuple.len(), 61);
+            assert_eq!(tuple[0].as_atom(), Some("68"));
+            assert_eq!(tuple[26].as_atom(), Some(own.to_string().as_str()));
+            assert_eq!(tuple[43].as_atom(), Some(extension.to_string().as_str()));
+        }
     }
 
     #[test]

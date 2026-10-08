@@ -41,8 +41,23 @@ native executable, SQL connection or existing archive is needed.
 
 The ordinary shared-property regression also exercises generated source → CF →
 native XML → both bootstrap compilers → native XML for both `2.20` and `2.21`.
-It preserves empty and nonempty prefixes and the shared compatibility property,
-then compares the complete returned Configuration.xml bytes. Explicit extension
+It preserves empty and nonempty prefixes and checks the authored shared
+compatibility directly in the generated CF tuple, separately from the native
+XML reading edition. An older ordinary root can store 8.3.24 while native XML
+reports `ConfigurationExtensionCompatibilityMode` 8.3.27 or 8.5.1 for the target
+platform; its own `CompatibilityMode` remains 8.3.24. The control then compares
+the complete returned Configuration.xml bytes. It uses the native factory's
+Russian script variant; the original English admission controls remain intact.
+Explicit extension
 purpose and mapping remain refused before publication even alongside these
 shared properties. These generated controls do not substitute for acceptance
 against retained native platform packages.
+
+The legacy `{68,...}` compiler stores the independent own compatibility in
+tuple field 26 and requested extension compatibility in field 43. Distinct
+21/24, 19/12 and 10/27 native tuples confirm these coordinates; swapping them
+would change the own compatibility when rebuilding XML that names the reading
+edition. The base-free compiler's older `{67,...}` layout predates that shared
+selector and keeps its own compatibility at field 43. Their native XML
+projections use the existing platform policy; package admission does not
+reinterpret either value or remove the ordinary property.

@@ -7,6 +7,7 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use ibcmd_rs::metadata_model::brace::{Brace, parse_row};
 use ibcmd_xml::{
     XmlReader,
     metadata::{PackageIntent, inspect_package_intent},
@@ -324,6 +325,32 @@ fn export(cf: &Path, output: &Path, version: &str) {
     assert_eq!(report["export"]["storage"]["failed"], 0, "{report}");
 }
 
+fn stored_configuration_tuple(cf: &Path, output: &Path) -> Vec<Brace> {
+    let report = success(
+        Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "extract"])
+            .arg(cf)
+            .arg(ROOT_UUID)
+            .arg(output)
+            .args(["--compression", "raw-deflate"])
+            .env("PATH", "")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(report["command"], "extract");
+    let row = parse_row(&fs::read(output.join("unpacked.bin")).unwrap()).unwrap();
+    assert_eq!(row.at(&[0]).unwrap().as_atom(), Some("2"));
+    assert_eq!(row.at(&[1, 0]).unwrap().as_atom(), Some(ROOT_UUID));
+    assert_eq!(row.at(&[2]).unwrap().as_atom(), Some("7"));
+    let tuple = row.at(&[3, 1, 1]).unwrap().as_list().unwrap();
+    match tuple[0].as_atom().unwrap() {
+        "67" => assert_eq!(tuple.len(), 60),
+        "68" => assert_eq!(tuple.len(), 61),
+        tag => panic!("unexpected ordinary generated root tuple {tag}"),
+    }
+    tuple.to_vec()
+}
+
 #[test]
 fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
     // NamePrefix is owned by the ordinary root compiler, including nonempty
@@ -333,7 +360,10 @@ fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
     for base_free in [false, true] {
         for prefix in ["", "Own_"] {
             let scratch = Scratch::new();
-            let xml = configuration().replacen(
+            // Use the measured native factory syntax in this new complete
+            // roundtrip control. The original English admission fixture above
+            // remains unchanged; syntax-coordinate coverage is separate.
+            let xml = configuration().replace("<ScriptVariant>English</ScriptVariant>", "<ScriptVariant>Russian</ScriptVariant>").replacen(
                 "<Comment/>",
                 &format!("<Comment/><NamePrefix>{prefix}</NamePrefix><ConfigurationExtensionCompatibilityMode>Version8_3_24</ConfigurationExtensionCompatibilityMode>"),
                 1,
@@ -347,6 +377,10 @@ fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
             let initial = scratch.0.join("ordinary.cf");
             let report = success(bootstrap(&source, &initial, base_free, "5"));
             assert_eq!(report["storage_entries"], 4);
+            let stored = stored_configuration_tuple(&initial, &scratch.0.join("stored-initial"));
+            assert_eq!(stored[2].as_str(), Some(prefix));
+            assert_eq!(stored[26].as_atom(), Some("80324"));
+            assert_eq!(stored[43].as_atom(), Some("80324"));
             for version in ["2.20", "2.21"] {
                 let native = scratch.0.join(format!("native-{version}"));
                 export(&initial, &native, version);
@@ -363,7 +397,24 @@ fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
                     format!("<NamePrefix>{prefix}</NamePrefix>")
                 };
                 assert!(text.contains(&prefix_element), "{text}");
-                assert!(text.contains("<ConfigurationExtensionCompatibilityMode>Version8_3_24</ConfigurationExtensionCompatibilityMode>"), "{text}");
+                // These are independent coordinates: the CF above still
+                // contains authored 80324, while native XML of an older root
+                // projects the reading platform's edition (proved tuples in
+                // config_compat and the retained 8.3/8.5 export controls).
+                let reading_edition = match version {
+                    "2.20" => "Version8_3_27",
+                    "2.21" => "Version8_5_1",
+                    _ => unreachable!(),
+                };
+                assert!(text.contains(&format!("<ConfigurationExtensionCompatibilityMode>{reading_edition}</ConfigurationExtensionCompatibilityMode>")), "{text}");
+                assert!(
+                    text.contains("<CompatibilityMode>Version8_3_24</CompatibilityMode>"),
+                    "{text}"
+                );
+                assert!(
+                    text.contains("<ScriptVariant>Russian</ScriptVariant>"),
+                    "{text}"
+                );
                 assert!(!text.contains("<ConfigurationExtensionPurpose>"));
 
                 let rebuilt = scratch.0.join(format!("rebuilt-{version}.cf"));
@@ -382,6 +433,24 @@ fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
                         .unwrap(),
                 );
                 assert_eq!(report["storage_entries"], 4);
+                let stored = stored_configuration_tuple(
+                    &rebuilt,
+                    &scratch.0.join(format!("stored-rebuilt-{version}")),
+                );
+                assert_eq!(stored[2].as_str(), Some(prefix));
+                assert_eq!(stored[26].as_atom(), Some("80324"));
+                // Legacy {68} transports the source's projected shared value;
+                // base-free {67} predates it and retains the own stored value.
+                assert_eq!(
+                    stored[43].as_atom(),
+                    Some(if base_free {
+                        "80324"
+                    } else if version == "2.20" {
+                        "80327"
+                    } else {
+                        "80501"
+                    })
+                );
                 let returned = scratch.0.join(format!("returned-{version}"));
                 export(&rebuilt, &returned, version);
                 // Independently authored properties must survive the actual
