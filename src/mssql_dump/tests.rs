@@ -58055,7 +58055,8 @@ fn extracts_task_generated_types_to_platform_proven_metadata_xml() {
     );
     assert_eq!(
         parse_task_standard_attributes(fields[34], &type_index, &BTreeMap::new())
-            .expect("Task standard attributes")
+            .expect("Task standard attribute envelope")
+            .expect("present Task standard attributes")
             .len(),
         8
     );
@@ -79981,4 +79982,203 @@ fn a_chart_writes_its_reference_bands_palette() {
         xml.contains("<d4p1:referenceBandsColorPaletteDescription>"),
         "{xml}"
     );
+}
+
+// These records are authored here from the closed native layout. They contain
+// no bytes copied from the external AGPL configuration used by the lab oracle.
+fn task_standard_attribute_presence_root_for_test(standard_attributes: &str) -> String {
+    let nil = "00000000-0000-0000-0000-000000000000";
+    let task_uuid = owner_graph_uuid_for_test(100);
+    let mut fields = vec!["0".to_owned(); 52];
+    fields[0] = "33".to_owned();
+    fields[1] = format!("{{3,{{1,0,{task_uuid}}},\"PresenceTask\",{{0}},\"\",0,0,{nil},0}}");
+    fields[2] = "1".to_owned();
+    for (offset, field) in fields[3..13].iter_mut().enumerate() {
+        *field = owner_graph_uuid_for_test(110 + offset);
+    }
+    for slot in [13, 14, 15, 16, 17, 25, 26, 29, 35, 36, 37] {
+        fields[slot] = nil.to_owned();
+    }
+    fields[18] = "1".to_owned();
+    fields[19] = "9".to_owned();
+    fields[20] = "1".to_owned();
+    fields[21] = "1".to_owned();
+    fields[22] = "100".to_owned();
+    fields[23] = "1".to_owned();
+    fields[27] = "1".to_owned();
+    fields[28] = "{1,{0,0}}".to_owned();
+    fields[30] = "{0,0}".to_owned();
+    fields[34] = standard_attributes.to_owned();
+    for field in &mut fields[38..43] {
+        *field = "{0}".to_owned();
+    }
+    fields[44] = "{0,{0}}".to_owned();
+    fields[45] = "1".to_owned();
+    fields[46] = "{1,{0,0}}".to_owned();
+    fields[47] = "{1,2,0}".to_owned();
+    let collections = (0..6)
+        .map(|offset| format!("{{{},0}}", owner_graph_uuid_for_test(130 + offset)))
+        .collect::<Vec<_>>()
+        .join(",");
+    format!("{{1,{{{}}},6,{collections}}}", fields.join(","))
+}
+
+fn task_standard_attribute_presence_collection_for_test(override_number: bool) -> String {
+    let mut payload = vec!["1".to_owned(), "8".to_owned()];
+    for (marker, name) in TASK_STANDARD_ATTRIBUTES {
+        let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if override_number && name == "Number" {
+            values[7] =
+                information_register_standard_attribute_localized_for_test(Some("Number tip"));
+            values[18] =
+                information_register_standard_attribute_localized_for_test(Some("Number caption"));
+        }
+        payload.push(format!("{{{marker}}}"));
+        payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_owned());
+        payload
+            .push(information_register_standard_attribute_bag_from_values_for_test(&values, false));
+    }
+    format!("{{1,{{{}}}}}", payload.join(","))
+}
+
+fn task_standard_attribute_presence_xml_for_test(
+    raw: &str,
+    profile: InfobaseConfigSourceVersion,
+) -> String {
+    let task_uuid = owner_graph_uuid_for_test(100);
+    let blob = deflate_for_test(raw.as_bytes());
+    let rows = vec![ConfigRow {
+        file_name: task_uuid.clone(),
+        part_no: 0,
+        data_size: blob.len() as i64,
+        binary_hex: encode_hex_for_test(&blob),
+    }];
+    let types = build_metadata_type_index(&rows);
+    assert_eq!(types.len(), 5, "complete Task generated type roster");
+    let extracted = extract_metadata_source_xml_with_refs(
+        &blob,
+        &task_uuid,
+        &types,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        profile,
+    )
+    .expect("complete cleanroom Task must decode");
+    assert_eq!(
+        extracted.relative_path,
+        PathBuf::from("Tasks/PresenceTask.xml")
+    );
+    String::from_utf8(extracted.xml).unwrap()
+}
+
+#[test]
+fn task_standard_attribute_presence_preserves_absence_and_present_overrides_both_profiles() {
+    let absent = task_standard_attribute_presence_root_for_test("{0}");
+    let present = task_standard_attribute_presence_root_for_test(
+        &task_standard_attribute_presence_collection_for_test(true),
+    );
+    for profile in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let absent_xml = task_standard_attribute_presence_xml_for_test(&absent, profile);
+        assert!(absent_xml.contains("<Name>PresenceTask</Name>"));
+        assert!(absent_xml.contains("<NumberLength>9</NumberLength>"));
+        assert!(!absent_xml.contains("<StandardAttributes>"));
+        assert!(!absent_xml.contains("<xr:StandardAttribute "));
+        let present_xml = task_standard_attribute_presence_xml_for_test(&present, profile);
+        assert_eq!(present_xml.matches("<StandardAttributes>").count(), 1);
+        assert_eq!(
+            present_xml.matches("<xr:StandardAttribute name=").count(),
+            8
+        );
+        for (_, name) in TASK_STANDARD_ATTRIBUTES {
+            assert!(present_xml.contains(&format!("<xr:StandardAttribute name=\"{name}\">")));
+        }
+        let number = accounting_register_standard_attribute_block(&present_xml, "Number");
+        assert!(number.contains("Number tip"));
+        assert!(number.contains("Number caption"));
+    }
+}
+
+#[test]
+fn task_standard_attribute_presence_does_not_admit_malformed_or_empty_present_rosters() {
+    for value in ["{}", "{0,0}", "{1}", "{2,{1,0}}", "{1,{1,0}}"] {
+        let raw = task_standard_attribute_presence_root_for_test(value);
+        let mut diagnostic = None;
+        assert!(
+            parse_task_properties_from_text(
+                &raw,
+                &owner_graph_uuid_for_test(100),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                &mut diagnostic,
+            )
+            .is_none(),
+            "malformed Task collection admitted: {value}"
+        );
+    }
+}
+
+#[test]
+fn accounting_register_standard_attribute_presence_preserves_absence_and_overrides_both_profiles() {
+    let uuid = owner_graph_uuid_for_test(200);
+    let absent = accounting_register_root_for_test(&uuid, false, "{0}");
+    let present = accounting_register_root_for_test(
+        &uuid,
+        false,
+        &accounting_register_standard_attributes_for_test(&[("-9", true)]),
+    );
+    for profile in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let absent_xml = extract_accounting_register_xml_for_test(&absent, &uuid, profile);
+        assert!(absent_xml.contains("<Name>Ledger</Name>"));
+        assert!(!absent_xml.contains("<StandardAttributes>"));
+        assert!(!absent_xml.contains("<xr:StandardAttribute "));
+        let present_xml = extract_accounting_register_xml_for_test(&present, &uuid, profile);
+        assert_eq!(
+            present_xml.matches("<xr:StandardAttribute name=").count(),
+            12
+        );
+        let record_type = accounting_register_standard_attribute_block(&present_xml, "RecordType");
+        assert!(record_type.contains("Record type tip"));
+        assert!(record_type.contains("Record type"));
+        assert!(
+            present_xml.find("name=\"Account\"").unwrap()
+                < present_xml.find("name=\"RecordType\"").unwrap()
+        );
+        assert!(
+            present_xml.find("name=\"RecordType\"").unwrap()
+                < present_xml.find("name=\"Active\"").unwrap()
+        );
+    }
+}
+
+#[test]
+fn accounting_register_standard_attribute_presence_retains_empty_present_and_malformed_fallback() {
+    let uuid = owner_graph_uuid_for_test(200);
+    // Existing accounting-register fallback is intentionally preserved. These
+    // envelopes must not be mistaken for the exact native absence marker.
+    for collection in ["{1,{1,0}}", "{0,0}", "{2,{1,0}}"] {
+        let raw = accounting_register_root_for_test(&uuid, false, collection);
+        for profile in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let xml = extract_accounting_register_xml_for_test(&raw, &uuid, profile);
+            assert_eq!(
+                xml.matches("<xr:StandardAttribute name=").count(),
+                11,
+                "{collection}"
+            );
+            assert!(!xml.contains("name=\"RecordType\""));
+        }
+    }
 }
