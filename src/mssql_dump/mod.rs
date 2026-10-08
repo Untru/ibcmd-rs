@@ -44872,7 +44872,11 @@ fn format_filter_criterion_source_xml(
         xml.insert_str(index, &internal_info);
     }
 
-    let mut insert = format_metadata_types_xml(&properties.value_types);
+    let mut insert = if properties.value_types.is_empty() {
+        "\t\t\t<Type/>\r\n".to_owned()
+    } else {
+        format_metadata_types_xml(&properties.value_types)
+    };
     insert.push_str(&format!(
         "\t\t\t<UseStandardCommands>{}</UseStandardCommands>\r\n",
         xml_bool(properties.use_standard_commands)
