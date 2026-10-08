@@ -667,6 +667,35 @@ fn extract_failure(
 }
 
 fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
+    let package = crate::compiler::artifact::discover_source_package(&args.source_dir)
+        .map_err(|source| {
+            bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}"))
+        })?;
+    if package.intent != crate::compiler::artifact::PackageIntent::Configuration {
+        return Err(bootstrap_failure(
+            &args,
+            "bootstrap_package_not_supported",
+            format!(
+                "{:?} source `{}` requires its own base-free package builder; CFE/EPF/ERF builders are not implemented yet; refusing ordinary CF publication",
+                package.intent,
+                package.root_xml.display(),
+            ),
+        ));
+    }
+    crate::compiler::artifact::validate_output_intent(package.intent, &args.output)
+        .map_err(|source| {
+            bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}"))
+        })?;
+    if args.source_dir.is_file() {
+        return Err(bootstrap_failure(
+            &args,
+            "bootstrap_package_root_file_not_supported",
+            format!(
+                "Configuration XML `{}` was identified; the current CF compiler requires its complete source directory",
+                package.root_xml.display(),
+            ),
+        ));
+    }
     let profiles = load_profile_registry(
         BUNDLED_PROFILES,
         args.profile_dir.as_deref(),
