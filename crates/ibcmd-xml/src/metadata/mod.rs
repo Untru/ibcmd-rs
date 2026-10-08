@@ -10,6 +10,7 @@ mod configuration_v85_projection;
 mod constant;
 mod defined_type;
 mod external_data_source;
+mod external_named;
 mod external_objects;
 mod fallback;
 mod functional_option;
@@ -99,3 +100,8 @@ pub fn data_processor_builtin_type_namespace_attribute(reference: &str) -> Optio
 /// a self-closing element, at the standard metadata property indentation.
 /// Populated patterns retain their existing typed children and qualifiers.
 pub const FILTER_CRITERION_EMPTY_TYPE_XML: &str = "\t\t\t<Type/>\r\n";
+
+pub use external_named::{
+    ExternalNamedOwnerContext, decode_external_named_owner, encode_external_named_owner,
+    validate_external_owned_body,
+};

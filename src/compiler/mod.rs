@@ -28,6 +28,7 @@ pub mod artifact;
 pub mod bodies;
 pub mod bootstrap;
 pub mod external_intake;
+pub mod external_owned;
 pub mod families;
 pub mod graph;
 pub mod identity;

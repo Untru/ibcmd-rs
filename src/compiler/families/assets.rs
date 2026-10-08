@@ -1926,3 +1926,52 @@ mod tests {
         assert!(matches!(SourceAssetCodec::Deferred.layout_key(), None));
     }
 }
+
+/// Exact source body roles for the source-only external named-owner stage.
+/// Form body and its optional module share one native bundle suffix; this does
+/// not select or invoke a native body codec. Existing ordinary route lookup is
+/// unchanged, including its one-route-per-suffix semantics.
+impl SourceAssetRegistry {
+    pub fn external_owner_relative_path(self, metadata_xml: &Path, relative: &str) -> PathBuf {
+        // All external roots and named objects use the existing non-Config
+        // filename-stem rule. No metadata kind is inferred from this path.
+        metadata_xml.with_extension("").join(relative)
+    }
+
+    pub fn external_named_body_route(
+        self,
+        family: &str,
+        source_file: &str,
+    ) -> Option<&'static SourceAssetRoute> {
+        const FORM: SourceAssetRoute =
+            route!("Form", StandaloneContent, ".0", "Ext/Form.xml", ManagedForm);
+        const XML: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.xml",
+            Deferred
+        );
+        const BIN: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.bin",
+            Deferred
+        );
+        const TXT: SourceAssetRoute = route!(
+            "Template",
+            StandaloneContent,
+            ".0",
+            "Ext/Template.txt",
+            Deferred
+        );
+        match (family, source_file) {
+            ("Form", "Form.xml") => Some(&FORM),
+            ("Template", "Template.xml") => Some(&XML),
+            ("Template", "Template.bin") => Some(&BIN),
+            ("Template", "Template.txt") => Some(&TXT),
+            _ => None,
+        }
+    }
+}

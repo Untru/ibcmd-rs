@@ -1472,7 +1472,7 @@ fn decode_properties(
     Ok(has_generated)
 }
 
-fn synonym_value(
+pub(super) fn synonym_value(
     e: &XmlElement,
     uris: &ResolvedNamespaces,
     policy: SourceOperationPolicy,
@@ -1977,6 +1977,13 @@ impl ResolvedNamespaces {
         }
     }
 
+    pub(super) fn qname_uri<'a>(&'a self, element: &XmlElement, prefix: &str) -> Option<&'a str> {
+        self.scopes
+            .get(&element_key(element))?
+            .get(prefix)
+            .map(|x| x.as_ref())
+    }
+
     fn get(&self, key: &usize) -> Option<&Option<Rc<str>>> {
         self.element_uris.get(key)
     }
@@ -2008,10 +2015,7 @@ pub(super) fn namespace_uri_for_prefix<'a>(
     prefix: &str,
     uris: &'a ResolvedNamespaces,
 ) -> Option<&'a str> {
-    uris.scopes
-        .get(&element_key(element))
-        .and_then(|scope| scope.get(prefix))
-        .map(Rc::as_ref)
+    uris.qname_uri(element, prefix)
 }
 
 pub(super) fn resolve_namespaces(
