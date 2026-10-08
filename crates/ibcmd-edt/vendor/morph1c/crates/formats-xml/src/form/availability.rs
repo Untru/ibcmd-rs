@@ -1761,7 +1761,7 @@ fn resolve_current_path(
         if !map.contains_key(&super::java_case_fold::fold(cut_index(owner))) {
             return None;
         }
-        return resolve_list_path(map, graph, &format!("{source}.{field}"));
+        return resolve_list_path_in_namespace(map, graph, &format!("{source}.{field}"), false);
     }
     resolve_list_path(map, graph, path)
 }
@@ -1771,8 +1771,27 @@ fn resolve_list_path(
     graph: Option<&ReferenceGraph>,
     path: &str,
 ) -> Option<bool> {
+    resolve_list_path_in_namespace(map, graph, path, true)
+}
+
+fn resolve_list_path_in_namespace(
+    map: &BTreeMap<String, Availability>,
+    graph: Option<&ReferenceGraph>,
+    path: &str,
+    object_namespace: bool,
+) -> Option<bool> {
     let (owner, field) = path.split_once('.')?;
     let a = map.get(&super::java_case_fold::fold(cut_index(owner)))?;
+    if object_namespace {
+        let first = cut_index(field.split('.').next()?);
+        if morph1c_core::ir::form::DynamicListObjectMember::ALL.iter().any(|member| {
+            member.names().iter().any(|name| super::java_case_fold::equal(first, name))
+        }) {
+            // Static object members precede query declarations in the original
+            // provider. This proves the root, not its script-derived children.
+            return (!field.contains('.')).then_some(false);
+        }
+    }
     if super::java_case_fold::equal(field, "Order")
         || super::java_case_fold::equal(field, "Порядок")
     {
@@ -1793,7 +1812,7 @@ fn resolve_list_path(
         // property providers (e.g. SettingsComposer.Settings.Filter[0].Date).
         // Without a CURRENT result-field edge, a nested provider is unknown;
         // absence from the query roster cannot prove absence from that object.
-        return (!field.contains('.')).then_some(true);
+        return (!object_namespace || !field.contains('.')).then_some(true);
     }
     if !field.contains('.') {
         return Some(false);
@@ -1892,8 +1911,20 @@ mod reference_child_tests {
     #[test]
     fn dynamic_list_object_providers_are_not_missing_query_result_fields() {
         let metadata = metadata();
-        let body = body();
+        let mut body = body();
+        let mut table = FormItem::new(FormControlKind::new("Table"), "Rows", 1);
+        table.properties.push((
+            morph1c_core::spec::forms::controls::table::F_DATA_PATH,
+            PropertyValue::Ref("List".into()),
+        ));
+        body.items.push(table);
         for minor in [20, 21] {
+            for member in morph1c_core::ir::form::DynamicListObjectMember::ALL {
+                for name in member.names() {
+                    assert_eq!(lookup(&metadata, &body, minor, &format!("List.{name}")), Some(false));
+                    assert_eq!(lookup(&metadata, &body, minor, &format!("List.{name}.Member")), None);
+                }
+            }
             for path in [
                 "List.SettingsComposer.Settings.Filter[0].Date",
                 "list.settingscomposer.settings.filter[1].date",
@@ -1904,6 +1935,11 @@ mod reference_child_tests {
             assert_eq!(lookup(&metadata, &body, minor, "List.MissingResult"), Some(true));
             assert_eq!(lookup(&metadata, &body, minor, "List.Reference.MissingChild"), Some(true));
             assert_eq!(lookup(&metadata, &body, minor, "List.Reference.KnownChild"), Some(false));
+            assert_eq!(
+                lookup(&metadata, &body, minor, "Items.Rows.CurrentData.SettingsComposer.Settings.Filter[0].Date"),
+                Some(true),
+                "CurrentData is the result-row namespace, not the DynamicList object",
+            );
         }
     }
     #[test]
