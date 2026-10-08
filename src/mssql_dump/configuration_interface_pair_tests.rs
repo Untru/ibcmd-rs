@@ -10,7 +10,7 @@ use crate::metadata_model::{
 
 const ROOT_UUID: &str = "10000000-0000-4000-8000-000000000456";
 
-fn fixture(dialect: &str, mode: &str, v76: bool) -> (Brace, DescriptorContext) {
+pub(super) fn fixture(dialect: &str, mode: &str, v76: bool) -> (Brace, DescriptorContext) {
     fixture_on_compatibility(dialect, mode, v76, "Version8_3_27")
 }
 
@@ -81,7 +81,7 @@ fn tuple(row: &Brace) -> &[Brace] {
     row.at(&[3, 1, 1]).unwrap().as_list().unwrap()
 }
 
-fn tuple_mut(row: &mut Brace) -> &mut Vec<Brace> {
+pub(super) fn tuple_mut(row: &mut Brace) -> &mut Vec<Brace> {
     row.as_list_mut().unwrap()[3].as_list_mut().unwrap()[1]
         .as_list_mut()
         .unwrap()[1]
@@ -101,7 +101,7 @@ fn canonical(row: &Brace, context: &DescriptorContext, dialect: &str) -> anyhow:
     )
 }
 
-fn physical(
+pub(super) fn physical(
     row: &Brace,
     context: &DescriptorContext,
     version: InfobaseConfigSourceVersion,
@@ -159,7 +159,16 @@ fn compiled_v76_pairs_preserve_complete_xml_and_current_edits_in_admitted_profil
         assert_eq!(fields[0].as_atom(), Some("76"));
         assert_eq!(fields[38], Brace::num(a));
         assert_eq!(fields[62], Brace::num(b));
+        assert_eq!(fields[26], Brace::num(80327));
+        assert_eq!(fields[43], Brace::num(80327));
         let exported = canonical(&row, &context, dialect).unwrap();
+        assert!(exported.contains(
+            "<ConfigurationExtensionCompatibilityMode>Version8_5_1</ConfigurationExtensionCompatibilityMode>"
+        ));
+        assert!(exported.contains("<CompatibilityMode>Version8_3_27</CompatibilityMode>"));
+        assert!(exported.contains("<UsePurposes/>"));
+        assert!(exported.contains("<DefaultLanguage/>"));
+        assert!(exported.contains("xmlns:pal=\"http://v8.1c.ru/8.1/data/ui/colors/palette\""));
         assert!(exported.contains(&format!(
             "<InterfaceCompatibilityMode>{name}</InterfaceCompatibilityMode>"
         )));
@@ -483,7 +492,10 @@ fn genuine_native_v76_taxi_and_v68_taxi_match_complete_configuration_xml() {
             .map(|(name, entry)| (entry.uuid.clone(), name.clone()))
             .collect::<BTreeMap<_, _>>();
         let text = String::from_utf8(bytes.clone()).unwrap();
-        let actual = refs::extract_configuration_source_xml(&text, uuid, &refs, version).unwrap();
+        // Retain raw bytes/hashes; this entry point consumes logical text,
+        // after the UTF-8 BOM boundary handled by the production row reader.
+        let text = text.strip_prefix('\u{feff}').unwrap_or(&text);
+        let actual = refs::extract_configuration_source_xml(text, uuid, &refs, version).unwrap();
         assert_eq!(
             actual.as_bytes(),
             expected,
@@ -500,6 +512,240 @@ fn genuine_native_v76_taxi_and_v68_taxi_match_complete_configuration_xml() {
                 Sha256::digest(fs::read(tree.join("Configuration.xml")).unwrap())
             ),
             xml_sha
+        );
+    }
+}
+
+#[test]
+fn configuration_native_class_authority_does_not_claim_partial_sql_tuple() {
+    let (original, context) = fixture("2.21", "Taxi", true);
+    assert_eq!(
+        refs::configuration_v76_interface_mode(&serialize(&original), ROOT_UUID).unwrap(),
+        Some(ibcmd_schema::configuration_root::V76InterfaceCompatibility::Taxi)
+    );
+    let mut partial = original.clone();
+    // The independently authored old SQL dialect carries scalar placeholders
+    // where the native Properties tuple has UUID/list/string classes. Its
+    // arbitrary class is not the canonical Properties family authority.
+    partial.as_list_mut().unwrap()[3].as_list_mut().unwrap()[0] =
+        Brace::uuid("10000000-0000-4000-8000-000000000888");
+    let fields = tuple_mut(&mut partial);
+    for (index, field) in fields.iter_mut().take(61).enumerate() {
+        if index != 0 && index != 1 {
+            *field = Brace::num(0);
+        }
+    }
+    fields[33] = Brace::List(vec![
+        Brace::num(1),
+        Brace::List(vec![
+            Brace::str("#"),
+            Brace::uuid("1708fdaa-cbce-4289-b373-07a5a74bee91"),
+            Brace::num(1),
+        ]),
+    ]);
+    fields[62] = Brace::num(6);
+    assert_eq!(fields[38], Brace::num(0));
+    assert_eq!(
+        refs::configuration_v76_interface_mode(&serialize(&partial), ROOT_UUID).unwrap(),
+        None,
+        "the partial 0/6 tuple has no native pair authority"
+    );
+    assert!(canonical(&partial, &context, "2.21").is_err());
+    for version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let xml = physical(&partial, &context, version).unwrap().xml;
+        let xml = std::str::from_utf8(&xml).unwrap();
+        assert!(xml.contains("<UsePurposes>"));
+        assert!(xml.contains(
+            "<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>"
+        ));
+        assert!(!xml.contains("<InterfaceCompatibilityMode>"));
+        assert!(!xml.contains("<DefaultLanguage/>"));
+    }
+    // The same malformed coordinate under its REAL class is still an error,
+    // rather than a per-field fallback. No native 0/6 enum is added.
+    partial.as_list_mut().unwrap()[3].as_list_mut().unwrap()[0] =
+        Brace::uuid(crate::metadata_model::root::MODULE_GROUP_CLASS_ID);
+    for version in [
+        InfobaseConfigSourceVersion::V2_20,
+        InfobaseConfigSourceVersion::V2_21,
+    ] {
+        let failure = physical(&partial, &context, version).err().unwrap();
+        assert_eq!(failure.class, MetadataSourceFailureClass::Malformed);
+        assert_eq!(failure.structural_signature, "unknown_v76_interface_pair");
+    }
+}
+
+#[test]
+fn configuration_complete_nil_and_nonempty_properties_keep_exact_presence_and_inverse() {
+    for (dialect, version) in [
+        ("2.20", InfobaseConfigSourceVersion::V2_20),
+        ("2.21", InfobaseConfigSourceVersion::V2_21),
+    ] {
+        let (original, context) = fixture(dialect, "Taxi", false);
+        let empty = canonical(&original, &context, dialect).unwrap();
+        assert!(empty.contains("<UsePurposes/>"));
+        assert!(empty.contains("<DefaultLanguage/>"));
+        assert_eq!(
+            physical(&original, &context, version).unwrap().xml,
+            empty.as_bytes()
+        );
+        assert_eq!(
+            parse_row(
+                &compile_descriptor(
+                    "Configuration",
+                    &context.root.join("Configuration.xml"),
+                    empty.as_bytes(),
+                    &context
+                )
+                .unwrap()
+            )
+            .unwrap(),
+            original
+        );
+
+        let edited_xml = empty.replace("<UsePurposes/>", "<UsePurposes>\r\n\t\t\t\t<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>\r\n\t\t\t</UsePurposes>");
+        let edited = parse_row(
+            &compile_descriptor(
+                "Configuration",
+                &context.root.join("Configuration.xml"),
+                edited_xml.as_bytes(),
+                &context,
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_ne!(edited, original);
+        assert_eq!(canonical(&edited, &context, dialect).unwrap(), edited_xml);
+        assert_eq!(
+            physical(&edited, &context, version).unwrap().xml,
+            edited_xml.as_bytes()
+        );
+        assert_eq!(
+            parse_row(
+                &compile_descriptor(
+                    "Configuration",
+                    &context.root.join("Configuration.xml"),
+                    edited_xml.as_bytes(),
+                    &context
+                )
+                .unwrap()
+            )
+            .unwrap(),
+            edited
+        );
+
+        for malformed_purposes in [
+            Brace::List(vec![Brace::num(0), Brace::num(1)]),
+            Brace::List(vec![Brace::num(1)]),
+            Brace::List(vec![
+                Brace::num(1),
+                Brace::List(vec![
+                    Brace::str("#"),
+                    Brace::uuid("1708fdaa-cbce-4289-b373-07a5a74bee91"),
+                    Brace::num(2),
+                ]),
+            ]),
+        ] {
+            let mut malformed = original.clone();
+            tuple_mut(&mut malformed)[33] = malformed_purposes;
+            assert!(canonical(&malformed, &context, dialect).is_err());
+            assert!(
+                refs::extract_configuration_source_xml(
+                    &serialize(&malformed),
+                    ROOT_UUID,
+                    &BTreeMap::new(),
+                    version
+                )
+                .is_none(),
+                "malformed/unknown purpose is not an authored empty collection"
+            );
+        }
+        let mut unresolved = original.clone();
+        tuple_mut(&mut unresolved)[10] = Brace::uuid("90000000-0000-4000-8000-000000000888");
+        assert!(canonical(&unresolved, &context, dialect).is_err());
+        assert!(
+            refs::extract_configuration_source_xml(
+                &serialize(&unresolved),
+                ROOT_UUID,
+                &BTreeMap::new(),
+                version
+            )
+            .is_none(),
+            "unknown language is not an authored nil"
+        );
+        assert_eq!(
+            tuple(&original)[10],
+            Brace::uuid("00000000-0000-0000-0000-000000000000")
+        );
+    }
+}
+
+#[test]
+fn configuration_empty_use_purposes_require_canonical_count_and_same_properties_owner() {
+    for (dialect, v76, version) in [
+        ("2.20", false, InfobaseConfigSourceVersion::V2_20),
+        ("2.21", false, InfobaseConfigSourceVersion::V2_21),
+        ("2.21", true, InfobaseConfigSourceVersion::V2_21),
+    ] {
+        let (original, context) = fixture(dialect, "Taxi", v76);
+        let text = serialize(&original);
+        assert_eq!(
+            refs::parse_configuration_use_purposes(&text, ROOT_UUID),
+            Some(vec![])
+        );
+        assert_eq!(
+            physical(&original, &context, version).unwrap().xml,
+            canonical(&original, &context, dialect).unwrap().as_bytes()
+        );
+        for token in ["00", "+0", "-0", "0.0", "184467440737095516160", "x"] {
+            let mut malformed = original.clone();
+            tuple_mut(&mut malformed)[33] = Brace::List(vec![Brace::atom(token)]);
+            assert!(
+                refs::parse_configuration_use_purposes(&serialize(&malformed), ROOT_UUID).is_none(),
+                "noncanonical declared count {token}"
+            );
+        }
+        for raw in [
+            Brace::List(vec![Brace::str("0")]),
+            Brace::List(vec![Brace::num(0), Brace::num(1)]),
+        ] {
+            let mut malformed = original.clone();
+            tuple_mut(&mut malformed)[33] = raw;
+            assert!(
+                refs::parse_configuration_use_purposes(&serialize(&malformed), ROOT_UUID).is_none()
+            );
+        }
+        let mut other_owner = original.clone();
+        other_owner.as_list_mut().unwrap()[3].as_list_mut().unwrap()[0] =
+            Brace::uuid("10000000-0000-4000-8000-000000000001");
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&other_owner), ROOT_UUID).is_none(),
+            "arbitrary class cannot own native emptiness"
+        );
+        let mut wrong_slot = original.clone();
+        tuple_mut(&mut wrong_slot)[33] = Brace::num(0);
+        tuple_mut(&mut wrong_slot)[34] = Brace::List(vec![Brace::num(0)]);
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&wrong_slot), ROOT_UUID).is_none(),
+            "a neighboring empty collection is not member33"
+        );
+        let mut wrong_header = original.clone();
+        tuple_mut(&mut wrong_header)[1].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[2] = Brace::uuid("90000000-0000-4000-8000-000000000099");
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&wrong_header), ROOT_UUID).is_none(),
+            "class does not waive SAME owner header identity"
+        );
+        assert_eq!(
+            serialize(&original),
+            text,
+            "negative edits leave original compiled row untouched"
         );
     }
 }

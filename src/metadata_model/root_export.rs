@@ -471,8 +471,11 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     }
     let compatibility = version_text(compat_26);
     // The extension compatibility the platform prints: its own edition for
-    // a tuple older than the one it writes, the stored value otherwise.
-    let extension_compatibility = if shape < own_shape {
+    // an older tuple and for ordinary V76; preserve the staged V68 rule.
+    let extension_compatibility = if shape < own_shape || shape == ConfigurationShape::V76 {
+        // Ordinary V76 at stored 80327/80327 still prints 80501 when read
+        // by 8.5 (native 8.5.1.1529). The reader edition is independent of
+        // the stored compatibility used by the inverse compiler.
         platform.compatibility_mode()
     } else if staged {
         version_text(compat_43)

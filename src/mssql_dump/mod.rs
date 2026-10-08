@@ -13011,6 +13011,21 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         return None;
     }
     let text = row.text.as_str();
+    // Only a successfully validated extension root owns this projection.
+    // Mere process-wide context presence cannot waive ordinary refusal gates.
+    if extension::active().is_some() {
+        if let Some(xml) = extract_configuration_source_xml(
+            text,
+            uuid,
+            configuration_root_object_refs,
+            source_version,
+        ) {
+            return Some(ExtractedMetadataSourceXml {
+                relative_path: PathBuf::from("Configuration.xml"),
+                xml: xml.into_bytes(),
+            });
+        }
+    }
     match refs::configuration_v76_interface_mode(text, uuid) {
         Err(signature) => {
             // A recognized owner/V76 failure cannot publish a generic root.
@@ -38334,6 +38349,12 @@ fn format_configuration_source_xml(
     source_version: InfobaseConfigSourceVersion,
 ) -> String {
     let mut xml = format_full_metadata_source_xml("Configuration", header, source_version);
+    if source_version == InfobaseConfigSourceVersion::V2_21 {
+        // Configuration's registered 2.21 frame includes the palette after
+        // logform, as the canonical writer and native 8.5 export do.
+        xml = String::from_utf8(declare_palette_namespace_beside_style(xml.into_bytes()))
+            .expect("palette declaration preserves UTF-8 Configuration text");
+    }
     let mut insert = String::new();
     push_optional_simple_property_xml(&mut insert, "NamePrefix", properties.name_prefix.as_deref());
     push_optional_simple_property_xml(
@@ -38353,6 +38374,11 @@ fn format_configuration_source_xml(
             ));
         }
         insert.push_str("\t\t\t</UsePurposes>\r\n");
+    } else if properties
+        .configuration_properties_evidenced_default_block
+        .is_some()
+    {
+        push_optional_simple_property_xml(&mut insert, "UsePurposes", Some(""));
     }
     let evidenced = properties
         .configuration_properties_evidenced_default_block
@@ -38511,7 +38537,7 @@ fn format_configuration_source_xml(
         push_optional_simple_property_xml(
             &mut insert,
             "DefaultLanguage",
-            properties.default_language.as_deref(),
+            Some(properties.default_language.as_deref().unwrap_or("")),
         );
     } else {
         push_used_mobile_application_functionalities_xml(
