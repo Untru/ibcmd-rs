@@ -18659,3 +18659,6 @@ pub mod metadata_record_upgrades;
 pub mod source_asset_storage_facts;
 
 pub mod websocket_client;
+
+/// Native collection envelopes preserve absence independently of item count.
+pub mod optional_metadata_collection;
