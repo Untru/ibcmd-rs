@@ -1296,3 +1296,22 @@ pub(super) fn numeric_type(t: Tbl, name: &str) -> Option<&'static str> {
         _ => return None,
     })
 }
+
+/// Native funnel percentages use integral spelling while retaining the same
+/// EFloat value. Independently paired UH83 Chart and nested Gantt Chart exports
+/// use 0/0/0 and 10/10/3; ordinary EFloat attributes keep Java float spelling.
+#[derive(Clone, Copy)]
+pub(super) enum NativeFloatTextPolicy {
+    JavaFloat,
+    OmitIntegralFraction,
+}
+
+pub(super) fn native_float_text_policy(t: Tbl, name: &str) -> NativeFloatTextPolicy {
+    match (t, name) {
+        (
+            Tbl::Chart,
+            "funnelNeckHeightPercent" | "funnelNeckWidthPercent" | "funnelGapSumPercent",
+        ) => NativeFloatTextPolicy::OmitIntegralFraction,
+        _ => NativeFloatTextPolicy::JavaFloat,
+    }
+}
