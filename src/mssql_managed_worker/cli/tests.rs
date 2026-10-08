@@ -270,14 +270,39 @@ fn public_programmatic_args_cannot_adopt_an_endpoint() {
 }
 #[test]
 fn public_source_rejects_unsupported_cohort_before_creation() {
-    let mut args = source();
-    args.source_path = "Catalogs/Unknown/Ext/ObjectModule.bsl".into();
-    assert!(
-        crate::mssql_apply::apply_source_change(&args)
-            .unwrap_err()
-            .to_string()
-            .contains("reference closure")
-    );
+    for path in [
+        "InformationRegisters/Unknown/Ext/RecordSetModule.bsl",
+        "Constants/Unknown/Ext/ObjectModule.bsl",
+        "Catalogs/Unknown/Forms/Card/Ext/Form.xml",
+    ] {
+        let mut args = source();
+        args.source_path = path.into();
+        assert!(
+            crate::mssql_apply::apply_source_change(&args)
+                .unwrap_err()
+                .to_string()
+                .contains("no measured module/form/template owner-body cohort"),
+            "{path} must fail at the shared cohort check before source or creator effects"
+        );
+    }
+}
+
+#[test]
+fn fresh_source_uses_current_measured_module_form_and_template_cohorts() {
+    for path in [
+        "CommonModules/Probe/Ext/Module.bsl",
+        "CommonForms/Probe/Ext/Form.xml",
+        "Catalogs/Probe/Ext/ObjectModule.bsl",
+        "InformationRegisters/Probe/Ext/ManagerModule.bsl",
+        "DataProcessors/Probe/Templates/Page/Ext/Template.xml",
+        "Reports/Probe/Templates/Main/Ext/Template.xml",
+        "ExchangePlans/Probe/Templates/Text/Ext/Template.txt",
+    ] {
+        let mut args = source();
+        args.source_path = path.into();
+        crate::mssql_apply::require_supported_main_source_cohort(&args)
+            .unwrap_or_else(|error| panic!("current measured cohort {path}: {error}"));
+    }
 }
 
 fn portable_group() -> ManagedWorkerCliArgs {
