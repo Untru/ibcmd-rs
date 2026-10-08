@@ -142,6 +142,30 @@ pub(crate) fn source_extensions_from_model(
             references,
         });
     }
+    fn presence_visit(objects: &[MetadataObject], count: &mut usize) -> Result<(), EdtError> {
+        for object in objects {
+            for form in &object.form_bodies {
+                if form.ordinary_body.is_none()
+                    && formats_xml::form::form_presence_resource_count(&form.body).is_some()
+                {
+                    *count = count
+                        .checked_add(1)
+                        .ok_or_else(|| EdtError::new("form presence count overflow"))?;
+                }
+            }
+            presence_visit(&object.children, count)?;
+        }
+        Ok(())
+    }
+    let mut count = 0;
+    presence_visit(&model.objects, &mut count)?;
+    if count > 0 {
+        extensions.push(SourceExtensionUse {
+            id: "ibcmd-form-presence/2",
+            resources: count,
+            references: count,
+        });
+    }
     let defaults = formats_xml::metadata_picture_semantics::common_picture_defaults(&model.objects)
         .map_err(EdtError::new)?;
     fn metadata_visit(

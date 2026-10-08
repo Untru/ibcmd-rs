@@ -378,7 +378,9 @@ fn reserved_annotation_family_unknown_and_malformed_versions_fail_on_both_routes
     for minor in [20, 21] {
         let source = native(minor);
         let cdf = String::from_utf8(bytes(&source, "ConfigDumpInfo.xml").to_vec()).unwrap();
-        for version in ["2:", "", "one:", "1", ":"] {
+        // v2 is now a supported closed protocol. Unknown and malformed version
+        // headers remain a distinct rejection class from malformed v2 contents.
+        for version in ["3:", "", "one:", "1", ":"] {
             let changed = cdf.replace(
                 "ibcmd-configuration-semantics:1:",
                 &format!("ibcmd-configuration-semantics:{version}"),
@@ -409,6 +411,48 @@ fn reserved_annotation_family_unknown_and_malformed_versions_fail_on_both_routes
                 "{error}"
             );
         }
+    }
+}
+#[test]
+fn v1_payload_relabelled_as_v2_rejects_missing_presence_collection_on_both_routes() {
+    for minor in [20, 21] {
+        let source = native(minor);
+        let original = bytes(&source, "ConfigDumpInfo.xml");
+        assert!(
+            read_native_data_path_annotation(original, FormatVersion::new(2, minor))
+                .unwrap()
+                .is_some()
+        );
+        let original = String::from_utf8(original.to_vec()).unwrap();
+        let relabelled = original.replace(
+            "ibcmd-configuration-semantics:1:",
+            "ibcmd-configuration-semantics:2:",
+        );
+        assert_ne!(relabelled.as_bytes(), original.as_bytes());
+        let changed = altered(
+            &source,
+            false,
+            Some(("ConfigDumpInfo.xml", relabelled.into_bytes())),
+        );
+        let error = xml_to_edt(&changed, &options(minor))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("missing field") && error.contains("form_presence"),
+            "{error}"
+        );
+        let tmp = tempfile::tempdir().unwrap();
+        publish(&changed, tmp.path());
+        let error = read_directory_source(tmp.path())
+            .unwrap()
+            .xml_to_edt(&options(minor))
+            .err()
+            .unwrap()
+            .to_string();
+        assert!(
+            error.contains("missing field") && error.contains("form_presence"),
+            "{error}"
+        );
     }
 }
 fn plain_native(minor: u16) -> (SourceTree, DataPathSpec) {
