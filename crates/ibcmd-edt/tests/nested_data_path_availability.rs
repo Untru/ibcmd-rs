@@ -20,6 +20,7 @@ fn form(version: FormatVersion, tables: bool) -> FormBody {
     let table = if tables {
         concat!(
             "<autoCommandBar><name>FormCommandBar</name><id>-1</id></autoCommandBar>",
+            "<commandInterface><navigationPanel/><commandBar/></commandInterface>",
             "<items xsi:type=\"form:Table\"><name>Rows</name><id>1</id><dataPath xsi:type=\"form:DataPath\"><segments>List</segments></dataPath></items>",
             "<items xsi:type=\"form:Table\"><name>OtherRows</name><id>2</id><dataPath xsi:type=\"form:DataPath\"><segments>OtherList</segments></dataPath></items>"
         )
@@ -36,7 +37,12 @@ fn form(version: FormatVersion, tables: bool) -> FormBody {
         ),
         table
     );
-    read(xml.as_bytes(), FormDialect::Edt, version)
+    let body = read(xml.as_bytes(), FormDialect::Edt, version);
+    // Define the complete authored fixture before recording its IR baseline.
+    // The separate ACB-present/CI-absent loss witness is retained in the lab;
+    // native synthesizes CI=true for that pre-existing unrelated combination.
+    assert_eq!(body.command_interface, tables);
+    body
 }
 fn add_paths(body: &mut FormBody, paths: &[&str], version: FormatVersion) {
     for (index, path) in paths.iter().enumerate() {
