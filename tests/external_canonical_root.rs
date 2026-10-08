@@ -18,7 +18,7 @@ const OBJECT: &str = "20000000-0000-4000-8000-000000000438";
 const TYPE: &str = "30000000-0000-4000-8000-000000000438";
 const VALUE: &str = "40000000-0000-4000-8000-000000000438";
 fn profile(version: &str) -> ProfileId {
-    ProfileId::parse(format!("xml-{version}")).unwrap()
+    ProfileId::parse(&format!("xml-{version}")).unwrap()
 }
 fn path() -> ObjectPath {
     ObjectPath::new(vec![PathSegment::name("OwnedExternal").unwrap()]).unwrap()
@@ -172,11 +172,11 @@ fn external_current_name_comment_synonym_and_owned_refs_edit_complete_inverse() 
             .unwrap();
             let reference = |suffix| format!("{}.Current.{suffix}", kind.external_kind());
             let forms = CanonicalValue::sequence(vec![CanonicalValue::reference(
-                UnresolvedReference::new("metadata", reference("Form.OwnForm")).unwrap(),
+                UnresolvedReference::new("metadata", &reference("Form.OwnForm")).unwrap(),
             )])
             .unwrap();
             let templates = CanonicalValue::sequence(vec![CanonicalValue::reference(
-                UnresolvedReference::new("metadata", reference("Template.OwnDcs")).unwrap(),
+                UnresolvedReference::new("metadata", &reference("Template.OwnDcs")).unwrap(),
             )])
             .unwrap();
             let mut updates = vec![

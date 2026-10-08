@@ -476,7 +476,7 @@ pub fn decode_external_root(
     parts.properties.push(canonical_field(
         "ObjectTypeName",
         CanonicalValue::text(
-            ibcmd_core::value::CanonicalText::new(generated)
+            ibcmd_core::value::CanonicalText::new(&generated)
                 .map_err(|x| MetadataDecodeError::Core(x.to_string()))?,
         ),
     )?);
