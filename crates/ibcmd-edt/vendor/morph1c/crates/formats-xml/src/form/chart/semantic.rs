@@ -1206,7 +1206,15 @@ fn current_value_at<'a>(fields: &'a [(String, ChartValue)], path: &[ChartLayoutS
 pub(super) fn native_float_text(t: Tbl, name: &str, value: &str) -> Result<String, FormError> {
     match super::sdk_defaults::numeric_type(t, name) {
         Some("EFloat") => ibcmd_number_format::parse_binary32(value)
-            .map(ibcmd_number_format::format_binary32)
+            .map(|number| {
+                let text = ibcmd_number_format::format_binary32(number);
+                match super::sdk_defaults::native_float_text_policy(t, name) {
+                    super::sdk_defaults::NativeFloatTextPolicy::JavaFloat => text,
+                    super::sdk_defaults::NativeFloatTextPolicy::OmitIntegralFraction => {
+                        designer_decimal(&text)
+                    }
+                }
+            })
             .ok_or_else(|| frame(format!("chart: invalid current EFloat {name}"))),
         Some("EDouble") => ibcmd_number_format::parse_binary64(value)
             .map(|value| {

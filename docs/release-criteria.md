@@ -76,10 +76,31 @@ Each target build uses:
 - a target-specific dependency fetch followed by `CARGO_NET_OFFLINE=true`;
 - the source commit time as `SOURCE_DATE_EPOCH`.
 
-The supported release targets are currently
-`x86_64-unknown-linux-gnu` and `x86_64-pc-windows-msvc`. A new target is not a
-supported release target until it is added to both the offline and release
-matrices and its green evidence is checked in.
+The offline and release matrices cover these targets:
+
+| Target | Build and offline test host |
+| --- | --- |
+| `x86_64-unknown-linux-gnu` | Ubuntu 22.04 x64 |
+| `aarch64-unknown-linux-gnu` | Ubuntu 22.04 ARM64 |
+| `x86_64-pc-windows-msvc` | Windows x64 |
+| `aarch64-apple-darwin` | macOS 15 ARM64 |
+| `x86_64-apple-darwin` | macOS 15 Intel |
+
+Linux binaries are built and executed on Ubuntu 22.04. Before packaging,
+`scripts/audit_linux_abi.py` verifies ELF64 architecture and rejects GLIBC
+requirements newer than 2.35, including the 2.38/2.39 failure reported in #441.
+The offline matrix tests the actual host binary, verifies native fixture parity,
+and audits the exact ZIP, checksum and SBOM on every target. Linux ABI receipts
+are retained as CI evidence separately from the published three-file contract.
+New platforms require green offline checks and retained evidence before they
+are advertised as available release downloads. Changing these workflows does
+not replace historical release assets.
+
+Runner labels are explicit for Linux and macOS because `*-latest` can change
+architecture or OS baseline. Label availability was verified against the
+[GitHub runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+on 2026-10-08. A new target must be added to both matrices and its green evidence
+checked in before it is treated as a supported release target.
 
 ## Artifact contract
 

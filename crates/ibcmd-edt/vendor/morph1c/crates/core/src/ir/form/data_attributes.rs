@@ -1,5 +1,32 @@
 use super::*;
 
+/// Object-owned DynamicList members, distinct from its query-result row.
+/// Names follow DynamicListPropertyInfoProvider.staticDynamicListProperty;
+/// descendant properties require their own script/type provider.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DynamicListObjectMember {
+    Order,
+    Filter,
+    Group,
+    ConditionalAppearance,
+    Parameters,
+    SettingsComposer,
+}
+impl DynamicListObjectMember {
+    pub const ALL: [Self; 6] = [Self::Order, Self::Filter, Self::Group,
+        Self::ConditionalAppearance, Self::Parameters, Self::SettingsComposer];
+    pub fn names(self) -> [&'static str; 2] {
+        match self {
+            Self::Order => ["Order", "Порядок"],
+            Self::Filter => ["Filter", "Отбор"],
+            Self::Group => ["Group", "Группировка"],
+            Self::ConditionalAppearance => ["ConditionalAppearance", "УсловноеОформление"],
+            Self::Parameters => ["Parameters", "Параметры"],
+            Self::SettingsComposer => ["SettingsComposer", "КомпоновщикНастроек"],
+        }
+    }
+}
+
 /// serde-дефолт `true` (view/edit-права реквизита).
 fn bool_true() -> bool {
     true
