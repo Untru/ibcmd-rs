@@ -3,10 +3,9 @@
 
 #[cfg(test)]
 use std::fs;
-use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
+use std::process::Command;
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail, ensure};
 use clap::Args;
@@ -348,54 +347,7 @@ fn rac_bounded(rac: &Path, args: &[&str], timeout: Duration) -> Result<String> {
 /// RAS session presence needs no decoding of OEM user names. Only an empty,
 /// successful, bounded response admits cycle 2; identity/version stay strict UTF-8.
 fn rac_bounded_bytes(rac: &Path, args: &[&str], timeout: Duration) -> Result<Vec<u8>> {
-    let mut child = Command::new(rac)
-        .args(args)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()?;
-    let stdout = child.stdout.take().unwrap();
-    let stderr = child.stderr.take().unwrap();
-    fn drain(mut stream: impl Read) -> Result<Vec<u8>> {
-        let mut bytes = Vec::new();
-        let mut buffer = [0; 4096];
-        loop {
-            let n = stream.read(&mut buffer)?;
-            if n == 0 {
-                break;
-            }
-            ensure!(bytes.len() + n <= 1024 * 1024, "rac output exceeded bound");
-            bytes.extend_from_slice(&buffer[..n]);
-        }
-        Ok(bytes)
-    }
-    let out = std::thread::spawn(move || drain(stdout));
-    let err = std::thread::spawn(move || drain(stderr));
-    let deadline = Instant::now() + timeout;
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = out.join();
-            let _ = err.join();
-            bail!("RAS session readiness timed out; cycle 2 was not started");
-        }
-        std::thread::sleep(Duration::from_millis(20));
-    };
-    let stdout = out
-        .join()
-        .map_err(|_| anyhow::anyhow!("rac stdout reader panicked"))??;
-    let stderr = err
-        .join()
-        .map_err(|_| anyhow::anyhow!("rac stderr reader panicked"))??;
-    ensure!(
-        status.success() && stderr.is_empty(),
-        "RAS session readiness failed: {}",
-        String::from_utf8_lossy(&stderr)
-    );
-    Ok(stdout)
+    crate::rac_process::bounded_bytes(Command::new(rac).args(args), timeout)
 }
 
 fn render_continuation_sessions_check(database: &str, interrupt: bool) -> String {
@@ -1148,17 +1100,24 @@ mod tests {
         assert!(serde_json::to_value(&report).unwrap()["cycle_2_executed"].is_null());
     }
 
-    #[cfg(windows)]
     #[test]
-    fn a_hung_rac_is_killed_at_the_readiness_deadline() {
-        let started = Instant::now();
-        let error = rac_bounded(
-            Path::new("pwsh"),
-            &["-NoProfile", "-Command", "Start-Sleep -Seconds 10"],
-            Duration::from_millis(150),
-        )
-        .unwrap_err();
-        assert!(error.to_string().contains("timed out"));
-        assert!(started.elapsed() < Duration::from_secs(3));
+    fn unproved_readiness_stops_before_recheck_or_cycle_two_append() {
+        let client = Complete {
+            calls: AtomicUsize::new(0),
+            malformed: false,
+            // This client's first read proves pending cycle 1; any later
+            // query would reach the append branch and fail this control.
+            post_append_failure: true,
+        };
+        let mut checks = 0;
+        let error =
+            finish_with_readiness(&client, &fixture(), Path::new("saved.json"), false, || {
+                checks += 1;
+                bail!("RAS session readiness timed out; cycle 2 was not started")
+            })
+            .unwrap_err();
+        assert_eq!(checks, 1);
+        assert_eq!(client.calls.load(Ordering::SeqCst), 1);
+        assert!(error.to_string().contains("cycle 2 was not started"));
     }
 }
