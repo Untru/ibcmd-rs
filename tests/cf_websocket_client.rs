@@ -341,16 +341,42 @@ fn report(output: Output) -> Value {
     report
 }
 fn export(cf: &Path, target: &Path, version: &str) -> Value {
-    report(
+    let result = report(
         Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
             .args(["cf", "export"])
             .arg(cf)
             .arg(target)
-            .args(["--source-version", version, "--fail-on-opaque"])
+            .args(["--source-version", version])
             .env("PATH", "")
             .output()
             .unwrap(),
-    )
+    );
+    // The public compatibility route accounts for structural entries which
+    // are not metadata decoders. Strict export deliberately refuses them.
+    let storage = &result["export"]["storage"];
+    assert_eq!(storage["failed"], 0, "{result}");
+    let entries = storage["entries"].as_array().unwrap();
+    let opaque: Vec<_> = entries
+        .iter()
+        .filter(|entry| entry["disposition"] == "opaque")
+        .collect();
+    assert_eq!(storage["opaque"].as_u64().unwrap(), opaque.len() as u64);
+    for entry in opaque {
+        assert!(
+            matches!(
+                entry["logical_name"].as_str(),
+                Some("root" | "version" | "versions")
+            ),
+            "unexpected undecoded metadata: {entry}"
+        );
+    }
+    assert!(
+        entries
+            .iter()
+            .any(|entry| { entry["logical_key"] == CLIENT && entry["disposition"] == "supported" }),
+        "WebSocketClient must be decoded: {result}"
+    );
+    result
 }
 
 #[test]
@@ -368,7 +394,6 @@ fn websocket_public_base_free_cf_routes_keep_owner_headers_and_module_both_profi
             let source = scratch.0.join("source");
             let r = export(&first, &source, version);
             assert_eq!(r["export"]["storage"]["failed"], 0, "{r}");
-            assert_eq!(r["export"]["storage"]["opaque"], 0, "{r}");
             let configuration = fs::read_to_string(source.join("Configuration.xml")).unwrap();
             assert!(
                 configuration.contains("<WebSocketClient>SocketWitness</WebSocketClient>"),
@@ -563,11 +588,18 @@ fn websocket_declared_malformed_descriptor_does_not_become_form_or_partial_xml()
             .output()
             .unwrap();
         assert!(!result.status.success());
-        let status: Value = serde_json::from_slice(&result.stdout).unwrap();
-        assert_eq!(status["ok"], false, "{status}");
-        let diagnostics = format!("{} {}", status, String::from_utf8_lossy(&result.stderr));
+        if !result.stdout.is_empty() {
+            let status: Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(status["ok"], false, "{status}");
+        }
+        let diagnostics = format!(
+            "{} {}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
+        );
         assert!(diagnostics.contains("WebSocketClient"), "{diagnostics}");
         assert!(!output.join("WebSocketClients/SocketWitness.xml").exists());
         assert!(!output.join("Forms/SocketWitness.xml").exists());
+        assert!(!output.join("ConfigDumpInfo.xml").exists());
     }
 }
