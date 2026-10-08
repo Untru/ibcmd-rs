@@ -436,9 +436,8 @@ fn foreign_help_key_and_nil_member_refuse() {
 #[test]
 fn duplicate_generated_owner_type_and_category_are_rejected() {
     let mut fixture = Fixture::new();
-    fixture.index.sections[0]
-        .entries
-        .push(fixture.index.sections[0].entries[0].clone());
+    let duplicate = fixture.index.sections[0].entries[0].clone();
+    fixture.index.sections[0].entries.push(duplicate);
     assert!(
         fixture
             .inspect()
