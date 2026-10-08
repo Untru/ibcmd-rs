@@ -1793,11 +1793,6 @@ fn resolve_list_path_in_namespace(
             return (!field.contains('.')).then_some(false);
         }
     }
-    if super::java_case_fold::equal(field, "Order")
-        || super::java_case_fold::equal(field, "Порядок")
-    {
-        return Some(false);
-    }
     if field.eq_ignore_ascii_case("DefaultPicture") {
         return Some(a.default_picture_unavailable);
     }
@@ -1941,6 +1936,12 @@ mod reference_child_tests {
                 Some(true),
                 "CurrentData is the result-row namespace, not the DynamicList object",
             );
+            for name in ["Order", "Порядок"] {
+                assert_eq!(lookup(&metadata, &body, minor, &format!("Items.Rows.CurrentData.{name}")), Some(true));
+                let mut selected = metadata.clone();
+                selected.objects[0].children.push(attribute("AccumulationRegister.Attribute", name, &["String"]));
+                assert_eq!(lookup(&selected, &body, minor, &format!("Items.Rows.CurrentData.{name}")), Some(false));
+            }
         }
     }
     #[test]
