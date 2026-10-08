@@ -3,12 +3,28 @@
 
 use flate2::{Compression, write::DeflateEncoder};
 use ibcmd_cf::archive::decode_packed_archive;
-use ibcmd_core::{artifact::StorageProfileId, limits::ResourceLimits};
+use ibcmd_cf::payload::{PayloadEncoding, decode_payload};
+use ibcmd_core::{
+    artifact::{ProfileId, StorageProfileId},
+    diagnostic::{ObjectPath, PathSegment, PropertyPath},
+    identity::{LogicalIdentity, ObjectUuid},
+    limits::ResourceLimits,
+    model::{CanonicalConfiguration, CanonicalObject, CanonicalObjectParts, MetadataKind},
+    provenance::{CanonicalAnchor, SourceProvenance},
+    validate::validate_configuration,
+};
 use ibcmd_rs::{
     cli::InfobaseConfigSourceVersion,
+    compiler::{
+        graph::{ObjectStorageRoute, build_bootstrap_graph},
+        identity::collect_bootstrap_identities,
+        root::{ConfigurationBodyProperties, compile_configuration_body, compile_root},
+        version::{SpecialEntryProfile, compile_version},
+    },
     mssql_dump::{
         ForeignReferences, export_packed_cf_archive_to_source, export_packed_entries_to_source,
     },
+    profile_registry::load_bundled_profile_registry,
 };
 use ibcmd_v8::writer::{Format15Document, Format15Element, write_format15_to_vec};
 use std::{
@@ -183,6 +199,59 @@ fn all_rows() -> Vec<(String, String)> {
     ]
 }
 
+/// An indexed CF inventory includes the actual root/version service entries
+/// and a complete canonical Configuration. A header-only stand-in cannot own
+/// its versions inventory. This does not require the pending root rewrite.
+fn indexed_rows() -> Vec<(String, String)> {
+    let id = ProfileId::parse("platform-8.3.27.1989").unwrap();
+    let objects = [
+        (1000, "Configuration"),
+        (10, "FilterCriterion"),
+        (100, "ChartOfAccounts"),
+        (200, "ChartOfCalculationTypes"),
+    ]
+    .map(|(seed, kind)| {
+        let path = ObjectPath::new(vec![PathSegment::name(kind).unwrap()]).unwrap();
+        CanonicalObject::new(CanonicalObjectParts::new(
+            LogicalIdentity::new(ObjectUuid::parse(&uuid(seed)).unwrap(), path.clone()),
+            MetadataKind::new(kind).unwrap(),
+            SourceProvenance::new(id.clone(), CanonicalAnchor::new(path, PropertyPath::root())),
+        ))
+        .unwrap()
+    });
+    let configuration = CanonicalConfiguration::new(objects.to_vec()).unwrap();
+    let validated = validate_configuration(&configuration).unwrap();
+    let identities = collect_bootstrap_identities(&validated).unwrap();
+    let routes = identities
+        .objects()
+        .iter()
+        .map(|object| ObjectStorageRoute::new(object.uuid(), vec![]).unwrap())
+        .collect();
+    let graph = build_bootstrap_graph(&identities, id.clone(), routes).unwrap();
+    let profiles = load_bundled_profile_registry().unwrap();
+    let profile = SpecialEntryProfile::from_effective(profiles.get(&id).unwrap()).unwrap();
+    let properties = ConfigurationBodyProperties::minimal("EmptyFamilies", profile.compatibility());
+    let mut rows = all_rows();
+    for entry in [
+        compile_root(&graph, &profile).unwrap(),
+        compile_version(&graph, &profile).unwrap(),
+        compile_configuration_body(&identities, &graph, &profile, &properties).unwrap(),
+    ] {
+        let text = decode_payload(
+            PayloadEncoding::RawDeflate,
+            entry.outcome().compiled_payload().unwrap().bytes(),
+            ResourceLimits::default(),
+        )
+        .unwrap()
+        .into_bytes();
+        rows.push((
+            entry.target().key().as_str().into(),
+            String::from_utf8(text).unwrap(),
+        ));
+    }
+    rows
+}
+
 #[test]
 fn ordinary_empty_families_export_complete_owned_metadata_from_public_cf_both_profiles() {
     for profile in [
@@ -316,6 +385,37 @@ fn empty_admission_does_not_accept_missing_tokens_or_unresolved_nonempty_referen
                 "ChartsOfAccounts/EmptyAccounts.xml",
             ),
             (
+                200,
+                calculation("{0,0}").replacen(",5,{", ",6,{", 1),
+                "ChartsOfCalculationTypes/EmptyCalculation.xml",
+            ),
+            (
+                100,
+                accounts(NIL).replacen("{1,", "{99,", 1),
+                "ChartsOfAccounts/EmptyAccounts.xml",
+            ),
+            (
+                200,
+                calculation("{0,0}").replacen("{1,", "{99,", 1),
+                "ChartsOfCalculationTypes/EmptyCalculation.xml",
+            ),
+            (
+                100,
+                accounts(NIL).replace(
+                    "{4c7fec95-d1bd-4508-8a01-f1db090d9af8,0}",
+                    &format!("{{4c7fec95-d1bd-4508-8a01-f1db090d9af8,1,{}}}", uuid(998)),
+                ),
+                "ChartsOfAccounts/EmptyAccounts.xml",
+            ),
+            (
+                200,
+                calculation("{0,0}").replace(
+                    "{2e90c75b-2f0c-4899-a7d4-5426eaefc96e,0}",
+                    &format!("{{2e90c75b-2f0c-4899-a7d4-5426eaefc96e,1,{}}}", uuid(998)),
+                ),
+                "ChartsOfCalculationTypes/EmptyCalculation.xml",
+            ),
+            (
                 100,
                 accounts_with_collections(NIL, "{0,0}", "{0}"),
                 "ChartsOfAccounts/EmptyAccounts.xml",
@@ -337,7 +437,10 @@ fn empty_admission_does_not_accept_missing_tokens_or_unresolved_nonempty_referen
             ),
         ] {
             let (scratch, report) = export(vec![(uuid(owner), row)], profile);
-            assert!(!scratch.0.join(path).exists(), "{report}");
+            assert!(
+                !scratch.0.join(path).exists(),
+                "owner {owner}, path {path}: {report}"
+            );
             assert!(
                 report["storage"]["opaque"].as_u64().unwrap()
                     + report["storage"]["failed"].as_u64().unwrap()
@@ -417,10 +520,14 @@ fn nonempty_chart_references_still_require_their_declared_family() {
                 if family == expected_kind {
                     let xml = fs::read_to_string(scratch.0.join(path))
                         .unwrap_or_else(|error| panic!("{error}: {report}"));
-                    assert!(
-                        xml.contains(&format!("<{property}>{family}.Referenced</{property}>")),
-                        "{xml}"
-                    );
+                    let expected = if property == "BaseCalculationTypes" {
+                        format!(
+                            "<BaseCalculationTypes>\r\n\t\t\t\t<xr:Item xsi:type=\"xr:MDObjectRef\">{family}.Referenced</xr:Item>\r\n\t\t\t</BaseCalculationTypes>"
+                        )
+                    } else {
+                        format!("<{property}>{family}.Referenced</{property}>")
+                    };
+                    assert!(xml.contains(&expected), "{xml}");
                     assert_eq!(report["storage"]["opaque"], 0, "{report}");
                     assert_eq!(report["storage"]["failed"], 0, "{report}");
                 } else {
@@ -454,7 +561,7 @@ fn malformed_or_duplicate_versions_never_fabricate_an_index() {
                 uuid(10)
             ),
         ] {
-            let mut rows = all_rows();
+            let mut rows = indexed_rows();
             rows.push(("versions".into(), version_text));
             let (scratch, report) = export(rows, profile);
             assert!(!scratch.0.join("ConfigDumpInfo.xml").exists(), "{report}");
@@ -482,8 +589,8 @@ fn malformed_or_duplicate_versions_never_fabricate_an_index() {
 #[test]
 fn config_dump_info_uses_each_own_stored_version_and_family_both_profiles() {
     let version = "12345678-9abc-4def-8012-3456789abcde";
-    let mut rows = all_rows();
-    rows.push(("versions".into(), format!("{{1,4,\"\",00000000-0000-4000-8000-000000000999,\"{}\",{version},\"{}\",{version},\"{}\",{version}}}", uuid(10), uuid(100), uuid(200))));
+    let mut rows = indexed_rows();
+    rows.push(("versions".into(), format!("{{1,5,\"\",00000000-0000-4000-8000-000000000999,\"{}\",{version},\"{}\",{version},\"{}\",{version},\"{}\",{version}}}", uuid(1000), uuid(10), uuid(100), uuid(200))));
     for profile in [
         InfobaseConfigSourceVersion::V2_20,
         InfobaseConfigSourceVersion::V2_21,
@@ -498,7 +605,8 @@ fn config_dump_info_uses_each_own_stored_version_and_family_both_profiles() {
         ] {
             assert!(xml.contains(&format!("name=\"{kind}.{name}\" id=\"{}\" configVersion=\"78563412bc9aef4d80123456789abcde00000000\"", uuid(seed))), "{xml}");
         }
-        assert_eq!(xml.matches("configVersion=").count(), 3);
+        assert!(xml.contains(&format!("name=\"Configuration.EmptyFamilies\" id=\"{}\" configVersion=\"78563412bc9aef4d80123456789abcde00000000\"", uuid(1000))), "{xml}");
+        assert_eq!(xml.matches("configVersion=").count(), 4);
         assert!(
             !xml.contains("000000000999"),
             "generation is not an object: {xml}"

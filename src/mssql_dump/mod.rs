@@ -24610,12 +24610,6 @@ fn parse_chart_of_accounts_properties_from_text(
     else {
         return StrictMetadataRoot::Unsupported;
     };
-    if root.first().map(|field| field.trim()) != Some("1") {
-        return StrictMetadataRoot::Unsupported;
-    }
-    if root.get(2).map(|field| field.trim()) != Some("7") {
-        return StrictMetadataRoot::Unsupported;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
@@ -24624,6 +24618,14 @@ fn parse_chart_of_accounts_properties_from_text(
     };
     if fields.first().map(|field| field.trim()) != Some("32") {
         return StrictMetadataRoot::Unsupported;
+    }
+    // The measured own-body marker commits to this complete family. A bad
+    // envelope/count must not reach the property-less legacy fallback.
+    if root.first().map(|field| field.trim()) != Some("1") {
+        return StrictMetadataRoot::Invalid;
+    }
+    if root.get(2).map(|field| field.trim()) != Some("7") {
+        return StrictMetadataRoot::Invalid;
     }
     if root.len() != 10 || fields.len() != 57 {
         return StrictMetadataRoot::Invalid;
@@ -24655,13 +24657,10 @@ fn parse_chart_of_accounts_properties_from_text(
     // required-empty: it is empty on all four charts of the stand and no
     // observation names it.
     if !collections[2].is_empty() {
-        return StrictMetadataRoot::Unsupported;
+        return StrictMetadataRoot::Invalid;
     }
 
-    // An owner the previous gate rejected outright keeps that gate's outcome
-    // when the rest of its record still does not read: the relaxation may add
-    // a complete file, never take one away.
-    let owns_commands_or_templates = !collections[0].is_empty() || !collections[1].is_empty();
+    // A known full record requires complete properties and child ownership.
     parse_chart_of_accounts_properties(
         text,
         header,
@@ -24674,11 +24673,7 @@ fn parse_chart_of_accounts_properties_from_text(
         template_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(if owns_commands_or_templates {
-        StrictMetadataRoot::Unsupported
-    } else {
-        StrictMetadataRoot::Invalid
-    })
+    .unwrap_or(StrictMetadataRoot::Invalid)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -25003,12 +24998,6 @@ fn parse_chart_of_calculation_types_properties_from_text(
     else {
         return StrictMetadataRoot::Unsupported;
     };
-    if root.first().map(|field| field.trim()) != Some("1") {
-        return StrictMetadataRoot::Unsupported;
-    }
-    if root.get(2).map(|field| field.trim()) != Some("5") {
-        return StrictMetadataRoot::Unsupported;
-    }
     let Some(fields) = root
         .get(1)
         .and_then(|field| split_information_register_braced_fields(field))
@@ -25017,6 +25006,14 @@ fn parse_chart_of_calculation_types_properties_from_text(
     };
     if fields.first().map(|field| field.trim()) != Some("35") {
         return StrictMetadataRoot::Unsupported;
+    }
+    // The measured own-body marker commits to this complete family. A bad
+    // envelope/count must not reach the property-less legacy fallback.
+    if root.first().map(|field| field.trim()) != Some("1") {
+        return StrictMetadataRoot::Invalid;
+    }
+    if root.get(2).map(|field| field.trim()) != Some("5") {
+        return StrictMetadataRoot::Invalid;
     }
     if root.len() != 8 || fields.len() != 63 {
         return StrictMetadataRoot::Invalid;
@@ -25047,13 +25044,10 @@ fn parse_chart_of_calculation_types_properties_from_text(
         .iter()
         .any(|collection| !collection.is_empty())
     {
-        return StrictMetadataRoot::Unsupported;
+        return StrictMetadataRoot::Invalid;
     }
 
-    // An owner the previous gate rejected outright keeps that gate's outcome
-    // when the rest of its record still does not read: the relaxation may add
-    // a complete file, never take one away.
-    let owns_children = !collections[0].is_empty() || !collections[1].is_empty();
+    // A known full record requires complete properties and child ownership.
     parse_chart_of_calculation_types_properties(
         text,
         header,
@@ -25065,11 +25059,7 @@ fn parse_chart_of_calculation_types_properties_from_text(
         form_refs,
     )
     .map(StrictMetadataRoot::Parsed)
-    .unwrap_or(if owns_children {
-        StrictMetadataRoot::Unsupported
-    } else {
-        StrictMetadataRoot::Invalid
-    })
+    .unwrap_or(StrictMetadataRoot::Invalid)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -25715,8 +25705,12 @@ fn parse_chart_root_standard_attributes(
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<Vec<RegisterStandardAttribute>> {
-    if split_information_register_braced_fields(value)
-        .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == "0")
+    if split_information_register_braced_fields(value).is_some_and(|fields| {
+        matches!(
+            ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::from_fields(&fields),
+            Some(ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::Absent)
+        )
+    })
     {
         return Some(Vec::new());
     }
@@ -25727,8 +25721,12 @@ fn parse_chart_root_standard_tabular_sections(
     value: &str,
     definitions: &[ChartStandardTabularSectionDefinition],
 ) -> Option<Option<Vec<MetadataStandardTabularSection>>> {
-    if split_information_register_braced_fields(value)
-        .is_some_and(|fields| fields.len() == 1 && fields[0].trim() == "0")
+    if split_information_register_braced_fields(value).is_some_and(|fields| {
+        matches!(
+            ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::from_fields(&fields),
+            Some(ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection::Absent)
+        )
+    })
     {
         return Some(None);
     }
@@ -44873,7 +44871,7 @@ fn format_filter_criterion_source_xml(
     }
 
     let mut insert = if properties.value_types.is_empty() {
-        "\t\t\t<Type/>\r\n".to_owned()
+        ibcmd_xml::metadata::FILTER_CRITERION_EMPTY_TYPE_XML.to_owned()
     } else {
         format_metadata_types_xml(&properties.value_types)
     };
