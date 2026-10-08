@@ -16,52 +16,10 @@ pub mod versions;
 
 use sha1::{Digest, Sha1};
 
-pub const EXTERNAL_DATA_PROCESSOR_CLASS: &str = "c3831ec8-d8d5-4f93-8a22-f9bfae07327f";
-pub const EXTERNAL_REPORT_CLASS: &str = "e41aff26-25cf-4bb6-b6c1-3f478a75f374";
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum ExternalKind {
-    DataProcessor,
-    Report,
-}
-
-impl ExternalKind {
-    pub fn from_class_id(class_id: &str) -> Option<Self> {
-        match class_id.trim().to_ascii_lowercase().as_str() {
-            EXTERNAL_DATA_PROCESSOR_CLASS => Some(Self::DataProcessor),
-            EXTERNAL_REPORT_CLASS => Some(Self::Report),
-            _ => None,
-        }
-    }
-
-    pub const fn class_id(self) -> &'static str {
-        match self {
-            Self::DataProcessor => EXTERNAL_DATA_PROCESSOR_CLASS,
-            Self::Report => EXTERNAL_REPORT_CLASS,
-        }
-    }
-
-    pub const fn internal_kind(self) -> &'static str {
-        match self {
-            Self::DataProcessor => "DataProcessor",
-            Self::Report => "Report",
-        }
-    }
-
-    pub const fn internal_folder(self) -> &'static str {
-        match self {
-            Self::DataProcessor => "DataProcessors",
-            Self::Report => "Reports",
-        }
-    }
-
-    pub const fn external_kind(self) -> &'static str {
-        match self {
-            Self::DataProcessor => "ExternalDataProcessor",
-            Self::Report => "ExternalReport",
-        }
-    }
-}
+pub use ibcmd_schema::external_artifact::{
+    DATA_PROCESSOR_CLASS as EXTERNAL_DATA_PROCESSOR_CLASS, ExternalArtifactKind as ExternalKind,
+    REPORT_CLASS as EXTERNAL_REPORT_CLASS,
+};
 
 /// Deterministic uuid-shaped id for rows the adapter has to invent (never
 /// written to output: the fields that carry it are dropped again).

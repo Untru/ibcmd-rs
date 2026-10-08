@@ -170,6 +170,7 @@ pub struct MetadataEnvelope {
     source_model_unchanged: bool,
     shape_policy: MetadataShapePolicy,
     content: VerifiedFacetContent,
+    external_binding: Option<super::package::ExternalSourceBinding>,
 }
 impl MetadataEnvelope {
     pub fn from_parts(
@@ -194,8 +195,42 @@ impl MetadataEnvelope {
         shape_policy: MetadataShapePolicy,
         content: VerifiedFacetContent,
     ) -> Result<Self, MetadataDecodeError> {
+        Self::from_parts_with_external_state(
+            root,
+            descendants,
+            source_document,
+            source_model_unchanged,
+            shape_policy,
+            content,
+            None,
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    fn from_parts_with_external_state(
+        root: CanonicalObject,
+        descendants: Vec<CanonicalObject>,
+        source_document: XmlDocument,
+        source_model_unchanged: bool,
+        shape_policy: MetadataShapePolicy,
+        content: VerifiedFacetContent,
+        external_binding: Option<super::package::ExternalSourceBinding>,
+    ) -> Result<Self, MetadataDecodeError> {
         let actual = inspect_metadata_family_with_policy(&source_document, shape_policy)?;
-        if actual.as_str() != root.kind().as_str() {
+        let family_matches = if let Some(binding) = external_binding {
+            binding.validate(&source_document)?;
+            actual.as_str() == binding.kind().external_kind()
+                && root.kind().as_str() == binding.kind().internal_kind()
+                && root.identity().uuid()
+                    == binding
+                        .identity()
+                        .contained
+                        .expect("validated contained identity")
+                        .object_id
+                && root.owner().is_none()
+        } else {
+            actual.as_str() == root.kind().as_str()
+        };
+        if !family_matches {
             return Err(MetadataDecodeError::InvalidEnvelope(
                 "source document family differs from canonical root",
             ));
@@ -272,6 +307,7 @@ impl MetadataEnvelope {
             source_model_unchanged,
             shape_policy,
             content,
+            external_binding,
         };
         let configuration = envelope
             .configuration()
@@ -291,14 +327,18 @@ impl MetadataEnvelope {
         root: CanonicalObject,
         descendants: Vec<CanonicalObject>,
     ) -> Result<Self, MetadataDecodeError> {
-        Self::from_parts_with_state(
+        Self::from_parts_with_external_state(
             root,
             descendants,
             self.fallback.into_document(),
             false,
             self.shape_policy,
             self.content,
+            self.external_binding,
         )
+    }
+    pub const fn external_source_binding(&self) -> Option<super::package::ExternalSourceBinding> {
+        self.external_binding
     }
     pub fn root(&self) -> &CanonicalObject {
         &self.root
@@ -644,6 +684,39 @@ fn decode_metadata_envelope_with_policy(
     child_reference_kinds: &[&str],
     shape_policy: MetadataShapePolicy,
 ) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    decode_metadata_envelope_with_binding(
+        document,
+        source_profile,
+        object_path,
+        child_reference_kinds,
+        shape_policy,
+        None,
+    )
+}
+pub(super) fn decode_external_metadata_envelope(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    claims: &super::external_objects::ExternalRootClaims<'_>,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
+    let binding = claims.binding_for(document)?;
+    decode_metadata_envelope_with_binding(
+        document,
+        source_profile,
+        object_path,
+        &["Form", "Template"],
+        DEFAULT_METADATA_POLICY,
+        Some(binding),
+    )
+}
+fn decode_metadata_envelope_with_binding(
+    document: &XmlDocument,
+    source_profile: ProfileId,
+    object_path: ObjectPath,
+    child_reference_kinds: &[&str],
+    shape_policy: MetadataShapePolicy,
+    binding: Option<super::package::ExternalSourceBinding>,
+) -> Result<MetadataEnvelope, MetadataDecodeError> {
     check_document_with_policy(document, shape_policy)?;
     let uris = resolve_namespaces(document.root())?;
     let expected = uri_of(document.root(), &uris);
@@ -725,7 +798,7 @@ fn decode_metadata_envelope_with_policy(
         )?;
     }
     let initial_facets = std::mem::take(&mut facet_set.values);
-    let root = decode_object(
+    let root = decode_object_with_binding(
         semantic,
         source_profile.clone(),
         object_path,
@@ -736,14 +809,16 @@ fn decode_metadata_envelope_with_policy(
         &uris,
         expected,
         child_reference_kinds,
+        binding,
     )?;
-    MetadataEnvelope::from_parts_with_state(
+    MetadataEnvelope::from_parts_with_external_state(
         root,
         descendants,
         document.clone(),
         true,
         shape_policy,
         Arc::new(std::mem::take(&mut *facet_set.content.borrow_mut())),
+        binding,
     )
 }
 
@@ -784,6 +859,7 @@ struct ObjectDecoder<'a> {
     containers: BTreeSet<&'static str>,
     generated_source: Option<&'static str>,
     generated_names: BTreeMap<ObjectUuid, Option<String>>,
+    external_claims: bool,
 }
 impl<'a> ObjectDecoder<'a> {
     fn new(
@@ -824,6 +900,7 @@ impl<'a> ObjectDecoder<'a> {
             containers: BTreeSet::new(),
             generated_source: None,
             generated_names: BTreeMap::new(),
+            external_claims: false,
         })
     }
     fn finish(mut self) -> Result<CanonicalObject, MetadataDecodeError> {
@@ -914,6 +991,7 @@ fn decode_object_node<'a>(
                 local_facets,
                 uris,
                 expected,
+                state.external_claims,
             )?;
             if has_generated
                 && generated_source
@@ -937,6 +1015,7 @@ fn decode_object_node<'a>(
                 uris,
                 expected,
                 DIRECT_GENERATED_LAYOUT,
+                state.external_claims,
             )?;
             if has_generated && generated_source.replace("GeneratedTypes").is_some() {
                 return Err(MetadataDecodeError::Duplicate("generated types source"));
@@ -960,6 +1039,7 @@ fn decode_object_node<'a>(
                     Some(XR_NAMESPACE)
                 },
                 INTERNAL_INFO_GENERATED_LAYOUT,
+                state.external_claims,
             )?;
             if has_generated && generated_source.replace("InternalInfo").is_some() {
                 return Err(MetadataDecodeError::Duplicate("generated types source"));
@@ -1072,7 +1152,46 @@ fn decode_object(
     expected: Option<&str>,
     child_reference_kinds: &[&str],
 ) -> Result<CanonicalObject, MetadataDecodeError> {
+    decode_object_with_binding(
+        e,
+        profile,
+        path,
+        owner,
+        descendants,
+        parent_facets,
+        initial_facets,
+        uris,
+        expected,
+        child_reference_kinds,
+        None,
+    )
+}
+#[allow(clippy::too_many_arguments)]
+fn decode_object_with_binding(
+    e: &XmlElement,
+    profile: ProfileId,
+    path: ObjectPath,
+    owner: Option<ObjectUuid>,
+    descendants: &mut Vec<CanonicalObject>,
+    parent_facets: &mut FacetSet,
+    initial_facets: Vec<OpaqueFacet>,
+    uris: &ResolvedNamespaces,
+    expected: Option<&str>,
+    child_reference_kinds: &[&str],
+    binding: Option<super::package::ExternalSourceBinding>,
+) -> Result<CanonicalObject, MetadataDecodeError> {
     let mut state = ObjectDecoder::new(e, profile, path, owner, parent_facets, initial_facets)?;
+    if let Some(binding) = binding {
+        state.uuid = binding
+            .identity()
+            .contained
+            .expect("validated contained identity")
+            .object_id;
+        state.parts.identity = LogicalIdentity::new(state.uuid, state.path.clone());
+        state.parts.kind = MetadataKind::new(binding.kind().internal_kind())
+            .map_err(|x| MetadataDecodeError::Core(x.to_string()))?;
+        state.external_claims = true;
+    }
     if state.facets.policy.core == SourceOperationPolicy::Source {
         return decode_source_objects_iteratively(
             state,
@@ -1246,6 +1365,7 @@ fn decode_properties(
     facets: &mut FacetSet,
     uris: &ResolvedNamespaces,
     expected: Option<&str>,
+    external_claims: bool,
 ) -> Result<bool, MetadataDecodeError> {
     let mut seen_generated = false;
     let mut has_generated = false;
@@ -1278,7 +1398,13 @@ fn decode_properties(
                 uris,
                 expected,
                 PROPERTIES_GENERATED_LAYOUT,
+                external_claims,
             )?;
+            continue;
+        }
+        // External codec has already projected/validated every other root
+        // property. Its CURRENT typed value must not become opaque old XML.
+        if external_claims && local != "Name" && local != "Synonym" {
             continue;
         }
         if (local != "Name" && local != "Synonym") || !typed(child, local, expected, uris) {
@@ -1313,15 +1439,17 @@ fn decode_properties(
         }
         let value = if local == "Synonym" {
             let value = synonym_value(child, uris, facets.policy.core)?;
-            retain_as(
-                node,
-                ordinal,
-                profile,
-                path,
-                "properties.synonym",
-                "xml:synonym-projection",
-                facets,
-            )?;
+            if !external_claims {
+                retain_as(
+                    node,
+                    ordinal,
+                    profile,
+                    path,
+                    "properties.synonym",
+                    "xml:synonym-projection",
+                    facets,
+                )?;
+            }
             value
         } else {
             CanonicalValue::text(
@@ -1452,6 +1580,7 @@ fn decode_generated_types(
     uris: &ResolvedNamespaces,
     expected_type_namespace: Option<&str>,
     layout: GeneratedLayout,
+    external_claims: bool,
 ) -> Result<bool, MetadataDecodeError> {
     retain_unknown_start_tag(
         e,
@@ -1477,6 +1606,9 @@ fn decode_generated_types(
             )?;
             continue;
         };
+        if external_claims && typed(child, "ContainedObject", expected_type_namespace, uris) {
+            continue;
+        }
         if !typed(child, "GeneratedType", expected_type_namespace, uris) {
             retain_as(
                 node,
@@ -1579,15 +1711,17 @@ fn decode_generated_types(
             None => generated_type,
         });
         any = true;
-        retain_as(
-            node,
-            ordinal,
-            profile,
-            path,
-            layout.projection_anchor,
-            layout.projection_placement,
-            facets,
-        )?;
+        if !external_claims {
+            retain_as(
+                node,
+                ordinal,
+                profile,
+                path,
+                layout.projection_anchor,
+                layout.projection_placement,
+                facets,
+            )?;
+        }
     }
     Ok(any)
 }

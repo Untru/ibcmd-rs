@@ -138,6 +138,56 @@ pub fn inspect_package_identity(
     }))
 }
 
+/// Closed source-family binding for canonical external contained metadata.
+/// Construction is private to the external codec; public identity values alone
+/// cannot waive envelope source-family validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExternalSourceBinding {
+    kind: ibcmd_schema::external_artifact::ExternalArtifactKind,
+    identity: PackageRootIdentity,
+}
+impl ExternalSourceBinding {
+    pub const fn kind(self) -> ibcmd_schema::external_artifact::ExternalArtifactKind {
+        self.kind
+    }
+    pub const fn identity(self) -> PackageRootIdentity {
+        self.identity
+    }
+    pub(super) fn inspect(document: &XmlDocument) -> Result<Self, MetadataDecodeError> {
+        use ibcmd_schema::external_artifact::ExternalArtifactKind;
+        let identity = inspect_package_identity(document)?
+            .ok_or(MetadataDecodeError::Missing("external package identity"))?;
+        let kind = match identity.intent {
+            PackageIntent::ExternalDataProcessor => ExternalArtifactKind::DataProcessor,
+            PackageIntent::ExternalReport => ExternalArtifactKind::Report,
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "package is not an external artifact",
+                ));
+            }
+        };
+        let contained = identity
+            .contained
+            .ok_or(MetadataDecodeError::Missing("external contained identity"))?;
+        if ExternalArtifactKind::from_class_id(&contained.class_id.to_string()) != Some(kind)
+            || contained.object_id == identity.main_uuid
+        {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "external class or main/contained identity relation differs",
+            ));
+        }
+        Ok(Self { kind, identity })
+    }
+    pub(super) fn validate(self, document: &XmlDocument) -> Result<(), MetadataDecodeError> {
+        if Self::inspect(document)? != self {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "external source binding changed",
+            ));
+        }
+        Ok(())
+    }
+}
+
 // These are package signals, not a second property/value schema. Ordinary
 // Configuration owns both shared fields too; only the extension-specific
 // purpose/adoption/mapping families grant Extension intent. Full property

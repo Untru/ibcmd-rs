@@ -54,3 +54,36 @@ SOURCE readiness does not carry over old runtime results or complete issue438;
 ROOT must run fresh tests on the exact new source revision. Existing inherited
 storage/text bounds are a separately tracked later policy atom, not a new limit
 introduced by this scope layer or a claim that all external paths have no caps.
+
+
+## External canonical root component (A1, partial)
+
+The library exposes `decode_external_root` / `encode_external_root` and explicit
+ExternalDataProcessor/ExternalReport metadata codec registrations. These map the
+source root to the existing canonical DataProcessor/Report kind under the actual
+ContainedObject ObjectId; the private validated source binding preserves physical
+main UUID/class separately. Existing Configuration wrappers and CLI external
+bootstrap refusals remain unchanged. This API does not create an EPF or ERF.
+
+The component accepts XML 2.20 and 2.21 independently, exact declared Object
+TypeId/ValueId, known root properties and owned named Form/Template references.
+Known CURRENT text/name/synonym/default references edit through the existing XML
+writer; a consistent name edit must also update its ObjectTypeName and all owned
+references. Root/child/type identity edits, source property-slot changes,
+synonym-item topology changes and cross-edition facet migration currently return
+an explicit error. They never silently publish old or partial values. Unknown
+attributes/properties/sections, duplicate identities and foreign/undeclared
+references refuse admission. AuxiliaryVariantForm is an explicit external Report
+2.21 root value; XML support proves no fresh nonempty native header mapping.
+
+This first component does not admit embedded attributes/tabular sections or read
+files/directories, resolve configuration-context storage references, compile
+forms/assets, construct external main/services, or publish storage. Complete A1
+owner intake and A2–7 acceptance remain pending. Inherited common metadata/core
+bounds are unchanged and remain the A6 SourceOperationPolicy dependency; no new
+quota is introduced and unrestricted configuration support is not claimed.
+
+Source readiness alone does not establish native/public acceptance. The new own
+cleanroom controls need fresh ROOT execution on the reviewed exact commit, along
+with unchanged A0/package/classifier/metadata controls. Native/SDK expected files
+remain independent, read-only evidence and are not copied into repository tests.
