@@ -1472,7 +1472,7 @@ fn decode_properties(
     Ok(has_generated)
 }
 
-fn synonym_value(
+pub(super) fn synonym_value(
     e: &XmlElement,
     uris: &ResolvedNamespaces,
     policy: SourceOperationPolicy,
@@ -1975,6 +1975,13 @@ impl ResolvedNamespaces {
             element_uris: BTreeMap::new(),
             scopes: BTreeMap::new(),
         }
+    }
+
+    pub(super) fn qname_uri<'a>(&'a self, element: &XmlElement, prefix: &str) -> Option<&'a str> {
+        self.scopes
+            .get(&element_key(element))?
+            .get(prefix)
+            .map(|x| x.as_ref())
     }
 
     fn get(&self, key: &usize) -> Option<&Option<Rc<str>>> {

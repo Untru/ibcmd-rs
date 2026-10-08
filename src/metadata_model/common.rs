@@ -641,19 +641,10 @@ pub struct Template {
     pub template_type: i64,
 }
 
-/// `TemplateType` codes, the platform enumeration order.
-const TEMPLATE_TYPES: &[(&str, i64)] = &[
-    ("SpreadsheetDocument", 0),
-    ("BinaryData", 1),
-    ("ActiveDocument", 2),
-    ("HTMLDocument", 3),
-    ("TextDocument", 4),
-    ("GeographicalSchema", 5),
-    ("DataCompositionSchema", 6),
-    ("DataCompositionAppearanceTemplate", 7),
-    ("GraphicalSchema", 8),
-    ("AddIn", 9),
-];
+// Existing native enumeration codes have one schema owner.
+use ibcmd_schema::external_named::{
+    FORM_TYPES, INTERFACE_COMPATIBILITY_MODES, TEMPLATE_TYPES, USE_PURPOSES,
+};
 
 impl Template {
     pub fn from_xml(object: &ObjectXml<'_>) -> Result<Self> {
@@ -1795,13 +1786,6 @@ impl Subsystem {
 
 /// The class of an `ApplicationUsePurpose` value.
 const USE_PURPOSE_CLASS: &str = "1708fdaa-cbce-4289-b373-07a5a74bee91";
-
-const USE_PURPOSES: &[(&str, i64)] =
-    &[("PlatformApplication", 1), ("MobilePlatformApplication", 2)];
-
-const FORM_TYPES: &[(&str, i64)] = &[("Ordinary", 0), ("Managed", 1)];
-
-const INTERFACE_COMPATIBILITY_MODES: &[(&str, i64)] = &[("Any", 0)];
 
 /// The record every form descriptor holds:
 /// `{13,<header>,help,type,{N,{"#",<class>,purpose}...}}`, and on 8.5

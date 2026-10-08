@@ -107,7 +107,10 @@ struct RootSections<'a> {
     properties: &'a XmlElement,
     children: &'a XmlElement,
 }
-fn attributes(element: &XmlElement, allowed: &[&str]) -> Result<(), MetadataDecodeError> {
+pub(super) fn attributes(
+    element: &XmlElement,
+    allowed: &[&str],
+) -> Result<(), MetadataDecodeError> {
     for attribute in element.attributes() {
         if let AttributeKind::Ordinary(name) = attribute.kind()
             && (name.prefix().is_some() || !allowed.contains(&name.local()))
@@ -119,7 +122,7 @@ fn attributes(element: &XmlElement, allowed: &[&str]) -> Result<(), MetadataDeco
     }
     Ok(())
 }
-fn container_content(
+pub(super) fn container_content(
     element: &XmlElement,
     owner: &str,
     property: &'static str,
@@ -137,7 +140,7 @@ fn container_content(
     }
     Ok(())
 }
-fn elements(element: &XmlElement) -> impl Iterator<Item = &XmlElement> {
+pub(super) fn elements(element: &XmlElement) -> impl Iterator<Item = &XmlElement> {
     element.children().iter().filter_map(|x| match x {
         XmlNode::Element(x) => Some(x),
         _ => None,

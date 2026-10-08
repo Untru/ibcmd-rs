@@ -70,7 +70,7 @@ impl Display for ExternalIntakeError {
     }
 }
 impl std::error::Error for ExternalIntakeError {}
-fn input(path: impl Into<String>, error: impl Display) -> ExternalIntakeError {
+pub(super) fn input(path: impl Into<String>, error: impl Display) -> ExternalIntakeError {
     ExternalIntakeError::Input {
         path: path.into(),
         reason: error.to_string(),
@@ -81,10 +81,10 @@ fn input(path: impl Into<String>, error: impl Display) -> ExternalIntakeError {
 /// No second payload cache or semantic model is stored by a claim.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ExternalAssetClaim {
-    source_path: SourcePath,
-    owner: ObjectUuid,
-    route: &'static SourceAssetRoute,
-    content: AssetReference,
+    pub(super) source_path: SourcePath,
+    pub(super) owner: ObjectUuid,
+    pub(super) route: &'static SourceAssetRoute,
+    pub(super) content: AssetReference,
 }
 impl ExternalAssetClaim {
     pub fn source_path(&self) -> &SourcePath {
@@ -121,43 +121,7 @@ impl ExternalIntake {
         path: ObjectPath,
         limits: ReaderLimits,
     ) -> Result<Self, ExternalIntakeError> {
-        let source = source.as_ref();
-        let metadata = std::fs::symlink_metadata(source)
-            .map_err(|e| input(source.display().to_string(), e))?;
-        #[cfg(windows)]
-        let redirected = {
-            use std::os::windows::fs::MetadataExt;
-            metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0
-        };
-        #[cfg(not(windows))]
-        let redirected = metadata.file_type().is_symlink();
-        if redirected || !metadata.is_file() && !metadata.is_dir() {
-            return Err(input(
-                source.display().to_string(),
-                "nonregular or redirected input",
-            ));
-        }
-        // Retain the selected physical file, not its caller-supplied spelling.
-        // Windows read sharing also prevents replacement while the census is read.
-        let selected_file = if metadata.is_file() {
-            Some(open_selected_file(source)?)
-        } else {
-            None
-        };
-        let directory = if selected_file.is_some() {
-            source
-                .parent()
-                .filter(|x| !x.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."))
-        } else {
-            source
-        };
-        let tree = read_source_tree_strict(directory, limits)
-            .map_err(|e| input(directory.display().to_string(), e))?;
-        let selected = selected_file
-            .as_ref()
-            .map(|file| selected_census_path(directory, &tree, file))
-            .transpose()?;
+        let (tree, selected) = read_snapshot(source.as_ref(), limits)?;
         Self::from_tree(tree, selected.as_ref(), profile, path)
     }
     /// Current caller-owned immutable source bytes, not a filesystem discovery
@@ -168,49 +132,11 @@ impl ExternalIntake {
         profile: ProfileId,
         path: ObjectPath,
     ) -> Result<Self, ExternalIntakeError> {
-        tree.validate().map_err(|e| input("source tree", e))?;
-        let mut candidates = Vec::new();
-        for (index, entry) in tree.entries().iter().enumerate() {
-            if entry.path().as_str().contains('/') {
-                continue;
-            }
-            if selected != Some(entry.path())
-                && !entry.path().as_str().to_ascii_lowercase().ends_with(".xml")
-            {
-                continue;
-            }
-            let document = XmlReader::from_slice(entry.bytes())
-                .map_err(|e| input(entry.path().as_str(), e))?;
-            if let Some(identity) =
-                inspect_package_identity(&document).map_err(|e| input(entry.path().as_str(), e))?
-            {
-                candidates.push((index, identity, document));
-            }
-        }
-        if candidates.len() != 1 {
-            return Err(ExternalIntakeError::RootCount {
-                actual: candidates.len(),
-            });
-        }
-        let (index, identity, document) = candidates.pop().expect("one current root");
+        let snapshot = admit_root(&tree, selected, profile.clone(), path)?;
+        let index = snapshot.index;
+        let identity = snapshot.identity;
+        let envelope = snapshot.envelope;
         let root_entry = &tree.entries()[index];
-        if selected.is_some_and(|x| x != root_entry.path()) {
-            return Err(ExternalIntakeError::WrongSelectedRoot {
-                selected: selected.expect("checked selected").to_string(),
-                actual: root_entry.path().to_string(),
-            });
-        }
-        if !matches!(
-            identity.intent,
-            PackageIntent::ExternalDataProcessor | PackageIntent::ExternalReport
-        ) {
-            return Err(ExternalIntakeError::Unsupported {
-                path: root_entry.path().to_string(),
-                coordinate: "non-external package intent",
-            });
-        }
-        let envelope = decode_external_root(&document, profile.clone(), path)
-            .map_err(|e| input(root_entry.path().as_str(), e))?;
         // Root-only codec deliberately retains these declarations, but complete
         // intake may not advertise them as consumed without their typed owners.
         if envelope.root().properties().iter().any(|field| {
@@ -477,5 +403,110 @@ fn selected_census_path(
             "selected file",
             "physical identity is absent from the retained census",
         )
+    })
+}
+
+// Shared census and CURRENT purpose/root admission. Both public scopes consume
+// the same retained inventory; there is no secondary filesystem discovery.
+pub(super) fn read_snapshot(
+    source: &Path,
+    limits: ReaderLimits,
+) -> Result<(SourceTree, Option<SourcePath>), ExternalIntakeError> {
+    let metadata =
+        std::fs::symlink_metadata(source).map_err(|e| input(source.display().to_string(), e))?;
+    #[cfg(windows)]
+    let redirected = {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0
+    };
+    #[cfg(not(windows))]
+    let redirected = metadata.file_type().is_symlink();
+    if redirected || !metadata.is_file() && !metadata.is_dir() {
+        return Err(input(
+            source.display().to_string(),
+            "nonregular or redirected input",
+        ));
+    }
+    // Retain the selected physical file, not its caller-supplied spelling.
+    // Windows read sharing also prevents replacement while the census is read.
+    let selected_file = if metadata.is_file() {
+        Some(open_selected_file(source)?)
+    } else {
+        None
+    };
+    let directory = if selected_file.is_some() {
+        source
+            .parent()
+            .filter(|x| !x.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."))
+    } else {
+        source
+    };
+    let tree = read_source_tree_strict(directory, limits)
+        .map_err(|e| input(directory.display().to_string(), e))?;
+    let selected = selected_file
+        .as_ref()
+        .map(|file| selected_census_path(directory, &tree, file))
+        .transpose()?;
+    Ok((tree, selected))
+}
+pub(super) struct AdmittedRoot {
+    pub(super) index: usize,
+    pub(super) identity: ibcmd_xml::metadata::PackageRootIdentity,
+    pub(super) envelope: MetadataEnvelope,
+}
+pub(super) fn admit_root(
+    tree: &SourceTree,
+    selected: Option<&SourcePath>,
+    profile: ProfileId,
+    path: ObjectPath,
+) -> Result<AdmittedRoot, ExternalIntakeError> {
+    tree.validate().map_err(|e| input("source tree", e))?;
+    let mut candidates = Vec::new();
+    for (index, entry) in tree.entries().iter().enumerate() {
+        if entry.path().as_str().contains('/') {
+            continue;
+        }
+        if selected != Some(entry.path())
+            && !entry.path().as_str().to_ascii_lowercase().ends_with(".xml")
+        {
+            continue;
+        }
+        let document =
+            XmlReader::from_slice(entry.bytes()).map_err(|e| input(entry.path().as_str(), e))?;
+        if let Some(identity) =
+            inspect_package_identity(&document).map_err(|e| input(entry.path().as_str(), e))?
+        {
+            candidates.push((index, identity, document));
+        }
+    }
+    if candidates.len() != 1 {
+        return Err(ExternalIntakeError::RootCount {
+            actual: candidates.len(),
+        });
+    }
+    let (index, identity, document) = candidates.pop().expect("one current root");
+    let root_entry = &tree.entries()[index];
+    if selected.is_some_and(|x| x != root_entry.path()) {
+        return Err(ExternalIntakeError::WrongSelectedRoot {
+            selected: selected.expect("checked selected").to_string(),
+            actual: root_entry.path().to_string(),
+        });
+    }
+    if !matches!(
+        identity.intent,
+        PackageIntent::ExternalDataProcessor | PackageIntent::ExternalReport
+    ) {
+        return Err(ExternalIntakeError::Unsupported {
+            path: root_entry.path().to_string(),
+            coordinate: "non-external package intent",
+        });
+    }
+    let envelope = decode_external_root(&document, profile.clone(), path)
+        .map_err(|e| input(root_entry.path().as_str(), e))?;
+    Ok(AdmittedRoot {
+        index,
+        identity,
+        envelope,
     })
 }
