@@ -158,9 +158,9 @@ fn complete_key_bijection_preserves_owner_only_nodes_and_full_values_without_tra
 
 #[test]
 fn real_growing_rosters_have_no_corpus_count_limit() {
-    for size in [9, 65, 513, 1025, 2049, 2377] {
+    for size in [9usize, 65, 513, 1025, 2049, 2377] {
         let ids: Vec<_> = (1..=size)
-            .map(|n| uuid::Uuid::from_u128(n).hyphenated().to_string())
+            .map(|n| uuid::Uuid::from_u128(n as u128).hyphenated().to_string())
             .collect();
         let mut records = vec![(ROOT, NIL_UUID)];
         records.extend(ids.iter().map(|id| (id.as_str(), ROOT)));
