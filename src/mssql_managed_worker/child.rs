@@ -82,6 +82,10 @@ impl OriginalReader {
         }
     }
 
+    fn startup_proved(&self) -> bool {
+        self._original.is_some() && self._thread.is_some()
+    }
+
     fn missing() -> Self {
         let (send, receive) = mpsc::channel();
         let _ = send.send(Err(anyhow::anyhow!("original managed pipe handle missing")));
@@ -234,9 +238,11 @@ impl OriginalChild {
         // An Err here would discard the only handle to a potentially live child.
         let out = child.stdout.take();
         let err = child.stderr.take();
-        let pipes_missing = out.is_none() || err.is_none();
         let stdout = out.map_or_else(OriginalReader::missing, |out| reader(Box::new(out)));
         let stderr = err.map_or_else(OriginalReader::missing, |err| reader(Box::new(err)));
+        // Both retained reader threads are required before this child can bind
+        // a long-lived census anchor, even when both pipe handles exist.
+        let readers_unproved = !stdout.startup_proved() || !stderr.startup_proved();
         let birth = original_birth(&child);
         drop(child.stdin.take()); // Valid pipe EOF, rather than inherited invalid stdin.
         let mut owned = Self {
@@ -245,7 +251,7 @@ impl OriginalChild {
             birth_100ns: 0,
             pipes: OriginalPipes { stdout, stderr },
             identity: None,
-            outcome_unproved: pipes_missing,
+            outcome_unproved: readers_unproved,
             terminal_proved: false,
             direct_exit_proved: false,
             command_deadline: deadline,
@@ -597,9 +603,135 @@ mod shutdown_pipe_tests {
         assert!(original.pipes.stderr._original.is_some());
         assert!(original.pipes.stdout._thread.is_none());
         assert!(original.pipes.stderr._thread.is_none());
+        assert!(original.outcome_unproved);
         assert!(original.completed_at(deadline).is_err());
         assert!(!original.terminal_proved());
-        assert!(original.pipes.stdout.obtained.as_ref().unwrap().is_err());
+        // Immediate refusal leaves both original queued errors untouched. Cache
+        // those exact results only for inspecting their retained error custody.
+        for reader in [&mut original.pipes.stdout, &mut original.pipes.stderr] {
+            assert!(reader.obtained.is_none());
+            let result = reader.receive.try_recv().unwrap();
+            assert!(
+                format!("{:#}", result.as_ref().unwrap_err()).contains("reader allocation refused")
+            );
+            reader.obtained = Some(result);
+            assert!(reader.obtained.as_ref().unwrap().is_err());
+        }
+        assert!(original.outcome_unproved);
+        assert!(original.identity.is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn census_anchor_requires_both_original_readers_to_start() {
+        let executable = std::env::current_exe().unwrap();
+        let arguments = [
+            "--exact".into(),
+            "managed_deadline_no_such_test".into(),
+            "--quiet".into(),
+        ];
+        for failed in [[false, false], [true, false], [false, true], [true, true]] {
+            let mut index = 0;
+            // This is the actual long-lived spawn path: no command deadline.
+            // Only thread startup is substituted; the original Child and pipes
+            // are the actual finite, empty-selection test process.
+            let mut original = OriginalChild::spawn_original_with_readers(
+                &executable,
+                &arguments,
+                None,
+                |stream| {
+                    let refuse = failed[index];
+                    index += 1;
+                    if refuse {
+                        OriginalReader::start_with(stream, |_| {
+                            Err(std::io::Error::other("reader allocation refused"))
+                        })
+                    } else {
+                        OriginalReader::new(stream)
+                    }
+                },
+            )
+            .unwrap();
+            assert_eq!(index, 2);
+            assert!(original.birth_100ns > 0);
+            assert!(original.command_deadline.is_none());
+            let pid = original.pid();
+            let streams = [
+                Arc::clone(original.pipes.stdout._original.as_ref().unwrap()),
+                Arc::clone(original.pipes.stderr._original.as_ref().unwrap()),
+            ];
+            let threads = [
+                original
+                    .pipes
+                    .stdout
+                    ._thread
+                    .as_ref()
+                    .map(|thread| thread.thread().id()),
+                original
+                    .pipes
+                    .stderr
+                    ._thread
+                    .as_ref()
+                    .map(|thread| thread.thread().id()),
+            ];
+            // The seam supplies a census row from the actual retained spawn
+            // identity; it is not native/CIM acceptance evidence.
+            let row = CensusIdentity {
+                pid,
+                parent: std::process::id(),
+                birth_filetime: original.birth_100ns / 10 * 10,
+                executable: executable.clone(),
+                command: format!(
+                    "{} --exact managed_deadline_no_such_test --quiet",
+                    executable.display()
+                ),
+            };
+            let unproved = failed.into_iter().any(|failed| failed);
+            assert_eq!(original.outcome_unproved, unproved);
+            let bound = original.bind_census(&row);
+            if unproved {
+                assert_eq!(
+                    bound.unwrap_err().to_string(),
+                    "original spawned handle identity unproved; retain child"
+                );
+                assert!(original.identity.is_none());
+            } else {
+                assert_eq!(bound.unwrap().pid, pid);
+                assert!(original.identity.is_some());
+            }
+            assert_eq!(original.pid(), pid);
+            assert_eq!(original.outcome_unproved, unproved);
+            assert!(!original.terminal_proved());
+            for (index, reader) in [&mut original.pipes.stdout, &mut original.pipes.stderr]
+                .into_iter()
+                .enumerate()
+            {
+                assert!(Arc::ptr_eq(
+                    reader._original.as_ref().unwrap(),
+                    &streams[index]
+                ));
+                assert_eq!(
+                    reader._thread.as_ref().map(|thread| thread.thread().id()),
+                    threads[index]
+                );
+                assert_eq!(reader.startup_proved(), !failed[index]);
+                assert!(reader.obtained.is_none());
+                if failed[index] {
+                    let result = reader.receive.try_recv().unwrap();
+                    assert!(
+                        format!("{:#}", result.as_ref().unwrap_err())
+                            .contains("reader allocation refused")
+                    );
+                    reader.obtained = Some(result);
+                    assert!(reader.obtained.as_ref().unwrap().is_err());
+                }
+            }
+            assert_eq!(original.outcome_unproved, unproved);
+            if unproved {
+                assert!(original.bind_census(&row).is_err());
+                assert!(original.identity.is_none());
+            }
+        }
     }
 
     #[cfg(windows)]
