@@ -1,18 +1,18 @@
 //! Authored root CI presence is independent of native's AutoCommandBar default.
 //! Fixtures are owned synthetic XML; the original 3a9 failure remains in the lab.
 use formats_xml::form::{
-    apply_form_presence_resource, prepare_form_presence, read_form,
-    validate_form_presence_resource, write_form, FormDialect,
+    FormDialect, apply_form_presence_resource, prepare_form_presence, read_form,
+    validate_form_presence_resource, write_form,
 };
 use morph1c_core::{
     ir::{
-        form::DataPathSpec, FormBody, FormCiItem, MetadataObject, NamedFormBody, ObjectKind,
-        PropertyValue, Token, Uuid,
+        FormBody, FormCiItem, MetadataObject, NamedFormBody, ObjectKind, PropertyValue, Token,
+        Uuid, form::DataPathSpec,
     },
     spec::forms::controls::form_field as ff,
-    version::{with_roundtrip_target, with_source_version, FormatVersion},
+    version::{FormatVersion, with_roundtrip_target, with_source_version},
 };
-use morph1c_pipeline::{read_config, write_config, ConvertOptions, Format};
+use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
 
 fn read(bytes: &[u8], dialect: FormDialect, profile: FormatVersion) -> FormBody {
     with_source_version(Some(profile), || read_form(dialect, bytes)).unwrap()
@@ -128,27 +128,25 @@ fn current_bar_and_ci_edits_regenerate_and_stale_resource_rejection_is_atomic() 
         assert_ne!(old.resource, new.resource);
         let mut stale = read(&new.bytes, FormDialect::Designer, profile);
         let before = semantic(&stale);
-        assert!(apply_form_presence_resource(
-            &mut stale,
-            Uuid([7; 16]),
-            profile,
-            old.resource.as_ref().unwrap(),
-            None
-        )
-        .is_err());
+        assert!(
+            apply_form_presence_resource(
+                &mut stale,
+                Uuid([7; 16]),
+                profile,
+                old.resource.as_ref().unwrap(),
+                None
+            )
+            .is_err()
+        );
         assert_eq!(before, semantic(&stale));
         native_roundtrip(&edited, profile);
         edited.command_interface = true;
-        assert!(prepare_form_presence(
-            &edited,
-            Uuid([7; 16]),
-            FormDialect::Designer,
-            profile,
-            None
-        )
-        .unwrap()
-        .resource
-        .is_none());
+        assert!(
+            prepare_form_presence(&edited, Uuid([7; 16]), FormDialect::Designer, profile, None)
+                .unwrap()
+                .resource
+                .is_none()
+        );
         native_roundtrip(&edited, profile);
         edited.auto_command_bar = None;
         native_roundtrip(&edited, profile);
@@ -217,13 +215,15 @@ fn closed_resource_rejects_foreign_stale_unknown_and_nonconsuming_values_without
         assert!(
             validate_form_presence_resource(&projected, Uuid([8; 16]), profile, &resource).is_err()
         );
-        assert!(validate_form_presence_resource(
-            &projected,
-            Uuid([7; 16]),
-            FormatVersion::new(2, if minor == 20 { 21 } else { 20 }),
-            &resource
-        )
-        .is_err());
+        assert!(
+            validate_form_presence_resource(
+                &projected,
+                Uuid([7; 16]),
+                FormatVersion::new(2, if minor == 20 { 21 } else { 20 }),
+                &resource
+            )
+            .is_err()
+        );
         let mut deleted = projected.clone();
         deleted.auto_command_bar = None;
         assert!(
@@ -239,13 +239,15 @@ fn closed_resource_rejects_foreign_stale_unknown_and_nonconsuming_values_without
         let duplicate = String::from_utf8(resource)
             .unwrap()
             .replace("\"version\":2", "\"version\":2,\"version\":2");
-        assert!(validate_form_presence_resource(
-            &projected,
-            Uuid([7; 16]),
-            profile,
-            duplicate.as_bytes()
-        )
-        .is_err());
+        assert!(
+            validate_form_presence_resource(
+                &projected,
+                Uuid([7; 16]),
+                profile,
+                duplicate.as_bytes()
+            )
+            .is_err()
+        );
     }
 }
 
@@ -459,16 +461,25 @@ fn edt_project_source(project: &std::path::Path, profile: FormatVersion) -> std:
 }
 fn bar_field(profile: FormatVersion, independent_extension: bool) -> FormBody {
     let field = if independent_extension {
-        concat!("<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id><type>None</type>",
-            "<extInfo xsi:type=\"form:LabelFieldExtInfo\"><useCopy>true</useCopy></extInfo></items>")
+        concat!(
+            "<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id><type>None</type>",
+            "<extInfo xsi:type=\"form:LabelFieldExtInfo\"><useCopy>true</useCopy></extInfo></items>"
+        )
     } else {
-        concat!("<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id>",
+        concat!(
+            "<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id>",
             "<dataPath xsi:type=\"form:DataPath\"><segments>List.Reference.Missing</segments></dataPath>",
-            "<type>LabelField</type><extInfo xsi:type=\"form:LabelFieldExtInfo\"/></items>")
+            "<type>LabelField</type><extInfo xsi:type=\"form:LabelFieldExtInfo\"/></items>"
+        )
     };
-    let xml = format!(concat!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
-        "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\">",
-        "<autoCommandBar><name>FormCommandBar</name><id>-1</id>{}</autoCommandBar></form:Form>\r\n"), field);
+    let xml = format!(
+        concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\">",
+            "<autoCommandBar><name>FormCommandBar</name><id>-1</id>{}</autoCommandBar></form:Form>\r\n"
+        ),
+        field
+    );
     read(xml.as_bytes(), FormDialect::Edt, profile)
 }
 fn assert_whole_cycle(
@@ -837,12 +848,14 @@ fn same_destination_rejects_foreign_or_unknown_owned_resources_before_publicatio
         edited.objects.last_mut().unwrap().form_bodies[0]
             .body
             .command_interface = true;
-        assert!(with_roundtrip_target(profile, || write_config(
-            Format::Designer,
-            &edited,
-            native.path()
-        ))
-        .is_err());
+        assert!(
+            with_roundtrip_target(profile, || write_config(
+                Format::Designer,
+                &edited,
+                native.path()
+            ))
+            .is_err()
+        );
         assert_eq!(std::fs::read(&manifest_path).unwrap(), bad.as_bytes());
         assert_eq!(
             std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap(),
@@ -858,12 +871,14 @@ fn same_destination_rejects_foreign_or_unknown_owned_resources_before_publicatio
             prepare_form_presence(&body, Uuid([99; 16]), FormDialect::Designer, profile, None)
                 .unwrap();
         std::fs::write(&sidecar, package.resource.unwrap()).unwrap();
-        assert!(with_roundtrip_target(profile, || write_config(
-            Format::Designer,
-            &edited,
-            native.path()
-        ))
-        .is_err());
+        assert!(
+            with_roundtrip_target(profile, || write_config(
+                Format::Designer,
+                &edited,
+                native.path()
+            ))
+            .is_err()
+        );
         assert_eq!(std::fs::read(&manifest_path).unwrap(), original);
         assert_eq!(
             std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap(),
@@ -932,7 +947,9 @@ fn owned_annotation_spans_preserve_bom_unicode_and_adjacent_markup_exactly() {
             .unwrap();
         let end = start + generated_text[start..].find("-->").unwrap() + 3;
         let comment = &generated_text[start..end];
-        let plain = format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?><ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" version=\"2.{minor}\"><!-- чужое --><ConfigVersions/><Other>Кириллица</Other></ConfigDumpInfo>");
+        let plain = format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?><ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" version=\"2.{minor}\"><!-- чужое --><ConfigVersions/><Other>Кириллица</Other></ConfigDumpInfo>"
+        );
         for existing_bom in [false, true] {
             let mut existing = if existing_bom {
                 b"\xef\xbb\xbf".to_vec()
