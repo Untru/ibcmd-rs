@@ -21,6 +21,7 @@ pub mod types;
 
 // Kind families, one track each.
 pub mod common;
+pub mod websocket_client;
 // Base-free body rows of track D: predefined data, flowcharts, aggregates.
 pub mod bodies_aggregates;
 pub mod bodies_flowchart;
@@ -206,6 +207,10 @@ pub fn compile_descriptor(
     xml: &[u8],
     context: &DescriptorContext,
 ) -> Result<Vec<u8>> {
+    if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
+        let document = ibcmd_xml::XmlReader::from_slice(xml)?;
+        ibcmd_xml::metadata::validate_websocket_client_headers_namespaces(&document)?;
+    }
     let doc = MetadataXml::parse(xml)?;
     let element = doc.object()?;
     let object = ObjectXml {
@@ -260,10 +265,9 @@ pub fn compile_object(object: &ObjectXml<'_>, context: &DescriptorContext) -> Re
         | "DocumentNumerator" => registers::compile(object, context),
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "CommonCommand" | "CommandGroup"
         | "Role" | "XDTOPackage" | "StyleItem" | "Style" | "WebService" | "HTTPService"
-        | "WSReference" | "IntegrationService" | "Bot" | "ExternalDataSource" | "Subsystem"
-        | "Form" | "Template" | "CommonForm" | "Interface" | "PaletteColor" => {
-            common::compile(object, context)
-        }
+        | "WSReference" | "WebSocketClient" | "IntegrationService" | "Bot"
+        | "ExternalDataSource" | "Subsystem" | "Form" | "Template" | "CommonForm" | "Interface"
+        | "PaletteColor" => common::compile(object, context),
         "Configuration" => root::compile(object, context),
         other => bail!("unknown metadata kind {other}"),
     }

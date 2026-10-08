@@ -1,7 +1,7 @@
 //! The kind-to-collection table (`index::ROOT_COLLECTIONS`) is the only one:
 //! `mssql_dump::root_family_folder`, `index::collection_of_kind` and
 //! `index::kind_of_collection` all read it. The expected pairs below are the
-//! two tables it replaced (the exporter's own `root_family_folder`, 46 kinds,
+//! two tables it replaced (the exporter's own `root_family_folder`, 46 original kinds,
 //! and the model's `kind_of_collection`, those 46 plus five nested kinds),
 //! carried as data.
 
@@ -12,12 +12,13 @@ use crate::metadata_model::index::{
 };
 use crate::mssql_dump::root_family_folder;
 
-/// `(kind, folder)` of the 46 root families, in the order the exporter's table had them.
-const ROOT_KINDS: [(&str, &str); 46] = [
+/// Original root families plus the independently supported WebSocketClient family.
+const ROOT_KINDS: [(&str, &str); 47] = [
     ("Role", "Roles"),
     ("CommonTemplate", "CommonTemplates"),
     ("CommonModule", "CommonModules"),
     ("HTTPService", "HTTPServices"),
+    ("WebSocketClient", "WebSocketClients"),
     ("ScheduledJob", "ScheduledJobs"),
     ("CommonAttribute", "CommonAttributes"),
     ("SessionParameter", "SessionParameters"),
@@ -123,7 +124,7 @@ fn the_table_is_exactly_the_two_it_replaced() {
         .iter()
         .map(|&(kind, folder)| (folder, kind))
         .collect();
-    assert_eq!(ROOT_COLLECTIONS.len(), 46);
+    assert_eq!(ROOT_COLLECTIONS.len(), 47);
     assert_eq!(table, expected);
     let nested: BTreeSet<_> = NESTED_COLLECTIONS.iter().copied().collect();
     let expected_nested: BTreeSet<_> = NESTED_KINDS

@@ -32536,6 +32536,9 @@ fn metadata_reference_source_folder(reference: &str) -> Option<(&'static str, &'
             Some(("FunctionalOptionsParameter", "FunctionalOptionsParameters"))
         }
         "HTTPService" => Some(("HTTPService", "HTTPServices")),
+        ibcmd_schema::websocket_client::WebSocketClientLayout::KIND => {
+            Some(ibcmd_schema::websocket_client::WebSocketClientLayout::identity())
+        }
         "Language" => Some(("Language", "Languages")),
         "InformationRegister" => Some(("InformationRegister", "InformationRegisters")),
         "ExchangePlan" => Some(("ExchangePlan", "ExchangePlans")),

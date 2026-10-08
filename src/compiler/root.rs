@@ -331,13 +331,6 @@ impl ConfigurationFamilySlot {
             kind: Some(kind),
         }
     }
-
-    const fn reserved(class_id: &'static str) -> Self {
-        Self {
-            class_id,
-            kind: None,
-        }
-    }
 }
 
 #[derive(Clone, Copy)]
@@ -379,7 +372,10 @@ const CONFIGURATION_SECTION_1: [ConfigurationFamilySlot; 25] = [
     ConfigurationFamilySlot::mapped("857c4a91-e5f4-4fac-86ec-787626f1c108", "ExchangePlan"),
     ConfigurationFamilySlot::mapped("8657032e-7740-4e1d-a3ba-5dd6e8afb78f", "WebService"),
     ConfigurationFamilySlot::mapped("9cd510ce-abfc-11d4-9434-004095e12fc7", "Language"),
-    ConfigurationFamilySlot::reserved("a7641777-7813-45c6-96ef-9d51587a6ac6"),
+    ConfigurationFamilySlot::mapped(
+        ibcmd_schema::websocket_client::WebSocketClientLayout::FAMILY_UUID,
+        ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
+    ),
     ConfigurationFamilySlot::mapped("af547940-3268-434f-a3e7-e47d6d2638c3", "FunctionalOption"),
     ConfigurationFamilySlot::mapped("c045099e-13b9-4fb6-9d50-fca00202971e", "DefinedType"),
     ConfigurationFamilySlot::mapped("cc9df798-7c94-4616-97d2-7aa0b7bc515e", "XDTOPackage"),
@@ -1310,7 +1306,7 @@ mod tests {
     use super::*;
 
     const CONFIGURATION_UUID: &str = "10000000-0000-4000-8000-000000000001";
-    const ALL_ROOT_FAMILIES: [&str; 47] = [
+    const ALL_ROOT_FAMILIES: [&str; 48] = [
         "Role",
         "CommonTemplate",
         "CommonModule",
@@ -1335,6 +1331,7 @@ mod tests {
         "DefinedType",
         "XDTOPackage",
         "WSReference",
+        "WebSocketClient",
         "Constant",
         "Document",
         "CommonForm",

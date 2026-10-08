@@ -28,7 +28,7 @@ use crate::metadata_model::xml::Element;
 /// The order `<ChildObjects>` lists the kinds in (the stored slots are in
 /// class-uuid order). Measured on the four corpora and the exporter's table;
 /// `Interface` and `ExternalDataSource` have no corpus and are refused.
-const CHILD_KIND_ORDER: [&str; 46] = [
+const CHILD_KIND_ORDER: [&str; 47] = [
     "Language",
     "Subsystem",
     "StyleItem",
@@ -45,6 +45,7 @@ const CHILD_KIND_ORDER: [&str; 46] = [
     "WebService",
     "HTTPService",
     "WSReference",
+    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
     "EventSubscription",
     "ScheduledJob",
     "SettingsStorage",

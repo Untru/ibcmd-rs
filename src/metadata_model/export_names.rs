@@ -236,6 +236,10 @@ const ROOT_CLASSES: &[(&str, &str)] = &[
     ("3e63355c-1378-4953-be9b-1deb5fb6bec5", "Task"),
     ("d26096fb-7a5d-4df9-af63-47d04771fa9b", "WSReference"),
     ("8657032e-7740-4e1d-a3ba-5dd6e8afb78f", "WebService"),
+    (
+        ibcmd_schema::websocket_client::WebSocketClientLayout::FAMILY_UUID,
+        ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
+    ),
     ("cc9df798-7c94-4616-97d2-7aa0b7bc515e", "XDTOPackage"),
 ];
 

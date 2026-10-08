@@ -72,6 +72,10 @@ pub const ROOT_COLLECTIONS: &[(&str, &str)] = &[
     ("WebServices", "WebService"),
     ("HTTPServices", "HTTPService"),
     ("WSReferences", "WSReference"),
+    (
+        ibcmd_schema::websocket_client::WebSocketClientLayout::FOLDER,
+        ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
+    ),
     ("EventSubscriptions", "EventSubscription"),
     ("ScheduledJobs", "ScheduledJob"),
     ("SettingsStorages", "SettingsStorage"),

@@ -53,6 +53,7 @@ fn compile_tree(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<B
         "Bot" => Bot::from_xml(object, context)?.to_brace(),
         "IntegrationService" => IntegrationService::from_xml(object)?.to_brace(),
         "HTTPService" => HttpService::from_xml(object)?.to_brace(),
+        "WebSocketClient" => super::websocket_client::WebSocketClient::from_xml(object)?.to_brace(),
         "WebService" => WebService::from_xml(object, context)?.to_brace(),
         "Subsystem" => Subsystem::from_xml(object, context)?.to_brace(),
         "Form" => Form::from_xml(object, context)?.to_brace(),

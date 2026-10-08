@@ -289,8 +289,8 @@ const SECTION_1: &[Slot] = &[
     slot("8657032e-7740-4e1d-a3ba-5dd6e8afb78f", "WebService"),
     slot("9cd510ce-abfc-11d4-9434-004095e12fc7", "Language"),
     Slot {
-        class_id: "a7641777-7813-45c6-96ef-9d51587a6ac6",
-        kind: None,
+        class_id: ibcmd_schema::websocket_client::WebSocketClientLayout::FAMILY_UUID,
+        kind: Some(ibcmd_schema::websocket_client::WebSocketClientLayout::KIND),
         since: SlotSince::V68,
     },
     slot("af547940-3268-434f-a3e7-e47d6d2638c3", "FunctionalOption"),

@@ -13448,6 +13448,15 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let document_numerator = parse_document_numerator_properties_from_text(text, uuid)?;
         format_document_numerator_source_xml(&header, &document_numerator, source_version)
             .into_bytes()
+    } else if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
+        let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+        let client =
+            crate::metadata_model::websocket_client::WebSocketClient::from_brace(&row).ok()?;
+        crate::metadata_model::export::write_document(
+            &client.to_xml().ok()?,
+            source_version.as_str(),
+        )
+        .into_bytes()
     } else if kind == "WSReference" {
         let ws_reference = parse_ws_reference_properties_from_text(text, uuid)?;
         format_ws_reference_source_xml(&header, &ws_reference, source_version).into_bytes()

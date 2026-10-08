@@ -9,6 +9,7 @@ import json
 import os
 import pathlib
 import re
+import struct
 import subprocess
 import tempfile
 import zipfile
@@ -42,9 +43,88 @@ EDT_SOURCE_IDS = (
 )
 
 
+def elf_debug_info_ranges(data: bytes) -> list[tuple[int, int]]:
+    """Exclude nonloaded .debug_info metadata; keep .debug_str and other bytes."""
+    if not data.startswith(b"\x7fELF\x02\x01"):
+        return []
+
+    def field(fmt: str, offset: int) -> int:
+        try:
+            return struct.unpack_from("<" + fmt, data, offset)[0]
+        except struct.error as error:
+            raise SystemExit("truncated ELF header") from error
+
+    def span(offset: int, size: int) -> tuple[int, int]:
+        end = offset + size
+        if end > len(data):
+            raise SystemExit("ELF range outside file")
+        return offset, end
+
+    shoff, stride, count, names_index = field("Q", 40), field("H", 58), field("H", 60), field("H", 62)
+    if shoff == 0 and count == 0:
+        return []
+    if stride < 64:
+        raise SystemExit("ELF section header width")
+    span(shoff, stride)
+    if count == 0:
+        count = field("Q", shoff + 32)
+    if names_index == 0xffff:
+        names_index = field("I", shoff + 40)
+    section_table = span(shoff, count * stride)
+    if names_index >= count:
+        raise SystemExit("ELF section name table index")
+    names_header = shoff + names_index * stride
+    if field("I", names_header + 4) != 3:
+        raise SystemExit("ELF section name table type")
+    start, end = span(field("Q", names_header + 24), field("Q", names_header + 32))
+    names = data[start:end]
+    allocated, debug = [], []
+    protected = [(0, 64), section_table, (start, end)]
+    for index in range(count):
+        header = shoff + index * stride
+        name_offset = field("I", header)
+        if name_offset >= len(names):
+            raise SystemExit("ELF section name offset")
+        name_end = names.find(b"\0", name_offset)
+        if name_end == -1:
+            raise SystemExit("unterminated ELF section name")
+        kind, flags = field("I", header + 4), field("Q", header + 8)
+        if kind == 8:
+            continue
+        section = span(field("Q", header + 24), field("Q", header + 32))
+        if flags & 2:
+            allocated.append(section)
+        if names[name_offset:name_end] == b".debug_info" and kind == 1 and flags == 0:
+            debug.append(section)
+        else:
+            protected.append(section)
+    phoff, phstride, phcount = field("Q", 32), field("H", 54), field("H", 56)
+    if phcount == 0xffff:
+        phcount = field("I", shoff + 44)
+    if phcount:
+        if phstride < 56:
+            raise SystemExit("ELF program header width")
+        protected.append(span(phoff, phcount * phstride))
+        for index in range(phcount):
+            header = phoff + index * phstride
+            kind = field("I", header)
+            if kind != 0:
+                segment = span(field("Q", header + 8), field("Q", header + 32))
+                protected.append(segment)
+                if kind == 1:
+                    allocated.append(segment)
+    if any(a < d_end and d < a_end for d, d_end in debug for a, a_end in allocated):
+        raise SystemExit("debug_info overlaps loadable ELF bytes")
+    if any(a < d_end and d < a_end for d, d_end in debug for a, a_end in protected):
+        raise SystemExit("debug_info overlaps ELF metadata or another section")
+    return debug
+
+
 def forbidden_binary_markers(data: bytes) -> list[bytes]:
     lowered = data.lower()
     declarative = bytearray(lowered)
+    for start, end in elf_debug_info_ranges(data):
+        declarative[start:end] = b"\0" * (end - start)
     for identifier in EDT_SOURCE_IDS:
         position = 0
         while (position := lowered.find(identifier, position)) != -1:

@@ -402,6 +402,11 @@ pub(super) fn metadata_source_for_object_fields(
     let header_index = metadata_header_field_index(&fields, uuid);
 
     match code {
+        0 if header_index == Some(1)
+            && ibcmd_schema::websocket_client::WebSocketClientLayout::recognizes_fields(fields) =>
+        {
+            Some(ibcmd_schema::websocket_client::WebSocketClientLayout::identity())
+        }
         0 if header_index == Some(1) && field_starts_with(fields.get(2), "{0,") => {
             Some(("FunctionalOptionsParameter", "FunctionalOptionsParameters"))
         }
