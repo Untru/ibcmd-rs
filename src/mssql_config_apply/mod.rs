@@ -140,6 +140,8 @@ pub enum GateChoice {
 
 #[derive(Debug, Clone)]
 pub struct ConfigApplyOptions {
+    /// Source apply's original export dependency proof, never caller SQL.
+    pub(crate) source_preimages: Option<dynamic::SourceOwnerPreimages>,
     pub database: String,
     pub platform_profile: MssqlNativePlatformProfile,
     /// Plan, check and render, but write nothing (not even the recovery
@@ -245,6 +247,7 @@ impl ConfigApplyOptions {
 
     pub fn new(database: impl Into<String>, platform_profile: MssqlNativePlatformProfile) -> Self {
         Self {
+            source_preimages: None,
             database: database.into(),
             platform_profile,
             dry_run: false,
@@ -951,6 +954,9 @@ pub fn plan_with_gate(
     let client = require_client(sql)?;
     let database = options.database.as_str();
     let db = quote_ident(database)?;
+    if let Some(original) = &options.source_preimages {
+        original.require_current(sql, database)?;
+    }
     let mut timings = ApplyTimings::default();
 
     let started = Instant::now();
@@ -1669,6 +1675,7 @@ pub fn plan_with_gate(
         NeedsNativeApply::apply(format!("Params marker descriptor decision: {error:#}"))
     })?;
     let inputs = ScriptInputs {
+        source_preimages: options.source_preimages.clone(),
         database: options.database.clone(),
         client_pid: std::process::id(),
         rehearse: options.rehearse,

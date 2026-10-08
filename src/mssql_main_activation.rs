@@ -1581,6 +1581,59 @@ mod tests {
     }
 
     #[test]
+    fn complete_129_row_body_cohort_remains_refused_until_native_measurement() {
+        // A structurally valid body-only cohort, with every original preimage
+        // and all three service rows. Its small byte size must not silently
+        // promote an unmeasured >128 publication to runtime support (#345).
+        for count in [128, 129] {
+            for mode in [
+                MainActivationMode::Online,
+                MainActivationMode::Exclusive,
+                MainActivationMode::Live,
+                MainActivationMode::Worker,
+            ] {
+                let base = fixture(mode);
+                let mut staged = base
+                    .staged_rows
+                    .iter()
+                    .filter(|row| SERVICE_NAMES.contains(&row.file_name.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mut active = base
+                    .active_rows
+                    .iter()
+                    .filter(|row| SERVICE_NAMES.contains(&row.file_name.as_str()))
+                    .cloned()
+                    .collect::<Vec<_>>();
+                let mut allowed = Vec::new();
+                for index in 0..count - 3 {
+                    let name = format!("00000000-0000-4000-8000-{:012x}.0", index + 1);
+                    staged.push(row(&name, b"new module".to_vec()));
+                    active.push(row(&name, b"old module".to_vec()));
+                    allowed.push(name);
+                }
+                let result = prepare_main_activation(
+                    mode,
+                    staged,
+                    MainActivationSnapshot {
+                        config_rows: active,
+                        config_dynamically_updated: None,
+                        params_dynamically_updated: None,
+                    },
+                    &allowed,
+                    true,
+                );
+                if count == 128 {
+                    assert_eq!(result.unwrap().dry_run_report().staged_rows, count);
+                } else {
+                    assert!(matches!(result, Err(MainActivationError::Limit(ref detail))
+                        if detail.contains("129 staged rows exceeds 128")));
+                }
+            }
+        }
+    }
+
+    #[test]
     fn exclusive_replaces_only_exact_staged_ordinary_rows() {
         let script =
             render_main_activation_sql("lab]db", &fixture(MainActivationMode::Exclusive), None)
@@ -1661,6 +1714,28 @@ mod tests {
         assert!(script.sql.contains("EFBBBF7B302C322C"));
         assert!(script.report.online_protocol_verified);
         assert!(script.report.existing_sessions_retain_generation);
+    }
+
+    #[test]
+    fn source_initial_dependency_preimages_precede_all_script_publications() {
+        let original =
+            crate::mssql_config_apply::dynamic::SourceOwnerPreimages::test_fixture("lab");
+        for mode in [
+            MainActivationMode::Online,
+            MainActivationMode::Live,
+            MainActivationMode::Worker,
+        ] {
+            let plan =
+                fixture(mode).with_precondition_sql(original.precondition_sql("lab").unwrap());
+            let tail = (mode == MainActivationMode::Live).then_some(r"C:\tail.trn");
+            let sql = render_main_activation_sql("lab", &plan, tail).unwrap().sql;
+            let begin = sql.find("BEGIN TRANSACTION;").unwrap();
+            let initial = sql.find("-- initial source dependency preimages").unwrap();
+            let first_write = sql.find("DELETE FROM dbo.Config WHERE").unwrap();
+            assert!(begin < initial && initial < first_write, "{mode:?}");
+            assert!(sql[initial..first_write].contains("UPDLOCK, HOLDLOCK"));
+            assert!(sql[initial..first_write].contains("HASHBYTES('SHA2_256', BinaryData)"));
+        }
     }
 
     #[test]
