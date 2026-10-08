@@ -398,7 +398,22 @@ pub fn decode_external_named_owner(
             "Synonym" | "ExtendedPresentation" => localized(property, &uris)?,
             "UsePurposes" => purposes(property, &uris)?,
             _ => {
-                let value = element_text(property)?.ok_or(MetadataDecodeError::InvalidEnvelope(
+                // Comments and processing instructions are retained lexical
+                // nodes, not scalar data or nested metadata.
+                let scalar = property.with_children(
+                    property
+                        .children()
+                        .iter()
+                        .filter(|node| {
+                            !matches!(
+                                node,
+                                XmlNode::Comment(_) | XmlNode::ProcessingInstruction(_)
+                            )
+                        })
+                        .cloned()
+                        .collect(),
+                );
+                let value = element_text(&scalar)?.ok_or(MetadataDecodeError::InvalidEnvelope(
                     "named scalar nested content",
                 ))?;
                 match name {
