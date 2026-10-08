@@ -28,6 +28,7 @@ pub mod bodies_flowchart;
 pub mod bodies_predefined;
 pub mod bodies_rows;
 pub mod bodies_value_table;
+pub(crate) mod external_data_source;
 pub mod objects;
 pub mod registers;
 pub mod root;
@@ -210,6 +211,9 @@ pub fn compile_descriptor(
     if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
         let document = ibcmd_xml::XmlReader::from_slice(xml)?;
         ibcmd_xml::metadata::validate_websocket_client_headers_namespaces(&document)?;
+    }
+    if kind == "ExternalDataSource" {
+        external_data_source::validate_source(xml, &context.version)?;
     }
     let doc = MetadataXml::parse(xml)?;
     let element = doc.object()?;

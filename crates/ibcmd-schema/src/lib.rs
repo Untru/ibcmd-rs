@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod configuration_rights;
+pub mod external_data_source;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};

@@ -7,9 +7,8 @@
 //! `to_brace` writes the stored descriptor, so the export can later decode a
 //! row into the same struct.
 //!
-//! ExternalDataSource and Interface are not compiled: none of the four
-//! reference corpora (BSP and ERP УХ, 8.3.27 and 8.5) holds one, so there is
-//! no stored row to measure a layout against.
+//! Empty ExternalDataSource is measured against a native 8.3.27.2214 CF;
+//! its nonempty child families and Interface require separate layouts.
 
 #[path = "common_export.rs"]
 pub(crate) mod export;
@@ -55,6 +54,7 @@ fn compile_tree(object: &ObjectXml<'_>, context: &DescriptorContext) -> Result<B
         "HTTPService" => HttpService::from_xml(object)?.to_brace(),
         "WebSocketClient" => super::websocket_client::WebSocketClient::from_xml(object)?.to_brace(),
         "WebService" => WebService::from_xml(object, context)?.to_brace(),
+        "ExternalDataSource" => super::external_data_source::compile(object, context)?,
         "Subsystem" => Subsystem::from_xml(object, context)?.to_brace(),
         "Form" => Form::from_xml(object, context)?.to_brace(),
         "CommonForm" => CommonForm::from_xml(object, context)?.to_brace(),

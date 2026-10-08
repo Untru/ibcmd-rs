@@ -13017,6 +13017,48 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
             xml: xml.into_bytes(),
         });
     }
+    let declared_external_data_source =
+        configuration_root_object_refs
+            .get(uuid)
+            .is_some_and(|reference| {
+                reference.starts_with(ibcmd_schema::external_data_source::FULL_NAME_PREFIX)
+            });
+    let external_data_source_candidate = row.object_code == Some(2)
+        && metadata_object_fields(text).is_some_and(|fields| {
+            fields.len() == ibcmd_schema::external_data_source::BODY_ARITY
+                && field_starts_with(fields.get(1), "{0,")
+        });
+    if declared_external_data_source
+        || external_data_source_candidate
+        || row.kind.as_deref() == Some(ibcmd_schema::external_data_source::KIND)
+    {
+        // The canonical family owns all fields/children. No later generic scan
+        // or header-only fallback is allowed to modify or replace this result.
+        match crate::metadata_model::external_data_source::export_source(
+            text,
+            uuid,
+            source_version.as_str(),
+        ) {
+            Ok((name, xml)) => {
+                let relative_path = PathBuf::from(ibcmd_schema::external_data_source::COLLECTION)
+                    .join(sanitize_source_path_segment(&name))
+                    .with_extension("xml");
+                return Some(ExtractedMetadataSourceXml {
+                    relative_path,
+                    xml: xml.into_bytes(),
+                });
+            }
+            Err(_) => {
+                *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                    MetadataSourceFailureClass::Malformed,
+                    ibcmd_schema::external_data_source::KIND,
+                    "canonical_empty_family",
+                    "invalid_or_unsupported_full_row",
+                ));
+                return None;
+            }
+        }
+    }
     let object_code = row.object_code?;
     if object_code == 4
         && let Some(recalculation_ref) = recalculation_refs.get(uuid)
@@ -13739,6 +13781,9 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
         return Ok(extracted);
     }
 
+    if let Some(diagnostic) = owner_graph_diagnostic {
+        return Err(diagnostic);
+    }
     let (class, family, signature) = if row.file_name.contains(METADATA_NAME_SEPARATOR) {
         (
             MetadataSourceFailureClass::Unsupported,
@@ -13773,8 +13818,6 @@ fn extract_metadata_source_xml_from_text_row_audited_with_object_ref_resolutions
             "Form",
             "direct_form_owner_missing",
         )
-    } else if let Some(diagnostic) = owner_graph_diagnostic {
-        return Err(diagnostic);
     } else {
         (
             MetadataSourceFailureClass::Unknown,
@@ -46617,3 +46660,6 @@ mod catalog_tabular_section_wrapper_tests {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod external_data_source_tests;
