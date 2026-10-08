@@ -44,9 +44,39 @@ fn metadata(kind: &str, properties: &str) -> String {
 }
 
 fn configuration() -> String {
+    // Both compilers receive a complete, independently authored root. The
+    // legacy base-free writer requires all seven declared section identities.
+    let contained = [
+        "9cd510cd-abfc-11d4-9434-004095e12fc7",
+        "9fcd25a0-4822-11d4-9414-008048da11f9",
+        "e3687481-0a87-462c-a166-9f34594f9bba",
+        "9de14907-ec23-4a07-96f0-85521cb6b53b",
+        "51f2d5d8-ea4d-4064-8892-82951750031e",
+        "e68182ea-4237-4383-967f-90c1e3370bc7",
+        "fb282519-d103-4dd3-bc12-cb271d631dfc",
+    ]
+    .iter()
+    .enumerate()
+    .map(|(index, class)| {
+        format!(
+            "<xr:ContainedObject><xr:ClassId>{class}</xr:ClassId><xr:ObjectId>20000000-0000-4000-8000-{:012}</xr:ObjectId></xr:ContainedObject>",
+            index + 1,
+        )
+    })
+    .collect::<String>();
     metadata(
         "Configuration",
         "<DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>English</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode>",
+    )
+    .replacen(
+        "version=\"2.20\"",
+        "xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" version=\"2.20\"",
+        1,
+    )
+    .replacen(
+        "<Properties>",
+        &format!("<InternalInfo>{contained}</InternalInfo><Properties>"),
+        1,
     )
 }
 
