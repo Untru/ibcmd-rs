@@ -1361,3 +1361,615 @@ fn empty_value_admission_does_not_admit_malformed_or_nil_type_declarations() {
         );
     }
 }
+
+// A1.5/A1.7 appended controls; the original twenty-three bodies above stay unchanged.
+use diagnostic::comparison as cmp;
+
+fn comparison_binding(files: &Files, name: &str, bytes: &[u8]) -> FileBinding {
+    let path = files.root.join(name);
+    fs::write(&path, bytes).unwrap();
+    FileBinding {
+        path,
+        length: bytes.len() as u64,
+        sha256: hash(bytes),
+    }
+}
+fn comparison_json<T: serde::Serialize>(files: &Files, name: &str, value: &T) -> FileBinding {
+    comparison_binding(files, name, &serde_json::to_vec(value).unwrap())
+}
+fn comparison_stage(files: &Files, mut input: ManifestV1, stage: &str) -> cmp::SnapshotDeclaration {
+    input.stage = stage.into();
+    for row in &mut input.rows {
+        row.origin.stage = stage.into();
+        row.origin.version = format!("independently-bound-{stage}-version");
+    }
+    let proof = comparison_binding(
+        files,
+        &format!("proof-{stage}.json"),
+        format!("own generated capture for generated/{stage}").as_bytes(),
+    );
+    input.predecessors.push(proof.clone());
+    let input_manifest = comparison_json(files, &format!("input-{stage}.json"), &input);
+    let witness = cmp::CaptureWitnessV1 {
+        schema: "cache-trace-capture-witness-v1".into(),
+        case: "generated".into(),
+        stage: stage.into(),
+        purpose: input.snapshot_purpose.clone(),
+        source_head: SOURCE.into(),
+        registry_root_uuid: ROOT.into(),
+        input_manifest_sha256: input_manifest.sha256.clone(),
+        provenance: cmp::Provenance::WeakPlainOnlyDiagnostic,
+        original_proofs: vec![proof],
+    };
+    cmp::SnapshotDeclaration {
+        case: "generated".into(),
+        stage: stage.into(),
+        purpose: input.snapshot_purpose,
+        registry_root_uuid: ROOT.into(),
+        input_manifest,
+        capture_witness: comparison_json(files, &format!("capture-{stage}.json"), &witness),
+        facts_manifest: None,
+    }
+}
+fn comparison_corpus(files: &Files, input: ManifestV1) -> cmp::RetainedCorpusV1 {
+    cmp::RetainedCorpusV1 {
+        schema: "cache-trace-retained-corpus-v1".into(),
+        input_exporter_source_head: SOURCE.into(),
+        compiled_source: cmp::compiled_sources(),
+        cases: vec![cmp::RetainedCase {
+            id: "generated".into(),
+            provenance: cmp::Provenance::WeakPlainOnlyDiagnostic,
+            current: comparison_stage(files, input.clone(), "current"),
+            baseline: Some(comparison_stage(files, input, "before")),
+        }],
+    }
+}
+fn comparison_run(
+    files: &Files,
+    corpus: &cmp::RetainedCorpusV1,
+    output: &Files,
+) -> anyhow::Result<cmp::CorpusReport> {
+    cmp::run_closed(
+        comparison_json(files, "outer.json", corpus),
+        &output.root.join("published"),
+    )
+}
+
+#[test]
+fn complete_literal_and_property_diagnostics_compare_same_positive_before_mutants() {
+    let files = Files::new();
+    let input = ProjectionInputs::load(files.manifest(0), SOURCE).unwrap();
+    let current = input.project().unwrap().help;
+    let raw = current.render();
+    assert_eq!(raw, input.raw(RowRole::HelpProps));
+    assert!(cmp::literal(&raw, &raw).first.is_none());
+    let positive = cmp::payload(&current, &current).unwrap();
+    assert!(positive.property_maps_equal);
+    assert!(positive.first_key.is_none());
+    for bytes in [
+        raw[3..].to_vec(),
+        raw[..raw.len() - 1].to_vec(),
+        [raw.as_slice(), b"x"].concat(),
+        raw.iter().copied().filter(|b| *b != b'\r').collect(),
+    ] {
+        assert!(cmp::literal(&raw, &bytes).first.is_some());
+    }
+    let eof = cmp::literal(&raw, &[raw.as_slice(), b"x"].concat())
+        .first
+        .unwrap();
+    assert_eq!(eof.offset, raw.len());
+    assert_eq!(eof.expected, cmp::ByteEndpoint::Eof);
+    assert_eq!(eof.actual, cmp::ByteEndpoint::Byte(b'x'));
+    let mut reordered = current.clone();
+    reordered.entries.swap(0, 1);
+    let compared = cmp::payload(&current, &reordered).unwrap();
+    assert!(compared.first_key.is_some());
+    assert!(compared.property_maps_equal); // Key order and complete values are independent facts.
+    for mutation in 0..4 {
+        let mut changed = current.clone();
+        match mutation {
+            0 => changed.entries[0].props[0].0 = "99".into(),
+            1 => changed.entries[0].props[0].1 = Brace::str("different complete value"),
+            2 => changed.entries[2].props.swap(0, 1),
+            _ => {
+                changed.entries[0].props.pop();
+            }
+        }
+        let difference = cmp::payload(&current, &changed).unwrap();
+        assert!(!difference.property_maps_equal);
+        assert!(difference.first_property.is_some());
+    }
+    let mut missing = current.clone();
+    missing.entries.remove(0);
+    assert_eq!(
+        cmp::payload(&current, &missing).unwrap().missing_keys,
+        [SET]
+    );
+    let mut extra = current.clone();
+    let mut new_entry = current.entries[0].clone();
+    new_entry.key = TYPE.into();
+    extra.entries.push(new_entry);
+    assert_eq!(cmp::payload(&current, &extra).unwrap().extra_keys, [TYPE]);
+    let mut duplicated = current.clone();
+    duplicated.entries.push(current.entries[0].clone());
+    assert!(cmp::payload(&current, &duplicated).is_err());
+    let mut duplicated = current.clone();
+    duplicated.entries[0]
+        .props
+        .push(current.entries[0].props[0].clone());
+    assert!(cmp::payload(&current, &duplicated).is_err());
+    assert_eq!(current.render(), raw);
+    input.verify_sources().unwrap();
+}
+fn comparison_proposal(input: &ProjectionInputs) -> cmp::DiagnosticProposal {
+    let witnesses = cmp::key_witnesses(input).unwrap();
+    let keys = input
+        .project()
+        .unwrap()
+        .help
+        .entries
+        .into_iter()
+        .map(|e| e.key)
+        .collect::<Vec<_>>();
+    cmp::DiagnosticProposal {
+        emits: keys
+            .into_iter()
+            .enumerate()
+            .map(|(i, key)| cmp::ProposedEmit {
+                occurrence: witnesses[&key].clone(),
+                key,
+                event_id: format!("explicit-diagnostic-event-{i}"),
+            })
+            .collect(),
+    }
+}
+#[test]
+fn proposal_actual_handler_requires_complete_current_bijection_and_source_occurrence() {
+    let files = Files::new();
+    let input = ProjectionInputs::load(files.manifest(0), SOURCE).unwrap();
+    let original = input.raw(RowRole::HelpProps).to_vec();
+    let proposal = comparison_proposal(&input);
+    assert_eq!(proposal.emits[0].occurrence, cmp::key_occurrence(&input, &proposal.emits[0].key).unwrap());
+    let default = cmp::compare_current(&input, None).unwrap();
+    assert!(default.current_roundtrip.first.is_none());
+    assert!(default.proposal.is_none());
+    let accepted = cmp::compare_current(&input, Some(&proposal)).unwrap();
+    let projected = accepted.proposal.unwrap();
+    assert!(projected.untrusted_diagnostic_only);
+    assert!(projected.literal.first.is_none()); // These authored keys occupy independent buckets.
+    assert!(projected.payload.property_maps_equal);
+    assert_eq!(projected.associations.len(), 3);
+    assert!(accepted.first_visit_authority.is_none());
+    assert!(!accepted.native_acceptance);
+    for mutation in 0..11 {
+        let mut changed = proposal.clone();
+        match mutation {
+            0 => {
+                changed.emits.pop();
+            }
+            1 => changed.emits.push(changed.emits[0].clone()),
+            2 => changed.emits[0].key = TYPE.into(),
+            3 => changed.emits[1].event_id = changed.emits[0].event_id.clone(),
+            4 => changed.emits[0].event_id = "bad\0event".into(),
+            5 => changed.emits[0].occurrence.source.stage = "other-stage".into(),
+            6 => changed.emits[0].occurrence.source.case = "other-case".into(),
+            7 => changed.emits[0].occurrence.plain_sha256 = "0".repeat(64),
+            8 => changed.emits[0].occurrence.path.push(99),
+            9 => changed.emits[0].occurrence.registry_span = Some((0, 99)),
+            _ => changed.emits[0].occurrence.source.version = "other-version".into(),
+        }
+        assert!(
+            cmp::compare_current(&input, Some(&changed)).is_err(),
+            "mutation {mutation}"
+        );
+    }
+    assert_eq!(input.raw(RowRole::HelpProps), original);
+    input.verify_sources().unwrap();
+}
+#[test]
+fn actual_growing_key_rosters_render_through_existing_model_without_native_history_authority() {
+    use ibcmd_rs::restructure::caches::order;
+    for size in [9usize, 65, 513, 1025, 2049] {
+        let files = Files::new();
+        let mut manifest = files.manifest(0);
+        let ids = (1..size)
+            .map(|n| {
+                uuid::Uuid::from_u128(((n as u128) << 96) | 1)
+                    .hyphenated()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        let mut records = vec![(ROOT, NIL_UUID)];
+        records.extend(ids.iter().map(|id| (id.as_str(), ROOT)));
+        let mut entries = ids
+            .iter()
+            .map(|id| (id.as_str(), vec![(5, l(vec![Brace::str("B"), a(0)]))]))
+            .collect::<Vec<_>>();
+        entries.push((NIL_UUID, vec![(23, links(&[]))]));
+        for (row, tree) in
+            manifest
+                .rows
+                .iter_mut()
+                .zip([registry(&records), sets(&[]), help(&entries)])
+        {
+            let bytes = serialize_row(&tree);
+            let Locator::Plain { path } = &row.locator else {
+                unreachable!()
+            };
+            fs::write(path, &bytes).unwrap();
+            row.stored_length = bytes.len() as u64;
+            row.packed_length = bytes.len() as u64;
+            row.plain_length = bytes.len() as u64;
+            row.stored_sha256 = hash(&bytes);
+            row.packed_sha256 = hash(&bytes);
+            row.plain_sha256 = hash(&bytes);
+        }
+        let input = ProjectionInputs::load(manifest, SOURCE).unwrap();
+        let original = input.project().unwrap().help;
+        assert_eq!(original.entries.len(), size);
+        let before = cmp::compare_current(&input, None).unwrap();
+        assert!(before.current_roundtrip.first.is_none());
+        let proposal = comparison_proposal(&input); // Explicit authored declaration order, never native expected order.
+        let actual = cmp::compare_current(&input, Some(&proposal))
+            .unwrap()
+            .proposal
+            .unwrap();
+        let mut table = order::MsvcTable::new();
+        for emit in &proposal.emits {
+            table.insert(order::uuid_hash(&emit.key).unwrap());
+        }
+        let expected_keys = table
+            .order()
+            .iter()
+            .map(|&i| proposal.emits[i].key.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(actual.model_order, expected_keys);
+        assert_eq!(actual.associations.len(), size);
+        assert!(actual.payload.property_maps_equal);
+        let mut copied = original.clone();
+        copied.entries = expected_keys
+            .iter()
+            .map(|key| {
+                original
+                    .entries
+                    .iter()
+                    .find(|e| &e.key == key)
+                    .unwrap()
+                    .clone()
+            })
+            .collect();
+        assert_eq!(
+            cmp::literal(input.raw(RowRole::HelpProps), &copied.render()),
+            actual.literal
+        );
+        assert_eq!(original.render(), input.raw(RowRole::HelpProps));
+        assert_eq!(table.buckets(), order::bucket_count(size));
+        assert!(actual.untrusted_diagnostic_only);
+    }
+    let first = [
+        "00000001-0000-0000-0000-000000000000",
+        "00000002-0000-0000-0000-000000000000",
+        "00000009-0000-0000-0000-000000000000",
+    ];
+    let other = [first[0], first[2], first[1]];
+    assert_ne!(first, other);
+    assert_eq!(
+        order::iteration_order(first).unwrap(),
+        order::iteration_order(other).unwrap()
+    );
+}
+#[test]
+fn recognized_edge_diagnostics_preserve_domains_occurrences_unknown_and_missing_endpoints() {
+    let (files, base, descriptor, index) = facts_fixture();
+    let manifest = additional_manifest(&files, &descriptor, Some(&index));
+    let loaded = diagnostic::FactInputs::load(&base, manifest).unwrap();
+    let original = loaded.project(&base).unwrap();
+    let same = loaded.project(&base).unwrap();
+    match cmp::edges(Some(&original), Some(&same)) {
+        cmp::EdgeComparison::ObservedOnly {
+            expected_count,
+            actual_count,
+            first,
+            ..
+        } => {
+            assert_eq!(expected_count, actual_count);
+            assert!(expected_count > 0);
+            assert!(first.is_none());
+        }
+        _ => panic!("actual graph observations lost"),
+    }
+    assert!(matches!(
+        cmp::edges(Some(&original), None),
+        cmp::EdgeComparison::Unavailable { .. }
+    ));
+    for mutation in 0..3 {
+        let mut changed = loaded.project(&base).unwrap();
+        let at = changed
+            .events
+            .iter()
+            .position(|e| matches!(e, diagnostic::ObservationEvent::ReferenceVisit { .. }))
+            .unwrap();
+        match mutation {
+            0 => {
+                let diagnostic::ObservationEvent::ReferenceVisit { target, .. } =
+                    &mut changed.events[at]
+                else {
+                    unreachable!()
+                };
+                *target = diagnostic::Target::Unknown {
+                    raw: l(vec![Brace::str("uncertain"), a(99)]),
+                };
+            }
+            1 => {
+                changed.events.remove(at);
+            }
+            _ => {
+                let diagnostic::ObservationEvent::ReferenceVisit { occurrence, .. } =
+                    &mut changed.events[at]
+                else {
+                    unreachable!()
+                };
+                occurrence.path.push(99);
+            }
+        }
+        match cmp::edges(Some(&original), Some(&changed)) {
+            cmp::EdgeComparison::ObservedOnly { first: Some(d), .. } => {
+                assert!(d.expected.is_some());
+                assert_ne!(d.expected, d.actual);
+            }
+            _ => panic!("changed endpoint not reported"),
+        }
+    }
+    loaded.verify_sources(&base).unwrap();
+}
+#[test]
+fn closed_corpus_actual_handler_accepts_independent_unchanged_stages_without_proposal() {
+    let files = Files::new();
+    let output = Files::new();
+    let corpus = comparison_corpus(&files, files.manifest(0));
+    let report = comparison_run(&files, &corpus, &output).unwrap();
+    assert_eq!(report.cases.len(), 1);
+    assert!(!report.native_acceptance);
+    assert!(report.first_visit_authority.is_none());
+    assert_eq!(report.trace_status, "NotIdentified");
+    let current = &report.cases[0].current;
+    assert_eq!(
+        (current.metadata_keys, current.set_keys, current.nil_keys),
+        (1, 1, 1)
+    );
+    assert!(current.comparison.proposal.is_none());
+    let compared = report.cases[0].baseline_vs_current.as_ref().unwrap();
+    assert!(compared.literal.first.is_none());
+    assert!(compared.payload.property_maps_equal);
+    assert!(matches!(
+        compared.recognized_edges,
+        cmp::EdgeComparison::Unavailable { .. }
+    ));
+    let completion: serde_json::Value =
+        serde_json::from_slice(&fs::read(output.root.join("published/completion.json")).unwrap())
+            .unwrap();
+    assert_eq!(completion["diagnosis_finished"], true);
+    assert_eq!(completion["native_acceptance"], false);
+    assert!(completion["first_visit_authority"].is_null());
+    let bytes = fs::read(output.root.join("published/report.json")).unwrap();
+    assert_eq!(completion["report_sha256"], hash(&bytes));
+    let saved: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        saved["cases"][0]["current"]["rows"]
+            .as_array()
+            .unwrap()
+            .len(),
+        3
+    );
+    assert_eq!(
+        saved["cases"][0]["current"]["original_proofs"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert!(saved["cases"][0]["current"]["facts_manifest"].is_null());
+    let retry = comparison_run(&files, &corpus, &output);
+    assert!(retry.is_err());
+    assert_eq!(
+        bytes,
+        fs::read(output.root.join("published/report.json")).unwrap()
+    );
+}
+#[test]
+fn closed_corpus_shared_indexed_pack_members_are_valid_but_ranges_and_bindings_are_not_interchangeable()
+ {
+    let files = Files::new();
+    let mut input = files.manifest(2);
+    let mut pack = b"independently-indexed-pack-prefix".to_vec();
+    let path = files.root.join("shared-pack.bin");
+    for row in &mut input.rows {
+        let Locator::GzipRawDeflateRange {
+            path: prior,
+            offset,
+        } = &row.locator
+        else {
+            unreachable!()
+        };
+        let stored = fs::read(prior).unwrap();
+        let selected = &stored[*offset as usize..*offset as usize + row.stored_length as usize];
+        let offset = pack.len() as u64;
+        pack.extend_from_slice(selected);
+        row.locator = Locator::GzipRawDeflateRange {
+            path: path.clone(),
+            offset,
+        };
+    }
+    pack.extend_from_slice(b"indexed-unrelated-suffix");
+    fs::write(&path, &pack).unwrap();
+    let corpus = comparison_corpus(&files, input);
+    let output = Files::new();
+    let report = comparison_run(&files, &corpus, &output).unwrap();
+    assert!(
+        report.cases[0]
+            .baseline_vs_current
+            .as_ref()
+            .unwrap()
+            .literal
+            .first
+            .is_none()
+    );
+    assert_eq!(fs::read(&path).unwrap(), pack);
+    let mut bad = corpus.clone();
+    let d = &mut bad.cases[0].current;
+    let mut rows: ManifestV1 =
+        serde_json::from_slice(&fs::read(&d.input_manifest.path).unwrap()).unwrap();
+    let Locator::GzipRawDeflateRange { offset, .. } = &mut rows.rows[0].locator else {
+        unreachable!()
+    };
+    *offset += 1; // Partial member cannot impersonate the complete indexed member.
+    d.input_manifest = comparison_json(&files, "input-current.json", &rows);
+    // Rebind the capture to the deliberate range mutant so the actual member loader is tested.
+    let mut witness: cmp::CaptureWitnessV1 =
+        serde_json::from_slice(&fs::read(&d.capture_witness.path).unwrap()).unwrap();
+    witness.input_manifest_sha256 = d.input_manifest.sha256.clone();
+    d.capture_witness = comparison_json(&files, "capture-current.json", &witness);
+    let fresh = Files::new();
+    assert!(comparison_run(&files, &bad, &fresh).is_err());
+    assert!(!fresh.root.join("published").exists());
+}
+#[test]
+fn closed_corpus_wrong_sources_stage_witness_alias_and_existing_output_fail_before_publication() {
+    for mutation in 0..9 {
+        let files = Files::new();
+        let good_output = Files::new();
+        let corpus = comparison_corpus(&files, files.manifest(0));
+        comparison_run(&files, &corpus, &good_output).unwrap(); // SAME genuine handler input before mutation.
+        let mut bad = corpus.clone();
+        match mutation {
+            0 => bad.compiled_source.comparison = "0".repeat(64),
+            1 => bad.input_exporter_source_head = "0".repeat(40),
+            2 => bad.cases[0].current.case = "wrong-case".into(),
+            3 => bad.cases[0].current.stage = "wrong-stage".into(),
+            4 => bad.cases[0].current.input_manifest.sha256 = "0".repeat(64),
+            5 => bad.cases.push(bad.cases[0].clone()),
+            6 => bad.cases[0].baseline = Some(bad.cases[0].current.clone()),
+            7 => bad.cases[0].current.capture_witness = bad.cases[0].current.input_manifest.clone(),
+            _ => bad.cases[0].current.registry_root_uuid = CHILD.into(),
+        }
+        let output = Files::new();
+        assert!(
+            comparison_run(&files, &bad, &output).is_err(),
+            "mutation {mutation}"
+        );
+        assert!(!output.root.join("published").exists());
+    }
+    let files = Files::new();
+    let corpus = comparison_corpus(&files, files.manifest(0));
+    let outer = comparison_json(&files, "outer.json", &corpus);
+    let mut unknown = serde_json::to_value(&corpus).unwrap();
+    unknown
+        .as_object_mut()
+        .unwrap()
+        .insert("proposal".into(), serde_json::json!([]));
+    let rejected = Files::new();
+    assert!(
+        cmp::run_closed(
+            comparison_json(&files, "unknown-outer.json", &unknown),
+            &rejected.root.join("published")
+        )
+        .is_err()
+    );
+    assert!(!rejected.root.join("published").exists());
+    let mut wrong_digest = outer.clone();
+    wrong_digest.sha256 = "0".repeat(64);
+    assert!(cmp::run_closed(wrong_digest, &rejected.root.join("published")).is_err());
+    assert!(cmp::run_closed(outer.clone(), &files.root.join("nested-output")).is_err());
+    assert!(!files.root.join("nested-output").exists());
+    let output = Files::new();
+    fs::create_dir(output.root.join("published")).unwrap();
+    fs::write(
+        output.root.join("published/keep.bin"),
+        b"all prior bytes preserved",
+    )
+    .unwrap();
+    assert!(cmp::run_closed(outer, &output.root.join("published")).is_err());
+    assert_eq!(
+        fs::read(output.root.join("published/keep.bin")).unwrap(),
+        b"all prior bytes preserved"
+    );
+}
+#[test]
+fn retained_env_request_has_no_missing_manifest_skip_or_non_f_fallback() {
+    use std::ffi::OsString;
+    assert!(cmp::EnvRequest::parse(None, None, None).is_err());
+    let manifest = Some(OsString::from("F:/explicit/input.json"));
+    let digest = Some(OsString::from("1".repeat(64)));
+    let output = Some(OsString::from("F:/explicit/new-output"));
+    #[cfg(windows)]
+    assert!(cmp::EnvRequest::parse(manifest.clone(), digest.clone(), output.clone()).is_ok());
+    assert!(cmp::EnvRequest::parse(manifest.clone(), None, output.clone()).is_err());
+    assert!(cmp::EnvRequest::parse(manifest.clone(), digest.clone(), None).is_err());
+    assert!(
+        cmp::EnvRequest::parse(manifest, Some(OsString::from("unknown")), output.clone()).is_err()
+    );
+    assert!(
+        cmp::EnvRequest::parse(Some(OsString::from("C:/wrong/input.json")), digest, output)
+            .is_err()
+    );
+}
+#[test]
+#[ignore = "requires independently ROOT-frozen complete same-stage manifest, SHA and NEW F output; missing inputs fail"]
+fn retained_closed_corpus_projection() {
+    let report = cmp::run_from_env()
+        .expect("closed retained diagnostic admission/execution failed; no fallback");
+    assert!(!report.native_acceptance);
+    assert!(report.original_issue_open);
+    assert_eq!(report.trace_status, "NotIdentified");
+    assert_eq!(report.graph_completeness, "Partial");
+    assert!(report.first_visit_authority.is_none());
+    assert!(
+        report
+            .cases
+            .iter()
+            .all(|c| c.current.comparison.proposal.is_none())
+    );
+}
+#[test]
+fn closed_corpus_optional_facts_use_actual_same_base_handler_and_report_full_bindings() {
+    let (files, base, descriptor, index) = facts_fixture();
+    let raw = [RowRole::Registry, RowRole::TypeSets, RowRole::HelpProps]
+        .map(|role| base.raw(role).to_vec());
+    let mut input = files.manifest(0);
+    for (row, bytes) in input.rows.iter_mut().zip(raw) {
+        let Locator::Plain { path } = &row.locator else {
+            unreachable!()
+        };
+        fs::write(path, &bytes).unwrap();
+        row.stored_length = bytes.len() as u64;
+        row.packed_length = bytes.len() as u64;
+        row.plain_length = bytes.len() as u64;
+        row.stored_sha256 = hash(&bytes);
+        row.packed_sha256 = hash(&bytes);
+        row.plain_sha256 = hash(&bytes);
+    }
+    let mut corpus = comparison_corpus(&files, input);
+    let facts = additional_manifest(&files, &descriptor, Some(&index));
+    corpus.cases[0].current.facts_manifest =
+        Some(comparison_json(&files, "facts-current.json", &facts));
+    let output = Files::new();
+    let report = comparison_run(&files, &corpus, &output).unwrap();
+    let current = &report.cases[0].current;
+    assert_eq!(current.fact_rows.len(), 2);
+    assert!(current.facts_manifest.is_some());
+    assert_eq!(current.covered_keys.len(), 4);
+    assert!(!current.observed_edges.is_empty());
+    assert!(
+        current
+            .partial_observations
+            .iter()
+            .all(|p| !p.reason.is_empty())
+    );
+    assert!(current.comparison.proposal.is_none());
+    assert!(!report.native_acceptance);
+    let mut bad = corpus.clone();
+    bad.cases[0].current.facts_manifest.as_mut().unwrap().sha256 = "0".repeat(64);
+    let failed = Files::new();
+    assert!(comparison_run(&files, &bad, &failed).is_err());
+    assert!(!failed.root.join("published").exists());
+}
