@@ -13011,6 +13011,28 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         return None;
     }
     let text = row.text.as_str();
+    match refs::configuration_v76_interface_mode(text, uuid) {
+        Err(signature) => {
+            // A recognized owner/V76 failure cannot publish a generic root.
+            *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                MetadataSourceFailureClass::Malformed,
+                "Configuration",
+                "interface_compatibility_pair",
+                signature,
+            ));
+            return None;
+        }
+        Ok(Some(_)) if source_version != InfobaseConfigSourceVersion::V2_21 => {
+            *owner_graph_diagnostic = Some(MetadataSourceExtractionDiagnostic::new(
+                MetadataSourceFailureClass::Unsupported,
+                "Configuration",
+                "configuration_root_profile",
+                "v76_root_requires_xml_2_21",
+            ));
+            return None;
+        }
+        Ok(_) => {}
+    }
     if let Some(xml) =
         extract_configuration_source_xml(text, uuid, configuration_root_object_refs, source_version)
     {
@@ -46692,6 +46714,9 @@ mod catalog_tabular_section_wrapper_tests {
         );
     }
 }
+
+#[cfg(test)]
+mod configuration_interface_pair_tests;
 
 #[cfg(test)]
 mod tests;

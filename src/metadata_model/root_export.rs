@@ -642,14 +642,28 @@ pub(crate) fn decode(row: &Brace, context: &ExportContext) -> Result<Element> {
     }
 
     let interface_compatibility = match shape {
-        ConfigurationShape::V76 => match (atom(item(t, 38)?)?, atom(item(t, 62)?)?) {
-            ("3", "6") => "Version8_5EnableTaxi",
-            // A configuration 8.5.1.1529 saved from an XML 2.20 tree at
-            // compatibility 8.3.27 (`home_page/one_column_v85/input.cf`):
-            // field 38 keeps the 8.3 code and 62 repeats it.
-            ("2", "2") => "TaxiEnableVersion8_2",
-            (a, b) => bail!("interface compatibility {a}/{b} has no known name"),
-        },
+        ConfigurationShape::V76 => {
+            let first = atom(item(t, 38)?)?;
+            let second = atom(item(t, 62)?)?;
+            let codes = first.parse::<u8>().ok().zip(second.parse::<u8>().ok());
+            let mode = codes.and_then(|(a, b)| {
+                // Stored single-byte scalar coordinates, not padded numbers.
+                (first.len() == 1 && second.len() == 1)
+                    .then(|| ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_stored_codes(a, b))
+                    .flatten()
+            });
+            let mode = mode.ok_or_else(|| {
+                anyhow!("interface compatibility {first}/{second} has no known V76 pair")
+            })?;
+            if !mode.supports_xml_dialect(&context.version) {
+                bail!(
+                    "Configuration <InterfaceCompatibilityMode> {} requires XML 2.21; selected edition is {}",
+                    mode.xml_name(),
+                    context.version
+                );
+            }
+            mode.xml_name()
+        }
         _ => code(
             t,
             38,

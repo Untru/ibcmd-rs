@@ -229,6 +229,15 @@ pub fn compile_descriptor(
     };
     let doc = MetadataXml::parse(xml)?;
     let element = doc.object()?;
+    if kind == "Configuration" {
+        // The declaration is a separate coordinate from the storage context.
+        if let Some(properties) = element.child("Properties") {
+            root::validate_interface_edition(
+                properties,
+                doc.root.attr("version").unwrap_or_default(),
+            )?;
+        }
+    }
     let object = ObjectXml {
         element,
         kind,

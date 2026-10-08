@@ -3710,9 +3710,10 @@ fn configuration_properties_8_5_1(
         return None;
     }
     // Members 61, 63 and 66-68 carry the four enumerations; 62 is the 8.5
-    // code of `InterfaceCompatibilityMode`, which is read from member 38 (the
-    // compiler, `metadata_model::root`, writes 3 and 6 for
-    // `Version8_5EnableTaxi`, 2 and 2 for `TaxiEnableVersion8_2`).
+    // code of `InterfaceCompatibilityMode`, paired with member 38 by the
+    // shared schema policy (Taxi 3/3, Version8_5EnableTaxi 3/6,
+    // TaxiEnableVersion8_2 2/2). Interface mode is decoded separately from
+    // the owner-validated stored tuple, before normalization loses member 62.
     // Two combinations are on record, so only they are read; any other
     // refuses rather than attributing codes to properties on a guess:
     // - BSP 3.2.1.356 under 8.5.1.1150: tabs, the 8.5 interface migration;
@@ -3892,6 +3893,13 @@ pub(super) fn extract_configuration_source_xml(
     if uuid_fields.first()?.trim() != uuid {
         return None;
     }
+    // Capture both coordinates from the SAME owner before normalization.
+    // Shared mode vocabulary does not prove the whole V76 root representable
+    // in XML 2.20: keep canonical profile admission and refuse partial output.
+    let interface = configuration_v76_interface_mode(text, uuid).ok()?;
+    if interface.is_some() && source_version != InfobaseConfigSourceVersion::V2_21 {
+        return None;
+    }
     let header_uuid = parse_configuration_header_uuid(text)?;
     let mut header = parse_metadata_header_from_text(text, &header_uuid)?;
     header.uuid = uuid.to_string();
@@ -3901,14 +3909,9 @@ pub(super) fn extract_configuration_source_xml(
     properties.use_purposes = parse_configuration_use_purposes(text, uuid).unwrap_or_default();
     let evidenced_property_fields = configuration_root_property_fields(text, uuid);
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
-        // The stored interface digit is numbered by the tuple that stores it:
-        // an 8.5 writer reads a `{76,...}` tuple's `3` as `Version8_5EnableTaxi`
-        // (BSP 3.2.1.356) and a `{68,...}` tuple's `2` as 8.3.27 does
-        // (`TaxiEnableVersion8_2`, ERP УХ).
-        let tuple_8_5_1 = !text.contains("{68,") && !text.contains("{67,") && text.contains("{76,");
         match super::configuration_properties_evidence::parse_configuration_properties_evidenced_default_block_on(
             property_fields,
-            tuple_8_5_1 && source_version == InfobaseConfigSourceVersion::V2_21,
+            interface,
         ) {
             Ok(fields) => properties.configuration_properties_evidenced_default_block = Some(fields),
             Err(
@@ -4787,7 +4790,10 @@ fn parse_configuration_mobile_application_permission_messages(
     Some(messages)
 }
 
-fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+fn configuration_root_stored_property_fields<'a>(
+    text: &'a str,
+    uuid: &str,
+) -> Option<Vec<&'a str>> {
     parse_configuration_root_layout(text, uuid)?;
     let envelope = parse_configuration_root_envelope(text)?;
     // Both footer variants reach this 60/61/77-length tuple shape and feed
@@ -4820,6 +4826,41 @@ fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<V
     if !is_configuration_root_property_header(fields.get(1)?.trim(), &object_id) {
         return None;
     }
+    Some(fields)
+}
+
+/// Exact V76 interface pair from the validated Configuration owner, never a
+/// nested textual `{76,` hit or the normalized 61-field projection.
+/// Err commits the recognized V76 family to an addressed publication refusal.
+pub(super) fn configuration_v76_interface_mode(
+    text: &str,
+    uuid: &str,
+) -> Result<Option<ibcmd_schema::configuration_root::V76InterfaceCompatibility>, &'static str> {
+    let Some(fields) = configuration_root_stored_property_fields(text, uuid) else {
+        return Ok(None);
+    };
+    if fields.first().map(|field| field.trim()) != Some("76") {
+        return Ok(None);
+    }
+    if fields.len() != 77 {
+        return Err("invalid_v76_tuple_arity");
+    }
+    let digit = |field: &str| {
+        let bytes = field.trim().as_bytes();
+        match bytes {
+            [digit @ b'0'..=b'9'] => Some(*digit - b'0'),
+            _ => None,
+        }
+    };
+    let first = digit(fields[38]).ok_or("invalid_v76_interface_scalar")?;
+    let second = digit(fields[62]).ok_or("invalid_v76_interface_scalar")?;
+    ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_stored_codes(first, second)
+        .map(Some)
+        .ok_or("unknown_v76_interface_pair")
+}
+
+fn configuration_root_property_fields<'a>(text: &'a str, uuid: &str) -> Option<Vec<&'a str>> {
+    let fields = configuration_root_stored_property_fields(text, uuid)?;
     // Normalize the older and the 8.5 shapes to the canonical `{68,...}` one
     // (see `normalize_short_configuration_root_property_fields` for the
     // evidence) so `parse_configuration_properties_evidenced_default_block`'s

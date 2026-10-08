@@ -764,6 +764,7 @@ fn properties_tuple(
     let functionalities = mobile_functionalities(p)?;
     let permissions = permissions_of(&functionalities);
     let compatibility = Brace::num(compatibility as i64);
+    validate_interface_edition(p, &context.version)?;
     let (interface_8_3, interface_8_5_1) = interface_compatibility(p, shape)?;
     let nil = Brace::nil_uuid;
     let pair = || brace_list![Brace::num(0), Brace::num(0)];
@@ -943,6 +944,21 @@ fn v76_window_and_migration(p: &Element) -> Result<(i64, i64)> {
     }
 }
 
+/// Refuse a known interface lexeme unavailable in the selected XML edition;
+/// this is independent of the disk layout used to store the Configuration.
+pub(crate) fn validate_interface_edition(p: &Element, dialect: &str) -> Result<()> {
+    if let Some(mode) = ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_xml_name(
+        text_of(p, "InterfaceCompatibilityMode"),
+    ) && !mode.supports_xml_dialect(dialect)
+    {
+        bail!(
+            "Configuration <InterfaceCompatibilityMode> {} requires XML 2.21; selected edition is {dialect}",
+            mode.xml_name()
+        );
+    }
+    Ok(())
+}
+
 /// `<InterfaceCompatibilityMode>`: the 8.3 code (field 38) and, for 8.5,
 /// the code of field 62.
 fn interface_compatibility(p: &Element, shape: ConfigurationShape) -> Result<(Brace, Brace)> {
@@ -951,15 +967,12 @@ fn interface_compatibility(p: &Element, shape: ConfigurationShape) -> Result<(Br
         text => text,
     };
     if shape == ConfigurationShape::V76 {
-        return match text {
-            "Version8_5EnableTaxi" => Ok((Brace::num(3), Brace::num(6))),
-            // `home_page/one_column_v85/input.cf` (8.5.1.1529, compatibility
-            // 8.3.27): field 62 repeats the 8.3 code.
-            "TaxiEnableVersion8_2" => Ok((Brace::num(2), Brace::num(2))),
-            other => bail!(
-                "Configuration <InterfaceCompatibilityMode> {other:?}: the 8.5 tuples on record show only Version8_5EnableTaxi and TaxiEnableVersion8_2"
-            ),
-        };
+        let mode = ibcmd_schema::configuration_root::V76InterfaceCompatibility::from_xml_name(text)
+            .ok_or_else(|| {
+                anyhow!("Configuration <InterfaceCompatibilityMode> {text:?} has no known V76 pair")
+            })?;
+        let (first, second) = mode.stored_codes();
+        return Ok((Brace::num(first as i64), Brace::num(second as i64)));
     }
     let code = match text {
         "Version8_2" => 0,
