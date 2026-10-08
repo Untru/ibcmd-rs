@@ -177,7 +177,7 @@ fn export(
 ) -> (Scratch, serde_json::Value) {
     let elements = rows
         .into_iter()
-        .map(|(name, text)| Format15Element::named(name, Some(packed(&text))))
+        .map(|(name, text)| Format15Element::named(&name, Some(packed(&text))))
         .collect();
     let bytes = write_format15_to_vec(&Format15Document::new(7, elements)).unwrap();
     let archive = decode_packed_archive(
