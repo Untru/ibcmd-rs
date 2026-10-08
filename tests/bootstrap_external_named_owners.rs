@@ -876,7 +876,11 @@ fn physical_link_and_nonregular_named_sources_never_borrow_foreign_bytes() {
     symlink(base.join("outside.xml"), own.join(TEMPLATE_BODY)).unwrap();
     assert!(ExternalOwnedSource::read(&own, profile(v), path(), ReaderLimits::default()).is_err());
     std::fs::remove_file(own.join(TEMPLATE_BODY)).unwrap();
-    let listener = UnixListener::bind(own.join(TEMPLATE_BODY)).unwrap();
+    // sockaddr_un limits the bind address, independently of source-tree paths.
+    // Create the genuine socket nearby, then move its node into the same tree.
+    let socket = base.join("s");
+    let listener = UnixListener::bind(&socket).unwrap();
+    std::fs::rename(&socket, own.join(TEMPLATE_BODY)).unwrap();
     assert!(ExternalOwnedSource::read(&own, profile(v), path(), ReaderLimits::default()).is_err());
     drop(listener);
     std::fs::remove_dir_all(base).unwrap();
