@@ -233,25 +233,27 @@ fn known_v76_invalid_pair_is_an_addressed_publication_failure_not_a_generic_root
                 .xml,
             canonical(&original, &context, "2.21").unwrap().as_bytes()
         );
-        for invalid in [
-            Brace::num(0),
-            Brace::num(2),
-            Brace::num(5),
-            Brace::atom("03"),
-            Brace::str("3"),
-            Brace::List(vec![Brace::num(3)]),
-        ] {
-            let mut changed = original.clone();
-            tuple_mut(&mut changed)[62] = invalid;
-            assert!(canonical(&changed, &context, "2.21").is_err());
-            let failure = physical(&changed, &context, version).err().unwrap();
-            assert_eq!(failure.family, "Configuration");
-            assert_eq!(failure.class, MetadataSourceFailureClass::Malformed);
-            assert_eq!(failure.parser_stage, "interface_compatibility_pair");
-            assert!(matches!(
-                failure.structural_signature.as_str(),
-                "unknown_v76_interface_pair" | "invalid_v76_interface_scalar"
-            ));
+        for member in [38, 62] {
+            for invalid in [
+                Brace::num(0),
+                Brace::num(2),
+                Brace::num(5),
+                Brace::atom("03"),
+                Brace::str("3"),
+                Brace::List(vec![Brace::num(3)]),
+            ] {
+                let mut changed = original.clone();
+                tuple_mut(&mut changed)[member] = invalid;
+                assert!(canonical(&changed, &context, "2.21").is_err());
+                let failure = physical(&changed, &context, version).err().unwrap();
+                assert_eq!(failure.family, "Configuration");
+                assert_eq!(failure.class, MetadataSourceFailureClass::Malformed);
+                assert_eq!(failure.parser_stage, "interface_compatibility_pair");
+                assert!(matches!(
+                    failure.structural_signature.as_str(),
+                    "unknown_v76_interface_pair" | "invalid_v76_interface_scalar"
+                ));
+            }
         }
         let mut shortened = original.clone();
         tuple_mut(&mut shortened).remove(62);
@@ -427,6 +429,11 @@ fn true_v85_compatibility_does_not_become_an_admitted_v83_reading() {
             .to_string()
             .contains("does not read a configuration")
     );
+    let failure = physical(&row, &context, InfobaseConfigSourceVersion::V2_20)
+        .err()
+        .unwrap();
+    assert_eq!(failure.class, MetadataSourceFailureClass::Unsupported);
+    assert_eq!(failure.structural_signature, "v76_root_requires_xml_2_21");
     assert_eq!(tuple(&row)[38], Brace::num(3));
     assert_eq!(tuple(&row)[62], Brace::num(3));
 }
