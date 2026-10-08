@@ -2,6 +2,8 @@
 //! Every unknown scenario has a fresh test process. Finite inherited-pipe
 //! holders expire naturally; tests never signal or adopt a descendant by PID.
 
+#[path = "../src/profile_process.rs"]
+mod profile_process;
 #[path = "../src/rac_process.rs"]
 mod rac_process;
 
@@ -25,6 +27,12 @@ fn main() {
                 uuid::Uuid::new_v4()
             ));
             std::fs::create_dir(&directory).unwrap();
+            // Wire the same private production profile owner into this source
+            // harness too. The ten existing RAC scenario handlers stay intact.
+            let mut profile_command = command("zero", &directory.join("profile-wiring"));
+            let profile = profile_process::bounded_output(&mut profile_command).unwrap();
+            assert!(profile.status.success());
+            assert!(profile.stdout.is_empty() && profile.stderr.is_empty());
             for name in [
                 "zero",
                 "empty",

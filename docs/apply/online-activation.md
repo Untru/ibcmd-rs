@@ -680,6 +680,18 @@ See [the format and acceptance boundary](evidence/live-gate/compact-live-recover
 
 Readiness currently accepts only an **empty RAS user-session inventory**. The current RAS agent build must still be exactly `8.3.27.2214`, the storage profile must match the saved fingerprint, and the original MSSQL registration is rechecked against the recorded SQL database before inventory and twice before attempting cycle 2; each RAS call has a five-second deadline. Version and identity responses remain strict UTF-8. Session inventory is bounded raw output: only a successful response with empty stderr and ASCII-whitespace-only stdout admits cycle 2. Any nonempty output, including OEM user names and hibernating sessions, refuses. Idle SQL handles of the cluster are not users and do not drive this decision. Any user session, ambiguous output, wrong binding or timeout leaves cycle 1 retained and reports `continuation_required`. The SQL active-work check repeats under the master lock immediately before the second interruption; refusal correctly says the committed promotion/cycle 1 is retained. Active/warm cohort readiness remains unimplemented: this is not an acceptance of F-5 under load.
 
+Initial raw profile/RAS probes and the explicit `sqlcmd` profile probe share the
+same original-process collector with LIVE readiness. Their existing twenty-second
+deadline now covers direct exit and EOF of both original streams; neither a
+blocking join nor a timeout kill/wait is used. Unknown completion retains the
+original child/readers and blocks another raw profile/readiness launch in this
+process. Profile replies still retain at most 64 KiB per stream, drain overflow
+to EOF within that deadline, decode lossily and leave status/stderr decisions to
+the profile caller. LIVE keeps its separate 1 MiB immediate-overflow refusal,
+strict UTF-8 identity replies and successful empty-stderr requirement. This
+completion check does not grant managed-worker ownership or warm readiness;
+old artifacts or a PID do not prove a current original lifetime.
+
 The boundary is explicit: active SQL work refuses before artifact publication and cycle 1; an SQL-idle but connected RAS user can pass promotion/cycle 1 and then block cycle 2. Closing a thin-client process can leave its RAS session hibernating. End the exact owned session through normal administration before continuation; the tool does not terminate it automatically. Recovery tokens compare the exact SHA-256 independently of hex letter case, retaining the original token spelling and backup names produced by the renderer.
 
 After ending the owned user sessions, resume with the saved manifest:
