@@ -106,10 +106,10 @@ pub fn validate_websocket_client_headers_namespaces(
         return Err(invalid());
     }
     for attribute in object.attributes() {
-        if let AttributeKind::Ordinary(name) = attribute.kind() {
-            if name.prefix().is_some() || name.local() != "uuid" {
-                return Err(invalid());
-            }
+        if let AttributeKind::Ordinary(name) = attribute.kind()
+            && (name.prefix().is_some() || name.local() != "uuid")
+        {
+            return Err(invalid());
         }
     }
     let properties = named(object, "Properties")?;
