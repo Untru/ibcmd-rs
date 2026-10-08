@@ -134,14 +134,20 @@ pub fn exclude_debug_info(bytes: &mut [u8]) -> Result<(), &'static str> {
 #[cfg(test)]
 mod tests {
     use super::exclude_debug_info;
-    const IMAGE: &[u8] = include_bytes!("../fixtures/elf-debug-numeric.bin");
+    use std::sync::LazyLock;
+    static IMAGE: LazyLock<Vec<u8>> = LazyLock::new(|| {
+        include_str!("../fixtures/elf-debug-numeric.hex")
+            .split_ascii_whitespace()
+            .map(|byte| u8::from_str_radix(byte, 16).expect("authored ELF fixture hex byte"))
+            .collect()
+    });
     fn has_jar(bytes: &[u8]) -> bool {
         bytes.windows(4).any(|b| b == b".jar")
     }
 
     #[test]
     fn numeric_debug_reference_is_distinct_from_loaded_bytes_and_strings() {
-        assert!(has_jar(IMAGE));
+        assert!(has_jar(&IMAGE));
         let mut numeric = IMAGE.to_vec();
         exclude_debug_info(&mut numeric).unwrap();
         assert!(!has_jar(&numeric));

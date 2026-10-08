@@ -17,7 +17,7 @@ spec.loader.exec_module(audit)
 
 class MarkerBoundary(unittest.TestCase):
     def elf_fixture(self):
-        return bytearray((source.parent.parent / "tests/fixtures/elf-debug-numeric.bin").read_bytes())
+        return bytearray.fromhex((source.parent.parent / "tests/fixtures/elf-debug-numeric.hex").read_text(encoding="ascii"))
 
     def test_numeric_debug_reference_is_distinct_from_loaded_bytes_and_strings(self):
         numeric = self.elf_fixture()
