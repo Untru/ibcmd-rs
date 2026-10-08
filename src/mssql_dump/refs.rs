@@ -3969,6 +3969,17 @@ pub(super) fn extract_configuration_source_xml(
         // empty element over a record that declares members.
         properties.allowed_incoming_share_request_types =
             parse_configuration_allowed_incoming_share_request_types(text, uuid)?;
+        // A complete Properties projection distinguishes an empty list from
+        // an undecodable one; the legacy partial route above stays unchanged.
+        properties.use_purposes = parse_configuration_use_purposes(text, uuid)?;
+        let fields = evidenced_property_fields.as_deref()?;
+        if properties.default_language.is_none() {
+            let stored = fields.get(10)?.trim();
+            let language = parse_uuid_field(stored)?;
+            if !information_register_uuid_is_zero(&language) {
+                return None;
+            }
+        }
     }
     if let Some(property_fields) = evidenced_property_fields.as_deref() {
         // A default style naming no style of the container cannot be spelled.
@@ -4508,6 +4519,11 @@ pub(super) fn parse_configuration_use_purposes(
 ) -> Option<Vec<&'static str>> {
     let fields = configuration_root_property_fields(text, uuid)?;
     let raw_fields = split_1c_braced_fields(fields.get(33)?.trim(), 0)?;
+    // The canonical compiler's empty declared collection is exactly {0}.
+    // Do not conflate malformed/nonempty unsupported groups with emptiness.
+    if raw_fields.len() == 1 && raw_fields.first()?.trim() == "0" {
+        return Some(Vec::new());
+    }
     if raw_fields.len() != 2 || raw_fields.first()?.trim() != "1" {
         return None;
     }
@@ -4840,6 +4856,19 @@ pub(super) fn configuration_v76_interface_mode(
         return Ok(None);
     };
     if fields.first().map(|field| field.trim()) != Some("76") {
+        return Ok(None);
+    }
+    // A partial SQL/per-field root may have the same tuple tag and header,
+    // but its arbitrary section class does not own native Properties. Keep
+    // that existing dialect out of this native pair/profile authority.
+    let Some(layout) = parse_configuration_root_layout(text, uuid) else {
+        return Ok(None);
+    };
+    if !layout.contained_objects.first().is_some_and(|owner| {
+        owner
+            .class_id
+            .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+    }) {
         return Ok(None);
     }
     if fields.len() != 77 {
