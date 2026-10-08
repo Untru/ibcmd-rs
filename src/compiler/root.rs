@@ -1239,6 +1239,7 @@ pub(crate) fn ensure_graph_profile(
     graph: &BootstrapGraph,
     profile: &SpecialEntryProfile,
 ) -> Result<(), SpecialEntryBuildError> {
+    graph.require_configuration_scope()?;
     if graph.profile_id() == profile.profile_id() {
         Ok(())
     } else {

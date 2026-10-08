@@ -106,3 +106,91 @@ pub fn validate_output_intent(intent: PackageIntent, output: &Path) -> Result<()
     }
     Ok(())
 }
+
+/// Artifact selection over the existing canonical graph, never a second IR.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ArtifactScope {
+    intent: PackageIntent,
+    root_uuid: ibcmd_core::identity::ObjectUuid,
+    main_uuid: ibcmd_core::identity::ObjectUuid,
+}
+impl ArtifactScope {
+    pub const fn configuration(root_uuid: ibcmd_core::identity::ObjectUuid) -> Self {
+        Self {
+            intent: PackageIntent::Configuration,
+            root_uuid,
+            main_uuid: root_uuid,
+        }
+    }
+    pub fn from_source_identity(
+        identity: ibcmd_xml::metadata::PackageRootIdentity,
+    ) -> Result<Self> {
+        let root_uuid = match identity.intent {
+            PackageIntent::Configuration | PackageIntent::Extension => {
+                if identity.contained.is_some() {
+                    bail!("configuration scope cannot alias an external contained root");
+                }
+                identity.main_uuid
+            }
+            PackageIntent::ExternalDataProcessor | PackageIntent::ExternalReport => {
+                let contained = identity
+                    .contained
+                    .context("external package requires contained identity")?;
+                let kind = match identity.intent {
+                    PackageIntent::ExternalDataProcessor => {
+                        crate::external::ExternalKind::DataProcessor
+                    }
+                    _ => crate::external::ExternalKind::Report,
+                };
+                if contained.class_id.to_string() != kind.class_id() {
+                    bail!(
+                        "external package class differs from declared {:?}",
+                        identity.intent
+                    );
+                }
+                contained.object_id
+            }
+        };
+        if [root_uuid, identity.main_uuid]
+            .iter()
+            .any(|u| u.as_bytes().iter().all(|b| *b == 0))
+        {
+            bail!("artifact main/owner identity cannot be nil");
+        }
+        Ok(Self {
+            intent: identity.intent,
+            root_uuid,
+            main_uuid: identity.main_uuid,
+        })
+    }
+    pub const fn intent(self) -> PackageIntent {
+        self.intent
+    }
+    /// Canonical semantic/module owner; for an external object this is ObjectId.
+    pub const fn root_uuid(self) -> ibcmd_core::identity::ObjectUuid {
+        self.root_uuid
+    }
+    /// Physical main descriptor identity; external aliases do not own modules.
+    pub const fn main_uuid(self) -> ibcmd_core::identity::ObjectUuid {
+        self.main_uuid
+    }
+    pub const fn root_kind(self) -> &'static str {
+        match self.intent {
+            PackageIntent::Configuration | PackageIntent::Extension => "Configuration",
+            PackageIntent::ExternalDataProcessor => "DataProcessor",
+            PackageIntent::ExternalReport => "Report",
+        }
+    }
+}
+impl SourcePackage {
+    pub fn artifact_scope(&self) -> Result<ArtifactScope> {
+        let bytes = fs::read(&self.root_xml)?;
+        let doc = XmlReader::from_slice(&bytes)?;
+        let identity = ibcmd_xml::metadata::inspect_package_identity(&doc)?
+            .context("package root disappeared")?;
+        if identity.intent != self.intent {
+            bail!("package intent changed before graph selection");
+        }
+        ArtifactScope::from_source_identity(identity)
+    }
+}

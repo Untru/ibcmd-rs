@@ -1592,7 +1592,7 @@ fn decode_generated_types(
     Ok(any)
 }
 
-fn uuid_attr(e: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
+pub(super) fn uuid_attr(e: &XmlElement) -> Result<ObjectUuid, MetadataDecodeError> {
     let mut value = None;
     for attribute in e.attributes() {
         if let AttributeKind::Ordinary(name) = attribute.kind()

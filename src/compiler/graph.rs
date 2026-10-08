@@ -10,6 +10,7 @@ use ibcmd_core::storage::{
     MAX_STORAGE_PATCH_ENTRIES, StorageBuildError, StorageKey, StoragePatch, StoragePatchOutcome,
 };
 
+use super::artifact::{ArtifactScope, PackageIntent};
 use super::identity::BootstrapIdentities;
 
 /// Maximum accepted byte length of a native object-entry suffix.
@@ -24,6 +25,10 @@ pub enum SpecialEntryKind {
     Version,
     /// Complete FileName-to-generation UUID map.
     Versions,
+    /// Extension packed payload digest index and main pointer.
+    ConfigInfo,
+    /// External used object/type dependency mapping.
+    CopyInfo,
 }
 
 impl SpecialEntryKind {
@@ -33,6 +38,8 @@ impl SpecialEntryKind {
             Self::Root => "root",
             Self::Version => "version",
             Self::Versions => "versions",
+            Self::ConfigInfo => "configinfo",
+            Self::CopyInfo => "copyinfo",
         }
     }
 }
@@ -153,11 +160,15 @@ pub enum InventoryScope {
     Complete,
     /// Every key except `versions` must be present.
     BeforeVersions,
+    /// Only compiled metadata/assets, before artifact service composition.
+    BeforeServices,
 }
 
 /// Failure to construct or verify a bootstrap storage graph.
 #[derive(Debug)]
 pub enum BootstrapGraphError {
+    /// A legacy CF service compiler cannot consume another artifact scope.
+    ArtifactScope,
     /// A suffix does not use the exact native lower-hex grammar.
     InvalidSuffix(String),
     /// One object route declares a suffix more than once.
@@ -197,6 +208,9 @@ pub enum BootstrapGraphError {
 impl Display for BootstrapGraphError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ArtifactScope => {
+                formatter.write_str("ordinary CF graph/compiler requires Configuration scope")
+            }
             Self::InvalidSuffix(value) => write!(
                 formatter,
                 "invalid bootstrap storage suffix `{value}`; expected dot plus lowercase hexadecimal digits"
@@ -281,11 +295,21 @@ impl From<StorageBuildError> for BootstrapGraphError {
 pub struct BootstrapGraph {
     profile_id: ProfileId,
     configuration_uuid: ObjectUuid,
+    scope: ArtifactScope,
     entries: Vec<BootstrapStorageIdentity>,
     generated_types: BTreeMap<ObjectUuid, ObjectUuid>,
 }
 
 impl BootstrapGraph {
+    pub const fn scope(&self) -> ArtifactScope {
+        self.scope
+    }
+    pub fn require_configuration_scope(&self) -> Result<(), BootstrapGraphError> {
+        if self.scope.intent() != PackageIntent::Configuration {
+            return Err(BootstrapGraphError::ArtifactScope);
+        }
+        Ok(())
+    }
     /// Returns the exact target profile used to resolve physical routes.
     pub const fn profile_id(&self) -> &ProfileId {
         &self.profile_id
@@ -357,12 +381,11 @@ impl BootstrapGraph {
 
     /// Verifies that all service references have exact storage targets.
     pub fn validate_special_references(&self) -> Result<(), BootstrapGraphError> {
-        for key in [
-            self.configuration_uuid.to_string(),
-            SpecialEntryKind::Root.key().to_owned(),
-            SpecialEntryKind::Version.key().to_owned(),
-            SpecialEntryKind::Versions.key().to_owned(),
-        ] {
+        for key in std::iter::once(self.scope.main_uuid().to_string()).chain(
+            special_entries(self.scope.intent())
+                .iter()
+                .map(|kind| kind.key().to_owned()),
+        ) {
             if !self.contains_key(&key) {
                 return Err(BootstrapGraphError::DanglingSpecialReference { key });
             }
@@ -379,9 +402,14 @@ impl BootstrapGraph {
         let expected = self
             .entries
             .iter()
-            .filter(|entry| {
-                scope == InventoryScope::Complete
-                    || entry.key.as_str() != SpecialEntryKind::Versions.key()
+            .filter(|entry| match scope {
+                InventoryScope::Complete => true,
+                InventoryScope::BeforeVersions => {
+                    entry.key.as_str() != SpecialEntryKind::Versions.key()
+                }
+                InventoryScope::BeforeServices => {
+                    matches!(entry.owner(), BootstrapStorageOwner::Object { .. })
+                }
             })
             .map(|entry| entry.key.as_str())
             .collect::<BTreeSet<_>>();
@@ -427,6 +455,34 @@ pub fn build_bootstrap_graph(
     profile_id: ProfileId,
     routes: Vec<ObjectStorageRoute>,
 ) -> Result<BootstrapGraph, BootstrapGraphError> {
+    if identities.scope().intent() != PackageIntent::Configuration {
+        return Err(BootstrapGraphError::ArtifactScope);
+    }
+    build_artifact_graph(identities, profile_id, routes)
+}
+
+fn special_entries(intent: PackageIntent) -> &'static [SpecialEntryKind] {
+    match intent {
+        PackageIntent::Configuration => &[
+            SpecialEntryKind::Root,
+            SpecialEntryKind::Version,
+            SpecialEntryKind::Versions,
+        ],
+        PackageIntent::Extension => &[SpecialEntryKind::ConfigInfo],
+        PackageIntent::ExternalDataProcessor | PackageIntent::ExternalReport => &[
+            SpecialEntryKind::Root,
+            SpecialEntryKind::Version,
+            SpecialEntryKind::Versions,
+            SpecialEntryKind::CopyInfo,
+        ],
+    }
+}
+/// Physical inventory for one explicitly selected package over the canonical IR.
+pub fn build_artifact_graph(
+    identities: &BootstrapIdentities,
+    profile_id: ProfileId,
+    routes: Vec<ObjectStorageRoute>,
+) -> Result<BootstrapGraph, BootstrapGraphError> {
     let mut routes_by_object = BTreeMap::new();
     for route in routes {
         identities
@@ -447,11 +503,7 @@ pub fn build_bootstrap_graph(
     }
 
     let mut entries = BTreeMap::<String, BootstrapStorageIdentity>::new();
-    for kind in [
-        SpecialEntryKind::Root,
-        SpecialEntryKind::Version,
-        SpecialEntryKind::Versions,
-    ] {
+    for &kind in special_entries(identities.scope().intent()) {
         insert_entry(
             &mut entries,
             kind.key().to_owned(),
@@ -469,7 +521,11 @@ pub fn build_bootstrap_graph(
         if let Some(route) = route {
             insert_entry(
                 &mut entries,
-                uuid.to_string(),
+                if uuid == identities.scope().root_uuid() {
+                    identities.scope().main_uuid().to_string()
+                } else {
+                    uuid.to_string()
+                },
                 BootstrapStorageOwner::Object { uuid, suffix: None },
             )?;
             for suffix in route.suffixes() {
@@ -491,6 +547,7 @@ pub fn build_bootstrap_graph(
     let graph = BootstrapGraph {
         profile_id,
         configuration_uuid: identities.configuration_uuid(),
+        scope: identities.scope(),
         entries: entries.into_values().collect(),
         generated_types,
     };

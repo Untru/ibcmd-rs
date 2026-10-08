@@ -11,9 +11,13 @@ use ibcmd_core::model::{GeneratedType, MetadataKind};
 use ibcmd_core::validate::ValidatedConfiguration;
 use sha2::{Digest, Sha256};
 
+use super::artifact::{ArtifactScope, PackageIntent};
+
 /// Failure to project storage identities from an encode-ready model.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BootstrapIdentityError {
+    /// Selected package identities do not match the validated graph.
+    ArtifactScope(String),
     /// No canonical object identifies the configuration root.
     MissingConfiguration,
     /// More than one canonical object identifies itself as the configuration.
@@ -40,6 +44,7 @@ pub enum BootstrapIdentityError {
 impl Display for BootstrapIdentityError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::ArtifactScope(reason) => write!(formatter, "invalid artifact scope: {reason}"),
             Self::MissingConfiguration => {
                 formatter.write_str("bootstrap graph has no Configuration object")
             }
@@ -121,10 +126,14 @@ impl BootstrapObjectIdentity {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BootstrapIdentities {
     configuration_uuid: ObjectUuid,
+    scope: ArtifactScope,
     objects: Vec<BootstrapObjectIdentity>,
 }
 
 impl BootstrapIdentities {
+    pub const fn scope(&self) -> ArtifactScope {
+        self.scope
+    }
     /// Returns the single canonical Configuration UUID.
     pub const fn configuration_uuid(&self) -> ObjectUuid {
         self.configuration_uuid
@@ -207,6 +216,101 @@ pub fn collect_bootstrap_identities(
     objects.sort_by_key(BootstrapObjectIdentity::uuid);
     Ok(BootstrapIdentities {
         configuration_uuid,
+        scope: ArtifactScope::configuration(configuration_uuid),
+        objects,
+    })
+}
+
+/// Explicit package root selection using the same already validated canonical IR.
+pub fn collect_artifact_identities(
+    validated: &ValidatedConfiguration<'_>,
+    scope: ArtifactScope,
+) -> Result<BootstrapIdentities, BootstrapIdentityError> {
+    let invalid = |reason: String| BootstrapIdentityError::ArtifactScope(reason);
+    if matches!(
+        scope.intent(),
+        PackageIntent::Configuration | PackageIntent::Extension
+    ) {
+        let mut identities = collect_bootstrap_identities(validated)?;
+        if identities.configuration_uuid != scope.root_uuid() {
+            return Err(invalid(
+                "source root differs from canonical Configuration".into(),
+            ));
+        }
+        let root = identities
+            .object(scope.root_uuid())
+            .expect("collector included selected root");
+        if root.owner().is_some() {
+            return Err(invalid("Configuration root has an owner".into()));
+        }
+        identities.scope = scope;
+        return Ok(identities);
+    }
+    let configuration = validated.configuration();
+    let root = configuration
+        .objects()
+        .iter()
+        .find(|o| o.identity().uuid() == scope.root_uuid())
+        .ok_or_else(|| invalid("contained object is absent from canonical graph".into()))?;
+    if root.kind().as_str() != scope.root_kind() || root.owner().is_some() {
+        return Err(invalid(
+            "external contained root has a different kind/owner".into(),
+        ));
+    }
+    let mut objects = Vec::with_capacity(configuration.objects().len());
+    for (source_index, object) in configuration.objects().iter().enumerate() {
+        let uuid = object.identity().uuid();
+        if is_nil(uuid) {
+            return Err(BootstrapIdentityError::NilObjectUuid {
+                kind: object.kind().as_str().into(),
+            });
+        }
+        if scope.main_uuid() != scope.root_uuid()
+            && (uuid == scope.main_uuid()
+                || object
+                    .generated_types()
+                    .iter()
+                    .any(|t| t.uuid() == scope.main_uuid()))
+        {
+            return Err(invalid(format!(
+                "external main alias {} collides with canonical identity",
+                scope.main_uuid()
+            )));
+        }
+        // Core already proved acyclic ownership. Every retained object must be
+        // selected root or owned transitively by it; context-only leaves cannot leak.
+        let mut ancestor = object;
+        while ancestor.identity().uuid() != scope.root_uuid() {
+            let owner = ancestor.owner().ok_or_else(|| {
+                invalid(format!(
+                    "foreign top-level object {uuid} in external package"
+                ))
+            })?;
+            ancestor = &configuration.objects()[validated
+                .graph()
+                .object_index_by_uuid(owner)
+                .expect("core proved owner")];
+        }
+        for t in object.generated_types() {
+            if is_nil(t.uuid()) {
+                return Err(BootstrapIdentityError::NilGeneratedTypeUuid {
+                    owner: uuid,
+                    kind: t.kind().as_str().into(),
+                });
+            }
+        }
+        objects.push(BootstrapObjectIdentity {
+            uuid,
+            kind: object.kind().clone(),
+            owner: object.owner(),
+            generated_types: object.generated_types().to_vec(),
+            source_index,
+        });
+    }
+    objects.sort_by_key(BootstrapObjectIdentity::uuid);
+    Ok(BootstrapIdentities {
+        configuration_uuid: scope.root_uuid(),
+        scope,
         objects,
     })
 }
