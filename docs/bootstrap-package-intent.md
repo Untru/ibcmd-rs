@@ -61,3 +61,23 @@ edition. The base-free compiler's older `{67,...}` layout predates that shared
 selector and keeps its own compatibility at field 43. Their native XML
 projections use the existing platform policy; package admission does not
 reinterpret either value or remove the ordinary property.
+
+
+Ordinary `UsedMobileApplicationFunctionalities` values now use the root's own
+named boolean flags in both source compiler routes. One shared schema roster
+owns the existing native name/ID mapping; XML parsing resolves expanded names
+before the base-free route's compact view discards namespace prefixes. A present
+block must contain the complete ordered roster (37 entries in 2.17, 38 in
+2.20/2.21), with one `functionality` name and one `use` value per entry. Names,
+values, duplicates, extra fields and foreign namespaces are checked; malformed
+or missing entries are refused before publication. Namespace aliases and the
+existing unqualified legacy envelope are accepted. Omission of the entire
+property retains the minimal Configuration contract. No missing flag is
+replaced by the all-default reference block.
+
+Generated allfalse, alltrue and mixed controls check physical tuple 53,
+including the `{67,...}` trailing TextToSpeech scalar, and full returned XML
+bytes through both compilers and both current dialects. Older physical reader
+layouts and other property scopes that still admit only evidenced defaults are
+unchanged. This source atom does not establish native-platform acceptance or
+complete CFE/EPF/ERF builders.

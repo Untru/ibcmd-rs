@@ -351,6 +351,237 @@ fn stored_configuration_tuple(cf: &Path, output: &Path) -> Vec<Brace> {
     tuple.to_vec()
 }
 
+fn mobile_block(enabled: &[u32]) -> String {
+    let entries = ibcmd_schema::configuration_mobile::FUNCTIONALITIES
+        .iter()
+        .map(|(id, name)| format!(
+            "<app:functionality><app:functionality>{name}</app:functionality><app:use>{}</app:use></app:functionality>",
+            if enabled.contains(id) { "true" } else { "false" },
+        ))
+        .collect::<String>();
+    format!(
+        "<UsedMobileApplicationFunctionalities xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\">{entries}</UsedMobileApplicationFunctionalities>"
+    )
+}
+
+fn assert_mobile_tuple(tuple: &[Brace], enabled: &[u32]) {
+    let table = tuple[53].as_list().unwrap();
+    assert_eq!(table[0].as_atom(), Some("2"));
+    let short = tuple[0].as_atom() == Some("67");
+    let pairs = if short { 37 } else { 38 };
+    assert_eq!(table[1].as_atom().unwrap().parse::<usize>().unwrap(), pairs);
+    assert_eq!(table.len(), pairs + 3);
+    assert_eq!(table[2 + 28].as_list().unwrap()[0].as_atom(), Some("32"));
+    let mut actual_enabled = Vec::new();
+    for (pair, (expected_id, _)) in table[2..2 + pairs]
+        .iter()
+        .zip(&ibcmd_schema::configuration_mobile::FUNCTIONALITIES)
+    {
+        let pair = pair.as_list().unwrap();
+        assert_eq!(pair.len(), 2);
+        let id = pair[0].as_atom().unwrap().parse::<u32>().unwrap();
+        assert_eq!(id, *expected_id);
+        match pair[1].as_atom().unwrap() {
+            "0" => assert!(!enabled.contains(&id)),
+            "1" => {
+                assert!(enabled.contains(&id));
+                actual_enabled.push(id);
+            }
+            flag => panic!("nonboolean stored mobile flag {flag}"),
+        }
+    }
+    let tail = table[2 + pairs].as_atom().unwrap();
+    if short && tail == "1" {
+        actual_enabled.push(41);
+    }
+    assert_eq!(
+        tail,
+        if short && enabled.contains(&41) {
+            "1"
+        } else {
+            "0"
+        }
+    );
+    assert_eq!(actual_enabled, enabled);
+}
+
+#[test]
+fn own_mobile_values_keep_exact_tuple_and_native_xml_through_both_compilers() {
+    let all = ibcmd_schema::configuration_mobile::FUNCTIONALITIES
+        .iter()
+        .map(|(id, _)| *id)
+        .collect::<Vec<_>>();
+    for enabled in [vec![], vec![1, 18, 35, 41], all] {
+        for base_free in [false, true] {
+            let scratch = Scratch::new();
+            let xml = configuration()
+                .replace(
+                    "<ScriptVariant>English</ScriptVariant>",
+                    "<ScriptVariant>Russian</ScriptVariant>",
+                )
+                .replacen(
+                    "<Comment/>",
+                    &format!("<Comment/>{}", mobile_block(&enabled)),
+                    1,
+                );
+            let source = scratch.source("Configuration.xml", &xml);
+            let initial = scratch.0.join("mobile.cf");
+            success(bootstrap(&source, &initial, base_free, "5"));
+            assert_mobile_tuple(
+                &stored_configuration_tuple(&initial, &scratch.0.join("mobile-tuple")),
+                &enabled,
+            );
+            for version in ["2.20", "2.21"] {
+                let native = scratch.0.join(format!("native-mobile-{version}"));
+                export(&initial, &native, version);
+                let expected = fs::read(native.join("Configuration.xml")).unwrap();
+                let document = XmlReader::from_slice(&expected).unwrap();
+                assert_eq!(
+                    ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)
+                        .unwrap(),
+                    Some(enabled.clone())
+                );
+                let expected_text = std::str::from_utf8(&expected).unwrap();
+                for (name, id) in [
+                    ("Location", 1),
+                    ("Camera", 18),
+                    ("NFC", 35),
+                    ("TextToSpeech", 41),
+                ] {
+                    assert!(expected_text.contains(&format!("<app:functionality>{name}</app:functionality>\r\n\t\t\t\t\t<app:use>{}</app:use>", enabled.contains(&id))), "{expected_text}");
+                }
+                let rebuilt = scratch.0.join(format!("rebuilt-mobile-{version}.cf"));
+                let mut command = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"));
+                command.args(["cf", "bootstrap"]);
+                if base_free {
+                    command.arg("--base-free");
+                }
+                success(
+                    command
+                        .arg(&native)
+                        .arg(&rebuilt)
+                        .args(["--source-version", version, "--storage-version", "5"])
+                        .env("PATH", "")
+                        .output()
+                        .unwrap(),
+                );
+                assert_mobile_tuple(
+                    &stored_configuration_tuple(
+                        &rebuilt,
+                        &scratch.0.join(format!("rebuilt-mobile-tuple-{version}")),
+                    ),
+                    &enabled,
+                );
+                let returned = scratch.0.join(format!("returned-mobile-{version}"));
+                export(&rebuilt, &returned, version);
+                assert_eq!(
+                    fs::read(returned.join("Configuration.xml")).unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn malformed_mobile_values_refuse_both_routes_before_fresh_or_existing_publication() {
+    let valid = configuration().replacen(
+        "<Comment/>",
+        &format!("<Comment/>{}", mobile_block(&[1, 41])),
+        1,
+    );
+    let first = "<app:functionality><app:functionality>Biometrics</app:functionality><app:use>false</app:use></app:functionality>";
+    let second = "<app:functionality><app:functionality>Location</app:functionality><app:use>true</app:use></app:functionality>";
+    let invalid = [
+        valid.replacen(first, "", 1),
+        valid.replacen(second, first, 1),
+        valid.replacen(
+            &(first.to_owned() + second),
+            &(second.to_owned() + first),
+            1,
+        ),
+        valid.replacen("Biometrics", "FutureFunctionality", 1),
+        valid.replacen("<app:use>false</app:use>", "<app:use>0</app:use>", 1),
+        valid.replacen("<app:use>false</app:use>", "<app:use/>", 1),
+        valid.replacen(
+            "<app:use>false</app:use>",
+            "<app:use><app:future/></app:use>",
+            1,
+        ),
+        valid.replacen(
+            "<app:use>false</app:use>",
+            "<app:use>false</app:use><app:future/>",
+            1,
+        ),
+        valid.replacen("<app:use>", "<app:use unexpected=\"yes\">", 1),
+        valid.replacen("<app:use>", "<app:use xmlns:app=\"urn:foreign\">", 1),
+        valid.replace(
+            "http://v8.1c.ru/8.2/managed-application/core",
+            "urn:foreign",
+        ),
+        valid.replacen(
+            "</Properties>",
+            &format!("{}</Properties>", mobile_block(&[])),
+            1,
+        ),
+    ];
+    for xml in invalid {
+        for base_free in [false, true] {
+            for existing in [false, true] {
+                let scratch = Scratch::new();
+                let source = scratch.source("Configuration.xml", &xml);
+                let output = scratch.0.join("blocked.cf");
+                if existing {
+                    fs::write(&output, b"original owned output").unwrap();
+                }
+                let result = bootstrap(&source, &output, base_free, "5");
+                assert!(!result.status.success());
+                let report: Value = serde_json::from_slice(&result.stderr).unwrap();
+                assert_eq!(report["ok"], false);
+                assert_eq!(report["storage_entries"], 0);
+                assert!(report["publication"].is_null());
+                let diagnostic = report["errors"].to_string();
+                assert!(
+                    diagnostic.contains("UsedMobileApplicationFunctionalities")
+                        || diagnostic.contains("mobile functionality"),
+                    "refused by an unrelated rule: {report}",
+                );
+                assert_eq!(
+                    fs::read_to_string(source.join("Configuration.xml")).unwrap(),
+                    xml
+                );
+                if existing {
+                    assert_eq!(fs::read(&output).unwrap(), b"original owned output");
+                } else {
+                    assert!(!output.exists());
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn mobile_namespace_aliases_reach_both_public_compilers() {
+    let xml = configuration()
+        .replacen(
+            "<Comment/>",
+            &format!("<Comment/>{}", mobile_block(&[1, 18, 35, 41])),
+            1,
+        )
+        .replace("app:", "alias:")
+        .replace("xmlns:app=", "xmlns:alias=");
+    for base_free in [false, true] {
+        let scratch = Scratch::new();
+        let source = scratch.source("Configuration.xml", &xml);
+        let output = scratch.0.join("aliases.cf");
+        success(bootstrap(&source, &output, base_free, "5"));
+        assert_mobile_tuple(
+            &stored_configuration_tuple(&output, &scratch.0.join("aliases-tuple")),
+            &[1, 18, 35, 41],
+        );
+    }
+}
+
 #[test]
 fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
     // NamePrefix is owned by the ordinary root compiler, including nonempty

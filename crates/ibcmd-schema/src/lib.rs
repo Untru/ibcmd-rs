@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod configuration_mobile;
 pub mod configuration_rights;
 
 use std::borrow::Cow;

@@ -1199,7 +1199,9 @@ fn configuration_mobile_capabilities(enabled: &[u32]) -> String {
 }
 
 fn mobile_functionality_ids() -> impl Iterator<Item = u32> {
-    (0..=27).chain(32..=41)
+    ibcmd_schema::configuration_mobile::FUNCTIONALITIES
+        .iter()
+        .map(|(id, _)| *id)
 }
 
 fn localized_1c(values: &[ConfigurationLocalizedString]) -> String {

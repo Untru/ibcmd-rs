@@ -1,4 +1,5 @@
 use super::*;
+use ibcmd_schema::configuration_mobile::FUNCTIONALITIES as CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES;
 
 #[allow(dead_code)]
 pub(super) fn build_metadata_command_reference_index(
@@ -4529,47 +4530,6 @@ pub(super) fn parse_configuration_use_purposes(
     }
     Some(vec!["PlatformApplication"])
 }
-
-const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [
-    (0, "Biometrics"),
-    (1, "Location"),
-    (2, "BackgroundLocation"),
-    (3, "BluetoothPrinters"),
-    (4, "WiFiPrinters"),
-    (5, "Contacts"),
-    (6, "Calendars"),
-    (7, "PushNotifications"),
-    (8, "LocalNotifications"),
-    (9, "InAppPurchases"),
-    (10, "PersonalComputerFileExchange"),
-    (11, "Ads"),
-    (12, "NumberDialing"),
-    (13, "CallProcessing"),
-    (14, "CallLog"),
-    (15, "AutoSendSMS"),
-    (16, "ReceiveSMS"),
-    (17, "SMSLog"),
-    (18, "Camera"),
-    (19, "Microphone"),
-    (20, "MusicLibrary"),
-    (21, "PictureAndVideoLibraries"),
-    (22, "AudioPlaybackAndVibration"),
-    (23, "BackgroundAudioPlaybackAndVibration"),
-    (24, "InstallPackages"),
-    (25, "OSBackup"),
-    (26, "ApplicationUsageStatistics"),
-    (27, "BarcodeScanning"),
-    (32, "BackgroundAudioRecording"),
-    (33, "AllFilesAccess"),
-    (34, "Videoconferences"),
-    (35, "NFC"),
-    (36, "DocumentScanning"),
-    (37, "SpeechToText"),
-    (38, "Geofences"),
-    (39, "IncomingShareRequests"),
-    (40, "AllIncomingShareRequestsTypesProcessing"),
-    (41, "TextToSpeech"),
-];
 
 /// The OS permissions a `<app:permissionMessage>` can explain.
 ///

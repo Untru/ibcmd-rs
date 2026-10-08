@@ -31,7 +31,7 @@ use ibcmd_schema::ConfigurationPropertyEvidencedDefault;
 use ibcmd_xml::{
     AttributeKind, DialectDetection, DialectRegistry, XmlDocument, XmlElement, XmlNode, XmlReader,
     bundled_dialect_registry, bundled_metadata_registry,
-    metadata::decode_configuration_envelope,
+    metadata::{decode_configuration_envelope, parse_configuration_mobile_functionalities},
     source_tree::{SourceKind, SourceTree},
 };
 
@@ -1348,6 +1348,11 @@ fn project_configuration(
         BootstrapCompileError::InvalidConfiguration("Configuration has no Properties".to_owned())
     })?;
     let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
+    let enabled_mobile = parse_configuration_mobile_functionalities(document).map_err(|error| {
+        BootstrapCompileError::InvalidConfiguration(format!(
+            "UsedMobileApplicationFunctionalities: {error}"
+        ))
+    })?;
     let mut properties = ConfigurationBodyProperties::minimal("", target_compatibility);
     let mut default_language = None::<String>;
     let mut seen = BTreeSet::new();
@@ -1491,10 +1496,13 @@ fn project_configuration(
                 reject_unless_empty(name, element)?;
             }
             "UsedMobileApplicationFunctionalities" => {
-                reject_unless_evidenced_mobile_default(element)?;
-                properties.enabled_mobile_functionalities = policy
-                    .used_mobile_application_functionalities_default_tuple_ids()
-                    .to_vec();
+                properties.enabled_mobile_functionalities =
+                    enabled_mobile.clone().ok_or_else(|| {
+                        BootstrapCompileError::InvalidConfiguration(
+                            "UsedMobileApplicationFunctionalities has no validated value"
+                                .to_owned(),
+                        )
+                    })?;
             }
             "DefaultStyle" => {
                 reject_unless_evidenced_default(name, element)?;
@@ -1645,57 +1653,6 @@ fn reject_unless_evidenced_default(
             property_not_projectable(property, "<unclassified default>".to_owned()),
         ),
     }
-}
-
-/// `<UsedMobileApplicationFunctionalities>` is compilable only as the exact
-/// all-default block: the evidenced reference tuple proves which numeric IDs
-/// that block corresponds to, and nothing proves any other combination.
-fn reject_unless_evidenced_mobile_default(
-    element: &XmlElement,
-) -> Result<(), BootstrapCompileError> {
-    const PROPERTY: &str = "UsedMobileApplicationFunctionalities";
-    let policy = ibcmd_schema::configuration_properties_evidenced_default_block_policy();
-    let mut actual = Vec::new();
-    for entry in child_elements(element)? {
-        if entry.name().local() != "functionality" {
-            return Err(property_not_projectable(
-                PROPERTY,
-                format!("<unexpected `{}` entry>", entry.name().local()),
-            ));
-        }
-        let name = named_child(entry, "functionality")?
-            .ok_or_else(|| property_not_projectable(PROPERTY, "<entry without a name>".to_owned()))
-            .and_then(simple_text)?;
-        let used = named_child(entry, "use")?
-            .ok_or_else(|| property_not_projectable(PROPERTY, "<entry without a use>".to_owned()))
-            .and_then(simple_text)?;
-        let used = match used.as_str() {
-            "true" => true,
-            "false" => false,
-            other => {
-                return Err(property_not_projectable(
-                    PROPERTY,
-                    format!("<{name} uses `{other}`>"),
-                ));
-            }
-        };
-        actual.push((name, used));
-    }
-    let expected = policy.used_mobile_application_functionality_defaults();
-    if actual.len() != expected.len()
-        || actual
-            .iter()
-            .zip(expected)
-            .any(|((name, used), (expected_name, expected_used))| {
-                name != expected_name || used != expected_used
-            })
-    {
-        return Err(property_not_projectable(
-            PROPERTY,
-            "<block differs from the evidenced platform default>".to_owned(),
-        ));
-    }
-    Ok(())
 }
 
 /// `<UsePurposes>` is compilable only as the single `PlatformApplication`
@@ -3114,19 +3071,21 @@ EndProcedure",
         }
     }
 
-    /// NEGATIVE 3: the mobile-functionality block is compilable only as the
-    /// exact evidenced default; flipping one entry must fail closed.
+    /// The existing named mobile block owns its flags. Other unprojectable
+    /// Configuration property scopes still refuse nondefaults.
     #[test]
-    fn a_modified_mobile_functionality_block_fails_closed() {
+    fn mobile_own_flags_project_but_unproved_use_purposes_still_refuse() {
         let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(
             "<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>false</app:use>",
             "<app:functionality>Location</app:functionality>\r\n\t\t\t\t\t<app:use>true</app:use>",
         );
-        assert!(matches!(
-            project_native_text(&xml).unwrap_err(),
-            BootstrapCompileError::ConfigurationPropertyValueNotProjectable { property, .. }
-                if property == "UsedMobileApplicationFunctionalities"
-        ));
+        assert_eq!(
+            project_native_text(&xml)
+                .unwrap()
+                .properties
+                .enabled_mobile_functionalities,
+            vec![0, 1, 25],
+        );
 
         let xml = native_configuration_xml(T1_ALL_DEFAULT_NATIVE_XML_B64).replace(
             "<v8:Value xsi:type=\"app:ApplicationUsePurpose\">PlatformApplication</v8:Value>",

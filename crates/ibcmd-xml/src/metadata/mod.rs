@@ -5,6 +5,7 @@ mod characteristics;
 mod children;
 mod common;
 mod common_objects;
+mod configuration_mobile;
 mod constant;
 mod defined_type;
 mod fallback;
@@ -36,6 +37,7 @@ pub use common_objects::{
     register_command_group_codec, register_common_command_codec, register_common_module_codec,
     register_common_picture_codec,
 };
+pub use configuration_mobile::parse_configuration_mobile_functionalities;
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
 pub use functional_option::register_functional_option_codec;

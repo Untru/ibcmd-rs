@@ -207,6 +207,10 @@ pub fn compile_descriptor(
     xml: &[u8],
     context: &DescriptorContext,
 ) -> Result<Vec<u8>> {
+    if kind == "Configuration" {
+        let document = ibcmd_xml::XmlReader::from_slice(xml)?;
+        ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)?;
+    }
     if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
         let document = ibcmd_xml::XmlReader::from_slice(xml)?;
         ibcmd_xml::metadata::validate_websocket_client_headers_namespaces(&document)?;
