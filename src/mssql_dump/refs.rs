@@ -4519,10 +4519,23 @@ pub(super) fn parse_configuration_use_purposes(
 ) -> Option<Vec<&'static str>> {
     let fields = configuration_root_property_fields(text, uuid)?;
     let raw_fields = split_1c_braced_fields(fields.get(33)?.trim(), 0)?;
-    // The canonical compiler's empty declared collection is exactly {0}.
-    // Do not conflate malformed/nonempty unsupported groups with emptiness.
-    if raw_fields.len() == 1 && raw_fields.first()?.trim() == "0" {
-        return Some(Vec::new());
+    let count_token = raw_fields.first()?.trim();
+    let count = count_token.parse::<usize>().ok()?;
+    // Declared collection counts use canonical unsigned decimal spelling.
+    if count_token != count.to_string() {
+        return None;
+    }
+    if count == 0 {
+        // Only the validated native Properties owner admits the compiler's
+        // empty collection, never a partial SQL tuple or a nested decoy.
+        let layout = parse_configuration_root_layout(text, uuid)?;
+        return (raw_fields.len() == 1
+            && layout.contained_objects.first().is_some_and(|owner| {
+                owner
+                    .class_id
+                    .eq_ignore_ascii_case(crate::metadata_model::root::MODULE_GROUP_CLASS_ID)
+            }))
+        .then(Vec::new);
     }
     if raw_fields.len() != 2 || raw_fields.first()?.trim() != "1" {
         return None;

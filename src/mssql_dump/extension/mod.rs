@@ -1159,6 +1159,42 @@ mod tests {
         false
     }
 
+    #[test]
+    fn active_unrelated_context_keeps_ordinary_v76_addressed_refusals() {
+        if !alone(
+            "mssql_dump::extension::tests::active_unrelated_context_keeps_ordinary_v76_addressed_refusals",
+        ) {
+            return;
+        }
+        use crate::metadata_model::brace::Brace;
+        use crate::mssql_dump::MetadataSourceFailureClass;
+        use crate::mssql_dump::configuration_interface_pair_tests::{fixture, physical, tuple_mut};
+
+        let (original, context) = fixture("2.21", "Taxi", true);
+        assert!(physical(&original, &context, InfobaseConfigSourceVersion::V2_21).is_ok());
+        let active = activate(ExtensionContext::new(std::iter::empty())).unwrap();
+        assert!(super::active().is_some());
+        let failure = physical(&original, &context, InfobaseConfigSourceVersion::V2_20)
+            .err()
+            .unwrap();
+        assert_eq!(failure.class, MetadataSourceFailureClass::Unsupported);
+        assert_eq!(failure.structural_signature, "v76_root_requires_xml_2_21");
+        let mut malformed = original.clone();
+        tuple_mut(&mut malformed)[38] = Brace::num(0);
+        tuple_mut(&mut malformed)[62] = Brace::num(6);
+        for version in [
+            InfobaseConfigSourceVersion::V2_20,
+            InfobaseConfigSourceVersion::V2_21,
+        ] {
+            let failure = physical(&malformed, &context, version).err().unwrap();
+            assert_eq!(failure.class, MetadataSourceFailureClass::Malformed);
+            assert_eq!(failure.structural_signature, "unknown_v76_interface_pair");
+        }
+        drop(active);
+        assert!(super::active().is_none());
+        assert!(physical(&original, &context, InfobaseConfigSourceVersion::V2_21).is_ok());
+    }
+
     /// The extension `_ДемоПустоеРасширение` of the БСП 8.3.27 and the БСП 8.5
     /// demonstration bases: the same two rows in both, and the tree each
     /// platform's own `config export --extension` wrote for them
