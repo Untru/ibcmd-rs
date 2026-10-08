@@ -34,12 +34,23 @@ are rejected. V1 never accepts a new v2 key.
 
 Standalone object-sidecar writers use `Ext/ibcmd-form-presence.v2.json` because
 they have no configuration manifest owner. The same root cannot be declared in
-both the manifest and sidecar. The public conversion reports extension use as
+both the manifest and sidecar. Rewriting the same destination validates the existing
+closed companion's ownership before publication and removes that exact owned file
+when the new intent is plain or moves into the whole-configuration manifest.
+The manifest updater replaces/removes only the closed direct-root protocol comment;
+it preserves unrelated platform XML, comments, attributes and whitespace.
+The public conversion reports extension use as
 `ibcmd-form-presence/2`.
 
 Reading validates the record against the original native artifact, then restores
 other typed descendant resources. It applies the root boolean to an unpublished
 clone, checks its actual CURRENT forward root, and publishes only after validation.
+Whole-configuration workers retain only typed validated restoration tickets. Their
+final restoration runs after every metadata object has loaded, on a complete
+unpublished configuration clone with its CURRENT `FormProjectionContext`.
+`attach_form_body_with_context` is the standalone read counterpart to
+`write_form_bodies_with_context`; a context-free reader cannot validate a forward
+artifact whose root descendants require metadata-dependent projection.
 Whole-configuration completion verifies UUID ownership and CURRENT metadata again.
 The canonical boolean survives ordinary IR serialization as well as both formats.
 
@@ -48,7 +59,10 @@ The original synthetic ACB-present / CI-absent failure is retained as
 calibration did not repair this loss. The nonignored `form_root_presence` tests
 cover that counterexample, the inverse explicit-empty case, both profiles 2.20
 and 2.21, complete IR serde, bar/panel/interface edits, stale and malformed atomic
-rejection, and whole-configuration conversion with rich DataPaths. The native
+rejection, and whole-configuration conversion with rich DataPaths. Additional regressions put
+nondefault event semantics and metadata-dependent rich paths inside the automatic
+bar itself, and exercise repeated same-destination writes and sidecar-to-manifest
+ownership transitions. The native
 annotation owner additionally tests unchanged v1 bytes and strict mixed v2 sections.
 These are candidate tests, not a claim that they have passed.
 

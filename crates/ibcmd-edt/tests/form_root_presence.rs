@@ -1,18 +1,18 @@
 //! Authored root CI presence is independent of native's AutoCommandBar default.
 //! Fixtures are owned synthetic XML; the original 3a9 failure remains in the lab.
 use formats_xml::form::{
-    FormDialect, apply_form_presence_resource, prepare_form_presence, read_form,
-    validate_form_presence_resource, write_form,
+    apply_form_presence_resource, prepare_form_presence, read_form,
+    validate_form_presence_resource, write_form, FormDialect,
 };
 use morph1c_core::{
     ir::{
-        FormBody, FormCiItem, MetadataObject, NamedFormBody, ObjectKind, PropertyValue, Token,
-        Uuid, form::DataPathSpec,
+        form::DataPathSpec, FormBody, FormCiItem, MetadataObject, NamedFormBody, ObjectKind,
+        PropertyValue, Token, Uuid,
     },
     spec::forms::controls::form_field as ff,
-    version::{FormatVersion, with_roundtrip_target, with_source_version},
+    version::{with_roundtrip_target, with_source_version, FormatVersion},
 };
-use morph1c_pipeline::{ConvertOptions, Format, read_config, write_config};
+use morph1c_pipeline::{read_config, write_config, ConvertOptions, Format};
 
 fn read(bytes: &[u8], dialect: FormDialect, profile: FormatVersion) -> FormBody {
     with_source_version(Some(profile), || read_form(dialect, bytes)).unwrap()
@@ -128,25 +128,27 @@ fn current_bar_and_ci_edits_regenerate_and_stale_resource_rejection_is_atomic() 
         assert_ne!(old.resource, new.resource);
         let mut stale = read(&new.bytes, FormDialect::Designer, profile);
         let before = semantic(&stale);
-        assert!(
-            apply_form_presence_resource(
-                &mut stale,
-                Uuid([7; 16]),
-                profile,
-                old.resource.as_ref().unwrap(),
-                None
-            )
-            .is_err()
-        );
+        assert!(apply_form_presence_resource(
+            &mut stale,
+            Uuid([7; 16]),
+            profile,
+            old.resource.as_ref().unwrap(),
+            None
+        )
+        .is_err());
         assert_eq!(before, semantic(&stale));
         native_roundtrip(&edited, profile);
         edited.command_interface = true;
-        assert!(
-            prepare_form_presence(&edited, Uuid([7; 16]), FormDialect::Designer, profile, None)
-                .unwrap()
-                .resource
-                .is_none()
-        );
+        assert!(prepare_form_presence(
+            &edited,
+            Uuid([7; 16]),
+            FormDialect::Designer,
+            profile,
+            None
+        )
+        .unwrap()
+        .resource
+        .is_none());
         native_roundtrip(&edited, profile);
         edited.auto_command_bar = None;
         native_roundtrip(&edited, profile);
@@ -215,15 +217,13 @@ fn closed_resource_rejects_foreign_stale_unknown_and_nonconsuming_values_without
         assert!(
             validate_form_presence_resource(&projected, Uuid([8; 16]), profile, &resource).is_err()
         );
-        assert!(
-            validate_form_presence_resource(
-                &projected,
-                Uuid([7; 16]),
-                FormatVersion::new(2, if minor == 20 { 21 } else { 20 }),
-                &resource
-            )
-            .is_err()
-        );
+        assert!(validate_form_presence_resource(
+            &projected,
+            Uuid([7; 16]),
+            FormatVersion::new(2, if minor == 20 { 21 } else { 20 }),
+            &resource
+        )
+        .is_err());
         let mut deleted = projected.clone();
         deleted.auto_command_bar = None;
         assert!(
@@ -239,15 +239,13 @@ fn closed_resource_rejects_foreign_stale_unknown_and_nonconsuming_values_without
         let duplicate = String::from_utf8(resource)
             .unwrap()
             .replace("\"version\":2", "\"version\":2,\"version\":2");
-        assert!(
-            validate_form_presence_resource(
-                &projected,
-                Uuid([7; 16]),
-                profile,
-                duplicate.as_bytes()
-            )
-            .is_err()
-        );
+        assert!(validate_form_presence_resource(
+            &projected,
+            Uuid([7; 16]),
+            profile,
+            duplicate.as_bytes()
+        )
+        .is_err());
     }
 }
 
@@ -373,6 +371,470 @@ fn whole_configuration_uses_same_current_plan_and_restores_root_with_rich_paths(
                     .form_bodies[0]
                     .body
             )
+        );
+    }
+}
+
+fn config_with_form(body: &FormBody) -> morph1c_core::ir::Configuration {
+    let source = std::path::Path::new(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/subsystem-ci/src"
+    ));
+    let mut cfg = read_config(Format::Designer, source, &ConvertOptions::default())
+        .unwrap()
+        .0;
+    let mut obj = MetadataObject::new(ObjectKind::new("CommonForm"), "Presence", Uuid([7; 16]));
+    let id = morph1c_core::spec::registry::spec_for("CommonForm")
+        .unwrap()
+        .fields()
+        .iter()
+        .find(|f| f.name == "formType")
+        .unwrap()
+        .id;
+    obj.properties
+        .push((id, PropertyValue::Enum(Token::new("Managed"))));
+    obj.form_bodies.push(NamedFormBody {
+        name: "Presence".into(),
+        body: body.clone(),
+        ordinary_body: None,
+        module: None,
+        help: vec![],
+        help_resources: vec![],
+    });
+    cfg.objects.push(obj);
+    cfg
+}
+fn present_body(cfg: &morph1c_core::ir::Configuration) -> &FormBody {
+    &cfg.objects
+        .iter()
+        .find(|o| o.name == "Presence")
+        .unwrap()
+        .form_bodies[0]
+        .body
+}
+fn load_native(path: &std::path::Path, profile: FormatVersion) -> morph1c_core::ir::Configuration {
+    with_source_version(Some(profile), || {
+        read_config(Format::Designer, path, &ConvertOptions::default())
+    })
+    .unwrap()
+    .0
+}
+fn bar_field(profile: FormatVersion, independent_extension: bool) -> FormBody {
+    let field = if independent_extension {
+        concat!("<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id><type>None</type>",
+            "<extInfo xsi:type=\"form:LabelFieldExtInfo\"><useCopy>true</useCopy></extInfo></items>")
+    } else {
+        concat!("<items xsi:type=\"form:FormField\"><name>BarField</name><id>11</id>",
+            "<dataPath xsi:type=\"form:DataPath\"><segments>List.Reference.Missing</segments></dataPath>",
+            "<type>LabelField</type><extInfo xsi:type=\"form:LabelFieldExtInfo\"/></items>")
+    };
+    let xml = format!(concat!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+        "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\">",
+        "<autoCommandBar><name>FormCommandBar</name><id>-1</id>{}</autoCommandBar></form:Form>\r\n"), field);
+    read(xml.as_bytes(), FormDialect::Edt, profile)
+}
+fn assert_whole_cycle(
+    body: &FormBody,
+    cfg: &morph1c_core::ir::Configuration,
+    profile: FormatVersion,
+) {
+    let before = semantic(body);
+    let native = tempfile::tempdir().unwrap();
+    with_roundtrip_target(profile, || {
+        write_config(Format::Designer, cfg, native.path())
+    })
+    .unwrap();
+    let restored = load_native(native.path(), profile);
+    assert_eq!(before, semantic(present_body(&restored)));
+    let edt = tempfile::tempdir().unwrap();
+    with_roundtrip_target(profile, || write_config(Format::Edt, &restored, edt.path())).unwrap();
+    let restored = with_source_version(Some(profile), || {
+        read_config(Format::Edt, edt.path(), &ConvertOptions::default())
+    })
+    .unwrap()
+    .0;
+    assert_eq!(before, semantic(present_body(&restored)));
+    let next = tempfile::tempdir().unwrap();
+    with_roundtrip_target(profile, || {
+        write_config(Format::Designer, &restored, next.path())
+    })
+    .unwrap();
+    assert_eq!(
+        before,
+        semantic(present_body(&load_native(next.path(), profile)))
+    );
+    assert_eq!(before, semantic(body));
+}
+#[test]
+fn root_bar_event_descendants_validate_original_wire_before_typed_restoration() {
+    use morph1c_core::ir::FormEvent;
+    for minor in [20, 21] {
+        let profile = FormatVersion::new(2, minor);
+        let mut body = bar_field(profile, true);
+        let field = &mut body.auto_command_bar.as_mut().unwrap().items[0];
+        assert!(field.field_type_none);
+        assert_eq!(
+            field.field_extension_kind.as_deref(),
+            Some("form:LabelFieldExtInfo")
+        );
+        field.events.push(FormEvent {
+            name: "StartChoice".into(),
+            handler: "CurrentChoice".into(),
+        });
+        assert!(
+            formats_xml::form::write_event_semantics_resource(&body, Uuid([7; 16]))
+                .unwrap()
+                .is_some()
+        );
+        let before = semantic(&body);
+        let serialized: FormBody = serde_json::from_slice(&before).unwrap();
+        assert_whole_cycle(&serialized, &config_with_form(&serialized), profile);
+        let obj = config_with_form(&serialized).objects.pop().unwrap();
+        let native = tempfile::tempdir().unwrap();
+        let descriptor = native.path().join("CommonForms/Presence.xml");
+        with_roundtrip_target(profile, || {
+            morph1c_pipeline::write_form_bodies(Format::Designer, &descriptor, &obj)
+        })
+        .unwrap();
+        let mut returned = obj.clone();
+        returned.form_bodies.clear();
+        with_source_version(Some(profile), || {
+            morph1c_pipeline::attach_form_body(
+                Format::Designer,
+                "CommonForm",
+                &descriptor,
+                &mut returned,
+            )
+        })
+        .unwrap();
+        assert_eq!(before, semantic(&returned.form_bodies[0].body));
+        let mut edited = serialized.clone();
+        edited.auto_command_bar.as_mut().unwrap().items[0].events[0].handler =
+            "EditedChoice".into();
+        assert_whole_cycle(&edited, &config_with_form(&edited), profile);
+    }
+}
+fn metadata_child(owner: &mut MetadataObject, name: &str, ty: &str, uuid: u8) {
+    use morph1c_core::ir::{TypeRef, TypeSpec};
+    let kind = format!("{}.Attribute", owner.kind.as_str());
+    let mut child = MetadataObject::new(ObjectKind::new(&kind), name, Uuid([uuid; 16]));
+    let id = morph1c_core::spec::registry::spec_for(&kind)
+        .unwrap()
+        .fields()
+        .iter()
+        .find(|f| f.name == "type")
+        .unwrap()
+        .id;
+    child.properties.push((
+        id,
+        PropertyValue::Type(TypeSpec {
+            parts: vec![TypeRef {
+                id: ty.into(),
+                qualifier: None,
+            }],
+        }),
+    ));
+    owner.children.push(child);
+}
+#[test]
+fn root_bar_rich_path_restoration_uses_complete_current_metadata_and_standalone_context() {
+    use formats_xml::form::FormProjectionContext;
+    for minor in [20, 21] {
+        let profile = FormatVersion::new(2, minor);
+        let mut body = bar_field(profile, false);
+        let attr = concat!(
+            "<attributes><name>List</name><valueType><types>DynamicList</types></valueType>",
+            "<view><common>true</common></view><edit><common>true</common></edit>",
+            "<extInfo xsi:type=\"form:DynamicListExtInfo\"><mainTable>Catalog.Source</mainTable>",
+            "<autoFillAvailableFields>true</autoFillAvailableFields></extInfo></attributes>"
+        );
+        let xml = with_roundtrip_target(profile, || write_form(FormDialect::Edt, &body)).unwrap();
+        let xml = String::from_utf8(xml)
+            .unwrap()
+            .replace("</form:Form>", &format!("{attr}</form:Form>"));
+        body = read(xml.as_bytes(), FormDialect::Edt, profile);
+        body.auto_command_bar.as_mut().unwrap().items[0]
+            .properties
+            .iter_mut()
+            .find(|(id, _)| *id == ff::F_DATA_PATH)
+            .unwrap()
+            .1 = PropertyValue::DataPath(DataPathSpec {
+            segments: vec!["List".into(), "Reference".into(), "Missing".into()],
+            extra_paths: vec!["Other.B".into(), "Next.C".into()],
+        });
+        let mut cfg = config_with_form(&body);
+        let mut source = MetadataObject::new(ObjectKind::new("Catalog"), "Source", Uuid([31; 16]));
+        metadata_child(&mut source, "Reference", "CatalogRef.Target", 32);
+        let mut target = MetadataObject::new(ObjectKind::new("Catalog"), "Target", Uuid([33; 16]));
+        metadata_child(&mut target, "Known", "Boolean", 34);
+        cfg.objects.extend([source, target]);
+        let context = FormProjectionContext::new(&cfg).unwrap();
+        let package = prepare_form_presence(
+            &body,
+            Uuid([7; 16]),
+            FormDialect::Designer,
+            profile,
+            Some(&context),
+        )
+        .unwrap();
+        let without =
+            prepare_form_presence(&body, Uuid([7; 16]), FormDialect::Designer, profile, None)
+                .unwrap();
+        assert_ne!(
+            package.resource, without.resource,
+            "fixture must witness metadata-dependent root wire digest"
+        );
+        assert!(String::from_utf8_lossy(&package.bytes).contains("~List.Reference.Missing"));
+        assert_whole_cycle(&body, &cfg, profile);
+        let obj = cfg.objects.iter().find(|o| o.name == "Presence").unwrap();
+        let standalone = tempfile::tempdir().unwrap();
+        let descriptor = standalone.path().join("CommonForms/Presence.xml");
+        with_roundtrip_target(profile, || {
+            morph1c_pipeline::write_form_bodies_with_context(
+                Format::Designer,
+                &descriptor,
+                obj,
+                &context,
+            )
+        })
+        .unwrap();
+        let mut reread = obj.clone();
+        reread.form_bodies.clear();
+        with_source_version(Some(profile), || {
+            morph1c_pipeline::attach_form_body_with_context(
+                Format::Designer,
+                "CommonForm",
+                &descriptor,
+                &mut reread,
+                &context,
+            )
+        })
+        .unwrap();
+        assert_eq!(semantic(&body), semantic(&reread.form_bodies[0].body));
+        // A context-free restoration cannot reproduce this actual forward artifact.
+        let mut no_context = obj.clone();
+        no_context.form_bodies.clear();
+        assert!(
+            with_source_version(Some(profile), || morph1c_pipeline::attach_form_body(
+                Format::Designer,
+                "CommonForm",
+                &descriptor,
+                &mut no_context
+            ))
+            .is_err()
+        );
+        assert!(no_context.form_bodies.is_empty());
+        let mut edited = cfg.clone();
+        edited
+            .objects
+            .iter_mut()
+            .find(|o| o.name == "Target")
+            .unwrap()
+            .children[0]
+            .name = "Missing".into();
+        assert_whole_cycle(&body, &edited, profile);
+    }
+}
+#[test]
+fn same_destination_updates_remove_owned_root_companions_and_preserve_unrelated_manifest() {
+    for minor in [20, 21] {
+        let profile = FormatVersion::new(2, minor);
+        let body = fixture(profile, true, false);
+        let mut cfg = config_with_form(&body);
+        let native = tempfile::tempdir().unwrap();
+        let descriptor = native.path().join("CommonForms/Presence.xml");
+        let sidecar = native
+            .path()
+            .join("CommonForms/Presence/Ext")
+            .join(formats_xml::form::FORM_PRESENCE_RESOURCE);
+        let obj = cfg.objects.last().unwrap();
+        with_roundtrip_target(profile, || {
+            morph1c_pipeline::write_form_bodies(Format::Designer, &descriptor, obj)
+        })
+        .unwrap();
+        assert!(sidecar.is_file());
+        with_roundtrip_target(profile, || {
+            write_config(Format::Designer, &cfg, native.path())
+        })
+        .unwrap();
+        assert!(
+            !sidecar.exists(),
+            "whole manifest owns the same root intent"
+        );
+        assert_eq!(
+            semantic(&body),
+            semantic(present_body(&load_native(native.path(), profile)))
+        );
+        let manifest_path = native.path().join("ConfigDumpInfo.xml");
+        let manifest = String::from_utf8(std::fs::read(&manifest_path).unwrap()).unwrap();
+        let marker = "<!-- platform-owned-comment --><PlatformOwned value=\"keep\"/>";
+        let manifest = manifest.replace("</ConfigDumpInfo>", &format!("{marker}</ConfigDumpInfo>"));
+        std::fs::write(&manifest_path, manifest.as_bytes()).unwrap();
+        cfg.objects.last_mut().unwrap().form_bodies[0]
+            .body
+            .command_interface = true;
+        with_roundtrip_target(profile, || {
+            write_config(Format::Designer, &cfg, native.path())
+        })
+        .unwrap();
+        let updated = std::fs::read(&manifest_path).unwrap();
+        let comment_start = manifest
+            .find("<!-- ibcmd-configuration-semantics:")
+            .unwrap();
+        let comment_end = comment_start + manifest[comment_start..].find("-->").unwrap() + 3;
+        let mut expected = manifest.as_bytes().to_vec();
+        expected.drain(comment_start..comment_end);
+        assert_eq!(
+            updated, expected,
+            "only the exact protocol comment may disappear"
+        );
+        assert!(String::from_utf8_lossy(&updated).contains(marker));
+        assert!(!String::from_utf8_lossy(&updated).contains("ibcmd-configuration-semantics:"));
+        assert_eq!(
+            semantic(present_body(&cfg)),
+            semantic(present_body(&load_native(native.path(), profile)))
+        );
+        cfg.objects.last_mut().unwrap().form_bodies[0]
+            .body
+            .command_interface = false;
+        with_roundtrip_target(profile, || {
+            write_config(Format::Designer, &cfg, native.path())
+        })
+        .unwrap();
+        assert!(String::from_utf8_lossy(&std::fs::read(&manifest_path).unwrap()).contains(marker));
+        assert_eq!(
+            semantic(&body),
+            semantic(present_body(&load_native(native.path(), profile)))
+        );
+        // Isolated standalone output has no manifest. False -> true removes its owned sidecar.
+        let standalone = tempfile::tempdir().unwrap();
+        let descriptor = standalone.path().join("CommonForms/Presence.xml");
+        let sidecar = standalone
+            .path()
+            .join("CommonForms/Presence/Ext")
+            .join(formats_xml::form::FORM_PRESENCE_RESOURCE);
+        let mut obj = cfg.objects.last().unwrap().clone();
+        with_roundtrip_target(profile, || {
+            morph1c_pipeline::write_form_bodies(Format::Designer, &descriptor, &obj)
+        })
+        .unwrap();
+        assert!(sidecar.exists());
+        obj.form_bodies[0].body.command_interface = true;
+        with_roundtrip_target(profile, || {
+            morph1c_pipeline::write_form_bodies(Format::Designer, &descriptor, &obj)
+        })
+        .unwrap();
+        assert!(!sidecar.exists());
+        let before = semantic(&obj.form_bodies[0].body);
+        obj.form_bodies.clear();
+        with_source_version(Some(profile), || {
+            morph1c_pipeline::attach_form_body(
+                Format::Designer,
+                "CommonForm",
+                &descriptor,
+                &mut obj,
+            )
+        })
+        .unwrap();
+        assert_eq!(before, semantic(&obj.form_bodies[0].body));
+    }
+}
+
+#[test]
+fn same_destination_rejects_foreign_or_unknown_owned_resources_before_publication() {
+    for minor in [20, 21] {
+        let profile = FormatVersion::new(2, minor);
+        let body = fixture(profile, true, false);
+        let cfg = config_with_form(&body);
+        let native = tempfile::tempdir().unwrap();
+        with_roundtrip_target(profile, || {
+            write_config(Format::Designer, &cfg, native.path())
+        })
+        .unwrap();
+        let manifest_path = native.path().join("ConfigDumpInfo.xml");
+        let original = std::fs::read(&manifest_path).unwrap();
+        let bad = String::from_utf8(original.clone()).unwrap().replace(
+            "ibcmd-configuration-semantics:2:",
+            "ibcmd-configuration-semantics:3:",
+        );
+        std::fs::write(&manifest_path, bad.as_bytes()).unwrap();
+        let before_body =
+            std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap();
+        let mut edited = cfg.clone();
+        edited.objects.last_mut().unwrap().form_bodies[0]
+            .body
+            .command_interface = true;
+        assert!(with_roundtrip_target(profile, || write_config(
+            Format::Designer,
+            &edited,
+            native.path()
+        ))
+        .is_err());
+        assert_eq!(std::fs::read(&manifest_path).unwrap(), bad.as_bytes());
+        assert_eq!(
+            std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap(),
+            before_body
+        );
+        std::fs::write(&manifest_path, &original).unwrap();
+        let descriptor = native.path().join("CommonForms/Presence.xml");
+        let sidecar = native
+            .path()
+            .join("CommonForms/Presence/Ext")
+            .join(formats_xml::form::FORM_PRESENCE_RESOURCE);
+        let package =
+            prepare_form_presence(&body, Uuid([99; 16]), FormDialect::Designer, profile, None)
+                .unwrap();
+        std::fs::write(&sidecar, package.resource.unwrap()).unwrap();
+        assert!(with_roundtrip_target(profile, || write_config(
+            Format::Designer,
+            &edited,
+            native.path()
+        ))
+        .is_err());
+        assert_eq!(std::fs::read(&manifest_path).unwrap(), original);
+        assert_eq!(
+            std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap(),
+            before_body
+        );
+        assert!(
+            with_roundtrip_target(profile, || morph1c_pipeline::write_form_bodies(
+                Format::Designer,
+                &descriptor,
+                edited.objects.last().unwrap()
+            ))
+            .is_err()
+        );
+        assert_eq!(
+            std::fs::read(native.path().join("CommonForms/Presence/Ext/Form.xml")).unwrap(),
+            before_body
+        );
+        let wrong_cfg = formats_xml::form::update_native_data_path_annotation(
+            Some(&original),
+            None,
+            profile,
+            Some(Uuid([99; 16])),
+        );
+        assert!(wrong_cfg.is_err());
+        let empty = format!(
+            "<ConfigDumpInfo xmlns=\"http://v8.1c.ru/8.3/xcf/dumpinfo\" version=\"2.{minor}\"/>"
+        );
+        let root_uuid = cfg
+            .objects
+            .iter()
+            .find(|o| o.kind.as_str() == "Configuration")
+            .map(|o| o.uuid);
+        let expanded = formats_xml::form::update_native_data_path_annotation(
+            Some(empty.as_bytes()),
+            Some(&original),
+            profile,
+            root_uuid,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(
+            formats_xml::form::read_native_data_path_annotation(&expanded, profile)
+                .unwrap()
+                .is_some()
         );
     }
 }

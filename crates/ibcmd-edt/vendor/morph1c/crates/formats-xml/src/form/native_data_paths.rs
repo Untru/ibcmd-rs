@@ -1,14 +1,14 @@
 //! One closed CURRENT configuration annotation in the existing native manifest.
 //! It transports semantic paths, never XML source bytes or stale manifest versions.
 use super::{
-    FormDialect, FormError, FormProjectionContext, data_path_semantics as paths,
-    form_presence as presence,
+    data_path_semantics as paths, form_presence as presence, FormDialect, FormError,
+    FormProjectionContext,
 };
 use morph1c_core::{
     ir::{Configuration, MetadataObject, Uuid},
     version::FormatVersion,
 };
-use quick_xml::{NsReader, events::Event, name::ResolveResult};
+use quick_xml::{events::Event, name::ResolveResult, NsReader};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 const NS: &str = "http://v8.1c.ru/8.3/xcf/dumpinfo";
@@ -535,6 +535,133 @@ pub fn prepare_native_form_write_plan(
     })
 }
 
+/// Replace/remove only our closed direct-root protocol comment. Existing platform
+/// roster, attributes, unrelated comments and whitespace remain byte-identical.
+/// Both inputs are validated completely before any destination publication.
+pub fn update_native_data_path_annotation(
+    existing: Option<&[u8]>,
+    current: Option<&[u8]>,
+    profile: FormatVersion,
+    expected_configuration_uuid: Option<Uuid>,
+) -> Result<Option<Vec<u8>>, FormError> {
+    let fresh = current
+        .map(|bytes| read_native_data_path_annotation(bytes, profile))
+        .transpose()?
+        .flatten();
+    if current.is_some() && fresh.is_none() {
+        return Err(error("CURRENT manifest has no owned annotation"));
+    }
+    if let Some(new) = &fresh {
+        if Some(new.envelope.uuid()) != expected_configuration_uuid {
+            return Err(error("foreign CURRENT Configuration UUID"));
+        }
+    }
+    let Some(existing) = existing else {
+        return Ok(current.map(<[u8]>::to_vec));
+    };
+    let previous = read_native_data_path_annotation(existing, profile)?;
+    if let Some(old) = &previous {
+        if Some(old.envelope.uuid()) != expected_configuration_uuid {
+            return Err(error("foreign existing Configuration UUID"));
+        }
+    }
+    if previous.is_none() && current.is_none() {
+        return Ok(None);
+    }
+    struct EmptyRoot {
+        span: std::ops::Range<usize>,
+        name: Vec<u8>,
+    }
+    struct CommentPositions {
+        owned: Option<std::ops::Range<usize>>,
+        close: usize,
+        empty_root: Option<EmptyRoot>,
+    }
+    fn positions(bytes: &[u8]) -> Result<CommentPositions, FormError> {
+        let mut reader = NsReader::from_reader(bytes);
+        let mut depth = 0usize;
+        let mut owned = None;
+        let mut close = None;
+        let mut empty_root = None;
+        loop {
+            let start = usize::try_from(reader.buffer_position())
+                .map_err(|_| error("actual XML offset overflow"))?;
+            let event = reader.read_event().map_err(|e| error(e.to_string()))?;
+            let end = usize::try_from(reader.buffer_position())
+                .map_err(|_| error("actual XML offset overflow"))?;
+            match event {
+                Event::Start(_) => depth += 1,
+                Event::Empty(root) if depth == 0 => {
+                    empty_root = Some(EmptyRoot {
+                        span: start..end,
+                        name: root.name().as_ref().to_vec(),
+                    });
+                    close = Some(start);
+                }
+                Event::End(_) => {
+                    if depth == 1 {
+                        close = Some(start);
+                    }
+                    depth -= 1;
+                }
+                Event::Comment(comment) if depth == 1 => {
+                    let text = std::str::from_utf8(comment.as_ref())
+                        .map_err(|e| error(e.to_string()))?
+                        .trim();
+                    if text.starts_with(FAMILY) {
+                        owned = Some(start..end);
+                    }
+                }
+                Event::Eof => break,
+                _ => {}
+            }
+        }
+        Ok(CommentPositions {
+            owned,
+            close: close.ok_or_else(|| error("manifest has no closing root"))?,
+            empty_root,
+        })
+    }
+    let previous_positions = positions(existing)?;
+    let comment = if let Some(bytes) = current {
+        let current_positions = positions(bytes)?;
+        Some(
+            &bytes[current_positions
+                .owned
+                .ok_or_else(|| error("CURRENT annotation comment missing"))?],
+        )
+    } else {
+        None
+    };
+    let mut out = existing.to_vec();
+    if let Some(span) = previous_positions.owned {
+        out.splice(span, comment.into_iter().flatten().copied());
+    } else if let Some(comment) = comment {
+        if let Some(EmptyRoot { span, name }) = previous_positions.empty_root {
+            let suffix = span
+                .end
+                .checked_sub(2)
+                .ok_or_else(|| error("empty manifest root malformed"))?;
+            if &out[suffix..span.end] != b"/>" {
+                return Err(error("empty manifest root malformed"));
+            }
+            let mut expanded = b">".to_vec();
+            expanded.extend_from_slice(comment);
+            expanded.extend_from_slice(b"</");
+            expanded.extend_from_slice(&name);
+            expanded.push(b'>');
+            out.splice(suffix..span.end, expanded);
+        } else {
+            out.splice(
+                previous_positions.close..previous_positions.close,
+                comment.iter().copied(),
+            );
+        }
+    }
+    read_native_data_path_annotation(&out, profile)?;
+    Ok(Some(out))
+}
+
 /// A recognized typed control is compared after full current configuration read.
 /// None denotes the historical plain storage manifest, retained independently by
 /// whole-source provenance; its platform incremental cache is not model data.
@@ -560,7 +687,7 @@ pub fn compare_native_data_path_annotations(
 mod tests {
     use super::*;
     use morph1c_core::{
-        ir::{FormBody, FormControlKind, FormItem, PropertyValue, form::DataPathSpec},
+        ir::{form::DataPathSpec, FormBody, FormControlKind, FormItem, PropertyValue},
         spec::forms::controls::form_field as ff,
     };
     fn manifest(raw: &[u8], prefix: &str, profile: FormatVersion) -> Vec<u8> {
@@ -627,13 +754,11 @@ mod tests {
             assert!(matches!(parsed.envelope, Envelope::V1(_)));
             let mut wrong = serde_json::to_value(&v1).unwrap();
             wrong["form_presence"] = serde_json::json!([]);
-            assert!(
-                read_native_data_path_annotation(
-                    &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX, profile),
-                    profile
-                )
-                .is_err()
-            );
+            assert!(read_native_data_path_annotation(
+                &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX, profile),
+                profile
+            )
+            .is_err());
             let v2 = EnvelopeV2 {
                 schema: SCHEMA_V2.into(),
                 version: 2,
@@ -648,12 +773,10 @@ mod tests {
                 .unwrap();
             assert_eq!(parsed.envelope.bytes().unwrap(), raw);
             assert!(parsed.form_resource(Uuid([7; 16])).unwrap().is_some());
-            assert!(
-                parsed
-                    .form_presence_resource(Uuid([7; 16]))
-                    .unwrap()
-                    .is_some()
-            );
+            assert!(parsed
+                .form_presence_resource(Uuid([7; 16]))
+                .unwrap()
+                .is_some());
             for kind in 0..6 {
                 let mut wrong = serde_json::to_value(&v2).unwrap();
                 match kind {
@@ -671,25 +794,21 @@ mod tests {
                         wrong.as_object_mut().unwrap().remove("data_paths");
                     }
                 }
-                assert!(
-                    read_native_data_path_annotation(
-                        &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX_V2, profile),
-                        profile
-                    )
-                    .is_err()
-                );
+                assert!(read_native_data_path_annotation(
+                    &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX_V2, profile),
+                    profile
+                )
+                .is_err());
             }
             assert!(
                 read_native_data_path_annotation(&manifest(&raw, PREFIX, profile), profile)
                     .is_err()
             );
-            assert!(
-                read_native_data_path_annotation(
-                    &manifest(&raw, "ibcmd-configuration-semantics:3:", profile),
-                    profile
-                )
-                .is_err()
-            );
+            assert!(read_native_data_path_annotation(
+                &manifest(&raw, "ibcmd-configuration-semantics:3:", profile),
+                profile
+            )
+            .is_err());
         }
     }
 }

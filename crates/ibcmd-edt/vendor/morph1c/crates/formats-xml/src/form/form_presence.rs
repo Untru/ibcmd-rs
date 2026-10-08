@@ -2,8 +2,8 @@
 //! interface cannot reconstruct an independently authored presence boolean.
 use super::{FormDialect, FormError, FormProjectionContext};
 use morph1c_core::{
-    ir::{FormBody, Uuid, form::FormRootPresence},
-    version::{FormatVersion, with_roundtrip_target, with_source_version},
+    ir::{form::FormRootPresence, FormBody, Uuid},
+    version::{with_roundtrip_target, with_source_version, FormatVersion},
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -198,6 +198,19 @@ pub(super) fn parse_resource(bytes: &[u8]) -> Result<Resource, FormError> {
         return Err(error("unknown schema/version or malformed root digest"));
     }
     Ok(resource)
+}
+/// Validate an existing owned companion before replacing/removing that exact file.
+/// Stale values may legitimately differ after an edit; foreign owner/profile may not.
+pub fn validate_form_presence_resource_owner(
+    bytes: &[u8],
+    uuid: Uuid,
+    profile: FormatVersion,
+) -> Result<(), FormError> {
+    let resource = parse_resource(bytes)?;
+    if resource.form_uuid != uuid || resource.profile != (profile.major, profile.minor) {
+        return Err(error("foreign form or profile in existing owned companion"));
+    }
+    Ok(())
 }
 pub(super) fn resource_uuid(resource: &Resource) -> Uuid {
     resource.form_uuid

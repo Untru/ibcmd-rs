@@ -92,14 +92,31 @@ fn read_config_inner(
         });
     }
 
-    let native_path_annotation=if format==Format::Designer {
-        let path=src.join("ConfigDumpInfo.xml");
-        if path.exists(){let bytes=crate::form_read::read_regular_source(&path).map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?;
-            formats_xml::form::read_native_data_path_annotation(&bytes,source_version.unwrap_or(morph1c_core::version::SSL))
-                .map_err(|e|ConvertError::Read{kind:"Configuration".into(),object:"DataPath annotation".into(),reason:e.to_string()})?
-        }else{None}
-    }else{None};
+    let native_path_annotation = if format == Format::Designer {
+        let path = src.join("ConfigDumpInfo.xml");
+        if path.exists() {
+            let bytes =
+                crate::form_read::read_regular_source(&path).map_err(|e| ConvertError::Io {
+                    path: path.display().to_string(),
+                    reason: e.to_string(),
+                })?;
+            formats_xml::form::read_native_data_path_annotation(
+                &bytes,
+                source_version.unwrap_or(morph1c_core::version::SSL),
+            )
+            .map_err(|e| ConvertError::Read {
+                kind: "Configuration".into(),
+                object: "DataPath annotation".into(),
+                reason: e.to_string(),
+            })?
+        } else {
+            None
+        }
+    } else {
+        None
+    };
 
+    let mut form_presence_tickets = Vec::new();
     let reg = FormatRegistry::for_format(format)?;
 
     // (1) §1.0 preflight — abort on any non-excluded blocked kind.
@@ -201,7 +218,9 @@ fn read_config_inner(
         let ambient_target = morph1c_core::version::current_roundtrip_target();
         // Тот же захват для ТЕКСТОВОЙ политики диалекта (in-text EOL): она тоже thread_local.
         let ambient_eol = formats_xml::read::in_text_eol_verbatim();
-        let results: Vec<Result<MetadataObject, ConvertError>> = read_pool().install(|| {
+        let results: Vec<
+            Result<(MetadataObject, crate::form_read::FormPresenceTickets), ConvertError>,
+        > = read_pool().install(|| {
             objs.par_iter()
                 .map(|(name, path)| {
                     formats_xml::read::with_captured_in_text_eol(ambient_eol, || {
@@ -212,7 +231,13 @@ fn read_config_inner(
                                 // наследует, а без неё ридер снова достраивал бы свойства,
                                 // которых в дампе этой версии нет.
                                 morph1c_core::version::with_source_version(source_version, || {
-                                    read_object_at_with_semantics(format, fk, name, path, native_path_annotation.as_ref())
+                                    read_object_at_with_semantics(
+                                        format,
+                                        fk,
+                                        name,
+                                        path,
+                                        native_path_annotation.as_ref(),
+                                    )
                                 })
                             },
                         )
@@ -226,12 +251,15 @@ fn read_config_inner(
         // на первом непокрытом sidecar/поле) и продолжать. Даёт полный список оставшихся
         // witness-классов за один проход. Продакшн-путь без env-переменной НЕ меняется.
         let collect_errors = false; // Never skip codec errors in production.
-        // For Nested kinds, remember each object's hierarchical key + declared nested-child
-        // names so membership (dangling / undeclared) can be cross-checked once all are read.
+                                    // For Nested kinds, remember each object's hierarchical key + declared nested-child
+                                    // names so membership (dangling / undeclared) can be cross-checked once all are read.
         let mut membership: Vec<(String, Vec<String>)> = Vec::new();
         for ((name, _path), result) in objs.iter().zip(results) {
             let obj = match result {
-                Ok(o) => o,
+                Ok((o, tickets)) => {
+                    form_presence_tickets.extend(tickets);
+                    o
+                }
                 Err(e) if collect_errors => {
                     eprintln!("COLLECT_ERR\t{}\t{}\t{e}", fk.kind, name);
                     continue;
@@ -261,23 +289,42 @@ fn read_config_inner(
         .map(|e| (e.kind.clone(), e.object_count))
         .collect();
 
-    if let Some(annotation)=&native_path_annotation {
-        annotation.verify_configuration(&cfg,source_version.unwrap_or(morph1c_core::version::SSL))
-            .map_err(|e|ConvertError::Read{kind:"Configuration".into(),object:"CURRENT DataPath annotation".into(),reason:e.to_string()})?;
+    crate::form_read::restore_form_presence_configuration(
+        &mut cfg,
+        form_presence_tickets,
+        source_version.unwrap_or(morph1c_core::version::SSL),
+    )?;
+    if let Some(annotation) = &native_path_annotation {
+        annotation
+            .verify_configuration(&cfg, source_version.unwrap_or(morph1c_core::version::SSL))
+            .map_err(|e| ConvertError::Read {
+                kind: "Configuration".into(),
+                object: "CURRENT DataPath annotation".into(),
+                reason: e.to_string(),
+            })?;
     }
     crate::picture_read::resolve_form_picture_transparency(format, &mut cfg)?;
     if format == Format::Designer {
-        formats_xml::form::bind_native_availability_sources(&mut cfg)
-            .map_err(|error| ConvertError::Read {
-                kind: "Configuration".into(), object: "form availability context".into(), reason: error.to_string(),
-            })?;
+        formats_xml::form::bind_native_availability_sources(&mut cfg).map_err(|error| {
+            ConvertError::Read {
+                kind: "Configuration".into(),
+                object: "form availability context".into(),
+                reason: error.to_string(),
+            }
+        })?;
     }
     Ok((cfg, skipped))
 }
 
 /// Read a descriptor and all its source-family bodies.
-fn read_object_at_with_semantics(format:Format,fk:&FormatKind,name:&str,path:&Path,
-    annotation:Option<&formats_xml::form::NativeDataPathAnnotation>)->Result<MetadataObject,ConvertError>{
+fn read_object_at_with_semantics(
+    format: Format,
+    fk: &FormatKind,
+    name: &str,
+    path: &Path,
+    annotation: Option<&formats_xml::form::NativeDataPathAnnotation>,
+) -> Result<(MetadataObject, crate::form_read::FormPresenceTickets), ConvertError> {
+    let mut tickets = Vec::new();
     let bytes = std::fs::read(path).map_err(|e| ConvertError::Io {
         path: path.display().to_string(),
         reason: e.to_string(),
@@ -355,7 +402,14 @@ fn read_object_at_with_semantics(format:Format,fk:&FormatKind,name:&str,path:&Pa
         // `Items/<Имя>/Picture.<ext>` pictures) → `templates` (object + children).
         crate::graph_template_read::attach_graph_template_bodies(format, fk.kind, path, &mut obj)?;
         // Form-body sidecar (`Form.form` / `Ext/Form.xml`) → `obj.form_bodies` (§1.0-strict).
-        crate::form_read::attach_form_body_with_semantics(format, fk.kind, path, &mut obj, annotation)?;
+        crate::form_read::attach_form_body_with_semantics(
+            format,
+            fk.kind,
+            path,
+            &mut obj,
+            annotation,
+            &mut tickets,
+        )?;
         // XDTO-schema sidecar (`Package.xdto` / `Ext/Package.bin`) → `obj.xdto_schema` (§1.0-strict).
         crate::xdto_read::attach_xdto_schema(format, fk.kind, path, &mut obj)?;
         // WSDL sidecar set (`WsDefinitions.wsdl`+`<N>.xsd` / `Ext/WSDefinition.xml`+`Ext/<N>.xsd`)
@@ -371,7 +425,7 @@ fn read_object_at_with_semantics(format:Format,fk:&FormatKind,name:&str,path:&Pa
         // Picture image-body sidecar → `obj.picture` (OPTIONAL).
         crate::picture_read::attach_picture_body(format, fk.kind, path, &mut obj)?;
     }
-    Ok(obj)
+    Ok((obj, tickets))
 }
 
 /// Write ONE object: its descriptor at the planned path `out`, then every BODY sidecar the read
@@ -391,11 +445,23 @@ fn write_object(
 ) -> Result<(), ConvertError> {
     let help_view = crate::help_read::descriptor_with_help(obj)?;
     let projection = if format == Format::Edt {
-        Some(formats_xml::metadata_picture_semantics::project_with_defaults(help_view.as_ref(), picture_defaults).map_err(|reason| ConvertError::Write {
-            kind: fk.kind.into(), object: obj.name.clone(), reason,
-        })?)
-    } else { None };
-    let descriptor = projection.as_ref().map_or(help_view.as_ref(), |(model,_)| model.as_ref());
+        Some(
+            formats_xml::metadata_picture_semantics::project_with_defaults(
+                help_view.as_ref(),
+                picture_defaults,
+            )
+            .map_err(|reason| ConvertError::Write {
+                kind: fk.kind.into(),
+                object: obj.name.clone(),
+                reason,
+            })?,
+        )
+    } else {
+        None
+    };
+    let descriptor = projection
+        .as_ref()
+        .map_or(help_view.as_ref(), |(model, _)| model.as_ref());
     let bytes = (fk.write)(descriptor).map_err(|reason| ConvertError::Write {
         kind: fk.kind.to_string(),
         object: obj.name.clone(),
@@ -420,7 +486,10 @@ fn write_object(
     // content loss the platform then compiles differently (§1.0/§1.6). No-op for objects /
     // kinds that carry no such body. cf never reaches here (handled by the caller).
     crate::source_extensions::emit(format, out, obj)?;
-    crate::metadata_picture_semantics::emit(out, projection.as_ref().and_then(|(_,bytes)| bytes.as_deref()))?;
+    crate::metadata_picture_semantics::emit(
+        out,
+        projection.as_ref().and_then(|(_, bytes)| bytes.as_deref()),
+    )?;
     let kind = obj.kind.as_str();
     crate::form_write::write_form_bodies_from_plan(format, out, obj, form_context, native_forms)?;
     if kind == "Configuration" {
@@ -542,15 +611,22 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
     let timing = std::env::var_os("MORPH1C_TIMING").is_some();
     let t1 = std::time::Instant::now();
     let reg = FormatRegistry::for_format(format)?;
-    let picture_defaults = formats_xml::metadata_picture_semantics::common_picture_defaults(&cfg.objects)
-        .map_err(|reason| ConvertError::Write {
-            kind: "CommonPicture".into(), object: "configuration context".into(), reason,
-        })?;
+    let picture_defaults = formats_xml::metadata_picture_semantics::common_picture_defaults(
+        &cfg.objects,
+    )
+    .map_err(|reason| ConvertError::Write {
+        kind: "CommonPicture".into(),
+        object: "configuration context".into(),
+        reason,
+    })?;
 
-    let form_context = formats_xml::form::FormProjectionContext::new(cfg)
-        .map_err(|error| ConvertError::Write {
-            kind: "Configuration".into(), object: "form projection context".into(), reason: error.to_string(),
-        })?;
+    let form_context = formats_xml::form::FormProjectionContext::new(cfg).map_err(|error| {
+        ConvertError::Write {
+            kind: "Configuration".into(),
+            object: "form projection context".into(),
+            reason: error.to_string(),
+        }
+    })?;
 
     // PHASE 1 — plan every object's output path (nothing written yet, so a path error aborts
     // BEFORE any partial output). Nested (Subsystem) kinds reconstruct the HIERARCHICAL path
@@ -599,10 +675,58 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
     // Bind bodies and all new root/chart companions before files are published.
     // The same immutable CURRENT plan supplies the final native manifest.
     let native_forms = if format == Format::Designer {
-        let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
-        Some(formats_xml::form::prepare_native_form_write_plan(cfg, profile)
-            .map_err(|e|ConvertError::Write{kind:"Configuration".into(),object:"CURRENT native form plan".into(),reason:e.to_string()})?)
-    } else { None };
+        let profile =
+            morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+        Some(
+            formats_xml::form::prepare_native_form_write_plan(cfg, profile).map_err(|e| {
+                ConvertError::Write {
+                    kind: "Configuration".into(),
+                    object: "CURRENT native form plan".into(),
+                    reason: e.to_string(),
+                }
+            })?,
+        )
+    } else {
+        None
+    };
+
+    // Prepare the owned manifest-comment transition before publishing descriptors.
+    // Existing unrelated platform content is retained byte-for-byte.
+    let manifest_output = if let Some(plan) = &native_forms {
+        let path = dst.join("ConfigDumpInfo.xml");
+        let existing = if path.exists() {
+            Some(
+                crate::form_read::read_regular_source(&path).map_err(|e| ConvertError::Io {
+                    path: path.display().to_string(),
+                    reason: e.to_string(),
+                })?,
+            )
+        } else {
+            None
+        };
+        let profile =
+            morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+        formats_xml::form::update_native_data_path_annotation(
+            existing.as_deref(),
+            plan.manifest.as_deref(),
+            profile,
+            cfg.objects
+                .iter()
+                .find(|o| o.kind.as_str() == "Configuration")
+                .map(|o| o.uuid),
+        )
+        .map_err(|e| ConvertError::Write {
+            kind: "Configuration".into(),
+            object: "owned manifest annotation".into(),
+            reason: e.to_string(),
+        })?
+    } else {
+        None
+    };
+
+    for ((_, path), obj) in planned.iter().zip(&cfg.objects) {
+        crate::form_write::validate_existing_root_companions(format, path, obj)?;
+    }
 
     // PHASE 2 — regenerate each descriptor byte-exactly and write it to its planned path.
     //
@@ -638,7 +762,15 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
             // Clock reads only when profiling — see `fsio::accounting`.
             let t = timing.then(std::time::Instant::now);
             let r = morph1c_core::version::with_captured_roundtrip_target(ambient_target, || {
-                write_object(format, fk, out, obj, &picture_defaults, &form_context, native_forms.as_ref())
+                write_object(
+                    format,
+                    fk,
+                    out,
+                    obj,
+                    &picture_defaults,
+                    &form_context,
+                    native_forms.as_ref(),
+                )
             });
             if let Some(t) = t {
                 use std::sync::atomic::Ordering::Relaxed;
@@ -684,7 +816,7 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
     {
         crate::language_write::write_languages(format, dst, root)?;
     }
-    if let Some(bytes) = native_forms.as_ref().and_then(|plan| plan.manifest.as_ref()) {
+    if let Some(bytes) = manifest_output.as_ref() {
         crate::form_write::write_file(&dst.join("ConfigDumpInfo.xml"), bytes)?;
     }
     if timing {

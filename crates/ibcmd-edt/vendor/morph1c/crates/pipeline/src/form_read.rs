@@ -45,8 +45,8 @@
 use std::path::{Path, PathBuf};
 
 use formats_xml::form::{
-    FormDialect, read_form, read_list_settings_dcss, read_spreadsheet_mxlx, set_sidecar_ext,
-    sidecar_slots,
+    read_form, read_list_settings_dcss, read_spreadsheet_mxlx, set_sidecar_ext, sidecar_slots,
+    FormDialect,
 };
 use formats_xml::registry::Format;
 use morph1c_core::ir::form::{DecoratorBody, FormItem, FormPicture};
@@ -131,11 +131,72 @@ pub fn attach_form_body(
     descriptor_path: &Path,
     obj: &mut MetadataObject,
 ) -> Result<(), ConvertError> {
-    attach_form_body_with_semantics(format, kind, descriptor_path, obj, None)
+    let mut restored = obj.clone();
+    attach_form_body_current(
+        format,
+        kind,
+        descriptor_path,
+        &mut restored,
+        None,
+        None,
+        None,
+    )?;
+    *obj = restored;
+    Ok(())
 }
+/// Standalone counterpart to write_form_bodies_with_context. Root restoration
+/// uses the same complete CURRENT metadata as the writer, before publication.
+pub fn attach_form_body_with_context(
+    format: Format,
+    kind: &str,
+    descriptor_path: &Path,
+    obj: &mut MetadataObject,
+    context: &formats_xml::form::FormProjectionContext<'_>,
+) -> Result<(), ConvertError> {
+    let mut restored = obj.clone();
+    attach_form_body_current(
+        format,
+        kind,
+        descriptor_path,
+        &mut restored,
+        None,
+        Some(context),
+        None,
+    )?;
+    *obj = restored;
+    Ok(())
+}
+pub(crate) type FormPresenceTickets = Vec<(
+    morph1c_core::ir::Uuid,
+    formats_xml::form::FormPresenceRestoration,
+)>;
+
 pub(crate) fn attach_form_body_with_semantics(
-    format: Format, kind: &str, descriptor_path: &Path, obj: &mut MetadataObject,
+    format: Format,
+    kind: &str,
+    descriptor_path: &Path,
+    obj: &mut MetadataObject,
     annotation: Option<&formats_xml::form::NativeDataPathAnnotation>,
+    tickets: &mut FormPresenceTickets,
+) -> Result<(), ConvertError> {
+    attach_form_body_current(
+        format,
+        kind,
+        descriptor_path,
+        obj,
+        annotation,
+        None,
+        Some(tickets),
+    )
+}
+fn attach_form_body_current(
+    format: Format,
+    kind: &str,
+    descriptor_path: &Path,
+    obj: &mut MetadataObject,
+    annotation: Option<&formats_xml::form::NativeDataPathAnnotation>,
+    context: Option<&formats_xml::form::FormProjectionContext<'_>>,
+    mut tickets: Option<&mut FormPresenceTickets>,
 ) -> Result<(), ConvertError> {
     if format == Format::Cf {
         return Ok(()); // cf: container — no file-per-object sidecar to attach.
@@ -238,11 +299,69 @@ pub(crate) fn attach_form_body_with_semantics(
             object: format!("{}.{name}", obj.name),
             reason: e.to_string(),
         })?;
+        let uuid = declared_form_uuid(obj, &name)?;
+        let profile =
+            morph1c_core::version::current_source_version().unwrap_or(morph1c_core::version::SSL);
+        // Validate the root companion against the original native artifact;
+        // restore it only after typed descendants and CURRENT metadata are available.
+        let root_presence = if format == Format::Designer {
+            let manifest = annotation
+                .map(|a| a.form_presence_resource(uuid))
+                .transpose()
+                .map_err(|e| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: e.to_string(),
+                })?
+                .flatten();
+            let path = body_path
+                .parent()
+                .expect("form parent")
+                .join(formats_xml::form::FORM_PRESENCE_RESOURCE);
+            let sidecar = if path.exists() {
+                Some(read_regular_source(&path).map_err(|e| ConvertError::Io {
+                    path: path.display().to_string(),
+                    reason: e.to_string(),
+                })?)
+            } else {
+                None
+            };
+            if manifest.is_some() && sidecar.is_some() {
+                return Err(ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: "duplicate manifest/sidecar root presence".into(),
+                });
+            }
+            manifest
+                .or(sidecar)
+                .map(|bytes| {
+                    formats_xml::form::validate_form_presence_resource(&body, uuid, profile, &bytes)
+                })
+                .transpose()
+                .map_err(|e| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: e.to_string(),
+                })?
+        } else {
+            None
+        };
         if format == Format::Designer {
             let directory = body_path.parent().expect("form body has a parent");
-            formats_xml::form::attach_choice_picture_assets(&mut body, declared_form_uuid(obj, &name)?, |path| {
-                read_regular_source(&directory.join(path)).map_err(|e| formats_xml::form::FormError::Frame(e.to_string()))
-            }).map_err(|e| ConvertError::Read { kind: kind.into(), object: name.clone(), reason: e.to_string() })?;
+            formats_xml::form::attach_choice_picture_assets(
+                &mut body,
+                declared_form_uuid(obj, &name)?,
+                |path| {
+                    read_regular_source(&directory.join(path))
+                        .map_err(|e| formats_xml::form::FormError::Frame(e.to_string()))
+                },
+            )
+            .map_err(|e| ConvertError::Read {
+                kind: kind.into(),
+                object: name.clone(),
+                reason: e.to_string(),
+            })?;
         }
         if format == Format::Edt {
             let resource = body_path
@@ -280,61 +399,86 @@ pub(crate) fn attach_form_body_with_semantics(
         }
 
         if format == Format::Designer {
-            let resource = body_path.parent().expect("form body has a parent")
+            let resource = body_path
+                .parent()
+                .expect("form body has a parent")
                 .join(formats_xml::form::EVENT_SEMANTICS_RESOURCE);
             if resource.exists() {
                 let bytes = read_regular_source(&resource).map_err(|error| ConvertError::Io {
-                    path: resource.display().to_string(), reason: error.to_string(),
+                    path: resource.display().to_string(),
+                    reason: error.to_string(),
                 })?;
                 formats_xml::form::apply_event_semantics_resource(
-                    &mut body, declared_form_uuid(obj, &name)?, &bytes,
-                ).map_err(|error| ConvertError::Read {
-                    kind: kind.into(), object: name.clone(), reason: error.to_string(),
+                    &mut body,
+                    declared_form_uuid(obj, &name)?,
+                    &bytes,
+                )
+                .map_err(|error| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: error.to_string(),
                 })?;
             }
         }
 
         // Restore CURRENT rich path identities before Chart/Picture resources:
         // their AdditionalColumns bindings use the current table path identity.
-        let uuid=declared_form_uuid(obj,&name)?;
-        let profile=morph1c_core::version::current_source_version().unwrap_or(morph1c_core::version::SSL);
-        // Validate the root companion against the original native artifact;
-        // apply it only after typed descendant resources finish restoring CURRENT IR.
-        let root_presence = if format == Format::Designer {
-            let manifest = annotation.map(|a| a.form_presence_resource(uuid)).transpose()
-                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?.flatten();
-            let path = body_path.parent().expect("form parent").join(formats_xml::form::FORM_PRESENCE_RESOURCE);
-            let sidecar = if path.exists() { Some(read_regular_source(&path)
-                .map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?) } else { None };
-            if manifest.is_some() && sidecar.is_some() {
-                return Err(ConvertError::Read{kind:kind.into(),object:name.clone(),reason:"duplicate manifest/sidecar root presence".into()});
-            }
-            manifest.or(sidecar)
-                .map(|bytes| formats_xml::form::validate_form_presence_resource(&body, uuid, profile, &bytes))
-                .transpose().map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?
-        } else { None };
-        let path_resource=if format==Format::Designer {
-            annotation.map(|a|a.form_resource(uuid)).transpose().map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?.flatten()
+        let path_resource = if format == Format::Designer {
+            annotation
+                .map(|a| a.form_resource(uuid))
+                .transpose()
+                .map_err(|e| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: e.to_string(),
+                })?
+                .flatten()
         } else {
-            let resource=body_path.parent().expect("form parent").join(formats_xml::form::DATA_PATH_SEMANTICS_RESOURCE);
-            if resource.exists(){Some(read_regular_source(&resource).map_err(|e|ConvertError::Io{path:resource.display().to_string(),reason:e.to_string()})?)}else{None}
+            let resource = body_path
+                .parent()
+                .expect("form parent")
+                .join(formats_xml::form::DATA_PATH_SEMANTICS_RESOURCE);
+            if resource.exists() {
+                Some(
+                    read_regular_source(&resource).map_err(|e| ConvertError::Io {
+                        path: resource.display().to_string(),
+                        reason: e.to_string(),
+                    })?,
+                )
+            } else {
+                None
+            }
         };
-        if let Some(bytes)=path_resource {
-            formats_xml::form::apply_data_path_semantics_resource(&mut body,uuid,dialect,profile,&bytes)
-                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+        if let Some(bytes) = path_resource {
+            formats_xml::form::apply_data_path_semantics_resource(
+                &mut body, uuid, dialect, profile, &bytes,
+            )
+            .map_err(|e| ConvertError::Read {
+                kind: kind.into(),
+                object: name.clone(),
+                reason: e.to_string(),
+            })?;
         }
 
         if format == Format::Designer {
-            let resource = body_path.parent().expect("form body has a parent")
+            let resource = body_path
+                .parent()
+                .expect("form body has a parent")
                 .join(formats_xml::form::CHART_SEMANTICS_RESOURCE);
             if resource.exists() {
                 let bytes = read_regular_source(&resource).map_err(|error| ConvertError::Io {
-                    path: resource.display().to_string(), reason: error.to_string(),
+                    path: resource.display().to_string(),
+                    reason: error.to_string(),
                 })?;
                 formats_xml::form::apply_chart_semantics_resource(
-                    &mut body, declared_form_uuid(obj, &name)?, &bytes,
-                ).map_err(|error| ConvertError::Read {
-                    kind: kind.into(), object: name.clone(), reason: error.to_string(),
+                    &mut body,
+                    declared_form_uuid(obj, &name)?,
+                    &bytes,
+                )
+                .map_err(|error| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: error.to_string(),
                 })?;
             }
         }
@@ -342,16 +486,46 @@ pub(crate) fn attach_form_body_with_semantics(
         // Restore chart omissions first: their current item bindings refer to the
         // native picture projection. Refresh asset identities after that restoration.
         if format == Format::Designer {
-            let path=body_path.parent().expect("form parent").join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE);
-            if path.exists(){
-                if body_path.parent().expect("form parent").join(formats_xml::form::CHART_SEMANTICS_RESOURCE).exists(){
-                    let directory=body_path.parent().expect("form parent");
-                    formats_xml::form::attach_choice_picture_assets(&mut body,declared_form_uuid(obj,&name)?,|path|read_regular_source(&directory.join(path)).map_err(|e|formats_xml::form::FormError::Frame(e.to_string())))
-                        .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+            let path = body_path
+                .parent()
+                .expect("form parent")
+                .join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE);
+            if path.exists() {
+                if body_path
+                    .parent()
+                    .expect("form parent")
+                    .join(formats_xml::form::CHART_SEMANTICS_RESOURCE)
+                    .exists()
+                {
+                    let directory = body_path.parent().expect("form parent");
+                    formats_xml::form::attach_choice_picture_assets(
+                        &mut body,
+                        declared_form_uuid(obj, &name)?,
+                        |path| {
+                            read_regular_source(&directory.join(path))
+                                .map_err(|e| formats_xml::form::FormError::Frame(e.to_string()))
+                        },
+                    )
+                    .map_err(|e| ConvertError::Read {
+                        kind: kind.into(),
+                        object: name.clone(),
+                        reason: e.to_string(),
+                    })?;
                 }
-                let bytes=read_regular_source(&path).map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?;
-                formats_xml::form::apply_native_picture_resource(&mut body,declared_form_uuid(obj,&name)?,&bytes)
-                    .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+                let bytes = read_regular_source(&path).map_err(|e| ConvertError::Io {
+                    path: path.display().to_string(),
+                    reason: e.to_string(),
+                })?;
+                formats_xml::form::apply_native_picture_resource(
+                    &mut body,
+                    declared_form_uuid(obj, &name)?,
+                    &bytes,
+                )
+                .map_err(|e| ConvertError::Read {
+                    kind: kind.into(),
+                    object: name.clone(),
+                    reason: e.to_string(),
+                })?;
             }
         }
         // EDT: the spreadsheet-document BODY of a form attribute is a SIDECAR
@@ -436,8 +610,17 @@ pub(crate) fn attach_form_body_with_semantics(
         }
 
         if let Some(restoration) = root_presence {
-            restoration.restore(&mut body, profile, None)
-                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+            if let Some(pending) = tickets.as_deref_mut() {
+                pending.push((uuid, restoration));
+            } else {
+                restoration
+                    .restore(&mut body, profile, context)
+                    .map_err(|e| ConvertError::Read {
+                        kind: kind.into(),
+                        object: name.clone(),
+                        reason: e.to_string(),
+                    })?;
+            }
         }
         obj.form_bodies.push(NamedFormBody {
             ordinary_body: None,
@@ -1124,10 +1307,14 @@ pub(crate) fn declared_form_is_ordinary(
 }
 fn read_ordinary_body(path: &Path) -> Result<Vec<u8>, ConvertError> {
     let bytes = read_regular_source(path).map_err(|error| ConvertError::Io {
-        path: path.display().to_string(), reason: error.to_string(),
+        path: path.display().to_string(),
+        reason: error.to_string(),
     })?;
     if bytes.is_empty() {
-        return Err(ConvertError::Io { path: path.display().to_string(), reason: "ordinary body is empty".into() });
+        return Err(ConvertError::Io {
+            path: path.display().to_string(),
+            reason: "ordinary body is empty".into(),
+        });
     }
     Ok(bytes)
 }
@@ -1393,4 +1580,73 @@ mod tests {
             "s15 form carries Ext/Form/Module.bsl"
         );
     }
+}
+
+/// Restore every gated root on an unpublished complete configuration clone.
+/// The context refers to the fully loaded CURRENT metadata, not a worker's object.
+pub(crate) fn restore_form_presence_configuration(
+    cfg: &mut morph1c_core::ir::Configuration,
+    tickets: FormPresenceTickets,
+    profile: morph1c_core::version::FormatVersion,
+) -> Result<(), ConvertError> {
+    if tickets.is_empty() {
+        return Ok(());
+    }
+    let mut pending = std::collections::BTreeMap::new();
+    for (uuid, ticket) in tickets {
+        if pending.insert(uuid, ticket).is_some() {
+            return Err(ConvertError::Read {
+                kind: "Configuration".into(),
+                object: "form presence".into(),
+                reason: "duplicate gated form UUID".into(),
+            });
+        }
+    }
+    let context =
+        formats_xml::form::FormProjectionContext::new(cfg).map_err(|e| ConvertError::Read {
+            kind: "Configuration".into(),
+            object: "CURRENT form presence".into(),
+            reason: e.to_string(),
+        })?;
+    let mut restored = cfg.clone();
+    fn visit(
+        objects: &mut [MetadataObject],
+        pending: &mut std::collections::BTreeMap<
+            morph1c_core::ir::Uuid,
+            formats_xml::form::FormPresenceRestoration,
+        >,
+        profile: morph1c_core::version::FormatVersion,
+        context: &formats_xml::form::FormProjectionContext<'_>,
+    ) -> Result<(), ConvertError> {
+        for obj in objects {
+            let identities = obj
+                .form_bodies
+                .iter()
+                .map(|f| declared_form_uuid(obj, &f.name))
+                .collect::<Result<Vec<_>, _>>()?;
+            for (form, uuid) in obj.form_bodies.iter_mut().zip(identities) {
+                if let Some(ticket) = pending.remove(&uuid) {
+                    ticket
+                        .restore(&mut form.body, profile, Some(context))
+                        .map_err(|e| ConvertError::Read {
+                            kind: obj.kind.as_str().into(),
+                            object: form.name.clone(),
+                            reason: e.to_string(),
+                        })?;
+                }
+            }
+            visit(&mut obj.children, pending, profile, context)?;
+        }
+        Ok(())
+    }
+    visit(&mut restored.objects, &mut pending, profile, &context)?;
+    if !pending.is_empty() {
+        return Err(ConvertError::Read {
+            kind: "Configuration".into(),
+            object: "form presence".into(),
+            reason: "gated form disappeared before CURRENT restoration".into(),
+        });
+    }
+    *cfg = restored;
+    Ok(())
 }
