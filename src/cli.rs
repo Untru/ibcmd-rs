@@ -537,6 +537,10 @@ pub struct CfExportArgs {
     /// that `cf load` of this tree onto the same file needs no re-export.
     #[arg(long)]
     pub index: bool,
+    /// Fail if any storage entry remains opaque. Checks the complete current
+    /// image before publishing an index or replacing an indexed update tree.
+    #[arg(long)]
+    pub fail_on_opaque: bool,
     /// Bring an indexed tree exported from an earlier version of this file up
     /// to it, rewriting only the entries that changed (a full export when
     /// objects were added, removed or their metadata changed). Refuses a tree

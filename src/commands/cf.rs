@@ -981,6 +981,7 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
         ));
     }
     if args.update
+        && !args.fail_on_opaque
         && let Some(summary) =
             crate::update::already_current(&args.output_dir, &args.input, args.source_version)
     {
@@ -1015,7 +1016,9 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
         let fresh = crate::update::preflight(&args.output_dir)
             .map_err(|reason| export_failure(&args, profile.clone(), "update_refused", reason))?;
         let entries = crate::external::export::entries_of(&archive);
-        let planned = if fresh {
+        let planned = if args.fail_on_opaque {
+            Err("--fail-on-opaque checks every entry of the current image".to_owned())
+        } else if fresh {
             Err("the directory holds no tree yet".to_owned())
         } else if crate::external::export::detect_in_archive(&archive)
             .ok()
@@ -1127,6 +1130,48 @@ fn export(args: CfExportArgs) -> Result<CfCommandReport, CfCommandError> {
     };
 
     let mut export = export;
+    if args.fail_on_opaque && (export.storage.opaque > 0 || export.storage.failed > 0) {
+        // Full update exports are still isolated here: neither the original
+        // tree nor its index has changed. Keep every per-entry reason in the
+        // report even when the rejected temporary export is removed.
+        if let Some(aside) = &aside {
+            let _ = std::fs::remove_dir_all(aside);
+        }
+        export.output_dir = args.output_dir.clone();
+        let mut errors = Vec::new();
+        if export.storage.opaque > 0 {
+            errors.push(diagnostic(
+                "opaque_export_refused",
+                format!(
+                    "--fail-on-opaque refused {} opaque CF storage entries; see export.storage.entries for names and reasons; no index was published",
+                    export.storage.opaque
+                ),
+            ));
+        }
+        if export.storage.failed > 0 {
+            errors.push(diagnostic(
+                "entry_export_failed",
+                format!(
+                    "{} CF storage entries could not be exported",
+                    export.storage.failed
+                ),
+            ));
+        }
+        return Err(CfCommandError {
+            report: Box::new(CfCommandReport::Export(CfExportReport {
+                schema_version: REPORT_SCHEMA_VERSION,
+                command: "export",
+                ok: false,
+                input: display_path(&args.input),
+                output_dir: display_path(&args.output_dir),
+                source_version: args.source_version.as_str(),
+                profile,
+                export: Some(export),
+                update,
+                errors,
+            })),
+        });
+    }
     if let Some(aside) = &aside {
         let replaced = replace_from_aside(&args.output_dir, aside, &export);
         let _ = std::fs::remove_dir_all(aside);
