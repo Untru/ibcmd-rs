@@ -10839,7 +10839,7 @@ struct TaskProperties {
     main_addressing_attribute: Option<String>,
     current_performer: Option<String>,
     based_on: Vec<String>,
-    standard_attributes: Vec<MetadataStandardAttribute>,
+    standard_attributes: Option<Vec<MetadataStandardAttribute>>,
     default_presentation: &'static str,
     edit_type: &'static str,
     input_by_string: Vec<String>,
@@ -17833,12 +17833,8 @@ fn register_standard_attributes(
         ));
     }
     if kind == "AccountingRegister" {
-        if extension::active().is_some()
-            && metadata_header_field_index(fields, uuid)
-                .and_then(|header_index| fields.get(header_index + 9))
-                .is_some_and(|field| field.trim() == "{0}")
-        {
-            // An extension's own register can hold no standard attributes.
+        if accounting_attributes.absent {
+            // The native collection's absence is independent of configuration kind.
             return Vec::new();
         }
         let account_data_path =
@@ -17945,6 +17941,7 @@ struct RegisterStandardAttributeOverrides {
 
 #[derive(Default)]
 struct AccountingRegisterStandardAttributes {
+    absent: bool,
     present: BTreeSet<&'static str>,
     overrides: BTreeMap<&'static str, RegisterStandardAttributeOverrides>,
 }
@@ -18009,10 +18006,17 @@ fn parse_accounting_register_standard_attribute_collection(
     value: &str,
 ) -> Option<AccountingRegisterStandardAttributes> {
     let outer = split_information_register_braced_fields(value)?;
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let items = split_information_register_braced_fields(outer.get(1)?)?;
+    use ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection;
+    let payload = match NativeOptionalMetadataCollection::from_fields(&outer)? {
+        NativeOptionalMetadataCollection::Absent => {
+            return Some(AccountingRegisterStandardAttributes {
+                absent: true,
+                ..AccountingRegisterStandardAttributes::default()
+            });
+        }
+        NativeOptionalMetadataCollection::Present(payload) => payload,
+    };
+    let items = split_information_register_braced_fields(payload)?;
     if items.len() < 2 || items.first()?.trim() != "1" {
         return None;
     }
@@ -31519,17 +31523,14 @@ fn parse_task_standard_attributes(
     value: &str,
     type_index: &BTreeMap<String, String>,
     object_refs: &BTreeMap<String, String>,
-) -> Option<Vec<MetadataStandardAttribute>> {
+) -> Option<Option<Vec<MetadataStandardAttribute>>> {
     let outer = split_information_register_braced_fields(value)?;
-    // An extension's adopted task stores no standard attributes (`{0}`,
-    // fixture `adopted/kinds`); the extension writer prints none of them.
-    if matches!(outer.as_slice(), [marker] if marker.trim() == "0") {
-        return Some(Vec::new());
-    }
-    if outer.len() != 2 || outer.first()?.trim() != "1" {
-        return None;
-    }
-    let payload = split_information_register_braced_fields(outer.get(1)?)?;
+    use ibcmd_schema::optional_metadata_collection::NativeOptionalMetadataCollection;
+    let payload = match NativeOptionalMetadataCollection::from_fields(&outer)? {
+        NativeOptionalMetadataCollection::Absent => return Some(None),
+        NativeOptionalMetadataCollection::Present(payload) => payload,
+    };
+    let payload = split_information_register_braced_fields(payload)?;
     if payload.first()?.trim() != "1"
         || parse_information_register_usize(payload.get(1)?)? != TASK_STANDARD_ATTRIBUTES.len()
         || payload.len()
@@ -31575,7 +31576,8 @@ fn parse_task_standard_attributes(
                 choice_parameter_links: Vec::new(),
             })
         })
-        .collect()
+        .collect::<Option<Vec<_>>>()
+        .map(Some)
 }
 
 fn parse_task_commands(
@@ -40894,7 +40896,9 @@ fn format_task_source_xml(
             task.current_performer.as_deref(),
         );
         push_task_based_on_xml(&mut properties, &task.based_on);
-        push_metadata_standard_attributes_xml(&mut properties, &task.standard_attributes);
+        if let Some(attributes) = &task.standard_attributes {
+            push_metadata_standard_attributes_xml(&mut properties, attributes);
+        }
         properties.push_str(&render_metadata_characteristics_xml(&task.characteristics).ok()?);
         properties.push_str(&format!(
             "\t\t\t<DefaultPresentation>{}</DefaultPresentation>\r\n\
@@ -41433,13 +41437,11 @@ fn format_document_journal_source_xml(
         );
         xml.insert_str(index, &properties);
     }
-    if !document_journal.columns.is_empty() {
-        let mut columns = String::new();
-        for column in &document_journal.columns {
-            push_document_journal_column_xml(&mut columns, column);
-        }
-        insert_metadata_child_objects_xml(&mut xml, "DocumentJournal", &columns);
+    let mut columns = String::new();
+    for column in &document_journal.columns {
+        push_document_journal_column_xml(&mut columns, column);
     }
+    insert_metadata_child_objects_or_empty_xml(&mut xml, "DocumentJournal", &columns);
     xml
 }
 
@@ -45117,6 +45119,8 @@ fn format_http_service_source_xml(
         if let Some(index) = xml.find(owner_end) {
             xml.insert_str(index, &child_xml);
         }
+    } else {
+        insert_metadata_child_objects_or_empty_xml(&mut xml, "HTTPService", "");
     }
     xml
 }
@@ -45288,6 +45292,7 @@ fn format_integration_service_source_xml(
         xml.insert_str(index, &insert);
     }
     if properties.channels.is_empty() {
+        insert_metadata_child_objects_or_empty_xml(&mut xml, "IntegrationService", "");
         return xml;
     }
     let mut child_objects = "\t\t<ChildObjects>\r\n".to_string();
