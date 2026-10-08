@@ -29,6 +29,22 @@ pub const F_VISIBLE: FieldId = FieldId(3);
 pub const F_ENABLED: FieldId = FieldId(4);
 pub const F_USER_VISIBLE: FieldId = FieldId(5);
 pub const F_DATA_PATH: FieldId = FieldId(6);
+/// Canonical names of the table's current-row source, in both editing languages.
+pub const CURRENT_DATA_MEMBER_NAMES: [&str; 2] = ["CurrentData", "ТекущиеДанные"];
+/// Table-owned element source path. The table and source identities must then
+/// be matched by the adapter's existing identifier comparison against CURRENT items.
+pub fn table_element_member_path(path: &str) -> Option<(&str, &str, &str)> {
+    let (items, tail) = path.split_once('.')?;
+    if !matches!(items, "Items" | "Элементы") {
+        return None;
+    }
+    let (table, tail) = tail.split_once('.')?;
+    let (current, member) = tail.split_once('.')?;
+    if table.is_empty() || current.is_empty() || member.is_empty() {
+        return None;
+    }
+    Some((table, current, member))
+}
 pub const F_DEFAULT_ITEM: FieldId = FieldId(7);
 pub const F_SKIP_ON_INPUT: FieldId = FieldId(8);
 pub const F_TITLE_LOCATION: FieldId = FieldId(9);
