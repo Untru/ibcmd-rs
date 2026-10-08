@@ -86,6 +86,11 @@ fn versioned_archive(
     write_format15_to_vec(&Format15Document::new(
         7,
         vec![
+            // A CF versions inventory includes all three service rows even
+            // though its explicit pairs name only ordinary entries. Omitting
+            // root/version is structural corruption, not an opaque export.
+            packed("root", &format!("\u{feff}{{2,{CONFIG},}}")),
+            packed("version", "\u{feff}{\r\n{216,0,\r\n{80327,0}\r\n}\r\n}"),
             configuration(name),
             packed(OPAQUE, "unrecognized unchanged clean-room body"),
             packed(
@@ -303,7 +308,8 @@ fn resaved_incremental_and_full_updates_all_check_the_complete_current_image() {
             OPAQUE,
         );
         assert_eq!(strict["update"]["mode"], "full");
-        assert_eq!(strict["export"]["storage"]["physical_entries"], 4);
+        assert_eq!(strict["export"]["storage"]["physical_entries"], 6);
+        assert_eq!(strict["export"]["storage"]["failed"], 0);
         assert!(
             strict["export"]["storage"]["entries"]
                 .as_array()
