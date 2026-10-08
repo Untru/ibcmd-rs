@@ -667,8 +667,8 @@ fn extract_failure(
 }
 
 fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandError> {
-    let package = crate::compiler::artifact::discover_source_package(&args.source_dir)
-        .map_err(|source| {
+    let package =
+        crate::compiler::artifact::discover_source_package(&args.source_dir).map_err(|source| {
             bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}"))
         })?;
     if package.intent != crate::compiler::artifact::PackageIntent::Configuration {
@@ -682,10 +682,9 @@ fn bootstrap(mut args: CfBootstrapArgs) -> Result<CfCommandReport, CfCommandErro
             ),
         ));
     }
-    crate::compiler::artifact::validate_output_intent(package.intent, &args.output)
-        .map_err(|source| {
-            bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}"))
-        })?;
+    crate::compiler::artifact::validate_output_intent(package.intent, &args.output).map_err(
+        |source| bootstrap_failure(&args, "bootstrap_package_invalid", format!("{source:#}")),
+    )?;
     if args.source_dir.is_file() {
         return Err(bootstrap_failure(
             &args,
