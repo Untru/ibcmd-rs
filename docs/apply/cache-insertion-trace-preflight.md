@@ -187,9 +187,9 @@ or crashed run's partial output is retained and is not adopted/retried/replaced.
 Existing outputs and caller files are preserved. This is not native acceptance:
 all paths retain Partial, NotIdentified, authority null, native false and issue open.
 
-Nine appended ordinary controls and one ignored target are prepared for independent
-SOURCE review; author did not run them. ROOT may run the original ordinary target
-above after that gate, then (with its owned context and separately reviewed inputs):
+Nine appended ordinary controls and one ignored target follow. Independent SOURCE
+review gates their execution. ROOT may run the original ordinary target above after
+that gate, then (with its owned context and separately reviewed inputs):
 
 ```powershell
 $env:IBCMD_RS_CACHE_TRACE_MANIFEST = 'F:/ROOT-reviewed/current-corpus.json'
