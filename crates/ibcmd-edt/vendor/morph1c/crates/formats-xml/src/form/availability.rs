@@ -1787,8 +1787,9 @@ fn resolve_list_path_in_namespace(
         if morph1c_core::ir::form::DynamicListObjectMember::ALL.iter().any(|member| {
             member.names().iter().any(|name| super::java_case_fold::equal(first, name))
         }) {
-            // Static object members precede query declarations in the original
-            // provider. This proves the root, not its script-derived children.
+            // The object provider owns these independently of query fields.
+            // A colliding query name does not prove which descendant provider
+            // wins; this proves only the root, not script-derived children.
             return (!field.contains('.')).then_some(false);
         }
     }
