@@ -222,6 +222,10 @@ pub enum SourceBodyKind {
         form_body: String,
         form_module: Option<String>,
     },
+    Template {
+        template_descriptor: String,
+        source_paths: Vec<String>,
+    },
 }
 
 /// Immutable, validated input to compilation and activation-plan construction.
@@ -324,7 +328,16 @@ pub fn classify_source_change(
         });
     }
 
-    let body = classify_supported_body(&active_selected.path, active)?;
+    // The proposed census retains the body and template descriptor bytes.
+    // The following whole-tree diff still requires descriptors and tree shape
+    // to remain unchanged; a descriptor is never part of the writable closure.
+    let body_inventory =
+        if measured_template_dir(&active_selected.path.split('/').collect::<Vec<_>>()).is_some() {
+            proposed
+        } else {
+            active
+        };
+    let body = classify_supported_body(&active_selected.path, body_inventory)?;
     let changed_paths = inventory_diff(active, proposed)?;
     let closure = dependency_closure(&body, &active_selected.path);
     let outside = changed_paths
@@ -336,6 +349,7 @@ pub fn classify_source_change(
         return Err(SourceChangeError::ChangesOutsideClosure(outside));
     }
     if !changed_paths.is_empty()
+        && !matches!(&body, SourceBodyKind::Template { .. })
         && !changed_paths
             .iter()
             .any(|path| paths_equal_text_windows(path, &active_selected.path))
@@ -389,6 +403,17 @@ fn candidate_retention_paths(selected: &str) -> BTreeSet<String> {
         let form_dir = parts[..form_dir_len].join("/");
         paths.insert(windows_path_key(&format!("{form_dir}/Ext/Form.xml")));
         paths.insert(windows_path_key(&format!("{form_dir}/Ext/Form/Module.bsl")));
+    }
+    if let Some(template_dir) = measured_template_dir(&parts) {
+        paths.insert(windows_path_key(&format!("{template_dir}.xml")));
+        paths.insert(windows_path_key(&format!(
+            "{template_dir}/Ext/Template.xml"
+        )));
+        paths.insert(windows_path_key(&format!(
+            "{template_dir}/Ext/Template.txt"
+        )));
+        // A trailing slash denotes a retained resource subtree, not a file.
+        paths.insert(windows_path_key(&format!("{template_dir}/Ext/Template/")));
     }
     paths
 }
@@ -469,6 +494,64 @@ fn classify_supported_body(
     inventory: &SourceInventory,
 ) -> Result<SourceBodyKind, SourceChangeError> {
     let parts = path.split('/').collect::<Vec<_>>();
+    if let Some(template_dir) = measured_template_dir(&parts) {
+        let descriptor = format!("{template_dir}.xml");
+        require_existing(
+            inventory,
+            &format!("{}/{}.xml", parts[0], parts[1]),
+            "top-level metadata owner descriptor",
+        )?;
+        require_existing(inventory, &descriptor, "template descriptor")?;
+        let file = inventory
+            .file(&descriptor)?
+            .expect("required descriptor exists");
+        let xml = file
+            .verified_bytes()
+            .ok_or_else(|| SourceChangeError::UnverifiedSourceBytes(descriptor.clone()))?;
+        let properties = crate::module_blob::parse_simple_metadata_xml_properties(xml)
+            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
+        let kind = crate::module_blob::parse_template_type_from_xml(xml)
+            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
+        let expected = match parts[0] {
+            "Reports" => "SpreadsheetDocument",
+            "DataProcessors" => "HTMLDocument",
+            "ExchangePlans" => "TextDocument",
+            _ => unreachable!("measured_template_dir restricts parent kinds"),
+        };
+        if properties.kind != "Template" || kind.as_deref() != Some(expected) {
+            return Err(SourceChangeError::UnsupportedSourcePath(path.to_owned()));
+        }
+        let body = format!(
+            "{template_dir}/Ext/Template.{}",
+            if expected == "TextDocument" {
+                "txt"
+            } else {
+                "xml"
+            }
+        );
+        require_existing(inventory, &body, "template body")?;
+        let mut source_paths = vec![inventory.file(&body)?.unwrap().path.clone()];
+        if expected == "HTMLDocument" {
+            let prefix = windows_path_key(&format!("{template_dir}/Ext/Template/"));
+            source_paths.extend(
+                inventory
+                    .files()
+                    .filter(|file| windows_path_key(file.path()).starts_with(&prefix))
+                    .map(|file| file.path.clone()),
+            );
+        }
+        if !source_paths
+            .iter()
+            .any(|candidate| paths_equal_text_windows(candidate, path))
+        {
+            return Err(SourceChangeError::UnsupportedSourcePath(path.to_owned()));
+        }
+        source_paths.sort_by_key(|path| windows_path_key(path));
+        return Ok(SourceBodyKind::Template {
+            template_descriptor: file.path.clone(),
+            source_paths,
+        });
+    }
     if let Some(form_dir_len) = managed_form_dir_len(&parts) {
         let form_dir = parts[..form_dir_len].join("/");
         let descriptor = format!("{form_dir}.xml");
@@ -525,6 +608,72 @@ fn classify_supported_body(
             .path
             .clone(),
     })
+}
+
+/// Closed source projection of the three parent/type pairs measured by the
+/// native C1 control. Other template kinds and nested forms remain unmeasured.
+fn measured_template_dir(parts: &[&str]) -> Option<String> {
+    (parts.len() >= 6
+        && matches!(parts[0], "Reports" | "DataProcessors" | "ExchangePlans")
+        && parts[2] == "Templates"
+        && parts[4] == "Ext"
+        && (parts.len() == 6 && matches!(parts[5], "Template.xml" | "Template.txt")
+            || parts.len() >= 7 && parts[5] == "Template"))
+        .then(|| parts[..4].join("/"))
+}
+
+/// Source paths whose owner/body layouts have native lifetime evidence on
+/// 8.3.27.2214. This is an early route check, not ownership or codec admission.
+pub(crate) fn measured_main_source_path(path: &str) -> bool {
+    let parts = path.split('/').collect::<Vec<_>>();
+    if measured_template_dir(&parts).is_some() {
+        return true;
+    }
+    if managed_form_dir_len(&parts) == Some(2) {
+        return true;
+    }
+    let Some((owner, file)) = generic_module_owner(&parts) else {
+        return false;
+    };
+    let [collection, _] = owner else {
+        return false;
+    };
+    match file {
+        "Module.bsl" => *collection == "CommonModules",
+        "ObjectModule.bsl" => matches!(
+            *collection,
+            "Catalogs"
+                | "Documents"
+                | "Reports"
+                | "DataProcessors"
+                | "ExchangePlans"
+                | "Tasks"
+                | "BusinessProcesses"
+                | "ChartsOfAccounts"
+                | "ChartsOfCalculationTypes"
+                | "ChartsOfCharacteristicTypes"
+        ),
+        "ManagerModule.bsl" => matches!(
+            *collection,
+            "Catalogs"
+                | "Documents"
+                | "Reports"
+                | "DataProcessors"
+                | "ExchangePlans"
+                | "Tasks"
+                | "BusinessProcesses"
+                | "ChartsOfAccounts"
+                | "ChartsOfCalculationTypes"
+                | "ChartsOfCharacteristicTypes"
+                | "Enums"
+                | "Constants"
+                | "SettingsStorages"
+                | "DocumentJournals"
+                | "InformationRegisters"
+                | "AccumulationRegisters"
+        ),
+        _ => false,
+    }
 }
 
 fn managed_form_dir_len(parts: &[&str]) -> Option<usize> {
@@ -715,6 +864,10 @@ fn module_owner_is_supported(owner: &[&str], file_name: &str) -> bool {
 fn dependency_closure(body: &SourceBodyKind, selected: &str) -> BTreeSet<String> {
     match body {
         SourceBodyKind::Module { .. } => BTreeSet::from([windows_path_key(selected)]),
+        SourceBodyKind::Template { source_paths, .. } => source_paths
+            .iter()
+            .map(|path| windows_path_key(path))
+            .collect(),
         SourceBodyKind::ManagedForm {
             form_body,
             form_module,
@@ -727,6 +880,20 @@ fn dependency_closure(body: &SourceBodyKind, selected: &str) -> BTreeSet<String>
             closure
         }
     }
+}
+
+pub(crate) fn source_body_closure_paths(
+    inventory: &SourceInventory,
+    selected: &str,
+) -> Result<Vec<String>, SourceChangeError> {
+    let selected = inventory
+        .file(selected)?
+        .ok_or_else(|| SourceChangeError::SelectedBodyDoesNotExist(selected.to_owned()))?;
+    let body = classify_supported_body(selected.path(), inventory)?;
+    Ok(dependency_closure(&body, selected.path())
+        .iter()
+        .map(|key| inventory.by_windows_key[key].path.clone())
+        .collect())
 }
 
 fn require_existing(
@@ -791,7 +958,11 @@ fn capture_inventory(
         let mut file = fs::File::open(&canonical_file)
             .map_err(|error| SourceChangeError::Io(error.to_string()))?;
         let mut hasher = Sha256::new();
-        let retain = retain_bytes.contains(&windows_path_key(&relative));
+        let key = windows_path_key(&relative);
+        let retain = retain_bytes.contains(&key)
+            || retain_bytes
+                .iter()
+                .any(|prefix| prefix.ends_with('/') && key.starts_with(prefix));
         let mut retained = retain.then(|| Vec::with_capacity(metadata.len() as usize));
         let mut buffer = [0_u8; 64 * 1024];
         let mut read_total = 0_u64;
@@ -1252,6 +1423,297 @@ mod tests {
             ("CommonModules/Work.xml", "metadata"),
             ("CommonModules/Work/Ext/Module.bsl", value),
         ])
+    }
+
+    #[test]
+    fn measured_main_modules_cover_exact_native_d1_roles() {
+        let object = [
+            "Catalogs",
+            "Documents",
+            "Reports",
+            "DataProcessors",
+            "ExchangePlans",
+            "Tasks",
+            "BusinessProcesses",
+            "ChartsOfAccounts",
+            "ChartsOfCalculationTypes",
+            "ChartsOfCharacteristicTypes",
+        ];
+        let manager_only = [
+            "Enums",
+            "Constants",
+            "SettingsStorages",
+            "DocumentJournals",
+            "InformationRegisters",
+            "AccumulationRegisters",
+        ];
+        let mut roles = 0;
+        for (collection, file) in object
+            .iter()
+            .flat_map(|collection| {
+                [
+                    (*collection, "ObjectModule.bsl"),
+                    (*collection, "ManagerModule.bsl"),
+                ]
+            })
+            .chain(
+                manager_only
+                    .iter()
+                    .map(|collection| (*collection, "ManagerModule.bsl")),
+            )
+        {
+            let owner = format!("{collection}/Owner.xml");
+            let selected = format!("{collection}/Owner/Ext/{file}");
+            assert!(measured_main_source_path(&selected));
+            let active = inventory(&[(&owner, "unchanged metadata"), (&selected, "old")]);
+            let proposed = inventory(&[(&owner, "unchanged metadata"), (&selected, "new")]);
+            let plan = classify_source_change(
+                &active,
+                &proposed,
+                &selected,
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            )
+            .unwrap();
+            assert_eq!(plan.changed_paths(), &[selected.clone()]);
+            assert_eq!(plan.verified_sources().len(), 1);
+            roles += 1;
+        }
+        assert_eq!(roles, 26);
+        for selected in [
+            "Constants/Owner/Ext/ObjectModule.bsl",
+            "FilterCriteria/Owner/Ext/ManagerModule.bsl",
+            "AccountingRegisters/Owner/Ext/ManagerModule.bsl",
+            "InformationRegisters/Owner/Ext/RecordSetModule.bsl",
+            "Catalogs/Owner/Forms/Card/Ext/Form.xml",
+            "CommonModules/X/Extra/Ext/Module.bsl",
+        ] {
+            assert!(!measured_main_source_path(selected), "{selected}");
+        }
+    }
+
+    fn template_inventory(
+        collection: &str,
+        kind: &str,
+        body: &str,
+        resource: &str,
+        owner: &str,
+    ) -> SourceInventory {
+        let descriptor = format!(
+            "<MetaDataObject><Template uuid=\"00000000-0000-4000-8000-000000000001\"><Properties><Name>Main</Name><TemplateType>{kind}</TemplateType></Properties></Template></MetaDataObject>"
+        );
+        let mut files = vec![
+            file(
+                &format!("{collection}/Owner.xml"),
+                &format!("<Owner><Value>{owner}</Value></Owner>"),
+            ),
+            file(
+                &format!("{collection}/Owner/Templates/Main.xml"),
+                &descriptor,
+            ),
+            file(
+                &format!(
+                    "{collection}/Owner/Templates/Main/Ext/Template.{}",
+                    if kind == "TextDocument" { "txt" } else { "xml" }
+                ),
+                body,
+            ),
+        ];
+        if kind == "HTMLDocument" {
+            files.push(file(
+                &format!("{collection}/Owner/Templates/Main/Ext/Template/ru.html"),
+                resource,
+            ));
+            files.push(file(
+                &format!("{collection}/Owner/Templates/Main/Ext/Template/logo.png"),
+                "same resource",
+            ));
+        }
+        SourceInventory::from_files(files).unwrap()
+    }
+
+    #[test]
+    fn template_closure_admits_only_native_c1_parent_type_pairs() {
+        for (collection, kind, suffix) in [
+            ("Reports", "SpreadsheetDocument", "xml"),
+            ("ExchangePlans", "TextDocument", "txt"),
+            ("DataProcessors", "HTMLDocument", "xml"),
+        ] {
+            let old = if suffix == "xml" {
+                "<document><value>old</value></document>"
+            } else {
+                "old"
+            };
+            let new = if suffix == "xml" {
+                "<document><value>new</value></document>"
+            } else {
+                "new"
+            };
+            let active = template_inventory(collection, kind, old, "old page", "owner");
+            let proposed = template_inventory(collection, kind, new, "new page", "owner");
+            let selected = format!("{collection}/Owner/Templates/Main/Ext/Template.{suffix}");
+            let plan = classify_source_change(
+                &active,
+                &proposed,
+                &selected,
+                ActivationTarget::Main,
+                ActivationMode::Online,
+            )
+            .unwrap();
+            assert!(matches!(plan.body(), SourceBodyKind::Template { .. }));
+            assert_eq!(
+                plan.verified_sources().len(),
+                if kind == "HTMLDocument" { 3 } else { 1 }
+            );
+        }
+        for (collection, kind) in [
+            ("Reports", "TextDocument"),
+            ("DataProcessors", "SpreadsheetDocument"),
+            ("ExchangePlans", "HTMLDocument"),
+            ("Catalogs", "SpreadsheetDocument"),
+            ("Reports", "DataCompositionSchema"),
+        ] {
+            let tree = template_inventory(collection, kind, "<document/>", "page", "owner");
+            let selected = format!(
+                "{collection}/Owner/Templates/Main/Ext/Template.{}",
+                if kind == "TextDocument" { "txt" } else { "xml" }
+            );
+            assert!(matches!(
+                classify_source_change(
+                    &tree,
+                    &tree,
+                    &selected,
+                    ActivationTarget::Main,
+                    ActivationMode::Online
+                ),
+                Err(SourceChangeError::UnsupportedSourcePath(_))
+            ));
+        }
+    }
+
+    #[test]
+    fn html_resource_edit_pins_whole_existing_asset_and_refuses_owner_drift() {
+        let selected = "DataProcessors/Owner/Templates/Main/Ext/Template/ru.html";
+        let active = template_inventory(
+            "DataProcessors",
+            "HTMLDocument",
+            "<Template/>",
+            "old",
+            "owner",
+        );
+        let proposed = template_inventory(
+            "DataProcessors",
+            "HTMLDocument",
+            "<Template/>",
+            "new",
+            "owner",
+        );
+        let plan = classify_source_change(
+            &active,
+            &proposed,
+            selected,
+            ActivationTarget::Main,
+            ActivationMode::Online,
+        )
+        .unwrap();
+        assert_eq!(plan.changed_paths(), &[selected]);
+        assert_eq!(plan.verified_sources().len(), 3);
+        assert!(
+            classify_source_change(
+                &active,
+                &proposed,
+                "DataProcessors/Owner/Templates/Main/Ext/Template.xml",
+                ActivationTarget::Main,
+                ActivationMode::Online
+            )
+            .is_ok()
+        );
+        assert!(
+            plan.verified_source("DataProcessors/Owner/Templates/Main/Ext/Template/logo.png")
+                .is_some()
+        );
+        let drift = template_inventory(
+            "DataProcessors",
+            "HTMLDocument",
+            "<Template/>",
+            "new",
+            "changed owner",
+        );
+        assert!(matches!(
+            classify_source_change(
+                &active,
+                &drift,
+                selected,
+                ActivationTarget::Main,
+                ActivationMode::Online
+            ),
+            Err(SourceChangeError::ChangesOutsideClosure(_))
+        ));
+        let missing = SourceInventory::from_files(
+            proposed
+                .files()
+                .filter(|file| !file.path().ends_with("logo.png"))
+                .cloned()
+                .collect(),
+        )
+        .unwrap();
+        assert!(matches!(
+            classify_source_change(
+                &active,
+                &missing,
+                selected,
+                ActivationTarget::Main,
+                ActivationMode::Online
+            ),
+            Err(SourceChangeError::SourceTreeShapeChanged { .. })
+        ));
+        let retained = candidate_retention_paths(selected);
+        assert!(retained.contains(&windows_path_key("DataProcessors/Owner/Templates/Main.xml")));
+        assert!(retained.contains(&windows_path_key(
+            "DataProcessors/Owner/Templates/Main/Ext/Template/"
+        )));
+    }
+
+    #[test]
+    fn measured_object_module_edit_refuses_sibling_and_descriptor_changes() {
+        let selected = "Catalogs/Owner/Ext/ObjectModule.bsl";
+        let active = inventory(&[
+            (
+                "Catalogs/Owner.xml",
+                "<Owner><Value>descriptor</Value></Owner>",
+            ),
+            (selected, "old"),
+            ("Catalogs/Owner/Ext/ManagerModule.bsl", "manager"),
+        ]);
+        for proposed in [
+            inventory(&[
+                (
+                    "Catalogs/Owner.xml",
+                    "<Owner><Value>descriptor</Value></Owner>",
+                ),
+                (selected, "new"),
+                ("Catalogs/Owner/Ext/ManagerModule.bsl", "changed manager"),
+            ]),
+            inventory(&[
+                (
+                    "Catalogs/Owner.xml",
+                    "<Owner><Value>changed descriptor</Value></Owner>",
+                ),
+                (selected, "new"),
+                ("Catalogs/Owner/Ext/ManagerModule.bsl", "manager"),
+            ]),
+        ] {
+            assert!(matches!(
+                classify_source_change(
+                    &active,
+                    &proposed,
+                    selected,
+                    ActivationTarget::Main,
+                    ActivationMode::Online
+                ),
+                Err(SourceChangeError::ChangesOutsideClosure(_))
+            ));
+        }
     }
 
     fn managed_form(body: &str, module: &str) -> SourceInventory {

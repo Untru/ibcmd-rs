@@ -153,10 +153,27 @@ fn apply_source_change_inner(
     let proposed_root = work.path.join("proposed");
 
     let bounded_source_paths = selected_source_closure_paths(&source_root, &selected_path)?;
+    // Object descriptors name children and cross-object types. Read their
+    // complete active reference graph instead of fabricating a sparse owner
+    // descriptor from the editable source directory.
+    let full_owner_export = args.extension.is_none() && requires_full_owner_export(&selected_path);
     let selected_storage_file_names = if args.extension.is_none() {
         selected_storage_file_names_for_source_paths(&source_root, &bounded_source_paths)?
     } else {
         Vec::new()
+    };
+    // Keep the originals from before export: the activation's ordinary
+    // post-stage snapshot cannot protect unchanged reference descriptors.
+    let source_preimages = if full_owner_export {
+        Some(
+            crate::mssql_config_apply::dynamic::SourceOwnerPreimages::capture(
+                &main_read_sql(args)?,
+                &args.database,
+                &selected_storage_file_names,
+            )?,
+        )
+    } else {
+        None
     };
 
     let export_started = Instant::now();
@@ -208,12 +225,16 @@ fn apply_source_change_inner(
                 overwrite: false,
                 include_config_save: false,
                 main_configuration: false,
-                file_names: selected_storage_file_names.clone(),
+                file_names: if full_owner_export {
+                    Vec::new()
+                } else {
+                    selected_storage_file_names.clone()
+                },
                 file_name_lists: Vec::new(),
                 inflate: false,
                 extract_module_text: true,
                 extract_metadata_xml: true,
-                require_complete_root_metadata: false,
+                require_complete_root_metadata: full_owner_export,
                 require_complete_source_assets: false,
                 collect_all_source_asset_diagnostics: false,
                 platform: None,
@@ -227,15 +248,27 @@ fn apply_source_change_inner(
             },
             Some(main_read_sql(args)?),
         )?;
-        ensure_bounded_export_complete(
-            &active_root,
-            &bounded_source_paths,
-            &selected_storage_file_names,
-            &report,
-        )?;
+        if full_owner_export {
+            ensure_full_owner_export_complete(
+                &active_root,
+                &bounded_source_paths,
+                &selected_storage_file_names,
+                &report,
+            )?;
+        } else {
+            ensure_bounded_export_complete(
+                &active_root,
+                &bounded_source_paths,
+                &selected_storage_file_names,
+                &report,
+            )?;
+        }
         active_dynamic_generation(args)?
     };
     let active_export_ms = export_started.elapsed().as_millis();
+    if let Some(original) = &source_preimages {
+        original.require_current(&main_read_sql(args)?, &args.database)?;
+    }
 
     copy_source_tree(&active_root, &proposed_root)?;
     overlay_selected_bodies(&source_root, &active_root, &proposed_root, &selected_path)?;
@@ -353,6 +386,9 @@ fn apply_source_change_inner(
 
     let path_prefix = owner_prefix(&selected_path)?;
     let staging_started = Instant::now();
+    if let Some(original) = &source_preimages {
+        original.require_current(&main_read_sql(args)?, &args.database)?;
+    }
     let build_stage = || -> Result<Value> {
         let staging = if let Some(extension) = args.extension.as_deref() {
             let load_args = MssqlLoadExtensionArgs {
@@ -420,8 +456,19 @@ fn apply_source_change_inner(
                     batch_size: Some(1),
                     platform: None,
                     source_version: Some(args.source_version),
-                    path_prefix: vec![path_prefix.clone()],
-                    files: Vec::new(),
+                    path_prefix: if full_owner_export {
+                        Vec::new()
+                    } else {
+                        vec![path_prefix.clone()]
+                    },
+                    // Compile in the complete active owner graph, then stage
+                    // only the selected body's full file/resource closure.
+                    // Unchanged descriptors and siblings keep their originals.
+                    files: if full_owner_export {
+                        bounded_source_paths.clone()
+                    } else {
+                        Vec::new()
+                    },
                     script_output: None,
                     script_only: false,
                     bulk: false,
@@ -449,7 +496,14 @@ fn apply_source_change_inner(
 
     let activation_started = Instant::now();
     let mut activate_main = |activation_args: &MssqlActivateStagedMainArgs, profile| {
-        if let Some(session) = managed.as_deref_mut() {
+        if let Some(original) = &source_preimages {
+            crate::mssql::activate_staged_main_source_verified(
+                activation_args,
+                profile,
+                managed.as_deref_mut(),
+                original,
+            )
+        } else if let Some(session) = managed.as_deref_mut() {
             crate::mssql::activate_staged_main_managed_verified(activation_args, profile, session)
         } else {
             crate::mssql::activate_staged_main_verified(activation_args, profile)
@@ -702,32 +756,37 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
 
 fn require_supported_main_source_cohort(args: &MssqlApplySourceChangeArgs) -> Result<()> {
     let selected = normalize_relative_path(&args.source_path)?;
+    require_supported_main_source_path(&selected, args.platform_profile)
+}
+
+fn require_supported_main_source_path(
+    selected: &str,
+    profile: crate::mssql_platform_profile::MssqlNativePlatformProfile,
+) -> Result<()> {
     let common_module =
         selected.starts_with("CommonModules/") && selected.ends_with("/Ext/Module.bsl");
     let common_form_body = selected.starts_with("CommonForms/")
         && (selected.ends_with("/Ext/Form.xml") || selected.ends_with("/Ext/Form/Module.bsl"));
-    if !common_module && !common_form_body {
-        // A body owned by a top-level object needs that object's own metadata
-        // XML in the active tree, and reconstructing it requires the reference
-        // closure of every child and type it names. The bounded export reads
-        // only the selected rows, so it cannot produce that descriptor yet;
-        // refusing here names the gap instead of failing later inside the
-        // bounded completeness check.
+    if !crate::mssql_source_change::measured_main_source_path(&selected) {
         bail!(
-            "main writes currently support common-module bodies and common-form bodies; `{selected}` is owned by a top-level metadata object whose reference closure the bounded active export cannot resolve yet"
+            "main source path `{selected}` has no measured module/form/template owner-body cohort; nested forms and unmeasured roles require native lifetime evidence"
         );
     }
     if matches!(
-        args.platform_profile,
+        profile,
         crate::mssql_platform_profile::MssqlNativePlatformProfile::Platform8_5_1_1150
     ) && !common_module
-        && !selected.ends_with("/Ext/Form/Module.bsl")
+        && !(common_form_body && selected.ends_with("/Ext/Form/Module.bsl"))
     {
         bail!(
             "platform-8.5.1.1150 main writes are currently limited to common-module and managed-form-module source bodies"
         );
     }
     Ok(())
+}
+
+fn requires_full_owner_export(selected: &str) -> bool {
+    !selected.starts_with("CommonModules/") && !selected.starts_with("CommonForms/")
 }
 
 fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u8; 32]> {
@@ -984,21 +1043,13 @@ fn overlay_selected_bodies(
     proposed_root: &Path,
     selected: &str,
 ) -> Result<()> {
-    let mut paths = vec![selected.to_owned()];
-    if let Some(form_root) = selected
-        .strip_suffix("/Ext/Form.xml")
-        .or_else(|| selected.strip_suffix("/Ext/Form/Module.bsl"))
-    {
-        for sibling in [
-            format!("{form_root}/Ext/Form.xml"),
-            format!("{form_root}/Ext/Form/Module.bsl"),
-        ] {
-            if sibling != selected
-                && active_root.join(path_from_slashes(&sibling)).is_file()
-                && source_root.join(path_from_slashes(&sibling)).is_file()
-            {
-                paths.push(sibling);
-            }
+    let mut paths = selected_source_closure_paths(source_root, selected)?;
+    if selected.contains("/Templates/") {
+        let active_paths = selected_source_closure_paths(active_root, selected)?;
+        if paths != active_paths {
+            bail!(
+                "selected template file/resource shape differs from the active body; additions, removals and path aliases are not non-structural edits"
+            );
         }
     }
     paths.sort();
@@ -1069,6 +1120,13 @@ fn ensure_main_dry_run_stageable(staging: &Value) -> Result<()> {
 }
 
 fn selected_source_closure_paths(source_root: &Path, selected: &str) -> Result<Vec<String>> {
+    if selected.contains("/Templates/") {
+        return crate::mssql_source_change::source_body_closure_paths(
+            &inventory_from_root(source_root)?,
+            selected,
+        )
+        .map_err(anyhow::Error::new);
+    }
     let mut paths = vec![selected.to_owned()];
     if let Some(form_root) = selected
         .strip_suffix("/Ext/Form.xml")
@@ -1128,20 +1186,25 @@ fn selected_storage_file_names_for_source_paths(
             bail!("bounded apply of configuration-level modules is not yet supported");
         }
         let owner_relative_asset = components[ext_index..].join("/");
-        let suffix = if matches!(
-            owner_relative_asset.as_str(),
-            "Ext/Form.xml" | "Ext/Form/Module.bsl"
-        ) && matches!(family.as_str(), "Form" | "CommonForm")
-        {
-            ".0"
-        } else {
-            registry
-                .route_by_relative_path(&family, &owner_relative_asset)
-                .ok_or_else(|| {
-                    anyhow!("no bounded storage route for {family}/{owner_relative_asset}")
-                })?
-                .suffix()
-        };
+        let suffix =
+            if family == "Template" && components.get(2).is_some_and(|part| part == "Templates") {
+                // The typed source closure already checked the native-measured
+                // parent/type pair, including HTML files below Ext/Template/.
+                ".0"
+            } else if matches!(
+                owner_relative_asset.as_str(),
+                "Ext/Form.xml" | "Ext/Form/Module.bsl"
+            ) && matches!(family.as_str(), "Form" | "CommonForm")
+            {
+                ".0"
+            } else {
+                registry
+                    .route_by_relative_path(&family, &owner_relative_asset)
+                    .ok_or_else(|| {
+                        anyhow!("no bounded storage route for {family}/{owner_relative_asset}")
+                    })?
+                    .suffix()
+            };
         selected.insert(owner_uuid.clone());
         selected.insert(format!("{owner_uuid}{suffix}"));
         // A nested asset (`Kind/Name/Forms/Form/Ext/...`) is placed by its
@@ -1168,6 +1231,58 @@ fn selected_storage_file_names_for_source_paths(
         bail!("selected source closure resolved to no storage rows");
     }
     Ok(selected.into_iter().collect())
+}
+
+fn ensure_full_owner_export_complete(
+    active_root: &Path,
+    required_paths: &[String],
+    selected_storage_file_names: &[String],
+    report: &crate::mssql_dump::MssqlDumpConfigReport,
+) -> Result<()> {
+    let table = report
+        .tables
+        .iter()
+        .find(|table| table.table == "Config")
+        .ok_or_else(|| anyhow!("complete active owner export produced no Config report"))?;
+    let root = &table.metadata_root_inventory;
+    if root.scope != crate::mssql_dump::RootMetadataInventoryScope::Full
+        || !root.candidate_set_complete
+        || root.expected != root.emitted
+        || root.missing != 0
+    {
+        bail!("complete active metadata reference graph is unavailable for selected owner");
+    }
+    for path in required_paths {
+        if !active_root.join(path_from_slashes(path)).is_file() {
+            bail!("selected existing body is absent from complete active export: {path}");
+        }
+    }
+    if selected_storage_file_names_for_source_paths(active_root, required_paths)?
+        != selected_storage_file_names
+    {
+        bail!(
+            "selected source owner identity/storage routes differ from the active metadata graph"
+        );
+    }
+    // Unknown unrelated assets do not grant or remove selected-body authority.
+    // Every diagnostic on the selected descriptor/body is still a refusal.
+    let selected = selected_storage_file_names
+        .iter()
+        .map(String::as_str)
+        .collect::<std::collections::BTreeSet<_>>();
+    for diagnostic in report
+        .source_assets
+        .affected_assets
+        .iter()
+        .filter(|entry| selected.contains(entry.source_row_id.as_str()))
+    {
+        bail!(
+            "selected owner asset diagnostic {} for {}",
+            diagnostic.code,
+            diagnostic.source_row_id
+        );
+    }
+    Ok(())
 }
 fn ensure_bounded_export_complete(
     active_root: &Path,
@@ -1503,26 +1618,34 @@ fn copy_source_tree(source: &Path, destination: &Path) -> Result<()> {
 
 fn inventory_from_root(root: &Path) -> Result<SourceInventory> {
     let mut files = Vec::new();
+    let limits = crate::mssql_source_change::SourceInventoryLimits::default();
+    let mut total = 0_u64;
     for item in WalkDir::new(root).follow_links(false) {
         let item = item?;
-        if item.file_type().is_symlink() {
-            bail!(
-                "source inventory contains a link: {}",
-                item.path().display()
-            );
-        }
+        reject_reparse_file(item.path())?;
         if !item.file_type().is_file() {
             continue;
+        }
+        let size = item.metadata()?.len();
+        total = total
+            .checked_add(size)
+            .ok_or_else(|| anyhow!("source inventory size overflow"))?;
+        if files.len() >= limits.max_files
+            || size > limits.max_file_bytes
+            || total > limits.max_total_bytes
+        {
+            bail!("source inventory exceeds file/count/total byte bounds");
         }
         let relative = item
             .path()
             .strip_prefix(root)?
             .to_string_lossy()
             .replace('\\', "/");
-        files.push(SourceFileDigest::for_bytes(
-            relative,
-            &fs::read(item.path())?,
-        )?);
+        let bytes = fs::read(item.path())?;
+        if bytes.len() as u64 != size {
+            bail!("source file size changed during inventory: {relative}");
+        }
+        files.push(SourceFileDigest::for_bytes(relative, &bytes)?);
     }
     Ok(SourceInventory::from_files(files)?)
 }
@@ -1569,6 +1692,193 @@ mod certificate_policy_tests;
 mod tests {
     use super::*;
     use crate::mssql_platform_profile::MssqlNativePlatformProfile;
+
+    #[test]
+    fn measured_owner_routes_require_full_reference_export_and_keep_85_gate() {
+        for path in [
+            "Catalogs/Goods/Ext/ObjectModule.bsl",
+            "Enums/State/Ext/ManagerModule.bsl",
+            "Reports/Sales/Templates/Table/Ext/Template.xml",
+            "DataProcessors/Chat/Templates/Page/Ext/Template/ru.html",
+            "ExchangePlans/Sync/Templates/Text/Ext/Template.txt",
+        ] {
+            require_supported_main_source_path(
+                path,
+                MssqlNativePlatformProfile::Platform8_3_27_2214,
+            )
+            .unwrap();
+            assert!(requires_full_owner_export(path));
+            assert!(
+                require_supported_main_source_path(
+                    path,
+                    MssqlNativePlatformProfile::Platform8_5_1_1150
+                )
+                .is_err()
+            );
+        }
+        for path in [
+            "CommonModules/Work/Ext/Module.bsl",
+            "CommonForms/Card/Ext/Form/Module.bsl",
+        ] {
+            require_supported_main_source_path(
+                path,
+                MssqlNativePlatformProfile::Platform8_5_1_1150,
+            )
+            .unwrap();
+            assert!(!requires_full_owner_export(path));
+        }
+        for path in [
+            "Catalogs/Goods/Forms/Card/Ext/Form.xml",
+            "InformationRegisters/Balance/Ext/RecordSetModule.bsl",
+            "AccountingRegisters/Balance/Ext/ManagerModule.bsl",
+        ] {
+            assert!(
+                require_supported_main_source_path(
+                    path,
+                    MssqlNativePlatformProfile::Platform8_3_27_2214
+                )
+                .is_err()
+            );
+        }
+    }
+
+    fn html_owner_tree(root: &Path, page: &str) {
+        let owner = root.join("DataProcessors/Chat.xml");
+        let template = root.join("DataProcessors/Chat/Templates/Page.xml");
+        let ext = root.join("DataProcessors/Chat/Templates/Page/Ext");
+        fs::create_dir_all(ext.join("Template")).unwrap();
+        fs::write(owner, format!("<MetaDataObject><DataProcessor uuid=\"{OWNER}\"><Properties><Name>Chat</Name></Properties></DataProcessor></MetaDataObject>")).unwrap();
+        fs::write(template, format!("<MetaDataObject><Template uuid=\"{OLD}\"><Properties><Name>Page</Name><TemplateType>HTMLDocument</TemplateType></Properties></Template></MetaDataObject>")).unwrap();
+        fs::write(ext.join("Template.xml"), "<Template/>").unwrap();
+        fs::write(ext.join("Template/ru.html"), page).unwrap();
+        fs::write(ext.join("Template/logo.png"), b"same binary resource").unwrap();
+    }
+
+    #[test]
+    fn html_source_apply_overlays_full_existing_asset_and_stages_only_that_owner() {
+        let root = std::env::temp_dir().join(format!("ibcmd-rs-family345-{}", Uuid::new_v4()));
+        let source = root.join("source");
+        let active = root.join("active");
+        let proposed = root.join("proposed");
+        html_owner_tree(&source, "new page");
+        html_owner_tree(&active, "old page");
+        copy_source_tree(&active, &proposed).unwrap();
+        let selected = "DataProcessors/Chat/Templates/Page/Ext/Template/ru.html";
+        let paths = selected_source_closure_paths(&source, selected).unwrap();
+        assert_eq!(paths.len(), 3);
+        assert_eq!(
+            selected_storage_file_names_for_source_paths(&source, &paths).unwrap(),
+            [OWNER.to_owned(), OLD.to_owned(), format!("{OLD}.0")]
+                .into_iter()
+                .collect::<std::collections::BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>()
+        );
+        overlay_selected_bodies(&source, &active, &proposed, selected).unwrap();
+        let plan = classify_source_change(
+            &inventory_from_root(&active).unwrap(),
+            &inventory_from_root(&proposed).unwrap(),
+            selected,
+            ActivationTarget::Main,
+            ActivationMode::Online,
+        )
+        .unwrap();
+        assert_eq!(plan.changed_paths(), &[selected]);
+        let selection = crate::mssql::files_stage::select(&proposed, &paths).unwrap();
+        assert_eq!(
+            selection.owners(),
+            &["DataProcessors/Chat/Templates/Page.xml"]
+        );
+        fs::remove_file(source.join("DataProcessors/Chat/Templates/Page/Ext/Template/logo.png"))
+            .unwrap();
+        assert!(
+            overlay_selected_bodies(&source, &active, &proposed, selected)
+                .unwrap_err()
+                .to_string()
+                .contains("shape differs")
+        );
+        fs::write(
+            source.join("DataProcessors/Chat/Templates/Page/Ext/Template/extra.html"),
+            "extra",
+        )
+        .unwrap();
+        assert!(overlay_selected_bodies(&source, &active, &proposed, selected).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    fn full_owner_report() -> crate::mssql_dump::MssqlDumpConfigReport {
+        use crate::mssql_dump::*;
+        MssqlDumpConfigReport {
+            database: "memory-only".into(),
+            output_dir: PathBuf::new(),
+            tables: vec![MssqlDumpedTableReport {
+                table: "Config".into(),
+                rows: 1000,
+                binary_bytes: 0,
+                inflated_rows: 0,
+                module_text_rows: 1,
+                metadata_xml_rows: 1,
+                source_asset_rows: 0,
+                source_assets: SourceAssetCompletenessReport::default(),
+                metadata_root_inventory: RootMetadataInventoryReport {
+                    scope: RootMetadataInventoryScope::Full,
+                    candidate_set_complete: true,
+                    expected: 1,
+                    emitted: 1,
+                    missing: 0,
+                    ..Default::default()
+                },
+                timings: MssqlDumpTimingReport::default(),
+            }],
+            total_rows: 1000,
+            total_binary_bytes: 0,
+            total_inflated_rows: 0,
+            total_module_text_rows: 1,
+            total_metadata_xml_rows: 1,
+            total_source_asset_rows: 0,
+            source_assets: SourceAssetCompletenessReport::default(),
+            timings: MssqlDumpTimingReport::default(),
+            incremental: None,
+        }
+    }
+
+    #[test]
+    fn complete_owner_export_refuses_scoped_missing_and_unemitted_root_graphs() {
+        let root =
+            std::env::temp_dir().join(format!("ibcmd-rs-family345-export-{}", Uuid::new_v4()));
+        let selected = "Catalogs/Goods/Ext/ObjectModule.bsl".to_owned();
+        fs::create_dir_all(root.join("Catalogs/Goods/Ext")).unwrap();
+        fs::write(root.join("Catalogs/Goods.xml"), format!("<MetaDataObject><Catalog uuid=\"{OWNER}\"><Properties><Name>Goods</Name></Properties></Catalog></MetaDataObject>")).unwrap();
+        fs::write(root.join(&selected), "body").unwrap();
+        let mut report = full_owner_report();
+        let paths = [selected];
+        let ids = selected_storage_file_names_for_source_paths(&root, &paths).unwrap();
+        // A complete graph legitimately includes more rows than the selected
+        // bounded pair. This must not hit the old bounded-table cardinality.
+        ensure_full_owner_export_complete(&root, &paths, &ids, &report).unwrap();
+        assert!(ensure_full_owner_export_complete(&root, &paths, &[], &report).is_err());
+        report.tables[0].metadata_root_inventory.scope =
+            crate::mssql_dump::RootMetadataInventoryScope::Scoped;
+        assert!(ensure_full_owner_export_complete(&root, &paths, &ids, &report).is_err());
+        report.tables[0].metadata_root_inventory.scope =
+            crate::mssql_dump::RootMetadataInventoryScope::Full;
+        report.tables[0]
+            .metadata_root_inventory
+            .candidate_set_complete = false;
+        assert!(ensure_full_owner_export_complete(&root, &paths, &ids, &report).is_err());
+        report.tables[0]
+            .metadata_root_inventory
+            .candidate_set_complete = true;
+        report.tables[0].metadata_root_inventory.expected = 2;
+        assert!(ensure_full_owner_export_complete(&root, &paths, &ids, &report).is_err());
+        report.tables[0].metadata_root_inventory.expected = 1;
+        report.tables[0].metadata_root_inventory.missing = 1;
+        assert!(ensure_full_owner_export_complete(&root, &paths, &ids, &report).is_err());
+        report.tables[0].metadata_root_inventory.missing = 0;
+        fs::remove_file(root.join(&paths[0])).unwrap();
+        assert!(ensure_full_owner_export_complete(&root, &paths, &ids, &report).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn the_tables_of_an_exclusive_promotion_are_the_ones_the_own_apply_wrote() {

@@ -98,6 +98,34 @@ impl FilesSelection {
         &self.owners
     }
 
+    /// An existing measured body-only selection can be compiled without
+    /// rebuilding unrelated assets of its owner. Metadata-file selections
+    /// and every other family keep the complete object preparation route.
+    pub(super) fn measured_body_files(
+        &self,
+        root: &Path,
+        xml: &Path,
+    ) -> Result<Option<Vec<String>>, FilesRefused> {
+        let relative = xml
+            .strip_prefix(root)
+            .map_err(|_| failed("selected metadata owner escapes the source root".to_owned()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        let mut files = Vec::new();
+        for file in &self.files {
+            if owner_of(root, file)? == relative {
+                if !crate::mssql_source_change::measured_main_source_path(file)
+                    || file.ends_with("/Ext/Form.xml")
+                    || file.ends_with("/Ext/Form/Module.bsl")
+                {
+                    return Ok(None);
+                }
+                files.push(file.clone());
+            }
+        }
+        Ok((!files.is_empty()).then_some(files))
+    }
+
     /// The paths the stage scans: the owners' metadata files and the listed
     /// files themselves (the guard compares the listed files).
     pub fn scan_prefixes(&self) -> Vec<String> {
@@ -409,6 +437,60 @@ mod tests {
 
     fn list(files: &[&str]) -> Vec<String> {
         files.iter().map(|file| file.to_string()).collect()
+    }
+
+    #[test]
+    fn narrow_preparation_keeps_metadata_and_unmeasured_mixed_selections_whole() {
+        let tree = Scratch::new(
+            "measured-body345",
+            &[
+                "Catalogs/X.xml",
+                "Catalogs/X/Ext/ObjectModule.bsl",
+                "Catalogs/X/Ext/ManagerModule.bsl",
+                "Catalogs/X/Ext/Help.xml",
+                "InformationRegisters/R.xml",
+                "InformationRegisters/R/Ext/RecordSetModule.bsl",
+                "Reports/Y/Templates/T.xml",
+                "Reports/Y/Templates/T/Ext/Template.xml",
+            ],
+        );
+        let xml = tree.0.join("Catalogs/X.xml");
+        let files = list(&["Catalogs/X/Ext/ObjectModule.bsl"]);
+        assert_eq!(
+            select(&tree.0, &files)
+                .unwrap()
+                .measured_body_files(&tree.0, &xml)
+                .unwrap(),
+            Some(files)
+        );
+        for files in [
+            list(&["Catalogs/X.xml", "Catalogs/X/Ext/ObjectModule.bsl"]),
+            list(&["Catalogs/X/Ext/ObjectModule.bsl", "Catalogs/X/Ext/Help.xml"]),
+        ] {
+            assert_eq!(
+                select(&tree.0, &files)
+                    .unwrap()
+                    .measured_body_files(&tree.0, &xml)
+                    .unwrap(),
+                None
+            );
+        }
+        let files = list(&["InformationRegisters/R/Ext/RecordSetModule.bsl"]);
+        assert_eq!(
+            select(&tree.0, &files)
+                .unwrap()
+                .measured_body_files(&tree.0, &tree.0.join("InformationRegisters/R.xml"))
+                .unwrap(),
+            None
+        );
+        let files = list(&["Reports/Y/Templates/T/Ext/Template.xml"]);
+        assert_eq!(
+            select(&tree.0, &files)
+                .unwrap()
+                .measured_body_files(&tree.0, &tree.0.join("Reports/Y/Templates/T.xml"))
+                .unwrap(),
+            Some(files)
+        );
     }
 
     #[test]
