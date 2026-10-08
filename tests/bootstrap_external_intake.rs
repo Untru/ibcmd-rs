@@ -553,3 +553,134 @@ fn strict_external_symlink_and_nonregular_sources_refuse_without_following() {
         );
     }
 }
+
+// Physical alias selection never changes the memory adapter's exact path contract.
+#[test]
+fn memory_selected_path_remains_exact_for_both_external_kinds_and_profiles() {
+    for kind in [
+        ExternalArtifactKind::DataProcessor,
+        ExternalArtifactKind::Report,
+    ] {
+        for version in ["2.20", "2.21"] {
+            let original = tree(kind, version);
+            let exact = SourcePath::new(ROOT_PATH).unwrap();
+            let alias = SourcePath::new(ROOT_PATH.to_uppercase()).unwrap();
+            let admitted =
+                ExternalIntake::from_tree(original.clone(), Some(&exact), profile(version), path())
+                    .unwrap();
+            equal(&admitted, &from_tree(original.clone(), version));
+            assert!(matches!(
+                ExternalIntake::from_tree(original.clone(), Some(&alias), profile(version), path()),
+                Err(ExternalIntakeError::WrongSelectedRoot { .. })
+            ));
+            assert_eq!(admitted.tree(), &original);
+        }
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_physical_case_alias_retains_actual_census_spelling_and_complete_source() {
+    for kind in [
+        ExternalArtifactKind::DataProcessor,
+        ExternalArtifactKind::Report,
+    ] {
+        for version in ["2.20", "2.21"] {
+            for root_name in [ROOT_PATH, "arbitrary-Ж-file.xml"] {
+                let scratch = Scratch::new();
+                let module_name = format!(
+                    "{}/Ext/ObjectModule.bsl",
+                    root_name.strip_suffix(".xml").unwrap()
+                );
+                let original = SourceTree::new(vec![
+                    entry(root_name, &fixture(kind, version, "")),
+                    entry(&module_name, MODULE),
+                ])
+                .unwrap();
+                for e in original.entries() {
+                    scratch.write(e.path().as_str(), e.bytes());
+                }
+                let alias = scratch.0.join(root_name.to_uppercase());
+                assert!(alias.is_file()); // OS resolves this spelling, not a Rust casefold assumption.
+                let direct =
+                    ExternalIntake::read(&alias, profile(version), path(), ReaderLimits::default())
+                        .unwrap();
+                let directory = ExternalIntake::read(
+                    &scratch.0,
+                    profile(version),
+                    path(),
+                    ReaderLimits::default(),
+                )
+                .unwrap();
+                let memory = from_tree(original.clone(), version);
+                equal(&direct, &directory);
+                equal(&direct, &memory);
+                assert_eq!(direct.root_path().as_str(), root_name);
+                assert_eq!(direct.tree(), &original);
+                assert_eq!(direct.claims()[0].source_path().as_str(), module_name);
+                direct.claims()[0].content().verify_bytes(MODULE).unwrap();
+                let metadata_name = direct
+                    .envelope()
+                    .root()
+                    .properties()
+                    .iter()
+                    .find(|field| field.name().as_str() == "Name")
+                    .unwrap();
+                assert_eq!(
+                    metadata_name.value(),
+                    &CanonicalValue::text(CanonicalText::new("Own").unwrap())
+                );
+                assert_ne!(root_name, "Own");
+                let no_edit = direct.with_current(direct.envelope(), &[]).unwrap();
+                equal(&direct, &no_edit);
+
+                // A physically distinct file's alias is never allowed to select the unique root.
+                scratch.write("not-a-package.xml", b"<Other/>");
+                assert!(matches!(
+                    ExternalIntake::read(
+                        scratch.0.join("NOT-A-PACKAGE.XML"),
+                        profile(version),
+                        path(),
+                        ReaderLimits::default(),
+                    ),
+                    Err(ExternalIntakeError::WrongSelectedRoot { .. })
+                ));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_selected_spelling_follows_actual_filesystem_identity_without_casefold() {
+    for kind in [
+        ExternalArtifactKind::DataProcessor,
+        ExternalArtifactKind::Report,
+    ] {
+        for version in ["2.20", "2.21"] {
+            let scratch = Scratch::new();
+            let original = tree(kind, version);
+            for e in original.entries() {
+                scratch.write(e.path().as_str(), e.bytes());
+            }
+            let alias = scratch.0.join(ROOT_PATH.to_uppercase());
+            let returned =
+                ExternalIntake::read(&alias, profile(version), path(), ReaderLimits::default());
+            // Unix includes both case-sensitive Linux and case-insensitive APFS.
+            // No spelling is invented: admission follows the OS's actual lookup.
+            if alias.exists() {
+                equal(&returned.unwrap(), &from_tree(original.clone(), version));
+            } else {
+                assert!(matches!(returned, Err(ExternalIntakeError::Input { .. })));
+            }
+            let exact = ExternalIntake::read(
+                scratch.0.join(ROOT_PATH),
+                profile(version),
+                path(),
+                ReaderLimits::default(),
+            )
+            .unwrap();
+            equal(&exact, &from_tree(original, version));
+        }
+    }
+}

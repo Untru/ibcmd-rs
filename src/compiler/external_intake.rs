@@ -137,24 +137,27 @@ impl ExternalIntake {
                 "nonregular or redirected input",
             ));
         }
-        let (directory, selected) = if metadata.is_file() {
-            let selected = source
-                .file_name()
-                .and_then(|x| x.to_str())
-                .ok_or_else(|| input(source.display().to_string(), "non-UTF8 selected file"))?;
-            let parent = source
+        // Retain the selected physical file, not its caller-supplied spelling.
+        // Windows read sharing also prevents replacement while the census is read.
+        let selected_file = if metadata.is_file() {
+            Some(open_selected_file(source)?)
+        } else {
+            None
+        };
+        let directory = if selected_file.is_some() {
+            source
                 .parent()
                 .filter(|x| !x.as_os_str().is_empty())
-                .unwrap_or_else(|| Path::new("."));
-            (
-                parent,
-                Some(SourcePath::new(selected).map_err(|e| input(selected, e))?),
-            )
+                .unwrap_or_else(|| Path::new("."))
         } else {
-            (source, None)
+            source
         };
         let tree = read_source_tree_strict(directory, limits)
             .map_err(|e| input(directory.display().to_string(), e))?;
+        let selected = selected_file
+            .as_ref()
+            .map(|file| selected_census_path(directory, &tree, file))
+            .transpose()?;
         Self::from_tree(tree, selected.as_ref(), profile, path)
     }
     /// Current caller-owned immutable source bytes, not a filesystem discovery
@@ -370,4 +373,109 @@ impl ExternalIntake {
         }
         Ok(result)
     }
+}
+
+// Stable OS handle APIs already used by source_oracle::file_identity. These
+// identities select actual census spelling; they do not infer package intent.
+#[cfg(unix)]
+fn selected_file_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = file.metadata()?;
+    Ok((metadata.dev(), metadata.ino()))
+}
+#[cfg(windows)]
+fn selected_file_identity(file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    use std::mem::MaybeUninit;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        BY_HANDLE_FILE_INFORMATION, GetFileInformationByHandle,
+    };
+    let mut information = MaybeUninit::<BY_HANDLE_FILE_INFORMATION>::zeroed();
+    // SAFETY: the retained File owns a live handle and the output storage is valid.
+    if unsafe { GetFileInformationByHandle(file.as_raw_handle(), information.as_mut_ptr()) } == 0 {
+        return Err(std::io::Error::last_os_error());
+    }
+    // SAFETY: successful GetFileInformationByHandle initializes the entire record.
+    let information = unsafe { information.assume_init() };
+    Ok((
+        u64::from(information.dwVolumeSerialNumber),
+        (u64::from(information.nFileIndexHigh) << 32) | u64::from(information.nFileIndexLow),
+    ))
+}
+#[cfg(not(any(unix, windows)))]
+fn selected_file_identity(_file: &std::fs::File) -> std::io::Result<(u64, u64)> {
+    Err(std::io::Error::new(
+        std::io::ErrorKind::Unsupported,
+        "selected-file physical identity is unavailable on this platform",
+    ))
+}
+fn open_selected_file(path: &Path) -> Result<std::fs::File, ExternalIntakeError> {
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            FILE_FLAG_OPEN_REPARSE_POINT, FILE_SHARE_READ,
+        };
+        options
+            .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT)
+            .share_mode(FILE_SHARE_READ);
+    }
+    let file = options
+        .open(path)
+        .map_err(|e| input(path.display().to_string(), e))?;
+    let metadata = file
+        .metadata()
+        .map_err(|e| input(path.display().to_string(), e))?;
+    let path_metadata =
+        std::fs::symlink_metadata(path).map_err(|e| input(path.display().to_string(), e))?;
+    #[cfg(windows)]
+    let redirected = {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0 || path_metadata.file_attributes() & 0x400 != 0
+    };
+    #[cfg(not(windows))]
+    let redirected = path_metadata.file_type().is_symlink();
+    if !metadata.is_file() || !path_metadata.is_file() || redirected {
+        return Err(input(
+            path.display().to_string(),
+            "nonregular or redirected selected file",
+        ));
+    }
+    Ok(file)
+}
+fn selected_census_path(
+    directory: &Path,
+    tree: &SourceTree,
+    selected: &std::fs::File,
+) -> Result<SourcePath, ExternalIntakeError> {
+    let identity = selected_file_identity(selected).map_err(|e| input("selected file", e))?;
+    let mut matched = None;
+    for entry in tree
+        .entries()
+        .iter()
+        .filter(|entry| !entry.path().as_str().contains('/'))
+    {
+        let physical = directory.join(entry.path().as_str());
+        // Only metadata/handle identity is queried. XML and all asset bytes come
+        // exclusively from the already retained SourceTree, never a second read.
+        let file = open_selected_file(&physical)?;
+        let actual = selected_file_identity(&file).map_err(|e| input(entry.path().as_str(), e))?;
+        if actual == identity {
+            if matched.is_some() {
+                return Err(input(
+                    "selected file",
+                    "physical identity aliases multiple census entries",
+                ));
+            }
+            matched = Some(entry.path().clone());
+        }
+    }
+    matched.ok_or_else(|| {
+        input(
+            "selected file",
+            "physical identity is absent from the retained census",
+        )
+    })
 }
