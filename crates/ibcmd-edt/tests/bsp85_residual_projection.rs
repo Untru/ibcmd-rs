@@ -80,10 +80,24 @@ fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() 
         if let Some(resource) = &package.resource {
             apply_form_presence_resource(&mut restored, uuid, profile, resource, None).unwrap();
         }
-        assert_eq!(
-            &restored, body,
-            "panel spelling must also retain root semantics"
-        );
+        // A cross-dialect read acquires native spelling/order and source
+        // dependency markers. Compare all current values after excluding only
+        // those five transport markers; root presence and panel values stay.
+        let semantics = |value: &FormBody| {
+            let mut value = serde_json::to_value(value).unwrap();
+            let object = value.as_object_mut().unwrap();
+            for marker in [
+                "native_event_order",
+                "source_wire_order",
+                "source_xml221_default_presence",
+                "designer_path_spelling",
+                "availability_source_form_dependency",
+            ] {
+                object.remove(marker);
+            }
+            value
+        };
+        assert_eq!(semantics(&restored), semantics(body));
         package.bytes
     }
     let source = br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:form="http://g5.1c.ru/v8/dt/form"><autoCommandBar><name>FormCommandBar</name><id>1</id><horizontalAlign>Left</horizontalAlign><autoFill>true</autoFill></autoCommandBar></form:Form>"#;
