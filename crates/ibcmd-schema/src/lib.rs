@@ -18657,3 +18657,5 @@ pub mod metadata_record_upgrades;
 
 /// Canonical storage admission for source-asset bodies.
 pub mod source_asset_storage_facts;
+
+pub mod websocket_client;

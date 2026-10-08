@@ -18,6 +18,7 @@ mod registry;
 mod services;
 mod session_parameter;
 mod utility_objects;
+mod websocket_client;
 
 pub use business_objects::{register_catalog_codec, register_document_codec};
 pub use characteristics::{
@@ -63,6 +64,7 @@ pub use utility_objects::{
     register_data_processor_codec, register_enum_codec, register_report_codec,
     register_settings_storage_codec,
 };
+pub use websocket_client::validate_websocket_client_headers_namespaces;
 /// Emits the namespace declaration for a schema-known processor value type.
 pub fn data_processor_builtin_type_namespace_attribute(reference: &str) -> Option<&'static str> {
     match ibcmd_schema::metadata_storage_facts::data_processor_builtin_type_namespace_uri(

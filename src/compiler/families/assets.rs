@@ -199,6 +199,13 @@ const ROUTES: &[SourceAssetRoute] = &[
     ),
     route!("CommonModule", Module, ".0", "Ext/Module.bsl", Module),
     route!("HTTPService", Module, ".0", "Ext/Module.bsl", Module),
+    SourceAssetRoute {
+        owner_family: ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
+        role: SourceAssetRole::Module,
+        suffix: ibcmd_schema::websocket_client::WebSocketClientLayout::MODULE_SUFFIX,
+        relative_path: ibcmd_schema::websocket_client::WebSocketClientLayout::MODULE_SOURCE,
+        codec: SourceAssetCodec::Module,
+    },
     route!("WebService", Module, ".0", "Ext/Module.bsl", Module),
     route!("Bot", Module, ".1", "Ext/Module.bsl", Module),
     route!("IntegrationService", Module, ".0", "Ext/Module.bsl", Module),

@@ -54,6 +54,9 @@ pub(crate) fn decode(kind: &str, row: &Brace, context: &ExportContext) -> Result
         "WSReference" => ws_reference(payload),
         "IntegrationService" => integration_service(root),
         "HTTPService" => http_service(root),
+        "WebSocketClient" => {
+            crate::metadata_model::websocket_client::WebSocketClient::from_brace(row)?.to_xml()
+        }
         "WebService" => web_service(root, names),
         other => bail!("{other} is not a common kind"),
     }
@@ -803,6 +806,11 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let head = match kind {
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "Role" | "Style" | "XDTOPackage"
         | "PaletteColor" | "Bot" => header(item(fields, 1)?)?,
+        "WebSocketClient" => {
+            return Ok(
+                crate::metadata_model::websocket_client::WebSocketClient::from_brace(row)?.names(),
+            );
+        }
         "StyleItem" => header(item(fields, 3)?)?,
         "CommandGroup" => header(item(fields, 6)?)?,
         "CommonCommand" => header(item(list(item(list(item(fields, 1)?)?, 2)?)?, 9)?)?,

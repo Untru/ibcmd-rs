@@ -4989,7 +4989,7 @@ fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
 
 const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
 
-const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 46] = [
+const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 47] = [
     "Language",
     "Subsystem",
     "StyleItem",
@@ -5006,6 +5006,7 @@ const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 46] = [
     "WebService",
     "HTTPService",
     "WSReference",
+    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
     "EventSubscription",
     "ScheduledJob",
     "SettingsStorage",

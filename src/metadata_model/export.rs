@@ -236,7 +236,7 @@ pub fn decode_object(kind: &str, row: &Brace, context: &ExportContext) -> Result
         | "Language" => super::simple::export::decode(kind, row, context),
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "CommonCommand" | "CommandGroup"
         | "Role" | "XDTOPackage" | "StyleItem" | "Style" | "PaletteColor" | "WebService"
-        | "HTTPService" | "WSReference" | "IntegrationService" | "Bot" => {
+        | "HTTPService" | "WSReference" | "WebSocketClient" | "IntegrationService" | "Bot" => {
             super::common::export::decode(kind, row, context)
         }
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
@@ -282,7 +282,7 @@ pub fn object_names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         | "Language" => super::simple::export::names(kind, row),
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "CommonCommand" | "CommandGroup"
         | "Role" | "XDTOPackage" | "StyleItem" | "Style" | "PaletteColor" | "WebService"
-        | "HTTPService" | "WSReference" | "IntegrationService" | "Bot" => {
+        | "HTTPService" | "WSReference" | "WebSocketClient" | "IntegrationService" | "Bot" => {
             super::common::export::names(kind, row)
         }
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
