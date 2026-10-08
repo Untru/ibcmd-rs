@@ -284,6 +284,29 @@ fn owner_root_kind_cycle_forward_orphan_and_reopened_subtree_are_not_inferred() 
 }
 
 #[test]
+fn nil_class_is_not_a_registry_class_and_unknown_nonnil_class_stays_partial() {
+    project(&fixture()).unwrap();
+    let mut trees = fixture();
+    fields(&mut trees[0], 1)[1] = a(NIL_UUID);
+    assert!(project(&trees).is_err());
+    fields(&mut trees[0], 1)[1] = a("66666666-6666-4666-8666-666666666666");
+    let admitted = project(&trees).unwrap();
+    assert_eq!(
+        admitted.registry.classes,
+        vec!["66666666-6666-4666-8666-666666666666"]
+    );
+    assert_eq!(
+        admitted.graph_completeness,
+        diagnostic::GraphCompleteness::Partial
+    );
+    assert_eq!(
+        admitted.trace_status,
+        diagnostic::TraceStatus::NotIdentified
+    );
+    assert!(admitted.first_visit_authority.is_none());
+}
+
+#[test]
 fn unresolved_keys_and_nil_wrapper_shape_counts_classes_duplicates_are_closed() {
     project(&fixture()).unwrap();
     let mut trees = fixture();

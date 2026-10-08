@@ -427,10 +427,9 @@ fn registry_preflight(tree: &Brace, declared_root: &str) -> Result<()> {
     let classes = counted(list(classes)?, 1)?;
     let mut class_ids = BTreeSet::new();
     for class in classes {
-        ensure!(
-            class_ids.insert(uuid(atom(class)?)?),
-            "duplicate registry class"
-        );
+        let class = uuid(atom(class)?)?;
+        ensure!(class != NIL_UUID, "nil registry class");
+        ensure!(class_ids.insert(class), "duplicate registry class");
     }
     let records = counted(list(records)?, 7)?;
     ensure!(!records.is_empty(), "missing registry root");
