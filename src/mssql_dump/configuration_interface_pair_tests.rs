@@ -10,7 +10,7 @@ use crate::metadata_model::{
 
 const ROOT_UUID: &str = "10000000-0000-4000-8000-000000000456";
 
-fn fixture(dialect: &str, mode: &str, v76: bool) -> (Brace, DescriptorContext) {
+pub(super) fn fixture(dialect: &str, mode: &str, v76: bool) -> (Brace, DescriptorContext) {
     fixture_on_compatibility(dialect, mode, v76, "Version8_3_27")
 }
 
@@ -81,7 +81,7 @@ fn tuple(row: &Brace) -> &[Brace] {
     row.at(&[3, 1, 1]).unwrap().as_list().unwrap()
 }
 
-fn tuple_mut(row: &mut Brace) -> &mut Vec<Brace> {
+pub(super) fn tuple_mut(row: &mut Brace) -> &mut Vec<Brace> {
     row.as_list_mut().unwrap()[3].as_list_mut().unwrap()[1]
         .as_list_mut()
         .unwrap()[1]
@@ -101,7 +101,7 @@ fn canonical(row: &Brace, context: &DescriptorContext, dialect: &str) -> anyhow:
     )
 }
 
-fn physical(
+pub(super) fn physical(
     row: &Brace,
     context: &DescriptorContext,
     version: InfobaseConfigSourceVersion,
@@ -679,6 +679,87 @@ fn configuration_complete_nil_and_nonempty_properties_keep_exact_presence_and_in
         assert_eq!(
             tuple(&original)[10],
             Brace::uuid("00000000-0000-0000-0000-000000000000")
+        );
+    }
+}
+
+#[test]
+fn configuration_empty_use_purposes_require_canonical_count_and_same_properties_owner() {
+    for (dialect, v76, version) in [
+        ("2.20", false, InfobaseConfigSourceVersion::V2_20),
+        ("2.21", false, InfobaseConfigSourceVersion::V2_21),
+        ("2.21", true, InfobaseConfigSourceVersion::V2_21),
+    ] {
+        let (original, context) = fixture(dialect, "Taxi", v76);
+        let text = serialize(&original);
+        assert_eq!(
+            refs::parse_configuration_use_purposes(&text, ROOT_UUID),
+            Some(vec![])
+        );
+        assert_eq!(
+            physical(&original, &context, version).unwrap().xml,
+            canonical(&original, &context, dialect).unwrap().as_bytes()
+        );
+        for token in ["00", "+0", "-0", "0.0", "184467440737095516160", "x"] {
+            let mut malformed = original.clone();
+            tuple_mut(&mut malformed)[33] = Brace::List(vec![Brace::atom(token)]);
+            assert!(
+                refs::parse_configuration_use_purposes(&serialize(&malformed), ROOT_UUID).is_none(),
+                "noncanonical declared count {token}"
+            );
+        }
+        for raw in [
+            Brace::List(vec![Brace::str("0")]),
+            Brace::List(vec![Brace::num(0), Brace::num(1)]),
+        ] {
+            let mut malformed = original.clone();
+            tuple_mut(&mut malformed)[33] = raw;
+            assert!(
+                refs::parse_configuration_use_purposes(&serialize(&malformed), ROOT_UUID).is_none()
+            );
+        }
+        let mut other_owner = original.clone();
+        other_owner.as_list_mut().unwrap()[3].as_list_mut().unwrap()[0] =
+            Brace::uuid("10000000-0000-4000-8000-000000000001");
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&other_owner), ROOT_UUID).is_none(),
+            "arbitrary class cannot own native emptiness"
+        );
+        let mut wrong_slot = original.clone();
+        tuple_mut(&mut wrong_slot)[33] = Brace::num(0);
+        tuple_mut(&mut wrong_slot)[34] = Brace::List(vec![Brace::num(0)]);
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&wrong_slot), ROOT_UUID).is_none(),
+            "a neighboring empty collection is not member33"
+        );
+        // The contained Properties ObjectId is independent of RootMainGuid.
+        // Changing its sole declaration is a valid identity edit, not a
+        // conflicting header. Keep that positive separate from malformed tags.
+        let mut edited_owner = original.clone();
+        tuple_mut(&mut edited_owner)[1].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[2] = Brace::uuid("90000000-0000-4000-8000-000000000099");
+        assert_eq!(
+            refs::parse_configuration_use_purposes(&serialize(&edited_owner), ROOT_UUID),
+            Some(vec![])
+        );
+        assert_eq!(edited_owner.at(&[1, 0]), original.at(&[1, 0]));
+        let mut wrong_header = original.clone();
+        tuple_mut(&mut wrong_header)[1].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1] = Brace::num(1);
+        assert!(
+            refs::parse_configuration_use_purposes(&serialize(&wrong_header), ROOT_UUID).is_none(),
+            "class does not waive malformed owner identity tuple grammar"
+        );
+        assert_eq!(
+            serialize(&original),
+            text,
+            "negative edits leave original compiled row untouched"
         );
     }
 }

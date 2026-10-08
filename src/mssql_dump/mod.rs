@@ -13011,6 +13011,21 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         return None;
     }
     let text = row.text.as_str();
+    // Only a successfully validated extension root owns this projection.
+    // Mere process-wide context presence cannot waive ordinary refusal gates.
+    if extension::active().is_some() {
+        if let Some(xml) = extract_configuration_source_xml(
+            text,
+            uuid,
+            configuration_root_object_refs,
+            source_version,
+        ) {
+            return Some(ExtractedMetadataSourceXml {
+                relative_path: PathBuf::from("Configuration.xml"),
+                xml: xml.into_bytes(),
+            });
+        }
+    }
     match refs::configuration_v76_interface_mode(text, uuid) {
         Err(signature) => {
             // A recognized owner/V76 failure cannot publish a generic root.
