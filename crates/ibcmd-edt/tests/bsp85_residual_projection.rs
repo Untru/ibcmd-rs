@@ -1,4 +1,6 @@
-use formats_xml::form::{FormDialect, read_form, write_form};
+use formats_xml::form::{
+    FormDialect, apply_form_presence_resource, prepare_form_presence, read_form, write_form,
+};
 use morph1c_core::{
     ir::{
         DecoratorBody, DecoratorRef, FormBody, FormControlKind, FormItem, MetadataObject,
@@ -69,6 +71,21 @@ fn form_read(bytes: &[u8], dialect: FormDialect) -> FormBody {
 }
 #[test]
 fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() {
+    fn prepared_native(body: &FormBody) -> Vec<u8> {
+        let profile = FormatVersion::new(2, 21);
+        let uuid = Uuid([77; 16]);
+        let package =
+            prepare_form_presence(body, uuid, FormDialect::Designer, profile, None).unwrap();
+        let mut restored = form_read(&package.bytes, FormDialect::Designer);
+        if let Some(resource) = &package.resource {
+            apply_form_presence_resource(&mut restored, uuid, profile, resource, None).unwrap();
+        }
+        assert_eq!(
+            &restored, body,
+            "panel spelling must also retain root semantics"
+        );
+        package.bytes
+    }
     let source = br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:form="http://g5.1c.ru/v8/dt/form"><autoCommandBar><name>FormCommandBar</name><id>1</id><horizontalAlign>Left</horizontalAlign><autoFill>true</autoFill></autoCommandBar></form:Form>"#;
     let mut body = form_read(
         &[
@@ -80,17 +97,17 @@ fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() 
         FormDialect::Edt,
     );
     assert!(
-        std::str::from_utf8(&form_write(&body, FormDialect::Designer))
+        std::str::from_utf8(&prepared_native(&body))
             .unwrap()
             .contains("name=\"FormCommandBar\"")
     );
     body.auto_command_bar.as_mut().unwrap().name = "CurrentPanel".into();
     assert!(
-        std::str::from_utf8(&form_write(&body, FormDialect::Designer))
+        std::str::from_utf8(&prepared_native(&body))
             .unwrap()
             .contains("name=\"CurrentPanel\"")
     );
-    let native = form_write(&body, FormDialect::Designer);
+    let native = prepared_native(&body);
     let native = String::from_utf8(native)
         .unwrap()
         .replace("name=\"CurrentPanel\"", "name=\"\"");
