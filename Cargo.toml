@@ -77,3 +77,9 @@ formats-xml = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats-xml" }
 morph1c-pipeline = { path = "crates/ibcmd-edt/vendor/morph1c/crates/pipeline" }
 formats-edt = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/edt" }
 formats-designer = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/designer" }
+
+# Real original-process/BOTH boundary tests, each scenario in its own process.
+[[test]]
+name = "rac_process_deadline"
+path = "tests/rac_process_deadline.rs"
+harness = false
