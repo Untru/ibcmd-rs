@@ -59,6 +59,7 @@ pub(crate) use tooltip::*;
 
 /// Записать тело формы в байты заданного формата (byte-exact).
 pub fn write_form(dialect: FormDialect, body: &FormBody) -> Result<Vec<u8>, FormError> {
+    check_root_presence(dialect, body)?;
     // The default envelope is SSL: policies and scalar emission must use that
     // same target even when callers do not supply an explicit version scope.
     let target = morph1c_core::version::current_roundtrip_target()
@@ -73,11 +74,19 @@ pub fn write_form_with_context(
     body: &FormBody,
     context: &super::FormProjectionContext<'_>,
 ) -> Result<Vec<u8>, FormError> {
+    check_root_presence(dialect, body)?;
     let target = morph1c_core::version::current_roundtrip_target()
         .unwrap_or(morph1c_core::version::SSL);
     morph1c_core::version::with_roundtrip_target(target, || write_form_current(dialect, body, Some(context)))
 }
-fn write_form_current(dialect: FormDialect, body: &FormBody, context: Option<&super::FormProjectionContext<'_>>) -> Result<Vec<u8>, FormError> {
+fn check_root_presence(dialect: FormDialect, body: &FormBody) -> Result<(), FormError> {
+    super::form_presence::validate_root(body)?;
+    if dialect == FormDialect::Designer && super::form_presence::needs_native_root_transport(body) {
+        return Err(FormError::Frame("native root command-interface presence requires prepare_form_presence and its typed companion".into()));
+    }
+    Ok(())
+}
+pub(super) fn write_form_current(dialect: FormDialect, body: &FormBody, context: Option<&super::FormProjectionContext<'_>>) -> Result<Vec<u8>, FormError> {
     match dialect {
         FormDialect::Edt => super::picture_defaults::with_common_picture_defaults(
             &body.common_picture_transparency,

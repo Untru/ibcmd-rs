@@ -1121,6 +1121,12 @@ pub(crate) fn same_body_bytes(path: &str, a: &[u8], b: &[u8]) -> Result<bool, Ed
     {
         return Ok(formats_xml::form::same_event_semantics_resource(a, b));
     }
+    if parts.last().copied() == Some(formats_xml::form::FORM_PRESENCE_RESOURCE)
+        && (parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
+            || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
+    {
+        return Ok(formats_xml::form::same_form_presence_resource(a, b));
+    }
     if parts.last().copied() == Some(formats_xml::form::CHART_SEMANTICS_RESOURCE)
         && (parts.len() == 4 && parts[0] == "CommonForms" && parts[2] == "Ext"
             || parts.len() == 6 && parts[2] == "Forms" && parts[4] == "Ext")
