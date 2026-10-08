@@ -46,7 +46,9 @@ fn main() {
     match args.get(1).map(String::as_str) {
         Some("helper") => helper(&args[2], Path::new(&args[3])),
         Some("scenario") => scenario(&args[2], Path::new(&args[3])),
-        None => {
+        // Cargo forwards filters and libtest flags to harness-free targets.
+        // Only the two private subprocess roles use their own argument protocol.
+        _ => {
             if !cfg!(windows) {
                 println!("managed original-handle controls require Windows; no runtime claim");
                 return;
@@ -71,7 +73,6 @@ fn main() {
             }
             println!("{} actual managed command scenarios PASS", SCENARIOS.len());
         }
-        _ => panic!("unknown test role"),
     }
 }
 
