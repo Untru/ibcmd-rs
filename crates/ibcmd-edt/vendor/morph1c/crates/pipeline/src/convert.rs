@@ -387,6 +387,7 @@ fn write_object(
     obj: &MetadataObject,
     picture_defaults: &std::collections::BTreeMap<String, bool>,
     form_context: &formats_xml::form::FormProjectionContext<'_>,
+    native_forms: Option<&formats_xml::form::NativeFormWritePlan>,
 ) -> Result<(), ConvertError> {
     let help_view = crate::help_read::descriptor_with_help(obj)?;
     let projection = if format == Format::Edt {
@@ -421,7 +422,7 @@ fn write_object(
     crate::source_extensions::emit(format, out, obj)?;
     crate::metadata_picture_semantics::emit(out, projection.as_ref().and_then(|(_,bytes)| bytes.as_deref()))?;
     let kind = obj.kind.as_str();
-    crate::form_write::write_form_bodies_with_context(format, out, obj, form_context)?;
+    crate::form_write::write_form_bodies_from_plan(format, out, obj, form_context, native_forms)?;
     if kind == "Configuration" {
         // The ROOT's modules are the config-level Ext APPLICATION modules (root-level
         // `Ext/*.bsl` / `src/Configuration/*.bsl`), NOT per-object `<Name>/Ext/` module
@@ -595,6 +596,14 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
         }
     }
 
+    // Bind bodies and all new root/chart companions before files are published.
+    // The same immutable CURRENT plan supplies the final native manifest.
+    let native_forms = if format == Format::Designer {
+        let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+        Some(formats_xml::form::prepare_native_form_write_plan(cfg, profile)
+            .map_err(|e|ConvertError::Write{kind:"Configuration".into(),object:"CURRENT native form plan".into(),reason:e.to_string()})?)
+    } else { None };
+
     // PHASE 2 — regenerate each descriptor byte-exactly and write it to its planned path.
     //
     // Objects write to DISTINCT paths (PHASE 1 planned them and already proved the Nested ones do
@@ -629,7 +638,7 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
             // Clock reads only when profiling — see `fsio::accounting`.
             let t = timing.then(std::time::Instant::now);
             let r = morph1c_core::version::with_captured_roundtrip_target(ambient_target, || {
-                write_object(format, fk, out, obj, &picture_defaults, &form_context)
+                write_object(format, fk, out, obj, &picture_defaults, &form_context, native_forms.as_ref())
             });
             if let Some(t) = t {
                 use std::sync::atomic::Ordering::Relaxed;
@@ -675,12 +684,8 @@ pub fn write_config(format: Format, cfg: &Configuration, dst: &Path) -> Result<(
     {
         crate::language_write::write_languages(format, dst, root)?;
     }
-    if format==Format::Designer {
-        let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
-        if let Some(bytes)=formats_xml::form::write_native_data_path_annotation(cfg,profile)
-            .map_err(|e|ConvertError::Write{kind:"Configuration".into(),object:"CURRENT DataPath annotation".into(),reason:e.to_string()})? {
-            crate::form_write::write_file(&dst.join("ConfigDumpInfo.xml"),&bytes)?;
-        }
+    if let Some(bytes) = native_forms.as_ref().and_then(|plan| plan.manifest.as_ref()) {
+        crate::form_write::write_file(&dst.join("ConfigDumpInfo.xml"), bytes)?;
     }
     if timing {
         eprintln!("[timing]   write_config total: {:?}", t1.elapsed());

@@ -14,7 +14,7 @@
 use std::path::{Path, PathBuf};
 
 use formats_xml::form::{
-    FormDialect, FormProjectionContext, write_form, write_form_with_context, write_list_settings_dcss, write_spreadsheet_mxlx,
+    FormDialect, FormProjectionContext, write_list_settings_dcss, write_spreadsheet_mxlx,
 };
 use formats_xml::registry::Format;
 use morph1c_core::ir::{FormBody, FormDataAttribute, MetadataObject};
@@ -38,7 +38,7 @@ pub fn write_form_bodies(
     descriptor_out: &Path,
     obj: &MetadataObject,
 ) -> Result<(), ConvertError> {
-    write_form_bodies_current(format, descriptor_out, obj, None)
+    write_form_bodies_current(format, descriptor_out, obj, None, None)
 }
 /// Whole-configuration variant: render against the fully read CURRENT metadata.
 pub fn write_form_bodies_with_context(
@@ -47,13 +47,20 @@ pub fn write_form_bodies_with_context(
     obj: &MetadataObject,
     context: &FormProjectionContext<'_>,
 ) -> Result<(), ConvertError> {
-    write_form_bodies_current(format, descriptor_out, obj, Some(context))
+    write_form_bodies_current(format, descriptor_out, obj, Some(context), None)
+}
+pub(crate) fn write_form_bodies_from_plan(
+    format: Format, descriptor_out: &Path, obj: &MetadataObject,
+    context: &FormProjectionContext<'_>, plan: Option<&formats_xml::form::NativeFormWritePlan>,
+) -> Result<(), ConvertError> {
+    write_form_bodies_current(format, descriptor_out, obj, Some(context), plan)
 }
 fn write_form_bodies_current(
     format: Format,
     descriptor_out: &Path,
     obj: &MetadataObject,
     context: Option<&FormProjectionContext<'_>>,
+    native_plan: Option<&formats_xml::form::NativeFormWritePlan>,
 ) -> Result<(), ConvertError> {
     if obj.form_bodies.is_empty() {
         return Ok(());
@@ -157,27 +164,27 @@ fn write_form_bodies_current(
             None
         };
         let body = projection.as_ref().map_or(&form.body, |(body, _)| body);
-        let native_picture_projection=if format==Format::Designer { formats_xml::form::project_native_picture_glyphs(body).map_err(|e|ConvertError::Write{kind:kind.into(),object:form.name.clone(),reason:e.to_string()})? } else {None};
-        let body=native_picture_projection.as_ref().unwrap_or(body);
-        let chart_projection = if format == Format::Designer {
-            formats_xml::form::project_chart_semantics(
-                body, crate::form_read::declared_form_uuid(obj, &form.name)?,
-            ).map_err(|error| ConvertError::Write {
-                kind: kind.into(), object: form.name.clone(), reason: error.to_string(),
+        let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
+        let uuid = crate::form_read::declared_form_uuid(obj, &form.name)?;
+        let standalone;
+        let prepared = if let Some(plan) = native_plan {
+            plan.form(uuid).ok_or_else(|| ConvertError::Write {
+                kind: kind.into(), object: form.name.clone(), reason: "CURRENT form missing from prepared native plan".into(),
             })?
         } else {
-            None
+            standalone = formats_xml::form::prepare_form_presence(body, uuid, dialect, profile, context)
+                .map_err(|e| ConvertError::Write {
+                    kind: kind.to_string(), object: format!("{}.{}", obj.name, form.name), reason: e.to_string(),
+                })?;
+            &standalone
         };
-        let body = chart_projection.as_ref().map_or(body, |(body, _)| body);
-        let bytes = match context {
-            Some(context) => write_form_with_context(dialect, body, context),
-            None => write_form(dialect, body),
-        }.map_err(|e| ConvertError::Write {
-            kind: kind.to_string(),
-            object: format!("{}.{}", obj.name, form.name),
-            reason: e.to_string(),
-        })?;
-        write_file(&body_path, &bytes)?;
+        write_file(&body_path, &prepared.bytes)?;
+        // Standalone object writers have no configuration manifest owner.
+        // Keep the same closed root companion adjacent to their native body.
+        if native_plan.is_none() && let Some(bytes) = &prepared.resource {
+            write_file(&body_path.parent().expect("form parent")
+                .join(formats_xml::form::FORM_PRESENCE_RESOURCE), bytes)?;
+        }
         if format==Format::Edt {
             let profile=morph1c_core::version::current_roundtrip_target().unwrap_or(morph1c_core::version::SSL);
             if let Some((_,resource))=formats_xml::form::project_data_path_semantics(body,
@@ -188,16 +195,13 @@ fn write_form_bodies_current(
         }
 
         if format == Format::Designer {
-            for (path, bytes) in formats_xml::form::choice_picture_assets(&form.body,
-                crate::form_read::declared_form_uuid(obj, &form.name)?).map_err(|e| ConvertError::Write {
-                    kind: kind.into(), object: form.name.clone(), reason: e.to_string(),
-                })? {
+            for (path, bytes) in &prepared.assets {
                 write_file(&body_path.parent().expect("form body has a parent").join(path), &bytes)?;
             }
         }
-        if let Some((_, bytes)) = &chart_projection {
+        if let Some(bytes) = &prepared.chart_resource {
             write_file(&body_path.parent().expect("form body has a parent")
-                .join(formats_xml::form::CHART_SEMANTICS_RESOURCE), &bytes)?;
+                .join(formats_xml::form::CHART_SEMANTICS_RESOURCE), bytes)?;
         }
         if let Some((_, Some(bytes))) = &projection {
             write_file(
@@ -210,15 +214,10 @@ fn write_form_bodies_current(
         }
 
         if format == Format::Designer {
-            if let Some(bytes)=formats_xml::form::write_native_picture_resource(&form.body,crate::form_read::declared_form_uuid(obj,&form.name)?)
-                .map_err(|e|ConvertError::Write{kind:kind.into(),object:form.name.clone(),reason:e.to_string()})?{
+            if let Some(bytes)=&prepared.picture_resource {
                 write_file(&body_path.parent().expect("form parent").join(formats_xml::form::PICTURE_SEMANTICS_RESOURCE),&bytes)?;
             }
-            if let Some(bytes) = formats_xml::form::write_event_semantics_resource(
-                &form.body, crate::form_read::declared_form_uuid(obj, &form.name)?,
-            ).map_err(|error| ConvertError::Write {
-                kind: kind.into(), object: form.name.clone(), reason: error.to_string(),
-            })? {
+            if let Some(bytes) = &prepared.event_resource {
                 write_file(&body_path.parent().expect("form body has a parent")
                     .join(formats_xml::form::EVENT_SEMANTICS_RESOURCE), &bytes)?;
             }

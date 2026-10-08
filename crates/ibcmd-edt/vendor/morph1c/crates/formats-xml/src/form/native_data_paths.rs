@@ -1,24 +1,82 @@
 //! One closed CURRENT configuration annotation in the existing native manifest.
 //! It transports semantic paths, never XML source bytes or stale manifest versions.
-use super::{data_path_semantics as paths, FormDialect, FormError, FormProjectionContext};
+use super::{
+    FormDialect, FormError, FormProjectionContext, data_path_semantics as paths,
+    form_presence as presence,
+};
 use morph1c_core::{
     ir::{Configuration, MetadataObject, Uuid},
     version::FormatVersion,
 };
-use quick_xml::{events::Event, name::ResolveResult, NsReader};
+use quick_xml::{NsReader, events::Event, name::ResolveResult};
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet};
 const NS: &str = "http://v8.1c.ru/8.3/xcf/dumpinfo";
 const FAMILY: &str = "ibcmd-configuration-semantics:";
 const PREFIX: &str = "ibcmd-configuration-semantics:1:";
+const PREFIX_V2: &str = "ibcmd-configuration-semantics:2:";
+const SCHEMA_V2: &str = "urn:ibcmd:source-extension:configuration-semantics:2";
 const SCHEMA: &str = "urn:ibcmd:source-extension:configuration-semantics:1";
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Envelope {
+struct EnvelopeV1 {
     schema: String,
     version: u32,
     configuration_uuid: Uuid,
     data_paths: Vec<paths::Resource>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct EnvelopeV2 {
+    schema: String,
+    version: u32,
+    configuration_uuid: Uuid,
+    data_paths: Vec<paths::Resource>,
+    form_presence: Vec<presence::Resource>,
+}
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Envelope {
+    V1(EnvelopeV1),
+    V2(EnvelopeV2),
+}
+impl Envelope {
+    fn data_paths(&self) -> &[paths::Resource] {
+        match self {
+            Self::V1(e) => &e.data_paths,
+            Self::V2(e) => &e.data_paths,
+        }
+    }
+    fn form_presence(&self) -> &[presence::Resource] {
+        match self {
+            Self::V1(_) => &[],
+            Self::V2(e) => &e.form_presence,
+        }
+    }
+    fn uuid(&self) -> Uuid {
+        match self {
+            Self::V1(e) => e.configuration_uuid,
+            Self::V2(e) => e.configuration_uuid,
+        }
+    }
+    fn bytes(&self) -> Result<Vec<u8>, FormError> {
+        match self {
+            Self::V1(e) => serde_json::to_vec(e),
+            Self::V2(e) => serde_json::to_vec(e),
+        }
+        .map_err(|e| error(e.to_string()))
+    }
+}
+/// Ephemeral CURRENT output plan. These are newly emitted artifacts, not retained
+/// input XML. Each body, chart companion and root record share one invocation.
+#[derive(Debug, Clone)]
+pub struct NativeFormWritePlan {
+    pub manifest: Option<Vec<u8>>,
+    forms: BTreeMap<Uuid, presence::PreparedFormPresence>,
+}
+impl NativeFormWritePlan {
+    pub fn form(&self, uuid: Uuid) -> Option<&presence::PreparedFormPresence> {
+        self.forms.get(&uuid)
+    }
 }
 /// Parsed typed annotation; all global declarations are validated at completion.
 #[derive(Debug, Clone)]
@@ -74,10 +132,18 @@ fn forms<'a>(
 impl NativeDataPathAnnotation {
     pub fn form_resource(&self, uuid: Uuid) -> Result<Option<Vec<u8>>, FormError> {
         self.envelope
-            .data_paths
+            .data_paths()
             .iter()
             .find(|r| paths::resource_uuid(r) == uuid)
             .map(paths::resource_bytes)
+            .transpose()
+    }
+    pub fn form_presence_resource(&self, uuid: Uuid) -> Result<Option<Vec<u8>>, FormError> {
+        self.envelope
+            .form_presence()
+            .iter()
+            .find(|r| presence::resource_uuid(r) == uuid)
+            .map(presence::resource_bytes)
             .transpose()
     }
     /// All current form UUIDs, current restored paths and actual metadata branches
@@ -87,15 +153,21 @@ impl NativeDataPathAnnotation {
         cfg: &Configuration,
         profile: FormatVersion,
     ) -> Result<(), FormError> {
-        if configuration_uuid(cfg)? != self.envelope.configuration_uuid {
+        if configuration_uuid(cfg)? != self.envelope.uuid() {
             return Err(error("Configuration UUID differs"));
         }
         let context = FormProjectionContext::new(cfg)?;
         let mut pending: BTreeMap<_, _> = self
             .envelope
-            .data_paths
+            .data_paths()
             .iter()
             .map(|r| (paths::resource_uuid(r), r))
+            .collect();
+        let mut pending_presence: BTreeMap<_, _> = self
+            .envelope
+            .form_presence()
+            .iter()
+            .map(|r| (presence::resource_uuid(r), r))
             .collect();
         let mut seen = BTreeSet::new();
         forms(&cfg.objects, &mut |uuid, body| {
@@ -112,9 +184,12 @@ impl NativeDataPathAnnotation {
                     &context,
                 )?;
             }
+            if let Some(resource) = pending_presence.remove(&uuid) {
+                presence::verify_restored(body, uuid, profile, resource, &context)?;
+            }
             Ok(())
         })?;
-        if !pending.is_empty() {
+        if !pending.is_empty() || !pending_presence.is_empty() {
             return Err(error("annotation has deleted/unknown/ordinary form"));
         }
         Ok(())
@@ -267,20 +342,50 @@ pub fn read_native_data_path_annotation(
                     .map_err(|e| error(e.to_string()))?
                     .trim();
                 if text.starts_with(FAMILY) || text == FAMILY.trim_end_matches(':') {
-                    let encoded = text
-                        .strip_prefix(PREFIX)
-                        .ok_or_else(|| error("unknown/malformed reserved annotation version"))?;
+                    let (encoded, v2) = if let Some(encoded) = text.strip_prefix(PREFIX) {
+                        (encoded, false)
+                    } else if let Some(encoded) = text.strip_prefix(PREFIX_V2) {
+                        (encoded, true)
+                    } else {
+                        return Err(error("unknown/malformed reserved annotation version"));
+                    };
                     if depth != 1 || payload.is_some() {
                         return Err(error("duplicate/wrong-ancestry annotation"));
                     }
                     let raw = decode(encoded)?;
-                    let model: Envelope =
-                        super::strict_resource::parse(&raw).map_err(|e| error(e.to_string()))?;
-                    if model.schema != SCHEMA || model.version != 1 || model.data_paths.is_empty() {
-                        return Err(error("annotation schema/empty records"));
+                    let model = if v2 {
+                        let model: EnvelopeV2 = super::strict_resource::parse(&raw)
+                            .map_err(|e| error(e.to_string()))?;
+                        if model.schema != SCHEMA_V2
+                            || model.version != 2
+                            || model.form_presence.is_empty()
+                        {
+                            return Err(error("annotation v2 schema/empty new facets"));
+                        }
+                        Envelope::V2(model)
+                    } else {
+                        let model: EnvelopeV1 = super::strict_resource::parse(&raw)
+                            .map_err(|e| error(e.to_string()))?;
+                        if model.schema != SCHEMA
+                            || model.version != 1
+                            || model.data_paths.is_empty()
+                        {
+                            return Err(error("annotation v1 schema/empty records"));
+                        }
+                        Envelope::V1(model)
+                    };
+                    let mut seen_presence = BTreeSet::new();
+                    for resource in model.form_presence() {
+                        let resource =
+                            presence::parse_resource(&presence::resource_bytes(resource)?)?;
+                        if presence::resource_profile(&resource) != (profile.major, profile.minor)
+                            || !seen_presence.insert(presence::resource_uuid(&resource))
+                        {
+                            return Err(error("duplicate/wrong-profile root section"));
+                        }
                     }
                     let mut seen = BTreeSet::new();
-                    for resource in &model.data_paths {
+                    for resource in model.data_paths() {
                         let resource = paths::parse_resource(&paths::resource_bytes(resource)?)?;
                         if !paths::resource_native(&resource)
                             || paths::resource_profile(&resource) != (profile.major, profile.minor)
@@ -313,8 +418,19 @@ pub fn write_native_data_path_annotation(
     cfg: &Configuration,
     profile: FormatVersion,
 ) -> Result<Option<Vec<u8>>, FormError> {
+    Ok(prepare_native_form_write_plan(cfg, profile)?.manifest)
+}
+
+/// Prepare before any output publication. A native descriptor and its root/chart
+/// companions are emitted from this plan, and the manifest uses those same records.
+pub fn prepare_native_form_write_plan(
+    cfg: &Configuration,
+    profile: FormatVersion,
+) -> Result<NativeFormWritePlan, FormError> {
     let context = FormProjectionContext::new(cfg)?;
+    let mut prepared_forms = BTreeMap::new();
     let mut records = Vec::new();
+    let mut root_records = Vec::new();
     let mut seen = BTreeSet::new();
     forms(&cfg.objects, &mut |uuid, body| {
         if !seen.insert(uuid) {
@@ -329,18 +445,43 @@ pub fn write_native_data_path_annotation(
         )? {
             records.push(paths::parse_resource(&bytes)?);
         }
+        let prepared = presence::prepare_form_presence(
+            body,
+            uuid,
+            FormDialect::Designer,
+            profile,
+            Some(&context),
+        )?;
+        if let Some(bytes) = &prepared.resource {
+            root_records.push(presence::parse_resource(bytes)?);
+        }
+        prepared_forms.insert(uuid, prepared);
         Ok(())
     })?;
-    if records.is_empty() {
-        return Ok(None);
+    if records.is_empty() && root_records.is_empty() {
+        return Ok(NativeFormWritePlan {
+            manifest: None,
+            forms: prepared_forms,
+        });
     }
-    let model = Envelope {
-        schema: SCHEMA.into(),
-        version: 1,
-        configuration_uuid: configuration_uuid(cfg)?,
-        data_paths: records,
+    let v2 = !root_records.is_empty();
+    let model = if v2 {
+        Envelope::V2(EnvelopeV2 {
+            schema: SCHEMA_V2.into(),
+            version: 2,
+            configuration_uuid: configuration_uuid(cfg)?,
+            data_paths: records,
+            form_presence: root_records,
+        })
+    } else {
+        Envelope::V1(EnvelopeV1 {
+            schema: SCHEMA.into(),
+            version: 1,
+            configuration_uuid: configuration_uuid(cfg)?,
+            data_paths: records,
+        })
     };
-    let raw = serde_json::to_vec(&model).map_err(|e| error(e.to_string()))?;
+    let raw = model.bytes()?;
     let comment = encode(&raw)?;
     let mut root = crate::emit::OutElement::branch("", "ConfigDumpInfo")
         .attr("xmlns", NS)
@@ -385,9 +526,13 @@ pub fn write_native_data_path_annotation(
         .windows(end.len())
         .rposition(|s| s == end)
         .ok_or_else(|| error("manifest emission root missing"))?;
-    let annotation = format!("\t<!-- {PREFIX}{comment} -->\r\n");
+    let prefix = if v2 { PREFIX_V2 } else { PREFIX };
+    let annotation = format!("\t<!-- {prefix}{comment} -->\r\n");
     out.splice(index..index, annotation.bytes());
-    Ok(Some(out))
+    Ok(NativeFormWritePlan {
+        manifest: Some(out),
+        forms: prepared_forms,
+    })
 }
 
 /// A recognized typed control is compared after full current configuration read.
@@ -408,5 +553,143 @@ pub fn compare_native_data_path_annotations(
                     .is_some_and(|rebuilt| source.envelope == rebuilt.envelope),
             )),
         },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use morph1c_core::{
+        ir::{FormBody, FormControlKind, FormItem, PropertyValue, form::DataPathSpec},
+        spec::forms::controls::form_field as ff,
+    };
+    fn manifest(raw: &[u8], prefix: &str, profile: FormatVersion) -> Vec<u8> {
+        format!("<ConfigDumpInfo xmlns=\"{NS}\" version=\"{}.{}\"><!-- {prefix}{} --><ConfigVersions/></ConfigDumpInfo>",
+            profile.major, profile.minor, encode(raw).unwrap()).into_bytes()
+    }
+    fn path_resource(profile: FormatVersion) -> paths::Resource {
+        let mut body = FormBody::new();
+        let mut field = FormItem::new(FormControlKind::new("LabelField"), "Field", 1);
+        field.properties.push((
+            ff::F_DATA_PATH,
+            PropertyValue::DataPath(DataPathSpec {
+                segments: vec!["A".into(), "B~literal".into()],
+                extra_paths: vec!["C.D".into()],
+            }),
+        ));
+        body.items.push(field);
+        let (_, bytes) = paths::project_data_path_semantics(
+            &body,
+            Uuid([7; 16]),
+            FormDialect::Designer,
+            profile,
+            None,
+        )
+        .unwrap()
+        .unwrap();
+        paths::parse_resource(&bytes).unwrap()
+    }
+    fn root_resource(profile: FormatVersion) -> presence::Resource {
+        let xml = concat!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n",
+            "<form:Form xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" xmlns:form=\"http://g5.1c.ru/v8/dt/form\"><autoCommandBar><name>FormCommandBar</name><id>-1</id></autoCommandBar></form:Form>\r\n"
+        );
+        let body = morph1c_core::version::with_source_version(Some(profile), || {
+            super::super::read_form(FormDialect::Edt, xml.as_bytes())
+        })
+        .unwrap();
+        let package = presence::prepare_form_presence(
+            &body,
+            Uuid([7; 16]),
+            FormDialect::Designer,
+            profile,
+            None,
+        )
+        .unwrap();
+        presence::parse_resource(package.resource.as_ref().unwrap()).unwrap()
+    }
+    #[test]
+    fn closed_v1_stays_exact_and_v2_discriminants_and_new_facets_are_strict() {
+        for minor in [20, 21] {
+            let profile = FormatVersion::new(2, minor);
+            let v1 = EnvelopeV1 {
+                schema: SCHEMA.into(),
+                version: 1,
+                configuration_uuid: Uuid([1; 16]),
+                data_paths: vec![path_resource(profile)],
+            };
+            let raw = serde_json::to_vec(&v1).unwrap();
+            let wire = manifest(&raw, PREFIX, profile);
+            let parsed = read_native_data_path_annotation(&wire, profile)
+                .unwrap()
+                .unwrap();
+            assert_eq!(parsed.envelope.bytes().unwrap(), raw);
+            assert!(matches!(parsed.envelope, Envelope::V1(_)));
+            let mut wrong = serde_json::to_value(&v1).unwrap();
+            wrong["form_presence"] = serde_json::json!([]);
+            assert!(
+                read_native_data_path_annotation(
+                    &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX, profile),
+                    profile
+                )
+                .is_err()
+            );
+            let v2 = EnvelopeV2 {
+                schema: SCHEMA_V2.into(),
+                version: 2,
+                configuration_uuid: Uuid([1; 16]),
+                data_paths: vec![path_resource(profile)],
+                form_presence: vec![root_resource(profile)],
+            };
+            let raw = serde_json::to_vec(&v2).unwrap();
+            let wire = manifest(&raw, PREFIX_V2, profile);
+            let parsed = read_native_data_path_annotation(&wire, profile)
+                .unwrap()
+                .unwrap();
+            assert_eq!(parsed.envelope.bytes().unwrap(), raw);
+            assert!(parsed.form_resource(Uuid([7; 16])).unwrap().is_some());
+            assert!(
+                parsed
+                    .form_presence_resource(Uuid([7; 16]))
+                    .unwrap()
+                    .is_some()
+            );
+            for kind in 0..6 {
+                let mut wrong = serde_json::to_value(&v2).unwrap();
+                match kind {
+                    0 => wrong["version"] = 1.into(),
+                    1 => wrong["schema"] = SCHEMA.into(),
+                    2 => wrong["form_presence"] = serde_json::json!([]),
+                    3 => wrong["opaque"] = true.into(),
+                    4 => {
+                        wrong["form_presence"] = serde_json::json!([
+                            v2.form_presence[0].clone(),
+                            v2.form_presence[0].clone()
+                        ])
+                    }
+                    _ => {
+                        wrong.as_object_mut().unwrap().remove("data_paths");
+                    }
+                }
+                assert!(
+                    read_native_data_path_annotation(
+                        &manifest(&serde_json::to_vec(&wrong).unwrap(), PREFIX_V2, profile),
+                        profile
+                    )
+                    .is_err()
+                );
+            }
+            assert!(
+                read_native_data_path_annotation(&manifest(&raw, PREFIX, profile), profile)
+                    .is_err()
+            );
+            assert!(
+                read_native_data_path_annotation(
+                    &manifest(&raw, "ibcmd-configuration-semantics:3:", profile),
+                    profile
+                )
+                .is_err()
+            );
+        }
     }
 }

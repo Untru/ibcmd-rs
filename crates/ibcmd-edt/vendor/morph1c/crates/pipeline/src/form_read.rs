@@ -298,6 +298,21 @@ pub(crate) fn attach_form_body_with_semantics(
         // their AdditionalColumns bindings use the current table path identity.
         let uuid=declared_form_uuid(obj,&name)?;
         let profile=morph1c_core::version::current_source_version().unwrap_or(morph1c_core::version::SSL);
+        // Validate the root companion against the original native artifact;
+        // apply it only after typed descendant resources finish restoring CURRENT IR.
+        let root_presence = if format == Format::Designer {
+            let manifest = annotation.map(|a| a.form_presence_resource(uuid)).transpose()
+                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?.flatten();
+            let path = body_path.parent().expect("form parent").join(formats_xml::form::FORM_PRESENCE_RESOURCE);
+            let sidecar = if path.exists() { Some(read_regular_source(&path)
+                .map_err(|e|ConvertError::Io{path:path.display().to_string(),reason:e.to_string()})?) } else { None };
+            if manifest.is_some() && sidecar.is_some() {
+                return Err(ConvertError::Read{kind:kind.into(),object:name.clone(),reason:"duplicate manifest/sidecar root presence".into()});
+            }
+            manifest.or(sidecar)
+                .map(|bytes| formats_xml::form::validate_form_presence_resource(&body, uuid, profile, &bytes))
+                .transpose().map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?
+        } else { None };
         let path_resource=if format==Format::Designer {
             annotation.map(|a|a.form_resource(uuid)).transpose().map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?.flatten()
         } else {
@@ -420,6 +435,10 @@ pub(crate) fn attach_form_body_with_semantics(
             }
         }
 
+        if let Some(restoration) = root_presence {
+            restoration.restore(&mut body, profile, None)
+                .map_err(|e|ConvertError::Read{kind:kind.into(),object:name.clone(),reason:e.to_string()})?;
+        }
         obj.form_bodies.push(NamedFormBody {
             ordinary_body: None,
             name,
