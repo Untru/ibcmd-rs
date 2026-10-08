@@ -82,7 +82,7 @@ fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() 
         }
         // A cross-dialect read acquires native spelling/order and source
         // dependency markers. Compare all current values after excluding only
-        // those five transport markers; root presence and panel values stay.
+        // those transport markers; root presence and panel values stay.
         let semantics = |value: &FormBody| {
             let mut value = serde_json::to_value(value).unwrap();
             let object = value.as_object_mut().unwrap();
@@ -94,6 +94,14 @@ fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() 
                 "availability_source_form_dependency",
             ] {
                 object.remove(marker);
+            }
+            // This flag records the source spelling of the special native
+            // FormCommandBar name. The actual current name is still compared.
+            if let Some(panel) = object
+                .get_mut("auto_command_bar")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                panel.remove("designer_named");
             }
             value
         };
