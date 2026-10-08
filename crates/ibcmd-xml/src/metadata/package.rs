@@ -13,6 +13,179 @@ pub enum PackageIntent {
     ExternalReport,
 }
 
+/// Physical package identity, separate from the one canonical metadata graph.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PackageRootIdentity {
+    pub intent: PackageIntent,
+    pub main_uuid: ibcmd_core::identity::ObjectUuid,
+    pub contained: Option<PackageContainedIdentity>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PackageContainedIdentity {
+    pub class_id: ibcmd_core::identity::ObjectUuid,
+    pub object_id: ibcmd_core::identity::ObjectUuid,
+}
+
+/// Read exact direct root identities through the canonical expanded-name resolver.
+/// This does not admit root properties or synthesize internal metadata objects.
+pub fn inspect_package_identity(
+    document: &XmlDocument,
+) -> Result<Option<PackageRootIdentity>, MetadataDecodeError> {
+    use super::common::{XR_NAMESPACE, element_text, uuid_attr};
+    use ibcmd_core::identity::ObjectUuid;
+    let Some(intent) = inspect_package_intent(document)? else {
+        return Ok(None);
+    };
+    let uris = resolve_namespaces(document.root())?;
+    let root = document
+        .root()
+        .children()
+        .iter()
+        .find_map(|node| match node {
+            XmlNode::Element(e) => Some(e),
+            _ => None,
+        })
+        .ok_or(MetadataDecodeError::Missing("package root"))?;
+    let main_uuid = uuid_attr(root)?;
+    if main_uuid.as_bytes().iter().all(|b| *b == 0) {
+        return Err(MetadataDecodeError::InvalidUuid(main_uuid.to_string()));
+    }
+    let external = matches!(
+        intent,
+        PackageIntent::ExternalDataProcessor | PackageIntent::ExternalReport
+    );
+    let mut contained = None;
+    if external {
+        let namespace = uri_of(root, &uris);
+        let mut internal = None;
+        for node in root.children() {
+            if let XmlNode::Element(e) = node
+                && e.name().local() == "InternalInfo"
+            {
+                if uri_of(e, &uris) != namespace {
+                    return Err(MetadataDecodeError::InvalidEnvelope(
+                        "foreign package InternalInfo",
+                    ));
+                }
+                if internal.replace(e).is_some() {
+                    return Err(MetadataDecodeError::Duplicate("InternalInfo"));
+                }
+            }
+        }
+        for node in internal
+            .ok_or(MetadataDecodeError::Missing("InternalInfo"))?
+            .children()
+        {
+            let XmlNode::Element(e) = node else {
+                continue;
+            };
+            if e.name().local() != "ContainedObject" {
+                continue;
+            }
+            if uri_of(e, &uris) != Some(XR_NAMESPACE) {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "foreign ContainedObject",
+                ));
+            }
+            let mut class_id = None;
+            let mut object_id = None;
+            for node in e.children() {
+                let XmlNode::Element(field) = node else {
+                    continue;
+                };
+                if uri_of(field, &uris) != Some(XR_NAMESPACE) {
+                    return Err(MetadataDecodeError::InvalidEnvelope(
+                        "foreign contained identity field",
+                    ));
+                }
+                let value = element_text(field)?
+                    .ok_or(MetadataDecodeError::Missing("contained identity value"))?;
+                let value = ObjectUuid::parse(value.trim())
+                    .map_err(|_| MetadataDecodeError::InvalidUuid(value.clone()))?;
+                if value.as_bytes().iter().all(|b| *b == 0) {
+                    return Err(MetadataDecodeError::InvalidUuid(value.to_string()));
+                }
+                let slot = match field.name().local() {
+                    "ClassId" => &mut class_id,
+                    "ObjectId" => &mut object_id,
+                    _ => {
+                        return Err(MetadataDecodeError::InvalidEnvelope(
+                            "unknown contained identity field",
+                        ));
+                    }
+                };
+                if slot.replace(value).is_some() {
+                    return Err(MetadataDecodeError::Duplicate("contained identity field"));
+                }
+            }
+            let value = PackageContainedIdentity {
+                class_id: class_id.ok_or(MetadataDecodeError::Missing("ClassId"))?,
+                object_id: object_id.ok_or(MetadataDecodeError::Missing("ObjectId"))?,
+            };
+            if contained.replace(value).is_some() {
+                return Err(MetadataDecodeError::Duplicate("ContainedObject"));
+            }
+        }
+        if contained.is_none() {
+            return Err(MetadataDecodeError::Missing("ContainedObject"));
+        }
+    }
+    Ok(Some(PackageRootIdentity {
+        intent,
+        main_uuid,
+        contained,
+    }))
+}
+
+/// Closed source-family binding for canonical external contained metadata.
+/// Construction is private to the external codec; public identity values alone
+/// cannot waive envelope source-family validation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ExternalSourceBinding {
+    kind: ibcmd_schema::external_artifact::ExternalArtifactKind,
+    identity: PackageRootIdentity,
+}
+impl ExternalSourceBinding {
+    pub const fn kind(self) -> ibcmd_schema::external_artifact::ExternalArtifactKind {
+        self.kind
+    }
+    pub const fn identity(self) -> PackageRootIdentity {
+        self.identity
+    }
+    pub(super) fn inspect(document: &XmlDocument) -> Result<Self, MetadataDecodeError> {
+        use ibcmd_schema::external_artifact::ExternalArtifactKind;
+        let identity = inspect_package_identity(document)?
+            .ok_or(MetadataDecodeError::Missing("external package identity"))?;
+        let kind = match identity.intent {
+            PackageIntent::ExternalDataProcessor => ExternalArtifactKind::DataProcessor,
+            PackageIntent::ExternalReport => ExternalArtifactKind::Report,
+            _ => {
+                return Err(MetadataDecodeError::InvalidEnvelope(
+                    "package is not an external artifact",
+                ));
+            }
+        };
+        let contained = identity
+            .contained
+            .ok_or(MetadataDecodeError::Missing("external contained identity"))?;
+        if ExternalArtifactKind::from_class_id(&contained.class_id.to_string()) != Some(kind) {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "external class differs from source kind",
+            ));
+        }
+        Ok(Self { kind, identity })
+    }
+    pub(super) fn validate(self, document: &XmlDocument) -> Result<(), MetadataDecodeError> {
+        if Self::inspect(document)? != self {
+            return Err(MetadataDecodeError::InvalidEnvelope(
+                "external source binding changed",
+            ));
+        }
+        Ok(())
+    }
+}
+
 // These are package signals, not a second property/value schema. Ordinary
 // Configuration owns both shared fields too; only the extension-specific
 // purpose/adoption/mapping families grant Extension intent. Full property

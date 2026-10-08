@@ -72,6 +72,71 @@ fn read_with_limits(
     SourceTree::new(entries)
 }
 
+/// Strict authored external intake: operational directories are refused rather
+/// than skipped; every directory must contribute an inventoried file. Reuses
+/// existing explicit reader/source-entry limits without introducing new quotas.
+pub fn read_source_tree_strict(
+    root: impl AsRef<Path>,
+    limits: ReaderLimits,
+) -> Result<SourceTree, SourceTreeError> {
+    let mut entries = Vec::new();
+    walk_strict(root.as_ref(), limits.validate()?, &mut |entry| {
+        entries.push(entry);
+        Ok(())
+    })?;
+    SourceTree::new(entries)
+}
+fn walk_strict(
+    root: &Path,
+    limits: ReaderLimits,
+    accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
+) -> Result<(), SourceTreeError> {
+    let metadata = fs::symlink_metadata(root)?;
+    if !metadata.is_dir() || redirect(&metadata) {
+        return Err(SourceTreeError::UnsafePath(root.display().to_string()));
+    }
+    let mut state = State {
+        limits,
+        total: 0,
+        dirs: 1,
+        files: 0,
+        strict: true,
+    };
+    visit(root, root, 0, &mut state, accept)
+}
+fn redirect(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_type().is_symlink() || metadata.file_attributes() & 0x400 != 0
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
+}
+fn strict_open(path: &Path) -> Result<File, SourceTreeError> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(rustix::fs::OFlags::NOFOLLOW.bits() as i32);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // Retain current regular bytes; neither writers nor deletion are shared.
+        options.custom_flags(0x00200000).share_mode(1);
+    }
+    let file = options.open(path)?;
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || redirect(&metadata) {
+        return Err(SourceTreeError::UnsafePath(path.display().to_string()));
+    }
+    Ok(file)
+}
+
 // Validate a staged tree one file at a time. Re-reading the complete inventory
 // would retain a second copy of every payload just before publication.
 pub(super) fn verify_with_limits(
@@ -117,6 +182,7 @@ fn walk_with_limits(
         total: 0,
         dirs: 1,
         files: 0,
+        strict: false,
     };
     visit(root, root, 0, &mut state, accept)
 }
@@ -125,6 +191,7 @@ struct State {
     total: usize,
     dirs: usize,
     files: usize,
+    strict: bool,
 }
 fn visit(
     root: &Path,
@@ -135,6 +202,12 @@ fn visit(
 ) -> Result<(), SourceTreeError> {
     if depth > s.limits.depth {
         return Err(SourceTreeError::DepthExceeded);
+    }
+    if s.strict {
+        let metadata = fs::symlink_metadata(dir)?;
+        if !metadata.is_dir() || redirect(&metadata) {
+            return Err(SourceTreeError::UnsafePath(dir.display().to_string()));
+        }
     }
     let mut es = Vec::new();
     for item in fs::read_dir(dir)? {
@@ -153,10 +226,13 @@ fn visit(
             .ok()
             .and_then(|p| p.to_str())
             .is_some_and(|p| parent_configuration_resource(&p.replace('\\', "/")));
-        if !parent_resource && matches!(n, ".git" | "target" | ".idea" | ".vscode") {
+        if !s.strict && !parent_resource && matches!(n, ".git" | "target" | ".idea" | ".vscode") {
             continue;
         }
-        if ty.is_symlink() || (!ty.is_file() && !ty.is_dir()) {
+        if ty.is_symlink()
+            || (!ty.is_file() && !ty.is_dir())
+            || s.strict && redirect(&fs::symlink_metadata(&entry_path)?)
+        {
             return Err(SourceTreeError::UnsafePath(e.path().display().to_string()));
         }
         if ty.is_dir() {
@@ -171,6 +247,9 @@ fn visit(
             }
         }
         es.push((e, ty));
+    }
+    if s.strict && dir != root && es.is_empty() {
+        return Err(SourceTreeError::UnsafePath(dir.display().to_string()));
     }
     es.sort_by_key(|(entry, _)| entry.file_name());
     for (e, ty) in es {
@@ -211,7 +290,11 @@ fn visit(
             }
             let remaining = s.limits.total_bytes - s.total;
             let read_limit = s.limits.asset_bytes.min(remaining);
-            let f = File::open(e.path())?;
+            let f = if s.strict {
+                strict_open(&e.path())?
+            } else {
+                File::open(e.path())?
+            };
             let mut bytes = Vec::with_capacity(announced.min(read_limit));
             f.take((read_limit + 1) as u64).read_to_end(&mut bytes)?;
             if bytes.len() > s.limits.asset_bytes {

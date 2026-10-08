@@ -92,8 +92,12 @@ impl MetadataRegistry {
         envelope: &MetadataEnvelope,
         target: &ProfileId,
     ) -> Result<Vec<u8>, MetadataEncodeError> {
-        let family = FamilyId::parse(envelope.root().kind().as_str())
-            .map_err(|x| MetadataEncodeError::Xml(x.to_string()))?;
+        let source_family = match envelope.external_source_binding() {
+            Some(binding) => binding.kind().external_kind(),
+            None => envelope.root().kind().as_str(),
+        };
+        let family =
+            FamilyId::parse(source_family).map_err(|x| MetadataEncodeError::Xml(x.to_string()))?;
         match self.codecs.get(&family) {
             Some(codec) => codec.encode(envelope, target),
             None => envelope.emit(target),

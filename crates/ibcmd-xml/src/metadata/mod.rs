@@ -10,6 +10,7 @@ mod configuration_v85_projection;
 mod constant;
 mod defined_type;
 mod external_data_source;
+mod external_objects;
 mod fallback;
 mod functional_option;
 mod functional_options_parameter;
@@ -44,6 +45,10 @@ pub use configuration_v85_projection::validate_older_configuration_v85_defaults;
 pub use constant::{bundled_metadata_registry, register_constant_codec};
 pub use defined_type::register_defined_type_codec;
 pub use external_data_source::decode_empty_external_data_source;
+pub use external_objects::{
+    decode_external_root, encode_external_root, register_external_data_processor_codec,
+    register_external_report_codec,
+};
 pub use functional_option::register_functional_option_codec;
 pub use functional_options_parameter::register_functional_options_parameter_codec;
 pub use hierarchical_objects::{
@@ -52,7 +57,10 @@ pub use hierarchical_objects::{
 };
 pub use language::register_language_codec;
 pub use order::{MetadataOrderError, order_metadata_features, order_produced_type_values};
-pub use package::{PackageIntent, inspect_package_intent};
+pub use package::{
+    ExternalSourceBinding, PackageContainedIdentity, PackageIntent, PackageRootIdentity,
+    inspect_package_identity, inspect_package_intent,
+};
 pub use register_objects::{
     register_accounting_register_codec, register_accumulation_register_codec,
     register_calculation_register_codec, register_chart_of_accounts_codec,
