@@ -620,6 +620,7 @@ pub struct RetainedCase {
 #[serde(deny_unknown_fields)]
 pub struct RetainedCorpusV1 {
     pub schema: String,
+    /// Admitted source/audit owner selected by ROOT, not an assertion of capture-producer Git.
     pub input_exporter_source_head: String,
     pub compiled_source: CompiledSources,
     pub cases: Vec<RetainedCase>,

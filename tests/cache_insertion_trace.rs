@@ -1529,7 +1529,10 @@ fn proposal_actual_handler_requires_complete_current_bijection_and_source_occurr
     let input = ProjectionInputs::load(files.manifest(0), SOURCE).unwrap();
     let original = input.raw(RowRole::HelpProps).to_vec();
     let proposal = comparison_proposal(&input);
-    assert_eq!(proposal.emits[0].occurrence, cmp::key_occurrence(&input, &proposal.emits[0].key).unwrap());
+    assert_eq!(
+        proposal.emits[0].occurrence,
+        cmp::key_occurrence(&input, &proposal.emits[0].key).unwrap()
+    );
     let default = cmp::compare_current(&input, None).unwrap();
     assert!(default.current_roundtrip.first.is_none());
     assert!(default.proposal.is_none());

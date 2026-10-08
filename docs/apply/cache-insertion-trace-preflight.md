@@ -156,10 +156,16 @@ The named ignored `retained_closed_corpus_projection` requires all three variabl
 must be NEW. Missing variables fail; there is no successful skip or fallback. Its
 portable ordinary handler is also exercised by generated controls on other hosts.
 The closed outer schema `cache-trace-retained-corpus-v1` includes independently
-bound child manifests and capture witnesses, actual producer source head, and the
+bound child manifests and capture witnesses, admitted source/audit owner head, and the
 compiled `include_bytes!` digests of the diagnostic helper/test/model/renderer.
 ROOT must supply the independent outer SHA and verify historical provenance before
-running. A historical producer SHA is not the running compiled-source identity.
+running. The admitted input source-owner SHA is separate from the running compiled-source identity.
+The field `input_exporter_source_head` retains the input API's name but means the
+ROOT-admitted source/audit owner: it must match capture/input/facts declarations.
+It does not recover historical producer Git from svc.json or byte hashes; if that
+producer is unknown it remains unknown. ROOT binds the selected audit owner and
+actual historical svc/blob proofs independently. The generated b74 source fixture
+is only a declared cleanroom test owner, not a capture receipt or traversal proof.
 Capture provenance is an explicitly pinned declaration, not fresh native proof.
 There is no JSON proposal field: all retained cases run with proposal None.
 
