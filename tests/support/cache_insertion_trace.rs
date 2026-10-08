@@ -237,6 +237,12 @@ pub enum NilActionKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub enum EmptyValueKind {
+    MetadataReference,
+    DesignTimeReference,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ObservationEvent {
     OwnerVisit {
         owner: String,
@@ -251,6 +257,13 @@ pub enum ObservationEvent {
         slot: Option<&'static str>,
         target: Target,
         first_in_domain: bool,
+        occurrence: Occurrence,
+    },
+    /// A canonical empty value is not a reference to a nil declaration.
+    EmptyValue {
+        owner: String,
+        kind: EmptyValueKind,
+        raw: Brace,
         occurrence: Occurrence,
     },
     TypeSetVisit {
@@ -581,24 +594,39 @@ fn observe_references(
                 "metadata reference tag/version"
             );
             let id = uuid(atom(id)?)?;
-            ensure!(id != NIL_UUID, "nil metadata reference target");
-            let ordinal = coverage.registry.index_of(&id);
-            if ordinal.is_none() {
+            if id == NIL_UUID {
                 partial(
                     graph,
-                    "unresolved-metadata-reference",
+                    "empty-metadata-reference-value-semantic-slot-unproved",
                     Some(owner),
                     Some(occurrence.clone()),
                 );
+                graph.events.push(ObservationEvent::EmptyValue {
+                    owner: owner.to_owned(),
+                    kind: EmptyValueKind::MetadataReference,
+                    raw: node.clone(),
+                    occurrence: occurrence.clone(),
+                });
+                None
+            } else {
+                let ordinal = coverage.registry.index_of(&id);
+                if ordinal.is_none() {
+                    partial(
+                        graph,
+                        "unresolved-metadata-reference",
+                        Some(owner),
+                        Some(occurrence.clone()),
+                    );
+                }
+                Some((
+                    Target::Metadata {
+                        uuid: id.clone(),
+                        registry_ordinal: ordinal,
+                    },
+                    0,
+                    id,
+                ))
             }
-            Some((
-                Target::Metadata {
-                    uuid: id.clone(),
-                    registry_ordinal: ordinal,
-                },
-                0,
-                id,
-            ))
         } else if class.is_some_and(|id| id.eq_ignore_ascii_case(DESIGN_TIME_REF_TYPE)) {
             let [tag, _, value] = items else {
                 bail!("design-time reference arity");
@@ -612,23 +640,42 @@ fn observe_references(
             );
             let type_id = uuid(atom(type_id)?)?;
             let value_id = uuid(atom(value_id)?)?;
-            ensure!(type_id != NIL_UUID, "nil design-time TypeId");
-            let declaration = generated_by_type.get(&type_id).copied();
-            partial(
-                graph,
-                "design-time-instance-value-not-resolved-by-generated-value-index",
-                Some(owner),
-                Some(occurrence.clone()),
-            );
-            Some((
-                Target::DesignTimeValue {
-                    type_id: type_id.clone(),
-                    value_id: value_id.clone(),
-                    type_declaration: declaration,
-                },
-                1,
-                format!("{type_id}/{value_id}"),
-            ))
+            if type_id == NIL_UUID && value_id == NIL_UUID {
+                partial(
+                    graph,
+                    "empty-design-time-reference-value-semantic-slot-unproved",
+                    Some(owner),
+                    Some(occurrence.clone()),
+                );
+                graph.events.push(ObservationEvent::EmptyValue {
+                    owner: owner.to_owned(),
+                    kind: EmptyValueKind::DesignTimeReference,
+                    raw: node.clone(),
+                    occurrence: occurrence.clone(),
+                });
+                None
+            } else {
+                ensure!(
+                    type_id != NIL_UUID,
+                    "nil design-time TypeId with nonempty value"
+                );
+                let declaration = generated_by_type.get(&type_id).copied();
+                partial(
+                    graph,
+                    "design-time-instance-value-not-resolved-by-generated-value-index",
+                    Some(owner),
+                    Some(occurrence.clone()),
+                );
+                Some((
+                    Target::DesignTimeValue {
+                        type_id: type_id.clone(),
+                        value_id: value_id.clone(),
+                        type_declaration: declaration,
+                    },
+                    1,
+                    format!("{type_id}/{value_id}"),
+                ))
+            }
         } else if items.first().and_then(Brace::as_str) == Some("#") {
             partial(
                 graph,

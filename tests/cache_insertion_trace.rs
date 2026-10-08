@@ -1034,7 +1034,13 @@ fn descriptor_identity_counts_and_known_reference_shape_are_closed_before_facts(
                     .as_list_mut()
                     .unwrap()[2] = Brace::str("other-name")
             }
-            3 => fields(&mut mutant, 1)[map.names["Owners"]] = metadata_reference(NIL_UUID),
+            3 => {
+                fields(&mut mutant, 1)[map.names["Owners"]] = l(vec![
+                    Brace::str("#"),
+                    a(facts::METADATA_REF),
+                    l(vec![a(0), a(NIL_UUID)]),
+                ])
+            }
             4 => {
                 fields(&mut mutant, 1)[map.names["Owners"]] = l(vec![
                     Brace::str("#"),
@@ -1235,4 +1241,123 @@ fn retained_fact_input_rejects_another_valid_base_and_unknown_layout_stays_parti
             .events
             .contains(&ObservationEvent::EmitKey { key: CHILD.into() })
     );
+}
+
+#[test]
+fn canonical_empty_reference_values_keep_raw_occurrences_without_nil_resolution() {
+    use diagnostic::{EmptyValueKind, FactInputs, ObservationEvent, Target};
+    use ibcmd_rs::metadata_model::{DescriptorContext, types};
+    let (files, base, mut descriptor, index) = facts_fixture();
+    let context = DescriptorContext::with_files(&files.root, "2.20", &[]).unwrap();
+    let metadata_empty = types::metadata_ref_uuid(NIL_UUID);
+    let design_empty = types::design_time_ref("", &context).unwrap();
+    let map = ibcmd_rs::restructure::caches::slots::RecordMap::new("Catalog", 57).unwrap();
+    let position = map.names["Owners"];
+    // Empty values inside an unknown envelope and repeated values remain distinct occurrences.
+    fields(&mut descriptor, 1)[position] = l(vec![
+        Brace::str("#"),
+        a(CLASS),
+        metadata_empty.clone(),
+        design_empty.clone(),
+        metadata_reference(ROOT),
+        metadata_empty.clone(),
+    ]);
+    let expected_bytes = serialize_row(&descriptor);
+    let manifest = additional_manifest(&files, &descriptor, Some(&index));
+    let origin = manifest.rows[0].origin.clone();
+    let inputs = FactInputs::load(&base, manifest).unwrap();
+    let graph = inputs.project(&base).unwrap();
+    assert_eq!(inputs.raw(0), Some(expected_bytes.as_slice()));
+    let empty: Vec<_> = graph
+        .events
+        .iter()
+        .filter_map(|event| match event {
+            ObservationEvent::EmptyValue {
+                owner,
+                kind,
+                raw,
+                occurrence,
+            } => Some((owner, kind, raw, occurrence)),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(empty.len(), 3);
+    for ((owner, kind, raw, occurrence), (offset, expected_kind, expected_raw)) in
+        empty.iter().zip([
+            (2, EmptyValueKind::MetadataReference, &metadata_empty),
+            (3, EmptyValueKind::DesignTimeReference, &design_empty),
+            (5, EmptyValueKind::MetadataReference, &metadata_empty),
+        ])
+    {
+        assert_eq!(*owner, CHILD);
+        assert_eq!(**kind, expected_kind);
+        assert_eq!(*raw, expected_raw);
+        assert_eq!(occurrence.path, vec![1, position, offset]);
+        assert_eq!(occurrence.source, origin);
+        assert_eq!(occurrence.plain_sha256, hash(&expected_bytes));
+        assert_eq!(occurrence.registry_span, None);
+        assert_eq!(descriptor.at(&occurrence.path), Some(*raw));
+    }
+    for reason in [
+        "empty-metadata-reference-value-semantic-slot-unproved",
+        "empty-design-time-reference-value-semantic-slot-unproved",
+    ] {
+        assert!(graph.partial.iter().any(|p| p.reason == reason));
+    }
+    assert!(graph.events.iter().any(|e| matches!(e,
+        ObservationEvent::ReferenceVisit { target: Target::Metadata { uuid, registry_ordinal: Some(0) }, .. } if uuid == ROOT)));
+    assert!(!graph.events.iter().any(|e| matches!(e,
+        ObservationEvent::ReferenceVisit { target: Target::Metadata { uuid, .. }, .. } if uuid == NIL_UUID)));
+    assert!(!graph.events.iter().any(|e| matches!(e,
+        ObservationEvent::ReferenceVisit { target: Target::DesignTimeValue { type_id, .. }, .. } if type_id == NIL_UUID)));
+    assert_eq!(
+        graph.graph_completeness,
+        diagnostic::GraphCompleteness::Partial
+    );
+    assert_eq!(graph.trace_status, diagnostic::TraceStatus::NotIdentified);
+    assert!(graph.candidate.is_none() && graph.first_visit_authority.is_none());
+    assert!(
+        !graph
+            .events
+            .iter()
+            .any(|e| matches!(e, ObservationEvent::EmitKey { .. }))
+    );
+}
+
+#[test]
+fn empty_value_admission_does_not_admit_malformed_or_nil_type_declarations() {
+    use diagnostic::FactInputs;
+    use ibcmd_rs::metadata_model::{DescriptorContext, types};
+    let (files, base, descriptor, index) = facts_fixture();
+    let context = DescriptorContext::with_files(&files.root, "2.20", &[]).unwrap();
+    let map = ibcmd_rs::restructure::caches::slots::RecordMap::new("Catalog", 57).unwrap();
+    for mutation in 0..6 {
+        let mut value = types::design_time_ref("", &context).unwrap();
+        match mutation {
+            0 => value.as_list_mut().unwrap()[0] = Brace::str("wrong-tag"),
+            1 => fields(&mut value, 2)[0] = a(1),
+            2 => {
+                value.as_list_mut().unwrap().push(a(0));
+            }
+            3 => {
+                fields(&mut value, 2).pop();
+            }
+            4 => fields(&mut value, 2)[2] = a(ROOT), // nil TypeId with a nonempty instance
+            _ => {
+                value = l(vec![
+                    Brace::str("Pattern"),
+                    l(vec![Brace::str("#"), a(NIL_UUID)]),
+                ])
+            }
+        }
+        let mut mutant = descriptor.clone();
+        fields(&mut mutant, 1)[map.names["Owners"]] = value;
+        assert!(
+            FactInputs::load(&base, additional_manifest(&files, &mutant, Some(&index)))
+                .unwrap()
+                .project(&base)
+                .is_err(),
+            "mutation {mutation}"
+        );
+    }
 }

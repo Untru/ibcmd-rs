@@ -98,6 +98,11 @@ spans. Legitimate repeated references retain separate occurrences; their domain
 first-observation flags do not establish insertion order. Generated ValueId,
 TypeId, metadata UUID and design-time instance value UUID are distinct roles.
 An instance value is never resolved merely by matching a generated ValueId.
+Canonical empty metadata references and `{0,nil,nil}` design-time values are
+retained as distinct `EmptyValue` observations with the complete value, row/hash
+and occurrence path. They remain Partial because semantic slot roles are not
+proved; nil is never resolved to an owner, type declaration or reference edge.
+Malformed tag/version/arity and nil declaration identities still refuse.
 Exact primitive pattern forms from the existing type encoder are observed;
 unknown qualifiers/members retain their whole value and a Partial reason.
 
@@ -115,5 +120,5 @@ missing inputs, unresolved type/reference targets and dispatch timing remain
 specific gaps. The complete named values and original rows are retained. A
 successful observation projection does not claim a complete reference graph,
 full family admission, native parity, or closure of #403. Subsequent A1.5–A1.7
-work and any proposed H1 still need their own source gate. Eight appended
+work and any proposed H1 still need their own source gate. Ten appended
 ordinary controls exercise this component; ROOT owns actual execution.
