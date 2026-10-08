@@ -1804,11 +1804,9 @@ fn resolve_list_path_in_namespace(
     let fields = a.fields.as_ref()?;
     let first = cut_index(field.split('.').next()?);
     if !contains_name(fields, first) {
-        // This roster contains result fields, not the DynamicList object's
-        // property providers (e.g. SettingsComposer.Settings.Filter[0].Date).
-        // Without a CURRENT result-field edge, a nested provider is unknown;
-        // absence from the query roster cannot prove absence from that object.
-        return (!object_namespace || !field.contains('.')).then_some(true);
+        // Object-owned providers were classified above; CURRENT result fields
+        // retain the existing complete-roster absence rule in either namespace.
+        return Some(true);
     }
     if !field.contains('.') {
         return Some(false);
@@ -1924,11 +1922,11 @@ mod reference_child_tests {
             for path in [
                 "List.SettingsComposer.Settings.Filter[0].Date",
                 "list.settingscomposer.settings.filter[1].date",
-                "List.UnknownProvider.Member",
             ] {
                 assert_eq!(lookup(&metadata, &body, minor, path), None, "{path}");
             }
             assert_eq!(lookup(&metadata, &body, minor, "List.MissingResult"), Some(true));
+            assert_eq!(lookup(&metadata, &body, minor, "List.UnknownProvider.Member"), Some(true));
             assert_eq!(lookup(&metadata, &body, minor, "List.Reference.MissingChild"), Some(true));
             assert_eq!(lookup(&metadata, &body, minor, "List.Reference.KnownChild"), Some(false));
             assert_eq!(
