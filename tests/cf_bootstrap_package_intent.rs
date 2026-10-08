@@ -7,6 +7,10 @@ use std::{
     sync::atomic::{AtomicUsize, Ordering},
 };
 
+use ibcmd_xml::{
+    XmlReader,
+    metadata::{PackageIntent, inspect_package_intent},
+};
 use serde_json::Value;
 
 const MD: &str = "http://v8.1c.ru/8.3/MDClasses";
@@ -154,7 +158,7 @@ fn extension_and_both_external_families_refuse_before_either_cf_compiler() {
 #[test]
 fn renamed_prefixed_extension_and_explicit_xml_file_are_addressed() {
     let xml = format!(
-        r#"<a:MetaDataObject xmlns:a="{MD}" version="2.20"><b:Configuration xmlns:b="{MD}" uuid="{ROOT_UUID}"><b:Properties><c:NamePrefix xmlns:c="{MD}">Own_</c:NamePrefix></b:Properties></b:Configuration></a:MetaDataObject>"#
+        r#"<a:MetaDataObject xmlns:a="{MD}" version="2.20"><b:Configuration xmlns:b="{MD}" uuid="{ROOT_UUID}"><b:Properties><c:NamePrefix xmlns:c="{MD}">Own_</c:NamePrefix><c:ConfigurationExtensionCompatibilityMode xmlns:c="{MD}">Version8_3_27</c:ConfigurationExtensionCompatibilityMode><c:ConfigurationExtensionPurpose xmlns:c="{MD}">Customization</c:ConfigurationExtensionPurpose></b:Properties></b:Configuration></a:MetaDataObject>"#
     );
     for base_free in [false, true] {
         let scratch = Scratch::new();
@@ -182,6 +186,14 @@ fn root_and_extension_property_namespace_spoofing_never_select_cf() {
             metadata(
                 "Configuration",
                 "<NamePrefix xmlns=\"urn:foreign\">Spoof_</NamePrefix>",
+            ),
+            metadata(
+                "Configuration",
+                "<ConfigurationExtensionCompatibilityMode xmlns=\"urn:foreign\">Version8_3_27</ConfigurationExtensionCompatibilityMode>",
+            ),
+            metadata(
+                "Configuration",
+                "<ConfigurationExtensionPurpose xmlns=\"urn:foreign\">Customization</ConfigurationExtensionPurpose>",
             ),
         ] {
             let scratch = Scratch::new();
@@ -282,5 +294,127 @@ fn generated_ordinary_cf_still_publishes_and_has_the_same_service_inventory() {
             .map(|entry| entry["name"].as_str().unwrap())
             .collect::<Vec<_>>();
         assert_eq!(names, [ROOT_UUID, "root", "version", "versions"]);
+    }
+}
+
+fn success(result: Output) -> Value {
+    assert!(
+        result.status.success(),
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&result.stdout),
+        String::from_utf8_lossy(&result.stderr),
+    );
+    let report: Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(report["ok"], true, "{report}");
+    report
+}
+
+fn export(cf: &Path, output: &Path, version: &str) {
+    let report = success(
+        Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "export"])
+            .arg(cf)
+            .arg(output)
+            .args(["--source-version", version])
+            .env("PATH", "")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(report["command"], "export");
+    assert_eq!(report["export"]["storage"]["failed"], 0, "{report}");
+}
+
+#[test]
+fn ordinary_prefix_and_shared_compatibility_survive_public_native_rebuild() {
+    // NamePrefix is owned by the ordinary root compiler, including nonempty
+    // values. Native ordinary export also emits its shared compatibility field.
+    // Exercise both actual compiler routes and both XML dialects without a
+    // platform process or a prebuilt archive; do not erase these properties.
+    for base_free in [false, true] {
+        for prefix in ["", "Own_"] {
+            let scratch = Scratch::new();
+            let xml = configuration().replacen(
+                "<Comment/>",
+                &format!("<Comment/><NamePrefix>{prefix}</NamePrefix><ConfigurationExtensionCompatibilityMode>Version8_3_24</ConfigurationExtensionCompatibilityMode>"),
+                1,
+            );
+            let input = XmlReader::from_slice(xml.as_bytes()).unwrap();
+            assert_eq!(
+                inspect_package_intent(&input).unwrap(),
+                Some(PackageIntent::Configuration)
+            );
+            let source = scratch.source("Configuration.xml", &xml);
+            let initial = scratch.0.join("ordinary.cf");
+            let report = success(bootstrap(&source, &initial, base_free, "5"));
+            assert_eq!(report["storage_entries"], 4);
+            for version in ["2.20", "2.21"] {
+                let native = scratch.0.join(format!("native-{version}"));
+                export(&initial, &native, version);
+                let expected = fs::read(native.join("Configuration.xml")).unwrap();
+                let native_document = XmlReader::from_slice(&expected).unwrap();
+                assert_eq!(
+                    inspect_package_intent(&native_document).unwrap(),
+                    Some(PackageIntent::Configuration)
+                );
+                let text = std::str::from_utf8(&expected).unwrap();
+                let prefix_element = if prefix.is_empty() {
+                    "<NamePrefix/>".to_owned()
+                } else {
+                    format!("<NamePrefix>{prefix}</NamePrefix>")
+                };
+                assert!(text.contains(&prefix_element), "{text}");
+                assert!(text.contains("<ConfigurationExtensionCompatibilityMode>Version8_3_24</ConfigurationExtensionCompatibilityMode>"), "{text}");
+                assert!(!text.contains("<ConfigurationExtensionPurpose>"));
+
+                let rebuilt = scratch.0.join(format!("rebuilt-{version}.cf"));
+                let mut command = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"));
+                command.args(["cf", "bootstrap"]);
+                if base_free {
+                    command.arg("--base-free");
+                }
+                let report = success(
+                    command
+                        .arg(&native)
+                        .arg(&rebuilt)
+                        .args(["--source-version", version, "--storage-version", "5"])
+                        .env("PATH", "")
+                        .output()
+                        .unwrap(),
+                );
+                assert_eq!(report["storage_entries"], 4);
+                let returned = scratch.0.join(format!("returned-{version}"));
+                export(&rebuilt, &returned, version);
+                // Independently authored properties must survive the actual
+                // native writer, package selection and selected compiler.
+                assert_eq!(
+                    fs::read(returned.join("Configuration.xml")).unwrap(),
+                    expected
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn extension_purpose_and_mapping_still_refuse_with_shared_ordinary_properties() {
+    for base_free in [false, true] {
+        for marker in [
+            "<ConfigurationExtensionPurpose>Patch</ConfigurationExtensionPurpose>",
+            "<ConfigurationExtensionPurpose>Customization</ConfigurationExtensionPurpose>",
+            "<ConfigurationExtensionPurpose>AddOn</ConfigurationExtensionPurpose>",
+            "<KeepMappingToExtendedConfigurationObjectsByIDs>false</KeepMappingToExtendedConfigurationObjectsByIDs>",
+            "<ObjectBelonging>Adopted</ObjectBelonging>",
+        ] {
+            let scratch = Scratch::new();
+            let xml = configuration().replacen("<Comment/>", &format!("<Comment/><NamePrefix>Own_</NamePrefix><ConfigurationExtensionCompatibilityMode>Version8_3_24</ConfigurationExtensionCompatibilityMode>{marker}"), 1);
+            let source = scratch.source("Renamed.xml", &xml);
+            let output = scratch.0.join("blocked.cf");
+            refusal(
+                bootstrap(&source, &output, base_free, "5"),
+                &output,
+                "bootstrap_package_not_supported",
+                "Extension",
+            );
+        }
     }
 }

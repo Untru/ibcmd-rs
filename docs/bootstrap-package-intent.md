@@ -9,10 +9,16 @@ name or the requested archive suffix. Nested family and body documents remain
 the responsibility of the selected source compiler.
 
 Ordinary Configuration XML continues through the existing CF compiler and
-publisher. Extension-only Configuration properties select Extension XML;
+publisher. `NamePrefix` (empty or nonempty) and
+`ConfigurationExtensionCompatibilityMode` are shared ordinary Configuration
+properties; they do not select Extension XML. Direct extension-only purpose,
+adoption and ID-mapping properties (`ConfigurationExtensionPurpose`,
+`ObjectBelonging`, `ExtendedConfigurationObject`, and
+`KeepMappingToExtendedConfigurationObjectsByIDs`) select Extension XML.
 ExternalDataProcessor and ExternalReport select their respective external
 packages. Prefix aliases work through expanded names, while a foreign namespace
-on a root or extension property is refused. Legacy unqualified envelopes retain
+on a root or a recognized package property is refused. Duplicate recognized
+package properties and duplicate Properties blocks are refused too. Legacy unqualified envelopes retain
 the existing metadata-envelope contract.
 
 CFE/EPF/ERF builders are not implemented by this change. Those inputs return
@@ -32,3 +38,11 @@ Generated controls are in `tests/cf_bootstrap_package_intent.rs`; XML namespace
 controls are in `ibcmd-xml::metadata::package`. They use hand-authored source
 strings and actual public CLI commands, with an empty PATH. No foreign fixture,
 native executable, SQL connection or existing archive is needed.
+
+The ordinary shared-property regression also exercises generated source → CF →
+native XML → both bootstrap compilers → native XML for both `2.20` and `2.21`.
+It preserves empty and nonempty prefixes and the shared compatibility property,
+then compares the complete returned Configuration.xml bytes. Explicit extension
+purpose and mapping remain refused before publication even alongside these
+shared properties. These generated controls do not substitute for acceptance
+against retained native platform packages.
