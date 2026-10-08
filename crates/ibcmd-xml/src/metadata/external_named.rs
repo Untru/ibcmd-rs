@@ -83,7 +83,11 @@ impl ExternalNamedOwnerContext {
                     };
                     let prefix = format!(
                         "{}.{}.{}.",
-                        decoded.root().kind().as_str(),
+                        decoded
+                            .external_source_binding()
+                            .ok_or(MetadataDecodeError::Missing("external binding"))?
+                            .kind()
+                            .external_kind(),
                         root_name,
                         kind.family()
                     );
