@@ -6,8 +6,10 @@
 
 #![forbid(unsafe_code)]
 
+pub mod configuration_mobile;
 pub mod configuration_rights;
 pub mod configuration_root;
+pub mod configuration_v85_projection;
 pub mod external_data_source;
 
 use std::borrow::Cow;

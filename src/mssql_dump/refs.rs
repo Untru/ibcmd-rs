@@ -1,4 +1,6 @@
 use super::*;
+use ibcmd_schema::configuration_mobile::FUNCTIONALITIES as CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES;
+use ibcmd_schema::configuration_v85_projection as configuration_v85_defaults;
 
 #[allow(dead_code)]
 pub(super) fn build_metadata_command_reference_index(
@@ -3669,19 +3671,6 @@ fn parse_configuration_reference_text_with_identity(text: &str) -> Option<(Strin
     Some((envelope.identity, header.name))
 }
 
-/// The configuration properties platform 8.5 adds, in the element order its
-/// `Configuration.xml` writes them.
-const CONFIGURATION_AUXILIARY_FORMS_8_5_1: [&str; 8] = [
-    "AuxiliaryReportForm",
-    "AuxiliaryReportVariantForm",
-    "AuxiliaryReportSettingsForm",
-    "AuxiliaryDynamicListSettingsForm",
-    "AuxiliaryDataHistoryChangeHistoryForm",
-    "AuxiliaryDataHistoryVersionDataForm",
-    "AuxiliaryDataHistoryVersionDifferencesForm",
-    "AuxiliaryCollaborationSystemUsersChoiceForm",
-];
-
 /// What 8.5 writes for the properties it adds to a configuration: read from
 /// the members an 8.5 `{76,...}` tuple appends, or the platform's defaults for
 /// a configuration still in the 8.3.27 `{68,...}` tuple.
@@ -3706,13 +3695,13 @@ fn configuration_properties_8_5_1(
         // automatic theme, data opened in dialogs, no captions, no 8.5
         // interface migration.
         return Some(ConfigurationPropertiesV8_5_1 {
-            auxiliary_forms: vec![None; CONFIGURATION_AUXILIARY_FORMS_8_5_1.len()],
-            interface_variant: "NavigationLeft",
-            theme: "Auto",
-            windows_open_variant: "OpenDataInDialogs",
+            auxiliary_forms: vec![None; configuration_v85_defaults::AUXILIARY_FORM_NAMES.len()],
+            interface_variant: configuration_v85_defaults::INTERFACE_VARIANT,
+            theme: configuration_v85_defaults::THEME,
+            windows_open_variant: configuration_v85_defaults::WINDOWS_OPEN_VARIANT,
             caption: Vec::new(),
             short_caption: Vec::new(),
-            migration_mode: "DontUse",
+            migration_mode: configuration_v85_defaults::MIGRATION_MODE,
         });
     }
     let start = text.find("{76,")?;
@@ -3784,7 +3773,7 @@ fn insert_configuration_properties_8_5_1_xml(
     }
     let mut inserts = Vec::new();
     let mut forms = String::new();
-    for (name, value) in CONFIGURATION_AUXILIARY_FORMS_8_5_1
+    for (name, value) in configuration_v85_defaults::AUXILIARY_FORM_NAMES
         .iter()
         .zip(&properties.auxiliary_forms)
     {
@@ -4530,47 +4519,6 @@ pub(super) fn parse_configuration_use_purposes(
     Some(vec!["PlatformApplication"])
 }
 
-const CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES: [(u32, &str); 38] = [
-    (0, "Biometrics"),
-    (1, "Location"),
-    (2, "BackgroundLocation"),
-    (3, "BluetoothPrinters"),
-    (4, "WiFiPrinters"),
-    (5, "Contacts"),
-    (6, "Calendars"),
-    (7, "PushNotifications"),
-    (8, "LocalNotifications"),
-    (9, "InAppPurchases"),
-    (10, "PersonalComputerFileExchange"),
-    (11, "Ads"),
-    (12, "NumberDialing"),
-    (13, "CallProcessing"),
-    (14, "CallLog"),
-    (15, "AutoSendSMS"),
-    (16, "ReceiveSMS"),
-    (17, "SMSLog"),
-    (18, "Camera"),
-    (19, "Microphone"),
-    (20, "MusicLibrary"),
-    (21, "PictureAndVideoLibraries"),
-    (22, "AudioPlaybackAndVibration"),
-    (23, "BackgroundAudioPlaybackAndVibration"),
-    (24, "InstallPackages"),
-    (25, "OSBackup"),
-    (26, "ApplicationUsageStatistics"),
-    (27, "BarcodeScanning"),
-    (32, "BackgroundAudioRecording"),
-    (33, "AllFilesAccess"),
-    (34, "Videoconferences"),
-    (35, "NFC"),
-    (36, "DocumentScanning"),
-    (37, "SpeechToText"),
-    (38, "Geofences"),
-    (39, "IncomingShareRequests"),
-    (40, "AllIncomingShareRequestsTypesProcessing"),
-    (41, "TextToSpeech"),
-];
-
 /// The OS permissions a `<app:permissionMessage>` can explain.
 ///
 /// A separate vocabulary from the functionality table above -- the same name
@@ -4702,7 +4650,13 @@ pub(super) fn parse_configuration_used_mobile_application_functionalities(
         ("2.17", n) if n + 1 == full => {
             parse_1c_bool_flag(trailing_field.trim())?;
         }
-        ("2.20", n) if n + 1 == full => {
+        // Both current XML editions print TextToSpeech. Its stored flag is
+        // the shorter record's tail, independently of the reading edition.
+        (dialect, n)
+            if n + 1 == full
+                && ibcmd_schema::configuration_mobile::source_functionalities(Some(dialect))
+                    .is_some_and(|roster| roster.len() == full) =>
+        {
             functionalities.push(ConfigurationMobileApplicationFunctionality {
                 name: CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES[full - 1].1,
                 use_functionality: parse_1c_bool_flag(trailing_field.trim())?,
@@ -5759,6 +5713,161 @@ pub(super) fn parse_metadata_command_reference_blob(
     };
     let header = parse_metadata_header_from_text(&text, uuid)?;
     Some((kind.to_string(), header, text))
+}
+
+#[cfg(test)]
+mod mobile_short_table_tests {
+    use super::*;
+    use crate::metadata_model::{
+        DescriptorContext,
+        brace::{Brace, parse_row, serialize},
+        compile_descriptor,
+    };
+
+    const ROOT_UUID: &str = "10000000-0000-4000-8000-000000000435";
+
+    fn compiled_root(enabled: &[u32]) -> Brace {
+        // Same complete cleanroom section envelope as the public package
+        // tests. The actual production compiler, not a hand-written tuple,
+        // selects compatibility 8.3.24's V67/37-pair physical representation.
+        let info = [
+            "9cd510cd-abfc-11d4-9434-004095e12fc7",
+            "9fcd25a0-4822-11d4-9414-008048da11f9",
+            "e3687481-0a87-462c-a166-9f34594f9bba",
+            "9de14907-ec23-4a07-96f0-85521cb6b53b",
+            "51f2d5d8-ea4d-4064-8892-82951750031e",
+            "e68182ea-4237-4383-967f-90c1e3370bc7",
+            "fb282519-d103-4dd3-bc12-cb271d631dfc",
+        ].iter().enumerate().map(|(index, class)| format!(
+            "<xr:ContainedObject><xr:ClassId>{class}</xr:ClassId><xr:ObjectId>20000000-0000-4000-8000-{:012}</xr:ObjectId></xr:ContainedObject>", index+1
+        )).collect::<String>();
+        let flags = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES.iter().map(|(id,name)| format!(
+            "<app:functionality><app:functionality>{name}</app:functionality><app:use>{}</app:use></app:functionality>", enabled.contains(id)
+        )).collect::<String>();
+        let source = format!(
+            "<MetaDataObject xmlns=\"http://v8.1c.ru/8.3/MDClasses\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:app=\"http://v8.1c.ru/8.2/managed-application/core\" version=\"2.20\"><Configuration uuid=\"{ROOT_UUID}\"><InternalInfo>{info}</InternalInfo><Properties><Name>OwnShortMobile</Name><Synonym/><Comment/><DefaultRunMode>ManagedApplication</DefaultRunMode><ScriptVariant>Russian</ScriptVariant><CompatibilityMode>Version8_3_24</CompatibilityMode><UsedMobileApplicationFunctionalities>{flags}</UsedMobileApplicationFunctionalities></Properties><ChildObjects/></Configuration></MetaDataObject>"
+        );
+        let root = Path::new(".");
+        let path = root.join("Configuration.xml");
+        let files = [(
+            path.clone(),
+            std::sync::Arc::new(source.as_bytes().to_vec()),
+        )];
+        let context = DescriptorContext::with_files(root, "2.20", &files).unwrap();
+        parse_row(&compile_descriptor("Configuration", &path, source.as_bytes(), &context).unwrap())
+            .unwrap()
+    }
+
+    fn table(row: &mut Brace) -> &mut Vec<Brace> {
+        row.as_list_mut().unwrap()[3].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[53]
+            .as_list_mut()
+            .unwrap()
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_keeps_tail_flag_and_full_roster_both_xml_editions() {
+        let all = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+            .iter()
+            .map(|(id, _)| *id)
+            .collect::<Vec<_>>();
+        for enabled in [vec![], vec![1, 18, 35, 41], all] {
+            let mut row = compiled_root(&enabled);
+            let tuple = row.at(&[3, 1, 1]).unwrap().as_list().unwrap();
+            assert_eq!(tuple[0].as_atom(), Some("67"));
+            assert_eq!(tuple.len(), 60);
+            let own = table(&mut row);
+            assert_eq!(own[0].as_atom(), Some("2"));
+            assert_eq!(own[1].as_atom(), Some("37"));
+            assert_eq!(own.len(), 40);
+            assert_eq!(
+                own[39].as_atom(),
+                Some(if enabled.contains(&41) { "1" } else { "0" })
+            );
+            let text = serialize(&row);
+            for (dialect, version) in [
+                ("2.20", InfobaseConfigSourceVersion::V2_20),
+                ("2.21", InfobaseConfigSourceVersion::V2_21),
+            ] {
+                let (actual, messages) =
+                    parse_configuration_used_mobile_application_functionalities(
+                        &text, ROOT_UUID, dialect,
+                    )
+                    .unwrap();
+                assert!(messages.is_empty());
+                let expected = CONFIGURATION_MOBILE_APPLICATION_FUNCTIONALITIES
+                    .iter()
+                    .map(|(id, name)| (*name, enabled.contains(id)))
+                    .collect::<Vec<_>>();
+                assert_eq!(
+                    actual
+                        .iter()
+                        .map(|item| (item.name, item.use_functionality))
+                        .collect::<Vec<_>>(),
+                    expected
+                );
+                let xml =
+                    extract_configuration_source_xml(&text, ROOT_UUID, &BTreeMap::new(), version)
+                        .unwrap();
+                let document = ibcmd_xml::XmlReader::from_slice(xml.as_bytes()).unwrap();
+                assert_eq!(
+                    ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)
+                        .unwrap(),
+                    Some(enabled.clone())
+                );
+                assert_eq!(xml.matches("<app:functionality>").count(), 76);
+            }
+            let (older, _) = parse_configuration_used_mobile_application_functionalities(
+                &text, ROOT_UUID, "2.17",
+            )
+            .unwrap();
+            assert_eq!(older.len(), 37);
+            assert!(older.iter().all(|item| item.name != "TextToSpeech"));
+        }
+    }
+
+    #[test]
+    fn compiled_short_mobile_root_rejects_malformed_counts_ids_flags_and_messages() {
+        let original = compiled_root(&[41]);
+        for case in 0..10 {
+            let mut row = original.clone();
+            let own = table(&mut row);
+            match case {
+                0 => own[0] = Brace::num(9),
+                1 => own[1] = Brace::num(36),
+                2 => own[1] = Brace::num(38),
+                3 => own[39] = Brace::num(2),
+                4 => own[2].as_list_mut().unwrap()[1] = Brace::num(2),
+                5 => own.swap(2, 3),
+                6 => own[3] = own[2].clone(),
+                7 => own[2].as_list_mut().unwrap()[0] = Brace::num(999),
+                8 => {
+                    own.remove(3);
+                }
+                9 => {
+                    own.push(Brace::List(vec![
+                        Brace::num(22),
+                        Brace::List(vec![Brace::num(0)]),
+                    ]));
+                }
+                _ => unreachable!(),
+            }
+            for dialect in ["2.20", "2.21"] {
+                assert!(
+                    parse_configuration_used_mobile_application_functionalities(
+                        &serialize(&row),
+                        ROOT_UUID,
+                        dialect
+                    )
+                    .is_none(),
+                    "{dialect}: malformed case{case}"
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]

@@ -208,6 +208,13 @@ pub fn compile_descriptor(
     xml: &[u8],
     context: &DescriptorContext,
 ) -> Result<Vec<u8>> {
+    let configuration_document = if kind == "Configuration" {
+        let document = ibcmd_xml::XmlReader::from_slice(xml)?;
+        ibcmd_xml::metadata::parse_configuration_mobile_functionalities(&document)?;
+        Some(document)
+    } else {
+        None
+    };
     if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
         let document = ibcmd_xml::XmlReader::from_slice(xml)?;
         ibcmd_xml::metadata::validate_websocket_client_headers_namespaces(&document)?;
@@ -235,6 +242,11 @@ pub fn compile_descriptor(
             .unwrap_or_default(),
         path: xml_path,
     };
+    if let Some(document) = configuration_document.as_ref()
+        && root::configuration_shape(&object, context)? != root::ConfigurationShape::V76
+    {
+        ibcmd_xml::metadata::validate_older_configuration_v85_defaults(document, &context.version)?;
+    }
     let tree = if let Some(canonical) = external_data_source.as_ref() {
         external_data_source::compile_admitted(&object, canonical)?
     } else {

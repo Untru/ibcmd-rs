@@ -48793,6 +48793,33 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
                 < v20_xml.find("</Properties>").unwrap()
         );
 
+        // The same stored short record retains its TextToSpeech tail when
+        // read as XML 2.21; the reading edition does not lengthen the record.
+        let (short_20, _) =
+            parse_configuration_used_mobile_application_functionalities(&v20_text, &uuid, "2.20")
+                .unwrap();
+        let (short_21, messages) =
+            parse_configuration_used_mobile_application_functionalities(&v20_text, &uuid, "2.21")
+                .unwrap();
+        assert!(messages.is_empty());
+        assert_eq!(short_21.len(), 38);
+        assert_eq!(
+            short_21
+                .iter()
+                .map(|item| (item.name, item.use_functionality))
+                .collect::<Vec<_>>(),
+            short_20
+                .iter()
+                .map(|item| (item.name, item.use_functionality))
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            short_21
+                .last()
+                .map(|item| (item.name, item.use_functionality)),
+            Some(("TextToSpeech", true))
+        );
+
         let (uuid, v21_text) = flat_configuration_mobile_text(code, field_count, &raw38);
         let v21_xml = extract_configuration_source_xml(
             &v21_text,
@@ -48818,6 +48845,12 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
     let ids38 = configuration_mobile_functionality_ids(38);
     let valid37 = configuration_mobile_raw(37, &ids37, None, Some("0"));
     let valid38 = configuration_mobile_raw(38, &ids38, None, Some("0"));
+    let incomplete36 = configuration_mobile_raw(
+        36,
+        &configuration_mobile_functionality_ids(36),
+        None,
+        Some("0"),
+    );
 
     let mut reordered = ids37.clone();
     reordered.swap(0, 1);
@@ -48895,7 +48928,13 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
         // declare the full 38 and are exported at 2.20, and every one of them
         // prints the whole block. The dialect decides whether the table's last
         // entry is printed, not how long the record may be.
-        ("2.21 count", 67, 60, valid37.as_str(), "2.21"),
+        (
+            "2.21 incomplete version-2 count",
+            67,
+            60,
+            incomplete36.as_str(),
+            "2.21",
+        ),
         ("unknown source version", 67, 60, valid37.as_str(), "9.99"),
     ] {
         let (uuid, text) = flat_configuration_mobile_text(code, field_count, raw);
