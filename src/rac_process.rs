@@ -1,6 +1,6 @@
-//! One original RAC process and both original readers share a single deadline.
+//! One original raw control process and both readers share a single deadline.
 //! An unproved lifetime is retained for this process's lifetime, and prevents
-//! another readiness attempt. No PID lookup, signal, retry or blocking join.
+//! another raw profile/readiness attempt. No PID lookup, signal, retry or join.
 
 use std::io::Read;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -14,33 +14,67 @@ use anyhow::{Context, Result, bail, ensure};
 const OUTPUT_BOUND: usize = 1024 * 1024;
 static UNPROVED: Mutex<Option<Attempt>> = Mutex::new(None);
 
+/// Small control replies, not configuration/storage payloads. LIVE preserves
+/// its immediate refusal; profile probes keep draining a bounded capture to EOF.
+#[derive(Clone, Copy)]
+pub(crate) enum CapturePolicy {
+    RefuseImmediately { limit: usize },
+    DrainToEof { limit: usize },
+}
+
+pub(crate) struct CapturedOutput {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) exceeded: bool,
+}
+
+/// This envelope is available only after direct exit and BOTH original EOFs.
+/// Success/stderr/encoding policies still belong to each existing caller.
+pub(crate) struct CompletedOutput {
+    pub(crate) status: ExitStatus,
+    pub(crate) stdout: CapturedOutput,
+    pub(crate) stderr: CapturedOutput,
+}
+
 struct Reader {
     // The original reader remains reachable even if thread creation fails or
     // the drain is still blocked. Never lock this mutex from the waiting side.
     _original: Arc<Mutex<Box<dyn Read + Send>>>,
     _thread: Option<JoinHandle<()>>,
-    receive: Receiver<Result<Vec<u8>>>,
-    completed: Option<Vec<u8>>,
+    receive: Receiver<Result<CapturedOutput>>,
+    completed: Option<CapturedOutput>,
 }
 
 impl Reader {
-    fn new(stream: impl Read + Send + 'static) -> Self {
+    fn new(stream: impl Read + Send + 'static, policy: CapturePolicy) -> Self {
         let original: Arc<Mutex<Box<dyn Read + Send>>> = Arc::new(Mutex::new(Box::new(stream)));
         let source = Arc::clone(&original);
         let (send, receive) = mpsc::channel();
         let error_send = send.clone();
         let thread = std::thread::Builder::new().spawn(move || {
-            let result = (|| -> Result<Vec<u8>> {
+            let result = (|| -> Result<CapturedOutput> {
                 let mut stream = source.lock().unwrap_or_else(|e| e.into_inner());
                 let mut bytes = Vec::new();
+                let mut exceeded = false;
                 let mut buffer = [0; 4096];
                 loop {
                     let n = stream.read(&mut buffer)?;
                     if n == 0 {
-                        return Ok(bytes);
+                        return Ok(CapturedOutput { bytes, exceeded });
                     }
-                    ensure!(bytes.len() + n <= OUTPUT_BOUND, "rac output exceeded bound");
-                    bytes.extend_from_slice(&buffer[..n]);
+                    match policy {
+                        CapturePolicy::RefuseImmediately { limit } => {
+                            ensure!(
+                                n <= limit.saturating_sub(bytes.len()),
+                                "rac output exceeded bound"
+                            );
+                            bytes.extend_from_slice(&buffer[..n]);
+                        }
+                        CapturePolicy::DrainToEof { limit } => {
+                            let remaining = limit.saturating_sub(bytes.len());
+                            bytes.extend_from_slice(&buffer[..n.min(remaining)]);
+                            exceeded |= n > remaining;
+                        }
+                    }
                 }
             })();
             let _ = send.send(result);
@@ -105,10 +139,13 @@ impl Attempt {
     }
 }
 
-/// A successful return proves direct exit and EOF of BOTH original streams.
-/// The output bound belongs to the small RAC control response, not metadata.
-pub(crate) fn bounded_bytes(command: &mut Command, timeout: Duration) -> Result<Vec<u8>> {
-    // Serialize readiness attempts so a concurrent attempt cannot escape the
+/// No output/status policy can authorize another raw launch after unknown.
+pub(crate) fn completed_output(
+    command: &mut Command,
+    timeout: Duration,
+    policy: CapturePolicy,
+) -> Result<CompletedOutput> {
+    // Serialize raw attempts so a concurrent attempt cannot escape the
     // sticky unknown outcome of an earlier original process.
     let mut unproved = match UNPROVED.try_lock() {
         Ok(guard) => guard,
@@ -131,8 +168,14 @@ pub(crate) fn bounded_bytes(command: &mut Command, timeout: Duration) -> Result<
         .stderr(Stdio::piped())
         .spawn()
         .context("rac launch failed; arguments redacted")?;
-    let stdout = child.stdout.take().map(Reader::new);
-    let stderr = child.stderr.take().map(Reader::new);
+    let stdout = child
+        .stdout
+        .take()
+        .map(|stream| Reader::new(stream, policy));
+    let stderr = child
+        .stderr
+        .take()
+        .map(|stream| Reader::new(stream, policy));
     let mut attempt = Attempt {
         child,
         stdout,
@@ -160,10 +203,27 @@ pub(crate) fn bounded_bytes(command: &mut Command, timeout: Duration) -> Result<
         .as_mut()
         .and_then(|reader| reader.completed.take())
         .context("rac stderr result absent")?;
+    Ok(CompletedOutput {
+        status,
+        stdout,
+        stderr,
+    })
+}
+
+/// A successful return proves direct exit and EOF of BOTH original streams.
+/// The output bound belongs to the small RAC control response, not metadata.
+pub(crate) fn bounded_bytes(command: &mut Command, timeout: Duration) -> Result<Vec<u8>> {
+    let output = completed_output(
+        command,
+        timeout,
+        CapturePolicy::RefuseImmediately {
+            limit: OUTPUT_BOUND,
+        },
+    )?;
     ensure!(
-        status.success() && stderr.is_empty(),
+        output.status.success() && output.stderr.bytes.is_empty(),
         "RAS session readiness failed: {}",
-        String::from_utf8_lossy(&stderr)
+        String::from_utf8_lossy(&output.stderr.bytes)
     );
-    Ok(stdout)
+    Ok(output.stdout.bytes)
 }
