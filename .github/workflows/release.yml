@@ -143,6 +143,9 @@ jobs:
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          # Keep Ubuntu 22.04 objects separate from newer runner images.
+          key: abi-v1-${{ matrix.os }}-${{ matrix.target }}
 
       - name: Resolve deterministic release coordinates
         shell: pwsh

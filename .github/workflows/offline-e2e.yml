@@ -177,6 +177,9 @@ jobs:
 
       - name: Cache Cargo artifacts
         uses: Swatinem/rust-cache@v2
+        with:
+          # Native dependency objects must not cross runner ABI boundaries.
+          key: abi-v1-${{ matrix.os }}-${{ matrix.target }}
 
       - name: Fetch locked dependencies
         run: cargo fetch --locked
