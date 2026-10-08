@@ -31,6 +31,10 @@ resources) and nonempty `form_presence`. Unaffected configurations retain the v1
 manifest schema, field order and acceptance, or no annotation when none is needed.
 Unknown versions, fields, duplicate roots, foreign profiles and empty v2 families
 are rejected. V1 never accepts a new v2 key.
+An unknown protocol prefix (such as v3) is distinct from a supported v2 prefix
+carrying an old v1 payload: the latter fails the closed v2 schema because its
+required `form_presence` collection is absent. Both public conversion routes
+test these rejection classes separately.
 
 Standalone object-sidecar writers use `Ext/ibcmd-form-presence.v2.json` because
 they have no configuration manifest owner. The same root cannot be declared in
