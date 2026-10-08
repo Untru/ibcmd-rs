@@ -65435,11 +65435,27 @@ fn register_localized_field(values: &[(&str, &str)]) -> String {
 }
 
 fn exact_register_standard_attributes_for_test(definitions: &[(&str, &str)]) -> String {
+    exact_register_standard_attributes_with_fill_for_test(definitions, None)
+}
+
+fn exact_register_standard_attributes_with_fill_for_test(
+    definitions: &[(&str, &str)],
+    fill_value: Option<&str>,
+) -> String {
     let mut payload = vec!["1".to_string(), definitions.len().to_string()];
     for (marker, name) in definitions {
         payload.push(format!("{{{marker}}}"));
         payload.push(INFORMATION_REGISTER_STANDARD_ATTRIBUTE_SECTION_UUID.to_string());
         let mut values = information_register_standard_attribute_values_for_test(name, false);
+        if let Some(fill_value) = fill_value {
+            let index = INFORMATION_REGISTER_STANDARD_ATTRIBUTE_KEYS
+                .iter()
+                .position(|key| {
+                    *key == INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_VALUE_PROPERTY_UUID
+                })
+                .expect("the authored property bag declares its fill-value key");
+            values[index] = fill_value.to_owned();
+        }
         if *name == "Period" {
             values[1] = information_register_standard_attribute_direct_enum_for_test(
                 INFORMATION_REGISTER_STANDARD_ATTRIBUTE_FILL_CHECKING_UUID,
@@ -80185,6 +80201,11 @@ fn accounting_register_standard_attribute_presence_retains_empty_present_and_mal
 
 #[test]
 fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
+    assert_eq!(
+        parse_information_register_owner_localized_value("{0}"),
+        Some(Vec::new())
+    );
+    assert!(parse_information_register_owner_localized_value("{1,0}").is_none());
     let index = BTreeMap::new();
     let vocabulary = || ChartStandardAttributeVocabulary::NilOnly;
     let attributes = parse_chart_root_standard_attributes(
@@ -80262,9 +80283,24 @@ fn chart_root_empty_presence_keeps_nested_and_complete_present_contracts() {
     ];
     for (marker, _, definitions) in CHART_OF_ACCOUNTS_STANDARD_TABULAR_SECTION_DEFINITIONS {
         payload.push((*marker).to_owned());
-        let attributes = exact_register_standard_attributes_for_test(definitions);
+        if definitions.iter().any(|(_, name)| *name == "LineNumber") {
+            let numeric_fill = exact_register_standard_attributes_for_test(definitions);
+            assert!(
+                parse_chart_standard_attributes(
+                    &numeric_fill,
+                    definitions,
+                    vocabulary(),
+                    &index,
+                    &index,
+                )
+                .is_none(),
+                "nested chart attributes must still refuse numeric LineNumber fill"
+            );
+        }
+        let attributes =
+            exact_register_standard_attributes_with_fill_for_test(definitions, Some(r#"{"U"}"#));
         payload.push(format!(
-            "{{3,{{1,0}},\"authored section\",0,0,{attributes},{{1,0}}}}"
+            "{{3,{{0}},\"authored section\",0,0,{attributes},{{0}}}}"
         ));
     }
     let present = parse_chart_root_standard_tabular_sections(
