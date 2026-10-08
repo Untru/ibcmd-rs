@@ -258,3 +258,143 @@ fn malformed_synonym_counts_do_not_panic_or_publish_physical_xml() {
         assert_eq!(error.parser_stage, "canonical_empty_family");
     }
 }
+
+#[test]
+fn compiled_root_projects_owned_eds_before_integration_on_both_routes() {
+    use crate::metadata_model::{
+        export::{ExportContext, NameIndex, decode_object, object_names},
+        objects::parts::Compat,
+    };
+    const SERVICE_UUID: &str = "43500000-0000-4000-8000-00000000000b";
+    for (dialect, version) in [
+        ("2.20", InfobaseConfigSourceVersion::V2_20),
+        ("2.21", InfobaseConfigSourceVersion::V2_21),
+    ] {
+        let eds = fixture::external_data_source(dialect, "Automatic", [0, 1, 2]);
+        let service = fixture::document(
+            dialect,
+            &format!(
+                r#"<IntegrationService uuid="{SERVICE_UUID}"><InternalInfo><xr:GeneratedType name="IntegrationServiceManager.Link435" category="Manager"><xr:TypeId>43500000-0000-4000-8000-00000000000c</xr:TypeId><xr:ValueId>43500000-0000-4000-8000-00000000000d</xr:ValueId></xr:GeneratedType></InternalInfo><Properties><Name>Link435</Name><Synonym/><Comment/><ExternalIntegrationServiceAddress/></Properties><ChildObjects/></IntegrationService>"#,
+            ),
+        );
+        // Deliberately reverse authored order; the stored seven-section root
+        // and both XML projections must use their shared schema vocabulary.
+        let configuration = fixture::configuration(dialect)
+            .replace("<ScheduledJob>Job435</ScheduledJob>", "")
+            .replace(
+                "<ChildObjects>",
+                "<ChildObjects><IntegrationService>Link435</IntegrationService>",
+            );
+        let sources = [
+            ("Configuration", "Configuration.xml", configuration),
+            (
+                "ExternalDataSource",
+                "ExternalDataSources/Source435.xml",
+                eds,
+            ),
+            (
+                "IntegrationService",
+                "IntegrationServices/Link435.xml",
+                service,
+            ),
+        ];
+        let files = sources
+            .iter()
+            .map(|(_, path, xml)| {
+                (
+                    PathBuf::from(path),
+                    std::sync::Arc::new(xml.as_bytes().to_vec()),
+                )
+            })
+            .collect::<Vec<_>>();
+        let context = DescriptorContext::with_files(Path::new("."), dialect, &files).unwrap();
+        let rows = sources
+            .iter()
+            .map(|(kind, path, xml)| {
+                parse_row(
+                    &compile_descriptor(kind, Path::new(path), xml.as_bytes(), &context).unwrap(),
+                )
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        let mut names = NameIndex::default();
+        let mut refs = BTreeMap::new();
+        for (kind, row) in [
+            ("ExternalDataSource", &rows[1]),
+            ("IntegrationService", &rows[2]),
+        ] {
+            let own = object_names(kind, row).unwrap();
+            refs.insert(own.uuid.clone(), own.full_name.clone());
+            names.add(&own);
+        }
+        assert_eq!(
+            refs.get(fixture::OBJECT_UUID).unwrap(),
+            "ExternalDataSource.Source435"
+        );
+        assert_eq!(
+            refs.get(SERVICE_UUID).unwrap(),
+            "IntegrationService.Link435"
+        );
+        let export_context = ExportContext {
+            names,
+            version: dialect.into(),
+            compat: Compat::parse(context.index.compatibility_mode.as_deref().unwrap()).unwrap(),
+        };
+        let current = decode_object("Configuration", &rows[0], &export_context).unwrap();
+        let children = current.child("ChildObjects").unwrap();
+        assert_eq!(
+            children
+                .children
+                .iter()
+                .map(|child| (child.name.as_str(), child.text.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("ExternalDataSource", "Source435"),
+                ("IntegrationService", "Link435")
+            ]
+        );
+        let root = serialize(&rows[0]);
+        let physical = refs::extract_configuration_source_xml(
+            &root,
+            fixture::CONFIGURATION_UUID,
+            &refs,
+            version,
+        )
+        .unwrap();
+        let physical = crate::metadata_model::xml::parse_element_tree(physical.as_bytes()).unwrap();
+        let children = physical.path(&["Configuration", "ChildObjects"]).unwrap();
+        assert_eq!(
+            children
+                .children
+                .iter()
+                .map(|child| (child.name.as_str(), child.text.as_str()))
+                .collect::<Vec<_>>(),
+            [
+                ("ExternalDataSource", "Source435"),
+                ("IntegrationService", "Link435")
+            ]
+        );
+        let mut incomplete = refs.clone();
+        incomplete.remove(fixture::OBJECT_UUID);
+        assert!(
+            refs::extension_root_parts(&root, fixture::CONFIGURATION_UUID, &incomplete)
+                .unwrap()
+                .child_objects
+                .is_none()
+        );
+        let mut wrong_family = refs;
+        wrong_family.insert(fixture::OBJECT_UUID.into(), "Interface.Source435".into());
+        assert!(
+            refs::extension_root_parts(&root, fixture::CONFIGURATION_UUID, &wrong_family)
+                .unwrap()
+                .child_objects
+                .is_none()
+        );
+        let missing_context = ExportContext {
+            names: NameIndex::default(),
+            version: dialect.into(),
+            compat: Compat::parse(context.index.compatibility_mode.as_deref().unwrap()).unwrap(),
+        };
+        assert!(decode_object("Configuration", &rows[0], &missing_context).is_err());
+    }
+}

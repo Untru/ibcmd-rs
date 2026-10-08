@@ -7,6 +7,7 @@
 #![forbid(unsafe_code)]
 
 pub mod configuration_rights;
+pub mod configuration_root;
 pub mod external_data_source;
 
 use std::borrow::Cow;

@@ -25,59 +25,6 @@ use crate::metadata_model::export::{
 };
 use crate::metadata_model::xml::Element;
 
-/// The order `<ChildObjects>` lists the kinds in (the stored slots are in
-/// class-uuid order). Measured on the four corpora and the exporter's table;
-/// `Interface` and `ExternalDataSource` have no corpus and are refused.
-const CHILD_KIND_ORDER: [&str; 47] = [
-    "Language",
-    "Subsystem",
-    "StyleItem",
-    "Style",
-    "CommonPicture",
-    "SessionParameter",
-    "Role",
-    "CommonTemplate",
-    "FilterCriterion",
-    "CommonModule",
-    "CommonAttribute",
-    "ExchangePlan",
-    "XDTOPackage",
-    "WebService",
-    "HTTPService",
-    "WSReference",
-    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
-    "EventSubscription",
-    "ScheduledJob",
-    "SettingsStorage",
-    "FunctionalOption",
-    "FunctionalOptionsParameter",
-    "DefinedType",
-    "PaletteColor",
-    "Bot",
-    "CommonCommand",
-    "CommandGroup",
-    "Constant",
-    "CommonForm",
-    "Catalog",
-    "Document",
-    "DocumentNumerator",
-    "Sequence",
-    "DocumentJournal",
-    "Enum",
-    "Report",
-    "DataProcessor",
-    "InformationRegister",
-    "AccumulationRegister",
-    "ChartOfCharacteristicTypes",
-    "ChartOfAccounts",
-    "AccountingRegister",
-    "ChartOfCalculationTypes",
-    "CalculationRegister",
-    "BusinessProcess",
-    "Task",
-    "IntegrationService",
-];
-
 /// The row taken apart: its identity, the seven sections' contained objects
 /// and slots, and the properties tuple.
 struct RootRow<'a> {
@@ -399,9 +346,7 @@ fn child_objects(row: &RootRow<'_>, context: &ExportContext) -> Result<Element> 
     let mut groups = Vec::with_capacity(row.objects.len());
     let mut seen = BTreeSet::new();
     for (kind, uuids) in &row.objects {
-        let order = CHILD_KIND_ORDER
-            .iter()
-            .position(|candidate| candidate == kind)
+        let (order, _) = ibcmd_schema::configuration_root::child_xml_kind(kind)
             .ok_or_else(|| anyhow!("no corpus shows where {kind} objects are listed"))?;
         if !seen.insert(*kind) {
             bail!("two slots list {kind} objects");

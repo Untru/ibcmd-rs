@@ -52,3 +52,13 @@ Issue #435 remains open until the public routes and fresh native load/export/
 rebuild acceptance pass. Native acceptance must check all three generated
 pairs and the entire EDS XML, each advertised enum value, edits preserving
 generated identities, and the separately admitted platform profiles.
+
+The Configuration XML child vocabulary is shared by canonical and physical
+exports in `ibcmd-schema::configuration_root`. Empty ExternalDataSource is
+listed immediately before IntegrationService, as observed in the retained
+native 8.3/8.5 XML. Binary section order and existing reference validation are
+unchanged; unknown kinds, including unmeasured Interface, remain unranked.
+Generated controls compile distinct EDS/IntegrationService identities through
+both root consumers and check public returned Configuration ChildObjects.
+This source integration does not complete native rebuild acceptance or admit
+nonempty EDS tables/cubes/functions.

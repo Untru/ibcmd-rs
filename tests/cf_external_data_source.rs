@@ -170,6 +170,10 @@ fn public_base_free_bootstrap_exports_all_eds_types_and_rebuilds_them_both_profi
             let report: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
             assert_eq!(report["source_version"], dialect);
             compatibility_export(&cf, &exported, dialect);
+            let root_xml = fs::read_to_string(exported.join("Configuration.xml")).unwrap();
+            assert!(root_xml.contains("<ExternalDataSource>Source435</ExternalDataSource>"));
+            assert!(root_xml.contains("<CommonModule>Handler435</CommonModule>"));
+            assert!(root_xml.contains("<ScheduledJob>Job435</ScheduledJob>"));
             let path = exported.join("ExternalDataSources/Source435.xml");
             let xml = fs::read_to_string(&path).unwrap();
             assert!(xml.contains(&format!(
@@ -201,6 +205,8 @@ fn public_base_free_bootstrap_exports_all_eds_types_and_rebuilds_them_both_profi
             let twice = tree.0.join("twice");
             succeeded(&bootstrap(&exported, &second, dialect));
             compatibility_export(&second, &twice, dialect);
+            let rebuilt_root = fs::read_to_string(twice.join("Configuration.xml")).unwrap();
+            assert!(rebuilt_root.contains("<ExternalDataSource>Source435</ExternalDataSource>"));
             assert_eq!(
                 fs::read(&path).unwrap(),
                 fs::read(twice.join("ExternalDataSources/Source435.xml")).unwrap()

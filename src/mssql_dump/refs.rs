@@ -4989,57 +4989,6 @@ fn is_configuration_root_synonym_field(field: Option<&str>) -> bool {
 
 const CONFIGURATION_CONTAINED_OBJECT_COUNT: usize = 7;
 
-const CONFIGURATION_ROOT_CHILD_KIND_ORDER: [&str; 47] = [
-    "Language",
-    "Subsystem",
-    "StyleItem",
-    "Style",
-    "CommonPicture",
-    "SessionParameter",
-    "Role",
-    "CommonTemplate",
-    "FilterCriterion",
-    "CommonModule",
-    "CommonAttribute",
-    "ExchangePlan",
-    "XDTOPackage",
-    "WebService",
-    "HTTPService",
-    "WSReference",
-    ibcmd_schema::websocket_client::WebSocketClientLayout::KIND,
-    "EventSubscription",
-    "ScheduledJob",
-    "SettingsStorage",
-    "FunctionalOption",
-    "FunctionalOptionsParameter",
-    "DefinedType",
-    // 8.5: the palette colours follow the defined types (BSP 3.2.1.356).
-    "PaletteColor",
-    "Bot",
-    "CommonCommand",
-    "CommandGroup",
-    "Constant",
-    "CommonForm",
-    "Catalog",
-    "Document",
-    "DocumentNumerator",
-    "Sequence",
-    "DocumentJournal",
-    "Enum",
-    "Report",
-    "DataProcessor",
-    "InformationRegister",
-    "AccumulationRegister",
-    "ChartOfCharacteristicTypes",
-    "ChartOfAccounts",
-    "AccountingRegister",
-    "ChartOfCalculationTypes",
-    "CalculationRegister",
-    "BusinessProcess",
-    "Task",
-    "IntegrationService",
-];
-
 /// The evidenced Configuration root envelope shared by every root consumer:
 /// `{2,{Identity},N,<section 1>...<section N>,{footer}}` — a flat field list
 /// whose declared section count must match the actual slots exactly (see
@@ -5399,11 +5348,7 @@ fn resolve_configuration_root_child_objects(
 }
 
 fn configuration_root_child_kind(kind: &str) -> Option<(usize, &'static str)> {
-    CONFIGURATION_ROOT_CHILD_KIND_ORDER
-        .iter()
-        .enumerate()
-        .find(|(_, candidate)| **candidate == kind)
-        .map(|(order, kind)| (order, *kind))
+    ibcmd_schema::configuration_root::child_xml_kind(kind)
 }
 
 pub(super) fn parse_configuration_localized_property(
