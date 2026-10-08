@@ -5,6 +5,8 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result, bail};
@@ -26,40 +28,116 @@ pub(crate) struct OriginalChild {
     outcome_unproved: bool,
     terminal_proved: bool,
     direct_exit_proved: bool,
+    command_deadline: Option<Instant>,
+}
+
+struct OriginalReader {
+    // The waiting owner never locks the stream or joins its reader.
+    _original: Option<Arc<Mutex<Box<dyn Read + Send>>>>,
+    _thread: Option<JoinHandle<()>>,
+    receive: Receiver<Result<Vec<u8>>>,
+    obtained: Option<Result<Vec<u8>>>,
+}
+
+impl OriginalReader {
+    fn new(reader: impl Read + Send + 'static) -> Self {
+        Self::start_with(reader, |task| std::thread::Builder::new().spawn(task))
+    }
+
+    fn start_with(
+        reader: impl Read + Send + 'static,
+        start: impl FnOnce(Box<dyn FnOnce() + Send>) -> std::io::Result<JoinHandle<()>>,
+    ) -> Self {
+        let original: Arc<Mutex<Box<dyn Read + Send>>> = Arc::new(Mutex::new(Box::new(reader)));
+        let source = Arc::clone(&original);
+        let (send, receive) = mpsc::channel();
+        let error_send = send.clone();
+        let thread = start(Box::new(move || {
+            let result = (|| -> Result<Vec<u8>> {
+                let mut stream = source.lock().unwrap_or_else(|error| error.into_inner());
+                let mut bytes = Vec::new();
+                stream
+                    .by_ref()
+                    .take((OUTPUT_BOUND + 1) as u64)
+                    .read_to_end(&mut bytes)?;
+                if bytes.len() > OUTPUT_BOUND {
+                    bail!("managed child pipe exceeds bound");
+                }
+                Ok(bytes)
+            })();
+            let _ = send.send(result);
+        }));
+        let thread = match thread {
+            Ok(thread) => Some(thread),
+            Err(error) => {
+                let _ = error_send.send(Err(error).context("managed original reader start failed"));
+                None
+            }
+        };
+        Self {
+            _original: Some(original),
+            _thread: thread,
+            receive,
+            obtained: None,
+        }
+    }
+
+    fn missing() -> Self {
+        let (send, receive) = mpsc::channel();
+        let _ = send.send(Err(anyhow::anyhow!("original managed pipe handle missing")));
+        Self {
+            _original: None,
+            _thread: None,
+            receive,
+            obtained: None,
+        }
+    }
+
+    fn complete_at(&mut self, deadline: Instant, label: &str) -> Result<&[u8]> {
+        require_deadline(deadline)?;
+        if self.obtained.is_none() {
+            self.obtained = Some(
+                self.receive
+                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                    .with_context(|| format!("original {label} unproved"))?,
+            );
+        }
+        // Even queued EOF cannot turn an expired attempt into known completion.
+        require_deadline(deadline)?;
+        match self
+            .obtained
+            .as_ref()
+            .context("original reader result absent")?
+        {
+            Ok(bytes) => Ok(bytes),
+            Err(_) => bail!("original managed {label} capture unproved; output redacted"),
+        }
+    }
 }
 
 struct OriginalPipes {
-    stdout: Receiver<Result<Vec<u8>>>,
-    stderr: Receiver<Result<Vec<u8>>>,
-    retained_stdout: Option<Vec<u8>>,
-    retained_stderr: Option<Vec<u8>>,
+    stdout: OriginalReader,
+    stderr: OriginalReader,
 }
 
 impl OriginalPipes {
-    fn finish(&mut self, deadline: Instant) -> Result<(Vec<u8>, Vec<u8>)> {
-        if self.retained_stdout.is_none() {
-            self.retained_stdout = Some(
-                self.stdout
-                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                    .context("original stdout unproved")??,
-            );
-        }
-        if self.retained_stderr.is_none() {
-            self.retained_stderr = Some(
-                self.stderr
-                    .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-                    .context("original stderr unproved")??,
-            );
-        }
+    fn finish_at(&mut self, deadline: Instant) -> Result<(Vec<u8>, Vec<u8>)> {
+        self.stdout.complete_at(deadline, "stdout")?;
+        self.stderr.complete_at(deadline, "stderr")?;
+        require_deadline(deadline)?;
+        // Retain the original obtained results through the caller policy gate.
         Ok((
-            self.retained_stdout
-                .take()
-                .context("original stdout absent")?,
-            self.retained_stderr
-                .take()
-                .context("original stderr absent")?,
+            self.stdout.complete_at(deadline, "stdout")?.to_vec(),
+            self.stderr.complete_at(deadline, "stderr")?.to_vec(),
         ))
     }
+}
+
+pub(crate) fn require_deadline(deadline: Instant) -> Result<()> {
+    if Instant::now() >= deadline {
+        bail!("managed child deadline; no signal sent");
+    }
+    Ok(())
 }
 
 fn await_direct_exit(
@@ -67,38 +145,16 @@ fn await_direct_exit(
     deadline: Instant,
 ) -> Result<std::process::ExitStatus> {
     loop {
+        require_deadline(deadline)?;
         if let Some(status) = poll()? {
+            require_deadline(deadline)?;
             return Ok(status);
         }
-        if Instant::now() >= deadline {
-            bail!("managed child deadline; no signal sent");
-        }
-        std::thread::sleep(Duration::from_millis(20));
+        require_deadline(deadline)?;
+        std::thread::sleep(
+            Duration::from_millis(20).min(deadline.saturating_duration_since(Instant::now())),
+        );
     }
-}
-
-fn pipe(reader: impl Read + Send + 'static) -> Receiver<Result<Vec<u8>>> {
-    let (send, receive) = mpsc::channel();
-    std::thread::spawn(move || {
-        let result = (|| -> Result<Vec<u8>> {
-            let mut bytes = Vec::new();
-            reader
-                .take((OUTPUT_BOUND + 1) as u64)
-                .read_to_end(&mut bytes)?;
-            if bytes.len() > OUTPUT_BOUND {
-                bail!("managed child pipe exceeds bound");
-            }
-            Ok(bytes)
-        })();
-        let _ = send.send(result);
-    });
-    receive
-}
-
-fn missing_pipe() -> Receiver<Result<Vec<u8>>> {
-    let (send, receive) = mpsc::channel();
-    let _ = send.send(Err(anyhow::anyhow!("original managed pipe handle missing")));
-    receive
 }
 
 #[cfg(windows)]
@@ -134,8 +190,37 @@ fn original_birth(_child: &Child) -> Result<u64> {
 
 impl OriginalChild {
     pub(crate) fn spawn(executable: &Path, arguments: &[String]) -> Result<Self> {
+        Self::spawn_original(executable, arguments, None)
+    }
+
+    pub(crate) fn spawn_at(
+        executable: &Path,
+        arguments: &[String],
+        deadline: Instant,
+    ) -> Result<Self> {
+        require_deadline(deadline)?;
+        Self::spawn_original(executable, arguments, Some(deadline))
+    }
+
+    fn spawn_original(
+        executable: &Path,
+        arguments: &[String],
+        deadline: Option<Instant>,
+    ) -> Result<Self> {
+        Self::spawn_original_with_readers(executable, arguments, deadline, OriginalReader::new)
+    }
+
+    fn spawn_original_with_readers(
+        executable: &Path,
+        arguments: &[String],
+        deadline: Option<Instant>,
+        mut reader: impl FnMut(Box<dyn Read + Send>) -> OriginalReader,
+    ) -> Result<Self> {
         if !cfg!(windows) || !executable.is_absolute() {
             bail!("managed creator requires a fully qualified Windows executable");
+        }
+        if let Some(deadline) = deadline {
+            require_deadline(deadline)?;
         }
         let mut child = Command::new(executable)
             .args(arguments)
@@ -150,30 +235,29 @@ impl OriginalChild {
         let out = child.stdout.take();
         let err = child.stderr.take();
         let pipes_missing = out.is_none() || err.is_none();
-        let stdout = out.map_or_else(missing_pipe, pipe);
-        let stderr = err.map_or_else(missing_pipe, pipe);
+        let stdout = out.map_or_else(OriginalReader::missing, |out| reader(Box::new(out)));
+        let stderr = err.map_or_else(OriginalReader::missing, |err| reader(Box::new(err)));
         let birth = original_birth(&child);
         drop(child.stdin.take()); // Valid pipe EOF, rather than inherited invalid stdin.
         let mut owned = Self {
             child,
             executable: executable.to_owned(),
             birth_100ns: 0,
-            pipes: OriginalPipes {
-                stdout,
-                stderr,
-                retained_stdout: None,
-                retained_stderr: None,
-            },
+            pipes: OriginalPipes { stdout, stderr },
             identity: None,
             outcome_unproved: pipes_missing,
             terminal_proved: false,
             direct_exit_proved: false,
+            command_deadline: deadline,
         };
         match birth {
             Ok(value) => owned.birth_100ns = value,
             Err(_) => {
                 owned.outcome_unproved = true;
             }
+        }
+        if deadline.is_some_and(|deadline| require_deadline(deadline).is_err()) {
+            owned.outcome_unproved = true;
         }
         Ok(owned)
     }
@@ -231,16 +315,28 @@ impl OriginalChild {
     }
 
     pub(crate) fn completed(&mut self, timeout: Duration) -> Result<(i32, Vec<u8>, Vec<u8>)> {
+        let deadline = Instant::now()
+            .checked_add(timeout)
+            .context("child deadline overflow")?;
+        self.completed_at(deadline)
+    }
+
+    pub(crate) fn completed_at(&mut self, deadline: Instant) -> Result<(i32, Vec<u8>, Vec<u8>)> {
         let result = (|| -> Result<_> {
+            require_deadline(deadline)?;
+            if self
+                .command_deadline
+                .is_some_and(|original| original != deadline)
+            {
+                bail!("managed original command deadline changed");
+            }
             if self.outcome_unproved {
                 bail!("managed child outcome already unproved");
             }
-            let deadline = Instant::now()
-                .checked_add(timeout)
-                .context("child deadline overflow")?;
             let exit = await_direct_exit(|| Ok(self.child.try_wait()?), deadline)?;
             self.direct_exit_proved = true;
-            let (stdout, stderr) = self.pipes.finish(deadline)?;
+            let (stdout, stderr) = self.pipes.finish_at(deadline)?;
+            require_deadline(deadline)?;
             Ok((
                 exit.code().context("managed child exit code unavailable")?,
                 stdout,
@@ -253,6 +349,10 @@ impl OriginalChild {
             self.terminal_proved = true;
         }
         result
+    }
+
+    pub(crate) fn mark_unproved(&mut self) {
+        self.outcome_unproved = true;
     }
 
     pub(crate) fn terminal_proved(&self) -> bool {
@@ -471,6 +571,157 @@ pub(crate) struct CensusIdentity {
 mod shutdown_pipe_tests {
     use super::*;
 
+    #[cfg(windows)]
+    #[test]
+    fn original_child_survives_both_reader_creation_failures() {
+        // The actual test binary runs an empty libtest selection, never 1C/native.
+        let executable = std::env::current_exe().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut original = OriginalChild::spawn_original_with_readers(
+            &executable,
+            &[
+                "--exact".into(),
+                "managed_deadline_no_such_test".into(),
+                "--quiet".into(),
+            ],
+            Some(deadline),
+            |stream| {
+                OriginalReader::start_with(stream, |_| {
+                    Err(std::io::Error::other("reader allocation refused"))
+                })
+            },
+        )
+        .unwrap();
+        assert!(original.pid() > 0);
+        assert!(original.pipes.stdout._original.is_some());
+        assert!(original.pipes.stderr._original.is_some());
+        assert!(original.pipes.stdout._thread.is_none());
+        assert!(original.pipes.stderr._thread.is_none());
+        assert!(original.completed_at(deadline).is_err());
+        assert!(!original.terminal_proved());
+        assert!(original.pipes.stdout.obtained.as_ref().unwrap().is_err());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn post_start_reader_setup_cannot_reset_original_command_budget() {
+        let executable = std::env::current_exe().unwrap();
+        let deadline = Instant::now() + Duration::from_millis(10);
+        let mut original = OriginalChild::spawn_original_with_readers(
+            &executable,
+            &[
+                "--exact".into(),
+                "managed_deadline_no_such_test".into(),
+                "--quiet".into(),
+            ],
+            Some(deadline),
+            |stream| {
+                std::thread::sleep(Duration::from_millis(20));
+                OriginalReader::new(stream)
+            },
+        )
+        .unwrap();
+        assert!(original.pipes.stdout._original.is_some());
+        assert!(original.pipes.stderr._original.is_some());
+        assert!(original.completed_at(deadline).is_err());
+        assert!(
+            original
+                .completed_at(Instant::now() + Duration::from_secs(5))
+                .is_err()
+        );
+        assert!(!original.terminal_proved());
+    }
+
+    #[test]
+    fn queued_original_reader_does_not_rescue_expired_deadline() {
+        let (send, receive) = mpsc::channel();
+        send.send(Ok(b"queued EOF".to_vec())).unwrap();
+        let mut reader = OriginalReader {
+            _original: None,
+            _thread: None,
+            receive,
+            obtained: None,
+        };
+        assert!(reader.complete_at(Instant::now(), "stdout").is_err());
+        assert!(reader.obtained.is_none());
+        assert_eq!(reader.receive.try_recv().unwrap().unwrap(), b"queued EOF");
+    }
+
+    #[test]
+    fn fallible_reader_start_keeps_the_original_stream_and_error() {
+        let mut reader = OriginalReader::start_with(std::io::Cursor::new(b"original"), |_| {
+            Err(std::io::Error::other("reader allocation refused"))
+        });
+        assert!(reader._original.is_some());
+        assert!(reader._thread.is_none());
+        assert!(
+            reader
+                .complete_at(Instant::now() + Duration::from_secs(1), "stderr")
+                .is_err()
+        );
+        assert!(reader.obtained.as_ref().unwrap().is_err());
+        assert_eq!(Arc::strong_count(reader._original.as_ref().unwrap()), 1);
+    }
+
+    #[test]
+    fn late_direct_status_and_poll_are_not_terminal_authority() {
+        #[cfg(unix)]
+        use std::os::unix::process::ExitStatusExt;
+        #[cfg(windows)]
+        use std::os::windows::process::ExitStatusExt;
+        let mut polled = false;
+        assert!(
+            await_direct_exit(
+                || {
+                    polled = true;
+                    Ok(Some(std::process::ExitStatus::from_raw(0)))
+                },
+                Instant::now()
+            )
+            .is_err()
+        );
+        assert!(!polled);
+        let deadline = Instant::now() + Duration::from_millis(10);
+        assert!(
+            await_direct_exit(
+                || {
+                    std::thread::sleep(Duration::from_millis(20));
+                    Ok(Some(std::process::ExitStatus::from_raw(0)))
+                },
+                deadline
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn each_original_stream_checks_same_deadline_before_queued_eof() {
+        for late_stream in ["stdout", "stderr"] {
+            let queued = || {
+                let (send, receive) = mpsc::channel();
+                send.send(Ok(Vec::new())).unwrap();
+                OriginalReader {
+                    _original: None,
+                    _thread: None,
+                    receive,
+                    obtained: None,
+                }
+            };
+            let mut pipes = OriginalPipes {
+                stdout: queued(),
+                stderr: queued(),
+            };
+            if late_stream == "stderr" {
+                pipes
+                    .stdout
+                    .complete_at(Instant::now() + Duration::from_secs(1), "stdout")
+                    .unwrap();
+            }
+            assert!(pipes.finish_at(Instant::now()).is_err());
+            assert!(pipes.stderr.obtained.is_none());
+        }
+    }
+
     #[test]
     fn direct_exit_precedes_descendant_owned_pipe_completion() {
         #[cfg(unix)]
@@ -479,30 +730,41 @@ mod shutdown_pipe_tests {
         use std::os::windows::process::ExitStatusExt;
         let (out_send, stdout) = mpsc::channel();
         let (err_send, stderr) = mpsc::channel();
-        let mut pipes = OriginalPipes {
-            stdout,
-            stderr,
-            retained_stdout: None,
-            retained_stderr: None,
+        let reader = |receive| OriginalReader {
+            _original: None,
+            _thread: None,
+            receive,
+            obtained: None,
         };
-        // The real direct-exit poll primitive never touches inherited pipes.
+        let mut pipes = OriginalPipes {
+            stdout: reader(stdout),
+            stderr: reader(stderr),
+        };
+        // Direct exit remains independent of inherited pipe EOF, but must be timely.
         let status = await_direct_exit(
             || Ok(Some(std::process::ExitStatus::from_raw(1))),
-            Instant::now(),
+            Instant::now() + Duration::from_secs(1),
         )
         .unwrap();
         assert!(!status.success());
         out_send.send(Ok(b"anchor output".to_vec())).unwrap();
-        // A descendant still owns stderr. This is not full terminal proof.
-        assert!(pipes.finish(Instant::now()).is_err());
+        assert!(
+            pipes
+                .finish_at(Instant::now() + Duration::from_millis(20))
+                .is_err()
+        );
         assert_eq!(
-            pipes.retained_stdout.as_deref(),
-            Some(b"anchor output".as_slice())
+            pipes.stdout.obtained.as_ref().unwrap().as_ref().unwrap(),
+            b"anchor output"
         );
         err_send.send(Ok(b"descendant EOF".to_vec())).unwrap();
-        let (out, err) = pipes.finish(Instant::now()).unwrap();
+        // This is the shutdown owner retrying its distinct pipe phase, not a utility command.
+        let (out, err) = pipes
+            .finish_at(Instant::now() + Duration::from_secs(1))
+            .unwrap();
         assert_eq!(out, b"anchor output");
         assert_eq!(err, b"descendant EOF");
+        assert!(pipes.finish_at(Instant::now()).is_err());
         assert!(await_direct_exit(|| Ok(None), Instant::now()).is_err());
         assert!(
             await_direct_exit(|| Err(anyhow::anyhow!("unproved handle")), Instant::now()).is_err()

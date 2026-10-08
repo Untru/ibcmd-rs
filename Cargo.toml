@@ -88,3 +88,8 @@ harness = false
 name = "profile_process_deadline"
 path = "tests/profile_process_deadline.rs"
 harness = false
+
+[[test]]
+name = "managed_command_deadline"
+path = "tests/managed_command_deadline.rs"
+harness = false

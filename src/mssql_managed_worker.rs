@@ -15,22 +15,15 @@ use serde::Serialize;
 use uuid::Uuid;
 
 mod child;
+mod command;
+mod identity;
+pub(crate) use identity::ProcessIdentity;
 mod native;
 pub(crate) mod undo;
 pub(crate) use native::{Creation, CreatorOptions, create};
 pub(crate) type NativeManagedWorker = ManagedWorker<native::NativeRuntime>;
 #[cfg(test)]
 mod tests;
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
-pub(crate) struct ProcessIdentity {
-    pub pid: u32,
-    pub parent: u32,
-    /// Original process-handle FILETIME, rather than rounded CIM time.
-    pub birth_100ns: u64,
-    pub executable: PathBuf,
-    pub command_sha256: String,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct LifetimeBinding {
