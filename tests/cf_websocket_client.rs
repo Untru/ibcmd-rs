@@ -25,6 +25,7 @@ use ibcmd_rs::{
         common::Header,
         compile_descriptor,
         export::{configuration_objects, object_names, write_document},
+        export_names::{root_kinds, root_members},
         websocket_client::WebSocketClient,
     },
     module_blob::{pack_module_blob_bytes_base_free, unpack_module_blob_text},
@@ -319,7 +320,7 @@ fn archive_with_row(row: Brace, with_module: bool) -> Vec<u8> {
     ));
     if with_module {
         elements.push(Format15Element::named(
-            format!("{CLIENT}.0"),
+            &format!("{CLIENT}.0"),
             Some(pack_module_blob_bytes_base_free(MODULE, None).unwrap().blob),
         ));
     }
@@ -454,6 +455,10 @@ fn websocket_root_family_uses_existing_seven_groups_and_canonical_uuid() {
             .unwrap()
             .contains(&(Layout::KIND.into(), CLIENT.into()))
     );
+    // The model plan's name reader has its own root-class projection. Check
+    // this route too: legacy family inference can otherwise mask omissions.
+    assert_eq!(root_kinds(&row).get(CLIENT), Some(&Layout::KIND));
+    assert_eq!(root_members(&row), [(Layout::KIND, CLIENT.into())]);
     // The module codec stores the exact source bytes, not a guessed encoding.
     assert_eq!(
         unpack_module_blob_text(&pack_module_blob_bytes_base_free(MODULE, None).unwrap().blob)
