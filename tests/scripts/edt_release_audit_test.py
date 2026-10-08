@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import subprocess
+import struct
 import sys
 import tempfile
 import tomllib
@@ -15,6 +16,60 @@ spec.loader.exec_module(audit)
 
 
 class MarkerBoundary(unittest.TestCase):
+    def elf_fixture(self):
+        return bytearray.fromhex((source.parent.parent / "tests/fixtures/elf-debug-numeric.hex").read_text(encoding="ascii"))
+
+    def test_numeric_debug_reference_is_distinct_from_loaded_bytes_and_strings(self):
+        numeric = self.elf_fixture()
+        self.assertIn(b".jar", numeric)
+        self.assertEqual(audit.forbidden_binary_markers(numeric), [])
+        for offset in (384, 416):
+            data = self.elf_fixture()
+            data[offset:offset + 4] = b".jar"
+            self.assertIn(b".jar", audit.forbidden_binary_markers(data))
+
+    def test_allocated_debug_info_is_scanned_and_load_segment_overlap_refuses(self):
+        data = self.elf_fixture()
+        struct.pack_into("<Q", data, 200, 2)
+        self.assertIn(b".jar", audit.forbidden_binary_markers(data))
+        data = self.elf_fixture()
+        struct.pack_into("<Q", data, 592, 408)
+        with self.assertRaisesRegex(SystemExit, "overlaps loadable"):
+            audit.forbidden_binary_markers(data)
+
+    def test_malformed_ranges_and_names_refuse_without_masking(self):
+        for offset, value in ((216, 1 << 63), (320, (1 << 64) - 1)):
+            data = self.elf_fixture()
+            struct.pack_into("<Q", data, offset, value)
+            with self.assertRaises(SystemExit):
+                audit.forbidden_binary_markers(data)
+
+    def test_extended_header_counts_use_the_actual_section_zero_fields(self):
+        data = self.elf_fixture()
+        for offset, value in ((60, 0), (62, 0xffff), (56, 0xffff)):
+            struct.pack_into("<H", data, offset, value)
+        struct.pack_into("<Q", data, 96, 5)
+        struct.pack_into("<I", data, 104, 4)
+        struct.pack_into("<I", data, 108, 1)
+        self.assertEqual(audit.forbidden_binary_markers(data), [])
+
+    def test_debug_cannot_hide_headers_string_table_or_other_section_payloads(self):
+        for offset in (64, 416, 432, 560):
+            data = self.elf_fixture()
+            struct.pack_into("<Q", data, 216, offset)
+            with self.assertRaises(SystemExit):
+                audit.forbidden_binary_markers(data)
+
+    def test_nonnull_program_payloads_cannot_alias_debug_or_escape_file_bounds(self):
+        for kind in (3, 2, 4, 7, 0x6fffffff):
+            for offset in (400, (1 << 64) - 1):
+                data = self.elf_fixture()
+                struct.pack_into("<I", data, 560, kind)
+                struct.pack_into("<Q", data, 568, offset)
+                struct.pack_into("<Q", data, 592, 8)
+                with self.assertRaises(SystemExit):
+                    audit.forbidden_binary_markers(data)
+
     def test_source_ids_are_accepted_but_do_not_mask_any_runtime_marker(self):
         project = b" ".join(audit.EDT_SOURCE_IDS)
         self.assertEqual(audit.forbidden_binary_markers(project), [])

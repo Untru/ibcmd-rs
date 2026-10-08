@@ -58,6 +58,14 @@ pub struct FormCiItem {
     pub user_visible_roles: Vec<(String, bool)>,
 }
 
+/// CURRENT semantic presence of the form-root command interface. The native
+/// AutoCommandBar convention may project this independently authored boolean.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct FormRootPresence {
+    pub command_interface: bool,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FormBody {
     /// Native merged event spelling only. Owner lists remain ordered semantic

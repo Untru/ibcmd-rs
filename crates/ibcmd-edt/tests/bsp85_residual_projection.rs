@@ -1,4 +1,6 @@
-use formats_xml::form::{FormDialect, read_form, write_form};
+use formats_xml::form::{
+    FormDialect, apply_form_presence_resource, prepare_form_presence, read_form, write_form,
+};
 use morph1c_core::{
     ir::{
         DecoratorBody, DecoratorRef, FormBody, FormControlKind, FormItem, MetadataObject,
@@ -69,6 +71,43 @@ fn form_read(bytes: &[u8], dialect: FormDialect) -> FormBody {
 }
 #[test]
 fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() {
+    fn prepared_native(body: &FormBody) -> Vec<u8> {
+        let profile = FormatVersion::new(2, 21);
+        let uuid = Uuid([77; 16]);
+        let package =
+            prepare_form_presence(body, uuid, FormDialect::Designer, profile, None).unwrap();
+        let mut restored = form_read(&package.bytes, FormDialect::Designer);
+        if let Some(resource) = &package.resource {
+            apply_form_presence_resource(&mut restored, uuid, profile, resource, None).unwrap();
+        }
+        // A cross-dialect read acquires native spelling/order and source
+        // dependency markers. Compare all current values after excluding only
+        // those transport markers; root presence and panel values stay.
+        let semantics = |value: &FormBody| {
+            let mut value = serde_json::to_value(value).unwrap();
+            let object = value.as_object_mut().unwrap();
+            for marker in [
+                "native_event_order",
+                "source_wire_order",
+                "source_xml221_default_presence",
+                "designer_path_spelling",
+                "availability_source_form_dependency",
+            ] {
+                object.remove(marker);
+            }
+            // This flag records the source spelling of the special native
+            // FormCommandBar name. The actual current name is still compared.
+            if let Some(panel) = object
+                .get_mut("auto_command_bar")
+                .and_then(serde_json::Value::as_object_mut)
+            {
+                panel.remove("designer_named");
+            }
+            value
+        };
+        assert_eq!(semantics(&restored), semantics(body));
+        package.bytes
+    }
     let source = br#"<form:Form xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:form="http://g5.1c.ru/v8/dt/form"><autoCommandBar><name>FormCommandBar</name><id>1</id><horizontalAlign>Left</horizontalAlign><autoFill>true</autoFill></autoCommandBar></form:Form>"#;
     let mut body = form_read(
         &[
@@ -80,17 +119,17 @@ fn explicit_edt_panel_name_and_current_edits_win_without_native_spelling_loss() 
         FormDialect::Edt,
     );
     assert!(
-        std::str::from_utf8(&form_write(&body, FormDialect::Designer))
+        std::str::from_utf8(&prepared_native(&body))
             .unwrap()
             .contains("name=\"FormCommandBar\"")
     );
     body.auto_command_bar.as_mut().unwrap().name = "CurrentPanel".into();
     assert!(
-        std::str::from_utf8(&form_write(&body, FormDialect::Designer))
+        std::str::from_utf8(&prepared_native(&body))
             .unwrap()
             .contains("name=\"CurrentPanel\"")
     );
-    let native = form_write(&body, FormDialect::Designer);
+    let native = prepared_native(&body);
     let native = String::from_utf8(native)
         .unwrap()
         .replace("name=\"CurrentPanel\"", "name=\"\"");

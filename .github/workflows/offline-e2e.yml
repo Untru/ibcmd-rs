@@ -204,6 +204,17 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo test --locked -p ibcmd-rs --test '*' --no-default-features
 
+      - name: Retain binary for failed release boundary investigation
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failed-boundary-binary-${{ matrix.target }}
+          path: |
+            target/debug/ibcmd-rs
+            target/debug/ibcmd-rs.exe
+          if-no-files-found: ignore
+          retention-days: 3
+
       - name: Build the release-shaped binary offline
         env:
           CARGO_NET_OFFLINE: "true"

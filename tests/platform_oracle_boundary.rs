@@ -2,6 +2,9 @@
 
 use std::{fs, path::PathBuf, process::Command};
 
+#[path = "support/elf_debug.rs"]
+mod elf_debug;
+
 /// Commands that locate or run an installed platform: never in a release.
 /// `infobase` is released: its `config export|import` read and write SQL
 /// Server directly and every other native command is refused, never run.
@@ -132,17 +135,25 @@ fn default_binary_has_no_known_platform_or_edt_payload_markers() {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(env!("CARGO_BIN_EXE_ibcmd-rs")));
     let mut bytes = fs::read(&executable).unwrap();
+    elf_debug::exclude_debug_info(&mut bytes).expect("valid ELF debug/runtime section boundaries");
     // Exact source-format IDs are legitimate data; runtime/Java markers remain
     // forbidden. This does not allow Eclipse package names generally.
     exclude_declarative_edt_ids(&mut bytes);
 
     for marker in FORBIDDEN_BINARY_MARKERS {
-        assert!(
-            !bytes.windows(marker.len()).any(|window| window == *marker),
-            "default binary {} contains forbidden marker `{}`",
-            executable.display(),
-            String::from_utf8_lossy(marker)
-        );
+        if let Some(offset) = bytes
+            .windows(marker.len())
+            .position(|window| window == *marker)
+        {
+            let start = offset.saturating_sub(32);
+            let end = (offset + marker.len() + 32).min(bytes.len());
+            panic!(
+                "default binary {} contains forbidden marker `{}` at offset {offset:#x}; surrounding bytes: {:02x?}",
+                executable.display(),
+                String::from_utf8_lossy(marker),
+                &bytes[start..end]
+            );
+        }
     }
 }
 
