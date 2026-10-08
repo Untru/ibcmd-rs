@@ -732,15 +732,29 @@ fn configuration_empty_use_purposes_require_canonical_count_and_same_properties_
             refs::parse_configuration_use_purposes(&serialize(&wrong_slot), ROOT_UUID).is_none(),
             "a neighboring empty collection is not member33"
         );
+        // The contained Properties ObjectId is independent of RootMainGuid.
+        // Changing its sole declaration is a valid identity edit, not a
+        // conflicting header. Keep that positive separate from malformed tags.
+        let mut edited_owner = original.clone();
+        tuple_mut(&mut edited_owner)[1].as_list_mut().unwrap()[1]
+            .as_list_mut()
+            .unwrap()[1]
+            .as_list_mut()
+            .unwrap()[2] = Brace::uuid("90000000-0000-4000-8000-000000000099");
+        assert_eq!(
+            refs::parse_configuration_use_purposes(&serialize(&edited_owner), ROOT_UUID),
+            Some(vec![])
+        );
+        assert_eq!(edited_owner.at(&[1, 0]), original.at(&[1, 0]));
         let mut wrong_header = original.clone();
         tuple_mut(&mut wrong_header)[1].as_list_mut().unwrap()[1]
             .as_list_mut()
             .unwrap()[1]
             .as_list_mut()
-            .unwrap()[2] = Brace::uuid("90000000-0000-4000-8000-000000000099");
+            .unwrap()[1] = Brace::num(1);
         assert!(
             refs::parse_configuration_use_purposes(&serialize(&wrong_header), ROOT_UUID).is_none(),
-            "class does not waive SAME owner header identity"
+            "class does not waive malformed owner identity tuple grammar"
         );
         assert_eq!(
             serialize(&original),
