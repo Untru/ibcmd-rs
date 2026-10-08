@@ -137,12 +137,19 @@ fn default_binary_has_no_known_platform_or_edt_payload_markers() {
     exclude_declarative_edt_ids(&mut bytes);
 
     for marker in FORBIDDEN_BINARY_MARKERS {
-        assert!(
-            !bytes.windows(marker.len()).any(|window| window == *marker),
-            "default binary {} contains forbidden marker `{}`",
-            executable.display(),
-            String::from_utf8_lossy(marker)
-        );
+        if let Some(offset) = bytes
+            .windows(marker.len())
+            .position(|window| window == *marker)
+        {
+            let start = offset.saturating_sub(32);
+            let end = (offset + marker.len() + 32).min(bytes.len());
+            panic!(
+                "default binary {} contains forbidden marker `{}` at offset {offset:#x}; surrounding bytes: {:02x?}",
+                executable.display(),
+                String::from_utf8_lossy(marker),
+                &bytes[start..end]
+            );
+        }
     }
 }
 
