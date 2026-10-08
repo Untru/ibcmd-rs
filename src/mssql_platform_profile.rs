@@ -5,9 +5,8 @@
 //! mutate.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Read;
 use std::path::Path;
-use std::process::{Command, ExitStatus, Stdio};
+use std::process::Command;
 
 use anyhow::{Context, Result, anyhow, bail};
 use clap::ValueEnum;
@@ -17,6 +16,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
+use crate::profile_process::{MAX_PROBE_OUTPUT_BYTES, bounded_output};
 use crate::sql::{SqlBackend, SqlExec, SqlLogin, SqlTarget};
 
 /// Capability that admits main-configuration writes for a platform profile.
@@ -881,67 +881,6 @@ fn run_probe(options: &MssqlNativeProfileVerificationOptions<'_>) -> Result<Stri
         );
     }
     Ok(output.stdout)
-}
-
-const MAX_PROBE_OUTPUT_BYTES: usize = 64 * 1024;
-
-struct BoundedOutput {
-    status: ExitStatus,
-    stdout: String,
-    stderr: String,
-}
-
-fn bounded_output(command: &mut Command) -> Result<BoundedOutput> {
-    command.stdout(Stdio::piped()).stderr(Stdio::piped());
-    let mut child = command.spawn()?;
-    let stdout = child.stdout.take().expect("piped stdout is present");
-    let stderr = child.stderr.take().expect("piped stderr is present");
-    let stdout_reader = std::thread::spawn(move || read_bounded(stdout));
-    let stderr_reader = std::thread::spawn(move || read_bounded(stderr));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-    let status = loop {
-        if let Some(status) = child.try_wait()? {
-            break status;
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            let _ = stdout_reader.join();
-            let _ = stderr_reader.join();
-            bail!("native profile/RAS probe exceeded its 20-second deadline");
-        }
-        std::thread::sleep(std::time::Duration::from_millis(20));
-    };
-    let stdout = stdout_reader
-        .join()
-        .map_err(|_| anyhow!("stdout reader panicked"))??;
-    let stderr = stderr_reader
-        .join()
-        .map_err(|_| anyhow!("stderr reader panicked"))??;
-    Ok(BoundedOutput {
-        status,
-        stdout,
-        stderr,
-    })
-}
-
-fn read_bounded(mut reader: impl Read) -> Result<String> {
-    let mut retained = Vec::new();
-    let mut buffer = [0_u8; 8192];
-    let mut exceeded = false;
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        let remaining = MAX_PROBE_OUTPUT_BYTES.saturating_sub(retained.len());
-        retained.extend_from_slice(&buffer[..count.min(remaining)]);
-        exceeded |= count > remaining;
-    }
-    if exceeded {
-        bail!("probe output exceeded {MAX_PROBE_OUTPUT_BYTES} bytes");
-    }
-    Ok(String::from_utf8_lossy(&retained).to_string())
 }
 
 fn parse_probe(output: &str) -> Result<NativeStorageProbe> {

@@ -83,3 +83,8 @@ formats-designer = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/desi
 name = "rac_process_deadline"
 path = "tests/rac_process_deadline.rs"
 harness = false
+
+[[test]]
+name = "profile_process_deadline"
+path = "tests/profile_process_deadline.rs"
+harness = false
