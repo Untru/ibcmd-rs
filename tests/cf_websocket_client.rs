@@ -24,8 +24,11 @@ use ibcmd_rs::{
         brace::{Brace, parse_row, serialize_row},
         common::Header,
         compile_descriptor,
-        export::{configuration_objects, object_names, write_document},
-        export_names::{root_kinds, root_members},
+        export::{
+            configuration_objects,
+            names::{root_kinds, root_members},
+            object_names, write_document,
+        },
         websocket_client::WebSocketClient,
     },
     module_blob::{pack_module_blob_bytes_base_free, unpack_module_blob_text},
