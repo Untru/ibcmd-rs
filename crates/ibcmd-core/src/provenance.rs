@@ -81,8 +81,10 @@ fn validate_locator(
     if value.is_empty() {
         return Err(ProvenanceBuildError::EmptyLocator);
     }
-    let maximum = policy.maximum(MAX_PROVENANCE_LOCATOR_BYTES);
-    if value.len() > maximum {
+    let maximum = policy.budget(MAX_PROVENANCE_LOCATOR_BYTES);
+    if let Some(maximum) = maximum
+        && value.len() > maximum
+    {
         return Err(ProvenanceBuildError::LocatorTooLong {
             maximum,
             actual: value.len(),

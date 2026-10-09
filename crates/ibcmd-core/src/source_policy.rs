@@ -29,10 +29,11 @@ impl SourceOperationPolicy {
         Self::Source
     }
 
-    pub(crate) const fn maximum(self, bounded: usize) -> usize {
+    /// Returns a real optional budget, never a sentinel source ceiling.
+    pub const fn budget(self, bounded: usize) -> Option<usize> {
         match self {
-            Self::Bounded => bounded,
-            Self::Source => usize::MAX,
+            Self::Bounded => Some(bounded),
+            Self::Source => None,
         }
     }
 }

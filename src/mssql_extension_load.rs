@@ -952,12 +952,12 @@ fn filter_extension_tree(tree: &SourceTree, prefixes: &[String]) -> Result<Sourc
                     || path.eq_ignore_ascii_case(&format!("{prefix}.xml"))
             });
         if selected {
-            let bytes = if path.eq_ignore_ascii_case("Configuration.xml") {
-                scoped_extension_configuration(entry.bytes(), &prefixes)?
+            if path.eq_ignore_ascii_case("Configuration.xml") {
+                let bytes = scoped_extension_configuration(entry.bytes(), &prefixes)?;
+                entries.push(SourceEntry::from_bytes(entry.path().clone(), bytes)?);
             } else {
-                entry.bytes().to_vec()
-            };
-            entries.push(SourceEntry::from_bytes(entry.path().clone(), bytes)?);
+                entries.push(entry.clone());
+            }
         }
     }
     if entries.len() <= 1 {
@@ -1087,9 +1087,9 @@ fn sanitize_extension_tree(
     let mut retained = std::collections::BTreeSet::new();
     let mut entries = Vec::with_capacity(tree.entries().len());
     for entry in tree.entries() {
-        let mut bytes = entry.bytes().to_vec();
+        let mut edited = None;
         if entry.path().as_str().to_ascii_lowercase().ends_with(".xml") {
-            let text = std::str::from_utf8(&bytes)
+            let text = std::str::from_utf8(entry.bytes())
                 .with_context(|| format!("extension XML {} is not UTF-8", entry.path().as_str()))?;
             if let Some(start) = text.find(OPEN) {
                 let value_start = start + OPEN.len();
@@ -1104,10 +1104,13 @@ fn sanitize_extension_tree(
                 sanitized.push_str(&text[..start]);
                 sanitized.push_str(&text[end..]);
                 let sanitized = remove_xml_element(&sanitized, "InternalInfo")?;
-                bytes = sanitized.into_bytes();
+                edited = Some(sanitized.into_bytes());
             }
         }
-        entries.push(SourceEntry::from_bytes(entry.path().clone(), bytes)?);
+        entries.push(match edited {
+            Some(bytes) => SourceEntry::from_bytes(entry.path().clone(), bytes)?,
+            None => entry.clone(),
+        });
     }
     Ok((SourceTree::new(entries)?, retained))
 }
@@ -1409,5 +1412,54 @@ EndProcedure",
     fn compiled_extension_payload_is_already_storage_ready() {
         let compiled = b"storage-ready";
         assert_eq!(compiled_extension_payload(compiled), compiled);
+    }
+    #[test]
+    fn source_sanitize_and_filter_share_unchanged_owned_entry_bytes_only() {
+        use std::sync::Arc;
+        let original = adopted_module_selection();
+        let module = original
+            .entries()
+            .iter()
+            .find(|e| e.path().as_str().ends_with("Module.bsl"))
+            .unwrap();
+        let (sanitized, retained) = sanitize_extension_tree(&original).unwrap();
+        assert!(retained.contains("20000000-0000-4000-8000-000000000001"));
+        let unchanged = sanitized
+            .entries()
+            .iter()
+            .find(|e| e.path() == module.path())
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &module.shared_bytes(),
+            &unchanged.shared_bytes()
+        ));
+        let owner = original
+            .entries()
+            .iter()
+            .find(|e| e.path().as_str() == "CommonModules/Portable.xml")
+            .unwrap();
+        let edited = sanitized
+            .entries()
+            .iter()
+            .find(|e| e.path() == owner.path())
+            .unwrap();
+        assert!(!Arc::ptr_eq(&owner.shared_bytes(), &edited.shared_bytes()));
+        assert!(
+            !String::from_utf8(edited.bytes().to_vec())
+                .unwrap()
+                .contains("ObjectBelonging")
+        );
+        let selected =
+            filter_extension_tree(&original, &["CommonModules/Portable".to_owned()]).unwrap();
+        let selected_module = selected
+            .entries()
+            .iter()
+            .find(|e| e.path() == module.path())
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            &module.shared_bytes(),
+            &selected_module.shared_bytes()
+        ));
+        assert_eq!(selected_module.digest(), module.digest());
     }
 }

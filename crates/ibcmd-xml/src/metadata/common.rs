@@ -42,20 +42,13 @@ struct MetadataShapePolicy {
     core: SourceOperationPolicy,
 }
 impl MetadataShapePolicy {
-    const fn limit(self, bounded: usize) -> usize {
-        match self.core {
-            SourceOperationPolicy::Bounded => bounded,
-            SourceOperationPolicy::Source => usize::MAX,
-        }
+    const fn limit(self, bounded: usize) -> Option<usize> {
+        self.core.budget(bounded)
     }
     const fn source_with(core: SourceOperationPolicy) -> Self {
-        match core {
-            SourceOperationPolicy::Bounded => SOURCE_METADATA_POLICY,
-            SourceOperationPolicy::Source => Self {
-                nodes: usize::MAX,
-                facets: usize::MAX,
-                core,
-            },
+        Self {
+            core,
+            ..SOURCE_METADATA_POLICY
         }
     }
 }
@@ -150,10 +143,18 @@ impl FacetSet {
             .bytes
             .checked_add(bytes)
             .ok_or(MetadataDecodeError::ResourceLimit("opaque bytes"))?;
-        if count > self.policy.facets {
+        if self
+            .policy
+            .limit(self.policy.facets)
+            .is_some_and(|limit| count > limit)
+        {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
-        if retained > self.policy.limit(MAX_METADATA_BYTES) {
+        if self
+            .policy
+            .limit(MAX_METADATA_BYTES)
+            .is_some_and(|limit| retained > limit)
+        {
             return Err(MetadataDecodeError::ResourceLimit("opaque bytes"));
         }
         budget.count = count;
@@ -294,10 +295,16 @@ impl MetadataEnvelope {
                     .ok_or(MetadataDecodeError::ResourceLimit("opaque bytes"))?;
             }
         }
-        if facet_count > shape_policy.facets {
+        if shape_policy
+            .limit(shape_policy.facets)
+            .is_some_and(|limit| facet_count > limit)
+        {
             return Err(MetadataDecodeError::ResourceLimit("opaque facets"));
         }
-        if facet_bytes > shape_policy.limit(MAX_METADATA_BYTES) {
+        if shape_policy
+            .limit(MAX_METADATA_BYTES)
+            .is_some_and(|limit| facet_bytes > limit)
+        {
             return Err(MetadataDecodeError::ResourceLimit("opaque bytes"));
         }
         let envelope = Self {
@@ -1757,9 +1764,9 @@ fn element_text_with_policy(
                 length = length
                     .checked_add(x.value().len())
                     .ok_or(MetadataDecodeError::ResourceLimit("canonical text"))?;
-                if length
-                    > MetadataShapePolicy::source_with(policy)
-                        .limit(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                if policy
+                    .budget(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                    .is_some_and(|limit| length > limit)
                 {
                     return Err(MetadataDecodeError::ResourceLimit("canonical text"));
                 }
@@ -1769,9 +1776,9 @@ fn element_text_with_policy(
                 length = length
                     .checked_add(x.value().len())
                     .ok_or(MetadataDecodeError::ResourceLimit("canonical text"))?;
-                if length
-                    > MetadataShapePolicy::source_with(policy)
-                        .limit(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                if policy
+                    .budget(ibcmd_core::value::MAX_CANONICAL_TEXT_BYTES)
+                    .is_some_and(|limit| length > limit)
                 {
                     return Err(MetadataDecodeError::ResourceLimit("canonical text"));
                 }
@@ -1840,7 +1847,11 @@ fn retain_unknown_start_tag(
         .map_err(|error| MetadataDecodeError::Xml(error.to_string()))?;
     let normalized_bytes = crate::writer::element_start_len(element, LexicalPolicy::Normalized)
         .map_err(|error| MetadataDecodeError::Xml(error.to_string()))?;
-    if normalized_bytes > facets.policy.limit(MAX_METADATA_BYTES) {
+    if facets
+        .policy
+        .limit(MAX_METADATA_BYTES)
+        .is_some_and(|limit| normalized_bytes > limit)
+    {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     facets.reserve(preserve_bytes)?;
@@ -1869,7 +1880,12 @@ fn retain_as(
     facets: &mut FacetSet,
 ) -> Result<(), MetadataDecodeError> {
     let preserve_bytes = node_lexical_len(node)?;
-    if node_normalized_len(node)? > facets.policy.limit(MAX_METADATA_BYTES) {
+    let normalized = node_normalized_len(node)?;
+    if facets
+        .policy
+        .limit(MAX_METADATA_BYTES)
+        .is_some_and(|limit| normalized > limit)
+    {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     facets.reserve(preserve_bytes)?;
@@ -2139,13 +2155,13 @@ struct Budget {
 fn checked_add(
     target: &mut usize,
     value: usize,
-    limit: usize,
+    limit: Option<usize>,
     what: &'static str,
 ) -> Result<(), MetadataDecodeError> {
     *target = target
         .checked_add(value)
         .ok_or(MetadataDecodeError::ResourceLimit(what))?;
-    if *target > limit {
+    if limit.is_some_and(|limit| *target > limit) {
         return Err(MetadataDecodeError::ResourceLimit(what));
     }
     Ok(())
@@ -2182,10 +2198,18 @@ fn check_document_with_policy(
         check_node(node, 0, &mut budget, shape_policy)?;
     }
     check_tree(document.root(), 0, &mut budget, shape_policy)?;
-    if document_lexical_len(document)? > shape_policy.limit(MAX_METADATA_BYTES) {
+    let lexical = document_lexical_len(document)?;
+    if shape_policy
+        .limit(MAX_METADATA_BYTES)
+        .is_some_and(|limit| lexical > limit)
+    {
         return Err(MetadataDecodeError::ResourceLimit("bytes"));
     }
-    if document_normalized_len(document)? > shape_policy.limit(MAX_METADATA_BYTES) {
+    let normalized = document_normalized_len(document)?;
+    if shape_policy
+        .limit(MAX_METADATA_BYTES)
+        .is_some_and(|limit| normalized > limit)
+    {
         return Err(MetadataDecodeError::ResourceLimit("normalized bytes"));
     }
     crate::writer::validate_document(document)
@@ -2201,7 +2225,12 @@ fn check_node(
     if let XmlNode::Element(element) = node {
         return check_tree(element, depth, b, shape_policy);
     }
-    checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
+    checked_add(
+        &mut b.nodes,
+        1,
+        shape_policy.limit(shape_policy.nodes),
+        "nodes",
+    )?;
     if let Some(raw) = node.raw() {
         return checked_add(
             &mut b.bytes,
@@ -2275,10 +2304,18 @@ fn check_element(
     b: &mut Budget,
     shape_policy: MetadataShapePolicy,
 ) -> Result<(), MetadataDecodeError> {
-    if depth > shape_policy.limit(MAX_METADATA_DEPTH) {
+    if shape_policy
+        .limit(MAX_METADATA_DEPTH)
+        .is_some_and(|limit| depth > limit)
+    {
         return Err(MetadataDecodeError::ResourceLimit("depth"));
     }
-    checked_add(&mut b.nodes, 1, shape_policy.nodes, "nodes")?;
+    checked_add(
+        &mut b.nodes,
+        1,
+        shape_policy.limit(shape_policy.nodes),
+        "nodes",
+    )?;
     if let Some(raw) = e.raw_start() {
         checked_add(
             &mut b.bytes,

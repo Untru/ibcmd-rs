@@ -780,7 +780,8 @@ mod tests {
     #[test]
     fn path_derived_names_use_lexical_safety_not_utf8_byte_quotas() {
         let physical = "Имя".repeat(50); //150 UTF16 characters /300 UTF8 bytes.
-        assert!(SourcePath::new(&physical).is_err());
+        assert!(SourcePath::new_bounded(&physical).is_err());
+        assert_eq!(SourcePath::new(&physical).unwrap().as_str(), physical);
         component(&physical).unwrap();
         let form = format!("<Form><items name='{}'/></Form>", "Имя".repeat(1000));
         validate_xml("Form.form", form.as_bytes()).unwrap();
@@ -943,7 +944,8 @@ mod tests {
         ] {
             assert!(validate_xml("ConfigDumpInfo.xml", dump(&unsafe_name).as_bytes()).is_err());
         }
-        assert!(SourcePath::new(name).is_err());
+        assert!(SourcePath::new_bounded(name).is_err());
+        assert_eq!(SourcePath::new(name).unwrap().as_str(), name);
     }
     #[test]
     fn logical_form_names_do_not_extend_filesystem_names() {
@@ -959,6 +961,7 @@ mod tests {
             let form = format!("<Form><name>{name}</name></Form>");
             assert!(validate_xml("Form.form", form.as_bytes()).is_err());
         }
-        assert!(SourcePath::new(name).is_err());
+        assert!(SourcePath::new_bounded(&name).is_err());
+        assert_eq!(SourcePath::new(&name).unwrap().as_str(), name);
     }
 }
