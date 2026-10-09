@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use crate::form_schema::form_text_document_context_menu_child_is_valid;
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, ensure};
 use flate2::Compression;
 use flate2::read::DeflateDecoder;
 use flate2::write::DeflateEncoder;
@@ -1536,6 +1536,11 @@ impl MetadataSourceContext {
         }
         let resolved = if name.starts_with("DefinedType.") {
             None
+        } else if self.original_source.is_some() {
+            self.resolve_original_generated_type_id(name)
+                .map_err(|error| self.record_original_failure(error.to_string()))
+                .ok()
+                .flatten()
         } else {
             self.resolve_metadata_type_id(name).ok()
         };
@@ -1543,6 +1548,44 @@ impl MetadataSourceContext {
             cache.insert(name.to_string(), resolved.clone());
         }
         resolved
+    }
+
+    /// An optional DCS lookup on the captured source closure. Missing names
+    /// deliberately remain literal references; a selected original that fails
+    /// to parse must instead reach the enclosing compiler's sticky read gate.
+    fn resolve_original_generated_type_id(&self, reference: &str) -> Result<Option<String>> {
+        let generated_type_name = reference
+            .trim()
+            .strip_prefix("cfg:")
+            .unwrap_or_else(|| reference.trim());
+        let Some(folder) = metadata_type_source_folder(generated_type_name) else {
+            return Ok(None);
+        };
+        let Some((_, name)) = generated_type_name.split_once('.') else {
+            return Ok(None);
+        };
+        let inspect = |path: &Path| -> Result<Option<String>> {
+            if !self.source_file_exists(path)? {
+                return Ok(None);
+            }
+            let xml = self.read_source(path)?;
+            inspect_generated_type_type_id(
+                &xml,
+                generated_type_name,
+                GeneratedTypeInspection::SelectedOriginal,
+            )
+            .with_context(|| format!("failed to inspect generated TypeId from {}", path.display()))
+        };
+        if let Some(owner) =
+            ibcmd_schema::generated_tabular_section_source_owner(generated_type_name)
+            && let Some(type_id) =
+                inspect(&self.source_root.join(folder).join(format!("{owner}.xml")))?
+        {
+            return Ok(Some(type_id));
+        }
+        // Historical dotted-file storage is still a supported alternate when
+        // the owner is absent or valid but does not declare the requested type.
+        inspect(&self.source_root.join(folder).join(format!("{name}.xml")))
     }
 
     /// The tree's configuration style items: lowercase uuid -> name. A file
@@ -32955,24 +32998,71 @@ fn parse_defined_type_type_id(xml: &[u8], expected_name: &str) -> Result<String>
 }
 
 fn parse_generated_type_type_id(xml: &[u8], expected_generated_name: &str) -> Result<String> {
+    inspect_generated_type_type_id(
+        xml,
+        expected_generated_name,
+        GeneratedTypeInspection::Legacy,
+    )?
+    .ok_or_else(|| anyhow!("GeneratedType {expected_generated_name} TypeId not found in XML"))
+}
+
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum GeneratedTypeInspection {
+    Legacy,
+    SelectedOriginal,
+}
+
+fn inspect_generated_type_type_id(
+    xml: &[u8],
+    expected_generated_name: &str,
+    purpose: GeneratedTypeInspection,
+) -> Result<Option<String>> {
+    let selected_original = purpose == GeneratedTypeInspection::SelectedOriginal;
+    if selected_original {
+        std::str::from_utf8(xml)?;
+    }
     let mut reader = Reader::from_reader(xml);
     let mut buffer = Vec::new();
     let mut path = Vec::<String>::new();
     let mut generated_type_depth = None::<usize>;
     let mut type_id = None::<String>;
+    let mut root_count = 0usize;
 
     loop {
         match reader.read_event_into(&mut buffer) {
             Ok(Event::Start(event)) => {
                 let local = xml_local_name(event.local_name().as_ref());
-                let is_matching_generated_type = local == "GeneratedType"
-                    && xml_attr_value(&event, "name").as_deref() == Some(expected_generated_name);
+                let name = if selected_original {
+                    if path.is_empty() {
+                        root_count += 1;
+                        ensure!(root_count == 1, "multiple roots in selected metadata XML");
+                    }
+                    generated_type_original_name(&event)?
+                } else {
+                    xml_attr_value(&event, "name")
+                };
+                let is_matching_generated_type =
+                    local == "GeneratedType" && name.as_deref() == Some(expected_generated_name);
                 path.push(local);
                 if is_matching_generated_type {
                     generated_type_depth = Some(path.len());
                 }
+                if selected_original
+                    && generated_type_depth.is_some()
+                    && path_ends_with(&path, &["GeneratedType", "TypeId"])
+                {
+                    type_id.get_or_insert_with(String::new);
+                }
             }
             Ok(Event::Text(text)) => {
+                if selected_original {
+                    let value = text.xml_content()?;
+                    let _ = unescape(value.as_ref())?;
+                    ensure!(
+                        !path.is_empty() || value.trim().is_empty(),
+                        "text outside selected metadata XML root"
+                    );
+                }
                 if generated_type_depth.is_some()
                     && path_ends_with(&path, &["GeneratedType", "TypeId"])
                 {
@@ -32984,6 +33074,10 @@ fn parse_generated_type_type_id(xml: &[u8], expected_generated_name: &str) -> Re
                 }
             }
             Ok(Event::CData(text)) => {
+                if selected_original {
+                    ensure!(!path.is_empty(), "CDATA outside selected metadata XML root");
+                    let _ = text.xml_content()?;
+                }
                 if generated_type_depth.is_some()
                     && path_ends_with(&path, &["GeneratedType", "TypeId"])
                 {
@@ -32999,17 +33093,72 @@ fn parse_generated_type_type_id(xml: &[u8], expected_generated_name: &str) -> Re
                 }
                 let _ = path.pop();
             }
-            Ok(Event::Eof) => break,
+            Ok(Event::Empty(event)) if selected_original => {
+                if path.is_empty() {
+                    root_count += 1;
+                    ensure!(root_count == 1, "multiple roots in selected metadata XML");
+                }
+                let _ = generated_type_original_name(&event)?;
+                if event.local_name().as_ref() == b"TypeId"
+                    && generated_type_depth.is_some()
+                    && path.last().is_some_and(|local| local == "GeneratedType")
+                {
+                    type_id.get_or_insert_with(String::new);
+                }
+            }
+            Ok(Event::GeneralRef(reference)) if selected_original => {
+                ensure!(
+                    !path.is_empty(),
+                    "entity outside selected metadata XML root"
+                );
+                let value = if let Some(ch) = reference.resolve_char_ref()? {
+                    ch.to_string()
+                } else {
+                    let entity = reference.decode()?;
+                    resolve_xml_entity(entity.as_ref())
+                        .ok_or_else(|| anyhow!("unrecognized XML entity: {entity}"))?
+                        .to_owned()
+                };
+                if generated_type_depth.is_some()
+                    && path_ends_with(&path, &["GeneratedType", "TypeId"])
+                {
+                    type_id.get_or_insert_with(String::new).push_str(&value);
+                }
+            }
+            Ok(Event::Eof) => {
+                if selected_original {
+                    ensure!(
+                        root_count == 1 && path.is_empty(),
+                        "incomplete selected metadata XML"
+                    );
+                }
+                break;
+            }
             Ok(_) => {}
             Err(error) => return Err(error.into()),
         }
         buffer.clear();
     }
 
-    let type_id = type_id.ok_or_else(|| {
-        anyhow!("GeneratedType {expected_generated_name} TypeId not found in XML")
-    })?;
-    normalize_uuid_text(&type_id)
+    type_id.map(|value| normalize_uuid_text(&value)).transpose()
+}
+
+/// Attribute syntax/text failures are not optional name absence. Legacy
+/// callers retain their existing attribute projection; captured originals
+/// validate each attribute through the same XML reader before selecting name.
+fn generated_type_original_name(
+    event: &quick_xml::events::BytesStart<'_>,
+) -> Result<Option<String>> {
+    let mut name = None;
+    for attribute in event.attributes() {
+        let attribute = attribute?;
+        let text = std::str::from_utf8(attribute.value.as_ref())?;
+        let value = unescape(text)?;
+        if attribute.key.as_ref() == b"name" {
+            name = Some(value.into_owned());
+        }
+    }
+    Ok(name)
 }
 
 fn normalize_uuid_text(value: &str) -> Result<String> {
