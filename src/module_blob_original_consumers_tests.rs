@@ -200,10 +200,15 @@ fn assert_original_generated_dcs_payload(source: &MetadataSourceContext, name: &
         "complete DCS payload, not only lookup success"
     );
     let body = decode_dcs(&DcsCodecProfile::fixture(), DcsTemplateKind::Schema, &blob).unwrap();
+    let documents = body.documents();
+    let text_documents: Vec<_> = documents
+        .iter()
+        .map(|document| std::str::from_utf8(document).unwrap())
+        .collect();
     assert!(
-        std::str::from_utf8(body.plaintext())
-            .unwrap()
-            .contains(DCS_GENERATED_ID)
+        text_documents
+            .iter()
+            .any(|document| document.contains(DCS_GENERATED_ID))
     );
     let types = BTreeMap::from([(
         DCS_GENERATED_ID.to_owned(),
@@ -213,7 +218,7 @@ fn assert_original_generated_dcs_payload(source: &MetadataSourceContext, name: &
     )]);
     let exported =
         crate::mssql_dump::normalize_data_composition_schema_template_documents_with_profiles(
-            &body.documents(),
+            &documents,
             &types,
             &BTreeMap::new(),
             &ibcmd_core::artifact::ProfileId::parse("provider:mssql-legacy").unwrap(),
