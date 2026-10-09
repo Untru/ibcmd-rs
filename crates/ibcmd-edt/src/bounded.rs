@@ -944,8 +944,8 @@ mod tests {
         ] {
             assert!(validate_xml("ConfigDumpInfo.xml", dump(&unsafe_name).as_bytes()).is_err());
         }
-        assert!(SourcePath::new_bounded(&name).is_err());
-        assert_eq!(SourcePath::new(&name).unwrap().as_str(), name);
+        assert!(SourcePath::new_bounded(name).is_err());
+        assert_eq!(SourcePath::new(name).unwrap().as_str(), name);
     }
     #[test]
     fn logical_form_names_do_not_extend_filesystem_names() {
