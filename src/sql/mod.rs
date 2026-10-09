@@ -25,6 +25,7 @@
 //! as well as its own client.
 
 pub mod mssql;
+mod owned;
 mod value;
 
 use std::path::{Path, PathBuf};
@@ -32,6 +33,10 @@ use std::sync::Arc;
 
 use anyhow::{Result, bail};
 
+pub use owned::{
+    InputDomain, InputRelation, InputRow, OwnedSqlCommand, OwnedSqlState, SealedSqlInput,
+    StorageTable,
+};
 pub use value::{SqlParam, SqlRow, SqlValue};
 
 /// The environment variable that sets how many connections a command may
@@ -65,6 +70,12 @@ pub enum ScriptVariables {
 /// tables) ends with the request, except within [`SqlClient::run_script`].
 pub trait SqlClient: Send + Sync {
     fn dbms(&self) -> Dbms;
+
+    /// An original sequential session. Unsupported clients must refuse here,
+    /// rather than substituting independent pooled execute calls.
+    fn open_owned_command(&self) -> Result<OwnedSqlCommand> {
+        bail!("this SQL client does not support an original owned command session")
+    }
 
     /// Why every request fails, for a handle that reaches no database
     /// (`SqlExec::detached`); `None` for a real client.
@@ -289,6 +300,17 @@ impl<'a> SqlOptions<'a> {
 }
 
 impl SqlExec {
+    /// The interactive original-session capability; external tools cannot
+    /// simulate it with several sqlcmd/bcp processes or independent logins.
+    pub fn open_owned_command(&self) -> Result<OwnedSqlCommand> {
+        match &self.inner.backend {
+            Backend::Client(client) => client.open_owned_command(),
+            Backend::Tools(_) => {
+                bail!("external SQL tools do not support an original owned command session")
+            }
+        }
+    }
+
     /// The built-in SQL Server client, or the external tools when the
     /// options name sqlcmd. Nothing connects until the first request.
     pub fn from_options(options: SqlOptions<'_>) -> Result<Self> {
