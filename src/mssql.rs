@@ -1664,6 +1664,14 @@ pub(crate) fn audit_source_parity_with_sql(
     args: &MssqlAuditSourceParityArgs,
     sql_override: Option<SqlExec>,
 ) -> Result<MssqlSourceParityAuditReport> {
+    audit_source_parity_with_source(args, sql_override, None)
+}
+
+pub(crate) fn audit_source_parity_with_source(
+    args: &MssqlAuditSourceParityArgs,
+    sql_override: Option<SqlExec>,
+    original: Option<&MetadataSourceContext>,
+) -> Result<MssqlSourceParityAuditReport> {
     let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
     let source_coverage = audit_source_load_coverage_from_manifest(&manifest)?;
     let metadata_xmls = filter_source_paths_by_prefix(
@@ -1696,7 +1704,9 @@ pub(crate) fn audit_source_parity_with_sql(
     };
 
     install_always_used_constants_source(&sql, &args.database, Some(&args.source_root));
-    let source = MetadataSourceContext::new(args.source_root.clone());
+    let source = original
+        .cloned()
+        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
     let metadata_results = parallel::install(|| {
         metadata_xmls
             .par_iter()
@@ -1716,15 +1726,20 @@ pub(crate) fn audit_source_parity_with_sql(
         common_module_xmls
             .par_iter()
             .map(|xml| {
-                prepare_common_module_object_stage(&sql, &args.database, xml.clone(), None).map_err(
-                    |error| {
-                        source_parity_prepare_failure(
-                            "common_module",
-                            source_relative_path(&args.source_root, xml),
-                            error,
-                        )
-                    },
+                prepare_common_module_object_stage_with_source(
+                    &sql,
+                    &args.database,
+                    xml.clone(),
+                    None,
+                    Some(&source),
                 )
+                .map_err(|error| {
+                    source_parity_prepare_failure(
+                        "common_module",
+                        source_relative_path(&args.source_root, xml),
+                        error,
+                    )
+                })
             })
             .collect::<Vec<_>>()
     })?;
@@ -3857,13 +3872,21 @@ pub(crate) fn stage_source_objects_with_sql(
     args: &MssqlStageSourceObjectsArgs,
     sql_override: Option<SqlExec>,
 ) -> Result<StageSourceObjectsReport> {
+    stage_source_objects_with_source(args, sql_override, None)
+}
+
+pub(crate) fn stage_source_objects_with_source(
+    args: &MssqlStageSourceObjectsArgs,
+    sql_override: Option<SqlExec>,
+    original: Option<&MetadataSourceContext>,
+) -> Result<StageSourceObjectsReport> {
     if !args.files.is_empty() {
-        return stage_source_files(args, sql_override);
+        return stage_source_files(args, sql_override, original);
     }
     if args.base_free {
         return empty_stage::stage_source_objects_base_free(args);
     }
-    stage_source_objects_patch(args, None, sql_override)
+    stage_source_objects_patch(args, None, sql_override, original)
 }
 
 /// `--file` (`infobase config import files`, #363): the objects the listed
@@ -3872,6 +3895,7 @@ pub(crate) fn stage_source_objects_with_sql(
 fn stage_source_files(
     args: &MssqlStageSourceObjectsArgs,
     sql_override: Option<SqlExec>,
+    original: Option<&MetadataSourceContext>,
 ) -> Result<StageSourceObjectsReport> {
     if args.base_free {
         bail!(
@@ -3895,13 +3919,14 @@ fn stage_source_files(
         scoped.source_version =
             <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&version, true).ok();
     }
-    stage_source_objects_patch(&scoped, Some(&selection), sql_override)
+    stage_source_objects_patch(&scoped, Some(&selection), sql_override, original)
 }
 
 fn stage_source_objects_patch(
     args: &MssqlStageSourceObjectsArgs,
     selection: Option<&files_stage::FilesSelection>,
     sql_override: Option<SqlExec>,
+    original: Option<&MetadataSourceContext>,
 ) -> Result<StageSourceObjectsReport> {
     require_non_lab_confirmation(args.allow_non_lab, "source tree staging")?;
     if !args.replace_config_save {
@@ -3937,7 +3962,9 @@ fn stage_source_objects_patch(
         ));
     }
 
-    let source = MetadataSourceContext::new(args.source_root.clone());
+    let source = original
+        .cloned()
+        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
     let sql_password = resolve_sqlcmd_password(
         args.sql_user.as_deref(),
         args.sql_pwd.as_deref(),
@@ -4093,11 +4120,17 @@ fn stage_source_objects_patch(
             common_module_xmls
                 .par_iter()
                 .map(|xml| {
-                    prepare_common_module_object_stage(&sql, &args.database, xml.clone(), None)
-                        .map_err(|error| patch_refusal::ObjectFailure {
-                            xml: xml.clone(),
-                            error,
-                        })
+                    prepare_common_module_object_stage_with_source(
+                        &sql,
+                        &args.database,
+                        xml.clone(),
+                        None,
+                        Some(&source),
+                    )
+                    .map_err(|error| patch_refusal::ObjectFailure {
+                        xml: xml.clone(),
+                        error,
+                    })
                 })
                 .collect::<Vec<_>>()
         })?
@@ -5166,6 +5199,16 @@ pub fn stage_common_template_object(
     stage_metadata_objects(&metadata_args)
 }
 
+fn read_stage_source(
+    source: Option<&MetadataSourceContext>,
+    path: &Path,
+) -> std::io::Result<crate::module_blob::SourceBytes> {
+    match source {
+        Some(source) => source.read_source(path),
+        None => fs::read(path).map(crate::module_blob::SourceBytes::Owned),
+    }
+}
+
 fn prepare_metadata_object_stage(
     sql: &SqlExec,
     database: &str,
@@ -5182,7 +5225,7 @@ fn prepare_metadata_object_stage_for_files(
     source: Option<&MetadataSourceContext>,
     selection: Option<(&Path, &files_stage::FilesSelection)>,
 ) -> Result<PreparedMetadataObjectStage> {
-    let xml = fs::read(&xml_path)
+    let xml = read_stage_source(source, &xml_path)
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
     let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
     let properties = parse_simple_metadata_xml_properties(&xml)?;
@@ -5235,7 +5278,13 @@ fn prepare_metadata_object_stage_for_files(
         } else {
             // The native module roles are independently compiled. No help,
             // predefined, interface or other module body is read or rewritten.
-            prepare_measured_selected_module_rows(root, &files, &properties, &axes)?
+            prepare_measured_selected_module_rows_with_source(
+                root,
+                &files,
+                &properties,
+                &axes,
+                source,
+            )?
         }
     } else {
         prepare_metadata_body_rows(
@@ -5261,11 +5310,22 @@ fn prepare_metadata_object_stage_for_files(
     })
 }
 
+#[cfg(test)]
 fn prepare_measured_selected_module_rows(
     root: &Path,
     files: &[String],
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_measured_selected_module_rows_with_source(root, files, properties, axes, None)
+}
+
+fn prepare_measured_selected_module_rows_with_source(
+    root: &Path,
+    files: &[String],
+    properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let registry = crate::compiler::families::assets::SourceAssetRegistry;
     files
@@ -5292,7 +5352,7 @@ fn prepare_measured_selected_module_rows(
             );
             let path = root.join(file.split('/').collect::<PathBuf>());
             let body_id = format!("{}{}", properties.uuid, route.suffix());
-            let packed = pack_module_body_source(&path, &body_id, axes)?;
+            let packed = pack_module_body_source_with_source(&path, &body_id, axes, source)?;
             Ok(PreparedMetadataBodyStage {
                 body_id,
                 path,
@@ -5388,9 +5448,9 @@ fn prepare_metadata_body_family(
         MetadataBodyFamily::Help => {
             prepare_object_help_body_row(sql, database, xml_path, properties, source)
         }
-        MetadataBodyFamily::ObjectModules => {
-            prepare_object_module_body_rows(sql, database, xml_path, properties, axes)
-        }
+        MetadataBodyFamily::ObjectModules => prepare_object_module_body_rows_with_source(
+            sql, database, xml_path, properties, axes, source,
+        ),
         MetadataBodyFamily::NestedCommandModules => {
             prepare_nested_command_module_body_rows(sql, database, xml_path, xml, properties, axes)
         }
@@ -5774,7 +5834,7 @@ fn prepare_raw_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let bytes = fs::read(&body_path).with_context(|| {
+    let bytes = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read {kind} Template body {}",
             body_path.display()
@@ -5786,7 +5846,7 @@ fn prepare_raw_template_body_row(
     ) && crate::module_blob::XML_2_21_TREE_IN_LAYOUT_8_3
         .load(std::sync::atomic::Ordering::Relaxed)
     {
-        palette_namespace_dropped(bytes)
+        crate::module_blob::SourceBytes::Owned(palette_namespace_dropped(bytes.into_vec()))
     } else {
         bytes
     };
@@ -5823,7 +5883,7 @@ fn prepare_spreadsheet_template_body_row(
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read SpreadsheetDocument Template body {}",
             body_path.display()
@@ -6645,7 +6705,7 @@ fn prepare_form_body_row(
         // inflated (ERP УХ: all 9, byte for byte), staged deflated again.
         let ordinary = form_path.with_extension("bin");
         if source_listing::is_file(&ordinary) {
-            let bytes = fs::read(&ordinary)
+            let bytes = read_stage_source(source, &ordinary)
                 .with_context(|| format!("failed to read {}", ordinary.display()))?;
             let blob = crate::module_blob::deflate_raw(&bytes)?;
             return Ok(vec![PreparedMetadataBodyStage {
@@ -6662,14 +6722,14 @@ fn prepare_form_body_row(
     }
     let body_id = format!("{}.0", properties.uuid);
     let form_xml = if source_listing::exists(&form_path) {
-        fs::read(&form_path)
+        read_stage_source(source, &form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
     } else {
-        Vec::new()
+        crate::module_blob::SourceBytes::Owned(Vec::new())
     };
     let module_text = if source_listing::exists(&module_path) {
         Some(
-            fs::read(&module_path)
+            read_stage_source(source, &module_path)
                 .with_context(|| format!("failed to read Form module {}", module_path.display()))?,
         )
     } else {
@@ -6680,7 +6740,10 @@ fn prepare_form_body_row(
     // (`cf load`): the form, its interceptors' call types, the base form.
     if CF_LOAD_COMPILE.load(std::sync::atomic::Ordering::Relaxed)
         && !BASE_FREE_STAGE.load(std::sync::atomic::Ordering::Relaxed)
-        && offline_compile::requires_adoption_adapter(&form_xml, &fs::read(xml_path)?)?
+        && offline_compile::requires_adoption_adapter(
+            &form_xml,
+            &read_stage_source(source, xml_path)?,
+        )?
     {
         let base_body = fetch_config_blob(sql, database, &body_id)?;
         let items_root = form_path.with_file_name("Form").join("Items");
@@ -7076,7 +7139,7 @@ fn read_help_source_parts(
     owner: HtmlPageOwner,
     source: Option<&MetadataSourceContext>,
 ) -> Result<(Vec<(String, Vec<u8>)>, Vec<(String, Vec<u8>)>)> {
-    let xml = fs::read(&body_path)
+    let xml = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read {label} XML {}", body_path.display()))?;
     let page_names = parse_help_pages_from_xml(&xml)
         .with_context(|| format!("failed to parse {label} XML {}", body_path.display()))?;
@@ -7087,7 +7150,7 @@ fn read_help_source_parts(
             return Err(anyhow!("unsupported {label} page name: {page}"));
         }
         let page_path = help_dir.join(format!("{page}.html"));
-        let content = fs::read(&page_path)
+        let content = read_stage_source(source, &page_path)
             .with_context(|| format!("failed to read {label} page {}", page_path.display()))?;
         let content = html_page_storage_bytes(&content, owner, source)
             .with_context(|| format!("failed to store {label} page {}", page_path.display()))?;
@@ -7108,10 +7171,10 @@ fn read_help_source_parts(
                 continue;
             }
             let file_name = entry.file_name().to_string_lossy().to_string();
-            let content = fs::read(entry.path()).with_context(|| {
+            let content = read_stage_source(source, &entry.path()).with_context(|| {
                 format!("failed to read {label} file {}", entry.path().display())
             })?;
-            files.push((file_name, content));
+            files.push((file_name, content.into_vec()));
         }
         // The platform keeps the attachments in case-insensitive name order:
         // all 51 ERP УХ helps with more than one file, six of which a
@@ -7171,12 +7234,24 @@ fn resolve_help_body_id_from_config_rows(
     })
 }
 
+#[cfg(test)]
 fn prepare_object_module_body_rows(
     _sql: &SqlExec,
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_object_module_body_rows_with_source(_sql, _database, xml_path, properties, axes, None)
+}
+
+fn prepare_object_module_body_rows_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let mut rows = Vec::new();
     // The configuration's own modules live under its managed-application
@@ -7191,7 +7266,7 @@ fn prepare_object_module_body_rows(
             continue;
         };
         let body_id = format!("{owner}.{suffix}");
-        let packed = pack_module_body_source(&body_path, &body_id, axes)
+        let packed = pack_module_body_source_with_source(&body_path, &body_id, axes, source)
             .with_context(|| format!("failed to pack module body {}", body_path.display()))?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
@@ -7208,7 +7283,16 @@ fn pack_module_body_source(
     body_id: &str,
     axes: &CompileAxes,
 ) -> Result<PreparedModuleBody> {
-    let bytes = fs::read(path)
+    pack_module_body_source_with_source(path, body_id, axes, None)
+}
+
+fn pack_module_body_source_with_source(
+    path: &Path,
+    body_id: &str,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PreparedModuleBody> {
+    let bytes = read_stage_source(source, path)
         .with_context(|| format!("failed to read module body source {}", path.display()))?;
     let is_container = path.extension().and_then(|extension| extension.to_str()) == Some("bin");
     let classification = compile_mssql_source(
@@ -7524,7 +7608,17 @@ fn prepare_common_module_object_stage(
     xml_path: PathBuf,
     text_path: Option<PathBuf>,
 ) -> Result<PreparedCommonModuleObjectStage> {
-    let xml = fs::read(&xml_path)
+    prepare_common_module_object_stage_with_source(sql, database, xml_path, text_path, None)
+}
+
+fn prepare_common_module_object_stage_with_source(
+    sql: &SqlExec,
+    database: &str,
+    xml_path: PathBuf,
+    text_path: Option<PathBuf>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<PreparedCommonModuleObjectStage> {
+    let xml = read_stage_source(source, &xml_path)
         .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
     let axes = mssql_compile_axes_from_metadata_xml(&xml)?;
     let properties = parse_common_module_xml_properties(&xml)?;
@@ -7548,7 +7642,8 @@ fn prepare_common_module_object_stage(
     let packed_metadata = pack_common_module_metadata_blob_from_xml(&base_metadata_blob, &xml)?;
     let module_body_id = format!("{module_id}.0");
     let (text_bytes, module_blob, module_blob_sha256) = if has_module_body {
-        let packed_module = pack_module_body_source(&text_path, &module_body_id, &axes)?;
+        let packed_module =
+            pack_module_body_source_with_source(&text_path, &module_body_id, &axes, source)?;
         (
             packed_module.text_bytes,
             packed_module.blob,
@@ -17795,3 +17890,6 @@ mod tests {
 
 #[cfg(test)]
 mod onecdec_tests;
+
+#[cfg(test)]
+mod original_source_tests;

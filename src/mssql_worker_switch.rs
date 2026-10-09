@@ -117,7 +117,10 @@ mod tests {
     fn unsupported_worker_ownership_dispatch_precedes_staging_and_artifact_publication() {
         let source = include_str!("mssql_apply.rs");
         let apply = source.split("pub fn apply_source_change(").nth(1).unwrap();
-        assert!(apply.find("classify_source_change(").unwrap() < apply.find("if no_op {").unwrap());
+        assert!(
+            apply.find("classify_original_source_change(").unwrap()
+                < apply.find("if no_op {").unwrap()
+        );
         assert!(
             apply.find("if no_op {").unwrap()
                 < apply.find("preflight_classified_worker_source(").unwrap()

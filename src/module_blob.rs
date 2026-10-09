@@ -1119,6 +1119,8 @@ pub struct MetadataSourceContext {
     /// workstation every file open waits in the on-access scanner's queue;
     /// ERP УХ's stage re-read metadata XMLs 150 000 times, about 20 ms each.
     preloaded: PreloadedSourceFiles,
+    /// Explicit operation-local original census, never a path-cache fallback.
+    original_source: Option<Arc<crate::mssql_source_change::HeldSourceRoot>>,
 }
 
 /// A source file's bytes: shared with the preloaded store, or read for the
@@ -1173,6 +1175,7 @@ impl MetadataSourceContext {
             configuration_uuid: Arc::new(std::sync::OnceLock::new()),
             moxel_object_refs: Arc::new(std::sync::OnceLock::new()),
             preloaded: PreloadedSourceFiles::default(),
+            original_source: None,
         }
     }
 
@@ -1193,10 +1196,32 @@ impl MetadataSourceContext {
         }
     }
 
+    pub(crate) fn with_original_source(
+        source: Arc<crate::mssql_source_change::HeldSourceRoot>,
+    ) -> Self {
+        Self {
+            original_source: Some(source.clone()),
+            ..Self::new(source.canonical_root().to_owned())
+        }
+    }
+
+    pub(crate) fn require_original_unchanged(&self) -> anyhow::Result<()> {
+        if let Some(source) = &self.original_source {
+            source.require_unchanged()?;
+        }
+        Ok(())
+    }
+
     /// The bytes of a source file: shared from memory when preloaded, else
     /// read. (The resolvers ask for ERP УХ's metadata XMLs some 150 000 times;
     /// a copy each time cost a large-block allocation each.)
     pub(crate) fn read_source(&self, path: &Path) -> std::io::Result<SourceBytes> {
+        if let Some(source) = &self.original_source {
+            return source
+                .read_original_path(path)
+                .map(SourceBytes::Shared)
+                .map_err(|error| std::io::Error::other(error.to_string()));
+        }
         match self.preloaded.0.get(path) {
             Some(bytes) => Ok(SourceBytes::Shared(bytes.clone())),
             None => fs::read(path).map(SourceBytes::Owned),
@@ -3249,7 +3274,7 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
         plain.replace_range(container.module_range, &format_1c_string(module_text));
     }
     if let Some(form_item_assets_root) = form_item_assets_root {
-        patch_form_item_picture_assets(&mut plain, form_item_assets_root)?;
+        patch_form_item_picture_assets_with_source(&mut plain, form_item_assets_root, source)?;
     }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
@@ -7736,8 +7761,11 @@ fn native_picture_of(
             anyhow!("<{holder}> names a <Picture><Abs> and the form's item files are not on hand")
         })?;
         let path = root.join(item_name).join(name);
-        let bytes = fs::read(&path)
-            .with_context(|| format!("failed to read the <Abs> picture {}", path.display()))?;
+        let bytes = match source {
+            Some(source) => source.read_source(&path),
+            None => fs::read(&path).map(SourceBytes::Owned),
+        }
+        .with_context(|| format!("failed to read the <Abs> picture {}", path.display()))?;
         // Read straight here: `false` is 0 and `true` is 1, with nothing in
         // between, unlike a common picture where an absent one also writes 1.
         let load_transparent = picture.load_transparent.as_deref().map(str::trim) == Some("true");
@@ -10010,7 +10038,11 @@ fn form_body_base_free_blockers_with_resolver(
     Ok(blockers)
 }
 
-fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Result<()> {
+fn patch_form_item_picture_assets_with_source(
+    plain: &mut String,
+    assets_root: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
     if !assets_root.is_dir() {
         return Ok(());
     }
@@ -10032,10 +10064,14 @@ fn patch_form_item_picture_assets(plain: &mut String, assets_root: &Path) -> Res
         {
             let file_name = form_item_asset_file_name(property_name, &current_content);
             if let Some(path) = resolve_form_item_asset_path(assets_root, &item_name, &file_name) {
-                let content = fs::read(&path).with_context(|| {
-                    format!("failed to read Form item asset {}", path.display())
-                })?;
-                if is_form_item_picture_asset_content(&content) && content != current_content {
+                let content = match source {
+                    Some(source) => source.read_source(&path),
+                    None => fs::read(&path).map(SourceBytes::Owned),
+                }
+                .with_context(|| format!("failed to read Form item asset {}", path.display()))?;
+                if is_form_item_picture_asset_content(&content)
+                    && content[..] != current_content[..]
+                {
                     replacements.push((payload_start..payload_end, encode_base64(&content)));
                 }
             }
