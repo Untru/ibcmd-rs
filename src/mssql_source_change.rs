@@ -345,6 +345,29 @@ impl HeldSourceRoot {
         Ok(bytes)
     }
 
+    /// Retain original XML bytes only where this census differs from the other.
+    /// The whole census remains authoritative; equal digests, non-XML members,
+    /// absent members and spelling mismatches require no semantic byte read.
+    pub(crate) fn comparison_inventory(
+        &self,
+        other: &SourceInventory,
+    ) -> Result<SourceInventory, SourceChangeError> {
+        let mut comparison = self.baseline.clone();
+        for member in comparison.by_windows_key.values_mut() {
+            let Some(counterpart) = other.file(&member.path)? else {
+                continue;
+            };
+            if member.path == counterpart.path
+                && member.path.ends_with(".xml")
+                && (member.size_bytes != counterpart.size_bytes
+                    || member.sha256 != counterpart.sha256)
+            {
+                member.verified_bytes = Some(self.source_bytes(&member.path)?);
+            }
+        }
+        Ok(comparison)
+    }
+
     pub(crate) fn read_original_path(
         &self,
         path: &Path,
@@ -396,7 +419,11 @@ impl HeldSourceRoot {
     }
 
     pub fn capture_current(&self) -> Result<SourceInventory, SourceChangeError> {
-        let current_root = canonical_directory(&self.requested_root)?;
+        let current_root =
+            canonical_directory(&self.requested_root).map_err(|error| match error {
+                SourceChangeError::LinkOrReparsePoint(_) => SourceChangeError::HeldRootChanged,
+                other => other,
+            })?;
         if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
@@ -409,12 +436,18 @@ impl HeldSourceRoot {
         target: ActivationTarget,
         mode: ActivationMode,
     ) -> Result<SourceActivationInput, SourceChangeError> {
-        let selected = resolve_selected_path(&self.canonical_root, selected_path)?;
-        let retention = candidate_retention_paths(&selected);
-        let current_root = canonical_directory(&self.requested_root)?;
+        let current_root =
+            canonical_directory(&self.requested_root).map_err(|error| match error {
+                SourceChangeError::LinkOrReparsePoint(_) => SourceChangeError::HeldRootChanged,
+                other => other,
+            })?;
         if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
+        // Validate the original ancestor before resolving a selected member;
+        // a retargeted ancestor must never supply selected-path authority.
+        let selected = resolve_selected_path(&self.canonical_root, selected_path)?;
+        let retention = candidate_retention_paths(&selected);
         let current = capture_inventory(&self.anchor, self.admission, &retention)?;
         classify_source_change(&self.baseline, &current, &selected, target, mode)
     }
@@ -1568,17 +1601,24 @@ mod tests {
         let root =
             std::env::temp_dir().join(format!("ibcmd-rs-held-root-{}", uuid::Uuid::new_v4()));
         let first = root.join("Выгрузка");
-        let second = root.join("ВЫГРУЗКА");
+        let second = root.join("ВЫГРУЗКА-target");
         fs::create_dir_all(first.join("sources")).unwrap();
         fs::create_dir_all(second.join("sources")).unwrap();
         fs::write(first.join("sources/Module.bsl"), b"first").unwrap();
         fs::write(second.join("sources/Module.bsl"), b"second").unwrap();
         let link = root.join("selected");
         symlink(&first, &link).unwrap();
-        let held =
-            HeldSourceRoot::open(&link.join("sources"), SourceInventoryLimits::default()).unwrap();
+        assert!(matches!(
+            HeldSourceRoot::open(&link.join("sources"), SourceInventoryLimits::default()),
+            Err(SourceChangeError::LinkOrReparsePoint(_))
+        ));
         fs::remove_file(&link).unwrap();
-        symlink(&second, &link).unwrap();
+        let held =
+            HeldSourceRoot::open(&first.join("sources"), SourceInventoryLimits::default()).unwrap();
+        // The original directory remains alive, but its admitted pathname is
+        // redirected to another case-distinct ancestor. Never adopt that target.
+        fs::rename(&first, root.join("original-directory")).unwrap();
+        symlink(&second, &first).unwrap();
         assert!(matches!(
             held.capture_current(),
             Err(SourceChangeError::HeldRootChanged)
@@ -1591,6 +1631,8 @@ mod tests {
             ),
             Err(SourceChangeError::HeldRootChanged)
         ));
+        drop(held);
+        fs::remove_file(&first).unwrap();
         fs::remove_dir_all(root).unwrap();
     }
 

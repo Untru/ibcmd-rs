@@ -284,7 +284,7 @@ fn unix_same_bytes_replacement_never_adopts_original_identity() {
 
 #[cfg(unix)]
 #[test]
-fn unix_no_follow_root_ancestor_and_entry_and_case_directory_aliases() {
+fn unix_no_follow_root_ancestor_and_entry() {
     use std::os::unix::fs::symlink;
     let fixture = Fixture::new();
     fixture.write("real/sub/file.bin", b"actual");
@@ -293,12 +293,98 @@ fn unix_no_follow_root_ancestor_and_entry_and_case_directory_aliases() {
     assert!(HeldSourceRoot::open_compiler_operation(&fixture.path.join("link/sub")).is_err());
     assert!(HeldSourceRoot::open_compiler_operation(&fixture.path).is_err());
     fs::remove_file(fixture.path.join("link")).unwrap();
+    fixture.original().require_unchanged().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn unix_case_directory_aliases_follow_actual_filesystem_identity() {
+    use std::os::unix::fs::MetadataExt;
+    let fixture = Fixture::new();
     fixture.write("Directory/one.bin", b"one");
     fixture.write("directory/two.bin", b"two");
-    assert!(matches!(
-        HeldSourceRoot::open_compiler_operation(&fixture.path),
-        Err(SourceChangeError::WindowsPathCollision { .. })
-    ));
+    let upper = fs::symlink_metadata(fixture.path.join("Directory")).unwrap();
+    let lower = fs::symlink_metadata(fixture.path.join("directory")).unwrap();
+    if (upper.dev(), upper.ino()) != (lower.dev(), lower.ino()) {
+        assert!(matches!(
+            HeldSourceRoot::open_compiler_operation(&fixture.path),
+            Err(SourceChangeError::WindowsPathCollision { .. })
+        ));
+    } else {
+        // A case-insensitive filesystem has one physical directory with two
+        // independent files. This is valid, rather than an alias collision.
+        let held = fixture.original();
+        assert_eq!(held.baseline().files().len(), 2);
+        for member in held.baseline().files() {
+            let expected: &[u8] = if member.path().ends_with("one.bin") {
+                b"one"
+            } else {
+                b"two"
+            };
+            assert_eq!(
+                held.source_bytes(member.path()).unwrap().as_slice(),
+                expected
+            );
+        }
+        held.require_unchanged().unwrap();
+    }
+}
+
+#[test]
+fn original_comparison_retains_only_different_common_xml_members() {
+    let active_fixture = Fixture::new();
+    let proposed_fixture = Fixture::new();
+    for fixture in [&active_fixture, &proposed_fixture] {
+        fixture.write("same.xml", b"<Root><Value>same</Value></Root>");
+        fixture.write("same.bin", b"same");
+    }
+    active_fixture.write("different.xml", b"<Root><Value>same</Value></Root>");
+    proposed_fixture.write("different.xml", b"<Root>\n<Value>same</Value>\n</Root>");
+    active_fixture.write("different.bin", b"old");
+    proposed_fixture.write("different.bin", b"new");
+    let active = active_fixture.original();
+    let proposed = proposed_fixture.original();
+    let left = active.comparison_inventory(proposed.baseline()).unwrap();
+    let right = proposed.comparison_inventory(active.baseline()).unwrap();
+    for (owner, inventory) in [(&active, &left), (&proposed, &right)] {
+        assert_eq!(inventory.files().len(), 4);
+        assert_eq!(owner.consumed.lock().unwrap().len(), 1);
+        for member in inventory.files() {
+            assert_eq!(
+                member.verified_bytes.is_some(),
+                member.path() == "different.xml"
+            );
+        }
+        let retained = inventory
+            .file("different.xml")
+            .unwrap()
+            .unwrap()
+            .verified_bytes
+            .as_ref()
+            .unwrap();
+        assert!(Arc::ptr_eq(
+            retained,
+            &owner.source_bytes("different.xml").unwrap()
+        ));
+        assert!(
+            owner
+                .baseline()
+                .files()
+                .all(|member| member.verified_bytes.is_none())
+        );
+        owner.require_unchanged().unwrap();
+    }
+    assert!(
+        source_files_equal(
+            left.file("different.xml").unwrap().unwrap(),
+            right.file("different.xml").unwrap().unwrap()
+        )
+        .unwrap()
+    );
+    assert_eq!(
+        inventory_diff(&left, &right).unwrap(),
+        vec!["different.bin"]
+    );
 }
 
 fn write_actual_extent(path: &Path, length: u64) -> [u8; 32] {

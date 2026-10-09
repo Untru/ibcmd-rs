@@ -293,8 +293,6 @@ fn apply_source_change_inner(
     let classify_started = Instant::now();
     let active_originals = HeldSourceRoot::open_compiler_operation(&active_root)?;
     let proposed_originals = HeldSourceRoot::open_source_operation(&proposed_root, &selected_path)?;
-    let active_inventory = active_originals.baseline();
-    let proposed_inventory = proposed_originals.baseline();
     let target = match args.extension.as_deref() {
         Some(name) => ActivationTarget::extension(name.to_owned())?,
         None => ActivationTarget::Main,
@@ -305,9 +303,9 @@ fn apply_source_change_inner(
         | MssqlMainActivationModeArg::Live
         | MssqlMainActivationModeArg::Worker => ActivationMode::Exclusive,
     };
-    let classified = classify_source_change(
-        &active_inventory,
-        &proposed_inventory,
+    let classified = classify_original_source_change(
+        &active_originals,
+        &proposed_originals,
         &selected_path,
         target,
         activation_mode,
@@ -2435,6 +2433,29 @@ mod tests {
         );
         fs::remove_dir_all(canonical).unwrap();
     }
+}
+
+/// The source-apply classifier consumes both original owners for XML semantics.
+/// This runs before the existing NoOp return and any stage preparation.
+fn classify_original_source_change(
+    active: &HeldSourceRoot,
+    proposed: &HeldSourceRoot,
+    selected: &str,
+    target: ActivationTarget,
+    mode: ActivationMode,
+) -> Result<
+    crate::mssql_source_change::SourceActivationInput,
+    crate::mssql_source_change::SourceChangeError,
+> {
+    let active_inventory = active.comparison_inventory(proposed.baseline())?;
+    let proposed_inventory = proposed.comparison_inventory(active.baseline())?;
+    classify_source_change(
+        &active_inventory,
+        &proposed_inventory,
+        selected,
+        target,
+        mode,
+    )
 }
 
 #[cfg(test)]
