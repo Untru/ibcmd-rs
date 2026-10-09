@@ -2224,8 +2224,70 @@ pub enum MssqlMainActivationModeArg {
     Worker,
 }
 
+/// Explicit creation of a new private worker lifetime. No existing endpoint is adopted.
+#[derive(Debug, Clone, Default, Args)]
+#[group(
+    id = "managed_worker_creation",
+    multiple = true,
+    conflicts_with_all = [
+        "cluster_id", "infobase_id", "rac", "ras_endpoint", "infobase_user", "infobase_pwd"
+    ]
+)]
+pub struct ManagedWorkerCliArgs {
+    #[arg(
+        long,
+        conflicts_with_all = [
+            "cluster_id", "infobase_id", "rac", "ras_endpoint", "infobase_user", "infobase_pwd"
+        ],
+        requires_all = [
+            "managed_platform_bin",
+            "managed_powershell",
+            "managed_agent_port",
+            "managed_cluster_port",
+            "managed_ras_port",
+            "managed_worker_first",
+            "managed_worker_last",
+            "managed_timeout_seconds",
+            "managed_registration_user",
+            "managed_registration_pwd_env",
+            "managed_infobase_user",
+            "managed_infobase_pwd_env"
+        ]
+    )]
+    pub managed_worker_parent: Option<PathBuf>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_platform_bin: Option<PathBuf>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_powershell: Option<PathBuf>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_agent_port: Option<u16>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_cluster_port: Option<u16>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_ras_port: Option<u16>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_worker_first: Option<u16>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_worker_last: Option<u16>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_timeout_seconds: Option<u64>,
+    /// SQL login used only by the new 1C registration; independent of --sql-user.
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_registration_user: Option<String>,
+    /// Environment slot for the registration password. Its value is never printed.
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_registration_pwd_env: Option<String>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_infobase_user: Option<String>,
+    #[arg(long, requires = "managed_worker_parent")]
+    pub managed_infobase_pwd_env: Option<String>,
+}
+
 #[derive(Debug, Clone, Args)]
 pub struct MssqlActivateStagedMainArgs {
+    #[command(flatten)]
+    pub managed_worker: ManagedWorkerCliArgs,
+
     /// Experimental idle-only split/continue checkpoint; already-staged activation only.
     /// Source apply refuses this option before any external process or staging.
     #[arg(long)]
@@ -2296,10 +2358,10 @@ pub struct MssqlActivateStagedMainArgs {
     #[arg(long, default_value = "localhost:1545")]
     pub ras_endpoint: String,
     /// 1C cluster UUID required to bind the verified registration.
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "managed_worker_parent")]
     pub cluster_id: Option<Uuid>,
     /// 1C infobase UUID required to bind the verified registration.
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "managed_worker_parent")]
     pub infobase_id: Option<Uuid>,
     #[arg(long)]
     pub infobase_user: Option<String>,
@@ -2430,6 +2492,9 @@ pub struct MssqlConfigApplyArgs {
 
 #[derive(Debug, Clone, Args)]
 pub struct MssqlApplySourceChangeArgs {
+    #[command(flatten)]
+    pub managed_worker: ManagedWorkerCliArgs,
+
     /// Experimental idle-only split/continue checkpoint; already-staged activation only.
     /// Source apply refuses this option before any external process or staging.
     #[arg(long)]
@@ -2496,9 +2561,9 @@ pub struct MssqlApplySourceChangeArgs {
     pub rac: PathBuf,
     #[arg(long, default_value = "localhost:1545")]
     pub ras_endpoint: String,
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "managed_worker_parent")]
     pub cluster_id: Option<Uuid>,
-    #[arg(long, required = true)]
+    #[arg(long, required_unless_present = "managed_worker_parent")]
     pub infobase_id: Option<Uuid>,
     #[arg(long)]
     pub infobase_user: Option<String>,

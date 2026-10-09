@@ -23,6 +23,8 @@ use authentication::{
     Action as AdminAction, Credentials as AdminCredentials, Family as AdminFamily,
 };
 
+// Input descriptor only: cloning never copies a runtime, process or journal owner.
+#[derive(Clone)]
 pub(crate) struct CreatorOptions {
     pub parent: PathBuf,
     pub platform_bin: PathBuf,

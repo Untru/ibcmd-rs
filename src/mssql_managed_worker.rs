@@ -15,6 +15,7 @@ use serde::Serialize;
 use uuid::Uuid;
 
 mod child;
+pub(crate) mod cli;
 mod command;
 mod identity;
 pub(crate) use identity::ProcessIdentity;

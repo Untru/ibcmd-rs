@@ -61,6 +61,9 @@ pub struct MssqlApplySourceChangeTimings {
 pub fn apply_source_change(
     args: &MssqlApplySourceChangeArgs,
 ) -> Result<MssqlApplySourceChangeReport> {
+    if crate::mssql_managed_worker::cli::selects_fresh(&args.managed_worker)? {
+        return crate::mssql_managed_worker::cli::apply(args);
+    }
     apply_source_change_inner(args, None)
 }
 
@@ -543,6 +546,7 @@ fn apply_source_change_inner(
     } else {
         Some(serde_json::to_value(activate_main(
             &MssqlActivateStagedMainArgs {
+                managed_worker: Default::default(),
                 live_checkpoint: false,
                 live_compact_recovery: false,
                 platform_profile: args.platform_profile,
@@ -654,6 +658,9 @@ fn apply_source_change_inner(
 }
 
 pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    if crate::mssql_managed_worker::cli::selects_fresh(&args.managed_worker)? {
+        bail!("fresh managed --watch is refused before creator effects");
+    }
     if args.live_checkpoint {
         bail!(
             "--live-checkpoint is only supported by mssql-activate-staged-main; source watch refused before staging"
@@ -754,7 +761,27 @@ pub fn watch_source_changes(args: &MssqlApplySourceChangeArgs) -> Result<()> {
     }
 }
 
-fn require_supported_main_source_cohort(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+/// Read-only input checks before creating a fresh managed lifetime. The normal
+/// consumer repeats these checks; this is not a cache or publication authority.
+pub(crate) fn preflight_managed_source_inputs(args: &MssqlApplySourceChangeArgs) -> Result<()> {
+    let source_root = fs::canonicalize(&args.source_root)
+        .with_context(|| format!("failed to canonicalize {}", args.source_root.display()))?;
+    if !source_root.is_dir() {
+        bail!("source root is not a directory: {}", source_root.display());
+    }
+    let selected = normalize_relative_path(&args.source_path)?;
+    for relative in selected_source_closure_paths(&source_root, &selected)? {
+        let path = source_root.join(path_from_slashes(&relative));
+        if !path.is_file() {
+            bail!("selected source body is absent: {}", path.display());
+        }
+        reject_reparse_file(&path)?;
+    }
+    Ok(())
+}
+pub(crate) fn require_supported_main_source_cohort(
+    args: &MssqlApplySourceChangeArgs,
+) -> Result<()> {
     let selected = normalize_relative_path(&args.source_path)?;
     require_supported_main_source_path(&selected, args.platform_profile)
 }
@@ -1903,6 +1930,7 @@ mod tests {
     #[test]
     fn runtime_profile_verification_fails_before_active_export() {
         let args = MssqlApplySourceChangeArgs {
+            managed_worker: Default::default(),
             live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
             sqlcmd: Some(PathBuf::from("must-not-run-sqlcmd")),
@@ -2022,6 +2050,7 @@ mod tests {
     #[test]
     fn runtime_profile_verification_fails_before_watch_reads_missing_source() {
         let args = MssqlApplySourceChangeArgs {
+            managed_worker: Default::default(),
             live_checkpoint: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
             sqlcmd: Some(PathBuf::from("must-not-run-sqlcmd")),
