@@ -19,6 +19,8 @@ use super::{Journal, LifetimeBinding, ManagedWorker, Observation, OwnedRuntime, 
 use crate::mssql_platform_profile::ManagedRacReadAuth;
 
 mod authentication;
+#[cfg(test)]
+mod census_observer_tests;
 use authentication::{
     Action as AdminAction, Credentials as AdminCredentials, Family as AdminFamily,
 };
@@ -146,15 +148,61 @@ struct ForeignProcessFact {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
+struct CensusObserverRow {
+    identity: CensusIdentity,
+}
+
+/// Index is selected before dispatch, never taken from the response. Pending
+/// and proved records stay with the same collector through every refusal.
+struct CensusObserverRecord {
+    original_index: usize,
+    row: Option<CensusIdentity>,
+    bound: Option<ProcessIdentity>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
 struct ShutdownCensus {
+    observer: CensusObserverRow,
     owned: Vec<CensusIdentity>,
     foreign: Vec<ForeignProcessFact>,
     listeners: Vec<Listener>,
 }
 
+fn require_census_observer(
+    census: &ShutdownCensus,
+    seeds: &BTreeSet<u32>,
+    bound: &ProcessIdentity,
+) -> Result<()> {
+    let row = &census.observer.identity;
+    if row.pid == 0
+        || row.birth_filetime == 0
+        || !row.executable.is_absolute()
+        || row.command.is_empty()
+        || row.command.len() > 32768
+        || seeds.contains(&row.pid)
+        || seeds.contains(&row.parent)
+        || census
+            .owned
+            .iter()
+            .any(|other| other.pid == row.pid || other.pid == row.parent || other.parent == row.pid)
+        || census
+            .foreign
+            .iter()
+            .any(|other| other.pid == row.pid || other.parent == row.pid)
+        || census
+            .listeners
+            .iter()
+            .any(|listener| listener.pid == row.pid)
+    {
+        bail!("census observer is not a separate complete original collector");
+    }
+    require_shutdown_identity(row, bound)
+}
+
 fn require_shutdown_census(census: &ShutdownCensus, seeds: &BTreeSet<u32>) -> Result<()> {
     let mut all = BTreeSet::new();
-    if census.owned.len() + census.foreign.len() > 4096 || census.listeners.len() > 512 {
+    if census.owned.len() + census.foreign.len() + 1 > 4096 || census.listeners.len() > 512 {
         bail!("bounded shutdown census required");
     }
     for row in &census.owned {
@@ -220,12 +268,15 @@ $all=@(Get-CimInstance Win32_Process -OperationTimeoutSec 10 | Select-Object -Fi
 $listeners=@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {$_.LocalPort -in @(__PORTS__)} | Select-Object -First 513); if($listeners.Count -gt 512){throw 'cold listener bound'}
 $ids=[Collections.Generic.HashSet[uint32]]::new(); foreach($id in @(__SEEDS__)){[void]$ids.Add([uint32]$id)}
 do{$n=$ids.Count; foreach($p in $all){if($ids.Contains([uint32]$p.ParentProcessId)){[void]$ids.Add([uint32]$p.ProcessId)}}}while($n -ne $ids.Count)
-$owned=@();$foreign=@()
+$owned=@();$foreign=@();$observer=$null
 foreach($p in $all){
  if(($p.CommandLine -and $p.CommandLine.Length -gt 32768) -or ($p.ExecutablePath -and $p.ExecutablePath.Length -gt 32768)){throw 'cold field bound'}
  $marker=if($p.CommandLine){$p.CommandLine.IndexOf('__ROOT__',[StringComparison]::OrdinalIgnoreCase) -ge 0}else{$null}
  $selected=$ids.Contains([uint32]$p.ProcessId) -or $marker -eq $true -or @($listeners|Where-Object{$_.OwningProcess -eq $p.ProcessId}).Count -gt 0
- if($selected){
+  if([uint32]$p.ProcessId -eq [uint32]$PID){
+   if($observer -or !$p.ExecutablePath -or !$p.CommandLine -or !$p.CreationDate){throw 'cold observer complete singleton absent'}
+   $observer=@{identity=@{pid=[uint32]$p.ProcessId;parent=[uint32]$p.ParentProcessId;birth_filetime=[uint64]$p.CreationDate.ToFileTimeUtc();executable=$p.ExecutablePath;command=$p.CommandLine}}
+  }elseif($selected){
   if(!$p.ExecutablePath -or !$p.CommandLine -or !$p.CreationDate){throw 'cold relevant complete identity absent'}
   $owned+=@{pid=[uint32]$p.ProcessId;parent=[uint32]$p.ParentProcessId;birth_filetime=[uint64]$p.CreationDate.ToFileTimeUtc();executable=$p.ExecutablePath;command=$p.CommandLine}
  }else{
@@ -233,7 +284,8 @@ foreach($p in $all){
  }
 }
 $ls=@($listeners|ForEach-Object{@{port=[uint16]$_.LocalPort;pid=[uint32]$_.OwningProcess}})
-ConvertTo-Json -InputObject @{owned=$owned;foreign=$foreign;listeners=$ls} -Depth 5 -Compress"#
+if(!$observer){throw 'cold original observer missing'}
+ConvertTo-Json -InputObject @{observer=$observer;owned=$owned;foreign=$foreign;listeners=$ls} -Depth 5 -Compress"#
     .replace("__ROOT__", root).replace("__SEEDS__", seeds).replace("__PORTS__", ports)
 }
 
@@ -255,6 +307,7 @@ pub(crate) struct NativeRuntime {
     agent: Option<OriginalChild>,
     ras: Option<OriginalChild>,
     collectors: Vec<OriginalChild>,
+    census_observers: Vec<CensusObserverRecord>,
     binding: LifetimeBinding,
     administrator: String,
     password: String,
@@ -337,6 +390,7 @@ pub(crate) fn create(options: CreatorOptions) -> Result<Creation> {
         agent: None,
         ras: None,
         collectors: Vec::new(),
+        census_observers: Vec::new(),
         binding,
         administrator: format!("ibcmd_{nonce}"),
         password: format!("{}{}", Uuid::new_v4(), Uuid::new_v4()),
@@ -786,11 +840,53 @@ impl NativeRuntime {
             .collect::<Vec<_>>()
             .join(",");
         let script = shutdown_census_script(&root, &text, &self.selected_ports());
-        let raw = self.shell(script)?;
-        let census: ShutdownCensus =
-            serde_json::from_str(&raw).context("bounded owned/opaque-foreign census shape")?;
-        require_shutdown_census(&census, &seeds)?;
-        Ok(census.owned)
+        let original_index = self.collectors.len();
+        if self.census_observers.len() >= 1024 {
+            self.failed = true;
+            bail!("bounded original census custody required");
+        }
+        let slot = self.census_observers.len();
+        self.census_observers.push(CensusObserverRecord {
+            original_index,
+            row: None,
+            bound: None,
+        });
+        let result = (|| {
+            let raw = self.shell(script)?;
+            if self.collectors.len() != original_index + 1
+                || self.census_observers[slot].original_index != original_index
+            {
+                bail!("same dispatched census collector slot required");
+            }
+            let census: ShutdownCensus = serde_json::from_str(&raw)
+                .context("bounded observer/owned/opaque-foreign census shape")?;
+            self.census_observers[slot].row = Some(census.observer.identity.clone());
+            let original = self
+                .collectors
+                .get_mut(original_index)
+                .context("original census collector absent")?;
+            let bound =
+                original.bind_completed_census(&census.observer.identity, raw.as_bytes())?;
+            self.census_observers[slot].bound = Some(bound);
+            require_census_observer(
+                &census,
+                &seeds,
+                self.census_observers[slot]
+                    .bound
+                    .as_ref()
+                    .context("original observer binding absent")?,
+            )?;
+            require_shutdown_census(&census, &seeds)?;
+            self.collectors
+                .get_mut(original_index)
+                .context("original census collector lost")?
+                .require_command_current()?;
+            Ok(census.owned)
+        })();
+        if result.is_err() {
+            self.failed = true;
+        }
+        result
     }
     fn is_shutdown_member(&self, row: &CensusIdentity) -> bool {
         row.pid == self.binding.agent.pid
@@ -1574,6 +1670,9 @@ mod tests {
             command: format!("{name} original"),
         };
         let mut census = ShutdownCensus {
+            observer: CensusObserverRow {
+                identity: full(20, 1, "pwsh.exe"),
+            },
             owned: vec![
                 full(10, 1, "ragent.exe"),
                 full(11, 1, "ras.exe"),
