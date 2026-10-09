@@ -39,7 +39,7 @@ workspace/all-targets compilation passed. The library suites passed 84 managed
 worker, 29 source-change and 43 activation methods, including all eight observer
 regressions. The separately selected real readonly control passed once in 2.83s.
 These results cover this integration; they do not establish server AUTH,
-registration/load, SQL consumption, handoff/shutdown or completion of issue409.
+registration/load, SQL consumption, handoff/shutdown or completion of issue #409.
 
 ## ROOT-only actual readonly control
 
@@ -63,17 +63,17 @@ through `IBCMD_CENSUS_OBSERVER_ROOT_REQUEST` and
 This is a schema sketch, not a runnable request or origin claim. ROOT chooses
 actual values and pins them. The unique marker is used only as a search string;
 no directory/registry/server is created. Selected seeds are empty and selected
-port0 has no valid TCP listener. The actual production script calls readonly
+port 0 has no valid TCP listener. The actual production script calls readonly
 Get-CimInstance and Get-NetTCPConnection through one original utility. Its
 response must contain the real observer and no marker-owned rows/listeners.
 The test binds the real handle/BOTH, then refuses a forged parent against that
 same original. No helper/mock positive OS census, native mutation, SQL, kill,
-retry or ownership admission is used. One original120 deadline is selected
+retry or ownership admission is used. One original 120-second deadline is selected
 before environment/request/pin reads and preserved through final checks.
 
 ROOT must separately retain actual command/tool/source pins, original test
 terminal and BOTH receipts. A test pass is a readonly census control, not AUTH
-4/4, production Ready, runtime recovery or acceptance of full issue409.
+4/4, production Ready, runtime recovery or acceptance of full issue #409.
 
 Use the library target, for example `cargo test --locked --offline -p ibcmd-rs
 --lib --no-default-features mssql_managed_worker:: -- --test-threads=1`.

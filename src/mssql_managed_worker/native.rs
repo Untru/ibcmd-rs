@@ -842,6 +842,7 @@ impl NativeRuntime {
         let script = shutdown_census_script(&root, &text, &self.selected_ports());
         let original_index = self.collectors.len();
         if self.census_observers.len() >= 1024 {
+            self.failed = true;
             bail!("bounded original census custody required");
         }
         let slot = self.census_observers.len();
