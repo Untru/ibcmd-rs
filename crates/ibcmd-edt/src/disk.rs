@@ -863,7 +863,13 @@ mod tests {
         let path = source.join(&relative);
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         fs::write(&path, b"exact body").unwrap();
-        assert!(ibcmd_xml::source_tree::SourcePath::new(&relative).is_err());
+        assert!(ibcmd_xml::source_tree::SourcePath::new_bounded(&relative).is_err());
+        assert_eq!(
+            ibcmd_xml::source_tree::SourcePath::new(&relative)
+                .unwrap()
+                .as_str(),
+            relative
+        );
         let copied = Inventory::snapshot(&source, &owner.path().join("snapshot")).unwrap();
         assert_eq!(copied.entries.len(), 1);
         assert_eq!(copied.read_entry(0).unwrap(), b"exact body");
@@ -876,7 +882,13 @@ mod tests {
         let source = owner.path().join("source");
         fs::create_dir(&source).unwrap();
         let name = format!("{}.bin", "Имя".repeat(50));
-        assert!(ibcmd_xml::source_tree::SourcePath::new(&name).is_err());
+        assert!(ibcmd_xml::source_tree::SourcePath::new_bounded(&name).is_err());
+        assert_eq!(
+            ibcmd_xml::source_tree::SourcePath::new(&name)
+                .unwrap()
+                .as_str(),
+            name
+        );
         fs::write(source.join(&name), b"exact body").unwrap();
         let copied = Inventory::snapshot(&source, &owner.path().join("snapshot")).unwrap();
         assert_eq!(copied.entries[0].path, name);
