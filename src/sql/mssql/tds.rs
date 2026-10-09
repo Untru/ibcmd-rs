@@ -100,6 +100,74 @@ pub struct TdsConnection {
 }
 
 impl TdsConnection {
+    /// Closed session/transaction receipts through the original simple_query
+    /// context, not a nested sp_executesql scope.
+    pub(super) fn owned_simple_rows(
+        &mut self,
+        sql: &str,
+        mut row: impl FnMut(SqlRow) -> Result<()>,
+    ) -> Result<()> {
+        let Self {
+            runtime, client, ..
+        } = self;
+        runtime.block_on(async {
+            let mut stream = client.simple_query(sql).await.map_err(request_error)?;
+            while let Some(item) = stream.try_next().await.map_err(request_error)? {
+                if let QueryItem::Row(value) = item {
+                    row(sql_row(value))?;
+                }
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+    }
+
+    /// Original-session parameter dispatch. No pool return, database reset,
+    /// replacement connection, retry or restoration runs after this request.
+    pub(super) fn owned_execute<'q>(
+        &mut self,
+        sql: &'q str,
+        params: &[SqlParam<'q>],
+    ) -> Result<u64> {
+        let Self {
+            runtime, client, ..
+        } = self;
+        let result = runtime
+            .block_on(async {
+                let mut query = Query::new(Cow::Borrowed(sql));
+                for param in params {
+                    bind(&mut query, *param);
+                }
+                query.execute(client).await
+            })
+            .map_err(request_error)?;
+        Ok(result.total())
+    }
+
+    /// Read on the same original, draining every result before returning.
+    pub(super) fn owned_query_each<'q>(
+        &mut self,
+        sql: &'q str,
+        params: &[SqlParam<'q>],
+        mut row: impl FnMut(SqlRow) -> Result<()>,
+    ) -> Result<()> {
+        let Self {
+            runtime, client, ..
+        } = self;
+        runtime.block_on(async {
+            let mut query = Query::new(Cow::Borrowed(sql));
+            for param in params {
+                bind(&mut query, *param);
+            }
+            let mut stream = query.query(client).await.map_err(request_error)?;
+            while let Some(item) = stream.try_next().await.map_err(request_error)? {
+                if let QueryItem::Row(value) = item {
+                    row(sql_row(value))?;
+                }
+            }
+            Ok::<_, anyhow::Error>(())
+        })
+    }
+
     /// Opens a connection, retrying transient connect failures.
     pub fn open(target: &SqlTarget, address: &ServerAddress) -> Result<Self> {
         let runtime = tokio::runtime::Builder::new_current_thread()

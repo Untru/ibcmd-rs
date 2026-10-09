@@ -7,6 +7,7 @@
 mod address;
 #[cfg(all(test, feature = "mssql-live-tests"))]
 mod live_tests;
+mod owned;
 mod script;
 mod tds;
 
@@ -16,20 +17,21 @@ use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use anyhow::{Context, Result, bail};
 
 pub use address::{DEFAULT_PORT, ServerAddress};
+pub use script::SealedSqlScript;
 pub use script::{ScriptBatch, split_batches};
 pub use tds::{REQUEST_FAILED, TdsConnection, TdsPool, sql_row, sql_value};
 
 use super::{Dbms, ScriptVariables, SqlClient, SqlParam, SqlRow, SqlTarget};
 
 /// SQL Server takes at most 2 100 parameters in one request.
-const MAX_PARAMETERS: usize = 2100;
+pub(super) const MAX_PARAMETERS: usize = 2100;
 /// Rows one INSERT statement carries: measured on the lab server, 25-100
 /// rows of ~30 KB each moved ~50 MB/s, 1 row 15 MB/s, 400 rows 30 MB/s
 /// (the plan of a long VALUES list costs more than it saves).
-const INSERT_ROWS: usize = 50;
+pub(super) const INSERT_ROWS: usize = 50;
 /// Bytes of parameters one INSERT statement carries before the next starts;
 /// a single larger row still gets a statement of its own.
-const INSERT_BYTES: usize = 8 * 1024 * 1024;
+pub(super) const INSERT_BYTES: usize = 8 * 1024 * 1024;
 /// Below this many bytes a bulk write uses one connection.
 const PARALLEL_WRITE_BYTES: usize = 64 * 1024 * 1024;
 
@@ -55,6 +57,10 @@ impl MssqlClient {
 impl SqlClient for MssqlClient {
     fn dbms(&self) -> Dbms {
         Dbms::SqlServer
+    }
+
+    fn open_owned_command(&self) -> Result<super::OwnedSqlCommand> {
+        Ok(owned::open(self.pool.dedicated()?))
     }
 
     fn max_connections(&self) -> usize {
@@ -217,7 +223,7 @@ fn insert_chunks(rows: &[Vec<SqlParam<'_>>], columns: usize) -> Vec<Range<usize>
 }
 
 /// `INSERT INTO <table> (<columns>) VALUES (@P1, ...), (...)` for `rows` rows.
-fn insert_statement(table: &str, columns: &[&str], rows: usize) -> String {
+pub(super) fn insert_statement(table: &str, columns: &[&str], rows: usize) -> String {
     let mut statement = format!("INSERT INTO {table} ({}) VALUES ", columns.join(", "));
     let mut parameter = 0usize;
     for row in 0..rows {

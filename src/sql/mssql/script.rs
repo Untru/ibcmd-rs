@@ -11,6 +11,60 @@ use anyhow::{Result, bail};
 
 use crate::sql::ScriptVariables;
 
+/// A complete immutable script admitted before dispatch. This first adapter
+/// materializes UTF-8 and the existing splitter's batches; it is not an O(1)
+/// streaming SQL executor. Late input errors cannot follow an early COMMIT.
+pub struct SealedSqlScript {
+    pub(super) batches: Vec<ScriptBatch>,
+    sha256: [u8; 32],
+    byte_length: usize,
+}
+
+impl SealedSqlScript {
+    pub fn read(mut input: impl std::io::Read, variables: ScriptVariables) -> Result<Self> {
+        use sha2::{Digest, Sha256};
+        let mut bytes = Vec::new();
+        let mut block = [0u8; 64 * 1024];
+        loop {
+            let count = match input.read(&mut block) {
+                Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                result => result?,
+            };
+            if count == 0 {
+                break;
+            }
+            if count > block.len() {
+                bail!("reader reported bytes outside its supplied buffer");
+            }
+            bytes
+                .len()
+                .checked_add(count)
+                .ok_or_else(|| anyhow::anyhow!("SQL input extent overflow"))?;
+            bytes.try_reserve(count)?;
+            bytes.extend_from_slice(&block[..count]);
+        }
+        let sha256 = Sha256::digest(&bytes).into();
+        let byte_length = bytes.len();
+        let text = String::from_utf8(bytes)?;
+        let batches = split_batches(&text, variables)?;
+        Ok(Self {
+            batches,
+            sha256,
+            byte_length,
+        })
+    }
+
+    pub fn sha256(&self) -> &[u8; 32] {
+        &self.sha256
+    }
+    pub fn byte_length(&self) -> usize {
+        self.byte_length
+    }
+    pub fn batches(&self) -> &[ScriptBatch] {
+        &self.batches
+    }
+}
+
 /// One batch of a script and the line it starts on.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScriptBatch {
