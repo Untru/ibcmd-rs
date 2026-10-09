@@ -1248,7 +1248,6 @@ fn source_closure_from_inventory(
     Ok(paths)
 }
 
-#[cfg(test)]
 fn selected_storage_file_names_for_source_paths(
     source_root: &Path,
     source_paths: &[String],
