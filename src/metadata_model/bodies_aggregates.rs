@@ -11,7 +11,6 @@
 //! (`ОперацииБюджетов`) holds no aggregate and columns of dimensions the
 //! register no longer has.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow};
@@ -63,13 +62,16 @@ fn code<'a>(table: &'a [(&str, &str)], value: &str, what: &str) -> Result<&'a st
 pub fn aggregates_row(
     owner: &Element,
     owner_xml: &Path,
-    _context: &DescriptorContext,
+    context: &DescriptorContext,
 ) -> Result<Option<Brace>> {
     let path = aggregates_path(owner_xml);
-    if !path.is_file() {
+    if !context.source.source_file_exists(&path)? {
         return Ok(None);
     }
-    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let bytes = context
+        .source
+        .read_source(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let document = parse_element_tree(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     aggregates_tree(owner, Some(&document)).map(Some)

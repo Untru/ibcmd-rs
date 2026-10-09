@@ -660,6 +660,19 @@ pub fn predefined_item_id(
         .with_extension("")
         .join("Ext")
         .join("Predefined.xml");
+    if context.source.original_source().is_some() {
+        context.source.require_source_root(&context.root)?;
+        let items = if context.source.source_file_exists(&path)? {
+            let bytes = context.source.read_source(&path)?;
+            parse_predefined(&bytes)?
+        } else {
+            HashMap::new()
+        };
+        return items
+            .get(item)
+            .cloned()
+            .ok_or_else(|| anyhow!("unknown predefined item {kind}.{name}.{item}"));
+    }
     let cached = predefined_cache()
         .lock()
         .map_err(|_| anyhow!("predefined cache poisoned"))?
@@ -683,6 +696,13 @@ pub fn predefined_item_id(
 }
 
 fn read_predefined(path: &PathBuf) -> Result<HashMap<String, String>> {
+    let Ok(bytes) = fs::read(path) else {
+        return Ok(HashMap::new());
+    };
+    parse_predefined(&bytes)
+}
+
+fn parse_predefined(bytes: &[u8]) -> Result<HashMap<String, String>> {
     fn visit(element: &Element, out: &mut HashMap<String, String>) {
         for item in element.children_named("Item") {
             if let (Some(id), Some(name)) = (item.attr("id"), item.child_text("Name")) {
@@ -694,10 +714,7 @@ fn read_predefined(path: &PathBuf) -> Result<HashMap<String, String>> {
         }
     }
     let mut out = HashMap::new();
-    let Ok(bytes) = fs::read(path) else {
-        return Ok(out);
-    };
-    visit(&parse_element_tree(&bytes)?, &mut out);
+    visit(&parse_element_tree(bytes)?, &mut out);
     Ok(out)
 }
 

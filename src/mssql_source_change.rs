@@ -372,11 +372,106 @@ impl HeldSourceRoot {
         &self,
         path: &Path,
     ) -> Result<Arc<Vec<u8>>, SourceChangeError> {
+        self.source_bytes(&self.relative_path(path)?)
+    }
+
+    pub(crate) fn relative_path(&self, path: &Path) -> Result<String, SourceChangeError> {
         let relative = path
             .strip_prefix(&self.canonical_root)
             .or_else(|_| path.strip_prefix(&self.requested_root))
             .map_err(|_| SourceChangeError::HeldRootChanged)?;
-        self.source_bytes(&path_to_slash(relative)?)
+        if relative.as_os_str().is_empty() {
+            Ok(String::new())
+        } else {
+            path_to_slash(relative)
+        }
+    }
+
+    /// Optional membership is decided by the complete original census, never
+    /// by a new pathname probe. Aliased spellings are errors, not absence.
+    pub(crate) fn files_under(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<&SourceFileDigest>, SourceChangeError> {
+        let key = windows_path_key(prefix);
+        let mut files = Vec::new();
+        for (candidate, member) in self.baseline.by_windows_key.range(key.clone()..) {
+            if !candidate.starts_with(&key) {
+                break;
+            }
+            if !member.path().starts_with(prefix) {
+                return Err(SourceChangeError::WindowsAliasMismatch {
+                    requested: prefix.to_owned(),
+                    actual: member.path().to_owned(),
+                });
+            }
+            files
+                .try_reserve(1)
+                .map_err(|e| SourceChangeError::Io(e.to_string()))?;
+            files.push(member);
+        }
+        Ok(files)
+    }
+
+    pub(crate) fn member(
+        &self,
+        path: &str,
+    ) -> Result<Option<&SourceFileDigest>, SourceChangeError> {
+        let member = self.baseline.file(path)?;
+        if let Some(member) = member
+            && member.path != path
+        {
+            return Err(SourceChangeError::WindowsAliasMismatch {
+                requested: path.to_owned(),
+                actual: member.path.clone(),
+            });
+        }
+        Ok(member)
+    }
+
+    /// Stream originals into the existing private compiler projection. The
+    /// exclusive output root is not returned as usable until the full census
+    /// and every consumed original digest have been checked.
+    pub(crate) fn copy_to_new_projection(
+        &self,
+        destination: &Path,
+    ) -> Result<(), SourceChangeError> {
+        self.require_unchanged()?;
+        fs::create_dir(destination).map_err(|e| SourceChangeError::Io(e.to_string()))?;
+        let destination = RootAnchor::open(destination)?;
+        // Empty directories remain part of the existing source projection.
+        // They never grant file-byte membership, which comes only from census.
+        for entry in WalkDir::new(&self.canonical_root).follow_links(false) {
+            let entry = entry.map_err(|e| SourceChangeError::Io(e.to_string()))?;
+            if entry.file_type().is_dir() && entry.path() != self.canonical_root {
+                let _original_directory = RootAnchor::open(entry.path())?;
+                destination.create_directory(&self.relative_path(entry.path())?)?;
+            } else if entry.file_type().is_symlink() {
+                return Err(SourceChangeError::LinkOrReparsePoint(
+                    entry.path().display().to_string(),
+                ));
+            }
+        }
+        for source in self.baseline.files() {
+            let original = match &source.original {
+                Some(original) => original.clone(),
+                None => Arc::new(self.anchor.open_file(&source.path)?),
+            };
+            if Some(original.identity()) != source.identity
+                || original.length() != source.size_bytes
+            {
+                return Err(SourceChangeError::FileChangedDuringRead(
+                    source.path.clone(),
+                ));
+            }
+            let (mut output, _parents) = destination.create_file(&source.path)?;
+            original.copy_into(&source.sha256, &mut output)?;
+            output
+                .sync_all()
+                .map_err(|e| SourceChangeError::Io(e.to_string()))?;
+        }
+        destination.require_path()?;
+        self.require_unchanged()
     }
 
     pub(crate) fn fingerprint_paths(

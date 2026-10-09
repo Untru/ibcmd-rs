@@ -29,10 +29,11 @@ use super::{
     StageSourceObjectsReport, StagedMetadataBodyReport, StagedMetadataObjectReport,
     StorageTableManifest, build_bulk_stage_prepare_sql, bulk_stage_paths,
     bulk_stage_rows_file_needed, bulk_stage_table_name, command_interface_body_suffix,
-    infer_common_module_text_path, mssql_compile_axes_from_metadata_xml, pack_module_body_source,
-    prepare_metadata_body_family, quote_ident, require_non_lab_confirmation,
-    resolve_sqlcmd_password, run_bulk_stage, source_module_body_path,
-    source_xml_version_from_bytes, stage_sql, storage_table_stats, write_bulk_stage_rows,
+    infer_common_module_text_path, mssql_compile_axes_from_metadata_xml,
+    pack_module_body_source_with_source, prepare_metadata_body_family, quote_ident,
+    require_non_lab_confirmation, resolve_sqlcmd_password, run_bulk_stage,
+    source_module_body_path_with_source, source_xml_version_from_bytes, stage_sql,
+    storage_table_stats, write_bulk_stage_rows,
 };
 use crate::cli::MssqlStageSourceObjectsArgs;
 use crate::compiler::families::assets::SourceAssetRegistry;
@@ -136,8 +137,22 @@ impl EmptyStageContext {
         files: &[(PathBuf, std::sync::Arc<Vec<u8>>)],
         listing: Option<std::sync::Arc<SourceListing>>,
     ) -> Result<Self> {
+        Self::for_objects_with_source(root, version, files, listing, None)
+    }
+
+    pub(super) fn for_objects_with_source(
+        root: &Path,
+        version: Option<&str>,
+        files: &[(PathBuf, std::sync::Arc<Vec<u8>>)],
+        listing: Option<std::sync::Arc<SourceListing>>,
+        source: Option<&crate::module_blob::MetadataSourceContext>,
+    ) -> Result<Self> {
+        if let Some(source) = source {
+            source.require_source_root(root)?;
+            source.require_original_unchanged()?;
+        }
         let configuration_path = root.join("Configuration.xml");
-        let configuration = fs::read(&configuration_path)
+        let configuration = super::read_stage_source(source, &configuration_path)
             .with_context(|| format!("failed to read {}", configuration_path.display()))?;
         let version = match version {
             Some(version) => version.to_string(),
@@ -155,13 +170,19 @@ impl EmptyStageContext {
         let xml_2_21 = platform.xml_version() == crate::cli::InfobaseConfigSourceVersion::V2_21;
         let layout_8_5_1 = xml_2_21
             && platform.form_layout() >= crate::platform::FormLayout::V8_5_1
-            && crate::metadata_model::common::tree_stores_layout_8_5_1(root);
+            && match source {
+                Some(source) => source.stores_layout_8_5_1()?,
+                None => crate::metadata_model::common::tree_stores_layout_8_5_1(root),
+            };
         crate::module_blob::XML_2_21_TREE_IN_LAYOUT_8_3
             .store(xml_2_21 && !layout_8_5_1, Ordering::Relaxed);
         if layout_8_5_1 {
             facts.shape = crate::metadata_model::root::ConfigurationShape::V76;
         }
-        let descriptors = DescriptorContext::with_files(root, &version, files)?;
+        let mut descriptors = DescriptorContext::with_files(root, &version, files)?;
+        if let Some(source) = source {
+            descriptors.source = source.clone();
+        }
         let module_group = module_group_of(&configuration);
         Ok(Self {
             root: root.to_path_buf(),
@@ -270,13 +291,30 @@ pub(super) fn map_heaviest_first<T: Send>(
 pub(super) fn read_descriptor_xmls(
     paths: &[PathBuf],
 ) -> Result<Vec<(PathBuf, std::sync::Arc<Vec<u8>>)>> {
+    read_descriptor_xmls_with_source(paths, None)
+}
+
+pub(super) fn read_descriptor_xmls_with_source(
+    paths: &[PathBuf],
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<Vec<(PathBuf, std::sync::Arc<Vec<u8>>)>> {
     parallel::install_io_bound(|| {
         paths
             .par_iter()
             .map(|path| {
-                fs::read(path)
+                super::read_stage_source(source, path)
                     .with_context(|| format!("failed to read {}", path.display()))
-                    .map(|bytes| (path.clone(), std::sync::Arc::new(bytes)))
+                    .map(|bytes| {
+                        (
+                            path.clone(),
+                            match bytes {
+                                crate::module_blob::SourceBytes::Shared(bytes) => bytes,
+                                crate::module_blob::SourceBytes::Owned(bytes) => {
+                                    std::sync::Arc::new(bytes)
+                                }
+                            },
+                        )
+                    })
             })
             .collect::<Result<Vec<_>>>()
     })?
@@ -467,10 +505,20 @@ pub(crate) fn prepare_empty_object(
     // The bodies.
     let source = Some(&context.descriptors.source);
     if properties.kind == "CommonModule" {
-        if let Some(text_path) = source_module_body_path(infer_common_module_text_path(path)) {
+        let module_path =
+            source_module_body_path_with_source(infer_common_module_text_path(path), source);
+        let text_path = match module_path {
+            Ok(path) => path,
+            Err(error) => {
+                fail(&mut object, "module source", error_text(&error));
+                return object;
+            }
+        };
+        if let Some(text_path) = text_path {
             let body_id = format!("{}.0", properties.uuid);
             let started = stage_timing::start();
-            let packed = catch(|| pack_module_body_source(&text_path, &body_id, &axes));
+            let packed =
+                catch(|| pack_module_body_source_with_source(&text_path, &body_id, &axes, source));
             stage_timing::record(started, "module", &kind, &relative);
             match packed {
                 Ok(packed) => object.rows.push(EmptyStageRow {
@@ -542,6 +590,9 @@ pub(crate) fn prepare_empty_object(
                 }
             }
         }
+    }
+    if let Err(error) = context.descriptors.source.require_original_reads() {
+        fail(&mut object, "original source", error_text(&error));
     }
     object.properties = Some(properties);
     object

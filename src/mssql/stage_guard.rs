@@ -35,6 +35,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::cli::{InfobaseConfigSourceVersion, MssqlStageSourceObjectsArgs};
+use crate::module_blob::MetadataSourceContext;
 use crate::mssql_dump::{FileSink, StagedRow, StateBase, export_staged_state};
 use crate::plan::{
     SourceDiffLeafDifference, SourceDiffLeafDifferenceKind, diff_indexed_xml_values,
@@ -197,15 +198,17 @@ fn state_base<'a>(
 }
 
 /// The guard for a patch stage: its rows over the target's Config.
-pub(super) fn verify_patch_stage(
+
+pub(super) fn verify_patch_stage_with_source(
     args: &MssqlStageSourceObjectsArgs,
     sql: &SqlExec,
     manifest: &SourceManifest,
     rows: &[super::BulkStageRow<'_>],
     removed: &[String],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<StageVerification> {
     let base_dir = std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").map(PathBuf::from);
-    verify_staged_state(
+    verify_staged_state_with_source(
         &GuardRequest {
             kind: StageKind::Patch,
             source_root: &args.source_root,
@@ -227,6 +230,7 @@ pub(super) fn verify_patch_stage(
             super::prefetched_base_rows(&args.database),
         ),
         &staged_rows(rows),
+        source,
     )
 }
 
@@ -273,14 +277,24 @@ pub(crate) fn verify_staged_state(
     base: StateBase<'_>,
     staged: &[StagedRow<'_>],
 ) -> Result<StageVerification> {
+    verify_staged_state_with_source(request, base, staged, None)
+}
+
+fn verify_staged_state_with_source(
+    request: &GuardRequest<'_>,
+    base: StateBase<'_>,
+    staged: &[StagedRow<'_>],
+    source: Option<&MetadataSourceContext>,
+) -> Result<StageVerification> {
     let started = Instant::now();
-    let (outcome, export) = compare_state(request, base, staged).map_err(|error| {
-        anyhow!(
-            "Не удалось проверить результат загрузки: {error:#}\n\
+    let (outcome, export) =
+        compare_state_with_source(request, base, staged, source).map_err(|error| {
+            anyhow!(
+                "Не удалось проверить результат загрузки: {error:#}\n\
                  Загрузка не выполнена, в ConfigSave ничего не записано. Проверку можно отключить \
                  ключом --no-verify (тогда расхождения с деревом не обнаруживаются)."
-        )
-    })?;
+            )
+        })?;
     let total_seconds = started.elapsed().as_secs_f64();
     if !outcome.differences.is_empty() {
         let message = refusal_text(
@@ -317,10 +331,12 @@ pub(super) struct TargetComparison {
 
 /// Compares the tree with the export of the target's own state (#395): what
 /// the target already holds as the tree has it needs no row in a stage.
-pub(super) fn compare_tree_with_target(
+
+pub(super) fn compare_tree_with_target_with_source(
     args: &MssqlStageSourceObjectsArgs,
     sql: &SqlExec,
     manifest: &SourceManifest,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<TargetComparison> {
     let started = Instant::now();
     let base_dir = std::env::var_os("IBCMD_RS_BASE_ROWS_DIR").map(PathBuf::from);
@@ -332,7 +348,7 @@ pub(super) fn compare_tree_with_target(
         path_prefix: &args.path_prefix,
         source_version: args.source_version,
     };
-    let (outcome, _) = compare_state(
+    let (outcome, _) = compare_state_with_source(
         &request,
         state_base(
             base_dir.as_deref(),
@@ -341,6 +357,7 @@ pub(super) fn compare_tree_with_target(
             super::prefetched_base_rows(&args.database),
         ),
         &[],
+        source,
     )?;
     Ok(TargetComparison {
         differences: outcome.differences,
@@ -352,38 +369,77 @@ pub(super) fn compare_tree_with_target(
 
 /// Exports the state `staged` would leave over `base` and compares each file
 /// with the tree.
-fn compare_state(
+
+fn compare_state_with_source(
     request: &GuardRequest<'_>,
     base: StateBase<'_>,
     staged: &[StagedRow<'_>],
+    source: Option<&MetadataSourceContext>,
 ) -> Result<(Compared, crate::mssql_dump::StateExportReport)> {
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
     let output_root = std::env::temp_dir().join("ibcmd-rs-verified-state");
-    let comparer = Arc::new(match &request.tree {
-        TreeFiles::Scanned(manifest) => TreeComparer::new(
-            &output_root,
-            request.source_root,
-            manifest
-                .files
-                .iter()
-                .map(|file| (file.path.clone(), Some(file.sha256.clone())))
-                .collect(),
-            request.path_prefix,
-        ),
-        TreeFiles::Listed(paths) => TreeComparer::hashing(
-            &output_root,
-            request.source_root,
-            paths.to_vec(),
-            request.path_prefix,
-        ),
-        TreeFiles::Unlisted => TreeComparer::hashing(
-            &output_root,
-            request.source_root,
-            source_listing::walk(request.source_root).files,
-            request.path_prefix,
-        ),
-    });
+    let mut comparer =
+        if let Some(original) = source.and_then(MetadataSourceContext::original_source) {
+            if !original.relative_path(request.source_root)?.is_empty() {
+                return Err(anyhow!("guard root differs from original source owner"));
+            }
+            TreeComparer::new(
+                &output_root,
+                request.source_root,
+                original
+                    .baseline()
+                    .files()
+                    .map(|member| {
+                        (
+                            member.path().to_owned(),
+                            Some(
+                                member
+                                    .sha256()
+                                    .iter()
+                                    .map(|byte| format!("{byte:02x}"))
+                                    .collect(),
+                            ),
+                        )
+                    })
+                    .collect(),
+                request.path_prefix,
+            )
+        } else {
+            match &request.tree {
+                TreeFiles::Scanned(manifest) => TreeComparer::new(
+                    &output_root,
+                    request.source_root,
+                    manifest
+                        .files
+                        .iter()
+                        .map(|file| (file.path.clone(), Some(file.sha256.clone())))
+                        .collect(),
+                    request.path_prefix,
+                ),
+                TreeFiles::Listed(paths) => TreeComparer::hashing(
+                    &output_root,
+                    request.source_root,
+                    paths.to_vec(),
+                    request.path_prefix,
+                ),
+                TreeFiles::Unlisted => TreeComparer::hashing(
+                    &output_root,
+                    request.source_root,
+                    source_listing::walk(request.source_root).files,
+                    request.path_prefix,
+                ),
+            }
+        };
+    comparer.original_source = source.cloned();
+    let comparer = Arc::new(comparer);
+    let tree_version = match source {
+        Some(source) => source.tree_version()?,
+        None => crate::metadata_model::export::tree_version(request.source_root),
+    };
     let version = request.source_version.unwrap_or_else(|| {
-        crate::metadata_model::export::tree_version(request.source_root)
+        tree_version
             .and_then(|text| {
                 <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(text.trim(), true).ok()
             })
@@ -398,6 +454,9 @@ fn compare_state(
         comparer.clone(),
     )?;
     let outcome = comparer.finish()?;
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
     Ok((outcome, export))
 }
 
@@ -464,6 +523,7 @@ struct Outcome {
 /// The sink of the verification export: each file the export would write is
 /// compared with the tree's file of the same relative path.
 struct TreeComparer {
+    original_source: Option<MetadataSourceContext>,
     output_root: PathBuf,
     tree_root: PathBuf,
     scope: Vec<String>,
@@ -500,6 +560,7 @@ impl TreeComparer {
             .map(|(path, sha256)| (path, TreeFile { sha256 }))
             .collect();
         Self {
+            original_source: None,
             output_root: output_root.to_path_buf(),
             tree_root: tree_root.to_path_buf(),
             scope,
@@ -528,6 +589,7 @@ impl TreeComparer {
             std::thread::spawn(move || hash_tree(&root, paths, &scope))
         };
         Self {
+            original_source: None,
             output_root: output_root.to_path_buf(),
             tree_root: tree_root.to_path_buf(),
             scope,
@@ -617,8 +679,9 @@ impl FileSink for TreeComparer {
                 let tree_path = relative
                     .split('/')
                     .fold(self.tree_root.clone(), |path, part| path.join(part));
-                let tree_bytes = fs::read(&tree_path)
-                    .with_context(|| format!("failed to read {}", tree_path.display()))?;
+                let tree_bytes =
+                    super::read_stage_source(self.original_source.as_ref(), &tree_path)
+                        .with_context(|| format!("failed to read {}", tree_path.display()))?;
                 compare_content(&relative, bytes, &tree_bytes)
                     .map(|leaves| Difference::Changed { leaves })
             }
@@ -1947,3 +2010,7 @@ mod tests {
         assert!(!wanted_with(Some("perhaps"), false));
     }
 }
+
+#[cfg(test)]
+#[path = "stage_guard_original_tests.rs"]
+mod original_comparison_tests;

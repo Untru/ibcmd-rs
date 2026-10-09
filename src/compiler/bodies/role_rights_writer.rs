@@ -997,6 +997,8 @@ pub struct SourceTreeRoleRightsSource {
     files: Mutex<HashMap<PathBuf, Option<Arc<UuidNode>>>>,
     /// Files already in memory (`MetadataSourceContext::with_preloaded`).
     preloaded: crate::module_blob::PreloadedSourceFiles,
+    original: Option<Arc<crate::mssql_source_change::HeldSourceRoot>>,
+    original_failure: Mutex<Option<String>>,
 }
 
 #[derive(Debug)]
@@ -1021,11 +1023,78 @@ impl SourceTreeRoleRightsSource {
             root: root.into(),
             files: Mutex::new(HashMap::new()),
             preloaded,
+            original: None,
+            original_failure: Mutex::new(None),
         }
     }
 
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    pub(crate) fn with_original(original: Arc<crate::mssql_source_change::HeldSourceRoot>) -> Self {
+        Self {
+            root: original.canonical_root().to_owned(),
+            original: Some(original),
+            ..Self::new(PathBuf::new())
+        }
+    }
+
+    fn checked_file(&self, path: PathBuf) -> Result<Option<Arc<UuidNode>>, String> {
+        let Some(original) = &self.original else {
+            return Ok(self.file(path));
+        };
+        let result = self.read_original_file(original, path);
+        if let Err(error) = &result {
+            let mut failure = self
+                .original_failure
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if failure.is_none() {
+                *failure = Some(error.clone());
+            }
+        }
+        result
+    }
+
+    pub(crate) fn require_original_reads(&self) -> Result<(), String> {
+        if let Some(error) = self
+            .original_failure
+            .lock()
+            .map_err(|e| e.to_string())?
+            .as_ref()
+        {
+            return Err(error.clone());
+        }
+        Ok(())
+    }
+
+    fn read_original_file(
+        &self,
+        original: &crate::mssql_source_change::HeldSourceRoot,
+        path: PathBuf,
+    ) -> Result<Option<Arc<UuidNode>>, String> {
+        let mut files = self.files.lock().map_err(|e| e.to_string())?;
+        if let Some(found) = files.get(&path) {
+            return Ok(found.clone());
+        }
+        let relative = original.relative_path(&path).map_err(|e| e.to_string())?;
+        if original
+            .member(&relative)
+            .map_err(|e| e.to_string())?
+            .is_none()
+        {
+            files.insert(path, None);
+            return Ok(None);
+        }
+        let bytes = original
+            .source_bytes(&relative)
+            .map_err(|e| e.to_string())?;
+        let parsed = parse_uuid_tree(&bytes)
+            .map(Arc::new)
+            .ok_or_else(|| format!("invalid original role metadata {}", path.display()))?;
+        files.insert(path, Some(parsed.clone()));
+        Ok(Some(parsed))
     }
 
     fn file(&self, path: PathBuf) -> Option<Arc<UuidNode>> {
@@ -1093,7 +1162,7 @@ impl SourceTreeRoleRightsSource {
             (self.root.join(folder).join(format!("{}.xml", parts[1])), 2)
         };
         let node = self
-            .file(path.clone())
+            .checked_file(path.clone())?
             .ok_or_else(|| format!("no readable metadata file {}", path.display()))?;
         let expected_tag = parts[consumed - 2];
         let expected_name = parts[consumed - 1];

@@ -282,7 +282,8 @@ fn apply_source_change_inner(
         original.require_current(&main_read_sql(args)?, &args.database)?;
     }
 
-    copy_source_tree(&active_root, &proposed_root)?;
+    let active_originals = HeldSourceRoot::open_compiler_operation(&active_root)?;
+    active_originals.copy_to_new_projection(&proposed_root)?;
     overlay_original_bodies(
         &source_originals,
         &active_root,
@@ -291,7 +292,6 @@ fn apply_source_change_inner(
     )?;
 
     let classify_started = Instant::now();
-    let active_originals = HeldSourceRoot::open_compiler_operation(&active_root)?;
     let proposed_originals = HeldSourceRoot::open_source_operation(&proposed_root, &selected_path)?;
     let target = match args.extension.as_deref() {
         Some(name) => ActivationTarget::extension(name.to_owned())?,
@@ -1708,6 +1708,7 @@ fn path_from_slashes(value: &str) -> PathBuf {
     value.split('/').collect()
 }
 
+#[cfg(test)]
 fn copy_source_tree(source: &Path, destination: &Path) -> Result<()> {
     fs::create_dir(destination)?;
     for item in WalkDir::new(source).follow_links(false) {

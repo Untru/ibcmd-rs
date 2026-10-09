@@ -274,7 +274,11 @@ fn child_objects<'a>(
 /// ([`tree_stores_layout_8_5_1`]).
 pub fn stores_layout_8_5_1(context: &DescriptorContext) -> bool {
     context.platform().form_layout() >= crate::platform::FormLayout::V8_5_1
-        && tree_stores_layout_8_5_1(&context.root)
+        && if context.source.original_source().is_some() {
+            context.source.descriptor_layout_8_5_1()
+        } else {
+            tree_stores_layout_8_5_1(&context.root)
+        }
 }
 
 /// Whether platform 8.5 stores the configuration of the XML 2.21 tree at
@@ -311,6 +315,40 @@ pub fn tree_stores_layout_8_5_1(root: &std::path::Path) -> bool {
         .unwrap_or_else(|poisoned| poisoned.into_inner())
         .insert(root.to_path_buf(), stores);
     stores
+}
+
+/// The original-bound Main path uses the same layout facts, with fallible
+/// reads of complete census members and no process-wide pathname memo.
+pub(crate) fn original_tree_stores_layout_8_5_1(
+    source: &crate::module_blob::MetadataSourceContext,
+) -> Result<bool> {
+    let configuration = source.source_root().join("Configuration.xml");
+    if !source.source_file_exists(&configuration)? {
+        return Ok(true);
+    }
+    let bytes = source.read_source(&configuration)?;
+    let doc = MetadataXml::parse(&bytes)?;
+    if compatibility_from_document(&doc) {
+        return Ok(true);
+    }
+    let original = source
+        .original_source()
+        .ok_or_else(|| anyhow!("layout requires original source"))?;
+    for member in original.baseline().files() {
+        let path = std::path::Path::new(member.path());
+        if path.file_name().is_some_and(|name| name == "Form.xml")
+            && path
+                .parent()
+                .and_then(|parent| parent.file_name())
+                .is_some_and(|name| name == "Ext")
+        {
+            let bytes = original.source_bytes(member.path())?;
+            if form_needs_layout_8_5_1(&String::from_utf8_lossy(&bytes)) {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
 }
 
 /// Whether some managed form of the tree (`.../Ext/Form.xml`) is one only
@@ -388,6 +426,10 @@ fn compatibility_at_least_8_5(root: &std::path::Path) -> bool {
     let Ok(doc) = MetadataXml::parse(&bytes) else {
         return true;
     };
+    compatibility_from_document(&doc)
+}
+
+fn compatibility_from_document(doc: &MetadataXml) -> bool {
     let mode = doc
         .object()
         .ok()

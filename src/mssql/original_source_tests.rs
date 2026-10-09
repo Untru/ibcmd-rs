@@ -38,6 +38,24 @@ impl Drop for Fixture {
     }
 }
 
+fn assert_failed_original_source_cannot_write_script(source: &MetadataSourceContext) {
+    let output = Fixture::new();
+    let kept = output.write("kept.sql", b"accepted script prefix");
+    let refused = output.0.join("never-created/refused.sql");
+    let build_called = std::cell::Cell::new(false);
+    assert!(
+        write_original_source_script(source, &refused, || {
+            build_called.set(true);
+            "SELECT 1;".to_owned()
+        })
+        .is_err()
+    );
+    assert!(!build_called.get());
+    assert!(!refused.parent().unwrap().exists());
+    assert!(!refused.exists());
+    assert_eq!(fs::read(kept).unwrap(), b"accepted script prefix");
+}
+
 #[test]
 fn actual_module_encoder_consumes_owned_original_in_both_dialects() {
     let fixture = Fixture::new();
@@ -55,6 +73,11 @@ fn actual_module_encoder_consumes_owned_original_in_both_dialects() {
         assert_eq!(owned.blob, ordinary.blob);
         assert_eq!(owned.output_sha256, ordinary.output_sha256);
         assert_eq!(owned.text_bytes, ordinary.text_bytes);
+    }
+    source.require_original_unchanged().unwrap();
+    for dialect in ["2.20", "2.21"] {
+        let axes = mssql_compile_axes(XmlDialect::parse(dialect).unwrap());
+        let key = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa.0";
         assert!(
             pack_module_body_source_with_source(
                 &fixture.0.join("late.bsl"),
@@ -65,7 +88,9 @@ fn actual_module_encoder_consumes_owned_original_in_both_dialects() {
             .is_err()
         );
     }
-    source.require_original_unchanged().unwrap();
+    assert!(source.require_original_reads().is_err());
+    assert!(source.require_original_unchanged().is_err());
+    assert_failed_original_source_cannot_write_script(&source);
 }
 
 #[test]
@@ -93,10 +118,11 @@ fn actual_html_handler_reads_pages_and_attachments_through_same_owner() {
         "Reports/R/Templates/Page/Ext/Template/_files/late.txt",
         b"not in census",
     );
-    assert!(
-        read_help_source_parts(&body, "Template", HtmlPageOwner::Template, Some(&source)).is_err()
-    );
+    let repeated =
+        read_help_source_parts(&body, "Template", HtmlPageOwner::Template, Some(&source)).unwrap();
+    assert_eq!(repeated, owned);
     assert!(source.require_original_unchanged().is_err());
+    assert_failed_original_source_cannot_write_script(&source);
 }
 
 #[test]

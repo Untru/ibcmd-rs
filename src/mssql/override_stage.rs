@@ -35,12 +35,12 @@ use anyhow::{Context, Result, anyhow, bail};
 
 use super::empty_stage::{
     EmptyStageContext, EmptyStageObject, catch, descriptor_xmls_of, map_heaviest_first,
-    prepare_empty_object, read_descriptor_xmls,
+    prepare_empty_object,
 };
 use super::patch_refusal::ObjectFailure;
 use super::stage_guard::{in_scope, normalize_prefix};
 use super::{PreparedMetadataBodyStage, PreparedMetadataObjectStage, query_json, quote_ident};
-use crate::apply_check::{ObjectOp, check_tree_against_db};
+use crate::apply_check::ObjectOp;
 use crate::cli::MssqlStageSourceObjectsArgs;
 use crate::metadata_model::brace::{Brace, parse_row, serialize_row};
 use crate::metadata_model::compile_descriptor;
@@ -96,7 +96,12 @@ impl Plan {
 }
 
 /// Asks the comparison of the tree with the target which objects differ.
-pub(super) fn plan(args: &MssqlStageSourceObjectsArgs, sql: &SqlExec) -> Result<Plan> {
+
+pub(super) fn plan_with_source(
+    args: &MssqlStageSourceObjectsArgs,
+    sql: &SqlExec,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<Plan> {
     let partial = !args.path_prefix.is_empty();
     let scope = args
         .path_prefix
@@ -105,8 +110,15 @@ pub(super) fn plan(args: &MssqlStageSourceObjectsArgs, sql: &SqlExec) -> Result<
         .filter(|prefix| !prefix.is_empty())
         .collect::<Vec<_>>();
     let version = args.source_version.map(|version| version.as_str());
-    let verdict = check_tree_against_db(sql, &args.database, &args.source_root, version, partial)
-        .context("не удалось сравнить дерево с описаниями объектов базы")?;
+    let verdict = crate::apply_check::check_tree_against_db_with_source(
+        sql,
+        &args.database,
+        &args.source_root,
+        version,
+        partial,
+        source,
+    )
+    .context("не удалось сравнить дерево с описаниями объектов базы")?;
     let mut plan = Plan::default();
     for object in &verdict.objects {
         match object.op {
@@ -170,6 +182,7 @@ pub(super) struct Built {
 /// with the row the stage would leave -- the patched one, or the target's own
 /// for an object a patch stage does not stage. Only a compiled row that
 /// differs is used.
+#[cfg(test)]
 pub(super) fn build(
     tree: &Tree<'_>,
     sql: &SqlExec,
@@ -177,6 +190,21 @@ pub(super) fn build(
     rebuild: &[PathBuf],
     patched: &dyn Fn(&str) -> Option<Vec<u8>>,
 ) -> Result<Built> {
+    build_with_source(tree, sql, plan, rebuild, patched, None)
+}
+
+pub(super) fn build_with_source(
+    tree: &Tree<'_>,
+    sql: &SqlExec,
+    plan: &Plan,
+    rebuild: &[PathBuf],
+    patched: &dyn Fn(&str) -> Option<Vec<u8>>,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<Built> {
+    if let Some(source) = source {
+        source.require_source_root(tree.root)?;
+        source.require_original_unchanged()?;
+    }
     let mut built = Built::default();
     // Objects the target holds whose patch failed in a way a build fixes.
     let rebuilt = rebuild
@@ -188,11 +216,22 @@ pub(super) fn build(
     }
 
     let root = tree.root;
-    let walked = source_listing::walk(root);
+    let walked = match source.and_then(|source| source.original_source()) {
+        Some(original) => source_listing::TreeWalk {
+            files: original
+                .baseline()
+                .files()
+                .map(|member| root.join(member.path()))
+                .collect(),
+            listing: None,
+        },
+        None => source_listing::walk(root),
+    };
     let descriptor_paths = descriptor_xmls_of(root, &walked.files);
-    let files = read_descriptor_xmls(&descriptor_paths)?;
+    let files = super::empty_stage::read_descriptor_xmls_with_source(&descriptor_paths, source)?;
     let version = tree.version;
-    let context = EmptyStageContext::for_objects(root, version, &files, walked.listing)?;
+    let context =
+        EmptyStageContext::for_objects_with_source(root, version, &files, walked.listing, source)?;
     drop(files);
 
     // Descriptors of objects the target holds: the compiler's row is used when
@@ -273,6 +312,9 @@ pub(super) fn build(
     }
     built.built_files.sort();
     built.compiled_files.sort();
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
     Ok(built)
 }
 

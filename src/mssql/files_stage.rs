@@ -101,10 +101,20 @@ impl FilesSelection {
     /// An existing measured body-only selection can be compiled without
     /// rebuilding unrelated assets of its owner. Metadata-file selections
     /// and every other family keep the complete object preparation route.
+    #[cfg(test)]
     pub(super) fn measured_body_files(
         &self,
         root: &Path,
         xml: &Path,
+    ) -> Result<Option<Vec<String>>, FilesRefused> {
+        self.measured_body_files_with_source(root, xml, None)
+    }
+
+    pub(super) fn measured_body_files_with_source(
+        &self,
+        root: &Path,
+        xml: &Path,
+        source: Option<&crate::module_blob::MetadataSourceContext>,
     ) -> Result<Option<Vec<String>>, FilesRefused> {
         let relative = xml
             .strip_prefix(root)
@@ -113,7 +123,7 @@ impl FilesSelection {
             .replace('\\', "/");
         let mut files = Vec::new();
         for file in &self.files {
-            if owner_of(root, file)? == relative {
+            if owner_of_with_source(root, file, source)? == relative {
                 if !crate::mssql_source_change::measured_main_source_path(file)
                     || file.ends_with("/Ext/Form.xml")
                     || file.ends_with("/Ext/Form/Module.bsl")
@@ -257,7 +267,19 @@ fn is_owner_xml(relative: &str) -> bool {
 /// else the nearest folder above it named as a metadata file, else (for the
 /// root `Ext`) the configuration's. The candidate is chosen by its name; a
 /// candidate the directory does not hold is refused, not passed over.
-fn owner_of(root: &Path, relative: &str) -> Result<String, FilesRefused> {
+fn owner_of_with_source(
+    root: &Path,
+    relative: &str,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<String, FilesRefused> {
+    let is_file = |path: &Path| -> Result<bool, FilesRefused> {
+        match source {
+            Some(source) => source
+                .source_file_exists(path)
+                .map_err(|e| failed(e.to_string())),
+            None => Ok(path.is_file()),
+        }
+    };
     if is_owner_xml(relative) {
         return Ok(relative.to_string());
     }
@@ -266,7 +288,7 @@ fn owner_of(root: &Path, relative: &str) -> Result<String, FilesRefused> {
         folder = &folder[..cut];
         let candidate = format!("{folder}.xml");
         if is_owner_xml(&candidate) {
-            if root.join(&candidate).is_file() {
+            if is_file(&root.join(&candidate))? {
                 return Ok(candidate);
             }
             return Err(unsupported(format!(
@@ -282,7 +304,7 @@ fn owner_of(root: &Path, relative: &str) -> Result<String, FilesRefused> {
         .is_some_and(|first| first.eq_ignore_ascii_case("Ext"))
         && relative.contains('/');
     if in_root_ext {
-        if root.join("Configuration.xml").is_file() {
+        if is_file(&root.join("Configuration.xml"))? {
             return Ok("Configuration.xml".to_string());
         }
         return Err(unsupported(format!(
@@ -334,47 +356,89 @@ fn relative_inside(root: &Path, canonical_root: &Path, given: &str) -> Option<St
 /// Checks the listed files against the directory and finds their objects.
 /// Reads the directory only: nothing here reaches a database.
 pub fn select(root: &Path, files: &[String]) -> Result<FilesSelection, FilesRefused> {
+    select_with_source(root, files, None)
+}
+
+pub(super) fn select_with_source(
+    root: &Path,
+    files: &[String],
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<FilesSelection, FilesRefused> {
     if files.is_empty() {
         return Err(failed(
             "Не указаны файлы для загрузки (пути относительно --base-dir)".to_string(),
         ));
     }
-    let canonical_root = fs::canonicalize(root)
-        .ok()
-        .filter(|path| path.is_dir())
-        .ok_or_else(|| {
-            failed(format!(
-                "каталог файлов конфигурации не найден: {}",
-                root.display()
-            ))
-        })?;
+    let original = source.and_then(|source| source.original_source());
+    if let Some(original) = original {
+        original
+            .require_unchanged()
+            .map_err(|e| failed(e.to_string()))?;
+    }
+    let canonical_root = if let Some(original) = original {
+        original.canonical_root().to_owned()
+    } else {
+        fs::canonicalize(root)
+            .ok()
+            .filter(|path| path.is_dir())
+            .ok_or_else(|| {
+                failed(format!(
+                    "каталог файлов конфигурации не найден: {}",
+                    root.display()
+                ))
+            })?
+    };
     let mut selected = Vec::<String>::new();
     let mut owners = Vec::<String>::new();
     for given in files {
-        let Some(relative) = relative_inside(root, &canonical_root, given) else {
+        let relative = if let Some(original) = original {
+            let path = PathBuf::from(given.replace('\\', "/"));
+            let relative = if path.is_absolute() {
+                original
+                    .relative_path(&path)
+                    .map_err(|e| failed(e.to_string()))?
+            } else {
+                given.replace('\\', "/")
+            };
+            // Exact captured spelling, no canonicalization through an alias.
+            original
+                .member(&relative)
+                .map_err(|e| failed(e.to_string()))?;
+            Some(relative)
+        } else {
+            relative_inside(root, &canonical_root, given)
+        };
+        let Some(relative) = relative else {
             return Err(failed(format!(
                 "Загрузка невозможна: файл {given} находится вне каталога {}",
                 root.display()
             )));
         };
         let path = root.join(&relative);
-        if !path.exists() {
+        let present = match source {
+            Some(source) if original.is_some() => source
+                .source_file_exists(&path)
+                .map_err(|e| failed(e.to_string()))?,
+            _ => path.exists(),
+        };
+        if !present {
             return Err(unsupported(format!(
                 "Загрузка невозможна: файла {relative} нет в каталоге {}; удаление файлов и объектов \
                  частичной загрузкой {PLANNED}",
                 root.display()
             )));
         }
-        if !path.is_file() {
+        if original.is_none() && !path.is_file() {
             return Err(failed(format!(
                 "Загрузка невозможна: {relative} в каталоге {} не файл",
                 root.display()
             )));
         }
         // A link that leads out of the directory is a file outside it.
-        let inside = fs::canonicalize(&path)
-            .map(|canonical| canonical.starts_with(&canonical_root))
-            .unwrap_or(false);
+        let inside = original.is_some()
+            || fs::canonicalize(&path)
+                .map(|canonical| canonical.starts_with(&canonical_root))
+                .unwrap_or(false);
         if !inside {
             return Err(failed(format!(
                 "Загрузка невозможна: файл {given} находится вне каталога {}",
@@ -397,11 +461,16 @@ pub fn select(root: &Path, files: &[String]) -> Result<FilesSelection, FilesRefu
         {
             continue;
         }
-        owners.push(owner_of(root, &relative)?);
+        owners.push(owner_of_with_source(root, &relative, source)?);
         selected.push(relative);
     }
     owners.sort();
     owners.dedup();
+    if let Some(original) = original {
+        original
+            .require_unchanged()
+            .map_err(|e| failed(e.to_string()))?;
+    }
     Ok(FilesSelection {
         files: selected,
         owners,
