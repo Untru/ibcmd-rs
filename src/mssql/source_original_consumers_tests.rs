@@ -253,7 +253,7 @@ fn original_role_resolver_keeps_full_uuid_and_never_masks_invalid_owner() {
 #[test]
 fn original_descriptor_compatibility_and_predefined_reference_keep_current_values() {
     use crate::metadata_model::DescriptorContext;
-    use crate::metadata_model::objects_parts::{Compat, compatibility};
+    use crate::metadata_model::objects::parts::{Compat, compatibility};
     use crate::metadata_model::types::predefined_item_id;
     for version in ["2.20", "2.21"] {
         let f = Fixture::new();
@@ -337,7 +337,7 @@ fn original_descriptor_compatibility_and_predefined_reference_keep_current_value
 #[test]
 fn original_descriptor_optional_absence_and_invalid_configuration_are_distinct() {
     use crate::metadata_model::DescriptorContext;
-    use crate::metadata_model::objects_parts::{Compat, compatibility};
+    use crate::metadata_model::objects::parts::{Compat, compatibility};
     use crate::metadata_model::types::predefined_item_id;
     for version in ["2.20", "2.21"] {
         let f = Fixture::new();
