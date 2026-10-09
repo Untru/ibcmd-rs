@@ -1700,3 +1700,7 @@ pub fn coverage(
 // A1.5/A1.7 composition only; no source traversal policy or production consumer migration.
 #[path = "cache_insertion_comparison.rs"]
 pub mod comparison;
+
+// Typed current A1 composition; original admission/comparison prefix is unchanged.
+#[path = "cache_trace_typed_current.rs"]
+pub mod typed_current;

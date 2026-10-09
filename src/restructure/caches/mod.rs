@@ -19,6 +19,7 @@ pub mod registry;
 pub mod root;
 pub mod slots;
 pub mod synonyms;
+pub mod trace_diagnostic;
 pub mod type_index;
 pub mod type_sets;
 pub mod xdto_types;
