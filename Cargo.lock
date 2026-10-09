@@ -624,6 +624,7 @@ dependencies = [
  "mimalloc",
  "quick-xml 0.38.4",
  "rayon",
+ "rustix",
  "serde",
  "serde_json",
  "sha1",

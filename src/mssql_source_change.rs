@@ -7,8 +7,11 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::error::Error;
 use std::fmt::{self, Display, Formatter};
 use std::fs;
-use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::sync::{Arc, Mutex};
+
+mod files;
+use files::{FileIdentity, OriginalFile, RootAnchor};
 
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -35,12 +38,14 @@ impl Default for SourceInventoryLimits {
 }
 
 /// Exact digest of one source file, addressed with `/` separators.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug)]
 pub struct SourceFileDigest {
     path: String,
     size_bytes: u64,
     sha256: [u8; SHA256_BYTES],
-    verified_bytes: Option<Vec<u8>>,
+    verified_bytes: Option<Arc<Vec<u8>>>,
+    identity: Option<FileIdentity>,
+    original: Option<Arc<OriginalFile>>,
 }
 
 impl SourceFileDigest {
@@ -55,13 +60,20 @@ impl SourceFileDigest {
             size_bytes,
             sha256,
             verified_bytes: None,
+            identity: None,
+            original: None,
         })
     }
 
     pub fn for_bytes(path: impl Into<String>, bytes: &[u8]) -> Result<Self, SourceChangeError> {
         let digest: [u8; SHA256_BYTES] = Sha256::digest(bytes).into();
         let mut file = Self::new(path, bytes.len() as u64, digest)?;
-        file.verified_bytes = Some(bytes.to_vec());
+        let mut retained = Vec::new();
+        retained
+            .try_reserve_exact(bytes.len())
+            .map_err(|e| SourceChangeError::Io(e.to_string()))?;
+        retained.extend_from_slice(bytes);
+        file.verified_bytes = Some(Arc::new(retained));
         Ok(file)
     }
 
@@ -78,7 +90,41 @@ impl SourceFileDigest {
     }
 
     fn verified_bytes(&self) -> Option<&[u8]> {
-        self.verified_bytes.as_deref()
+        self.verified_bytes.as_ref().map(|bytes| bytes.as_slice())
+    }
+}
+
+// Semantic inventory equality never grants original-file custody.
+impl PartialEq for SourceFileDigest {
+    fn eq(&self, other: &Self) -> bool {
+        self.path == other.path
+            && self.size_bytes == other.size_bytes
+            && self.sha256 == other.sha256
+            && self.verified_bytes == other.verified_bytes
+    }
+}
+impl Eq for SourceFileDigest {}
+
+#[derive(Clone, Copy, Debug)]
+enum CensusAdmission {
+    CallerBudget(SourceInventoryLimits),
+    OriginalSource,
+}
+
+impl CensusAdmission {
+    fn check(self, count: usize, length: u64, total: u64) -> Result<(), SourceChangeError> {
+        if let Self::CallerBudget(limits) = self {
+            if count > limits.max_files {
+                return Err(SourceChangeError::InventoryLimit("file count"));
+            }
+            if length > limits.max_file_bytes {
+                return Err(SourceChangeError::InventoryLimit("single file size"));
+            }
+            if total > limits.max_total_bytes {
+                return Err(SourceChangeError::InventoryLimit("total byte size"));
+            }
+        }
+        Ok(())
     }
 }
 
@@ -90,21 +136,33 @@ pub struct SourceInventory {
 
 impl SourceInventory {
     pub fn from_files(files: Vec<SourceFileDigest>) -> Result<Self, SourceChangeError> {
-        let mut by_windows_key = BTreeMap::new();
+        let mut by_windows_key = BTreeMap::<String, SourceFileDigest>::new();
         for file in files {
             let key = windows_path_key(&file.path);
-            if let Some(previous) = by_windows_key.insert(key, file.clone()) {
+            if let Some(previous) = by_windows_key.get(&key) {
                 return Err(SourceChangeError::WindowsPathCollision {
-                    first: previous.path,
+                    first: previous.path.clone(),
                     second: file.path,
                 });
             }
+            by_windows_key.insert(key, file);
         }
         Ok(Self { by_windows_key })
     }
 
     pub fn files(&self) -> impl ExactSizeIterator<Item = &SourceFileDigest> {
         self.by_windows_key.values()
+    }
+
+    /// Digest-only projection for the existing compiler tree transformation.
+    /// It carries no retained body or original-file capability.
+    pub(crate) fn digest_projection(&self) -> Self {
+        let mut projection = self.clone();
+        for member in projection.by_windows_key.values_mut() {
+            member.verified_bytes = None;
+            member.original = None;
+        }
+        projection
     }
 
     pub fn file(&self, path: &str) -> Result<Option<&SourceFileDigest>, SourceChangeError> {
@@ -117,31 +175,216 @@ impl SourceInventory {
 ///
 /// The root is re-canonicalized before every subsequent capture. Replacement
 /// by a junction/symlink therefore fails instead of silently changing scope.
-#[derive(Debug)]
 pub struct HeldSourceRoot {
     requested_root: PathBuf,
     canonical_root: PathBuf,
     baseline: SourceInventory,
-    limits: SourceInventoryLimits,
-    #[cfg(windows)]
-    _root_guard: fs::File,
+    admission: CensusAdmission,
+    anchor: Arc<RootAnchor>,
+    consumed: Mutex<BTreeMap<String, ConsumedSourceFile>>,
+}
+
+#[derive(Debug)]
+struct ConsumedSourceFile {
+    original: Arc<OriginalFile>,
+    bytes: Arc<Vec<u8>>,
+}
+
+impl fmt::Debug for HeldSourceRoot {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("HeldSourceRoot")
+            .field("canonical_root", &self.canonical_root)
+            .field("file_count", &self.baseline.files().len())
+            .field("admission", &self.admission)
+            .finish_non_exhaustive()
+    }
 }
 
 impl HeldSourceRoot {
     pub fn open(root: &Path, limits: SourceInventoryLimits) -> Result<Self, SourceChangeError> {
         validate_limits(limits)?;
         let canonical_root = canonical_directory(root)?;
-        #[cfg(windows)]
-        let root_guard = open_root_guard(&canonical_root)?;
-        let baseline = capture_inventory(&canonical_root, limits, &BTreeSet::new())?;
+        Self::open_with_admission(
+            root,
+            canonical_root,
+            CensusAdmission::CallerBudget(limits),
+            &BTreeSet::new(),
+        )
+    }
+
+    fn open_with_admission(
+        root: &Path,
+        canonical_root: PathBuf,
+        admission: CensusAdmission,
+        retained: &BTreeSet<String>,
+    ) -> Result<Self, SourceChangeError> {
+        let anchor = RootAnchor::open(&canonical_root)?;
+        let baseline = capture_inventory(&anchor, admission, retained)?;
         Ok(Self {
-            requested_root: root.to_path_buf(),
+            requested_root: root.to_owned(),
             canonical_root,
             baseline,
-            limits,
-            #[cfg(windows)]
-            _root_guard: root_guard,
+            admission,
+            anchor,
+            consumed: Mutex::new(BTreeMap::new()),
         })
+    }
+
+    pub(crate) fn open_source_operation(
+        root: &Path,
+        selected: &str,
+    ) -> Result<Self, SourceChangeError> {
+        let selected = normalize_relative_path(selected)?;
+        Self::open_with_admission(
+            root,
+            canonical_directory(root)?,
+            CensusAdmission::OriginalSource,
+            &candidate_retention_paths(&selected),
+        )
+    }
+
+    /// Private compiler admission has no caller-selected resource budget.
+    /// It still captures every file and does not authorize absent members.
+    pub(crate) fn open_compiler_operation(root: &Path) -> Result<Self, SourceChangeError> {
+        Self::open_with_admission(
+            root,
+            canonical_directory(root)?,
+            CensusAdmission::OriginalSource,
+            &BTreeSet::new(),
+        )
+    }
+
+    pub(crate) fn require_unchanged(&self) -> Result<(), SourceChangeError> {
+        let consumed = self
+            .consumed
+            .lock()
+            .map_err(|e| SourceChangeError::Io(e.to_string()))?;
+        for (path, consumed) in consumed.iter() {
+            let expected = self
+                .baseline
+                .file(path)?
+                .ok_or(SourceChangeError::HeldRootChanged)?;
+            consumed.original.require_digest(&expected.sha256)?;
+        }
+        drop(consumed);
+        for source in self.baseline.files() {
+            if let Some(original) = &source.original {
+                original.require_digest(&source.sha256)?;
+            }
+        }
+        let current = self.capture_current()?;
+        if self.baseline.files().len() != current.files().len() {
+            return Err(SourceChangeError::HeldRootChanged);
+        }
+        for original in self.baseline.files() {
+            let Some(now) = current.file(original.path())? else {
+                return Err(SourceChangeError::HeldRootChanged);
+            };
+            if original.path != now.path
+                || original.identity != now.identity
+                || original.size_bytes != now.size_bytes
+                || original.sha256 != now.sha256
+            {
+                return Err(SourceChangeError::FileChangedDuringRead(
+                    original.path.clone(),
+                ));
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn source_bytes(&self, path: &str) -> Result<Arc<Vec<u8>>, SourceChangeError> {
+        let source = self
+            .baseline
+            .file(path)?
+            .ok_or_else(|| SourceChangeError::SelectedBodyDoesNotExist(path.to_owned()))?;
+        if source.path != path {
+            return Err(SourceChangeError::WindowsAliasMismatch {
+                requested: path.to_owned(),
+                actual: source.path.clone(),
+            });
+        }
+        // Memoisation belongs to this original census; it cannot substitute a
+        // cached member from another tree, or authorize a missing pathname.
+        let mut consumed = self
+            .consumed
+            .lock()
+            .map_err(|e| SourceChangeError::Io(e.to_string()))?;
+        if let Some(consumed) = consumed.get(path) {
+            // Immutable returned bytes remain bound to the original digest;
+            // require_unchanged checks originals once at the publication gate.
+            return Ok(consumed.bytes.clone());
+        }
+        let original = match &source.original {
+            Some(original) => original.clone(),
+            None => Arc::new(self.anchor.open_file(path)?),
+        };
+        if Some(original.identity()) != source.identity || original.length() != source.size_bytes {
+            return Err(SourceChangeError::FileChangedDuringRead(path.to_owned()));
+        }
+        let bytes = if let Some(bytes) = &source.verified_bytes {
+            original.require_digest(&source.sha256)?;
+            bytes.clone()
+        } else {
+            let (digest, bytes) = original.read(true)?;
+            if digest != source.sha256 {
+                return Err(SourceChangeError::FileChangedDuringRead(path.to_owned()));
+            }
+            bytes.ok_or_else(|| SourceChangeError::UnverifiedSourceBytes(path.to_owned()))?
+        };
+        // Only bytes just read from the same original (or the originally
+        // retained immutable bytes) enter the compiler's shared read owner.
+        consumed.insert(
+            path.to_owned(),
+            ConsumedSourceFile {
+                original,
+                bytes: bytes.clone(),
+            },
+        );
+        Ok(bytes)
+    }
+
+    pub(crate) fn read_original_path(
+        &self,
+        path: &Path,
+    ) -> Result<Arc<Vec<u8>>, SourceChangeError> {
+        let relative = path
+            .strip_prefix(&self.canonical_root)
+            .or_else(|_| path.strip_prefix(&self.requested_root))
+            .map_err(|_| SourceChangeError::HeldRootChanged)?;
+        self.source_bytes(&path_to_slash(relative)?)
+    }
+
+    pub(crate) fn fingerprint_paths(
+        &self,
+        paths: &[String],
+    ) -> Result<[u8; 32], SourceChangeError> {
+        let mut hash = Sha256::new();
+        for path in paths {
+            let source = self
+                .baseline
+                .file(path)?
+                .ok_or_else(|| SourceChangeError::SelectedBodyDoesNotExist(path.clone()))?;
+            if source.path() != path {
+                return Err(SourceChangeError::WindowsAliasMismatch {
+                    requested: path.clone(),
+                    actual: source.path.clone(),
+                });
+            }
+            let original = self.anchor.open_file(path)?;
+            if Some(original.identity()) != source.identity
+                || original.length() != source.size_bytes
+            {
+                return Err(SourceChangeError::FileChangedDuringRead(path.clone()));
+            }
+            hash.update((path.len() as u64).to_le_bytes());
+            hash.update(path.as_bytes());
+            hash.update(source.size_bytes.to_le_bytes());
+            original.extend_hash(&source.sha256, &mut hash)?;
+        }
+        self.require_unchanged()?;
+        Ok(hash.finalize().into())
     }
 
     pub fn canonical_root(&self) -> &Path {
@@ -157,7 +400,7 @@ impl HeldSourceRoot {
         if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
-        capture_inventory(&current_root, self.limits, &BTreeSet::new())
+        capture_inventory(&self.anchor, self.admission, &BTreeSet::new())
     }
 
     pub fn classify_current(
@@ -172,7 +415,7 @@ impl HeldSourceRoot {
         if !held_root_paths_equal(&current_root, &self.canonical_root) {
             return Err(SourceChangeError::HeldRootChanged);
         }
-        let current = capture_inventory(&current_root, self.limits, &retention)?;
+        let current = capture_inventory(&self.anchor, self.admission, &retention)?;
         classify_source_change(&self.baseline, &current, &selected, target, mode)
     }
 }
@@ -247,7 +490,7 @@ pub struct SourceActivationInput {
 pub struct VerifiedSourceFile {
     path: String,
     sha256: [u8; SHA256_BYTES],
-    bytes: Vec<u8>,
+    bytes: Arc<Vec<u8>>,
 }
 
 impl VerifiedSourceFile {
@@ -372,10 +615,16 @@ pub fn classify_source_change(
                 source.path.clone(),
             ));
         }
+        verified_sources
+            .try_reserve(1)
+            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
         verified_sources.push(VerifiedSourceFile {
             path: source.path.clone(),
             sha256: digest,
-            bytes: bytes.to_vec(),
+            bytes: source
+                .verified_bytes
+                .clone()
+                .expect("verified retained bytes"),
         });
     }
     verified_sources
@@ -399,6 +648,14 @@ pub fn classify_source_change(
 fn candidate_retention_paths(selected: &str) -> BTreeSet<String> {
     let mut paths = BTreeSet::from([windows_path_key(selected)]);
     let parts = selected.split('/').collect::<Vec<_>>();
+    if let Some(ext) = parts.iter().position(|part| *part == "Ext") {
+        if ext > 0 {
+            paths.insert(windows_path_key(&format!("{}.xml", parts[..ext].join("/"))));
+            if ext > 2 {
+                paths.insert(windows_path_key(&format!("{}/{}.xml", parts[0], parts[1])));
+            }
+        }
+    }
     if let Some(form_dir_len) = managed_form_dir_len(&parts) {
         let form_dir = parts[..form_dir_len].join("/");
         paths.insert(windows_path_key(&format!("{form_dir}/Ext/Form.xml")));
@@ -911,15 +1168,17 @@ fn require_existing(
 }
 
 fn capture_inventory(
-    canonical_root: &Path,
-    limits: SourceInventoryLimits,
+    anchor: &Arc<RootAnchor>,
+    admission: CensusAdmission,
     retain_bytes: &BTreeSet<String>,
 ) -> Result<SourceInventory, SourceChangeError> {
     let mut files = Vec::new();
     let mut total = 0_u64;
-    for entry in WalkDir::new(canonical_root).follow_links(false) {
+    let mut identities = BTreeSet::new();
+    let mut directory_spellings = BTreeMap::<String, String>::new();
+    for entry in WalkDir::new(&anchor.path).follow_links(false) {
         let entry = entry.map_err(|error| SourceChangeError::Io(error.to_string()))?;
-        if entry.path() == canonical_root {
+        if entry.path() == anchor.path {
             continue;
         }
         if entry.file_type().is_symlink() || path_has_reparse_attribute(entry.path())? {
@@ -927,74 +1186,65 @@ fn capture_inventory(
                 entry.path().display().to_string(),
             ));
         }
-        if !entry.file_type().is_file() {
+        if entry.file_type().is_dir() {
+            let relative = path_to_slash(
+                entry
+                    .path()
+                    .strip_prefix(&anchor.path)
+                    .map_err(|error| SourceChangeError::Io(error.to_string()))?,
+            )?;
+            let key = windows_path_key(&relative);
+            if let Some(first) = directory_spellings.insert(key, relative.clone()) {
+                return Err(SourceChangeError::WindowsPathCollision {
+                    first,
+                    second: relative,
+                });
+            }
             continue;
         }
-        if files.len() >= limits.max_files {
-            return Err(SourceChangeError::InventoryLimit("file count"));
+        if !entry.file_type().is_file() {
+            return Err(SourceChangeError::Io("nonregular source member".to_owned()));
         }
-        let canonical_file = fs::canonicalize(entry.path())
-            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
-        if !path_is_within_windows(&canonical_file, canonical_root) {
-            return Err(SourceChangeError::PathEscapesRoot(
-                entry.path().display().to_string(),
+        let relative = path_to_slash(
+            entry
+                .path()
+                .strip_prefix(&anchor.path)
+                .map_err(|e| SourceChangeError::Io(e.to_string()))?,
+        )?;
+        let original = Arc::new(anchor.open_file(&relative)?);
+        total = total
+            .checked_add(original.length())
+            .ok_or(SourceChangeError::InventoryLimit("total byte overflow"))?;
+        let count = files
+            .len()
+            .checked_add(1)
+            .ok_or(SourceChangeError::InventoryLimit("file count overflow"))?;
+        admission.check(count, original.length(), total)?;
+        if !identities.insert(original.identity()) {
+            return Err(SourceChangeError::Io(
+                "duplicate physical source identity".to_owned(),
             ));
         }
-        let relative = canonical_file.strip_prefix(canonical_root).map_err(|_| {
-            SourceChangeError::PathEscapesRoot(canonical_file.display().to_string())
-        })?;
-        let relative = path_to_slash(relative)?;
-        let metadata = fs::metadata(&canonical_file)
-            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
-        if metadata.len() > limits.max_file_bytes {
-            return Err(SourceChangeError::InventoryLimit("single file size"));
-        }
-        total = total
-            .checked_add(metadata.len())
-            .ok_or(SourceChangeError::InventoryLimit("total byte size"))?;
-        if total > limits.max_total_bytes {
-            return Err(SourceChangeError::InventoryLimit("total byte size"));
-        }
-        let mut file = fs::File::open(&canonical_file)
-            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
-        let mut hasher = Sha256::new();
         let key = windows_path_key(&relative);
         let retain = retain_bytes.contains(&key)
             || retain_bytes
                 .iter()
                 .any(|prefix| prefix.ends_with('/') && key.starts_with(prefix));
-        let mut retained = retain.then(|| Vec::with_capacity(metadata.len() as usize));
-        let mut buffer = [0_u8; 64 * 1024];
-        let mut read_total = 0_u64;
-        loop {
-            let read = file
-                .read(&mut buffer)
-                .map_err(|error| SourceChangeError::Io(error.to_string()))?;
-            if read == 0 {
-                break;
-            }
-            read_total += read as u64;
-            if read_total > metadata.len() || read_total > limits.max_file_bytes {
-                return Err(SourceChangeError::FileChangedDuringRead(relative));
-            }
-            hasher.update(&buffer[..read]);
-            if let Some(bytes) = &mut retained {
-                bytes.extend_from_slice(&buffer[..read]);
-            }
-        }
-        let post_metadata = file
-            .metadata()
-            .map_err(|error| SourceChangeError::Io(error.to_string()))?;
-        if read_total != metadata.len()
-            || post_metadata.len() != metadata.len()
-            || metadata.modified().ok() != post_metadata.modified().ok()
-        {
-            return Err(SourceChangeError::FileChangedDuringRead(relative));
-        }
-        let mut source = SourceFileDigest::new(relative, read_total, hasher.finalize().into())?;
+        let (digest, retained) = original.read(retain)?;
+        let mut source = SourceFileDigest::new(relative, original.length(), digest)?;
+        source.identity = Some(original.identity());
         source.verified_bytes = retained;
+        // Census-only handles are dropped promptly; selected normal-operation
+        // originals retain their shared immutable bytes and ancestors.
+        if retain && matches!(admission, CensusAdmission::OriginalSource) {
+            source.original = Some(original);
+        }
+        files
+            .try_reserve(1)
+            .map_err(|e| SourceChangeError::Io(e.to_string()))?;
         files.push(source);
     }
+    anchor.require_path()?;
     SourceInventory::from_files(files)
 }
 
@@ -1026,6 +1276,15 @@ fn resolve_selected_path(root: &Path, selected: &Path) -> Result<String, SourceC
 }
 
 fn canonical_directory(path: &Path) -> Result<PathBuf, SourceChangeError> {
+    // A canonical target obtained through a link is not an admitted original
+    // spelling. Check each existing ancestor before resolving the name.
+    for ancestor in path.ancestors().filter(|p| !p.as_os_str().is_empty()) {
+        if path_has_reparse_attribute(ancestor)? {
+            return Err(SourceChangeError::LinkOrReparsePoint(
+                ancestor.display().to_string(),
+            ));
+        }
+    }
     if path_has_reparse_attribute(path)? {
         return Err(SourceChangeError::LinkOrReparsePoint(
             path.display().to_string(),
@@ -1054,23 +1313,6 @@ fn path_has_reparse_attribute(path: &Path) -> Result<bool, SourceChangeError> {
     let metadata =
         fs::symlink_metadata(path).map_err(|error| SourceChangeError::Io(error.to_string()))?;
     Ok(metadata.file_type().is_symlink())
-}
-
-#[cfg(windows)]
-fn open_root_guard(path: &Path) -> Result<fs::File, SourceChangeError> {
-    use std::os::windows::fs::OpenOptionsExt;
-    use windows_sys::Win32::Storage::FileSystem::{
-        FILE_FLAG_BACKUP_SEMANTICS, FILE_SHARE_READ, FILE_SHARE_WRITE,
-    };
-
-    fs::OpenOptions::new()
-        .access_mode(0)
-        // Deliberately omit FILE_SHARE_DELETE: the held root cannot be
-        // replaced or renamed between classification and later consumption.
-        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE)
-        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-        .open(path)
-        .map_err(|error| SourceChangeError::Io(error.to_string()))
 }
 
 fn validate_limits(limits: SourceInventoryLimits) -> Result<(), SourceChangeError> {
@@ -2337,3 +2579,6 @@ mod tests {
         fs::remove_dir_all(base).unwrap();
     }
 }
+
+#[cfg(test)]
+mod original_source_tests;

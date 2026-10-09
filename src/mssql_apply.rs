@@ -2,13 +2,13 @@
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use anyhow::{Context, Result, anyhow, bail};
 use serde::Serialize;
 use serde_json::Value;
-use sha2::{Digest, Sha256};
 use uuid::Uuid;
 use walkdir::WalkDir;
 
@@ -17,8 +17,10 @@ use crate::cli::{
     MssqlAuditSourceParityArgs, MssqlDumpConfigArgs, MssqlDumpExtensionArgs,
     MssqlLoadExtensionArgs, MssqlMainActivationModeArg, MssqlStageSourceObjectsArgs,
 };
+#[cfg(test)]
+use crate::mssql_source_change::SourceFileDigest;
 use crate::mssql_source_change::{
-    ActivationMode, ActivationTarget, SourceFileDigest, SourceInventory, classify_source_change,
+    ActivationMode, ActivationTarget, HeldSourceRoot, SourceInventory, classify_source_change,
 };
 use crate::sql::{SqlExec, SqlOptions};
 
@@ -155,13 +157,20 @@ fn apply_source_change_inner(
     let active_root = work.path.join("active");
     let proposed_root = work.path.join("proposed");
 
-    let bounded_source_paths = selected_source_closure_paths(&source_root, &selected_path)?;
+    let source_originals =
+        HeldSourceRoot::open_source_operation(&args.source_root, &selected_path)?;
+    let bounded_source_paths =
+        source_closure_from_inventory(source_originals.baseline(), &selected_path)?;
     // Object descriptors name children and cross-object types. Read their
     // complete active reference graph instead of fabricating a sparse owner
     // descriptor from the editable source directory.
     let full_owner_export = args.extension.is_none() && requires_full_owner_export(&selected_path);
     let selected_storage_file_names = if args.extension.is_none() {
-        selected_storage_file_names_for_source_paths(&source_root, &bounded_source_paths)?
+        selected_storage_file_names_with_originals(
+            &source_root,
+            &bounded_source_paths,
+            Some(&source_originals),
+        )?
     } else {
         Vec::new()
     };
@@ -274,11 +283,18 @@ fn apply_source_change_inner(
     }
 
     copy_source_tree(&active_root, &proposed_root)?;
-    overlay_selected_bodies(&source_root, &active_root, &proposed_root, &selected_path)?;
+    overlay_original_bodies(
+        &source_originals,
+        &active_root,
+        &proposed_root,
+        &selected_path,
+    )?;
 
     let classify_started = Instant::now();
-    let active_inventory = inventory_from_root(&active_root)?;
-    let proposed_inventory = inventory_from_root(&proposed_root)?;
+    let active_originals = HeldSourceRoot::open_compiler_operation(&active_root)?;
+    let proposed_originals = HeldSourceRoot::open_source_operation(&proposed_root, &selected_path)?;
+    let active_inventory = active_originals.baseline();
+    let proposed_inventory = proposed_originals.baseline();
     let target = match args.extension.as_deref() {
         Some(name) => ActivationTarget::extension(name.to_owned())?,
         None => ActivationTarget::Main,
@@ -313,6 +329,9 @@ fn apply_source_change_inner(
     .to_owned();
 
     if no_op {
+        source_originals.require_unchanged()?;
+        active_originals.require_unchanged()?;
+        proposed_originals.require_unchanged()?;
         return Ok(MssqlApplySourceChangeReport {
             schema_version: 1,
             database: args.database.clone(),
@@ -385,7 +404,20 @@ fn apply_source_change_inner(
         )?,
         _ => None,
     };
+    proposed_originals.require_unchanged()?;
+    let classified_inventory = proposed_originals.baseline().digest_projection();
+    drop(classified);
+    drop(proposed_originals);
     prepare_compile_tree_for_selected_change(&proposed_root, &selected_path)?;
+    let compiler_originals = Arc::new(HeldSourceRoot::open_compiler_operation(&proposed_root)?);
+    require_compile_projection(
+        &classified_inventory,
+        compiler_originals.baseline(),
+        &selected_path,
+    )?;
+    let compiler_source =
+        crate::module_blob::MetadataSourceContext::with_original_source(compiler_originals.clone());
+    source_originals.require_unchanged()?;
 
     let path_prefix = owner_prefix(&selected_path)?;
     let staging_started = Instant::now();
@@ -430,7 +462,7 @@ fn apply_source_change_inner(
                     "main dry-run with SQL authentication is not yet supported by the parity auditor"
                 );
             }
-            serde_json::to_value(crate::mssql::audit_source_parity_with_sql(
+            serde_json::to_value(crate::mssql::audit_source_parity_with_source(
                 &MssqlAuditSourceParityArgs {
                     server: args.server.clone(),
                     database: args.database.clone(),
@@ -443,9 +475,10 @@ fn apply_source_change_inner(
                     output: None,
                 },
                 Some(main_read_sql(args)?),
+                Some(&compiler_source),
             )?)?
         } else {
-            serde_json::to_value(crate::mssql::stage_source_objects_with_sql(
+            serde_json::to_value(crate::mssql::stage_source_objects_with_source(
                 &MssqlStageSourceObjectsArgs {
                     server: args.server.clone(),
                     sql_user: args.sql_user.clone(),
@@ -483,6 +516,7 @@ fn apply_source_change_inner(
                     verify: false,
                 },
                 Some(main_read_sql(args)?),
+                Some(&compiler_source),
             )?)?
         };
         Ok(staging)
@@ -497,6 +531,11 @@ fn apply_source_change_inner(
     }
     let staging_ms = staging_started.elapsed().as_millis();
 
+    // Complete census and each consumed original are checked before handing
+    // the stage to publication. Extension consumer propagation is separate.
+    source_originals.require_unchanged()?;
+    active_originals.require_unchanged()?;
+    compiler_source.require_original_unchanged()?;
     let activation_started = Instant::now();
     let mut activate_main = |activation_args: &MssqlActivateStagedMainArgs, profile| {
         if let Some(original) = &source_preimages {
@@ -817,17 +856,8 @@ fn requires_full_owner_export(selected: &str) -> bool {
 }
 
 fn source_closure_fingerprint(source_root: &Path, paths: &[String]) -> Result<[u8; 32]> {
-    let mut digest = Sha256::new();
-    for relative in paths {
-        digest.update((relative.len() as u64).to_le_bytes());
-        digest.update(relative.as_bytes());
-        let path = source_root.join(path_from_slashes(relative));
-        let bytes = fs::read(&path)
-            .with_context(|| format!("failed to read watched source {}", path.display()))?;
-        digest.update((bytes.len() as u64).to_le_bytes());
-        digest.update(&bytes);
-    }
-    Ok(digest.finalize().into())
+    let original = HeldSourceRoot::open_compiler_operation(source_root)?;
+    Ok(original.fingerprint_paths(paths)?)
 }
 
 // Metadata is an inexpensive change hint, never proof that content is unchanged.
@@ -1064,36 +1094,75 @@ fn owner_prefix(selected: &str) -> Result<String> {
     }
 }
 
+#[cfg(test)]
 fn overlay_selected_bodies(
     source_root: &Path,
     active_root: &Path,
     proposed_root: &Path,
     selected: &str,
 ) -> Result<()> {
-    let mut paths = selected_source_closure_paths(source_root, selected)?;
+    let original = HeldSourceRoot::open_source_operation(source_root, selected)?;
+    overlay_original_bodies(&original, active_root, proposed_root, selected)
+}
+
+fn overlay_original_bodies(
+    original: &HeldSourceRoot,
+    active_root: &Path,
+    proposed_root: &Path,
+    selected: &str,
+) -> Result<()> {
+    let paths = source_closure_from_inventory(original.baseline(), selected)?;
     if selected.contains("/Templates/") {
-        let active_paths = selected_source_closure_paths(active_root, selected)?;
-        if paths != active_paths {
+        let active = HeldSourceRoot::open_source_operation(active_root, selected)?;
+        if paths != source_closure_from_inventory(active.baseline(), selected)? {
             bail!(
                 "selected template file/resource shape differs from the active body; additions, removals and path aliases are not non-structural edits"
             );
         }
     }
-    paths.sort();
-    paths.dedup();
+    original.require_unchanged()?;
     for path in paths {
         let relative = path_from_slashes(&path);
-        let active = active_root.join(&relative);
-        let source = source_root.join(&relative);
-        if !active.is_file() {
+        if !active_root.join(&relative).is_file() {
             bail!("selected existing body is absent from active storage export: {path}");
         }
-        if !source.is_file() {
-            bail!("selected source body is absent: {}", source.display());
-        }
-        reject_reparse_file(&source)?;
-        fs::copy(&source, proposed_root.join(&relative))
+        let bytes = original.source_bytes(&path)?;
+        fs::write(proposed_root.join(&relative), bytes.as_slice())
             .with_context(|| format!("failed to overlay {path}"))?;
+    }
+    original.require_unchanged()?;
+    Ok(())
+}
+
+fn require_compile_projection(
+    before: &SourceInventory,
+    after: &SourceInventory,
+    selected: &str,
+) -> Result<()> {
+    let removed = selected
+        .strip_suffix("/Ext/Form/Module.bsl")
+        .map(|root| format!("{root}/Ext/Form.xml"));
+    for original in before.files() {
+        if removed.as_deref() == Some(original.path()) {
+            if after.file(original.path())?.is_some() {
+                bail!("module-only form projection retained Form.xml");
+            }
+        } else {
+            let current = after
+                .file(original.path())?
+                .ok_or_else(|| anyhow!("compiler projection lost {}", original.path()))?;
+            if original.path() != current.path()
+                || original.size_bytes() != current.size_bytes()
+                || original.sha256() != current.sha256()
+            {
+                bail!("compiler projection changed {}", original.path());
+            }
+        }
+    }
+    for current in after.files() {
+        if before.file(current.path())?.is_none() {
+            bail!("compiler projection added {}", current.path());
+        }
     }
     Ok(())
 }
@@ -1147,12 +1216,17 @@ fn ensure_main_dry_run_stageable(staging: &Value) -> Result<()> {
 }
 
 fn selected_source_closure_paths(source_root: &Path, selected: &str) -> Result<Vec<String>> {
+    let original = HeldSourceRoot::open_source_operation(source_root, selected)?;
+    source_closure_from_inventory(original.baseline(), selected)
+}
+
+fn source_closure_from_inventory(
+    inventory: &SourceInventory,
+    selected: &str,
+) -> Result<Vec<String>> {
     if selected.contains("/Templates/") {
-        return crate::mssql_source_change::source_body_closure_paths(
-            &inventory_from_root(source_root)?,
-            selected,
-        )
-        .map_err(anyhow::Error::new);
+        return crate::mssql_source_change::source_body_closure_paths(inventory, selected)
+            .map_err(anyhow::Error::new);
     }
     let mut paths = vec![selected.to_owned()];
     if let Some(form_root) = selected
@@ -1163,7 +1237,10 @@ fn selected_source_closure_paths(source_root: &Path, selected: &str) -> Result<V
             format!("{form_root}/Ext/Form.xml"),
             format!("{form_root}/Ext/Form/Module.bsl"),
         ] {
-            if source_root.join(path_from_slashes(&sibling)).is_file() {
+            if let Some(member) = inventory.file(&sibling)? {
+                if member.path() != sibling {
+                    bail!("source body has a case alias: {sibling}");
+                }
                 paths.push(sibling);
             }
         }
@@ -1173,9 +1250,18 @@ fn selected_source_closure_paths(source_root: &Path, selected: &str) -> Result<V
     Ok(paths)
 }
 
+#[cfg(test)]
 fn selected_storage_file_names_for_source_paths(
     source_root: &Path,
     source_paths: &[String],
+) -> Result<Vec<String>> {
+    selected_storage_file_names_with_originals(source_root, source_paths, None)
+}
+
+fn selected_storage_file_names_with_originals(
+    source_root: &Path,
+    source_paths: &[String],
+    original: Option<&HeldSourceRoot>,
 ) -> Result<Vec<String>> {
     let registry = crate::compiler::families::assets::SourceAssetRegistry;
     let mut selected = std::collections::BTreeSet::new();
@@ -1199,8 +1285,10 @@ fn selected_storage_file_names_for_source_paths(
             .expect("Ext owner has a preceding component") = format!("{owner_name}.xml");
         let owner_relative = owner_parts.iter().collect::<PathBuf>();
         let owner_path = source_root.join(&owner_relative);
-        let owner_xml = fs::read(&owner_path)
-            .with_context(|| format!("failed to read selected owner {}", owner_path.display()))?;
+        let owner_xml = match original {
+            Some(original) => original.read_original_path(&owner_path)?.as_ref().clone(),
+            None => fs::read(&owner_path)?,
+        };
         let owner_relative_slashes = owner_relative.to_string_lossy().replace('\\', "/");
         let (family, owner_uuid) = if owner_relative_slashes.starts_with("CommonModules/") {
             let properties = crate::module_blob::parse_common_module_xml_properties(&owner_xml)?;
@@ -1243,12 +1331,13 @@ fn selected_storage_file_names_for_source_paths(
                     .iter()
                     .collect();
             let top_level_path = source_root.join(&top_level_relative);
-            let top_level_xml = fs::read(&top_level_path).with_context(|| {
-                format!(
-                    "failed to read top-level owner {}",
-                    top_level_path.display()
-                )
-            })?;
+            let top_level_xml = match original {
+                Some(original) => original
+                    .read_original_path(&top_level_path)?
+                    .as_ref()
+                    .clone(),
+                None => fs::read(&top_level_path)?,
+            };
             let properties =
                 crate::module_blob::parse_simple_metadata_xml_properties(&top_level_xml)?;
             selected.insert(properties.uuid);
@@ -1643,9 +1732,9 @@ fn copy_source_tree(source: &Path, destination: &Path) -> Result<()> {
     Ok(())
 }
 
+#[cfg(test)]
 fn inventory_from_root(root: &Path) -> Result<SourceInventory> {
     let mut files = Vec::new();
-    let limits = crate::mssql_source_change::SourceInventoryLimits::default();
     let mut total = 0_u64;
     for item in WalkDir::new(root).follow_links(false) {
         let item = item?;
@@ -1657,12 +1746,6 @@ fn inventory_from_root(root: &Path) -> Result<SourceInventory> {
         total = total
             .checked_add(size)
             .ok_or_else(|| anyhow!("source inventory size overflow"))?;
-        if files.len() >= limits.max_files
-            || size > limits.max_file_bytes
-            || total > limits.max_total_bytes
-        {
-            bail!("source inventory exceeds file/count/total byte bounds");
-        }
         let relative = item
             .path()
             .strip_prefix(root)?
@@ -2353,3 +2436,6 @@ mod tests {
         fs::remove_dir_all(canonical).unwrap();
     }
 }
+
+#[cfg(test)]
+mod original_file_tests;

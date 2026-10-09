@@ -58,6 +58,10 @@ walkdir = "2.5"
 # src/settings.rs; the maintained successor of serde_yaml.
 yaml_serde = "0.10"
 
+[target.'cfg(unix)'.dependencies]
+# Original source directory-relative NOFOLLOW reads; same pinned fs package.
+rustix = { version = "1.1.5", features = ["fs"] }
+
 [target.'cfg(windows)'.dependencies]
 # Integrated (Windows) logins to SQL Server through SSPI.
 tiberius = { version = "0.13", default-features = false, features = ["winauth"] }
