@@ -960,6 +960,9 @@ pub fn diff_activation_snapshots(
 pub fn activate_staged_main(
     args: &MssqlActivateStagedMainArgs,
 ) -> Result<MssqlActivateStagedMainReport> {
+    if crate::mssql_managed_worker::cli::selects_fresh(&args.managed_worker)? {
+        return crate::mssql_managed_worker::cli::activate(args);
+    }
     if args.live_compact_recovery && !args.live_checkpoint {
         bail!("--live-compact-recovery requires --live-checkpoint");
     }
@@ -1316,9 +1319,11 @@ fn activate_staged_main_verified_inner(
             // SQL stage was already physically captured by the activation plan.
             // This dispatch journals publication uncertainty and preserves a
             // confirmed COMMIT even when worker handoff cannot be proved.
-            managed_worker = Some(serde_json::to_value(
-                session.publish_and_handoff(|| Ok(()), || run_sql_file(&sql, &script))?,
-            )?);
+            let outcome = session.publish_and_handoff(|| Ok(()), || run_sql_file(&sql, &script))?;
+            // Inspect the actual typed state before serialization. A confirmed
+            // COMMIT without replacement proof must never set executed=true.
+            crate::mssql_managed_worker::cli::require_completed(&outcome)?;
+            managed_worker = Some(serde_json::to_value(outcome)?);
         } else {
             run_sql_file(&sql, &script).with_context(|| if live_artifact.is_some() { format!("promotion/cycle 1 may have committed; retained recovery {} and live continuation {} must be inspected before retry",recovery.display(),live_artifact_path.display()) } else {format!("activation outcome must be inspected using retained recovery {} before retry",recovery.display())})?;
         }
@@ -10572,6 +10577,7 @@ mod tests {
     #[test]
     fn runtime_profile_verification_fails_before_main_stage_read() {
         let args = MssqlActivateStagedMainArgs {
+            managed_worker: Default::default(),
             live_checkpoint: false,
             live_compact_recovery: false,
             platform_profile: MssqlNativePlatformProfile::Platform8_5_1_1150,
