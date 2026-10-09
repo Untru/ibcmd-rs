@@ -1121,6 +1121,26 @@ pub struct MetadataSourceContext {
     preloaded: PreloadedSourceFiles,
     /// Explicit operation-local original census, never a path-cache fallback.
     original_source: Option<Arc<crate::mssql_source_change::HeldSourceRoot>>,
+    /// Option-based codec traits cannot return I/O failures. This local sticky
+    /// receipt makes every bound success/publication gate refuse those failures.
+    original_failure: Arc<Mutex<Option<String>>>,
+    original_layout: Arc<std::sync::OnceLock<Result<bool, String>>>,
+    original_compatibility_mode: Arc<std::sync::OnceLock<Result<Option<String>, String>>>,
+    original_constants: Arc<std::sync::OnceLock<OriginalConstants>>,
+}
+
+struct OriginalConstants {
+    resolve: Box<dyn Fn() -> Result<Vec<String>> + Send + Sync>,
+    value: std::sync::OnceLock<Result<Vec<String>, String>>,
+}
+
+impl std::fmt::Debug for OriginalConstants {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("OriginalConstants")
+            .field("resolved", &self.value.get().is_some())
+            .finish()
+    }
 }
 
 /// A source file's bytes: shared with the preloaded store, or read for the
@@ -1176,6 +1196,10 @@ impl MetadataSourceContext {
             moxel_object_refs: Arc::new(std::sync::OnceLock::new()),
             preloaded: PreloadedSourceFiles::default(),
             original_source: None,
+            original_failure: Arc::new(Mutex::new(None)),
+            original_layout: Arc::new(std::sync::OnceLock::new()),
+            original_compatibility_mode: Arc::new(std::sync::OnceLock::new()),
+            original_constants: Arc::new(std::sync::OnceLock::new()),
         }
     }
 
@@ -1200,16 +1224,246 @@ impl MetadataSourceContext {
         source: Arc<crate::mssql_source_change::HeldSourceRoot>,
     ) -> Self {
         Self {
+            role_rights_source: Arc::new(SourceTreeRoleRightsSource::with_original(source.clone())),
             original_source: Some(source.clone()),
             ..Self::new(source.canonical_root().to_owned())
         }
     }
 
+    pub(crate) fn require_original_reads(&self) -> anyhow::Result<()> {
+        self.role_rights_source
+            .require_original_reads()
+            .map_err(|error| anyhow!(error))?;
+        if let Some(error) = self
+            .original_failure
+            .lock()
+            .map_err(|e| anyhow!(e.to_string()))?
+            .as_ref()
+        {
+            return Err(anyhow!(error.clone()));
+        }
+        Ok(())
+    }
+
     pub(crate) fn require_original_unchanged(&self) -> anyhow::Result<()> {
+        self.require_original_reads()?;
         if let Some(source) = &self.original_source {
             source.require_unchanged()?;
         }
         Ok(())
+    }
+
+    pub(crate) fn original_source(&self) -> Option<&crate::mssql_source_change::HeldSourceRoot> {
+        self.original_source.as_deref()
+    }
+
+    pub(crate) fn original_source_owner(
+        &self,
+    ) -> Option<Arc<crate::mssql_source_change::HeldSourceRoot>> {
+        self.original_source.clone()
+    }
+
+    pub(crate) fn install_original_constants(
+        &self,
+        resolve: impl Fn() -> Result<Vec<String>> + Send + Sync + 'static,
+    ) {
+        // Each retained source operation resolves its target flags once. The
+        // resolver contains a separate explicit owner, never this cache itself.
+        self.original_constants.get_or_init(|| OriginalConstants {
+            resolve: Box::new(resolve),
+            value: std::sync::OnceLock::new(),
+        });
+    }
+
+    fn target_constants(&self) -> Result<Vec<String>> {
+        if self.original_source.is_none() {
+            return Ok(target_always_used_constants());
+        }
+        let resolver = self
+            .original_constants
+            .get()
+            .ok_or_else(|| anyhow!("original source constants resolver was not installed"))?;
+        resolver
+            .value
+            .get_or_init(|| {
+                if let Some(path) = std::env::var_os("IBCMD_RS_ALWAYS_USED_CONSTANTS") {
+                    return fs::read_to_string(path)
+                        .map(|text| {
+                            text.lines()
+                                .map(str::trim)
+                                .filter(|line| !line.is_empty())
+                                .map(str::to_owned)
+                                .collect()
+                        })
+                        .map_err(|e| e.to_string());
+                }
+                (resolver.resolve)().map_err(|e| e.to_string())
+            })
+            .clone()
+            .map_err(|e| anyhow!(e))
+    }
+
+    pub(crate) fn source_root(&self) -> &Path {
+        &self.source_root
+    }
+
+    pub(crate) fn require_source_root(&self, root: &Path) -> Result<()> {
+        if let Some(original) = self.original_source()
+            && !original.relative_path(root)?.is_empty()
+        {
+            return Err(anyhow!("source root differs from retained original owner"));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn stores_layout_8_5_1(&self) -> Result<bool> {
+        if self.original_source.is_none() {
+            return Ok(crate::metadata_model::common::tree_stores_layout_8_5_1(
+                &self.source_root,
+            ));
+        }
+        self.original_layout
+            .get_or_init(|| {
+                crate::metadata_model::common::original_tree_stores_layout_8_5_1(self)
+                    .map_err(|e| e.to_string())
+            })
+            .clone()
+            .map_err(|e| anyhow!(e))
+    }
+
+    /// Existing descriptor helpers expose a boolean rather than Result. Keep
+    /// their signature, but retain any original read failure for the enclosing
+    /// object/compiler success gate; false cannot authorize a successful row.
+    pub(crate) fn descriptor_layout_8_5_1(&self) -> bool {
+        match self.stores_layout_8_5_1() {
+            Ok(layout) => layout,
+            Err(error) => {
+                self.record_original_failure(error.to_string());
+                false
+            }
+        }
+    }
+
+    /// Compatibility is a current source fact, not a process-wide pathname
+    /// memo. The existing descriptor API returns an optional value; retain
+    /// every failure for its actual enclosing object/publication success gate.
+    pub(crate) fn descriptor_compatibility_mode(&self, root: &Path) -> Option<String> {
+        if let Err(error) = self.require_source_root(root) {
+            self.record_original_failure(error.to_string());
+            return None;
+        }
+        let mode = self.original_compatibility_mode.get_or_init(|| {
+            let path = self.source_root.join("Configuration.xml");
+            let read = || -> Result<Option<String>> {
+                if !self.source_file_exists(&path)? {
+                    return Ok(None);
+                }
+                let bytes = self.read_source(&path)?;
+                let document = crate::metadata_model::xml::MetadataXml::parse(&bytes)?;
+                Ok(document
+                    .object()?
+                    .path(&["Properties", "CompatibilityMode"])
+                    .map(|mode| mode.text.clone()))
+            };
+            read().map_err(|e| e.to_string())
+        });
+        match mode {
+            Ok(mode) => mode.clone(),
+            Err(error) => {
+                self.record_original_failure(error.clone());
+                None
+            }
+        }
+    }
+
+    pub(crate) fn tree_version(&self) -> anyhow::Result<Option<String>> {
+        if self.original_source.is_none() {
+            return Ok(crate::metadata_model::export::tree_version(
+                &self.source_root,
+            ));
+        }
+        let path = self.source_root.join("Configuration.xml");
+        if !self.source_file_exists(&path)? {
+            return Ok(None);
+        }
+        let bytes = self.read_source(&path)?;
+        let document = crate::metadata_model::xml::MetadataXml::parse(&bytes)?;
+        Ok(document.version().map(str::to_owned))
+    }
+
+    pub(crate) fn scan_sources(
+        &self,
+        prefixes: &[String],
+    ) -> anyhow::Result<crate::source::SourceManifest> {
+        match self.original_source() {
+            Some(original) => crate::source::scan_original_sources(original, prefixes),
+            None => crate::source::scan_sources_with_prefixes(&self.source_root, prefixes),
+        }
+    }
+
+    pub(crate) fn source_file_exists(&self, path: &Path) -> anyhow::Result<bool> {
+        match self.original_source() {
+            Some(original) => Ok(original.member(&original.relative_path(path)?)?.is_some()),
+            None => Ok(path.is_file()),
+        }
+    }
+
+    fn source_members_under(&self, directory: &Path) -> Result<Vec<PathBuf>> {
+        let original = self
+            .original_source()
+            .ok_or_else(|| anyhow!("no original census"))?;
+        let relative = original.relative_path(directory)?;
+        let prefix = if relative.is_empty() {
+            String::new()
+        } else {
+            format!("{relative}/")
+        };
+        Ok(original
+            .files_under(&prefix)?
+            .into_iter()
+            // Keep the caller's admitted root spelling (including a Windows
+            // non-verbatim path) while membership remains the original census.
+            .map(|member| {
+                directory.join(
+                    member
+                        .path()
+                        .strip_prefix(&prefix)
+                        .expect("census prefix matched"),
+                )
+            })
+            .collect())
+    }
+
+    pub(crate) fn source_directory_exists(&self, directory: &Path) -> Result<bool> {
+        if self.original_source.is_none() {
+            return Ok(directory.is_dir());
+        }
+        Ok(!self.source_members_under(directory)?.is_empty())
+    }
+
+    pub(crate) fn source_descendant_files(&self, directory: &Path) -> Result<Vec<PathBuf>> {
+        self.source_members_under(directory)
+    }
+
+    pub(crate) fn source_files(&self, directory: &Path) -> Result<Vec<PathBuf>> {
+        if self.original_source.is_some() {
+            return Ok(self
+                .source_members_under(directory)?
+                .into_iter()
+                .filter(|path| path.parent() == Some(directory))
+                .collect());
+        }
+        if !directory.is_dir() {
+            return Ok(Vec::new());
+        }
+        fs::read_dir(directory)?
+            .map(|entry| {
+                let entry = entry?;
+                Ok(entry.file_type()?.is_file().then(|| entry.path()))
+            })
+            .filter_map(|entry: std::io::Result<Option<PathBuf>>| entry.transpose())
+            .collect::<std::io::Result<Vec<_>>>()
+            .map_err(Into::into)
     }
 
     /// The bytes of a source file: shared from memory when preloaded, else
@@ -1220,7 +1474,10 @@ impl MetadataSourceContext {
             return source
                 .read_original_path(path)
                 .map(SourceBytes::Shared)
-                .map_err(|error| std::io::Error::other(error.to_string()));
+                .map_err(|error| {
+                    self.record_original_failure(error.to_string());
+                    std::io::Error::other(error.to_string())
+                });
         }
         match self.preloaded.0.get(path) {
             Some(bytes) => Ok(SourceBytes::Shared(bytes.clone())),
@@ -1228,14 +1485,35 @@ impl MetadataSourceContext {
         }
     }
 
+    fn record_original_failure(&self, error: String) {
+        if self.original_source.is_some() {
+            let mut failure = self
+                .original_failure
+                .lock()
+                .unwrap_or_else(|e| e.into_inner());
+            if failure.is_none() {
+                *failure = Some(error);
+            }
+        }
+    }
+
     /// The uuid `Configuration.xml` declares for the configuration itself.
     pub(crate) fn configuration_uuid(&self) -> Option<String> {
         self.configuration_uuid
             .get_or_init(|| {
+                if !self
+                    .source_file_exists(&self.source_root.join("Configuration.xml"))
+                    .map_err(|e| self.record_original_failure(e.to_string()))
+                    .ok()?
+                {
+                    return None;
+                }
                 let xml = self
                     .read_source(&self.source_root.join("Configuration.xml"))
                     .ok()?;
-                let properties = parse_simple_metadata_xml_properties(&xml).ok()?;
+                let properties = parse_simple_metadata_xml_properties(&xml)
+                    .map_err(|e| self.record_original_failure(e.to_string()))
+                    .ok()?;
                 (properties.kind == "Configuration").then_some(properties.uuid)
             })
             .clone()
@@ -1270,8 +1548,18 @@ impl MetadataSourceContext {
     /// The tree's configuration style items: lowercase uuid -> name. A file
     /// that does not parse contributes nothing rather than failing the scan.
     pub(crate) fn dcs_style_items(&self) -> &BTreeMap<String, String> {
-        self.style_items
-            .get_or_init(|| crate::mssql::style_reference_types_from_source_root(&self.source_root))
+        self.style_items.get_or_init(|| {
+            if self.original_source.is_none() {
+                return crate::mssql::style_reference_types_from_source_root(&self.source_root);
+            }
+            match crate::mssql::style_reference_types_from_source(self) {
+                Ok(items) => items,
+                Err(error) => {
+                    self.record_original_failure(error.to_string());
+                    BTreeMap::new()
+                }
+            }
+        })
     }
 
     /// One metadata object of the source tree, by `"<Class>.<Name>"`.
@@ -1297,8 +1585,18 @@ impl MetadataSourceContext {
         let (class, name) = key.split_once('.')?;
         let folder = configuration_object_source_folder(class)?;
         let path = self.source_root.join(folder).join(format!("{name}.xml"));
+        if !self
+            .source_file_exists(&path)
+            .map_err(|e| self.record_original_failure(e.to_string()))
+            .ok()?
+        {
+            return None;
+        }
         let xml = self.read_source(&path).ok()?;
-        let object = parse_configuration_object_xml(&xml).ok().flatten()?;
+        let object = parse_configuration_object_xml(&xml)
+            .map_err(|e| self.record_original_failure(e.to_string()))
+            .ok()
+            .flatten()?;
         (object.class == class).then(|| Arc::new(object))
     }
 
@@ -1322,15 +1620,8 @@ impl MetadataSourceContext {
         refs: &mut BTreeMap<String, String>,
     ) -> Result<()> {
         let dir = self.source_root.join(folder);
-        if !dir.is_dir() {
-            return Ok(());
-        }
-        for entry in
-            fs::read_dir(&dir).with_context(|| format!("failed to read {}", dir.display()))?
-        {
-            let entry = entry?;
-            let path = entry.path();
-            if !path.is_file() || path.extension().and_then(|value| value.to_str()) != Some("xml") {
+        for path in self.source_files(&dir)? {
+            if path.extension().and_then(|value| value.to_str()) != Some("xml") {
                 continue;
             }
             let xml = self
@@ -2073,6 +2364,9 @@ pub fn pack_style_body_blob_from_xml_with_base(
         replacements.sort_by(|left, right| right.0.start.cmp(&left.0.start));
         for (range, replacement) in replacements {
             replace_1c_value_if_different(&mut plain, range, &replacement);
+        }
+        if let Some(source) = source {
+            source.require_original_reads()?;
         }
         let blob = deflate_raw(plain.as_bytes())?;
         let output_sha256 = hex_sha256(&blob);
@@ -3081,6 +3375,9 @@ pub fn pack_moxel_spreadsheet_blob_from_xml_with_source_and_hint(
 ) -> Result<PackedRawDeflatedBlob> {
     let body = crate::compiler::bodies::mxl_native::write_native_moxel_body(xml, source)?;
     let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{body}");
+    if let Some(source) = source {
+        source.require_original_reads()?;
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3276,6 +3573,9 @@ pub fn pack_form_body_blob_from_form_xml_with_source_and_assets(
     if let Some(form_item_assets_root) = form_item_assets_root {
         patch_form_item_picture_assets_with_source(&mut plain, form_item_assets_root, source)?;
     }
+    if let Some(source) = source {
+        source.require_original_reads()?;
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -3324,6 +3624,12 @@ struct NativeDataPaths<'a> {
 }
 
 impl NativeDataPaths<'_> {
+    fn target_constants(&self) -> Result<Vec<String>> {
+        match self.source {
+            Some(source) => source.target_constants(),
+            None => Ok(target_always_used_constants()),
+        }
+    }
     /// Member 11 of the record, or `None` when the path names something the
     /// measured rule cannot place -- which refuses the form.
     fn resolve(&self, data_path: &str) -> Option<String> {
@@ -3787,7 +4093,8 @@ fn native_form_attribute_use_always(
     let Some(fields) = attribute.use_always.as_deref() else {
         // No field named is the flagged set itself under the delta reading.
         if declared == Some("cfg:ConstantsSet") {
-            let paths = target_always_used_constants()
+            let paths = data_paths
+                .target_constants()?
                 .iter()
                 .map(|uuid| format!("{{1,{{0,{uuid}}}}}"))
                 .collect::<Vec<_>>();
@@ -3816,7 +4123,7 @@ fn native_form_attribute_use_always(
         return Err(anyhow!("an empty <UseAlways> is not measured"));
     }
     let flagged = if declared == Some("cfg:ConstantsSet") {
-        target_always_used_constants()
+        data_paths.target_constants()?
     } else {
         Vec::new()
     };
@@ -9492,6 +9799,9 @@ pub fn pack_native_form_body_blob(
     // What the exporter cannot read back would load as a form nobody can open.
     parse_form_body_plain(&body).context("the native Form body does not parse back")?;
     let plain = format!("\u{feff}{body}");
+    if let Some(source) = source {
+        source.require_original_reads()?;
+    }
     let blob = deflate_raw(plain.as_bytes())?;
     let output_sha256 = hex_sha256(&blob);
     Ok(PackedRawDeflatedBlob {
@@ -10043,7 +10353,11 @@ fn patch_form_item_picture_assets_with_source(
     assets_root: &Path,
     source: Option<&MetadataSourceContext>,
 ) -> Result<()> {
-    if !assets_root.is_dir() {
+    let present = match source.filter(|source| source.original_source().is_some()) {
+        Some(source) => source.source_directory_exists(assets_root)?,
+        None => assets_root.is_dir(),
+    };
+    if !present {
         return Ok(());
     }
 
@@ -10063,7 +10377,12 @@ fn patch_form_item_picture_assets_with_source(
                 crate::mssql_dump::resolve_form_item_picture_owner(plain, marker_start)
         {
             let file_name = form_item_asset_file_name(property_name, &current_content);
-            if let Some(path) = resolve_form_item_asset_path(assets_root, &item_name, &file_name) {
+            if let Some(path) = resolve_form_item_asset_path_with_source(
+                assets_root,
+                &item_name,
+                &file_name,
+                source,
+            )? {
                 let content = match source {
                     Some(source) => source.read_source(&path),
                     None => fs::read(&path).map(SourceBytes::Owned),
@@ -10083,6 +10402,41 @@ fn patch_form_item_picture_assets_with_source(
         plain.replace_range(range, &payload);
     }
     Ok(())
+}
+
+fn resolve_form_item_asset_path_with_source(
+    assets_root: &Path,
+    item_name: &str,
+    file_name: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<PathBuf>> {
+    let Some(source) = source.filter(|source| source.original_source().is_some()) else {
+        return Ok(resolve_form_item_asset_path(
+            assets_root,
+            item_name,
+            file_name,
+        ));
+    };
+    let item_dir = assets_root.join(sanitize_source_path_segment(item_name));
+    let exact = item_dir.join(file_name);
+    if source.source_file_exists(&exact)? {
+        return Ok(Some(exact));
+    }
+    let stem = file_name
+        .split_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(file_name);
+    let mut candidates = source
+        .source_files(&item_dir)?
+        .into_iter()
+        .filter(|path| path.file_stem().and_then(|value| value.to_str()) == Some(stem));
+    let candidate = candidates.next();
+    if candidates.next().is_some() {
+        return Err(anyhow!(
+            "ambiguous original Form item asset: {item_name}/{file_name}"
+        ));
+    }
+    Ok(candidate)
 }
 
 fn resolve_form_item_asset_path(
@@ -25973,6 +26327,7 @@ pub fn pack_role_rights_blob_base_free(
 
     let written = write_role_rights(xml, source.role_rights_source())
         .map_err(|refusal| anyhow!("Role rights writer refused: {refusal}"))?;
+    source.require_original_reads()?;
     let blob = deflate_raw(&written.plain)?;
     let exported = crate::mssql_dump::role_rights_xml_from_blob(
         &blob,
@@ -46887,3 +47242,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
         assert!(blockers[2].contains("database-specific GUIDs"));
     }
 }
+
+#[cfg(test)]
+#[path = "module_blob_original_consumers_tests.rs"]
+mod original_consumers_tests;

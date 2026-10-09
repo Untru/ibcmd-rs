@@ -68,6 +68,15 @@ impl Compat {
 /// state of the file. `DontUse` (or no file) means the platform's own: the
 /// release the registry maps the XML dialect to.
 pub(crate) fn compatibility(context: &DescriptorContext) -> Compat {
+    if context.source.original_source().is_some() {
+        let [major, minor, patch] = context.platform().release();
+        return context
+            .source
+            .descriptor_compatibility_mode(&context.root)
+            .as_deref()
+            .and_then(Compat::parse)
+            .unwrap_or(Compat(major, minor, patch));
+    }
     type Key = (PathBuf, Option<std::time::SystemTime>, u64);
     static CACHE: OnceLock<Mutex<HashMap<Key, Compat>>> = OnceLock::new();
     let path = context.root.join("Configuration.xml");

@@ -1672,7 +1672,11 @@ pub(crate) fn audit_source_parity_with_source(
     sql_override: Option<SqlExec>,
     original: Option<&MetadataSourceContext>,
 ) -> Result<MssqlSourceParityAuditReport> {
-    let manifest = scan_sources_with_prefixes(&args.source_root, &args.path_prefix)?;
+    let source = original
+        .cloned()
+        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
+    source.require_source_root(&args.source_root)?;
+    let manifest = source.scan_sources(&args.path_prefix)?;
     let source_coverage = audit_source_load_coverage_from_manifest(&manifest)?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
@@ -1691,11 +1695,23 @@ pub(crate) fn audit_source_parity_with_source(
         ));
     }
     if let Some(source_version) = args.source_version {
-        validate_selected_source_versions(&metadata_xmls, source_version)?;
-        validate_selected_source_versions(&common_module_xmls, source_version)?;
+        validate_selected_source_versions_with_source(
+            &metadata_xmls,
+            source_version,
+            Some(&source),
+        )?;
+        validate_selected_source_versions_with_source(
+            &common_module_xmls,
+            source_version,
+            Some(&source),
+        )?;
     }
-    let bootstrap_readiness =
-        source_bootstrap_readiness_report(&args.source_root, &metadata_xmls, &common_module_xmls)?;
+    let bootstrap_readiness = source_bootstrap_readiness_report_with_source(
+        &args.source_root,
+        &metadata_xmls,
+        &common_module_xmls,
+        &source,
+    )?;
     let sql = match sql_override {
         Some(sql) => sql,
         None => {
@@ -1703,10 +1719,7 @@ pub(crate) fn audit_source_parity_with_source(
         }
     };
 
-    install_always_used_constants_source(&sql, &args.database, Some(&args.source_root));
-    let source = original
-        .cloned()
-        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
+    install_operation_constants_source(&source, &sql, &args.database);
     let metadata_results = parallel::install(|| {
         metadata_xmls
             .par_iter()
@@ -1898,17 +1911,32 @@ fn source_parity_failure_summary(
         .collect()
 }
 
+#[cfg(test)]
 fn source_bootstrap_readiness_report(
     source_root: &Path,
     metadata_xmls: &[PathBuf],
     common_module_xmls: &[PathBuf],
 ) -> Result<MssqlSourceBootstrapReadinessReport> {
+    source_bootstrap_readiness_report_with_source(
+        source_root,
+        metadata_xmls,
+        common_module_xmls,
+        &MetadataSourceContext::new(source_root.to_path_buf()),
+    )
+}
+
+fn source_bootstrap_readiness_report_with_source(
+    source_root: &Path,
+    metadata_xmls: &[PathBuf],
+    common_module_xmls: &[PathBuf],
+    source_context: &MetadataSourceContext,
+) -> Result<MssqlSourceBootstrapReadinessReport> {
     let mut rows = Vec::new();
     let mut objects = Vec::new();
-    let source_context = MetadataSourceContext::new(source_root.to_path_buf());
 
     for xml_path in metadata_xmls {
-        let xml = fs::read(xml_path)
+        let xml = source_context
+            .read_source(xml_path)
             .with_context(|| format!("failed to read XML {}", xml_path.display()))?;
         let properties = parse_simple_metadata_xml_properties(&xml)
             .with_context(|| format!("failed to parse metadata XML {}", xml_path.display()))?;
@@ -1945,7 +1973,8 @@ fn source_bootstrap_readiness_report(
     }
 
     for xml_path in common_module_xmls {
-        let xml = fs::read(xml_path)
+        let xml = source_context
+            .read_source(xml_path)
             .with_context(|| format!("failed to read common module XML {}", xml_path.display()))?;
         let properties = parse_common_module_xml_properties(&xml)
             .with_context(|| format!("failed to parse common module XML {}", xml_path.display()))?;
@@ -1970,7 +1999,10 @@ fn source_bootstrap_readiness_report(
             true,
             &metadata_reason,
         ));
-        if let Some(body_path) = source_module_body_path(infer_common_module_text_path(xml_path)) {
+        if let Some(body_path) = source_module_body_path_with_source(
+            infer_common_module_text_path(xml_path),
+            Some(source_context),
+        )? {
             rows.push(bootstrap_row_report(
                 "common_module",
                 "CommonModule",
@@ -2037,6 +2069,7 @@ fn source_bootstrap_readiness_report(
         .count();
     let generation_summary = source_bootstrap_generation_summary(&rows);
 
+    source_context.require_original_unchanged()?;
     Ok(MssqlSourceBootstrapReadinessReport {
         selected_objects: metadata_xmls.len() + common_module_xmls.len(),
         config_rows: rows.len(),
@@ -2061,7 +2094,7 @@ fn metadata_body_bootstrap_rows(
 ) -> Result<Vec<MssqlSourceBootstrapRowReport>> {
     let mut rows = Vec::new();
     match properties.kind.as_str() {
-        "Style" => rows.extend(optional_body_bootstrap_row(
+        "Style" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2070,9 +2103,8 @@ fn metadata_body_bootstrap_rows(
             "style_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "Style body packer builds a new body from Style.xml and source-root StyleItem references without reading the active Config row",
-        )),
-        "ScheduledJob" => rows.extend(optional_body_bootstrap_row(
+            "Style body packer builds a new body from Style.xml and source-root StyleItem references without reading the active Config row", Some(source_context))?),
+        "ScheduledJob" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2081,9 +2113,8 @@ fn metadata_body_bootstrap_rows(
             "schedule_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "schedule packer builds the schedule body directly from Schedule.xml without reading the active Config row",
-        )),
-        "XDTOPackage" => rows.extend(optional_body_bootstrap_row(
+            "schedule packer builds the schedule body directly from Schedule.xml without reading the active Config row", Some(source_context))?),
+        "XDTOPackage" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2092,9 +2123,8 @@ fn metadata_body_bootstrap_rows(
             "raw_deflated_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "raw deflated body packer builds the Config blob directly from source bytes without reading the active Config row",
-        )),
-        "WSReference" => rows.extend(optional_body_bootstrap_row(
+            "raw deflated body packer builds the Config blob directly from source bytes without reading the active Config row", Some(source_context))?),
+        "WSReference" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2103,8 +2133,7 @@ fn metadata_body_bootstrap_rows(
             "ws_reference_definition_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "WSReference definition body is stored as a raw deflated body generated from source bytes without reading the active Config row",
-        )),
+            "WSReference definition body is stored as a raw deflated body generated from source bytes without reading the active Config row", Some(source_context))?),
         "CommonTemplate" | "Template" => rows.extend(template_bootstrap_rows(
             source_root,
             source_context,
@@ -2113,7 +2142,7 @@ fn metadata_body_bootstrap_rows(
             properties,
             object_path,
         )?),
-        "CommonPicture" => rows.extend(optional_body_bootstrap_row(
+        "CommonPicture" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2122,18 +2151,16 @@ fn metadata_body_bootstrap_rows(
             "picture_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "picture packer creates a new ExtPicture wrapper from Picture.xml and referenced bytes without reading the active Config row",
-        )),
-        "Configuration" => rows.extend(configuration_asset_bootstrap_rows(
+            "picture packer creates a new ExtPicture wrapper from Picture.xml and referenced bytes without reading the active Config row", Some(source_context))?),
+        "Configuration" => rows.extend(configuration_asset_bootstrap_rows_with_source(
             source_root,
             xml_path,
             properties,
-            object_path,
-        )),
+            object_path, Some(source_context))?),
         "BusinessProcess" => {
             let body_path = infer_business_process_flowchart_body_path(xml_path);
-            if body_path.exists() {
-                let reason = business_process_flowchart_base_free_blocker_reason(&body_path)
+            if source_context.source_file_exists(&body_path)? {
+                let reason = business_process_flowchart_base_free_blocker_reason_with_source(&body_path, Some(source_context))
                     .with_context(|| {
                         format!(
                             "failed to audit BusinessProcess Flowchart base-free blockers for {}",
@@ -2155,8 +2182,8 @@ fn metadata_body_bootstrap_rows(
         }
         "Catalog" | "ChartOfCharacteristicTypes" => {
             let body_path = infer_predefined_data_body_path(xml_path);
-            if body_path.exists() {
-                let reason = predefined_data_base_free_blocker_reason(&body_path).with_context(|| {
+            if source_context.source_file_exists(&body_path)? {
+                let reason = predefined_data_base_free_blocker_reason_with_source(&body_path, Some(source_context)).with_context(|| {
                     format!(
                         "failed to audit PredefinedData base-free blockers for {}",
                         body_path.display()
@@ -2179,7 +2206,7 @@ fn metadata_body_bootstrap_rows(
                 ));
             }
         }
-        "ExchangePlan" => rows.extend(optional_body_bootstrap_row(
+        "ExchangePlan" => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2188,25 +2215,23 @@ fn metadata_body_bootstrap_rows(
             "exchange_plan_content_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "Content.xml packer generates the content body after resolving metadata references from the source tree without reading the active Config row",
-        )),
+            "Content.xml packer generates the content body after resolving metadata references from the source tree without reading the active Config row", Some(source_context))?),
         "Form" | "CommonForm" => {
             let form_path = infer_form_body_path(xml_path);
             let module_path = infer_form_module_body_path(xml_path);
-            if form_path.exists() || module_path.exists() {
-                let source_path = if form_path.exists() {
+            if source_context.source_file_exists(&form_path)? || source_context.source_file_exists(&module_path)? {
+                let source_path = if source_context.source_file_exists(&form_path)? {
                     &form_path
                 } else {
                     &module_path
                 };
                 // A form the readiness model cannot read is a blocker of that
                 // form, not a reason to abandon the whole report.
-                let blockers = form_body_base_free_blockers_for_paths(&form_path, &module_path)
-                    .unwrap_or_else(|error| {
-                        vec![format!(
-                            "Form body base-free blockers could not be audited: {error:#}"
-                        )]
-                    });
+                let blockers = if source_context.original_source().is_some() {
+                    form_body_base_free_blockers_for_paths_with_source(&form_path, &module_path, Some(source_context))?
+                } else {
+                    form_body_base_free_blockers_for_paths(&form_path, &module_path).unwrap_or_else(|error| vec![format!("Form body base-free blockers could not be audited: {error:#}")])
+                };
                 let (generation, current_staging_fetches_base_blob, reason) =
                     if blockers.is_empty() {
                         (
@@ -2239,8 +2264,8 @@ fn metadata_body_bootstrap_rows(
         }
         "Role" => {
             let body_path = infer_role_rights_body_path(xml_path);
-            if body_path.exists() {
-                let xml = fs::read(&body_path).with_context(|| {
+            if source_context.source_file_exists(&body_path)? {
+                let xml = source_context.read_source(&body_path).with_context(|| {
                     format!("failed to read Role rights XML {}", body_path.display())
                 })?;
                 let blockers =
@@ -2287,7 +2312,7 @@ fn metadata_body_bootstrap_rows(
         .help_suffix(&properties.kind)
         .expect("source-asset registry defines the help suffix policy")
         .trim_start_matches('.');
-    rows.extend(optional_body_bootstrap_row(
+    rows.extend(optional_body_bootstrap_row_with_source(
         source_root,
         properties,
         object_path,
@@ -2296,22 +2321,24 @@ fn metadata_body_bootstrap_rows(
         "help_body",
         BootstrapGeneration::CanGenerateWithoutBaseBlob,
         false,
-        "Help packer builds the help blob from Help.xml, pages and files using the deterministic body id without reading active Config rows",
-    ));
+        "Help packer builds the help blob from Help.xml, pages and files using the deterministic body id without reading active Config rows", Some(source_context))?);
 
     for (suffix, _) in object_module_body_suffixes(&properties.kind) {
         let body_path = infer_object_module_body_path(xml_path, &properties.kind, suffix);
-        rows.extend(optional_module_body_bootstrap_row(
+        rows.extend(optional_module_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
             body_path,
             suffix,
             "module_body",
-        ));
+            Some(source_context),
+        )?);
     }
 
-    for source in nested_command_module_sources(xml_path, xml, properties)? {
+    for source in
+        nested_command_module_sources_with_source(xml_path, xml, properties, Some(source_context))?
+    {
         rows.push(bootstrap_row_report(
             "metadata_object",
             &properties.kind,
@@ -2330,18 +2357,19 @@ fn metadata_body_bootstrap_rows(
     if let Some(suffix) = command_interface_body_suffix(&properties.kind)
         && properties.kind != "Configuration"
     {
-        rows.extend(command_interface_bootstrap_row(
+        rows.extend(command_interface_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
             infer_command_interface_body_path(xml_path, &properties.kind),
             suffix,
             "command_interface_body",
-        ));
+            Some(source_context),
+        )?);
     }
 
     if let Some(suffix) = additional_indexes_body_suffix(&properties.kind) {
-        rows.extend(optional_body_bootstrap_row(
+        rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2350,11 +2378,10 @@ fn metadata_body_bootstrap_rows(
             "additional_indexes_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes without reading the active Config row",
-        ));
+            "AdditionalIndexes.xml is stored as a raw deflated body and can be generated from source bytes without reading the active Config row", Some(source_context))?);
     } else {
         let body_path = infer_additional_indexes_body_path(xml_path);
-        if body_path.exists() {
+        if source_context.source_file_exists(&body_path)? {
             rows.push(bootstrap_row_report(
                 "metadata_object",
                 &properties.kind,
@@ -2369,6 +2396,7 @@ fn metadata_body_bootstrap_rows(
         }
     }
 
+    source_context.require_original_reads()?;
     Ok(rows)
 }
 
@@ -2422,6 +2450,27 @@ pub(crate) fn style_reference_types_from_source_root(
     style_reference_types
 }
 
+pub(crate) fn style_reference_types_from_source(
+    source: &MetadataSourceContext,
+) -> Result<BTreeMap<String, String>> {
+    let mut items = BTreeMap::new();
+    for path in source.source_files(&source.source_root().join("StyleItems"))? {
+        if path.extension().and_then(|extension| extension.to_str()) != Some("xml") {
+            continue;
+        }
+        let Some(name) = path.file_stem().and_then(|stem| stem.to_str()) else {
+            continue;
+        };
+        let xml = source.read_source(&path)?;
+        // The existing optional style semantic admission is unchanged; actual
+        // original I/O is now fallible and cannot silently disappear.
+        if let Some(uuid) = parse_style_item_root_uuid(&xml) {
+            items.insert(uuid, name.to_owned());
+        }
+    }
+    Ok(items)
+}
+
 /// Reads the `uuid` attribute off a `StyleItems/<Name>.xml` object's root
 /// `<StyleItem>` element, canonicalized to the lowercase-hyphenated form
 /// (matching the `compile_dcs_with_references` resolver contract). Returns
@@ -2466,12 +2515,16 @@ pub(crate) fn compile_dcs_template_body(
     match source {
         Some(source) => {
             let resolver = |name: &str| source.dcs_generated_type_id(name);
-            compile_evidenced_template_with_resolvers(
+            let compiled = compile_evidenced_template_with_resolvers(
                 TemplateKind::DataCompositionSchema,
                 TemplateSource::Bytes(bytes),
                 source.dcs_style_items(),
                 &resolver,
-            )
+            )?;
+            source.require_original_reads().map_err(|e| {
+                crate::compiler::bodies::template::TemplateCodecError::InvalidSource(e.to_string())
+            })?;
+            Ok(compiled)
         }
         None => compile_evidenced_template(
             TemplateKind::DataCompositionSchema,
@@ -2515,8 +2568,8 @@ fn template_bootstrap_rows(
         | TemplateKind::GraphicalSchema
         | TemplateKind::TextDocument => {
             if let Some(body_path) = infer_raw_deflated_template_body_path(xml_path, kind.as_str()) {
-                if body_path.exists() && kind == TemplateKind::DataCompositionSchema {
-                    let source = fs::read(&body_path).with_context(|| {
+                if source_context.source_file_exists(&body_path)? && kind == TemplateKind::DataCompositionSchema {
+                    let source = source_context.read_source(&body_path).with_context(|| {
                         format!("failed to read DCS Template body {}", body_path.display())
                     })?;
                     // Configuration types and custom style items are stored
@@ -2539,7 +2592,7 @@ fn template_bootstrap_rows(
                         return Ok(rows);
                     }
                 }
-                rows.extend(optional_body_bootstrap_row(
+                rows.extend(optional_body_bootstrap_row_with_source(
                     source_root,
                     properties,
                     object_path,
@@ -2552,11 +2605,10 @@ fn template_bootstrap_rows(
                     },
                     BootstrapGeneration::CanGenerateWithoutBaseBlob,
                     false,
-                    "profile-selected Template codec builds the native body directly from source bytes without reading the active Config row",
-                ));
+                    "profile-selected Template codec builds the native body directly from source bytes without reading the active Config row", Some(source_context))?);
             }
         }
-        TemplateKind::HtmlDocument => rows.extend(optional_body_bootstrap_row(
+        TemplateKind::HtmlDocument => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2565,9 +2617,8 @@ fn template_bootstrap_rows(
             "template_html_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "HTML Template codec preserves its ordered page/file container without reading an active base blob",
-        )),
-        TemplateKind::SpreadsheetDocument => rows.extend(optional_body_bootstrap_row(
+            "HTML Template codec preserves its ordered page/file container without reading an active base blob", Some(source_context))?),
+        TemplateKind::SpreadsheetDocument => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2576,9 +2627,8 @@ fn template_bootstrap_rows(
             "template_spreadsheet_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "profile-selected MXL codec builds the MOXCEL blob from Template.xml without reading the active Config row",
-        )),
-        TemplateKind::AddIn | TemplateKind::BinaryData => rows.extend(optional_body_bootstrap_row(
+            "profile-selected MXL codec builds the MOXCEL blob from Template.xml without reading the active Config row", Some(source_context))?),
+        TemplateKind::AddIn | TemplateKind::BinaryData => rows.extend(optional_body_bootstrap_row_with_source(
             source_root,
             properties,
             object_path,
@@ -2587,9 +2637,9 @@ fn template_bootstrap_rows(
             "template_binary_body",
             BootstrapGeneration::CanGenerateWithoutBaseBlob,
             false,
-            "binary Template codec preserves exact bytes in the evidenced marker-1 base64 container without reading the active Config row",
-        )),
+            "binary Template codec preserves exact bytes in the evidenced marker-1 base64 container without reading the active Config row", Some(source_context))?),
     }
+    source_context.require_original_reads()?;
     Ok(rows)
 }
 
@@ -2659,6 +2709,85 @@ fn command_interface_bootstrap_row(
     )]
 }
 
+fn command_interface_bootstrap_row_with_source(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<MssqlSourceBootstrapRowReport>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(command_interface_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            body_path,
+            suffix,
+            row_kind,
+        ));
+    }
+
+    if !stage_source_file_exists(source, &body_path)? {
+        return Ok(Vec::new());
+    }
+    let source = source.expect("bound original context checked");
+    let xml = source.read_source(&body_path)?;
+    let (generation, current_staging_fetches_base_blob, reason) = Some(xml)
+        .and_then(|xml| {
+            if command_interface_xml_can_pack_without_base(&xml).ok()? {
+                Some((
+                    BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                    false,
+                    "CommandInterface.xml contains raw command references and can be packed without reading the active Config row".to_string(),
+                ))
+            } else if interface_asset_plaintext(
+                InterfaceAssetSource::CommandInterface,
+                &xml,
+                Some(source),
+            )
+            .is_ok()
+            {
+                Some((
+                    BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                    false,
+                    "CommandInterface.xml compiles base-free: every section is encoded and every name resolves against the source tree without reading the active Config row".to_string(),
+                ))
+            } else {
+                let blockers = command_interface_base_free_blockers(&xml).ok()?;
+                Some((
+                    BootstrapGeneration::RequiresBaseBlob,
+                    true,
+                    format!(
+                        "CommandInterface.xml requires active base blob: {}",
+                        blockers.join("; ")
+                    ),
+                ))
+            }
+        })
+        .unwrap_or_else(|| {
+            (
+                BootstrapGeneration::RequiresBaseBlob,
+                true,
+                "CommandInterface.xml with readable command references preserves command references and validates command count against the base blob".to_string(),
+            )
+        });
+
+    source.require_original_reads()?;
+    Ok(vec![bootstrap_row_report(
+        "metadata_object",
+        &properties.kind,
+        object_path,
+        source_relative_path(source_root, &body_path),
+        format!("{}.{}", properties.uuid, suffix),
+        row_kind,
+        generation,
+        current_staging_fetches_base_blob,
+        &reason,
+    )])
+}
+
 fn form_body_base_free_blocker_reason(form_path: &Path, module_path: &Path) -> Result<String> {
     let blockers = form_body_base_free_blockers_for_paths(form_path, module_path)?;
     Ok(format!(
@@ -2681,6 +2810,28 @@ fn form_body_base_free_blockers_for_paths(
     let form_item_asset_files =
         count_form_item_asset_files(&form_path.with_extension("").join("Items"))?;
     form_body_base_free_blockers(&form_xml, has_module_text, form_item_asset_files)
+}
+
+fn form_body_base_free_blockers_for_paths_with_source(
+    form_path: &Path,
+    module_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<String>> {
+    let Some(source) = source.filter(|source| source.original_source().is_some()) else {
+        return form_body_base_free_blockers_for_paths(form_path, module_path);
+    };
+    let form_xml = if source.source_file_exists(form_path)? {
+        source.read_source(form_path)?
+    } else {
+        crate::module_blob::SourceBytes::Owned(Vec::new())
+    };
+    let has_module = source.source_file_exists(module_path)?;
+    let count = source
+        .source_descendant_files(&form_path.with_extension("").join("Items"))?
+        .len();
+    let blockers = form_body_base_free_blockers(&form_xml, has_module, count)?;
+    source.require_original_reads()?;
+    Ok(blockers)
 }
 
 fn count_form_item_asset_files(path: &Path) -> Result<usize> {
@@ -2728,7 +2879,7 @@ fn role_rights_base_free_blocker_reason(
     body_path: &Path,
     source: Option<&MetadataSourceContext>,
 ) -> Result<String> {
-    let xml = fs::read(body_path)
+    let xml = read_stage_source(source, body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
     let blockers = role_rights_base_free_blockers(&xml, source)?;
     Ok(format!(
@@ -2747,8 +2898,38 @@ fn predefined_data_base_free_blocker_reason(body_path: &Path) -> Result<String> 
     ))
 }
 
+fn predefined_data_base_free_blocker_reason_with_source(
+    body_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let xml = read_stage_source(source, body_path)
+        .with_context(|| format!("failed to read PredefinedData XML {}", body_path.display()))?;
+    let blockers = predefined_data_base_free_blockers(&xml)?;
+    Ok(format!(
+        "Predefined.xml requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
 fn business_process_flowchart_base_free_blocker_reason(body_path: &Path) -> Result<String> {
     let xml = fs::read(body_path).with_context(|| {
+        format!(
+            "failed to read BusinessProcess Flowchart XML {}",
+            body_path.display()
+        )
+    })?;
+    let blockers = business_process_flowchart_base_free_blockers(&xml)?;
+    Ok(format!(
+        "BusinessProcess Flowchart.xml requires active base blob: {}",
+        blockers.join("; ")
+    ))
+}
+
+fn business_process_flowchart_base_free_blocker_reason_with_source(
+    body_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<String> {
+    let xml = read_stage_source(source, body_path).with_context(|| {
         format!(
             "failed to read BusinessProcess Flowchart XML {}",
             body_path.display()
@@ -2882,6 +3063,124 @@ fn configuration_asset_bootstrap_rows(
     rows
 }
 
+fn configuration_asset_bootstrap_rows_with_source(
+    source_root: &Path,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<MssqlSourceBootstrapRowReport>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(configuration_asset_bootstrap_rows(
+            source_root,
+            xml_path,
+            properties,
+            object_path,
+        ));
+    }
+
+    // The rows live under the configuration's module group, as the loader
+    // stages them.
+    let owner = configuration_asset_owner_with_source(xml_path, source)?.map(|uuid| {
+        SimpleMetadataXmlProperties {
+            uuid,
+            ..properties.clone()
+        }
+    });
+    let properties = owner.as_ref().unwrap_or(properties);
+    let mut rows = Vec::new();
+    rows.extend(optional_body_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "Splash.xml"),
+        "2",
+        "configuration_picture_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        false,
+        "configuration picture body creates a new ExtPicture wrapper from source bytes without reading the active Config row", source)?);
+    rows.extend(optional_body_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin"),
+        "4",
+        "configuration_binary_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        false,
+        "ParentConfigurations.bin is exported as inflated raw-deflated source bytes and staging re-deflates it without reading the active Config row", source)?);
+    let source_context = source.expect("original context checked");
+    rows.extend(interface_asset_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "HomePageWorkArea.xml"),
+        "8",
+        "configuration_home_page_work_area_body",
+        InterfaceAssetSource::HomePageWorkArea,
+        source_context,
+    )?);
+    rows.extend(optional_body_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MobileClientSignature.bin"),
+        "10",
+        "configuration_raw_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        false,
+        "configuration raw asset is stored as a raw deflated body generated from source bytes without reading the active Config row", source)?);
+    rows.extend(command_interface_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "CommandInterface.xml"),
+        "a",
+        "configuration_command_interface_body",
+        source,
+    )?);
+    rows.extend(command_interface_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MainSectionCommandInterface.xml"),
+        "9",
+        "configuration_command_interface_body",
+        source,
+    )?);
+    rows.extend(interface_asset_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "ClientApplicationInterface.xml"),
+        "b",
+        "configuration_client_application_interface_body",
+        InterfaceAssetSource::ClientApplicationInterface,
+        source_context,
+    )?);
+    rows.extend(optional_body_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
+        "c",
+        "configuration_picture_body",
+        BootstrapGeneration::CanGenerateWithoutBaseBlob,
+        false,
+        "configuration picture body creates a new ExtPicture wrapper from source bytes without reading the active Config row", source)?);
+    rows.extend(interface_asset_bootstrap_row_with_source(
+        source_root,
+        properties,
+        object_path,
+        infer_configuration_ext_body_path(xml_path, "StandaloneConfigurationContent.bin"),
+        "f",
+        "configuration_standalone_content_body",
+        InterfaceAssetSource::StandaloneContent,
+        source_context,
+    )?);
+    Ok(rows)
+}
+
 /// A configuration interface asset the base-free writer compiles. One it
 /// refuses has no base to patch either, so the load refuses it too.
 fn interface_asset_bootstrap_row(
@@ -2930,6 +3229,63 @@ fn interface_asset_bootstrap_row(
     ))
 }
 
+fn interface_asset_bootstrap_row_with_source(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    kind: InterfaceAssetSource,
+    source: &MetadataSourceContext,
+) -> Result<Option<MssqlSourceBootstrapRowReport>> {
+    if source.original_source().is_none() {
+        return Ok(interface_asset_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            body_path,
+            suffix,
+            row_kind,
+            kind,
+            source,
+        ));
+    }
+    if !source.source_file_exists(&body_path)? {
+        return Ok(None);
+    }
+    let file = body_path
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let xml = source.read_source(&body_path)?;
+    let refusal = interface_asset_plaintext(kind, &xml, Some(source)).err();
+    source.require_original_reads()?;
+    let (generation, reason) = match refusal {
+        None => (
+            BootstrapGeneration::CanGenerateWithoutBaseBlob,
+            format!(
+                "{file} compiles base-free to the stored brace text, names resolved against the source tree, without reading the active Config row"
+            ),
+        ),
+        Some(error) => (
+            BootstrapGeneration::RequiresBaseBlob,
+            format!("{file} is refused by the base-free writer and has no base patch: {error:#}"),
+        ),
+    };
+    Ok(Some(bootstrap_row_report(
+        "metadata_object",
+        &properties.kind,
+        object_path,
+        source_relative_path(source_root, &body_path),
+        format!("{}.{}", properties.uuid, suffix),
+        row_kind,
+        generation,
+        false,
+        &reason,
+    )))
+}
+
 fn optional_body_bootstrap_row(
     source_root: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -2956,6 +3312,47 @@ fn optional_body_bootstrap_row(
     })
 }
 
+fn optional_body_bootstrap_row_with_source(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    body_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    generation: BootstrapGeneration,
+    current_staging_fetches_base_blob: bool,
+    reason: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<MssqlSourceBootstrapRowReport>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(optional_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            body_path,
+            suffix,
+            row_kind,
+            generation,
+            current_staging_fetches_base_blob,
+            reason,
+        ));
+    }
+
+    Ok(stage_source_file_exists(source, &body_path)?.then(|| {
+        bootstrap_row_report(
+            "metadata_object",
+            &properties.kind,
+            object_path,
+            source_relative_path(source_root, &body_path),
+            format!("{}.{}", properties.uuid, suffix),
+            row_kind,
+            generation,
+            current_staging_fetches_base_blob,
+            reason,
+        )
+    }))
+}
+
 fn optional_module_body_bootstrap_row(
     source_root: &Path,
     properties: &SimpleMetadataXmlProperties,
@@ -2979,12 +3376,80 @@ fn optional_module_body_bootstrap_row(
     })
 }
 
+fn optional_module_body_bootstrap_row_with_source(
+    source_root: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    object_path: &str,
+    bsl_path: PathBuf,
+    suffix: &str,
+    row_kind: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<MssqlSourceBootstrapRowReport>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(optional_module_body_bootstrap_row(
+            source_root,
+            properties,
+            object_path,
+            bsl_path,
+            suffix,
+            row_kind,
+        ));
+    }
+
+    Ok(
+        source_module_body_path_with_source(bsl_path, source)?.map(|body_path| {
+            bootstrap_row_report(
+                "metadata_object",
+                &properties.kind,
+                object_path,
+                source_relative_path(source_root, &body_path),
+                format!("{}.{}", properties.uuid, suffix),
+                row_kind,
+                BootstrapGeneration::CanGenerateWithoutBaseBlob,
+                false,
+                metadata_module_body_base_free_reason(&properties.kind),
+            )
+        }),
+    )
+}
+
 fn source_module_body_path(bsl_path: PathBuf) -> Option<PathBuf> {
     if source_listing::exists(&bsl_path) {
         return Some(bsl_path);
     }
     let bin_path = module_binary_body_path(&bsl_path);
     source_listing::exists(&bin_path).then_some(bin_path)
+}
+
+fn stage_source_file_exists(source: Option<&MetadataSourceContext>, path: &Path) -> Result<bool> {
+    match source.filter(|source| source.original_source().is_some()) {
+        Some(source) => source.source_file_exists(path),
+        None => Ok(source_listing::exists(path)),
+    }
+}
+
+fn stage_source_directory_exists(
+    source: Option<&MetadataSourceContext>,
+    path: &Path,
+) -> Result<bool> {
+    match source.filter(|source| source.original_source().is_some()) {
+        Some(source) => source.source_directory_exists(path),
+        None => Ok(source_listing::exists(path)),
+    }
+}
+
+fn source_module_body_path_with_source(
+    bsl_path: PathBuf,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<PathBuf>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(source_module_body_path(bsl_path));
+    }
+    if stage_source_file_exists(source, &bsl_path)? {
+        return Ok(Some(bsl_path));
+    }
+    let binary = module_binary_body_path(&bsl_path);
+    Ok(stage_source_file_exists(source, &binary)?.then_some(binary))
 }
 
 fn module_binary_body_path(bsl_path: &Path) -> PathBuf {
@@ -3905,16 +4370,20 @@ fn stage_source_files(
     if !args.path_prefix.is_empty() {
         bail!("--file selects the objects itself: it does not go with --path-prefix");
     }
-    let selection = files_stage::select(&args.source_root, &args.files)?;
+    let selection = files_stage::select_with_source(&args.source_root, &args.files, original)?;
     let mut scoped = args.clone();
     scoped.path_prefix = selection.owners().to_vec();
     scoped.files = selection.files().to_vec();
     // A sparse directory has no Configuration.xml to name its XML version:
     // the guard then exports in the version the listed objects declare.
     if scoped.source_version.is_none()
-        && crate::metadata_model::export::tree_version(&scoped.source_root).is_none()
+        && match original {
+            Some(source) => source.tree_version()?.is_none(),
+            None => crate::metadata_model::export::tree_version(&scoped.source_root).is_none(),
+        }
         && let Some(owner) = selection.owners().first()
-        && let Some(version) = source_xml_version(&scoped.source_root.join(owner))?
+        && let Some(version) =
+            source_xml_version_with_source(&scoped.source_root.join(owner), original)?
     {
         scoped.source_version =
             <InfobaseConfigSourceVersion as clap::ValueEnum>::from_str(&version, true).ok();
@@ -3942,9 +4411,11 @@ fn stage_source_objects_patch(
         Some(selection) => selection.scan_prefixes(),
         None => args.path_prefix.clone(),
     };
-    let manifest = timed_stage_step("scan the tree", || {
-        scan_sources_with_prefixes(&args.source_root, &scan_prefixes)
-    })?;
+    let source = original
+        .cloned()
+        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
+    source.require_source_root(&args.source_root)?;
+    let manifest = timed_stage_step("scan the tree", || source.scan_sources(&scan_prefixes))?;
     let metadata_xmls = filter_source_paths_by_prefix(
         source_metadata_xmls(&manifest, &args.source_root),
         &args.source_root,
@@ -3962,9 +4433,6 @@ fn stage_source_objects_patch(
         ));
     }
 
-    let source = original
-        .cloned()
-        .unwrap_or_else(|| MetadataSourceContext::new(args.source_root.clone()));
     let sql_password = resolve_sqlcmd_password(
         args.sql_user.as_deref(),
         args.sql_pwd.as_deref(),
@@ -3988,14 +4456,14 @@ fn stage_source_objects_patch(
             &args.sql_pwd_env,
         )?
     };
-    install_always_used_constants_source(&sql, &args.database, Some(&args.source_root));
+    install_operation_constants_source(&source, &sql, &args.database);
     // What the target's rows cannot carry is built from the tree: the
     // objects it lacks, the descriptors that differ, the removals
     // (`override_stage`). Only a bulk stage against a database can.
     let overriding = !args.per_row && !offline;
     let plan = if overriding {
         timed_stage_step("compare the tree with the target", || {
-            override_stage::plan(args, &sql)
+            override_stage::plan_with_source(args, &sql, Some(&source))
         })?
     } else {
         override_stage::Plan::default()
@@ -4053,7 +4521,15 @@ fn stage_source_objects_patch(
             .map(PathBuf::as_path)
             .collect::<Vec<_>>();
         match timed_stage_step("compare the tree with the target's export", || {
-            delta_stage::plan(args, &sql, &manifest, &prepared, &plan, &aliases)
+            delta_stage::plan_with_source(
+                args,
+                &sql,
+                &manifest,
+                &prepared,
+                &plan,
+                &aliases,
+                Some(&source),
+            )
         })? {
             delta_stage::Outcome::Active(found) => delta = Some(found),
             delta_stage::Outcome::Off(reason) => all_rows_because = Some(reason),
@@ -4167,7 +4643,7 @@ fn stage_source_objects_patch(
                     })
             };
             timed_stage_step("build what the target's rows cannot carry", || {
-                override_stage::build(
+                override_stage::build_with_source(
                     &override_stage::Tree {
                         root: &args.source_root,
                         version: args.source_version.map(|version| version.as_str()),
@@ -4177,6 +4653,7 @@ fn stage_source_objects_patch(
                     &plan,
                     &rebuild,
                     &patched,
+                    Some(&source),
                 )
             })?
         } else {
@@ -4306,12 +4783,13 @@ fn stage_source_objects_patch(
                 false,
             );
             let verified = timed_stage_step("verify the staged state", || {
-                stage_guard::verify_patch_stage(
+                stage_guard::verify_patch_stage_with_source(
                     args,
                     &sql,
                     &manifest,
                     &staged,
                     &additions.deleted_names,
+                    Some(&source),
                 )
             });
             match verified {
@@ -4349,6 +4827,7 @@ fn stage_source_objects_patch(
         );
     };
 
+    source.require_original_unchanged()?;
     let batch_size = args.batch_size.unwrap_or(500).max(1);
     let batches = if !args.per_row {
         Vec::new()
@@ -4366,6 +4845,7 @@ fn stage_source_objects_patch(
     let mut after = before.clone();
 
     if !args.per_row {
+        source.require_original_unchanged()?;
         scripts = stage_source_rows_bulk(
             args,
             &sql,
@@ -4373,6 +4853,7 @@ fn stage_source_objects_patch(
             &common_modules,
             &patched_versions.blob,
             &additions,
+            &source,
         )?;
         if !args.script_only {
             after = storage_table_stats(&sql, &args.database, "ConfigSave")?;
@@ -4381,31 +4862,31 @@ fn stage_source_objects_patch(
 
     let batch_reports = source_stage_batch_reports(&batches);
     for (index, batch) in batches.iter().enumerate() {
+        // Before the first directory/build/write effect of this batch. A
+        // refusal after earlier batches honestly retains their existing prefix.
+        source.require_original_unchanged()?;
         let script = batch_stage_script_path(
             args.script_output.as_ref(),
             &args.database,
             "source_objects",
             index,
         );
-        if let Some(parent) = script.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("failed to create {}", parent.display()))?;
-        }
         let batch_report = &batch_reports[index];
         running_rows += batch.row_count;
         debug_assert_eq!(running_rows, batch_report.running_staged_rows);
-        let statements = build_stage_source_objects_sql(
-            &args.database,
-            &batch.metadata_objects,
-            &batch.common_modules,
-            &patched_versions.blob,
-            batch_report.include_stable_rows,
-            batch_report.include_versions_row,
-            batch_report.expected_total_rows,
-        );
-        fs::write(&script, statements)
-            .with_context(|| format!("failed to write {}", script.display()))?;
+        write_original_source_script(&source, &script, || {
+            build_stage_source_objects_sql(
+                &args.database,
+                &batch.metadata_objects,
+                &batch.common_modules,
+                &patched_versions.blob,
+                batch_report.include_stable_rows,
+                batch_report.include_versions_row,
+                batch_report.expected_total_rows,
+            )
+        })?;
         if !args.script_only {
+            source.require_original_unchanged()?;
             run_sql_file(&sql, &script)?;
             after = storage_table_stats(&sql, &args.database, "ConfigSave")?;
         }
@@ -5260,7 +5741,7 @@ fn prepare_metadata_object_stage_for_files(
         ));
     }
     let body_files = selection
-        .map(|(root, selection)| selection.measured_body_files(root, &xml_path))
+        .map(|(root, selection)| selection.measured_body_files_with_source(root, &xml_path, source))
         .transpose()?
         .flatten();
     let body_rows = if let Some(files) = body_files {
@@ -5298,6 +5779,9 @@ fn prepare_metadata_object_stage_for_files(
         )?
     };
 
+    if let Some(source) = source {
+        source.require_original_reads()?;
+    }
     Ok(PreparedMetadataObjectStage {
         object_id,
         kind: packed_metadata.properties.kind.clone(),
@@ -5441,7 +5925,7 @@ fn prepare_metadata_body_family(
     source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    match family {
+    let rows = match family {
         MetadataBodyFamily::KindBody => {
             prepare_metadata_kind_body_rows(sql, database, xml_path, xml, properties, source, axes)
         }
@@ -5452,15 +5936,21 @@ fn prepare_metadata_body_family(
             sql, database, xml_path, properties, axes, source,
         ),
         MetadataBodyFamily::NestedCommandModules => {
-            prepare_nested_command_module_body_rows(sql, database, xml_path, xml, properties, axes)
+            prepare_nested_command_module_body_rows_with_source(
+                sql, database, xml_path, xml, properties, axes, source,
+            )
         }
         MetadataBodyFamily::CommandInterface => {
             prepare_command_interface_body_row(sql, database, xml_path, properties, source, axes)
         }
-        MetadataBodyFamily::AdditionalIndexes => {
-            prepare_additional_indexes_body_row(sql, database, xml_path, properties, axes)
-        }
+        MetadataBodyFamily::AdditionalIndexes => prepare_additional_indexes_body_row_with_source(
+            sql, database, xml_path, properties, axes, source,
+        ),
+    }?;
+    if let Some(source) = source {
+        source.require_original_reads()?;
     }
+    Ok(rows)
 }
 
 fn prepare_metadata_kind_body_rows(
@@ -5474,29 +5964,34 @@ fn prepare_metadata_kind_body_rows(
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     match properties.kind.as_str() {
         "Style" => prepare_style_body_row(sql, database, xml_path, properties, source),
-        "ScheduledJob" => prepare_scheduled_job_body_row(sql, database, xml_path, properties),
-        "XDTOPackage" => prepare_raw_deflated_body_row(
+        "ScheduledJob" => {
+            prepare_scheduled_job_body_row_with_source(sql, database, xml_path, properties, source)
+        }
+        "XDTOPackage" => prepare_raw_deflated_body_row_with_source(
             sql,
             database,
             infer_xdto_package_body_path(xml_path),
             properties,
             "XDTOPackage body",
             axes,
+            source,
         ),
-        "WSReference" => prepare_ws_reference_body_row(xml_path, properties),
+        "WSReference" => prepare_ws_reference_body_row_with_source(xml_path, properties, source),
         "CommonTemplate" | "Template" => {
             prepare_template_body_row(sql, database, xml_path, xml, properties, source, axes)
         }
-        "CommonPicture" => prepare_common_picture_body_row(sql, database, xml_path, properties),
+        "CommonPicture" => {
+            prepare_common_picture_body_row_with_source(sql, database, xml_path, properties, source)
+        }
         "Configuration" => {
             prepare_configuration_asset_body_rows(sql, database, xml_path, properties, source, axes)
         }
-        "BusinessProcess" => {
-            prepare_business_process_flowchart_body_row(sql, database, xml_path, properties, axes)
-        }
-        "Catalog" | "ChartOfCharacteristicTypes" => {
-            prepare_predefined_data_body_row(sql, database, xml_path, properties, axes)
-        }
+        "BusinessProcess" => prepare_business_process_flowchart_body_row_with_source(
+            sql, database, xml_path, properties, axes, source,
+        ),
+        "Catalog" | "ChartOfCharacteristicTypes" => prepare_predefined_data_body_row_with_source(
+            sql, database, xml_path, properties, axes, source,
+        ),
         "ExchangePlan" => {
             prepare_exchange_plan_content_body_row(sql, database, xml_path, properties, source)
         }
@@ -5508,6 +6003,7 @@ fn prepare_metadata_kind_body_rows(
     }
 }
 
+#[cfg(test)]
 fn prepare_additional_indexes_body_row(
     _sql: &SqlExec,
     _database: &str,
@@ -5515,8 +6011,21 @@ fn prepare_additional_indexes_body_row(
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_additional_indexes_body_row_with_source(
+        _sql, _database, xml_path, properties, axes, None,
+    )
+}
+
+fn prepare_additional_indexes_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_additional_indexes_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let (body_id, mapping) = match additional_indexes_body_suffix(&properties.kind) {
@@ -5529,12 +6038,12 @@ fn prepare_additional_indexes_body_row(
             AdditionalIndexesMapping::Unmapped,
         ),
     };
-    let bytes = fs::read(&body_path)
+    let bytes = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read AdditionalIndexes {}", body_path.display()))?;
     if matches!(mapping, AdditionalIndexesMapping::Confirmed) {
         // The platform stores brace text, not the XML: compile it.
-        let owner_xml =
-            fs::read(xml_path).with_context(|| format!("failed to read {}", xml_path.display()))?;
+        let owner_xml = read_stage_source(source, xml_path)
+            .with_context(|| format!("failed to read {}", xml_path.display()))?;
         let blob = crate::module_blob::pack_additional_indexes_blob_from_xml(
             &bytes,
             &owner_xml,
@@ -5587,7 +6096,7 @@ fn prepare_style_body_row(
     source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_style_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let source = source.ok_or_else(|| {
@@ -5597,7 +6106,8 @@ fn prepare_style_body_row(
         )
     })?;
     let body_id = format!("{}.0", properties.uuid);
-    let xml = fs::read(&body_path)
+    let xml = source
+        .read_source(&body_path)
         .with_context(|| format!("failed to read Style body XML {}", body_path.display()))?;
     let packed = pack_style_body_blob_from_xml(&xml, Some(source))
         .with_context(|| format!("failed to pack Style body {}", body_path.display()))?;
@@ -5609,18 +6119,29 @@ fn prepare_style_body_row(
     }])
 }
 
+#[cfg(test)]
 fn prepare_scheduled_job_body_row(
     _sql: &SqlExec,
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_scheduled_job_body_row_with_source(_sql, _database, xml_path, properties, None)
+}
+
+fn prepare_scheduled_job_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_scheduled_job_schedule_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let xml = fs::read(&body_path)
+    let xml = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read JobSchedule XML {}", body_path.display()))?;
     let packed = pack_schedule_blob_from_xml(&xml)
         .with_context(|| format!("failed to pack JobSchedule {}", body_path.display()))?;
@@ -5638,16 +6159,18 @@ fn prepare_scheduled_job_body_row(
 /// order -- the four ERP УХ references store exactly that
 /// (`WSСборОтчетностиРосстата`: `0.wsdl`, `1.xsd` ... `4.xsd`, each member
 /// byte-equal to its file). The exporter refuses anything else.
-fn prepare_ws_reference_body_row(
+
+fn prepare_ws_reference_body_row_with_source(
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     use crate::v8_container::{V8Element, build_v8_container, make_v8_element_header};
     let body_path = infer_ws_reference_definition_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
-    let definition = fs::read(&body_path).with_context(|| {
+    let definition = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read WSReference definition {}",
             body_path.display()
@@ -5668,12 +6191,19 @@ fn prepare_ws_reference_body_row(
             body_path.display()
         )
     })?;
-    let mut imports = fs::read_dir(ext)
-        .with_context(|| format!("failed to list {}", ext.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| source_listing::is_file(path) && path != &body_path)
-        .collect::<Vec<_>>();
+    let mut imports = match source.filter(|source| source.original_source().is_some()) {
+        Some(source) => source
+            .source_files(ext)?
+            .into_iter()
+            .filter(|path| path != &body_path)
+            .collect(),
+        None => fs::read_dir(ext)
+            .with_context(|| format!("failed to list {}", ext.display()))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| source_listing::is_file(path) && path != &body_path)
+            .collect::<Vec<_>>(),
+    };
     imports.sort();
     for path in imports {
         let name = path
@@ -5681,12 +6211,12 @@ fn prepare_ws_reference_body_row(
             .and_then(|name| name.to_str())
             .ok_or_else(|| anyhow!("WSReference import has no UTF-8 name: {}", path.display()))?
             .to_string();
-        let data = fs::read(&path)
+        let data = read_stage_source(source, &path)
             .with_context(|| format!("failed to read WSReference import {}", path.display()))?;
         elements.push(V8Element {
             header: make_v8_element_header(&name),
             name,
-            data,
+            data: data.into_vec(),
         });
     }
     let container = build_v8_container(&elements).with_context(|| {
@@ -5704,6 +6234,7 @@ fn prepare_ws_reference_body_row(
     }])
 }
 
+#[cfg(test)]
 fn prepare_raw_deflated_body_row(
     _sql: &SqlExec,
     _database: &str,
@@ -5712,11 +6243,25 @@ fn prepare_raw_deflated_body_row(
     label: &str,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !source_listing::exists(&body_path) {
+    prepare_raw_deflated_body_row_with_source(
+        _sql, _database, body_path, properties, label, axes, None,
+    )
+}
+
+fn prepare_raw_deflated_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    body_path: PathBuf,
+    properties: &SimpleMetadataXmlProperties,
+    label: &str,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let bytes = fs::read(&body_path)
+    let bytes = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read {label} {}", body_path.display()))?;
     let entry = compile_mssql_source(
         axes,
@@ -5765,7 +6310,7 @@ fn prepare_template_body_row(
                 })
             });
             if let Some(base) = brace_base {
-                let xml = fs::read(&body_path).with_context(|| {
+                let xml = read_stage_source(source, &body_path).with_context(|| {
                     format!(
                         "failed to read GraphicalSchema Template {}",
                         body_path.display()
@@ -5811,7 +6356,9 @@ fn prepare_template_body_row(
             prepare_spreadsheet_template_body_row(sql, database, xml_path, properties, source, axes)
         }
         TemplateKind::AddIn | TemplateKind::BinaryData => {
-            prepare_binary_template_body_row(sql, database, xml_path, properties, kind, axes)
+            prepare_binary_template_body_row_with_source(
+                sql, database, xml_path, properties, kind, axes, source,
+            )
         }
     }
 }
@@ -5830,7 +6377,7 @@ fn prepare_raw_template_body_row(
     kind: TemplateKind,
     source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
@@ -5879,7 +6426,7 @@ fn prepare_spreadsheet_template_body_row(
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     ensure_template_axes(axes)?;
     let body_path = infer_spreadsheet_template_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
@@ -5995,7 +6542,7 @@ pub(crate) fn html_template_source_row(
     source: Option<&MetadataSourceContext>,
 ) -> Result<Option<HelpSourceRow>> {
     let body_path = infer_html_template_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(None);
     }
     let body_id = format!("{}.0", properties.uuid);
@@ -6016,6 +6563,7 @@ pub(crate) fn html_template_source_row(
     }))
 }
 
+#[cfg(test)]
 fn prepare_binary_template_body_row(
     _sql: &SqlExec,
     _database: &str,
@@ -6024,13 +6572,27 @@ fn prepare_binary_template_body_row(
     kind: TemplateKind,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_binary_template_body_row_with_source(
+        _sql, _database, xml_path, properties, kind, axes, None,
+    )
+}
+
+fn prepare_binary_template_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    kind: TemplateKind,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
     ensure_template_axes(axes)?;
     let body_path = infer_binary_template_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let bytes = fs::read(&body_path).with_context(|| {
+    let bytes = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read binary Template body {}",
             body_path.display()
@@ -6051,23 +6613,34 @@ fn prepare_binary_template_body_row(
     }])
 }
 
+#[cfg(test)]
 fn prepare_common_picture_body_row(
     _sql: &SqlExec,
     _database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
+    prepare_common_picture_body_row_with_source(_sql, _database, xml_path, properties, None)
+}
+
+fn prepare_common_picture_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_common_picture_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let xml = fs::read(&body_path)
+    let xml = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read ExtPicture XML {}", body_path.display()))?;
     let file_name = parse_ext_picture_file_name_from_xml(&xml)
         .with_context(|| format!("failed to parse ExtPicture XML {}", body_path.display()))?;
     let picture_path = body_path.with_extension("").join(&file_name);
-    let picture = fs::read(&picture_path)
+    let picture = read_stage_source(source, &picture_path)
         .with_context(|| format!("failed to read ExtPicture file {}", picture_path.display()))?;
     let packed = pack_ext_picture_blob_from_xml_and_bytes(&xml, &picture)
         .with_context(|| format!("failed to pack ExtPicture {}", picture_path.display()))?;
@@ -6085,12 +6658,28 @@ fn prepare_common_picture_body_row(
 /// `f389d417-…` while `Configuration.xml` is `66193438-…`.
 pub(crate) fn configuration_asset_owner_uuid(xml_path: &Path) -> Option<String> {
     let xml = fs::read_to_string(xml_path).ok()?;
+    configuration_asset_owner_from_text(&xml)
+}
+
+fn configuration_asset_owner_from_text(xml: &str) -> Option<String> {
     let class = xml.find("<xr:ClassId>9cd510cd-abfc-11d4-9434-004095e12fc7</xr:ClassId>")?;
     let rest = &xml[class..];
     let open = rest.find("<xr:ObjectId>")? + "<xr:ObjectId>".len();
     let close = rest[open..].find("</xr:ObjectId>")? + open;
     let uuid = rest[open..close].trim();
     (uuid.len() == 36).then(|| uuid.to_string())
+}
+
+fn configuration_asset_owner_with_source(
+    xml_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return Ok(configuration_asset_owner_uuid(xml_path));
+    }
+    let bytes = read_stage_source(source, xml_path)?;
+    let xml = std::str::from_utf8(&bytes).context("Configuration XML is not UTF-8")?;
+    Ok(configuration_asset_owner_from_text(xml))
 }
 
 fn prepare_configuration_asset_body_rows(
@@ -6102,9 +6691,11 @@ fn prepare_configuration_asset_body_rows(
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let configuration_uuid = properties.uuid.clone();
-    let owner = configuration_asset_owner_uuid(xml_path).map(|uuid| SimpleMetadataXmlProperties {
-        uuid,
-        ..properties.clone()
+    let owner = configuration_asset_owner_with_source(xml_path, source)?.map(|uuid| {
+        SimpleMetadataXmlProperties {
+            uuid,
+            ..properties.clone()
+        }
     });
     let properties = owner.as_ref().unwrap_or(properties);
     // `Configuration.xml` sits at the root of its source tree, so the names
@@ -6117,14 +6708,15 @@ fn prepare_configuration_asset_body_rows(
         .map(|root| MetadataSourceContext::new(root.to_path_buf()));
     let source = source.or(inferred.as_ref());
     let mut rows = Vec::new();
-    rows.extend(prepare_configuration_ext_picture_body_row(
+    rows.extend(prepare_configuration_ext_picture_body_row_with_source(
         sql,
         database,
         properties,
         infer_configuration_ext_body_path(xml_path, "Splash.xml"),
         "2",
+        source,
     )?);
-    rows.extend(prepare_configuration_raw_deflated_body_row(
+    rows.extend(prepare_configuration_raw_deflated_body_row_with_source(
         sql,
         database,
         properties,
@@ -6132,6 +6724,7 @@ fn prepare_configuration_asset_body_rows(
         "4",
         "ParentConfigurations",
         axes,
+        source,
     )?);
     rows.extend(prepare_configuration_interface_asset_body_row(
         properties,
@@ -6142,7 +6735,7 @@ fn prepare_configuration_asset_body_rows(
         source,
         axes,
     )?);
-    rows.extend(prepare_configuration_raw_deflated_body_row(
+    rows.extend(prepare_configuration_raw_deflated_body_row_with_source(
         sql,
         database,
         properties,
@@ -6150,6 +6743,7 @@ fn prepare_configuration_asset_body_rows(
         "10",
         "MobileClientSignature",
         axes,
+        source,
     )?);
     rows.extend(prepare_configuration_command_interface_body_row(
         sql,
@@ -6178,12 +6772,13 @@ fn prepare_configuration_asset_body_rows(
         source,
         axes,
     )?);
-    rows.extend(prepare_configuration_ext_picture_body_row(
+    rows.extend(prepare_configuration_ext_picture_body_row_with_source(
         sql,
         database,
         properties,
         infer_configuration_ext_body_path(xml_path, "MainSectionPicture.xml"),
         "c",
+        source,
     )?);
     rows.extend(prepare_configuration_interface_asset_body_row(
         properties,
@@ -6194,11 +6789,12 @@ fn prepare_configuration_asset_body_rows(
         source,
         axes,
     )?);
-    rows.extend(prepare_parent_configuration_rows(
+    rows.extend(prepare_parent_configuration_rows_with_source(
         sql,
         database,
         &configuration_uuid,
         xml_path,
+        source,
     )?);
     Ok(rows)
 }
@@ -6220,34 +6816,45 @@ fn prepare_configuration_asset_body_rows(
 /// itself while it holds this very file
 /// ([`stored_parent_configuration_row`]): a check of the stage against the
 /// target compares the bytes, and reads a re-deflated row as a change.
-fn prepare_parent_configuration_rows(
+
+fn prepare_parent_configuration_rows_with_source(
     sql: &SqlExec,
     database: &str,
     configuration_uuid: &str,
     xml_path: &Path,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let dir = infer_configuration_ext_body_path(xml_path, "ParentConfigurations");
-    if !dir.is_dir() {
-        return Ok(Vec::new());
-    }
-    let mut files = fs::read_dir(&dir)
-        .with_context(|| format!("failed to list {}", dir.display()))?
-        .filter_map(|entry| entry.ok())
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .extension()
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("cf"))
-        })
-        .collect::<Vec<_>>();
+    let mut files = if let Some(source) = source.filter(|source| source.original_source().is_some())
+    {
+        source.source_files(&dir)?
+    } else {
+        if !dir.is_dir() {
+            return Ok(Vec::new());
+        }
+        fs::read_dir(&dir)
+            .with_context(|| format!("failed to list {}", dir.display()))?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.is_file()
+                    && path
+                        .extension()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("cf"))
+            })
+            .collect::<Vec<_>>()
+    };
+    files.retain(|path| {
+        path.extension()
+            .is_some_and(|extension| extension.eq_ignore_ascii_case("cf"))
+    });
     if files.is_empty() {
         return Ok(Vec::new());
     }
     files.sort();
     let list_path = infer_configuration_ext_body_path(xml_path, "ParentConfigurations.bin");
-    let list =
-        fs::read(&list_path).with_context(|| format!("failed to read {}", list_path.display()))?;
+    let list = read_stage_source(source, &list_path)
+        .with_context(|| format!("failed to read {}", list_path.display()))?;
     let parents = parse_parent_configuration_list(&list)
         .with_context(|| format!("failed to read {}", list_path.display()))?;
     let mut rows = Vec::with_capacity(files.len());
@@ -6271,7 +6878,8 @@ fn prepare_parent_configuration_rows(
                     list_path.display()
                 )
             })?;
-        let cf = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+        let cf = read_stage_source(source, &path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
         let body_id = format!("{configuration_uuid}.{uuid}");
         let blob = match stored_parent_configuration_row(sql, database, &body_id, &cf) {
             Some(stored) => stored,
@@ -6414,14 +7022,14 @@ fn prepare_configuration_interface_asset_body_row(
     source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !body_path.exists() {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     if let Some(reason) = crate::compiler::unsupported_axes_reason(axes) {
         return Err(anyhow!("unsupported Configuration {label}: {reason}"));
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read Configuration {label} {}",
             body_path.display()
@@ -6441,6 +7049,7 @@ fn prepare_configuration_interface_asset_body_row(
     }])
 }
 
+#[cfg(test)]
 fn prepare_configuration_ext_picture_body_row(
     _sql: &SqlExec,
     _database: &str,
@@ -6448,11 +7057,24 @@ fn prepare_configuration_ext_picture_body_row(
     body_path: PathBuf,
     suffix: &str,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !body_path.exists() {
+    prepare_configuration_ext_picture_body_row_with_source(
+        _sql, _database, properties, body_path, suffix, None,
+    )
+}
+
+fn prepare_configuration_ext_picture_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read Configuration ExtPicture {}",
             body_path.display()
@@ -6465,7 +7087,7 @@ fn prepare_configuration_ext_picture_body_row(
         )
     })?;
     let picture_path = body_path.with_extension("").join(&file_name);
-    let picture = fs::read(&picture_path).with_context(|| {
+    let picture = read_stage_source(source, &picture_path).with_context(|| {
         format!(
             "failed to read Configuration ExtPicture file {}",
             picture_path.display()
@@ -6494,11 +7116,11 @@ fn prepare_configuration_command_interface_body_row(
     source: Option<&MetadataSourceContext>,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !body_path.exists() {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read Configuration CommandInterface {}",
             body_path.display()
@@ -6537,6 +7159,7 @@ fn prepare_configuration_command_interface_body_row(
     }])
 }
 
+#[cfg(test)]
 fn prepare_configuration_raw_deflated_body_row(
     _sql: &SqlExec,
     _database: &str,
@@ -6546,11 +7169,26 @@ fn prepare_configuration_raw_deflated_body_row(
     label: &str,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    if !body_path.exists() {
+    prepare_configuration_raw_deflated_body_row_with_source(
+        _sql, _database, properties, body_path, suffix, label, axes, None,
+    )
+}
+
+fn prepare_configuration_raw_deflated_body_row_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    properties: &SimpleMetadataXmlProperties,
+    body_path: PathBuf,
+    suffix: &str,
+    label: &str,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let bytes = fs::read(&body_path).with_context(|| {
+    let bytes = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read Configuration {label} {}",
             body_path.display()
@@ -6577,7 +7215,7 @@ fn prepare_exchange_plan_content_body_row(
     source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_exchange_plan_content_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let source = source.ok_or_else(|| {
@@ -6587,7 +7225,7 @@ fn prepare_exchange_plan_content_body_row(
         )
     })?;
     let body_id = format!("{}.1", properties.uuid);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = source.read_source(&body_path).with_context(|| {
         format!(
             "failed to read ExchangePlan Content {}",
             body_path.display()
@@ -6608,25 +7246,30 @@ fn prepare_exchange_plan_content_body_row(
     }])
 }
 
-fn prepare_predefined_data_body_row(
+fn prepare_predefined_data_body_row_with_source(
     sql: &SqlExec,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let Some(suffix) = predefined_data_body_suffix(&properties.kind) else {
         return Ok(Vec::new());
     };
     let body_path = infer_predefined_data_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let reason = predefined_data_base_free_blocker_reason(&body_path)?;
+    let body_bytes = read_stage_source(source, &body_path)?;
+    let reason = format!(
+        "source body requires active base blob: {}",
+        predefined_data_base_free_blockers(&body_bytes)?.join("; ")
+    );
     let required = classify_required_base(axes, &body_id, &body_path, &reason, "PredefinedData")?;
     let base_body = fetch_config_blob(sql, database, required.as_str())?;
-    let xml = fs::read(&body_path)
+    let xml = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read PredefinedData {}", body_path.display()))?;
     let patch = patch_predefined_data_blob_from_xml(&base_body, &xml)
         .with_context(|| format!("failed to pack PredefinedData {}", body_path.display()))?;
@@ -6648,19 +7291,24 @@ fn prepare_predefined_data_body_row(
     }
 }
 
-fn prepare_business_process_flowchart_body_row(
+fn prepare_business_process_flowchart_body_row_with_source(
     sql: &SqlExec,
     database: &str,
     xml_path: &Path,
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_business_process_flowchart_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.7", properties.uuid);
-    let reason = business_process_flowchart_base_free_blocker_reason(&body_path)?;
+    let body_bytes = read_stage_source(source, &body_path)?;
+    let reason = format!(
+        "source body requires active base blob: {}",
+        business_process_flowchart_base_free_blockers(&body_bytes)?.join("; ")
+    );
     let required = classify_required_base(
         axes,
         &body_id,
@@ -6669,7 +7317,7 @@ fn prepare_business_process_flowchart_body_row(
         "BusinessProcess Flowchart",
     )?;
     let base_body = fetch_config_blob(sql, database, required.as_str())?;
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read BusinessProcess Flowchart {}",
             body_path.display()
@@ -6700,11 +7348,13 @@ fn prepare_form_body_row(
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let form_path = infer_form_body_path(xml_path);
     let module_path = infer_form_module_body_path(xml_path);
-    if !source_listing::exists(&form_path) && !source_listing::exists(&module_path) {
+    if !stage_source_file_exists(source, &form_path)?
+        && !stage_source_file_exists(source, &module_path)?
+    {
         // An ordinary form's body is `Ext/Form.bin`, the stored row
         // inflated (ERP УХ: all 9, byte for byte), staged deflated again.
         let ordinary = form_path.with_extension("bin");
-        if source_listing::is_file(&ordinary) {
+        if stage_source_file_exists(source, &ordinary)? {
             let bytes = read_stage_source(source, &ordinary)
                 .with_context(|| format!("failed to read {}", ordinary.display()))?;
             let blob = crate::module_blob::deflate_raw(&bytes)?;
@@ -6721,13 +7371,13 @@ fn prepare_form_body_row(
         return Err(anyhow!("unsupported Form body: {reason}"));
     }
     let body_id = format!("{}.0", properties.uuid);
-    let form_xml = if source_listing::exists(&form_path) {
+    let form_xml = if stage_source_file_exists(source, &form_path)? {
         read_stage_source(source, &form_path)
             .with_context(|| format!("failed to read Form XML {}", form_path.display()))?
     } else {
         crate::module_blob::SourceBytes::Owned(Vec::new())
     };
-    let module_text = if source_listing::exists(&module_path) {
+    let module_text = if stage_source_file_exists(source, &module_path)? {
         Some(
             read_stage_source(source, &module_path)
                 .with_context(|| format!("failed to read Form module {}", module_path.display()))?,
@@ -6801,7 +7451,7 @@ fn prepare_form_body_row(
             blob_sha256: packed.output_sha256,
         }]);
     }
-    if !form_xml.is_empty() && !source_listing::exists(&form_item_assets_root) {
+    if !form_xml.is_empty() && !stage_source_directory_exists(source, &form_item_assets_root)? {
         if let Some(packed) = native() {
             return Ok(vec![PreparedMetadataBodyStage {
                 body_id,
@@ -6864,15 +7514,19 @@ fn prepare_form_body_row(
         };
         bail!("{BASE_FREE_MISSING_ROW} {body_id}: the native form writer refuses it: {refusal}");
     }
-    let reason = form_body_base_free_blocker_reason(&form_path, &module_path)?;
-    let provenance = if source_listing::exists(&form_path) {
+    let reason = format!(
+        "Form body requires active base blob: {}",
+        form_body_base_free_blockers_for_paths_with_source(&form_path, &module_path, source)?
+            .join("; ")
+    );
+    let provenance = if stage_source_file_exists(source, &form_path)? {
         &form_path
     } else {
         &module_path
     };
     let required = classify_required_base(axes, &body_id, provenance, &reason, "Form body")?;
     let base_body = fetch_config_blob(sql, database, required.as_str())?;
-    if !source_listing::exists(&form_item_assets_root) {
+    if !stage_source_directory_exists(source, &form_item_assets_root)? {
         let native_form_matches = if form_xml.is_empty() {
             true
         } else {
@@ -6889,7 +7543,7 @@ fn prepare_form_body_row(
         if native_form_matches && native_module_matches {
             return Ok(vec![PreparedMetadataBodyStage {
                 body_id,
-                path: if source_listing::exists(&form_path) {
+                path: if stage_source_file_exists(source, &form_path)? {
                     form_path
                 } else {
                     module_path
@@ -6934,7 +7588,7 @@ fn prepare_form_body_row(
     })?;
     Ok(vec![PreparedMetadataBodyStage {
         body_id,
-        path: if source_listing::exists(&form_path) {
+        path: if stage_source_file_exists(source, &form_path)? {
             form_path
         } else {
             module_path
@@ -6953,11 +7607,11 @@ fn prepare_role_rights_body_row(
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
     let body_path = infer_role_rights_body_path(xml_path);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.0", properties.uuid);
-    let xml = fs::read(&body_path)
+    let xml = read_stage_source(source, &body_path)
         .with_context(|| format!("failed to read Role rights XML {}", body_path.display()))?;
     // The base-free writer compiles the row from the source alone and is the
     // first choice; a role it refuses falls back to patching the active row.
@@ -7015,11 +7669,11 @@ fn prepare_command_interface_body_row(
         return Ok(Vec::new());
     };
     let body_path = infer_command_interface_body_path(xml_path, &properties.kind);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(Vec::new());
     }
     let body_id = format!("{}.{}", properties.uuid, suffix);
-    let xml = fs::read(&body_path).with_context(|| {
+    let xml = read_stage_source(source, &body_path).with_context(|| {
         format!(
             "failed to read CommandInterface XML {}",
             body_path.display()
@@ -7096,10 +7750,16 @@ pub(crate) fn object_help_source_row(
     source: Option<&MetadataSourceContext>,
 ) -> Result<Option<HelpSourceRow>> {
     let body_path = infer_object_help_body_path(xml_path, &properties.kind);
-    if !source_listing::exists(&body_path) {
+    if !stage_source_file_exists(source, &body_path)? {
         return Ok(None);
     }
-    let body_id = object_help_body_id(xml_path, properties);
+    let body_id = if properties.kind == "Configuration" {
+        configuration_asset_owner_with_source(xml_path, source)?
+            .map(|owner| infer_help_body_id_for_kind(&properties.kind, &owner))
+            .unwrap_or_else(|| infer_help_body_id(properties))
+    } else {
+        object_help_body_id(xml_path, properties)
+    };
     // `Configuration.xml` sits at the root of its tree, so the names its help
     // spells resolve there even when the caller staged it without naming the
     // tree.
@@ -7158,7 +7818,17 @@ fn read_help_source_parts(
     }
     let mut files = Vec::<(String, Vec<u8>)>::new();
     let files_dir = help_dir.join("_files");
-    if source_listing::exists(&files_dir) {
+    if let Some(source) = source.filter(|source| source.original_source().is_some()) {
+        for path in source.source_files(&files_dir)? {
+            let file_name = path
+                .file_name()
+                .ok_or_else(|| anyhow!("help attachment has no name"))?
+                .to_string_lossy()
+                .into_owned();
+            let content = source.read_source(&path)?;
+            files.push((file_name, content.into_vec()));
+        }
+    } else if source_listing::exists(&files_dir) {
         for entry in fs::read_dir(&files_dir)
             .with_context(|| format!("failed to read {label} files dir {}", files_dir.display()))?
         {
@@ -7187,6 +7857,12 @@ fn read_help_source_parts(
                 .then_with(|| left.0.cmp(&right.0))
         });
     }
+    files.sort_by(|left, right| {
+        left.0
+            .to_lowercase()
+            .cmp(&right.0.to_lowercase())
+            .then_with(|| left.0.cmp(&right.0))
+    });
     Ok((pages, files))
 }
 
@@ -7262,7 +7938,7 @@ fn prepare_object_module_body_rows_with_source(
         .unwrap_or_else(|| properties.uuid.clone());
     for (suffix, _) in object_module_body_suffixes(&properties.kind) {
         let body_path = infer_object_module_body_path(xml_path, &properties.kind, suffix);
-        let Some(body_path) = source_module_body_path(body_path) else {
+        let Some(body_path) = source_module_body_path_with_source(body_path, source)? else {
             continue;
         };
         let body_id = format!("{owner}.{suffix}");
@@ -7352,6 +8028,7 @@ fn predefined_data_body_suffix(kind: &str) -> Option<&'static str> {
     }
 }
 
+#[cfg(test)]
 fn prepare_nested_command_module_body_rows(
     _sql: &SqlExec,
     _database: &str,
@@ -7360,17 +8037,33 @@ fn prepare_nested_command_module_body_rows(
     properties: &SimpleMetadataXmlProperties,
     axes: &CompileAxes,
 ) -> Result<Vec<PreparedMetadataBodyStage>> {
-    let sources = nested_command_module_sources(xml_path, xml, properties)?;
+    prepare_nested_command_module_body_rows_with_source(
+        _sql, _database, xml_path, xml, properties, axes, None,
+    )
+}
+
+fn prepare_nested_command_module_body_rows_with_source(
+    _sql: &SqlExec,
+    _database: &str,
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    axes: &CompileAxes,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<PreparedMetadataBodyStage>> {
+    let source_context = source;
+    let sources = nested_command_module_sources_with_source(xml_path, xml, properties, source)?;
     let mut rows = Vec::with_capacity(sources.len());
     for source in sources {
         let body_id = format!("{}.2", source.command_id);
         let packed =
-            pack_module_body_source(&source.body_path, &body_id, axes).with_context(|| {
-                format!(
-                    "failed to pack nested command module body {}",
-                    source.body_path.display()
-                )
-            })?;
+            pack_module_body_source_with_source(&source.body_path, &body_id, axes, source_context)
+                .with_context(|| {
+                    format!(
+                        "failed to pack nested command module body {}",
+                        source.body_path.display()
+                    )
+                })?;
         rows.push(PreparedMetadataBodyStage {
             body_id,
             path: source.body_path,
@@ -7412,6 +8105,64 @@ fn nested_command_module_sources(
         let command_name = entry.file_name().to_string_lossy().to_string();
         let Some(body_path) =
             source_module_body_path(entry.path().join(command_module_route.relative_path()))
+        else {
+            continue;
+        };
+        let command_id = command_ids.get(&command_name).cloned().ok_or_else(|| {
+            anyhow!(
+                "nested command module {} has no matching Command named {} in {}",
+                body_path.display(),
+                command_name,
+                xml_path.display()
+            )
+        })?;
+        sources.push(NestedCommandModuleSource {
+            command_id,
+            command_name,
+            body_path,
+        });
+    }
+    sources.sort_by(|left, right| left.body_path.cmp(&right.body_path));
+    Ok(sources)
+}
+
+fn nested_command_module_sources_with_source(
+    xml_path: &Path,
+    xml: &[u8],
+    properties: &SimpleMetadataXmlProperties,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<NestedCommandModuleSource>> {
+    if !metadata_kind_can_own_commands(&properties.kind) {
+        return Ok(Vec::new());
+    }
+    let commands_dir = xml_path.with_extension("").join("Commands");
+    if source.is_none_or(|source| source.original_source().is_none()) {
+        return nested_command_module_sources(xml_path, xml, properties);
+    }
+    let command_ids = parse_nested_command_ids_by_name(xml)?;
+    let command_module_route = SourceAssetRegistry
+        .route("Command", SourceAssetRole::CommandModule)
+        .expect("nested-command module route is registered");
+    let mut sources = Vec::new();
+    let source = source.expect("original source checked");
+    let files = source.source_descendant_files(&commands_dir)?;
+    let command_names = files
+        .iter()
+        .filter_map(|path| {
+            path.strip_prefix(&commands_dir)
+                .ok()?
+                .components()
+                .next()
+                .map(|part| part.as_os_str().to_string_lossy().into_owned())
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for command_name in command_names {
+        let Some(body_path) = source_module_body_path_with_source(
+            commands_dir
+                .join(&command_name)
+                .join(command_module_route.relative_path()),
+            Some(source),
+        )?
         else {
             continue;
         };
@@ -7533,12 +8284,21 @@ fn xml_attr_value_for_stage(event: &BytesStart<'_>, name: &str) -> Option<String
         .map(|attr| String::from_utf8_lossy(attr.value.as_ref()).to_string())
 }
 
+#[cfg(test)]
 fn validate_selected_source_versions(
     paths: &[PathBuf],
     expected: InfobaseConfigSourceVersion,
 ) -> Result<()> {
+    validate_selected_source_versions_with_source(paths, expected, None)
+}
+
+fn validate_selected_source_versions_with_source(
+    paths: &[PathBuf],
+    expected: InfobaseConfigSourceVersion,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
     for path in paths {
-        let actual = source_xml_version(path)?;
+        let actual = source_xml_version_with_source(path, source)?;
         match actual.as_deref() {
             Some(version) if version == expected.as_str() => {}
             Some(version) => {
@@ -7561,9 +8321,12 @@ fn validate_selected_source_versions(
     Ok(())
 }
 
-fn source_xml_version(path: &Path) -> Result<Option<String>> {
-    let xml =
-        fs::read(path).with_context(|| format!("failed to read source XML {}", path.display()))?;
+fn source_xml_version_with_source(
+    path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Option<String>> {
+    let xml = read_stage_source(source, path)
+        .with_context(|| format!("failed to read source XML {}", path.display()))?;
     source_xml_version_from_bytes(&xml)
         .with_context(|| format!("failed to read source XML version from {}", path.display()))
 }
@@ -7625,7 +8388,10 @@ fn prepare_common_module_object_stage_with_source(
     let module_id = properties.uuid.clone();
     let (text_path, has_module_body) = match text_path {
         Some(path) => (path, true),
-        None => match source_module_body_path(infer_common_module_text_path(&xml_path)) {
+        None => match source_module_body_path_with_source(
+            infer_common_module_text_path(&xml_path),
+            source,
+        )? {
             Some(path) => (path, true),
             None => (infer_common_module_text_path(&xml_path), false),
         },
@@ -8212,6 +8978,25 @@ fn install_always_used_constants_source(sql: &SqlExec, database: &str, source_ro
     });
 }
 
+/// Install the lazy flag reader on the explicit operation owner. The old
+/// process-wide resolver remains only for unbound compatibility callers.
+fn install_operation_constants_source(
+    source: &MetadataSourceContext,
+    sql: &SqlExec,
+    database: &str,
+) {
+    let Some(original) = source.original_source_owner() else {
+        install_always_used_constants_source(sql, database, Some(source.source_root()));
+        return;
+    };
+    let sql = sql.clone();
+    let database = database.to_owned();
+    let constants_source = MetadataSourceContext::with_original_source(original);
+    source.install_original_constants(move || {
+        target_always_used_constants_with_source(&sql, &database, None, Some(&constants_source))
+    });
+}
+
 /// The constants the target flags always-used (slot 11 of each constant's
 /// row), sorted: every constant the target's Configuration row lists, and
 /// every constant of the tree. A row that is missing or does not read counts
@@ -8221,6 +9006,15 @@ fn target_always_used_constants(
     database: &str,
     source_root: Option<&Path>,
 ) -> Vec<String> {
+    target_always_used_constants_with_source(sql, database, source_root, None).unwrap_or_default()
+}
+
+fn target_always_used_constants_with_source(
+    sql: &SqlExec,
+    database: &str,
+    source_root: Option<&Path>,
+    source: Option<&MetadataSourceContext>,
+) -> Result<Vec<String>> {
     let fetch = |name: &str| {
         fetch_config_blob(sql, database, name)
             .ok()
@@ -8244,7 +9038,15 @@ fn target_always_used_constants(
             .filter(|(kind, _)| kind == "Constant")
             .map(|(_, uuid)| uuid),
     );
-    if let Some(Ok(entries)) = source_root.map(|root| fs::read_dir(root.join("Constants"))) {
+    if let Some(source) = source {
+        for path in source.source_files(&source.source_root().join("Constants"))? {
+            if path.extension().is_some_and(|extension| extension == "xml") {
+                let bytes = source.read_source(&path)?;
+                let properties = parse_simple_metadata_xml_properties(&bytes)?;
+                constants.insert(properties.uuid);
+            }
+        }
+    } else if let Some(Ok(entries)) = source_root.map(|root| fs::read_dir(root.join("Constants"))) {
         for path in entries
             .filter_map(|entry| entry.ok())
             .map(|entry| entry.path())
@@ -8289,7 +9091,7 @@ fn target_always_used_constants(
         .map(|(uuid, _)| uuid)
         .collect::<Vec<_>>();
     flagged.sort();
-    flagged
+    Ok(flagged)
 }
 
 /// The online generations active in `database`, oldest first (empty when there
@@ -9852,11 +10654,36 @@ fn run_bulk_stage(
     prepare_path: &Path,
     apply_path: &Path,
 ) -> Result<()> {
+    run_bulk_stage_with_source(sql, table, rows, rows_path, prepare_path, apply_path, None)
+}
+
+fn run_bulk_stage_with_source(
+    sql: &SqlExec,
+    table: &str,
+    rows: &[BulkStageRow<'_>],
+    rows_path: &Path,
+    prepare_path: &Path,
+    apply_path: &Path,
+    source: Option<&MetadataSourceContext>,
+) -> Result<()> {
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
     run_sql_file(sql, prepare_path)?;
     let loaded = timed_stage_step("rows into the tempdb table", || {
+        if let Some(source) = source {
+            source.require_original_unchanged()?;
+        }
         load_bulk_stage_rows(sql, table, rows, rows_path)
     })
-    .and_then(|()| timed_stage_step("apply into ConfigSave", || run_sql_file(sql, apply_path)));
+    .and_then(|()| {
+        timed_stage_step("apply into ConfigSave", || {
+            if let Some(source) = source {
+                source.require_original_unchanged()?;
+            }
+            run_sql_file(sql, apply_path)
+        })
+    });
     if let Err(error) = loaded {
         let drop = format!(
             "IF OBJECT_ID(N'tempdb.dbo.{name}', N'U') IS NOT NULL DROP TABLE tempdb.dbo.{table};",
@@ -9938,6 +10765,22 @@ fn load_bulk_stage_rows(
 /// database's own schema is never touched), then moved into ConfigSave by
 /// one guarded transaction. With `--script-only` the rows file and both
 /// scripts are written and nothing runs.
+fn write_original_source_script(
+    source: &MetadataSourceContext,
+    path: &Path,
+    build: impl FnOnce() -> String,
+) -> Result<()> {
+    source.require_original_unchanged()?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("failed to create {}", parent.display()))?;
+    }
+    let statements = build();
+    source.require_original_unchanged()?;
+    fs::write(path, statements).with_context(|| format!("failed to write {}", path.display()))?;
+    source.require_original_unchanged()
+}
+
 fn stage_source_rows_bulk(
     args: &MssqlStageSourceObjectsArgs,
     sql: &SqlExec,
@@ -9945,7 +10788,9 @@ fn stage_source_rows_bulk(
     common_modules: &[PreparedCommonModuleObjectStage],
     versions_blob: &[u8],
     additions: &StageAdditions,
+    source: &MetadataSourceContext,
 ) -> Result<Vec<PathBuf>> {
+    source.require_original_unchanged()?;
     let rows = bulk_stage_rows(
         metadata_objects,
         common_modules,
@@ -9955,6 +10800,7 @@ fn stage_source_rows_bulk(
     );
     let (rows_path, prepare_path, apply_path) =
         bulk_stage_paths(args.script_output.as_ref(), &args.database);
+    source.require_original_unchanged()?;
     if let Some(parent) = rows_path.parent() {
         fs::create_dir_all(parent)
             .with_context(|| format!("failed to create {}", parent.display()))?;
@@ -9974,8 +10820,18 @@ fn stage_source_rows_bulk(
     )
     .with_context(|| format!("failed to write {}", apply_path.display()))?;
     if !args.script_only {
-        run_bulk_stage(sql, &table, &rows, &rows_path, &prepare_path, &apply_path)?;
+        source.require_original_unchanged()?;
+        run_bulk_stage_with_source(
+            sql,
+            &table,
+            &rows,
+            &rows_path,
+            &prepare_path,
+            &apply_path,
+            Some(source),
+        )?;
     }
+    source.require_original_unchanged()?;
     Ok(vec![prepare_path, apply_path])
 }
 
@@ -17893,3 +18749,6 @@ mod onecdec_tests;
 
 #[cfg(test)]
 mod original_source_tests;
+
+#[cfg(test)]
+pub(crate) mod source_original_consumers_tests;

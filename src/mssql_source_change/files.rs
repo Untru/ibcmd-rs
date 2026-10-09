@@ -4,7 +4,7 @@ use sha2::{Digest, Sha256};
 #[cfg(windows)]
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
@@ -95,6 +95,104 @@ pub(super) struct RootAnchor {
 }
 
 impl RootAnchor {
+    /// Create a private projection member while retaining its rooted parents.
+    /// No existing file, symlink or reparse object is adopted as an output.
+    pub(super) fn create_file(
+        self: &Arc<Self>,
+        relative: &str,
+    ) -> Result<(File, Vec<File>), SourceChangeError> {
+        self.create_member(relative, false)
+    }
+
+    pub(super) fn create_directory(
+        self: &Arc<Self>,
+        relative: &str,
+    ) -> Result<(), SourceChangeError> {
+        self.create_member(relative, true).map(|_| ())
+    }
+
+    fn create_member(
+        self: &Arc<Self>,
+        relative: &str,
+        final_directory: bool,
+    ) -> Result<(File, Vec<File>), SourceChangeError> {
+        if path_to_slash(Path::new(relative))? != relative {
+            return Err(io("projection spelling is not canonical"));
+        }
+        self.require_path()?;
+        let mut parents = Vec::<File>::new();
+        let mut components = Path::new(relative).components().peekable();
+        #[cfg(windows)]
+        let mut path = self.path.clone();
+        while let Some(component) = components.next() {
+            let Component::Normal(name) = component else {
+                return Err(io("invalid projection member"));
+            };
+            let last = components.peek().is_none();
+            let directory = !last || final_directory;
+            #[cfg(unix)]
+            let child = {
+                use rustix::fs::{Mode, OFlags, mkdirat, openat};
+                let parent = parents.last().unwrap_or(&self.file);
+                if directory {
+                    match mkdirat(parent, name, Mode::from_bits_truncate(0o700)) {
+                        Ok(()) => (),
+                        Err(rustix::io::Errno::EXIST) => (),
+                        Err(error) => return Err(io(error)),
+                    }
+                }
+                let flags = if directory {
+                    OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC
+                } else {
+                    OFlags::WRONLY
+                        | OFlags::CREATE
+                        | OFlags::EXCL
+                        | OFlags::NOFOLLOW
+                        | OFlags::CLOEXEC
+                };
+                File::from(
+                    openat(parent, name, flags, Mode::from_bits_truncate(0o600)).map_err(io)?,
+                )
+            };
+            #[cfg(windows)]
+            let child = {
+                use std::os::windows::fs::OpenOptionsExt;
+                path.push(name);
+                if directory {
+                    match fs::create_dir(&path) {
+                        Ok(()) => (),
+                        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => (),
+                        Err(error) => return Err(io(error)),
+                    }
+                    open_windows(&path, true)?
+                } else {
+                    fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .share_mode(0)
+                        .custom_flags(
+                            windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT,
+                        )
+                        .open(&path)
+                        .map_err(io)?
+                }
+            };
+            #[cfg(not(any(unix, windows)))]
+            return Err(io("rooted projection writes are unavailable"));
+            #[cfg(any(unix, windows))]
+            {
+                stamp(&child, !directory)?;
+                if last {
+                    self.require_path()?;
+                    return Ok((child, parents));
+                }
+                parents.try_reserve(1).map_err(io)?;
+                parents.push(child);
+            }
+        }
+        Err(io("empty projection member"))
+    }
+
     pub(super) fn open(path: &Path) -> Result<Arc<Self>, SourceChangeError> {
         #[cfg(windows)]
         let (file, ancestors) = {
@@ -283,7 +381,7 @@ impl OriginalFile {
         &self,
         retain: bool,
     ) -> Result<([u8; 32], Option<Arc<Vec<u8>>>), SourceChangeError> {
-        self.read_into(retain, None)
+        self.read_into(retain, None, None)
     }
 
     pub(super) fn extend_hash(
@@ -291,7 +389,7 @@ impl OriginalFile {
         expected: &[u8; 32],
         hash: &mut Sha256,
     ) -> Result<(), SourceChangeError> {
-        let (digest, _) = self.read_into(false, Some(hash))?;
+        let (digest, _) = self.read_into(false, Some(hash), None)?;
         if &digest != expected {
             return Err(SourceChangeError::FileChangedDuringRead(
                 self.relative.clone(),
@@ -304,6 +402,7 @@ impl OriginalFile {
         &self,
         retain: bool,
         mut external_hash: Option<&mut Sha256>,
+        mut output: Option<&mut dyn Write>,
     ) -> Result<([u8; 32], Option<Arc<Vec<u8>>>), SourceChangeError> {
         self.root.require_path()?;
         let mut file = self.file.lock().map_err(io)?;
@@ -345,6 +444,9 @@ impl OriginalFile {
             if let Some(bytes) = &mut bytes {
                 bytes.extend_from_slice(&buffer[..count]);
             }
+            if let Some(output) = &mut output {
+                output.write_all(&buffer[..count]).map_err(io)?;
+            }
         }
         if total != self.original.length || stamp(&file, true)? != self.original {
             return Err(SourceChangeError::FileChangedDuringRead(
@@ -354,6 +456,20 @@ impl OriginalFile {
         drop(file);
         self.require_name()?;
         Ok((hash.finalize().into(), bytes.map(Arc::new)))
+    }
+
+    pub(super) fn copy_into(
+        &self,
+        expected: &[u8; 32],
+        output: &mut dyn Write,
+    ) -> Result<(), SourceChangeError> {
+        let (digest, _) = self.read_into(false, None, Some(output))?;
+        if &digest != expected {
+            return Err(SourceChangeError::FileChangedDuringRead(
+                self.relative.clone(),
+            ));
+        }
+        Ok(())
     }
 
     fn require_name(&self) -> Result<(), SourceChangeError> {

@@ -84,6 +84,84 @@ pub fn scan_sources(root: &Path) -> Result<SourceManifest> {
     })
 }
 
+/// Main's original-bound scanner reuses the ordinary classification rules.
+/// All membership, sizes and digests come from the complete retained census;
+/// only XML needing its root name is materialized through the original owner.
+pub(crate) fn scan_original_sources(
+    original: &crate::mssql_source_change::HeldSourceRoot,
+    prefixes: &[String],
+) -> Result<SourceManifest> {
+    let mut selected = Vec::new();
+    for prefix in prefixes {
+        let normalized = normalize_prefix(prefix);
+        if normalized.is_empty() {
+            selected.clear();
+            break;
+        }
+        // Validate components even when this prefix has no captured member.
+        crate::mssql_source_change::SourceFileDigest::new(normalized.clone(), 0, [0; 32])?;
+        // Probe exact captured spelling before filtering: case aliases cannot
+        // become an empty successful scan of another owner.
+        original.member(&normalized)?;
+        original.files_under(&format!("{normalized}/"))?;
+        if Path::new(&normalized).extension().is_none() {
+            original.member(&format!("{normalized}.xml"))?;
+        }
+        selected.push(normalized);
+    }
+    original.require_unchanged()?;
+    let mut files = parallel::install(|| {
+        original
+            .baseline()
+            .files()
+            .par_bridge()
+            .filter(|file| {
+                let path = file.path();
+                !Path::new(path)
+                    .components()
+                    .any(|part| is_ignored(Path::new(part.as_os_str())))
+                    && (selected.is_empty()
+                        || selected.iter().any(|prefix| {
+                            path == prefix
+                                || path.starts_with(&format!("{prefix}/"))
+                                || (Path::new(prefix).extension().is_none()
+                                    && path == format!("{prefix}.xml"))
+                        }))
+            })
+            .map(|file| {
+                let relative = file.path();
+                let path = original.canonical_root().join(relative);
+                let xml_root = if is_xml(&path) && should_parse_xml_root(relative) {
+                    let bytes = original.source_bytes(relative)?;
+                    first_xml_element_from_bytes(&bytes, &path)?
+                } else {
+                    None
+                };
+                let kind = classify(&path, relative, xml_root.as_deref());
+                Ok(SourceFile {
+                    path: relative.to_owned(),
+                    size_bytes: file.size_bytes(),
+                    sha256: file
+                        .sha256()
+                        .iter()
+                        .map(|byte| format!("{byte:02x}"))
+                        .collect(),
+                    object_hint: infer_object_hint(relative, &kind, xml_root.as_deref()),
+                    kind,
+                    xml_root,
+                })
+            })
+            .collect::<Result<Vec<_>>>()
+    })??;
+    files.par_sort_by(|left, right| left.path.cmp(&right.path));
+    original.require_unchanged()?;
+    Ok(SourceManifest {
+        root: original.canonical_root().to_owned(),
+        generated_at_unix: now_unix(),
+        files,
+    })
+}
+
 pub fn scan_sources_with_prefixes(root: &Path, prefixes: &[String]) -> Result<SourceManifest> {
     if prefixes.is_empty() {
         return scan_sources(root);

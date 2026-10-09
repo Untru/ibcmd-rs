@@ -19,7 +19,6 @@
 //! rows in document order and writes the root the way every freshly numbered
 //! tree of the corpora stores it.
 
-use std::fs;
 use std::path::Path;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -66,10 +65,13 @@ pub fn predefined_row(
     context: &DescriptorContext,
 ) -> Result<Option<Brace>> {
     let path = predefined_path(owner_xml);
-    if predefined_suffix(kind).is_none() || !path.is_file() {
+    if predefined_suffix(kind).is_none() || !context.source.source_file_exists(&path)? {
         return Ok(None);
     }
-    let bytes = fs::read(&path).with_context(|| format!("failed to read {}", path.display()))?;
+    let bytes = context
+        .source
+        .read_source(&path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let document = parse_element_tree(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let items = document.children_named("Item").collect::<Vec<_>>();

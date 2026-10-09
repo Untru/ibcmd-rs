@@ -38,7 +38,7 @@ use anyhow::Result;
 use rayon::prelude::*;
 
 use super::override_stage::Plan;
-use super::stage_guard::{Difference, FileDifference, compare_tree_with_target};
+use super::stage_guard::{Difference, FileDifference};
 use super::{PreparedCommonModuleObjectStage, PreparedMetadataObjectStage};
 use crate::cli::MssqlStageSourceObjectsArgs;
 use crate::module_blob::{hex_sha256, inflate_raw};
@@ -155,23 +155,95 @@ fn object_uuid(path: &Path) -> Option<String> {
     Some(value[..end].to_lowercase())
 }
 
+/// Bound metadata identities use the existing complete metadata parser, not
+/// the legacy 8 KiB text probe. Missing captured members and I/O are errors.
+fn original_object_uuid(
+    path: &Path,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<Option<String>> {
+    let Some(source) = source.filter(|source| source.original_source().is_some()) else {
+        return Ok(object_uuid(path));
+    };
+    let bytes = source.read_source(path)?;
+    let properties = crate::module_blob::parse_simple_metadata_xml_properties(&bytes)?;
+    Ok(Some(
+        uuid::Uuid::parse_str(&properties.uuid)?
+            .hyphenated()
+            .to_string(),
+    ))
+}
+
+fn source_aliased_units(
+    root: &Path,
+    xmls: &[&Path],
+    aliased_ids: &HashSet<String>,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<HashSet<String>> {
+    if let Some(source) = source {
+        source.require_source_root(root)?;
+    }
+    Ok(if aliased_ids.is_empty() {
+        HashSet::new()
+    } else {
+        let owned = xmls
+            .iter()
+            .map(|xml| (relative(root, xml), xml.to_path_buf()))
+            .collect::<Vec<_>>();
+        crate::parallel::install_io_bound(|| {
+            owned
+                .par_iter()
+                .map(|(unit, xml)| {
+                    let uuid = original_object_uuid(xml, source)?;
+                    Ok(uuid
+                        .is_some_and(|uuid| aliased_ids.contains(&uuid))
+                        .then(|| unit.clone()))
+                })
+                .collect::<Result<Vec<_>>>()
+                .map(|units| units.into_iter().flatten().collect::<HashSet<_>>())
+        })??
+    })
+}
+
 /// Compares the tree with the target's export and decides what the stage leaves out.
 ///
 /// `xmls` are the metadata files the stage would prepare (the patch loop's, after the
 /// override took the objects it builds); `aliases` are the rows an online update of the
 /// target publishes under another name.
-pub(super) fn plan(
+
+pub(super) fn plan_with_source(
     args: &MssqlStageSourceObjectsArgs,
     sql: &SqlExec,
     manifest: &SourceManifest,
     xmls: &[&Path],
     overrides: &Plan,
     aliases: &BTreeMap<String, String>,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
 ) -> Result<Outcome> {
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
     if std::env::var(ALL_ROWS_ENV).is_ok_and(|value| value.trim() == "1") {
         return Ok(Outcome::Off(format!("{ALL_ROWS_ENV}=1")));
     }
-    let comparison = compare_tree_with_target(args, sql, manifest)?;
+    let comparison =
+        super::stage_guard::compare_tree_with_target_with_source(args, sql, manifest, source)?;
+    plan_from_comparison(args, xmls, overrides, aliases, source, comparison)
+}
+
+/// The actual delta derivation after the database/export boundary. Kept
+/// separate so original-source controls can exercise the planner without SQL.
+fn plan_from_comparison(
+    args: &MssqlStageSourceObjectsArgs,
+    xmls: &[&Path],
+    overrides: &Plan,
+    aliases: &BTreeMap<String, String>,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+    comparison: super::stage_guard::TargetComparison,
+) -> Result<Outcome> {
+    if let Some(source) = source {
+        source.require_source_root(&args.source_root)?;
+        source.require_original_unchanged()?;
+    }
     let root = args.source_root.as_path();
     let mut units = xmls
         .iter()
@@ -232,21 +304,10 @@ pub(super) fn plan(
         .iter()
         .map(|name| row_id(name).to_string())
         .collect::<HashSet<_>>();
-    let aliased_units = if aliased_ids.is_empty() {
-        HashSet::new()
-    } else {
-        let owned = xmls
-            .iter()
-            .map(|xml| (relative(root, xml), xml.to_path_buf()))
-            .collect::<Vec<_>>();
-        crate::parallel::install_io_bound(|| {
-            owned
-                .par_iter()
-                .filter(|(_, xml)| object_uuid(xml).is_some_and(|uuid| aliased_ids.contains(&uuid)))
-                .map(|(unit, _)| unit.clone())
-                .collect::<HashSet<_>>()
-        })?
-    };
+    let aliased_units = source_aliased_units(root, xmls, &aliased_ids, source)?;
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
 
     let forced_ids = overrides
         .changed
@@ -902,3 +963,7 @@ mod tests {
         assert_eq!(row_id("abc_dynupdate_def.0"), "abc_dynupdate_def");
     }
 }
+
+#[cfg(test)]
+#[path = "delta_stage_original_tests.rs"]
+mod original_alias_tests;

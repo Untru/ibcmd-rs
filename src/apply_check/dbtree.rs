@@ -563,25 +563,102 @@ pub fn check_tree_against_db(
     xml_version: Option<&str>,
     partial: bool,
 ) -> Result<Verdict> {
-    let scanned = scan(tree, partial)?;
-    let version = xml_version
-        .map(str::to_string)
-        .or_else(|| tree_version(tree));
+    check_tree_against_db_with_source(sql, database, tree, xml_version, partial, None)
+}
+
+pub(crate) fn check_tree_against_db_with_source(
+    sql: &SqlExec,
+    database: &str,
+    tree: &Path,
+    xml_version: Option<&str>,
+    partial: bool,
+    source: Option<&crate::module_blob::MetadataSourceContext>,
+) -> Result<Verdict> {
+    if let Some(source) = source {
+        source.require_source_root(tree)?;
+    }
+    let scanned = match source.filter(|source| source.original_source().is_some()) {
+        Some(source) => scan_original(source, partial)?,
+        None => scan(tree, partial)?,
+    };
+    let version = match xml_version {
+        Some(version) => Some(version.to_owned()),
+        None => match source {
+            Some(source) => source.tree_version()?,
+            None => tree_version(tree),
+        },
+    };
     let active = active_of(sql, database, version.as_deref())?;
     let root = tree.to_path_buf();
     let read = move |rel: &str| -> Result<Vec<u8>> {
         let path = root.join(rel);
-        fs::read(&path).with_context(|| format!("failed to read {}", path.display()))
+        match source {
+            Some(source) => source
+                .read_source(&path)
+                .map(|bytes| bytes.into_vec())
+                .map_err(Into::into),
+            None => fs::read(&path).with_context(|| format!("failed to read {}", path.display())),
+        }
     };
-    Ok(compare(
-        &active.inputs,
-        &active.rows,
-        &scanned,
-        &read,
-        partial,
-    ))
+    let verdict = compare(&active.inputs, &active.rows, &scanned, &read, partial);
+    if let Some(source) = source {
+        source.require_original_unchanged()?;
+    }
+    Ok(verdict)
+}
+
+/// Complete original metadata bytes feed the existing XML identity model.
+/// No 8 KiB prefix or swallowed I/O error can turn a real member into absence.
+pub(super) fn scan_original(
+    source: &crate::module_blob::MetadataSourceContext,
+    partial: bool,
+) -> Result<TreeScan> {
+    let original = source
+        .original_source()
+        .ok_or_else(|| anyhow::anyhow!("original scan has no source owner"))?;
+    original.require_unchanged()?;
+    if !partial && original.member("Configuration.xml")?.is_none() {
+        bail!("original source holds no Configuration.xml");
+    }
+    let mut out = TreeScan::default();
+    for member in original.baseline().files() {
+        let rel = member.path();
+        if rel == "ConfigDumpInfo.xml" {
+            continue;
+        }
+        out.files += 1;
+        let head = if rel.ends_with(".xml") {
+            let bytes = original.source_bytes(rel)?;
+            read_head(&bytes)
+        } else {
+            Head::NotMetadata
+        };
+        match head {
+            Head::Object { kind, uuid } => out.objects.push(TreeObject {
+                rel: rel.to_owned(),
+                kind,
+                uuid,
+            }),
+            Head::Unreadable(why) => out.unreadable.push((rel.to_owned(), why)),
+            Head::NotMetadata => match file_role(rel) {
+                Some(role) if role.effect == Effect::Safe => {
+                    *out.safe_bodies.entry(role.name.to_owned()).or_default() += 1;
+                }
+                _ => out.not_compared.push(rel.to_owned()),
+            },
+        }
+    }
+    out.unreadable.sort();
+    out.objects.sort_by(|left, right| left.rel.cmp(&right.rel));
+    out.not_compared.sort();
+    original.require_unchanged()?;
+    Ok(out)
 }
 
 #[cfg(test)]
 #[path = "dbtree_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "dbtree_original_tests.rs"]
+mod original_tests;

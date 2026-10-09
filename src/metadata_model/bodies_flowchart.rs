@@ -30,7 +30,6 @@
 //! for a scheme never edited after deletions (18 of 20 flowcharts, 29 of 64
 //! templates of ERP УХ); the others count deleted items too.
 
-use std::fs;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -116,10 +115,13 @@ fn scheme_row(
     owner: SchemeOwner,
     context: &DescriptorContext,
 ) -> Result<Option<Brace>> {
-    if !path.is_file() {
+    if !context.source.source_file_exists(path)? {
         return Ok(None);
     }
-    let bytes = fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+    let bytes = context
+        .source
+        .read_source(path)
+        .with_context(|| format!("failed to read {}", path.display()))?;
     let schema = parse_element_tree_raw_line_breaks(&bytes)
         .with_context(|| format!("failed to parse {}", path.display()))?;
     let pictures = path.with_extension("").join("Items");
@@ -404,7 +406,10 @@ impl<'a> Flowchart<'a> {
         let (x, y) = (coordinate("x")?, coordinate("y")?);
         if !inline.is_empty() {
             let path = self.pictures.join(item_name).join(inline);
-            let bytes = fs::read(&path)
+            let bytes = self
+                .context
+                .source
+                .read_source(&path)
                 .with_context(|| format!("failed to read picture {}", path.display()))?;
             return Ok(brace_list![
                 Brace::num(4),

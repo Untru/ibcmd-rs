@@ -59,6 +59,7 @@ mod s1h_corpus_tests;
 
 pub use check::{Inputs, RowProvider, check};
 pub use dbtree::check_tree_against_db;
+pub(crate) use dbtree::check_tree_against_db_with_source;
 pub use model::{Note, ObjectChange, ObjectOp, Reason, ReasonClass, Stats, Verdict};
 pub use rule_id::RuleId;
 pub use sql::check_staged;
