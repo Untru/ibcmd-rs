@@ -529,7 +529,7 @@ mod tests {
         let tree = SourceTree::new(vec![entry]).unwrap();
         let refused = temp.0.join("default");
         assert!(matches!(
-            publish_new(&tree, &refused),
+            publish_new_with_limits(&tree, &refused, ReaderLimits::default()),
             Err(SourceTreeError::AssetTooLarge { .. })
         ));
         assert!(!refused.exists());
@@ -541,7 +541,9 @@ mod tests {
         let output = temp.0.join("explicit");
         publish_new_with_limits(&tree, &output, limits).unwrap();
         assert!(matches!(
-            read_source_tree(&output),
+            SourceTreeReader::new(ReaderLimits::default())
+                .unwrap()
+                .read(&output),
             Err(SourceTreeError::AssetTooLarge { .. })
         ));
         let reread = SourceTreeReader::new(limits)
@@ -550,6 +552,16 @@ mod tests {
             .unwrap();
         assert_eq!(reread.entries()[0].digest(), expected);
         assert_eq!(reread, tree);
+        let ordinary_output = temp.0.join("ordinary");
+        publish_new(&tree, &ordinary_output).unwrap();
+        let ordinary = read_source_tree(&ordinary_output).unwrap();
+        assert_eq!(ordinary.entries()[0].bytes(), tree.entries()[0].bytes());
+        assert_eq!(
+            ordinary.entries()[0].bytes().len(),
+            ibcmd_core::asset::MAX_ASSET_BYTES + 1
+        );
+        assert_eq!(ordinary.entries()[0].digest(), expected);
+        assert_eq!(ordinary, tree);
     }
     #[test]
     fn entries_have_digest_and_tree_rejects_case_parent_and_uuid_conflicts() {
