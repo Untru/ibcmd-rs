@@ -50,6 +50,10 @@ pub(super) struct Plan {
     cluster: Uuid,
 }
 impl Plan {
+    #[cfg(test)]
+    pub(super) fn administrator(&self) -> &str {
+        &self.administrator
+    }
     pub(super) fn new(administrator: &str, cluster: Uuid) -> Result<Self> {
         let nonce = administrator
             .strip_prefix("ibcmd_")
@@ -122,6 +126,14 @@ impl Plan {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Inventory(BTreeMap<String, BTreeMap<String, String>>);
 impl Inventory {
+    #[cfg(test)]
+    pub(super) fn complete(&self) -> &BTreeMap<String, BTreeMap<String, String>> {
+        &self.0
+    }
+    #[cfg(test)]
+    pub(super) fn require_control_present(&self, before: &Self, name: &str) -> Result<()> {
+        self.control_present(before, name)
+    }
     pub(super) fn from_rows(rows: Vec<BTreeMap<String, String>>, allowed: &[&str]) -> Result<Self> {
         if rows.is_empty() || rows.len() > 2 || allowed.is_empty() || allowed.len() > 2 {
             bail!("bounded own admin inventory required");
@@ -274,6 +286,185 @@ pub(super) fn verify(io: &mut impl Io, plan: &Plan) -> Result<()> {
             }
             if !admitted {
                 bail!("mutation challenge unclassified or OS bypass; no ownership authority");
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+struct ControlObservation {
+    baseline: Inventory,
+    #[cfg(test)]
+    present: Inventory,
+    #[cfg(test)]
+    restored: Inventory,
+}
+
+#[cfg(test)]
+fn correct_control(io: &mut impl Io, plan: &Plan, family: Family) -> Result<ControlObservation> {
+    let baseline = io.inventory(family, &[&plan.administrator])?;
+    baseline.exact_baseline(plan)?;
+    let name = plan.name(family, Credentials::Correct);
+    io.mutation(
+        family,
+        Credentials::Correct,
+        Action::Register,
+        Credentials::Correct,
+    )?
+    .successful()?;
+    let present = io.inventory(family, &[&plan.administrator, &name])?;
+    present.control_present(&baseline, &name)?;
+    io.mutation(
+        family,
+        Credentials::Correct,
+        Action::Remove,
+        Credentials::Correct,
+    )?
+    .successful()?;
+    let restored = io.inventory(family, &[&plan.administrator])?;
+    if restored != baseline {
+        bail!("control failed complete baseline restoration");
+    }
+    io.record("correct_admin_mutation_observed", serde_json::json!({
+            "family": family, "before": baseline.digest()?, "present": present.digest()?, "after": restored.digest()?,
+            "product_ownership": false,
+        }))?;
+    Ok(ControlObservation {
+        baseline,
+        #[cfg(test)]
+        present,
+        #[cfg(test)]
+        restored,
+    })
+}
+
+#[cfg(test)]
+struct ObservedChallenge {
+    before: Inventory,
+    after: Inventory,
+    receipt: Receipt,
+    mutated: bool,
+}
+
+#[cfg(test)]
+fn observe_challenge(
+    io: &mut impl Io,
+    plan: &Plan,
+    family: Family,
+    kind: Credentials,
+    baseline: &Inventory,
+) -> Result<ObservedChallenge> {
+    let before = io.inventory(family, &[&plan.administrator])?;
+    if &before != baseline {
+        bail!("whole baseline changed before mutation challenge");
+    }
+    io.record(
+        "authentication_challenge_intent",
+        serde_json::json!({ "family": family, "kind": kind }),
+    )?;
+    let receipt = io.mutation(family, kind, Action::Register, kind)?;
+    let name = plan.name(family, kind);
+    let after = io.inventory(family, &[&plan.administrator, &name])?;
+    let mutated = after.0.contains_key(&name);
+    if !mutated && after != before {
+        bail!("unrelated complete inventory change during challenge");
+    }
+    if mutated {
+        after.control_present(&before, &name)?;
+    }
+    Ok(ObservedChallenge {
+        before,
+        after,
+        receipt,
+        mutated,
+    })
+}
+
+/// Evidence has no admission conversion. This consumer is compiled only for
+/// the ROOT-selected ignored diagnostic, never the positive creator.
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct DiagnosticMeasurements {
+    pub(super) attempted: bool,
+    pub controls: Vec<DiagnosticControl>,
+    pub challenges: Vec<DiagnosticWitness>,
+}
+
+#[cfg(test)]
+pub(super) struct DiagnosticControl {
+    pub family: Family,
+    pub before: BTreeMap<String, BTreeMap<String, String>>,
+    pub present: BTreeMap<String, BTreeMap<String, String>>,
+    pub after: BTreeMap<String, BTreeMap<String, String>>,
+}
+
+#[cfg(test)]
+pub(super) struct DiagnosticWitness {
+    pub family: Family,
+    pub kind: Credentials,
+    pub exit: i32,
+    pub stdout: Vec<u8>,
+    pub stderr: Vec<u8>,
+    pub before: BTreeMap<String, BTreeMap<String, String>>,
+    pub after: BTreeMap<String, BTreeMap<String, String>>,
+    pub mutated: bool,
+}
+
+#[cfg(test)]
+pub(super) fn measure(
+    io: &mut impl Io,
+    plan: &Plan,
+    retained: &mut DiagnosticMeasurements,
+) -> Result<()> {
+    if retained.attempted {
+        bail!("diagnostic consumer is one attempt; no replay");
+    }
+    retained.attempted = true;
+    for family in [Family::Agent, Family::Cluster] {
+        let baseline = correct_control(io, plan, family)?;
+        retained.controls.push(DiagnosticControl {
+            family,
+            before: baseline.baseline.0.clone(),
+            present: baseline.present.0,
+            after: baseline.restored.0,
+        });
+        for kind in [Credentials::WrongPassword, Credentials::ImplicitOs] {
+            let observed = observe_challenge(io, plan, family, kind, &baseline.baseline)?;
+            // Retain full original receipt and both complete inventories before
+            // fallible journal serialization. No denial_is_measured call here.
+            retained.challenges.push(DiagnosticWitness {
+                family,
+                kind,
+                exit: observed.receipt.exit,
+                stdout: observed.receipt.stdout,
+                stderr: observed.receipt.stderr,
+                before: observed.before.0,
+                after: observed.after.0,
+                mutated: observed.mutated,
+            });
+            let witness = retained
+                .challenges
+                .last()
+                .context("diagnostic witness absent")?;
+            io.record(
+                "diagnostic_mutation_observation",
+                serde_json::json!({
+                    "family": family, "kind": kind, "exit": witness.exit,
+                    "stdout_bytes": witness.stdout.len(), "stderr_bytes": witness.stderr.len(),
+                    "stdout_sha256": format!("{:X}", Sha256::digest(&witness.stdout)),
+                    "stderr_sha256": format!("{:X}", Sha256::digest(&witness.stderr)),
+                    "before": witness.before, "after": witness.after,
+                    "mutated": witness.mutated, "classified_denial": false, "Ready": false,
+                }),
+            )?;
+            if witness.mutated {
+                // Unlike positive verify's narrowly proved own removal, the
+                // diagnostic issues no automatic cleanup or further challenge.
+                bail!("diagnostic mutation observed; retain own addition without authority");
+            }
+            if witness.exit == 0 {
+                bail!("diagnostic successful exit without mutation; not a denial");
             }
         }
     }

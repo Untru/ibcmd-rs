@@ -30,6 +30,7 @@ enum Mode {
     UnknownChallenge,
     ForeignAfterChallenge,
     LateBeforeChallenge,
+    DiagnosticRecordFailure,
 }
 struct Mock {
     mode: Mode,
@@ -39,6 +40,7 @@ struct Mock {
     mutations: Vec<(Family, Credentials, Action, Credentials)>,
     records: Vec<(String, serde_json::Value)>,
     challenged: bool,
+    classifier_calls: std::cell::Cell<usize>,
 }
 impl Mock {
     fn new(mode: Mode, measured: bool) -> Self {
@@ -51,6 +53,7 @@ impl Mock {
             mutations: vec![],
             records: vec![],
             challenged: false,
+            classifier_calls: std::cell::Cell::new(0),
         }
     }
 }
@@ -123,10 +126,15 @@ impl Io for Mock {
         })
     }
     fn record(&mut self, event: &'static str, value: serde_json::Value) -> Result<()> {
+        if self.mode == Mode::DiagnosticRecordFailure && event == "diagnostic_mutation_observation"
+        {
+            bail!("original journal write failed after completed observation");
+        }
         self.records.push((event.into(), value));
         Ok(())
     }
     fn denial_is_measured(&self, _family: Family, _kind: Credentials, _receipt: &Receipt) -> bool {
+        self.classifier_calls.set(self.classifier_calls.get() + 1);
         self.measured
     }
 }
@@ -337,4 +345,112 @@ fn arbitrary_names_nil_clusters_and_noncanonical_uuids_are_refused() {
         assert!(Plan::new(name, plan().cluster).is_err());
     }
     assert!(Plan::new(&plan().administrator, Uuid::nil()).is_err());
+}
+
+#[test]
+fn diagnostic_collects_four_actual_protocol_observations_without_admitting_denials() {
+    let mut io = Mock::new(Mode::Denied, false);
+    let mut held = DiagnosticMeasurements::default();
+    measure(&mut io, &plan(), &mut held).unwrap();
+    assert_eq!(io.classifier_calls.get(), 0);
+    assert_eq!(io.mutations.len(), 8);
+    assert_eq!(held.controls.len(), 2);
+    assert_eq!(held.challenges.len(), 4);
+    for (control, family) in held.controls.iter().zip([Family::Agent, Family::Cluster]) {
+        assert_eq!(control.family, family);
+        assert_eq!(control.before, control.after);
+        assert_eq!(control.before.len(), 1);
+        assert_eq!(control.present.len(), 2);
+        assert_eq!(
+            control.present.get(&plan().administrator),
+            control.before.get(&plan().administrator)
+        );
+    }
+    let pairs: Vec<_> = held.challenges.iter().map(|w| (w.family, w.kind)).collect();
+    assert_eq!(
+        pairs,
+        vec![
+            (Family::Agent, Credentials::WrongPassword),
+            (Family::Agent, Credentials::ImplicitOs),
+            (Family::Cluster, Credentials::WrongPassword),
+            (Family::Cluster, Credentials::ImplicitOs)
+        ]
+    );
+    assert!(held.challenges.iter().all(|w| w.exit == -1
+        && w.stdout == [255, 128]
+        && w.stderr.is_empty()
+        && w.before == w.after
+        && !w.mutated));
+    assert!(
+        io.records
+            .iter()
+            .filter(|(e, _)| e == "diagnostic_mutation_observation")
+            .all(|(_, v)| v["classified_denial"] == false && v["Ready"] == false)
+    );
+    let calls = io.calls.len();
+    assert!(measure(&mut io, &plan(), &mut held).is_err());
+    assert_eq!(io.calls.len(), calls); // No reissue of a consumed matrix.
+    let mut positive = Mock::new(Mode::Denied, false);
+    assert!(verify(&mut positive, &plan()).is_err());
+    assert_eq!(positive.mutations.len(), 3); // Empty table remains a strict gate.
+}
+
+#[test]
+fn diagnostic_unknown_stops_without_after_inventory_cleanup_or_new_family() {
+    let mut io = Mock::new(Mode::UnknownChallenge, false);
+    let mut held = DiagnosticMeasurements::default();
+    assert!(measure(&mut io, &plan(), &mut held).is_err());
+    assert_eq!(held.controls.len(), 1);
+    assert!(held.challenges.is_empty());
+    assert_eq!(io.calls.last().unwrap(), "agent:WrongPassword:Register");
+    assert_eq!(io.mutations.len(), 3);
+    assert_eq!(io.classifier_calls.get(), 0);
+}
+
+#[test]
+fn diagnostic_known_mutation_stops_and_retains_own_addition_without_removal() {
+    for mode in [Mode::Bypass, Mode::NonzeroMutation] {
+        let mut io = Mock::new(mode, false);
+        let mut held = DiagnosticMeasurements::default();
+        assert!(measure(&mut io, &plan(), &mut held).is_err());
+        assert_eq!(io.mutations.len(), 3);
+        assert_eq!(io.admins.len(), 2);
+        assert_eq!(held.challenges.len(), 1);
+        assert!(held.challenges[0].mutated);
+        assert_eq!(held.challenges[0].after.len(), 2);
+        assert_eq!(io.mutations.last().unwrap().2, Action::Register);
+    }
+}
+
+#[test]
+fn diagnostic_zero_foreign_control_drift_and_expiry_never_extend_matrix() {
+    for mode in [
+        Mode::ZeroWithoutMutation,
+        Mode::ForeignAfterChallenge,
+        Mode::ControlDrift,
+        Mode::MissingControl,
+        Mode::RemoveNoop,
+        Mode::LateBeforeChallenge,
+    ] {
+        let mut io = Mock::new(mode, false);
+        let mut held = DiagnosticMeasurements::default();
+        assert!(measure(&mut io, &plan(), &mut held).is_err());
+        assert!(io.mutations.iter().all(|(f, _, _, _)| *f == Family::Agent));
+        assert!(held.challenges.len() <= 1);
+        assert_eq!(io.classifier_calls.get(), 0);
+        let calls = io.calls.len();
+        assert!(measure(&mut io, &plan(), &mut held).is_err());
+        assert_eq!(io.calls.len(), calls);
+    }
+}
+
+#[test]
+fn diagnostic_persistence_failure_retains_original_raw_and_whole_inventories() {
+    let mut io = Mock::new(Mode::DiagnosticRecordFailure, false);
+    let mut held = DiagnosticMeasurements::default();
+    assert!(measure(&mut io, &plan(), &mut held).is_err());
+    assert_eq!(held.challenges.len(), 1);
+    assert_eq!(held.challenges[0].stdout, vec![255, 128]);
+    assert_eq!(held.challenges[0].before, held.challenges[0].after);
+    assert_eq!(io.mutations.len(), 3);
 }

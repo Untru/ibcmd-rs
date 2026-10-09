@@ -974,3 +974,9 @@ mod shutdown_pipe_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "child/diagnostic.rs"]
+mod diagnostic;
+#[cfg(test)]
+pub(crate) use diagnostic::{DiagnosticLiveProof, PendingShutdownHandle};

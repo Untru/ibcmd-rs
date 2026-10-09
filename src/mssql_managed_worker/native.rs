@@ -21,6 +21,8 @@ use crate::mssql_platform_profile::ManagedRacReadAuth;
 mod authentication;
 #[cfg(test)]
 mod census_observer_tests;
+#[cfg(test)]
+mod diagnostic;
 use authentication::{
     Action as AdminAction, Credentials as AdminCredentials, Family as AdminFamily,
 };
@@ -317,6 +319,8 @@ pub(crate) struct NativeRuntime {
     failed: bool,
     authenticated_boundary: bool,
     startup_deadline: Option<Instant>,
+    #[cfg(test)]
+    diagnostic_recovery_deadline: Option<Instant>,
     anchor_tools: Vec<Tool>,
     console_tool: Tool,
     shutdown_handles: BTreeMap<u32, KernelProcess>,
@@ -400,6 +404,8 @@ pub(crate) fn create(options: CreatorOptions) -> Result<Creation> {
         failed: false,
         authenticated_boundary: false,
         startup_deadline: None,
+        #[cfg(test)]
+        diagnostic_recovery_deadline: None,
         anchor_tools,
         console_tool,
         shutdown_handles: BTreeMap::new(),
@@ -1003,7 +1009,11 @@ impl NativeRuntime {
         argv: &[String],
         policy: impl FnOnce((i32, Vec<u8>, Vec<u8>)) -> Result<T>,
     ) -> Result<T> {
-        let deadline = super::command::deadline(self.startup_deadline, self.options.timeout)?;
+        #[cfg(test)]
+        let phase = self.diagnostic_recovery_deadline.or(self.startup_deadline);
+        #[cfg(not(test))]
+        let phase = self.startup_deadline;
+        let deadline = super::command::deadline(phase, self.options.timeout)?;
         super::command::run(
             &mut self.failed,
             &mut self.collectors,
@@ -1123,6 +1133,148 @@ impl NativeRuntime {
         let tool = self.rac.clone();
         // Never propagate native text containing credentials or command lines.
         self.execute(&tool, &argv, super::command::strict_text)
+    }
+
+    #[cfg(test)]
+    fn start_private_lifetime(&mut self, journal: &mut Journal, deadline: Instant) -> Result<()> {
+        self.startup_deadline = Some(deadline);
+        self.startup_remaining()?;
+        let ports: Vec<_> = [
+            self.options.agent_port,
+            self.options.cluster_port,
+            self.options.ras_port,
+        ]
+        .into_iter()
+        .chain(self.options.worker_first..=self.options.worker_last)
+        .collect();
+        let port_list = ports
+            .iter()
+            .map(u16::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        let raw = self.shell(format!("$ErrorActionPreference='Stop'; if(@(Get-NetTCPConnection -State Listen -ErrorAction Stop | Where-Object {{ $_.LocalPort -in @({port_list}) }}).Count) {{throw 'private ports occupied'}}; 'EMPTY'"))?;
+        if raw.trim() != "EMPTY" {
+            bail!("fresh private ports not proved");
+        }
+        journal.append("agent_spawn_intent", self.binding.root.to_string_lossy())?;
+        let agent = Tool::pin(self.options.platform_bin.join("ragent.exe"))?;
+        self.startup_remaining()?;
+        self.agent = Some(OriginalChild::diagnostic_lifetime_spawn_at(
+            &agent.path,
+            &[
+                "-agent".into(),
+                "-port".into(),
+                self.options.agent_port.to_string(),
+                "-regport".into(),
+                self.options.cluster_port.to_string(),
+                "-range".into(),
+                format!("{}:{}", self.options.worker_first, self.options.worker_last),
+                "-d".into(),
+                self.binding
+                    .root
+                    .join("srvinfo")
+                    .to_string_lossy()
+                    .into_owned(),
+            ],
+            deadline,
+        )?);
+        self.anchor_tools.push(agent);
+        let rows = self.census()?;
+        let anchor = self
+            .agent
+            .as_mut()
+            .context("agent original handle absent")?;
+        let row = rows
+            .iter()
+            .find(|p| p.pid == anchor.pid())
+            .context("spawned agent census absent")?;
+        self.binding.agent = anchor.bind_census(row)?;
+        journal.append("agent_spawn_confirmed", &self.binding.agent)?;
+        journal.append("ras_spawn_intent", self.binding.root.to_string_lossy())?;
+        let ras = Tool::pin(self.options.platform_bin.join("ras.exe"))?;
+        self.startup_remaining()?;
+        self.ras = Some(OriginalChild::diagnostic_lifetime_spawn_at(
+            &ras.path,
+            &[
+                "cluster".into(),
+                format!("--port={}", self.options.ras_port),
+                format!("localhost:{}", self.options.agent_port),
+            ],
+            deadline,
+        )?);
+        self.anchor_tools.push(ras);
+        let rows = self.census()?;
+        let anchor = self.ras.as_mut().context("RAS original handle absent")?;
+        let row = rows
+            .iter()
+            .find(|p| p.pid == anchor.pid())
+            .context("spawned RAS census absent")?;
+        self.binding.ras = anchor.bind_census(row)?;
+        journal.append("ras_spawn_confirmed", &self.binding.ras)?;
+        // Bounded startup only retries read-only version probes, never writes.
+        loop {
+            match self.rac(vec!["agent".into(), "version".into()], false, false) {
+                Ok(build)
+                    if crate::mssql_platform_profile::parse_rac_agent_build(&build)
+                        .is_ok_and(|build| build == "8.3.27.2214") =>
+                {
+                    self.startup_remaining()?;
+                    break;
+                }
+                _ if self.failed || Instant::now() >= deadline => {
+                    bail!("managed agent startup/profile unproved")
+                }
+                _ => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+        let clusters = blocks(&self.rac(vec!["cluster".into(), "list".into()], false, false)?)?;
+        if clusters.len() != 1 {
+            bail!("fresh managed cluster count must be exactly one");
+        }
+        self.binding.cluster =
+            Uuid::parse_str(clusters[0].get("cluster").context("cluster UUID absent")?)?;
+        if self.binding.cluster.is_nil() {
+            bail!("nil managed cluster");
+        }
+        journal.append("cluster_confirmed", self.binding.cluster.to_string())?;
+        self.startup_remaining()?;
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn establish_password_administrators(&mut self, journal: &mut Journal) -> Result<()> {
+        journal.append("agent_admin_intent", &self.administrator)?;
+        self.rac(
+            vec![
+                "agent".into(),
+                "admin".into(),
+                "register".into(),
+                format!("--name={}", self.administrator),
+                format!("--pwd={}", self.password),
+                "--auth=pwd".into(),
+            ],
+            true,
+            false,
+        )?;
+        journal.append("agent_admin_confirmed", &self.administrator)?;
+        journal.append("cluster_admin_intent", &self.administrator)?;
+        self.rac(
+            vec![
+                "cluster".into(),
+                "admin".into(),
+                "register".into(),
+                format!("--cluster={}", self.binding.cluster),
+                format!("--name={}", self.administrator),
+                format!("--pwd={}", self.password),
+                "--auth=pwd".into(),
+            ],
+            true,
+            true,
+        )?;
+        journal.append("cluster_admin_confirmed", &self.administrator)?;
+        self.require_admins()?;
+        self.startup_remaining()?;
+        Ok(())
     }
 
     fn bootstrap(&mut self, journal: &mut Journal) -> Result<()> {
@@ -1310,6 +1462,8 @@ impl NativeRuntime {
                 plan: &plan,
                 wrong_password: format!("{}{}", Uuid::new_v4(), Uuid::new_v4()),
                 throwaway_password: format!("{}{}", Uuid::new_v4(), Uuid::new_v4()),
+                #[cfg(test)]
+                captures: None,
             },
             &plan,
         )?;
@@ -1344,6 +1498,8 @@ struct NativeAdminIo<'a> {
     plan: &'a authentication::Plan,
     wrong_password: String,
     throwaway_password: String,
+    #[cfg(test)]
+    captures: Option<&'a mut Vec<diagnostic::RawMutation>>,
 }
 
 impl authentication::Io for NativeAdminIo<'_> {
@@ -1369,6 +1525,23 @@ impl authentication::Io for NativeAdminIo<'_> {
         action: AdminAction,
         credentials: AdminCredentials,
     ) -> Result<authentication::Receipt> {
+        #[cfg(test)]
+        let capture = if let Some(captures) = self.captures.as_deref_mut() {
+            let index = captures.len();
+            captures.push(diagnostic::RawMutation::pending(
+                family,
+                challenge,
+                action,
+                credentials,
+            ));
+            self.journal.append(
+                "diagnostic_mutation_intent",
+                (family, challenge, credentials),
+            )?;
+            Some(index)
+        } else {
+            None
+        };
         let mut argv = self.plan.mutation_arguments(
             family,
             challenge,
@@ -1383,14 +1556,56 @@ impl authentication::Io for NativeAdminIo<'_> {
         argv.push(format!("localhost:{}", self.runtime.options.ras_port));
         self.runtime.require_private_endpoint()?;
         let tool = self.runtime.rac.clone();
-        self.runtime
+        #[cfg(test)]
+        let original_index = self.runtime.collectors.len();
+        #[cfg(test)]
+        if let Some(index) = capture {
+            self.captures
+                .as_deref_mut()
+                .context("diagnostic raw registry absent")?[index]
+                .original_index = Some(original_index);
+        }
+        #[cfg(test)]
+        let captures = &mut self.captures;
+        let result = self
+            .runtime
             .execute(&tool, &argv, |(exit, stdout, stderr)| {
+                #[cfg(test)]
+                if let Some(index) = capture {
+                    captures
+                        .as_deref_mut()
+                        .context("diagnostic raw registry absent")?[index]
+                        .raw = Some(authentication::Receipt {
+                        exit,
+                        stdout: stdout.clone(),
+                        stderr: stderr.clone(),
+                    });
+                }
                 Ok(authentication::Receipt {
                     exit,
                     stdout,
                     stderr,
                 })
-            })
+            });
+        #[cfg(test)]
+        if let Some(index) = capture {
+            let record = self
+                .captures
+                .as_deref_mut()
+                .context("diagnostic raw registry absent")?
+                .get_mut(index)
+                .context("diagnostic pending slot absent")?;
+            record.known_direct_both = result.is_ok()
+                && self
+                    .runtime
+                    .collectors
+                    .get(original_index)
+                    .is_some_and(OriginalChild::terminal_proved);
+            if result.is_err() || !record.known_direct_both {
+                record.unproved = true;
+            }
+        }
+        result
     }
     fn record(&mut self, event: &'static str, value: serde_json::Value) -> Result<()> {
         self.journal.append(event, value)
