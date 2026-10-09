@@ -20,6 +20,7 @@ const OUTPUT_BOUND: usize = 1024 * 1024;
 /// The handle and pipe receivers remain owned on every failure. Dropping this
 /// value sends no signal; the caller must retain its unproved lifetime journal.
 pub(crate) struct OriginalChild {
+    terminal_exit: Option<i32>,
     child: Child,
     executable: PathBuf,
     birth_100ns: u64,
@@ -246,6 +247,7 @@ impl OriginalChild {
         let birth = original_birth(&child);
         drop(child.stdin.take()); // Valid pipe EOF, rather than inherited invalid stdin.
         let mut owned = Self {
+            terminal_exit: None,
             child,
             executable: executable.to_owned(),
             birth_100ns: 0,
@@ -353,6 +355,7 @@ impl OriginalChild {
             self.outcome_unproved = true;
         } else {
             self.terminal_proved = true;
+            self.terminal_exit = result.as_ref().ok().map(|output| output.0);
         }
         result
     }
@@ -363,6 +366,74 @@ impl OriginalChild {
 
     pub(crate) fn terminal_proved(&self) -> bool {
         self.terminal_proved && !self.outcome_unproved
+    }
+
+    /// Already captured original bytes; no new wait, pipe read or deadline.
+    pub(crate) fn terminal_raw(&self) -> Result<(i32, &[u8], &[u8])> {
+        if !self.terminal_proved() {
+            bail!("original terminal snapshot unproved");
+        }
+        let stdout = self
+            .pipes
+            .stdout
+            .obtained
+            .as_ref()
+            .context("original stdout absent")?
+            .as_ref()
+            .map_err(|_| anyhow::anyhow!("original stdout fault retained"))?;
+        let stderr = self
+            .pipes
+            .stderr
+            .obtained
+            .as_ref()
+            .context("original stderr absent")?
+            .as_ref()
+            .map_err(|_| anyhow::anyhow!("original stderr fault retained"))?;
+        Ok((
+            self.terminal_exit.context("original typed exit absent")?,
+            stdout,
+            stderr,
+        ))
+    }
+
+    /// A census utility observes itself while running, but its row is bound
+    /// only after the SAME retained command has proved direct exit and BOTH.
+    /// No PID reopen, synthetic row or replacement process is accepted.
+    pub(crate) fn bind_completed_census(
+        &mut self,
+        row: &CensusIdentity,
+        original_stdout: &[u8],
+    ) -> Result<ProcessIdentity> {
+        let result = (|| {
+            self.require_command_current()?;
+            if !self.direct_exit_proved() {
+                bail!("original census direct exit unproved");
+            }
+            let (exit, stdout, stderr) = self.terminal_raw()?;
+            if exit != 0 || !stderr.is_empty() || stdout != original_stdout {
+                bail!("original census command exit/BOTH/raw unproved");
+            }
+            let identity = self.bind_census(row)?;
+            self.require_command_current()?;
+            Ok(identity)
+        })();
+        if result.is_err() {
+            self.outcome_unproved = true;
+        }
+        result
+    }
+
+    /// Use the immutable deadline selected before this original command's
+    /// spawn. In particular, recovery must not use the spent startup phase.
+    pub(crate) fn require_command_current(&mut self) -> Result<()> {
+        let result = self
+            .command_deadline
+            .context("original finite command deadline absent")
+            .and_then(require_deadline);
+        if result.is_err() {
+            self.outcome_unproved = true;
+        }
+        result
     }
 
     /// Current original kernel exit permits subsequent descendant cleanup;
@@ -563,7 +634,7 @@ impl KernelProcess {
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct CensusIdentity {
     pub pid: u32,
