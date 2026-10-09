@@ -1,4 +1,4 @@
-//! A bounded, portable inventory of a 1C XML source tree.
+//! Complete immutable 1C XML source inventories with explicit optional reader budgets.
 mod reader;
 mod writer;
 
@@ -67,8 +67,8 @@ fn safe_relative_path(value: &str) -> Result<String, SourceTreeError> {
     Ok(value)
 }
 
-/// Absolute inventory bounds, including a complete ERP UH source tree and
-/// reversible EDT preservation records. Readers retain smaller defaults.
+/// Retained legacy explicit-budget values. Normal Source admission does not
+/// use these values as absolute model bounds.
 pub const MAX_SOURCE_FILES: usize = 524_288;
 pub const MAX_SOURCE_DIRECTORIES: usize = 524_288;
 /// Source files are not canonical assets: native MXL/XML files exceed 100 MiB.
@@ -83,19 +83,21 @@ pub const MAX_SOURCE_PATH_BYTES: usize = 4_096;
 pub struct SourcePath(Box<str>);
 impl SourcePath {
     pub fn new(value: impl AsRef<str>) -> Result<Self, SourceTreeError> {
-        let value = safe_relative_path(value.as_ref())?;
-        if value.len() > MAX_SOURCE_PATH_BYTES {
-            return Err(SourceTreeError::UnsafePath(value));
-        }
-        let parts: Vec<_> = value.split('/').collect();
-        if parts.len() > MAX_SOURCE_DEPTH
-            || parts
-                .iter()
+        Ok(Self(safe_relative_path(value.as_ref())?.into()))
+    }
+    /// Deliberate compatibility path budget; normal construction is quota-free.
+    pub fn new_bounded(value: impl AsRef<str>) -> Result<Self, SourceTreeError> {
+        let path = Self::new(value)?;
+        if path.as_str().len() > MAX_SOURCE_PATH_BYTES
+            || path.as_str().split('/').count() > MAX_SOURCE_DEPTH
+            || path
+                .as_str()
+                .split('/')
                 .any(|part| part.len() > MAX_SOURCE_COMPONENT_BYTES)
         {
-            return Err(SourceTreeError::UnsafePath(value));
+            return Err(SourceTreeError::UnsafePath(path.to_string()));
         }
-        Ok(Self(value.into()))
+        Ok(path)
     }
     pub fn as_str(&self) -> &str {
         &self.0
@@ -158,8 +160,26 @@ pub struct SourceEntry {
 }
 impl SourceEntry {
     pub fn from_bytes(path: SourcePath, bytes: Vec<u8>) -> Result<Self, SourceTreeError> {
+        Self::from_shared_bytes(path, Arc::new(bytes))
+    }
+    /// Shares genuine immutable content; repeats classification, XML and UUID
+    /// inspection and computes its digest. This is not original-source CAS authority.
+    pub fn from_shared_bytes(
+        path: SourcePath,
+        bytes: Arc<Vec<u8>>,
+    ) -> Result<Self, SourceTreeError> {
         let (kind, uuid) = Self::classify_bytes(&path, &bytes)?;
-        Self::new(path, kind, bytes, uuid)
+        Ok(Self {
+            path,
+            kind,
+            digest: ibcmd_core::storage::Sha256Digest::for_bytes(&bytes),
+            bytes,
+            uuid,
+        })
+    }
+    /// Returns the original immutable content owner without copying payload bytes.
+    pub fn shared_bytes(&self) -> Arc<Vec<u8>> {
+        Arc::clone(&self.bytes)
     }
     /// Rebinds immutable content to a validated path without copying its bytes.
     /// Path-dependent XML validation, classification and identity are repeated.
@@ -209,18 +229,13 @@ impl SourceEntry {
         };
         Ok((kind, uuid))
     }
+    #[cfg(test)]
     pub(crate) fn new(
         path: SourcePath,
         kind: SourceKind,
         bytes: Vec<u8>,
         uuid: Option<ObjectUuid>,
     ) -> Result<Self, SourceTreeError> {
-        if bytes.len() > MAX_SOURCE_FILE_BYTES {
-            return Err(SourceTreeError::AssetTooLarge {
-                path,
-                actual: bytes.len(),
-            });
-        }
         Ok(Self {
             path,
             kind,
@@ -260,10 +275,7 @@ impl SourceTree {
         &self.entries
     }
     pub fn validate(&self) -> Result<(), SourceTreeError> {
-        if self.entries.len() > MAX_SOURCE_FILES {
-            return Err(SourceTreeError::TooManyFiles);
-        }
-        count_directories(&self.entries, MAX_SOURCE_DIRECTORIES)?;
+        directory_domain(&self.entries, None)?;
         let mut folded = BTreeMap::new();
         let mut uuids = BTreeMap::new();
         let mut total = 0usize;
@@ -271,9 +283,6 @@ impl SourceTree {
             total = total
                 .checked_add(e.bytes.len())
                 .ok_or(SourceTreeError::TotalTooLarge)?;
-            if total > MAX_SOURCE_RETAINED_BYTES {
-                return Err(SourceTreeError::TotalTooLarge);
-            }
             let fold = e
                 .path
                 .as_str()
@@ -317,7 +326,10 @@ impl SourceTree {
         Ok(())
     }
 }
-fn count_directories(entries: &[SourceEntry], maximum: usize) -> Result<(), SourceTreeError> {
+fn directory_domain(
+    entries: &[SourceEntry],
+    maximum: Option<usize>,
+) -> Result<BTreeMap<String, String>, SourceTreeError> {
     let mut directories = BTreeMap::<String, String>::new();
     directories.insert(String::new(), String::new());
     for entry in entries {
@@ -332,20 +344,25 @@ fn count_directories(entries: &[SourceEntry], maximum: usize) -> Result<(), Sour
                     second: SourcePath(raw.into()),
                 });
             }
-            if directories.len() > maximum {
+            if maximum.is_some_and(|maximum| directories.len() > maximum) {
                 return Err(SourceTreeError::TooManyDirectories);
             }
         }
     }
-    if directories.len() > maximum {
-        Err(SourceTreeError::TooManyDirectories)
-    } else {
-        Ok(())
+    if maximum.is_some_and(|maximum| directories.len() > maximum) {
+        return Err(SourceTreeError::TooManyDirectories);
     }
+    Ok(directories)
+}
+#[cfg(test)]
+fn count_directories(entries: &[SourceEntry], maximum: usize) -> Result<(), SourceTreeError> {
+    directory_domain(entries, Some(maximum)).map(|_| ())
 }
 #[derive(Debug)]
 pub enum SourceTreeError {
     UnsafePath(String),
+    CapacityExceeded,
+    ChangedDuringRead(SourcePath),
     AssetTooLarge {
         path: SourcePath,
         actual: usize,
@@ -381,6 +398,12 @@ pub enum SourceTreeError {
 impl Display for SourceTreeError {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
+            Self::CapacityExceeded => {
+                f.write_str("source accounting or allocation cannot be represented")
+            }
+            Self::ChangedDuringRead(p) => {
+                write!(f, "source file changed during complete read: {p}")
+            }
             Self::UnsafePath(p) => write!(f, "unsafe source path: {p}"),
             Self::AssetTooLarge { path, actual } => write!(f, "asset {path} too large: {actual}"),
             Self::TotalTooLarge => f.write_str("source tree exceeds retained-byte limit"),
@@ -579,10 +602,11 @@ mod tests {
         assert!(SourcePath::new("target/a").is_err());
         assert!(SourcePath::new("a\u{1}").is_err());
         assert!(
-            SourcePath::new("a/".to_owned() + &"x".repeat(MAX_SOURCE_COMPONENT_BYTES + 1)).is_err()
+            SourcePath::new_bounded("a/".to_owned() + &"x".repeat(MAX_SOURCE_COMPONENT_BYTES + 1))
+                .is_err()
         );
         assert!(
-            SourcePath::new(
+            SourcePath::new_bounded(
                 (0..MAX_SOURCE_DEPTH + 1)
                     .map(|_| "a")
                     .collect::<Vec<_>>()
@@ -591,7 +615,7 @@ mod tests {
             .is_err()
         );
         assert!(
-            SourcePath::new(
+            SourcePath::new_bounded(
                 (0..21)
                     .map(|_| "x".repeat(200))
                     .collect::<Vec<_>>()
@@ -1083,5 +1107,193 @@ mod tests {
                 Err(SourceTreeError::PathConflict { .. })
             ));
         }
+    }
+    #[test]
+    fn normal_paths_remove_utf8_depth_approximations_but_keep_lexical_safety() {
+        let component = "я".repeat(200);
+        let deep = (0..80).map(|_| "safe").collect::<Vec<_>>().join("/");
+        let long = (0..24)
+            .map(|_| "x".repeat(200))
+            .collect::<Vec<_>>()
+            .join("/");
+        for path in [component, deep, long] {
+            assert_eq!(SourcePath::new(&path).unwrap().as_str(), path);
+            assert!(SourcePath::new_bounded(&path).is_err());
+        }
+        for path in ["../x", "a//b", "CON", "a/target/x", "a\0b"] {
+            assert!(SourcePath::new(path).is_err(), "{path}");
+        }
+    }
+    #[test]
+    fn shared_entry_repeats_classification_and_complete_xml_without_cas_authority() {
+        let bytes =
+            Arc::new(b"<Configuration uuid='12345678-90ab-cdef-0123-456789abcdef'/>".to_vec());
+        let plain = SourceEntry::from_shared_bytes(
+            SourcePath::new("original.bin").unwrap(),
+            Arc::clone(&bytes),
+        )
+        .unwrap();
+        let xml = SourceEntry::from_shared_bytes(
+            SourcePath::new("Configuration.xml").unwrap(),
+            Arc::clone(&bytes),
+        )
+        .unwrap();
+        assert!(Arc::ptr_eq(&bytes, &plain.shared_bytes()));
+        assert!(Arc::ptr_eq(&bytes, &xml.shared_bytes()));
+        assert_eq!(plain.uuid(), None);
+        assert_eq!(
+            xml.uuid().unwrap().to_string(),
+            "12345678-90ab-cdef-0123-456789abcdef"
+        );
+        assert_eq!(xml.digest(), plain.digest());
+        assert!(
+            SourceEntry::from_shared_bytes(
+                SourcePath::new("broken.xml").unwrap(),
+                Arc::new(b"<root>".to_vec())
+            )
+            .is_err()
+        );
+    }
+    #[test]
+    fn deliberate_reader_budget_can_exceed_old_model_ceiling_and_stays_enforced() {
+        let temp = Temp::new();
+        temp.file("body.bin", b"complete");
+        let high = ReaderLimits {
+            files: MAX_SOURCE_FILES + 1,
+            directories: MAX_SOURCE_DIRECTORIES + 1,
+            depth: MAX_SOURCE_DEPTH + 1,
+            asset_bytes: MAX_SOURCE_FILE_BYTES + 1,
+            total_bytes: MAX_SOURCE_RETAINED_BYTES + 1,
+        };
+        assert_eq!(
+            SourceTreeReader::new(high).unwrap().read(&temp.0).unwrap(),
+            read_source_tree(&temp.0).unwrap()
+        );
+        let small = ReaderLimits {
+            asset_bytes: 2,
+            ..high
+        };
+        assert!(matches!(
+            SourceTreeReader::new(small).unwrap().read(&temp.0),
+            Err(SourceTreeError::AssetTooLarge { .. })
+        ));
+        let tree = read_source_tree(&temp.0).unwrap();
+        assert!(publish_new_with_limits(&tree, temp.0.join("bounded"), small).is_err());
+        assert!(!temp.0.join("bounded").exists());
+    }
+    #[test]
+    fn ordinary_and_strict_purposes_preserve_operational_and_empty_input_contracts() {
+        let temp = Temp::new();
+        temp.file("Module.bsl", b"source");
+        for name in [".git", "target", ".idea", ".vscode"] {
+            temp.file(&format!("{name}/hidden.bin"), b"ignored");
+        }
+        fs::create_dir(temp.0.join("empty")).unwrap();
+        let ordinary = read_source_tree(&temp.0).unwrap();
+        assert_eq!(ordinary.entries().len(), 1);
+        assert!(read_source_tree_strict(&temp.0, ReaderLimits::default()).is_err());
+        assert!(
+            reader::ClosedOutput::prepare(&ordinary, None)
+                .unwrap()
+                .verify(&temp.0)
+                .is_err()
+        );
+    }
+    #[test]
+    fn iterative_reader_handles_real_depth_beyond64_and_explicit_budget_refuses() {
+        let temp = Temp::new();
+        let path = format!(
+            "{}/Module.bsl",
+            (0..70).map(|_| "d").collect::<Vec<_>>().join("/")
+        );
+        temp.file(&path, b"deep source");
+        let normal = read_source_tree(&temp.0).unwrap();
+        assert_eq!(normal.entries()[0].path().as_str(), path);
+        assert_eq!(normal.entries()[0].bytes(), b"deep source");
+        assert!(matches!(
+            SourceTreeReader::new(ReaderLimits::default())
+                .unwrap()
+                .read(&temp.0),
+            Err(SourceTreeError::DepthExceeded)
+        ));
+        let output = temp.0.join("published");
+        publish_new(&normal, &output).unwrap();
+        assert_eq!(read_source_tree(output).unwrap(), normal);
+    }
+    #[test]
+    #[ignore = "ROOT-only genuine >32MiB and >256MiB physical files; no sparse payloads"]
+    fn source_scale_actual_payloads_cross_both_reader_and_model_byte_ceilings() {
+        for size in [33_554_433usize, MAX_SOURCE_FILE_BYTES + 1] {
+            let temp = Temp::new();
+            let bytes = (0..size).map(|n| (n % 251) as u8).collect::<Vec<_>>();
+            let original =
+                SourceEntry::from_bytes(SourcePath::new("body.bin").unwrap(), bytes).unwrap();
+            let expected = SourceTree::new(vec![original]).unwrap();
+            let destination = temp.0.join("out");
+            publish_new(&expected, &destination).unwrap();
+            let actual = read_source_tree(&destination).unwrap();
+            assert_eq!(actual, expected);
+            assert_eq!(actual.entries()[0].bytes().len(), size);
+            assert!(
+                SourceTreeReader::new(ReaderLimits::default())
+                    .unwrap()
+                    .read(&destination)
+                    .is_err()
+            );
+        }
+    }
+    #[test]
+    #[ignore = "ROOT-only genuine 65537 files and 65538 physical directories"]
+    fn source_scale_actual_file_and_directory_inventory_crosses_default_limits() {
+        let temp = Temp::new();
+        let mut entries = Vec::new();
+        for n in 0..65_537 {
+            entries.push(
+                SourceEntry::from_bytes(
+                    SourcePath::new(format!("d{n:05}/body.bin")).unwrap(),
+                    vec![(n % 251) as u8],
+                )
+                .unwrap(),
+            );
+        }
+        let expected = SourceTree::new(entries).unwrap();
+        let out = temp.0.join("out");
+        publish_new(&expected, &out).unwrap();
+        assert_eq!(read_source_tree(&out).unwrap(), expected);
+        assert!(matches!(
+            SourceTreeReader::new(ReaderLimits::default())
+                .unwrap()
+                .read(out),
+            Err(SourceTreeError::TooManyDirectories) | Err(SourceTreeError::TooManyFiles)
+        ));
+    }
+    #[test]
+    #[ignore = "ROOT-only logical >32GiB SAME real shared payload; NOT physical publication"]
+    fn source_scale_logical_model_shares_real_bytes_above_32gib() {
+        let original =
+            SourceEntry::from_bytes(SourcePath::new("body.bin").unwrap(), vec![7u8; 1024 * 1024])
+                .unwrap();
+        let entries = (0..32_769)
+            .map(|n| {
+                original
+                    .with_path(SourcePath::new(format!("body{n}.bin")).unwrap())
+                    .unwrap()
+            })
+            .collect();
+        let tree = SourceTree::new(entries).unwrap();
+        tree.validate().unwrap();
+        let total = tree
+            .entries()
+            .iter()
+            .try_fold(0usize, |sum, entry| sum.checked_add(entry.bytes().len()))
+            .unwrap();
+        assert_eq!(total, 32_769usize * 1024 * 1024);
+        assert!(total > MAX_SOURCE_RETAINED_BYTES);
+        assert!(
+            tree.entries()
+                .iter()
+                .all(|e| Arc::ptr_eq(&original.shared_bytes(), &e.shared_bytes())
+                    && e.digest() == original.digest())
+        );
     }
 }

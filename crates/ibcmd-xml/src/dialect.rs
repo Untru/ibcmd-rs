@@ -1428,7 +1428,7 @@ fn record_source_element(
         evidence.namespaces.push(declaration.clone());
         for (feature, uris) in &matchers.namespaces {
             if uris.contains(&declaration.uri) {
-                record_feature_with_limit(evidence, feature, usize::MAX)?;
+                record_feature_with_limit(evidence, feature, None)?;
             }
         }
     }
@@ -1436,7 +1436,7 @@ fn record_source_element(
     if element.name().prefix().is_none() || effective.is_some() {
         for (feature, elements) in &matchers.elements {
             if elements.contains(&(element.name().local().into(), effective.clone())) {
-                record_feature_with_limit(evidence, feature, usize::MAX)?;
+                record_feature_with_limit(evidence, feature, None)?;
             }
         }
     }
@@ -1446,14 +1446,16 @@ fn record_feature(
     evidence: &mut DialectEvidence,
     feature: &DialectFeature,
 ) -> Result<(), DialectError> {
-    record_feature_with_limit(evidence, feature, MAX_EVIDENCE)
+    record_feature_with_limit(evidence, feature, Some(MAX_EVIDENCE))
 }
 fn record_feature_with_limit(
     evidence: &mut DialectEvidence,
     feature: &DialectFeature,
-    maximum: usize,
+    maximum: Option<usize>,
 ) -> Result<(), DialectError> {
-    if !evidence.features.contains(feature) && evidence.features.len() >= maximum {
+    if !evidence.features.contains(feature)
+        && maximum.is_some_and(|maximum| evidence.features.len() >= maximum)
+    {
         return Err(DialectError::EvidenceLimit);
     }
     evidence
@@ -2007,9 +2009,10 @@ mod tests {
             namespaces: vec![],
             features: BTreeSet::new(),
         };
-        record_feature_with_limit(&mut evidence, &DialectFeature::parse("a").unwrap(), 1).unwrap();
+        record_feature_with_limit(&mut evidence, &DialectFeature::parse("a").unwrap(), Some(1))
+            .unwrap();
         assert!(matches!(
-            record_feature_with_limit(&mut evidence, &DialectFeature::parse("b").unwrap(), 1),
+            record_feature_with_limit(&mut evidence, &DialectFeature::parse("b").unwrap(), Some(1)),
             Err(DialectError::EvidenceLimit)
         ));
         assert_eq!(evidence.features.len(), 1);

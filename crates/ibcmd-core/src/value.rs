@@ -93,6 +93,8 @@ pub enum ValueBuildError {
         /// Actual retained bytes.
         actual: usize,
     },
+    /// Aggregate node-count arithmetic overflowed.
+    NodeCountOverflow,
     /// Aggregate retained-byte arithmetic overflowed.
     RetainedByteCountOverflow,
 }
@@ -137,6 +139,7 @@ impl Display for ValueBuildError {
                 formatter,
                 "canonical value exceeds aggregate retained-byte budget {maximum} (actual {actual})"
             ),
+            Self::NodeCountOverflow => formatter.write_str("canonical node count overflowed"),
             Self::RetainedByteCountOverflow => {
                 formatter.write_str("canonical retained-byte count overflowed")
             }
@@ -149,14 +152,16 @@ impl Error for ValueBuildError {}
 fn validate_bounded_text(
     field: &'static str,
     value: &str,
-    maximum: usize,
+    maximum: Option<usize>,
     allow_empty: bool,
     control_free: bool,
 ) -> Result<(), ValueBuildError> {
     if value.is_empty() && !allow_empty {
         return Err(ValueBuildError::EmptyText { field });
     }
-    if value.len() > maximum {
+    if let Some(maximum) = maximum
+        && value.len() > maximum
+    {
         return Err(ValueBuildError::TextTooLong {
             field,
             maximum,
@@ -214,7 +219,7 @@ macro_rules! bounded_string_type {
                 validate_bounded_text(
                     $field,
                     value,
-                    policy.maximum($maximum),
+                    policy.budget($maximum),
                     $allow_empty,
                     $control_free,
                 )?;
@@ -299,7 +304,7 @@ impl CanonicalInteger {
         validate_bounded_text(
             "canonical integer",
             value,
-            policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+            policy.budget(MAX_CANONICAL_NUMBER_BYTES),
             false,
             true,
         )?;
@@ -380,7 +385,7 @@ impl CanonicalDecimal {
         validate_bounded_text(
             "canonical decimal",
             value,
-            policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+            policy.budget(MAX_CANONICAL_NUMBER_BYTES),
             false,
             true,
         )?;
@@ -966,15 +971,14 @@ impl ValueBudget {
     }
 
     fn add_node(&mut self) -> Result<(), ValueBuildError> {
-        let maximum = self.policy.maximum(MAX_CANONICAL_NODES);
+        let maximum = self.policy.budget(MAX_CANONICAL_NODES);
         let actual = self
             .nodes
             .checked_add(1)
-            .ok_or(ValueBuildError::TooManyNodes {
-                maximum,
-                actual: usize::MAX,
-            })?;
-        if actual > maximum {
+            .ok_or(ValueBuildError::NodeCountOverflow)?;
+        if let Some(maximum) = maximum
+            && actual > maximum
+        {
             return Err(ValueBuildError::TooManyNodes { maximum, actual });
         }
         self.nodes = actual;
@@ -982,12 +986,14 @@ impl ValueBudget {
     }
 
     fn retain(&mut self, bytes: usize) -> Result<(), ValueBuildError> {
-        let maximum = self.policy.maximum(MAX_CANONICAL_RETAINED_BYTES);
+        let maximum = self.policy.budget(MAX_CANONICAL_RETAINED_BYTES);
         let actual = self
             .retained_bytes
             .checked_add(bytes)
             .ok_or(ValueBuildError::RetainedByteCountOverflow)?;
-        if actual > maximum {
+        if let Some(maximum) = maximum
+            && actual > maximum
+        {
             return Err(ValueBuildError::RetainedBytesExceeded { maximum, actual });
         }
         self.retained_bytes = actual;
@@ -1022,7 +1028,7 @@ fn validate_value(
                 validate_bounded_text(
                     "field name",
                     field.name.as_str(),
-                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_TOKEN_BYTES),
                     false,
                     true,
                 )?;
@@ -1033,12 +1039,19 @@ fn validate_value(
                 }
                 budget.retain(field.name.as_str().len())?;
                 work.push(Work::Record(fields, index + 1, depth, names));
-                work.push(Work::Value(&field.value, depth + 1));
+                work.push(Work::Value(
+                    &field.value,
+                    depth
+                        .checked_add(1)
+                        .ok_or(ValueBuildError::NodeCountOverflow)?,
+                ));
                 continue;
             }
         };
-        let maximum = budget.policy.maximum(MAX_CANONICAL_DEPTH);
-        if depth > maximum {
+        let maximum = budget.policy.budget(MAX_CANONICAL_DEPTH);
+        if let Some(maximum) = maximum
+            && depth > maximum
+        {
             return Err(ValueBuildError::DepthExceeded {
                 maximum,
                 actual: depth,
@@ -1051,7 +1064,7 @@ fn validate_value(
                 validate_bounded_text(
                     "canonical integer",
                     value.as_str(),
-                    budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_NUMBER_BYTES),
                     false,
                     true,
                 )?;
@@ -1061,7 +1074,7 @@ fn validate_value(
                 validate_bounded_text(
                     "canonical decimal",
                     value.as_str(),
-                    budget.policy.maximum(MAX_CANONICAL_NUMBER_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_NUMBER_BYTES),
                     false,
                     true,
                 )?;
@@ -1071,7 +1084,7 @@ fn validate_value(
                 validate_bounded_text(
                     "canonical text",
                     value.as_str(),
-                    budget.policy.maximum(MAX_CANONICAL_TEXT_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_TEXT_BYTES),
                     true,
                     false,
                 )?;
@@ -1081,7 +1094,7 @@ fn validate_value(
                 validate_bounded_text(
                     "enum token",
                     value.as_str(),
-                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_TOKEN_BYTES),
                     false,
                     true,
                 )?;
@@ -1091,14 +1104,14 @@ fn validate_value(
                 validate_bounded_text(
                     "enum token",
                     value.kind(),
-                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_TOKEN_BYTES),
                     false,
                     true,
                 )?;
                 validate_bounded_text(
                     "reference target",
                     value.target(),
-                    budget.policy.maximum(MAX_CANONICAL_TOKEN_BYTES),
+                    budget.policy.budget(MAX_CANONICAL_TOKEN_BYTES),
                     false,
                     true,
                 )?;
@@ -1110,11 +1123,14 @@ fn validate_value(
             }
             CanonicalValueInner::Sequence(values) => {
                 validate_collection_len(values.len(), budget.policy)?;
+                let child_depth = depth
+                    .checked_add(1)
+                    .ok_or(ValueBuildError::NodeCountOverflow)?;
                 work.extend(
                     values
                         .iter()
                         .rev()
-                        .map(|child| Work::Value(child, depth + 1)),
+                        .map(|child| Work::Value(child, child_depth)),
                 );
             }
             CanonicalValueInner::Binary(asset) => budget.retain(asset.retained_byte_len())?,
@@ -1130,8 +1146,10 @@ fn validate_collection_len(
     actual: usize,
     policy: SourceOperationPolicy,
 ) -> Result<(), ValueBuildError> {
-    let maximum = policy.maximum(MAX_CANONICAL_COLLECTION_ITEMS);
-    if actual > maximum {
+    let maximum = policy.budget(MAX_CANONICAL_COLLECTION_ITEMS);
+    if let Some(maximum) = maximum
+        && actual > maximum
+    {
         return Err(ValueBuildError::TooManyCollectionItems { maximum, actual });
     }
     Ok(())

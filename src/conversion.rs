@@ -437,9 +437,7 @@ enum DecodedXmlEntry {
         envelope: Box<MetadataEnvelope>,
     },
     Passthrough {
-        path: SourcePath,
-        kind: SourceKind,
-        bytes: Vec<u8>,
+        entry: SourceEntry,
     },
 }
 
@@ -449,8 +447,7 @@ enum MigratedXmlEntry {
         envelope: Box<MetadataEnvelope>,
     },
     Passthrough {
-        path: SourcePath,
-        bytes: Vec<u8>,
+        entry: SourceEntry,
     },
 }
 
@@ -467,9 +464,7 @@ fn decode_xml_tree(
             SourceKind::ConfigurationRoot | SourceKind::MetadataXml
         ) {
             decoded.push(DecodedXmlEntry::Passthrough {
-                path: source.path().clone(),
-                kind: source.kind(),
-                bytes: source.bytes().to_vec(),
+                entry: source.clone(),
             });
             continue;
         }
@@ -486,9 +481,7 @@ fn decode_xml_tree(
             "MetaDataObject" | "Configuration" | "DefinedType"
         ) {
             decoded.push(DecodedXmlEntry::Passthrough {
-                path: source.path().clone(),
-                kind: source.kind(),
-                bytes: source.bytes().to_vec(),
+                entry: source.clone(),
             });
             continue;
         }
@@ -541,11 +534,12 @@ fn validate_decoded_xml(
                     )
                 })?;
             }
-            DecodedXmlEntry::Passthrough { path, kind, .. }
-                if cross_profile && !matches!(kind, SourceKind::Module | SourceKind::Binary) =>
+            DecodedXmlEntry::Passthrough { entry }
+                if cross_profile
+                    && !matches!(entry.kind(), SourceKind::Module | SourceKind::Binary) =>
             {
                 return Err((
-                    Some(path.to_string()),
+                    Some(entry.path().to_string()),
                     "cross-profile conversion has no verified adapter for this source asset"
                         .to_owned(),
                 ));
@@ -689,8 +683,8 @@ fn convert_xml_to_xml(
                 };
                 migrated.push(MigratedXmlEntry::Metadata { path, envelope });
             }
-            DecodedXmlEntry::Passthrough { path, bytes, .. } => {
-                migrated.push(MigratedXmlEntry::Passthrough { path, bytes });
+            DecodedXmlEntry::Passthrough { entry } => {
+                migrated.push(MigratedXmlEntry::Passthrough { entry });
             }
         }
     }
@@ -741,19 +735,7 @@ fn convert_xml_to_xml(
                     },
                 )?);
             }
-            MigratedXmlEntry::Passthrough { path, bytes } => {
-                encoded_entries.push(SourceEntry::from_bytes(path.clone(), bytes).map_err(
-                    |error| {
-                        failure(
-                            &mut report,
-                            PHASE_PREFLIGHT,
-                            "conversion.xml-target-tree-invalid",
-                            error.to_string(),
-                            Some(path.to_string()),
-                        )
-                    },
-                )?);
-            }
+            MigratedXmlEntry::Passthrough { entry } => encoded_entries.push(entry),
         }
     }
     let target_tree = SourceTree::new(encoded_entries).map_err(|error| {
@@ -1646,5 +1628,52 @@ impl TemporaryDirectory {
 impl Drop for TemporaryDirectory {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(test)]
+mod source_passthrough_sharing_tests {
+    use super::*;
+    #[test]
+    fn actual_xml_decoder_preserves_unchanged_module_arc_and_profile_refusal() {
+        use std::sync::Arc;
+        let profiles =
+            load_profile_registry(BUNDLED_PROFILES, None, ProfileRegistryLimits::default())
+                .unwrap();
+        let profile = profiles
+            .get(&ProfileId::parse("platform-8.3.27.2214").unwrap())
+            .unwrap();
+        let dialects = DialectRegistry::from_profiles(&profiles).unwrap();
+        let codecs = bundled_metadata_registry();
+        let module = SourceEntry::from_bytes(
+            SourcePath::new("CommonModules/Own/Ext/Module.bsl").unwrap(),
+            b"Procedure Own() Export\nEndProcedure".to_vec(),
+        )
+        .unwrap();
+        let tree = SourceTree::new(vec![module.clone()]).unwrap();
+        let decoded = decode_xml_tree(&tree, profile, &dialects, &codecs).unwrap();
+        validate_decoded_xml(&decoded, false).unwrap();
+        validate_decoded_xml(&decoded, true).unwrap();
+        match &decoded[0] {
+            DecodedXmlEntry::Passthrough { entry } => {
+                assert_eq!(entry, &module);
+                assert!(Arc::ptr_eq(&module.shared_bytes(), &entry.shared_bytes()));
+            }
+            _ => panic!("real Module.bsl must use the existing passthrough branch"),
+        }
+        let xml = SourceEntry::from_bytes(
+            SourcePath::new("Ext/Help.xml").unwrap(),
+            b"<Help/>".to_vec(),
+        )
+        .unwrap();
+        let tree = SourceTree::new(vec![xml.clone()]).unwrap();
+        let decoded = decode_xml_tree(&tree, profile, &dialects, &codecs).unwrap();
+        assert!(validate_decoded_xml(&decoded, true).is_err());
+        match &decoded[0] {
+            DecodedXmlEntry::Passthrough { entry } => {
+                assert!(Arc::ptr_eq(&xml.shared_bytes(), &entry.shared_bytes()))
+            }
+            _ => panic!("existing nonmetadata Ext sidecar must stay passthrough"),
+        }
     }
 }

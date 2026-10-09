@@ -9,34 +9,25 @@ impl SourceTreeWriter {
     }
 }
 pub fn publish_new(tree: &SourceTree, dest: impl AsRef<Path>) -> Result<(), SourceTreeError> {
-    publish_new_with_limits(tree, dest, ReaderLimits::default())
+    publish_owned(tree, dest.as_ref(), None, |_| Ok(()))
 }
-/// Publish with explicit bounded inventory limits, including complete ERP trees.
+/// Publish with a deliberate caller budget; normal publication is quota-free.
 pub fn publish_new_with_limits(
     tree: &SourceTree,
     dest: impl AsRef<Path>,
     limits: ReaderLimits,
 ) -> Result<(), SourceTreeError> {
-    let limits = limits.validate()?;
-    tree.validate()?;
-    if tree.entries().len() > limits.files {
-        return Err(SourceTreeError::TooManyFiles);
-    }
-    count_directories(tree.entries(), limits.directories)?;
-    let mut total = 0usize;
-    for entry in tree.entries() {
-        if entry.bytes().len() > limits.asset_bytes {
-            return Err(SourceTreeError::AssetTooLarge {
-                path: entry.path().clone(),
-                actual: entry.bytes().len(),
-            });
-        }
-        total = total
-            .checked_add(entry.bytes().len())
-            .filter(|value| *value <= limits.total_bytes)
-            .ok_or(SourceTreeError::TotalTooLarge)?;
-    }
-    let dest = dest.as_ref();
+    publish_owned(tree, dest.as_ref(), Some(limits.validate()?), |_| Ok(()))
+}
+// The closure is an OS scheduling boundary only: production supplies no action;
+// owner tests can mutate the physical stage before the SAME mandatory verifier.
+fn publish_owned(
+    tree: &SourceTree,
+    dest: &Path,
+    limits: Option<ReaderLimits>,
+    before_verify: impl FnOnce(&Path) -> Result<(), SourceTreeError>,
+) -> Result<(), SourceTreeError> {
+    let closed = reader::ClosedOutput::prepare(tree, limits)?;
     destination_absent(dest)?;
     let parent = dest
         .parent()
@@ -68,7 +59,8 @@ pub fn publish_new_with_limits(
         f.write_all(e.bytes())?;
         f.sync_all()?;
     }
-    reader::verify_with_limits(&temp, tree, limits)?;
+    before_verify(&temp)?;
+    closed.verify(&temp)?;
     destination_absent(dest)?;
     rename_directory_new(&temp, dest)?;
     let mut guard = guard;
@@ -205,5 +197,154 @@ mod tests {
         assert!(staged.join("new.bin").exists());
         assert!(!destination.join("new.bin").exists());
         fs::remove_dir_all(&root).unwrap();
+    }
+    static NEXT_CLOSED: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    fn closed_temp() -> Temp {
+        let number = NEXT_CLOSED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let path = std::env::temp_dir().join(format!(
+            "ibcmd-closed-source-{}-{number}",
+            std::process::id()
+        ));
+        fs::create_dir(&path).unwrap();
+        Temp { path, keep: false }
+    }
+    fn closed_tree() -> SourceTree {
+        SourceTree::new(vec![
+            SourceEntry::from_bytes(
+                SourcePath::new("nested/Module.bsl").unwrap(),
+                b"original".to_vec(),
+            )
+            .unwrap(),
+        ])
+        .unwrap()
+    }
+    #[test]
+    fn closed_publisher_rejects_each_unmodelled_operational_tree_before_rename() {
+        for name in [".git", "target", ".idea", ".vscode"] {
+            let temp = closed_temp();
+            let dest = temp.path.join("out");
+            let result = publish_owned(&closed_tree(), &dest, None, |stage| {
+                fs::create_dir(stage.join(name))?;
+                fs::write(stage.join(name).join("foreign.bin"), b"extra")?;
+                Ok(())
+            });
+            assert!(result.is_err(), "{name}");
+            assert!(!dest.exists());
+            assert!(fs::read_dir(&temp.path).unwrap().next().is_none());
+        }
+    }
+    #[test]
+    fn closed_publisher_rejects_extra_regular_file_and_empty_orphans() {
+        for name in ["extra.bin", "orphan", "nested/empty"] {
+            let temp = closed_temp();
+            let dest = temp.path.join("out");
+            assert!(
+                publish_owned(&closed_tree(), &dest, None, |stage| {
+                    if name.ends_with(".bin") {
+                        fs::write(stage.join(name), b"extra")?;
+                    } else {
+                        fs::create_dir(stage.join(name))?;
+                    }
+                    Ok(())
+                })
+                .is_err(),
+                "{name}"
+            );
+            assert!(!dest.exists());
+        }
+    }
+    #[test]
+    fn closed_publisher_rejects_current_file_drift_disappearance_and_type_substitution() {
+        for action in 0..3 {
+            let temp = closed_temp();
+            let dest = temp.path.join("out");
+            assert!(
+                publish_owned(&closed_tree(), &dest, None, |stage| {
+                    let file = stage.join("nested/Module.bsl");
+                    match action {
+                        0 => fs::write(file, b"modified")?,
+                        1 => fs::remove_file(file)?,
+                        _ => {
+                            fs::remove_file(&file)?;
+                            fs::create_dir(file)?;
+                        }
+                    }
+                    Ok(())
+                })
+                .is_err()
+            );
+            assert!(!dest.exists());
+        }
+    }
+    #[test]
+    fn closed_publisher_accepts_expected_parent_resource_and_refuses_its_extra_sibling() {
+        let payload = b"<?xml opaque invalid\xff";
+        let tree = SourceTree::new(vec![
+            SourceEntry::from_bytes(
+                SourcePath::new("Ext/ParentConfigurations/target/payload.bin").unwrap(),
+                payload.to_vec(),
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+        let temp = closed_temp();
+        let dest = temp.path.join("out");
+        publish_new(&tree, &dest).unwrap();
+        assert_eq!(read_source_tree(&dest).unwrap(), tree);
+        assert_eq!(
+            fs::read(dest.join("Ext/ParentConfigurations/target/payload.bin")).unwrap(),
+            payload
+        );
+        let other = temp.path.join("refused");
+        assert!(
+            publish_owned(&tree, &other, None, |stage| {
+                fs::write(
+                    stage.join("Ext/ParentConfigurations/target/extra.bin"),
+                    b"unowned",
+                )?;
+                Ok(())
+            })
+            .is_err()
+        );
+        assert!(!other.exists());
+    }
+    #[test]
+    fn closed_verifier_directly_refuses_tree_alias_and_empty_directory_without_publication() {
+        let temp = closed_temp();
+        fs::create_dir(temp.path.join("nested")).unwrap();
+        fs::write(temp.path.join("nested/Module.bsl"), b"original").unwrap();
+        reader::ClosedOutput::prepare(&closed_tree(), None)
+            .unwrap()
+            .verify(&temp.path)
+            .unwrap();
+        fs::create_dir(temp.path.join("nested/orphan")).unwrap();
+        assert!(
+            reader::ClosedOutput::prepare(&closed_tree(), None)
+                .unwrap()
+                .verify(&temp.path)
+                .is_err()
+        );
+    }
+    #[test]
+    fn closed_empty_root_success_and_early_destination_sentinel_are_distinct_gates() {
+        let temp = closed_temp();
+        let tree = SourceTree::new(vec![]).unwrap();
+        let dest = temp.path.join("empty");
+        publish_new(&tree, &dest).unwrap();
+        assert_eq!(read_source_tree(&dest).unwrap(), tree);
+        fs::write(dest.join("sentinel.bin"), b"original sentinel").unwrap();
+        let mut called = false;
+        assert!(matches!(
+            publish_owned(&closed_tree(), &dest, None, |_| {
+                called = true;
+                Ok(())
+            }),
+            Err(SourceTreeError::ExistingDestination)
+        ));
+        assert!(!called); // The existing destination refused before the verifier scheduling seam.
+        assert_eq!(
+            fs::read(dest.join("sentinel.bin")).unwrap(),
+            b"original sentinel"
+        );
     }
 }

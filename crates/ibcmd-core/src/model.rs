@@ -447,22 +447,22 @@ impl CanonicalObject {
         validate_item_count(
             "object properties",
             parts.properties.len(),
-            policy.maximum(MAX_OBJECT_PROPERTIES),
+            policy.budget(MAX_OBJECT_PROPERTIES),
         )?;
         validate_item_count(
             "object references",
             parts.references.len(),
-            policy.maximum(MAX_OBJECT_REFERENCES),
+            policy.budget(MAX_OBJECT_REFERENCES),
         )?;
         validate_item_count(
             "object generated types",
             parts.generated_types.len(),
-            policy.maximum(MAX_GENERATED_TYPES),
+            policy.budget(MAX_GENERATED_TYPES),
         )?;
         validate_item_count(
             "object assets",
             parts.assets.len(),
-            policy.maximum(MAX_OBJECT_ASSETS),
+            policy.budget(MAX_OBJECT_ASSETS),
         )?;
         validate_unique_properties(&parts.properties)?;
 
@@ -480,13 +480,13 @@ impl CanonicalObject {
         enforce_member_budget(
             "canonical object",
             object.member_count()?,
-            policy.maximum(MAX_OBJECT_MEMBERS),
+            policy.budget(MAX_OBJECT_MEMBERS),
         )?;
         let retained = measure_object_retained_bytes(&object)?;
         enforce_retained_budget(
             "canonical object",
             retained,
-            policy.maximum(MAX_OBJECT_RETAINED_BYTES),
+            policy.budget(MAX_OBJECT_RETAINED_BYTES),
         )?;
         Ok(object)
     }
@@ -561,9 +561,11 @@ impl CanonicalObject {
 fn validate_item_count(
     field: &'static str,
     actual: usize,
-    maximum: usize,
+    maximum: Option<usize>,
 ) -> Result<(), ModelBuildError> {
-    if actual > maximum {
+    if let Some(maximum) = maximum
+        && actual > maximum
+    {
         return Err(ModelBuildError::TooManyItems {
             field,
             maximum,
@@ -594,9 +596,11 @@ fn checked_add_members(current: usize, additional: usize) -> Result<usize, Model
 fn enforce_member_budget(
     scope: &'static str,
     actual: usize,
-    maximum: usize,
+    maximum: Option<usize>,
 ) -> Result<(), ModelBuildError> {
-    if actual > maximum {
+    if let Some(maximum) = maximum
+        && actual > maximum
+    {
         return Err(ModelBuildError::TooManyMembers {
             scope,
             maximum,
@@ -618,28 +622,18 @@ fn add_property_members(
 }
 
 fn canonical_value_member_count(value: &CanonicalValue) -> Result<usize, ModelBuildError> {
-    let mut count = 1_usize;
-    match value.kind() {
-        CanonicalValueKind::Record(fields) => {
-            for field in fields {
-                count = checked_add_members(count, 1)?;
-                count = checked_add_members(count, canonical_value_member_count(field.value())?)?;
+    let mut count = 0usize;
+    let mut pending = vec![value];
+    while let Some(value) = pending.pop() {
+        count = checked_add_members(count, 1)?;
+        match value.kind() {
+            CanonicalValueKind::Record(fields) => {
+                count = checked_add_members(count, fields.len())?;
+                pending.extend(fields.iter().map(|field| field.value()));
             }
+            CanonicalValueKind::Sequence(values) => pending.extend(values),
+            _ => {}
         }
-        CanonicalValueKind::Sequence(values) => {
-            for child in values {
-                count = checked_add_members(count, canonical_value_member_count(child)?)?;
-            }
-        }
-        CanonicalValueKind::Null
-        | CanonicalValueKind::Bool(_)
-        | CanonicalValueKind::Integer(_)
-        | CanonicalValueKind::Decimal(_)
-        | CanonicalValueKind::Text(_)
-        | CanonicalValueKind::EnumToken(_)
-        | CanonicalValueKind::Reference(_)
-        | CanonicalValueKind::Binary(_)
-        | CanonicalValueKind::AssetReference(_) => {}
     }
     Ok(count)
 }
@@ -653,9 +647,11 @@ fn checked_add_retained(current: usize, additional: usize) -> Result<usize, Mode
 fn enforce_retained_budget(
     scope: &'static str,
     actual: usize,
-    maximum: usize,
+    maximum: Option<usize>,
 ) -> Result<(), ModelBuildError> {
-    if actual > maximum {
+    if let Some(maximum) = maximum
+        && actual > maximum
+    {
         return Err(ModelBuildError::RetainedBytesExceeded {
             scope,
             maximum,
@@ -794,10 +790,14 @@ impl<'de, const MAXIMUM_MEMBERS: usize> Visitor<'de> for BoundedPropertiesVisito
             retained = checked_add_retained(retained, property.name().as_str().len())
                 .and_then(|value| checked_add_retained(value, property.value().retained_byte_len()))
                 .map_err(de::Error::custom)?;
-            enforce_retained_budget("object properties", retained, MAX_OBJECT_RETAINED_BYTES)
-                .map_err(de::Error::custom)?;
+            enforce_retained_budget(
+                "object properties",
+                retained,
+                Some(MAX_OBJECT_RETAINED_BYTES),
+            )
+            .map_err(de::Error::custom)?;
             members = add_property_members(members, &property).map_err(de::Error::custom)?;
-            enforce_member_budget("canonical object", members, MAXIMUM_MEMBERS)
+            enforce_member_budget("canonical object", members, Some(MAXIMUM_MEMBERS))
                 .map_err(de::Error::custom)?;
             properties.push(property);
         }
@@ -877,7 +877,7 @@ impl CanonicalConfiguration {
         validate_item_count(
             "configuration objects",
             objects.len(),
-            policy.maximum(MAX_CONFIGURATION_OBJECTS),
+            policy.budget(MAX_CONFIGURATION_OBJECTS),
         )?;
         validate_configuration_budgets(&objects, policy)?;
         Ok(Self { objects })
@@ -931,13 +931,16 @@ impl CanonicalConfigurationBudget {
         enforce_member_budget(
             "canonical configuration",
             members,
-            self.policy.maximum(MAX_CONFIGURATION_MEMBERS),
+            self.policy.budget(MAX_CONFIGURATION_MEMBERS),
         )?;
-        let retained = checked_add_retained(self.retained, 40 + asset.media_kind().as_str().len())?;
+        let retained = checked_add_retained(
+            self.retained,
+            checked_add_retained(40, asset.media_kind().as_str().len())?,
+        )?;
         enforce_retained_budget(
             "canonical configuration",
             retained,
-            self.policy.maximum(MAX_CONFIGURATION_RETAINED_BYTES),
+            self.policy.budget(MAX_CONFIGURATION_RETAINED_BYTES),
         )?;
         self.members = members;
         self.retained = retained;
@@ -951,19 +954,19 @@ impl CanonicalConfigurationBudget {
         validate_item_count(
             "configuration objects",
             objects,
-            self.policy.maximum(MAX_CONFIGURATION_OBJECTS),
+            self.policy.budget(MAX_CONFIGURATION_OBJECTS),
         )?;
         let members = checked_add_members(self.members, object.member_count()?)?;
         enforce_member_budget(
             "canonical configuration",
             members,
-            self.policy.maximum(MAX_CONFIGURATION_MEMBERS),
+            self.policy.budget(MAX_CONFIGURATION_MEMBERS),
         )?;
         let retained = checked_add_retained(self.retained, object.retained_byte_len())?;
         enforce_retained_budget(
             "canonical configuration",
             retained,
-            self.policy.maximum(MAX_CONFIGURATION_RETAINED_BYTES),
+            self.policy.budget(MAX_CONFIGURATION_RETAINED_BYTES),
         )?;
         *self = Self {
             objects,
@@ -1444,5 +1447,20 @@ mod tests {
                 .to_string()
                 .contains("canonical object exceeds 6 graph members (actual 7)")
         );
+    }
+    #[test]
+    fn source_object_member_measurement_is_iterative_for_genuine_deep_values() {
+        let source = SourceOperationPolicy::Source;
+        let mut value = CanonicalValue::null();
+        for _ in 0..256 {
+            value = CanonicalValue::sequence_with_policy(vec![value], source).unwrap();
+        }
+        let mut object = parts();
+        object.properties = vec![CanonicalField::named_with_policy("deep", value, source).unwrap()];
+        let object = CanonicalObject::new_with_policy(object, source).unwrap();
+        assert_eq!(object.member_count().unwrap(), 259);
+        let clone = object.clone();
+        assert_eq!(clone, object);
+        CanonicalConfiguration::new_with_policy(vec![object], source).unwrap();
     }
 }

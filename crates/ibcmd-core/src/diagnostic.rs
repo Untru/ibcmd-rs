@@ -270,10 +270,10 @@ impl PathSegment {
         value: &str,
         policy: SourceOperationPolicy,
     ) -> Result<Self, DiagnosticBuildError> {
-        validate_text(
+        validate_text_budget(
             "path segment",
             value,
-            policy.maximum(MAX_PATH_NAME_BYTES),
+            policy.budget(MAX_PATH_NAME_BYTES),
             false,
         )?;
         Ok(Self(PathSegmentValue::Name(value.into())))
@@ -456,16 +456,18 @@ macro_rules! diagnostic_path {
                 segments: Vec<PathSegment>,
                 policy: SourceOperationPolicy,
             ) -> Result<Self, DiagnosticBuildError> {
-                let maximum = policy.maximum(MAX_PATH_SEGMENTS);
-                if segments.len() > maximum {
+                let maximum = policy.budget(MAX_PATH_SEGMENTS);
+                if let Some(maximum) = maximum
+                    && segments.len() > maximum
+                {
                     return Err(DiagnosticBuildError::TooManyPathSegments { maximum });
                 }
                 for segment in &segments {
                     if let Some(name) = segment.as_name() {
-                        validate_text(
+                        validate_text_budget(
                             "path segment",
                             name,
-                            policy.maximum(MAX_PATH_NAME_BYTES),
+                            policy.budget(MAX_PATH_NAME_BYTES),
                             false,
                         )?;
                     }
@@ -489,15 +491,17 @@ macro_rules! diagnostic_path {
                 segment: PathSegment,
                 policy: SourceOperationPolicy,
             ) -> Result<(), DiagnosticBuildError> {
-                let maximum = policy.maximum(MAX_PATH_SEGMENTS);
-                if self.0.len() >= maximum {
+                let maximum = policy.budget(MAX_PATH_SEGMENTS);
+                if let Some(maximum) = maximum
+                    && self.0.len() >= maximum
+                {
                     return Err(DiagnosticBuildError::TooManyPathSegments { maximum });
                 }
                 if let Some(name) = segment.as_name() {
-                    validate_text(
+                    validate_text_budget(
                         "path segment",
                         name,
-                        policy.maximum(MAX_PATH_NAME_BYTES),
+                        policy.budget(MAX_PATH_NAME_BYTES),
                         false,
                     )?;
                 }
@@ -508,6 +512,9 @@ macro_rules! diagnostic_path {
                         }
                     }
                 }
+                self.0
+                    .try_reserve(1)
+                    .map_err(|_| DiagnosticBuildError::PathAllocationFailed)?;
                 self.0.push(segment);
                 Ok(())
             }
@@ -584,6 +591,8 @@ pub enum DiagnosticBuildError {
         /// Maximum accepted segments.
         maximum: usize,
     },
+    /// Growing the original path could not allocate storage.
+    PathAllocationFailed,
     /// Context contained too many entries.
     TooManyContextEntries {
         /// Maximum accepted entries.
@@ -614,6 +623,7 @@ impl Display for DiagnosticBuildError {
             Self::TooManyPathSegments { maximum } => {
                 write!(formatter, "path contains more than {maximum} segments")
             }
+            Self::PathAllocationFailed => formatter.write_str("path allocation failed"),
             Self::TooManyContextEntries { maximum } => {
                 write!(formatter, "context contains more than {maximum} entries")
             }
@@ -631,10 +641,20 @@ fn validate_text(
     maximum: usize,
     allow_empty: bool,
 ) -> Result<(), DiagnosticBuildError> {
+    validate_text_budget(field, value, Some(maximum), allow_empty)
+}
+fn validate_text_budget(
+    field: &'static str,
+    value: &str,
+    maximum: Option<usize>,
+    allow_empty: bool,
+) -> Result<(), DiagnosticBuildError> {
     if value.is_empty() && !allow_empty {
         return Err(DiagnosticBuildError::EmptyText { field });
     }
-    if value.len() > maximum {
+    if let Some(maximum) = maximum
+        && value.len() > maximum
+    {
         return Err(DiagnosticBuildError::TextTooLong { field, maximum });
     }
     if value.chars().any(char::is_control) {

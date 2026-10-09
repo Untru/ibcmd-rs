@@ -1,8 +1,9 @@
 use super::*;
 use std::fs::{self, File};
 use std::io::Read;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
+/// Explicit caller-chosen budgets; normal Source reads have no fixed resource cap.
 #[derive(Clone, Copy, Debug)]
 pub struct ReaderLimits {
     pub files: usize,
@@ -32,77 +33,64 @@ impl ReaderLimits {
         {
             return Err(SourceTreeError::InvalidLimits);
         }
-        if self.files > MAX_SOURCE_FILES
-            || self.directories > MAX_SOURCE_DIRECTORIES
-            || self.depth > MAX_SOURCE_DEPTH
-            || self.asset_bytes > MAX_SOURCE_FILE_BYTES
-            || self.total_bytes > MAX_SOURCE_RETAINED_BYTES
-        {
-            return Err(SourceTreeError::InvalidLimits);
-        }
         Ok(self)
     }
 }
+/// A default reader admits complete Source inventories. `new` is an explicit
+/// limited facade; its budget never becomes a serialized source permission.
 #[derive(Default)]
 pub struct SourceTreeReader {
-    limits: ReaderLimits,
+    limits: Option<ReaderLimits>,
 }
 impl SourceTreeReader {
     pub fn new(limits: ReaderLimits) -> Result<Self, SourceTreeError> {
         Ok(Self {
-            limits: limits.validate()?,
+            limits: Some(limits.validate()?),
         })
     }
     pub fn read(&self, root: impl AsRef<Path>) -> Result<SourceTree, SourceTreeError> {
-        read_with_limits(root, self.limits)
+        read_with_budget(root.as_ref(), self.limits, Purpose::OrdinaryInput)
     }
 }
 pub fn read_source_tree(root: impl AsRef<Path>) -> Result<SourceTree, SourceTreeError> {
-    read_with_limits(root, ReaderLimits::default())
+    read_with_budget(root.as_ref(), None, Purpose::OrdinaryInput)
 }
-fn read_with_limits(
+/// Strict authored input retains operational/empty-directory refusal. The
+/// supplied caller budget is explicit and has no absolute Source model ceiling.
+pub fn read_source_tree_strict(
     root: impl AsRef<Path>,
     limits: ReaderLimits,
 ) -> Result<SourceTree, SourceTreeError> {
+    read_with_budget(
+        root.as_ref(),
+        Some(limits.validate()?),
+        Purpose::StrictAuthoredInput,
+    )
+}
+fn read_with_budget(
+    root: &Path,
+    limits: Option<ReaderLimits>,
+    purpose: Purpose,
+) -> Result<SourceTree, SourceTreeError> {
     let mut entries = Vec::new();
-    walk_with_limits(root.as_ref(), limits, &mut |entry| {
+    walk(root, limits, purpose, &mut |_| Ok(()), &mut |entry| {
+        entries
+            .try_reserve(1)
+            .map_err(|_| SourceTreeError::CapacityExceeded)?;
         entries.push(entry);
         Ok(())
     })?;
     SourceTree::new(entries)
 }
 
-/// Strict authored external intake: operational directories are refused rather
-/// than skipped; every directory must contribute an inventoried file. Reuses
-/// existing explicit reader/source-entry limits without introducing new quotas.
-pub fn read_source_tree_strict(
-    root: impl AsRef<Path>,
-    limits: ReaderLimits,
-) -> Result<SourceTree, SourceTreeError> {
-    let mut entries = Vec::new();
-    walk_strict(root.as_ref(), limits.validate()?, &mut |entry| {
-        entries.push(entry);
-        Ok(())
-    })?;
-    SourceTree::new(entries)
-}
-fn walk_strict(
-    root: &Path,
-    limits: ReaderLimits,
-    accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
-) -> Result<(), SourceTreeError> {
-    let metadata = fs::symlink_metadata(root)?;
-    if !metadata.is_dir() || redirect(&metadata) {
-        return Err(SourceTreeError::UnsafePath(root.display().to_string()));
-    }
-    let mut state = State {
-        limits,
-        total: 0,
-        dirs: 1,
-        files: 0,
-        strict: true,
-    };
-    visit(root, root, 0, &mut state, accept)
+// Traversal purpose and resource budget are independent. Only ordinary input
+// skips operational-looking trees; closed staged verification inventories ALL
+// physical entries, including empty directories, through the same walker.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum Purpose {
+    OrdinaryInput,
+    StrictAuthoredInput,
+    ClosedStagedOutput,
 }
 fn redirect(metadata: &fs::Metadata) -> bool {
     #[cfg(windows)]
@@ -126,7 +114,6 @@ fn strict_open(path: &Path) -> Result<File, SourceTreeError> {
     #[cfg(windows)]
     {
         use std::os::windows::fs::OpenOptionsExt;
-        // Retain current regular bytes; neither writers nor deletion are shared.
         options.custom_flags(0x00200000).share_mode(1);
     }
     let file = options.open(path)?;
@@ -136,45 +123,145 @@ fn strict_open(path: &Path) -> Result<File, SourceTreeError> {
     }
     Ok(file)
 }
-
-// Validate a staged tree one file at a time. Re-reading the complete inventory
-// would retain a second copy of every payload just before publication.
+/// Transient exact file/parent-directory domain derived before any staged writes.
+/// Not a second Source model or authority reconstructed from disk observations.
+pub(super) struct ClosedOutput<'a> {
+    files: BTreeMap<&'a str, &'a SourceEntry>,
+    directories: BTreeMap<String, String>,
+    limits: Option<ReaderLimits>,
+}
+impl<'a> ClosedOutput<'a> {
+    pub(super) fn prepare(
+        expected: &'a SourceTree,
+        limits: Option<ReaderLimits>,
+    ) -> Result<Self, SourceTreeError> {
+        expected.validate()?;
+        if let Some(limits) = limits {
+            limits.validate()?;
+            if expected.entries().len() > limits.files {
+                return Err(SourceTreeError::TooManyFiles);
+            }
+            let mut total = 0usize;
+            for entry in expected.entries() {
+                if entry.path().as_str().split('/').count().saturating_sub(1) > limits.depth {
+                    return Err(SourceTreeError::DepthExceeded);
+                }
+                check_asset(entry.path(), entry.bytes().len(), Some(limits))?;
+                total = total
+                    .checked_add(entry.bytes().len())
+                    .ok_or(SourceTreeError::TotalTooLarge)?;
+                if total > limits.total_bytes {
+                    return Err(SourceTreeError::TotalTooLarge);
+                }
+            }
+        }
+        let directories = directory_domain(expected.entries(), limits.map(|l| l.directories))?;
+        let files = expected
+            .entries()
+            .iter()
+            .map(|e| (e.path().as_str(), e))
+            .collect();
+        Ok(Self {
+            files,
+            directories,
+            limits,
+        })
+    }
+    pub(super) fn verify(mut self, root: &Path) -> Result<(), SourceTreeError> {
+        walk(
+            root,
+            self.limits,
+            Purpose::ClosedStagedOutput,
+            &mut |raw| {
+                let fold = raw.chars().flat_map(char::to_lowercase).collect::<String>();
+                match self.directories.remove(&fold) {
+                    Some(expected) if expected == raw => Ok(()),
+                    _ => Err(mismatch()),
+                }
+            },
+            &mut |entry| {
+                let original = self
+                    .files
+                    .remove(entry.path().as_str())
+                    .ok_or_else(mismatch)?;
+                if &entry != original {
+                    return Err(mismatch());
+                }
+                Ok(())
+            },
+        )?;
+        if !self.files.is_empty() || !self.directories.is_empty() {
+            return Err(mismatch());
+        }
+        Ok(())
+    }
+}
+fn mismatch() -> SourceTreeError {
+    SourceTreeError::PathConflict {
+        first: SourcePath::new("staging").expect("fixed safe path"),
+        second: SourcePath::new("tree").expect("fixed safe path"),
+    }
+}
+#[cfg(test)]
 pub(super) fn verify_with_limits(
     root: &Path,
     expected: &SourceTree,
     limits: ReaderLimits,
 ) -> Result<(), SourceTreeError> {
-    let mut remaining = expected
-        .entries()
-        .iter()
-        .map(|entry| (entry.path().as_str(), entry))
-        .collect::<BTreeMap<_, _>>();
-    let mismatch = || SourceTreeError::PathConflict {
-        first: SourcePath::new("staging").expect("fixed safe path"),
-        second: SourcePath::new("tree").expect("fixed safe path"),
-    };
-    walk_with_limits(root, limits, &mut |entry| {
-        let original = remaining
-            .remove(entry.path().as_str())
-            .ok_or_else(mismatch)?;
-        if &entry != original {
-            return Err(mismatch());
-        }
-        Ok(())
-    })?;
-    if !remaining.is_empty() {
-        return Err(mismatch());
+    ClosedOutput::prepare(expected, Some(limits.validate()?))?.verify(root)
+}
+struct State {
+    limits: Option<ReaderLimits>,
+    total: usize,
+    dirs: usize,
+    files: usize,
+}
+fn increment(
+    counter: &mut usize,
+    maximum: Option<usize>,
+    error: fn() -> SourceTreeError,
+) -> Result<(), SourceTreeError> {
+    let next = counter
+        .checked_add(1)
+        .ok_or(SourceTreeError::CapacityExceeded)?;
+    if maximum.is_some_and(|maximum| next > maximum) {
+        return Err(error());
     }
+    *counter = next;
     Ok(())
 }
-
-fn walk_with_limits(
+fn relative(root: &Path, path: &Path) -> Result<String, SourceTreeError> {
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| SourceTreeError::UnsafePath("outside root".into()))?;
+    let mut value = String::new();
+    for component in relative.components() {
+        let text = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| SourceTreeError::UnsafePath("non-UTF8 filename".into()))?;
+        if text.contains('\\') {
+            return Err(SourceTreeError::UnsafePath(text.into()));
+        }
+        if !value.is_empty() {
+            value.push('/');
+        }
+        value
+            .try_reserve(text.len())
+            .map_err(|_| SourceTreeError::CapacityExceeded)?;
+        value.push_str(text);
+    }
+    Ok(value)
+}
+fn walk(
     root: &Path,
-    limits: ReaderLimits,
+    limits: Option<ReaderLimits>,
+    purpose: Purpose,
+    directory: &mut impl FnMut(&str) -> Result<(), SourceTreeError>,
     accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
 ) -> Result<(), SourceTreeError> {
-    let m = fs::symlink_metadata(root)?;
-    if !m.file_type().is_dir() || m.file_type().is_symlink() {
+    let metadata = fs::symlink_metadata(root)?;
+    if !metadata.is_dir() || redirect(&metadata) {
         return Err(SourceTreeError::UnsafePath(root.display().to_string()));
     }
     let mut state = State {
@@ -182,143 +269,141 @@ fn walk_with_limits(
         total: 0,
         dirs: 1,
         files: 0,
-        strict: false,
     };
-    visit(root, root, 0, &mut state, accept)
-}
-struct State {
-    limits: ReaderLimits,
-    total: usize,
-    dirs: usize,
-    files: usize,
-    strict: bool,
-}
-fn visit(
-    root: &Path,
-    dir: &Path,
-    depth: usize,
-    s: &mut State,
-    accept: &mut impl FnMut(SourceEntry) -> Result<(), SourceTreeError>,
-) -> Result<(), SourceTreeError> {
-    if depth > s.limits.depth {
-        return Err(SourceTreeError::DepthExceeded);
+    if limits.is_some_and(|l| state.dirs > l.directories) {
+        return Err(SourceTreeError::TooManyDirectories);
     }
-    if s.strict {
-        let metadata = fs::symlink_metadata(dir)?;
-        if !metadata.is_dir() || redirect(&metadata) {
-            return Err(SourceTreeError::UnsafePath(dir.display().to_string()));
-        }
-    }
-    let mut es = Vec::new();
-    for item in fs::read_dir(dir)? {
-        let e = item?;
-        let ty = e.file_type()?;
-        let n = e.file_name();
-        let n = n
-            .to_str()
-            .ok_or_else(|| SourceTreeError::UnsafePath("non-UTF8 filename".into()))?;
-        if n.contains('\\') {
-            return Err(SourceTreeError::UnsafePath(n.into()));
-        }
-        let entry_path = e.path();
-        let parent_resource = entry_path
-            .strip_prefix(root)
-            .ok()
-            .and_then(|p| p.to_str())
-            .is_some_and(|p| parent_configuration_resource(&p.replace('\\', "/")));
-        if !s.strict && !parent_resource && matches!(n, ".git" | "target" | ".idea" | ".vscode") {
+    directory("")?;
+    // Explicit DFS work stack retains the original sorted traversal, without a
+    // recursive Rust frame for each user-authored directory depth.
+    let mut pending = vec![(root.to_path_buf(), true, 0usize)];
+    while let Some((path, is_dir, depth)) = pending.pop() {
+        if !is_dir {
+            let source_path = SourcePath::new(relative(root, &path)?)?;
+            let bytes = read_complete(&path, &source_path, &mut state)?;
+            accept(SourceEntry::from_bytes(source_path, bytes)?)?;
             continue;
         }
-        if ty.is_symlink()
-            || (!ty.is_file() && !ty.is_dir())
-            || s.strict && redirect(&fs::symlink_metadata(&entry_path)?)
-        {
-            return Err(SourceTreeError::UnsafePath(e.path().display().to_string()));
+        if limits.is_some_and(|l| depth > l.depth) {
+            return Err(SourceTreeError::DepthExceeded);
         }
-        if ty.is_dir() {
-            s.dirs += 1;
-            if s.dirs > s.limits.directories {
-                return Err(SourceTreeError::TooManyDirectories);
-            }
-        } else {
-            s.files += 1;
-            if s.files > s.limits.files {
-                return Err(SourceTreeError::TooManyFiles);
-            }
+        let metadata = fs::symlink_metadata(&path)?;
+        if !metadata.is_dir() || redirect(&metadata) {
+            return Err(SourceTreeError::UnsafePath(path.display().to_string()));
         }
-        es.push((e, ty));
-    }
-    if s.strict && dir != root && es.is_empty() {
-        return Err(SourceTreeError::UnsafePath(dir.display().to_string()));
-    }
-    es.sort_by_key(|(entry, _)| entry.file_name());
-    for (e, ty) in es {
-        if ty.is_dir() {
-            visit(root, &e.path(), depth + 1, s, accept)?
-        } else {
-            let entry_path = e.path();
-            let relative = entry_path
-                .strip_prefix(root)
-                .map_err(|_| SourceTreeError::UnsafePath("outside root".into()))?;
-            let parts = relative
-                .components()
-                .map(|x| {
-                    x.as_os_str()
-                        .to_str()
-                        .ok_or_else(|| SourceTreeError::UnsafePath("non-UTF8".into()))
-                })
-                .collect::<Result<Vec<_>, _>>()?;
-            let path = SourcePath::new(parts.join("/"))?;
-            let announced = usize::try_from(e.metadata()?.len()).map_err(|_| {
-                SourceTreeError::AssetTooLarge {
-                    path: path.clone(),
-                    actual: usize::MAX,
-                }
-            })?;
-            if announced > s.limits.asset_bytes {
-                return Err(SourceTreeError::AssetTooLarge {
-                    path,
-                    actual: announced,
-                });
+        let mut children: Vec<(PathBuf, bool, usize)> = Vec::new();
+        for item in fs::read_dir(&path)? {
+            let entry = item?;
+            let name = entry.file_name();
+            let name = name
+                .to_str()
+                .ok_or_else(|| SourceTreeError::UnsafePath("non-UTF8 filename".into()))?;
+            if name.contains('\\') {
+                return Err(SourceTreeError::UnsafePath(name.into()));
             }
-            if s.total
-                .checked_add(announced)
-                .filter(|x| *x <= s.limits.total_bytes)
-                .is_none()
+            let child = entry.path();
+            let raw = relative(root, &child)?;
+            if purpose == Purpose::OrdinaryInput
+                && !parent_configuration_resource(&raw)
+                && matches!(name, ".git" | "target" | ".idea" | ".vscode")
             {
-                return Err(SourceTreeError::TotalTooLarge);
+                continue;
             }
-            let remaining = s.limits.total_bytes - s.total;
-            let read_limit = s.limits.asset_bytes.min(remaining);
-            let f = if s.strict {
-                strict_open(&e.path())?
+            let metadata = fs::symlink_metadata(&child)?;
+            if redirect(&metadata) || (!metadata.is_file() && !metadata.is_dir()) {
+                return Err(SourceTreeError::UnsafePath(child.display().to_string()));
+            }
+            let next_depth = depth
+                .checked_add(1)
+                .ok_or(SourceTreeError::CapacityExceeded)?;
+            if metadata.is_dir() {
+                // Closed membership is checked before any input-only path rule.
+                directory(&raw)?;
+                increment(&mut state.dirs, limits.map(|l| l.directories), || {
+                    SourceTreeError::TooManyDirectories
+                })?;
             } else {
-                File::open(e.path())?
-            };
-            let mut bytes = Vec::with_capacity(announced.min(read_limit));
-            f.take((read_limit + 1) as u64).read_to_end(&mut bytes)?;
-            if bytes.len() > s.limits.asset_bytes {
-                return Err(SourceTreeError::AssetTooLarge {
-                    path,
-                    actual: bytes.len(),
-                });
+                increment(&mut state.files, limits.map(|l| l.files), || {
+                    SourceTreeError::TooManyFiles
+                })?;
             }
-            if bytes.len() > remaining {
-                return Err(SourceTreeError::TotalTooLarge);
-            }
-            s.total = s
-                .total
-                .checked_add(bytes.len())
-                .ok_or(SourceTreeError::TotalTooLarge)?;
-            if s.total > s.limits.total_bytes {
-                return Err(SourceTreeError::TotalTooLarge);
-            }
-            // Use the same streaming body validation and descriptor identity
-            // rules for both disk inventories and entries built by adapters.
-            accept(SourceEntry::from_bytes(path, bytes)?)?;
+            children
+                .try_reserve(1)
+                .map_err(|_| SourceTreeError::CapacityExceeded)?;
+            children.push((child, metadata.is_dir(), next_depth));
         }
+        if purpose == Purpose::StrictAuthoredInput && path != root && children.is_empty() {
+            return Err(SourceTreeError::UnsafePath(path.display().to_string()));
+        }
+        children.sort_by(|a, b| a.0.file_name().cmp(&b.0.file_name()));
+        pending
+            .try_reserve(children.len())
+            .map_err(|_| SourceTreeError::CapacityExceeded)?;
+        pending.extend(children.into_iter().rev());
     }
     Ok(())
+}
+fn check_asset(
+    path: &SourcePath,
+    actual: usize,
+    limits: Option<ReaderLimits>,
+) -> Result<(), SourceTreeError> {
+    if limits.is_some_and(|l| actual > l.asset_bytes) {
+        return Err(SourceTreeError::AssetTooLarge {
+            path: path.clone(),
+            actual,
+        });
+    }
+    Ok(())
+}
+fn read_complete(
+    path: &Path,
+    source_path: &SourcePath,
+    state: &mut State,
+) -> Result<Vec<u8>, SourceTreeError> {
+    let mut file = strict_open(path)?;
+    let announced =
+        usize::try_from(file.metadata()?.len()).map_err(|_| SourceTreeError::CapacityExceeded)?;
+    check_asset(source_path, announced, state.limits)?;
+    let total = state
+        .total
+        .checked_add(announced)
+        .ok_or(SourceTreeError::TotalTooLarge)?;
+    if state.limits.is_some_and(|l| total > l.total_bytes) {
+        return Err(SourceTreeError::TotalTooLarge);
+    }
+    let mut bytes = Vec::new();
+    let mut scratch = [0u8; 65_536];
+    loop {
+        let count = match file.read(&mut scratch) {
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            result => result?,
+        };
+        if count == 0 {
+            break;
+        }
+        let length = bytes
+            .len()
+            .checked_add(count)
+            .ok_or(SourceTreeError::CapacityExceeded)?;
+        check_asset(source_path, length, state.limits)?;
+        let total = state
+            .total
+            .checked_add(length)
+            .ok_or(SourceTreeError::TotalTooLarge)?;
+        if state.limits.is_some_and(|l| total > l.total_bytes) {
+            return Err(SourceTreeError::TotalTooLarge);
+        }
+        bytes
+            .try_reserve(count)
+            .map_err(|_| SourceTreeError::CapacityExceeded)?;
+        bytes.extend_from_slice(&scratch[..count]);
+    }
+    if bytes.len() != announced || file.metadata()?.len() != announced as u64 {
+        return Err(SourceTreeError::ChangedDuringRead(source_path.clone()));
+    }
+    state.total = total;
+    Ok(bytes)
 }
 pub(crate) fn parent_configuration_resource(path: &str) -> bool {
     let path = path.strip_prefix(".ibcmd-provenance/xml/").unwrap_or(path);

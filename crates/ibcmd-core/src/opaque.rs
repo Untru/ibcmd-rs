@@ -614,8 +614,8 @@ impl OpaqueFacets {
     ) -> Result<Self, OpaqueBuildError> {
         validate_facets(
             &facets,
-            policy.maximum(MAX_OPAQUE_FACETS),
-            policy.maximum(MAX_OPAQUE_RETAINED_BYTES),
+            policy.budget(MAX_OPAQUE_FACETS),
+            policy.budget(MAX_OPAQUE_RETAINED_BYTES),
         )?;
         Ok(Self { facets })
     }
@@ -652,10 +652,12 @@ impl Serialize for OpaqueFacets {
 
 fn validate_facets(
     facets: &[OpaqueFacet],
-    maximum_facets: usize,
-    maximum_retained_bytes: usize,
+    maximum_facets: Option<usize>,
+    maximum_retained_bytes: Option<usize>,
 ) -> Result<(), OpaqueBuildError> {
-    if facets.len() > maximum_facets {
+    if let Some(maximum_facets) = maximum_facets
+        && facets.len() > maximum_facets
+    {
         return Err(OpaqueBuildError::TooManyFacets {
             maximum: maximum_facets,
             actual: facets.len(),
@@ -675,12 +677,14 @@ fn validate_facets(
 fn checked_retained_bytes(
     current: usize,
     additional: usize,
-    maximum: usize,
+    maximum: Option<usize>,
 ) -> Result<usize, OpaqueBuildError> {
     let actual = current
         .checked_add(additional)
         .ok_or(OpaqueBuildError::RetainedByteCountOverflow)?;
-    if actual > maximum {
+    if let Some(maximum) = maximum
+        && actual > maximum
+    {
         return Err(OpaqueBuildError::RetainedBytesExceeded { maximum, actual });
     }
     Ok(actual)
@@ -718,7 +722,7 @@ impl<'de, const MAXIMUM_FACETS: usize, const MAXIMUM_RETAINED_BYTES: usize> Visi
             retained_bytes = checked_retained_bytes(
                 retained_bytes,
                 facet.retained_byte_len().map_err(de::Error::custom)?,
-                MAXIMUM_RETAINED_BYTES,
+                Some(MAXIMUM_RETAINED_BYTES),
             )
             .map_err(de::Error::custom)?;
             facets.push(facet);
@@ -873,11 +877,11 @@ mod tests {
                 .is_err()
         );
         assert_eq!(
-            checked_retained_bytes(MAX_OPAQUE_RETAINED_BYTES, 1, usize::MAX).unwrap(),
+            checked_retained_bytes(MAX_OPAQUE_RETAINED_BYTES, 1, None).unwrap(),
             MAX_OPAQUE_RETAINED_BYTES + 1
         );
         assert!(matches!(
-            checked_retained_bytes(usize::MAX, 1, usize::MAX),
+            checked_retained_bytes(usize::MAX, 1, None),
             Err(OpaqueBuildError::RetainedByteCountOverflow)
         ));
     }
