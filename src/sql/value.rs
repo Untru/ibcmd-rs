@@ -15,6 +15,22 @@ pub enum SqlParam<'a> {
 }
 
 impl SqlParam<'_> {
+    /// Checked physical parameter extent for original-session transport.
+    /// The legacy estimate below retains its existing tuning behavior.
+    pub fn checked_wire_bytes(&self) -> Result<usize> {
+        match self {
+            Self::Text(value) => value
+                .encode_utf16()
+                .count()
+                .checked_mul(2)
+                .ok_or_else(|| anyhow!("SQL text parameter byte extent overflow")),
+            Self::U8(_) => Ok(1),
+            Self::I32(_) => Ok(4),
+            Self::I64(_) => Ok(8),
+            Self::Binary(value) => Ok(value.len()),
+        }
+    }
+
     /// Bytes the parameter adds to a request, for sizing batches.
     pub fn wire_bytes(&self) -> usize {
         match self {
