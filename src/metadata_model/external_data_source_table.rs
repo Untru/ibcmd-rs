@@ -7,7 +7,7 @@
 
 use anyhow::{Result, bail};
 
-use super::brace::{Brace, parse_row};
+use super::brace::{Brace, parse_row, serialize};
 use super::export::values::{header, localized_element};
 use super::export::{Build, atom, el, leaf, list, xml_text};
 use super::xml::Element;
@@ -24,6 +24,17 @@ pub(crate) const KEY_FIELD_REF_TYPE: &str = "157fa490-4ce9-11d4-9415-008048da11f
 /// Type id of the `<InputByString>` reference list.
 pub(crate) const INPUT_BY_STRING_REF_TYPE: &str = "60ea359f-3a6e-48bb-8e71-d2a457572918";
 
+/// What a table record keeps behind its `NameInDataSource`, with the key-field
+/// list, the `InputByString` list and the generated type ids masked, in the one
+/// table measured against the platform (ServiceDesk 3.10.28, 8.5.1.1529). The
+/// writer spells every other table property as that table's value, so a record
+/// that stores anything else is refused instead of written with those values.
+const MEASURED_TABLE_TAIL: &str = r#"00000000-0000-0000-0000-000000000000,0,1,0,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,00000000-0000-0000-0000-000000000000,{0},{0},{0},{0},{0},{0,{0}},<InputByString>,{0},{0},<type>,<type>,00000000-0000-0000-0000-000000000000,{"U"},0,{1,2,0},0,0,{0,"","",{0,0,0}},0,0,00000000-0000-0000-0000-000000000000,1,{0,0},{1,{0,0}},0"#;
+
+/// What a field record keeps around its header, type and `NameInDataSource`,
+/// with the fill value masked; every field of the measured table stores it.
+const MEASURED_FIELD_TAIL: &str = r#"0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},<fill>,0,0,0,0,0,0"#;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FieldRecord {
     pub uuid: String,
@@ -35,12 +46,16 @@ pub(crate) struct FieldRecord {
     pub comment: String,
     /// `{"N",10,0,0}`, `{"S",255,1}`, … as stored.
     pub pattern: Vec<String>,
+    /// `<FillValue>` as stored (`{"N",0}` -> `0`, `{"S",""}` -> empty).
+    pub fill_value: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct TableRecord {
     pub uuid: String,
     pub name: String,
+    /// `NameInDataSource`: the first string the record body stores.
+    pub name_in_source: String,
     /// The header's synonym, as stored (`<Synonym>` content).
     pub synonym: Brace,
     pub comment: String,
@@ -92,7 +107,14 @@ pub(crate) fn from_brace(row: &Brace) -> Result<TableRecord> {
             None => pending = Some(value),
         }
     }
-    let fields = outer
+    let name_index = body
+        .iter()
+        .enumerate()
+        .skip(2)
+        .find_map(|(index, node)| node.as_str().map(|_| index))
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: no NameInDataSource"))?;
+    let name_in_source = body[name_index].as_str().unwrap_or_default().to_string();
+    let collection = outer
         .iter()
         .skip(3)
         .find_map(|candidate| {
@@ -100,37 +122,56 @@ pub(crate) fn from_brace(row: &Brace) -> Result<TableRecord> {
             (collection.first().and_then(|first| first.as_atom()) == Some(FIELD_COLLECTION))
                 .then_some(collection)
         })
-        .map(|collection| {
-            collection
-                .iter()
-                .skip(2)
-                .filter_map(|entry| field_record(entry).ok())
-                .collect::<Vec<_>>()
-        })
-        .unwrap_or_default();
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: no field collection"))?;
+    let fields = collection
+        .iter()
+        .skip(2)
+        .map(field_record)
+        .collect::<Result<Vec<_>>>()?;
     let field_names = fields
         .iter()
         .map(|field| (field.uuid.as_str(), field.name.as_str()))
         .collect::<std::collections::BTreeMap<_, _>>();
     let resolve = |ids: Vec<String>| {
         ids.into_iter()
-            .filter_map(|id| field_names.get(id.as_str()).map(|name| (*name).to_string()))
-            .collect::<Vec<_>>()
+            .map(|id| {
+                field_names
+                    .get(id.as_str())
+                    .map(|name| (*name).to_string())
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("external-data-source table: reference to no field {id}")
+                    })
+            })
+            .collect::<Result<Vec<_>>>()
     };
-    let mut key_fields = Vec::new();
-    let mut input_by_string = Vec::new();
-    for node in body.iter().skip(2) {
-        if let Some(ids) = typed_ref_list(node, KEY_FIELD_REF_TYPE) {
-            key_fields = resolve(ids);
-        }
-    }
+    // `{0,<count>,…}` right behind the name: the key fields.
+    let key_node = body
+        .get(name_index + 1)
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: no key-field list"))?;
+    let key_ids = match list(key_node)? {
+        [kind, count] if kind.as_atom() == Some("0") && count.as_atom() == Some("0") => Vec::new(),
+        _ => typed_ref_list(key_node, KEY_FIELD_REF_TYPE)
+            .ok_or_else(|| anyhow::anyhow!("external-data-source table: key-field list"))?,
+    };
+    let key_fields = resolve(key_ids)?;
     // `InputByString` is stored one level deeper, inside a `{1,…}` wrapper.
-    if let Some(ids) = find_typed_ref_list(&Brace::List(body.to_vec()), INPUT_BY_STRING_REF_TYPE) {
-        input_by_string = resolve(ids);
+    let input_by_string =
+        match find_typed_ref_list(&Brace::List(body.to_vec()), INPUT_BY_STRING_REF_TYPE) {
+            Some(ids) => resolve(ids)?,
+            None => Vec::new(),
+        };
+    let tail = masked_table_tail(&body[name_index + 2..], &generated);
+    if tail != MEASURED_TABLE_TAIL {
+        bail!(
+            "external-data-source table {}: stores properties the writer has not measured \
+             ({tail})",
+            head.name
+        );
     }
     Ok(TableRecord {
         uuid: head.uuid,
         name: head.name,
+        name_in_source,
         synonym: head.synonym,
         comment: head.comment,
         generated,
@@ -178,18 +219,50 @@ fn find_typed_ref_list(node: &Brace, type_id: &str) -> Option<Vec<String>> {
     None
 }
 
+/// The serialized members, line breaks dropped, with the reference lists and
+/// generated type ids replaced by placeholders.
+fn masked_table_tail(members: &[Brace], generated: &[(String, String)]) -> String {
+    let type_ids: std::collections::BTreeSet<&str> = generated
+        .iter()
+        .flat_map(|(type_id, value_id)| [type_id.as_str(), value_id.as_str()])
+        .collect();
+    members
+        .iter()
+        .map(|node| {
+            if find_typed_ref_list(node, INPUT_BY_STRING_REF_TYPE).is_some() {
+                "<InputByString>".to_string()
+            } else if node.as_atom().is_some_and(|atom| type_ids.contains(atom)) {
+                "<type>".to_string()
+            } else {
+                compact(node)
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+fn compact(node: &Brace) -> String {
+    serialize(node).replace("\r\n", "")
+}
+
+fn member<'a>(items: &'a [Brace], index: usize, what: &str) -> Result<&'a Brace> {
+    items
+        .get(index)
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: field record has no {what}"))
+}
+
 fn field_record(entry: &Brace) -> Result<FieldRecord> {
     // `{{1,{27,{2,{3,<header>,{"Pattern",…}},…}},"<name>",0,0},0}`
     let outer = list(entry)?;
-    let wrapped = list(&outer[0])?;
-    let ordinal = list(&wrapped[1])?;
-    let holder = list(&ordinal[1])?;
-    let head = header(&holder[1])?;
-    let pattern = list(&holder[2])?;
-    if pattern.first().and_then(Brace::as_str) != Some("Pattern") {
-        bail!("external-data-source table: field type is not a Pattern");
+    let wrapped = list(member(outer, 0, "wrapper")?)?;
+    let ordinal = list(member(wrapped, 1, "body")?)?;
+    let holder = list(member(ordinal, 1, "header holder")?)?;
+    let head = header(member(holder, 1, "header")?)?;
+    let pattern = list(member(holder, 2, "type")?)?;
+    if pattern.first().and_then(Brace::as_str) != Some("Pattern") || pattern.len() != 2 {
+        bail!("external-data-source table: field type is not a single-type Pattern");
     }
-    let kind = list(&pattern[1])?
+    let kind = list(member(pattern, 1, "type pattern")?)?
         .iter()
         .map(|part| {
             part.as_atom()
@@ -200,17 +273,54 @@ fn field_record(entry: &Brace) -> Result<FieldRecord> {
                 })
         })
         .collect::<Result<Vec<_>>>()?;
+    let name_in_source = member(wrapped, 2, "NameInDataSource")?
+        .as_str()
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: NameInDataSource"))?
+        .to_string();
+    // The fill value is the fourth member from the end of the body:
+    // `{"N",0}`, `{"S",""}`.
+    let fill_index = ordinal
+        .len()
+        .checked_sub(4)
+        .ok_or_else(|| anyhow::anyhow!("external-data-source table: short field body"))?;
+    let fill_value = match list(member(ordinal, fill_index, "fill value")?)? {
+        [code, value] if code.as_str() == kind.first().map(String::as_str) => value
+            .as_atom()
+            .or_else(|| value.as_str())
+            .ok_or_else(|| anyhow::anyhow!("external-data-source table: fill value"))?
+            .to_string(),
+        _ => bail!("external-data-source table: fill value of another type"),
+    };
+    let tail = ordinal
+        .iter()
+        .enumerate()
+        .skip(2)
+        .map(|(index, node)| {
+            if index == fill_index {
+                "<fill>".to_string()
+            } else {
+                compact(node)
+            }
+        })
+        .chain(wrapped.iter().skip(3).map(compact))
+        .chain(outer.iter().skip(1).map(compact))
+        .collect::<Vec<_>>()
+        .join(",");
+    if tail != MEASURED_FIELD_TAIL {
+        bail!(
+            "external-data-source table: field {} stores properties the writer has not \
+             measured ({tail})",
+            head.name
+        );
+    }
     Ok(FieldRecord {
         uuid: head.uuid,
         name: head.name,
-        name_in_source: wrapped
-            .get(2)
-            .and_then(Brace::as_str)
-            .unwrap_or_default()
-            .to_string(),
+        name_in_source,
         synonym: head.synonym,
         comment: head.comment,
         pattern: kind,
+        fill_value,
     })
 }
 
@@ -250,7 +360,7 @@ pub(crate) fn to_element(table: &TableRecord, owner: &str) -> Result<Element> {
     let fields = table
         .fields
         .iter()
-        .map(|field| field_element(field, &full))
+        .map(field_element)
         .collect::<Result<Vec<_>>>()?;
     Ok(el("Table")
         .attr("uuid", &table.uuid)
@@ -272,7 +382,7 @@ fn table_properties(table: &TableRecord, full: &str) -> Result<Element> {
         .child(localized_element("Synonym", &table.synonym)?)
         .child(leaf("Comment", xml_text(&table.comment)))
         .child(leaf("TableType", "Table"))
-        .child(leaf("NameInDataSource", &table.name))
+        .child(leaf("NameInDataSource", &table.name_in_source))
         .child(leaf("ExpressionInDataSource", ""))
         .child(leaf("TableDataType", "ObjectData"))
         .child(el("KeyFields").children(key_field_elements(full, &table.key_fields)))
@@ -308,7 +418,7 @@ fn table_properties(table: &TableRecord, full: &str) -> Result<Element> {
         .child(leaf("DataLockControlMode", "Automatic")))
 }
 
-fn field_element(field: &FieldRecord, table_full: &str) -> Result<Element> {
+fn field_element(field: &FieldRecord) -> Result<Element> {
     let type_element = field_type(&field.pattern)?;
     Ok(el("Field").attr("uuid", &field.uuid).child(
         el("Properties")
@@ -327,7 +437,7 @@ fn field_element(field: &FieldRecord, table_full: &str) -> Result<Element> {
             .child(el("MinValue").attr("nil", "true"))
             .child(el("MaxValue").attr("nil", "true"))
             .child(leaf("FillFromFillingValue", "false"))
-            .child(fill_value(&field.pattern)?)
+            .child(fill_value(field)?)
             .child(leaf("FillChecking", "DontCheck"))
             .child(leaf("ChoiceParameterLinks", ""))
             .child(leaf("ChoiceParameters", ""))
@@ -341,44 +451,48 @@ fn field_element(field: &FieldRecord, table_full: &str) -> Result<Element> {
     ))
 }
 
-/// The platform's field type element: `{"N",digits,fraction}` -> decimal
-/// qualifiers, `{"S",length,allowed}` -> string qualifiers. An unknown code is
-/// refused, not defaulted.
+/// The platform's field type element, by the qualifier rules of
+/// `types_export::type_children`: `{"N",digits,fraction,sign}` (`0` Any, `1`
+/// Nonnegative) and `{"S",length,allowed}` (`0` Fixed, `1` Variable). Any
+/// other code or flag is refused, not defaulted.
 fn field_type(pattern: &[String]) -> Result<Element> {
-    let mut element = el("Type");
-    match pattern.first().map(String::as_str) {
-        Some("N") => {
-            let digits = pattern.get(1).cloned().unwrap_or_default();
-            let fraction = pattern.get(2).cloned().unwrap_or_default();
-            element = element.child(leaf("v8:Type", "xs:decimal")).child(
+    let element = el("Type");
+    Ok(match pattern {
+        [code, digits, fraction, sign] if code == "N" => {
+            let sign = match sign.as_str() {
+                "0" => "Any",
+                "1" => "Nonnegative",
+                other => bail!("external-data-source table: unknown number sign {other:?}"),
+            };
+            element.child(leaf("v8:Type", "xs:decimal")).child(
                 el("v8:NumberQualifiers")
-                    .child(leaf("v8:Digits", digits))
-                    .child(leaf("v8:FractionDigits", fraction))
-                    .child(leaf("v8:AllowedSign", "Any")),
-            );
+                    .child(leaf("v8:Digits", digits.clone()))
+                    .child(leaf("v8:FractionDigits", fraction.clone()))
+                    .child(leaf("v8:AllowedSign", sign)),
+            )
         }
-        Some("S") => {
-            let length = pattern.get(1).cloned().unwrap_or_default();
-            let allowed = match pattern.get(2).map(String::as_str) {
-                Some("1") => "Variable",
-                Some("2") => "Fixed",
+        [code, length, allowed] if code == "S" => {
+            let allowed = match allowed.as_str() {
+                "0" => "Fixed",
+                "1" => "Variable",
                 other => bail!("external-data-source table: unknown string length rule {other:?}"),
             };
-            element = element.child(leaf("v8:Type", "xs:string")).child(
+            element.child(leaf("v8:Type", "xs:string")).child(
                 el("v8:StringQualifiers")
-                    .child(leaf("v8:Length", length))
+                    .child(leaf("v8:Length", length.clone()))
                     .child(leaf("v8:AllowedLength", allowed)),
-            );
+            )
         }
-        other => bail!("external-data-source table: unknown field type code {other:?}"),
-    }
-    Ok(element)
+        other => bail!("external-data-source table: unknown field type {other:?}"),
+    })
 }
 
-fn fill_value(pattern: &[String]) -> Result<Element> {
-    Ok(match pattern.first().map(String::as_str) {
-        Some("N") => leaf("FillValue", "0").attr("type", "xs:decimal"),
-        Some("S") => el("FillValue").attr("type", "xs:string"),
+fn fill_value(field: &FieldRecord) -> Result<Element> {
+    let value = field.fill_value.as_str();
+    Ok(match field.pattern.first().map(String::as_str) {
+        Some("N") => leaf("FillValue", value).attr("type", "xs:decimal"),
+        Some("S") if value.is_empty() => el("FillValue").attr("type", "xs:string"),
+        Some("S") => leaf("FillValue", value).attr("type", "xs:string"),
         other => bail!("external-data-source table: no fill value for {other:?}"),
     })
 }
@@ -504,5 +618,59 @@ mod tests {
             .expect("FillValue");
         assert_eq!(attribute(fill, "type"), Some("xs:decimal"));
         assert_eq!(fill.text, "0");
+    }
+
+    /// `ROW` with the record's own `NameInDataSource` (the body's string, not
+    /// the header's) spelled `other`.
+    fn row_with_name_in_source(other: &str) -> String {
+        let quoted = "\"oc_product_to_1c\"";
+        let header = ROW.find(quoted).expect("header name");
+        let body = header
+            + quoted.len()
+            + ROW[header + quoted.len()..]
+                .find(quoted)
+                .expect("body name");
+        format!("{}\"{other}\"{}", &ROW[..body], &ROW[body + quoted.len()..])
+    }
+
+    #[test]
+    fn writes_the_stored_name_in_data_source() {
+        let table = parse(&row_with_name_in_source("oc_product")).expect("a table row");
+        assert_eq!(table.name, "oc_product_to_1c");
+        assert_eq!(table.name_in_source, "oc_product");
+        let element = to_element(&table, "ВнешнийИсточникДанных1").expect("element");
+        let name_in_source = element.children[1]
+            .children
+            .iter()
+            .find(|child| child.name == "NameInDataSource")
+            .expect("NameInDataSource");
+        assert_eq!(name_in_source.text, "oc_product");
+    }
+
+    #[test]
+    fn refuses_a_table_property_it_has_not_measured() {
+        let row = ROW.replacen("{1,2,0}", "{1,3,0}", 1);
+        assert_ne!(row, ROW);
+        let error = parse(&row).expect_err("an unmeasured table property");
+        assert!(error.to_string().contains("not measured"), "{error}");
+    }
+
+    #[test]
+    fn refuses_a_field_property_it_has_not_measured() {
+        let row = ROW.replacen("{3,0,0}", "{3,1,0}", 1);
+        assert_ne!(row, ROW);
+        let error = parse(&row).expect_err("an unmeasured field property");
+        assert!(error.to_string().contains("field product_id"), "{error}");
+    }
+
+    #[test]
+    fn spells_qualifiers_by_the_type_description_rules() {
+        let fixed = field_type(&["S".into(), "10".into(), "0".into()]).expect("fixed string");
+        assert_eq!(fixed.children[1].children[1].text, "Fixed");
+        let unsigned =
+            field_type(&["N".into(), "5".into(), "0".into(), "1".into()]).expect("unsigned number");
+        assert_eq!(unsigned.children[1].children[2].text, "Nonnegative");
+        assert!(field_type(&["S".into(), "10".into(), "2".into()]).is_err());
+        assert!(field_type(&["N".into(), "5".into(), "0".into()]).is_err());
     }
 }

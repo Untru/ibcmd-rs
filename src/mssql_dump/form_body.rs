@@ -13164,7 +13164,9 @@ fn parse_form_child_item_with_metadata_owners(
     // The root-48 table record carries one extra member at 15 relative to the
     // layout the table properties are calibrated on; dropping it aligns every
     // later forward slot (DefaultItem 16, InitialTreeView 39, EnableStartDrag
-    // 52).
+    // 52).  Unproven layout hypothesis: fitted on one Бухгалтерия 3.0 list
+    // form, see the heuristics register in docs/evidence/rea-matrix-20261022.
+    // It only runs on tag `53`, which the exporter dropped before.
     let legacy_table_trimmed =
         (fields.first().map(|field| field.trim()) == Some("53") && fields.len() > 15).then(|| {
             let mut trimmed = fields.to_vec();
@@ -14343,8 +14345,6 @@ fn parse_form_child_item_with_metadata_owners(
         },
         choice_folders_and_items: if let Some(schema) = table_schema {
             parse_form_table_choice_folders_and_items(schema, &fields)
-        } else if tag == "Table" && matches!(wrapper, "50" | "53") {
-            Some("Items")
         } else if tag == "InputField" {
             field_schema_and_options
                 .as_ref()
@@ -14374,19 +14374,9 @@ fn parse_form_child_item_with_metadata_owners(
         },
         row_picture_data_path: if tag == "Table" {
             parse_form_table_property_bag_string(&fields, TableBagKey::RowPictureDataPath)
+                // The bag spells an absent path as an empty string; only a
+                // real path stops the schema read below.
                 .filter(|value| !value.is_empty())
-                // The bag spells an empty string here, so the legacy fallback
-                // runs only after the emptiness filter.
-                .or_else(|| {
-                    (matches!(wrapper, "50" | "53"))
-                        .then(|| {
-                            data_path_resolution
-                                .as_ref()
-                                .map(|resolved| format!("{}.DefaultPicture", resolved.data_path))
-                        })
-                        .flatten()
-                        .filter(|value| !value.is_empty())
-                })
                 .or_else(|| {
                     table_schema.and_then(|schema| {
                         parse_form_table_row_picture_data_path(
@@ -14522,6 +14512,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
+        // The legacy tables (`50`, `53`) keep no group alignment at the table
+        // offsets; the platform writes none for the sampled ones.  Unproven
+        // (heuristics register), but it writes nothing rather than a guess.
         group_horizontal_align: if tag == "Table" && matches!(wrapper, "50" | "53") {
             None
         } else if let Some((schema, _)) = field_schema_and_options.as_ref() {
@@ -18609,12 +18602,22 @@ fn physical_choice_parameter_link_path(members: &[&str]) -> Option<String> {
     Some(segments.join("/"))
 }
 
+/// Whether a `5007` mirror holds no link (`{5007,0}`).
+fn is_empty_5007_mirror(mirror: &str) -> bool {
+    split_1c_braced_fields(mirror.trim(), 0).is_some_and(|fields| {
+        fields.len() == 2
+            && fields[0].trim().parse::<u32>() == Ok(5007)
+            && fields[1].trim().parse::<u32>() == Ok(0)
+    })
+}
+
 /// The legacy `{5004,…}` link collection: each link stores the bound data path
 /// itself (`{1}` + `{0,<attribute binding>}` for a form attribute,
 /// `{7,<table item>}` + `{0,<column binding>}` for a table column), and the
 /// `5007` mirror is usually empty, so the collection has to be read alone.
 fn parse_legacy_5004_choice_parameter_links(
     primary: &str,
+    attribute_names_by_id: &BTreeMap<String, String>,
     table_name_by_id: &BTreeMap<String, String>,
     table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
     type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
@@ -18647,55 +18650,64 @@ fn parse_legacy_5004_choice_parameter_links(
         };
         index += 1;
         let table_head = split_1c_braced_fields(&first, 0)?;
-        let data_path = if first == "{1}" {
-            let semantic = parse_form_binding_key(&second)
-                .and_then(|key| data_path_by_binding_key.get(&key).cloned())
-                // The legacy link names the choice parameter's own path
-                // (`Объект.Организация`); the route map holds the attribute's
-                // type path (`ВалютаРегламентированногоУчета.Организация`).
-                .map(|path| format!("Объект.{}", path.rsplit('.').next().unwrap_or(&path)));
+        let main_attribute_head =
+            table_head.len() == 1 && table_head[0].trim().parse::<u32>() == Ok(1);
+        let data_path = if main_attribute_head {
+            // `{1}` is form attribute 1, the one the physical spelling
+            // `1/0:<uuid>` starts from. The legacy link names the choice
+            // parameter's own path under it (`Объект.Организация`); the route
+            // map holds the attribute's type path
+            // (`ВалютаРегламентированногоУчета.Организация`).
+            let semantic = table_head
+                .first()
+                .and_then(|id| attribute_names_by_id.get(id.trim()))
+                .zip(
+                    parse_form_binding_key(&second)
+                        .and_then(|key| data_path_by_binding_key.get(&key).cloned()),
+                )
+                .map(|(owner, path)| {
+                    format!("{owner}.{}", path.rsplit('.').next().unwrap_or(&path))
+                });
             match semantic.or(physical) {
                 Some(path) => path,
                 None => return None,
             }
-        } else if table_head.first()?.trim() == "7" {
-            // The uuid in `{7,<uuid>}` is the form container, not a table id;
-            // the table is the one owning this column binding.
+        } else if let [table_id, item_type] = table_head.as_slice()
+            && item_type.trim()
+                == ibcmd_schema::FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE
+        {
+            // `{<table id>,<TableCurrentData item type>}` + `{0,<column>}`: a
+            // column of that table's current data, the pair the `5006`
+            // grammar reads. When the id names no table of the form, the
+            // column's single owning table answers instead.
+            let table_id = table_id.trim();
             let semantic = parse_form_binding_key(&second).and_then(|column_key| {
-                let mut found = Vec::new();
-                for (table_id, columns) in table_column_names_by_id {
-                    if let Some(column) = columns.get(&column_key) {
-                        if let Some(table) = table_name_by_id.get(table_id) {
-                            found.push((
-                                table_id.clone(),
-                                format!("Items.{table}.CurrentData.{column}"),
-                            ));
-                        }
-                    }
-                }
-                match found.as_slice() {
-                    [(table_id, path)] => Some(
-                        type_link_data_path_by_table_column
-                            .get(&(table_id.clone(), column_key.clone()))
-                            .cloned()
-                            .unwrap_or_else(|| path.clone()),
-                    ),
-                    _ => {
-                        let uuid = column_key.rsplit('|').next().unwrap_or(&column_key);
-                        let mut routes = Vec::new();
-                        for ((table_key, candidate), path) in type_link_data_path_by_table_column {
-                            if candidate == &column_key
-                                || candidate.contains(uuid)
-                                || table_key.contains(uuid)
-                            {
-                                routes.push(path.clone());
-                            }
-                        }
-                        routes.sort();
-                        routes.dedup();
-                        routes.first().cloned()
-                    }
-                }
+                let owners: Vec<(&String, &String)> = match table_column_names_by_id
+                    .get(table_id)
+                    .and_then(|columns| columns.get(&column_key))
+                {
+                    Some(column) => table_name_by_id
+                        .get_key_value(table_id)
+                        .map(|(id, _)| vec![(id, column)])
+                        .unwrap_or_default(),
+                    None => table_column_names_by_id
+                        .iter()
+                        .filter_map(|(id, columns)| Some((id, columns.get(&column_key)?)))
+                        .filter(|(id, _)| table_name_by_id.contains_key(*id))
+                        .collect(),
+                };
+                // A column no table or several tables own has no single named
+                // route: the platform's physical spelling stands.
+                let [(owner_id, column)] = owners.as_slice() else {
+                    return None;
+                };
+                let table = table_name_by_id.get(*owner_id)?;
+                Some(
+                    type_link_data_path_by_table_column
+                        .get(&((*owner_id).clone(), column_key.clone()))
+                        .cloned()
+                        .unwrap_or_else(|| format!("Items.{table}.CurrentData.{column}")),
+                )
             });
             match semantic.or(physical) {
                 Some(path) => path,
@@ -19099,22 +19111,7 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         };
         Some(duplicate)
     };
-    if primary.trim_start().starts_with("{5004,") {
-        if let Some(links) = parse_legacy_5004_choice_parameter_links(
-            primary,
-            table_name_by_id,
-            table_column_names_by_id,
-            type_link_data_path_by_table_column,
-            data_path_by_binding_key,
-        ) {
-            return if links.is_empty() {
-                FormChoiceParameterLinks::Empty
-            } else {
-                FormChoiceParameterLinks::Typed(links)
-            };
-        }
-    }
-    match parse_form_input_field_choice_parameter_links_with_metadata(
+    let result = parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
         duplicate,
         attribute_names_by_id,
@@ -19125,7 +19122,30 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         type_link_data_path_by_table_column,
         data_path_by_binding_key,
         object_refs,
-    ) {
+    );
+    // The legacy `5004` spelling is read only where the schema reader refuses
+    // it, so every collection that reader answered keeps its answer; and only
+    // beside an absent or empty `5007` mirror, since the legacy reader cannot
+    // cross-check a populated one.
+    if result.is_err()
+        && primary.trim_start().starts_with("{5004,")
+        && duplicate.is_none_or(is_empty_5007_mirror)
+        && let Some(links) = parse_legacy_5004_choice_parameter_links(
+            primary,
+            attribute_names_by_id,
+            table_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+        )
+    {
+        return if links.is_empty() {
+            FormChoiceParameterLinks::Empty
+        } else {
+            FormChoiceParameterLinks::Typed(links)
+        };
+    }
+    match result {
         Ok(links) if links.is_empty() => FormChoiceParameterLinks::Empty,
         Ok(links) => FormChoiceParameterLinks::Typed(links),
         // On a revision that carries the mirror an unreadable collection is a
@@ -41854,4 +41874,97 @@ fn format_form_chart_settings_body_xml(
         ));
     }
     Some(xml)
+}
+
+#[cfg(test)]
+mod legacy_5004_tests {
+    use super::*;
+
+    const FIELD: &str = "a6087610-0000-4000-8000-000000000001";
+    const COLUMN: &str = "b6087610-0000-4000-8000-000000000002";
+
+    fn paths(
+        primary: &str,
+        attributes: &[(&str, &str)],
+        tables: &[(&str, &str)],
+        columns: &[(&str, &str, &str)],
+    ) -> Option<Vec<String>> {
+        let owned = |pairs: &[(&str, &str)]| {
+            pairs
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect::<BTreeMap<_, _>>()
+        };
+        let mut column_names: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        for (table, key, name) in columns {
+            column_names
+                .entry((*table).to_string())
+                .or_default()
+                .insert((*key).to_string(), (*name).to_string());
+        }
+        let routes = owned(&[(&format!("0|{FIELD}"), "ВалютаУчета.Организация")]);
+        parse_legacy_5004_choice_parameter_links(
+            primary,
+            &owned(attributes),
+            &owned(tables),
+            &column_names,
+            &BTreeMap::new(),
+            &routes,
+        )
+        .map(|links| {
+            links
+                .iter()
+                .map(|link| link.data_path().to_string())
+                .collect()
+        })
+    }
+
+    #[test]
+    fn an_attribute_link_lives_under_form_attribute_one() {
+        let primary = format!(r#"{{5004,1,"Отбор.Организация",2,{{1}},{{0,{FIELD}}},0}}"#);
+        assert_eq!(
+            paths(&primary, &[("1", "Запись")], &[], &[]),
+            Some(vec!["Запись.Организация".to_string()])
+        );
+        // Without attribute 1 there is no named route: the physical spelling.
+        assert_eq!(
+            paths(&primary, &[], &[], &[]),
+            Some(vec![format!("1/0:{FIELD}")])
+        );
+    }
+
+    #[test]
+    fn a_column_link_reads_the_table_its_head_names() {
+        let item = ibcmd_schema::FORM_CHOICE_PARAMETER_LINK_TABLE_CURRENT_DATA_ITEM_TYPE;
+        let primary = format!(r#"{{5004,1,"Отбор.Владелец",2,{{12,{item}}},{{0,{COLUMN}}},0}}"#);
+        let column = format!("0|{COLUMN}");
+        assert_eq!(
+            paths(
+                &primary,
+                &[],
+                &[("7", "Другая"), ("12", "Список")],
+                &[("7", &column, "Владелец"), ("12", &column, "Контрагент")],
+            ),
+            Some(vec!["Items.Список.CurrentData.Контрагент".to_string()])
+        );
+        // A head naming no table of the form, and two tables owning the
+        // column: no single named route, so the physical spelling stands.
+        let unknown = primary.replace("{12,", "{30,");
+        assert_eq!(
+            paths(
+                &unknown,
+                &[],
+                &[("7", "Другая"), ("12", "Список")],
+                &[("7", &column, "Владелец"), ("12", &column, "Контрагент")],
+            ),
+            Some(vec![format!("30:{item}/0:{COLUMN}")])
+        );
+    }
+
+    #[test]
+    fn only_an_empty_5007_mirror_counts_as_empty() {
+        assert!(is_empty_5007_mirror("{5007,0}"));
+        assert!(!is_empty_5007_mirror("{5007,1,\"x\"}"));
+        assert!(!is_empty_5007_mirror("{5006,0}"));
+    }
 }

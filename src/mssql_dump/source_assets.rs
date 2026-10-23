@@ -2464,9 +2464,17 @@ fn write_source_asset_inner(
             };
             // A V2 container carries layout only: the platform generates the
             // list table (and its columns) from the main table's metadata, so
-            // the written XML is knowingly incomplete. Say so once per file
-            // instead of losing it in silence.
+            // the XML written from it is knowingly incomplete. That is a loss,
+            // refused unless the caller accepts it explicitly.
             if body.revision == crate::module_blob::FormBodyRevision::V2 {
+                if !allow_incomplete_v2_forms() {
+                    bail!(
+                        "form {} has the legacy V2 layout: the platform generates its list \
+                         table, which the body does not store, so its XML would be \
+                         incomplete; set {ALLOW_INCOMPLETE_V2_FORMS_ENV}=1 to write it anyway",
+                        asset.primary_path.display()
+                    );
+                }
                 eprintln!(
                     "incomplete form (V2 layout, platform-generated table): {}",
                     asset.primary_path.display()
@@ -6238,4 +6246,13 @@ pub(super) fn push_job_schedule_list_xml(
             values.join(" ")
         ));
     }
+}
+
+/// Opt-in to publishing V2 form bodies without the list table the platform
+/// generates for them (see `SourceAssetKind::Form`).
+pub(super) const ALLOW_INCOMPLETE_V2_FORMS_ENV: &str = "IBCMD_RS_ALLOW_INCOMPLETE_V2_FORMS";
+
+fn allow_incomplete_v2_forms() -> bool {
+    std::env::var(ALLOW_INCOMPLETE_V2_FORMS_ENV)
+        .is_ok_and(|value| value.trim().parse::<u8>() == Ok(1))
 }

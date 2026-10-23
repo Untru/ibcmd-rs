@@ -1,6 +1,5 @@
-//! Standalone, versioned schema knowledge derived from public XML behaviour,
-//! locally inspected EDT model/export metadata, and the platform's own XDTO
-//! package `http://v8.1c.ru/8.3/xcf/logform` extracted from `mngbase_root.res`.
+//! Standalone, versioned schema knowledge derived from public XML behaviour and
+//! locally inspected EDT model/export metadata.
 //!
 //! This crate embeds declarative data only. It neither links to nor starts EDT,
 //! Java, OSGi, platform executables, or native libraries.
@@ -14,9 +13,6 @@ pub mod configuration_v85_projection;
 pub mod external_artifact;
 pub mod external_data_source;
 pub mod external_named;
-pub mod form_attribute_order_v851;
-pub mod xdto_logform_v8327;
-pub mod xdto_logform_v851;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
