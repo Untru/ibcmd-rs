@@ -29,6 +29,7 @@ pub mod bodies_predefined;
 pub mod bodies_rows;
 pub mod bodies_value_table;
 pub(crate) mod external_data_source;
+pub(crate) mod external_data_source_table;
 pub mod objects;
 pub mod registers;
 pub mod root;

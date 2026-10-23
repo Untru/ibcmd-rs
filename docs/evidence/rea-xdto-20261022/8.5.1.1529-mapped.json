@@ -1,0 +1,2719 @@
+{
+  "package": "http://v8.1c.ru/8.3/xcf/logform",
+  "elements": [
+    {
+      "element": "UsualGroup",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": 4,
+          "name": "Group",
+          "xml": "group",
+          "default": "Vertical",
+          "owner": "UsualGroup",
+          "type": "d4p1:FormChildrenGroup"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 0,
+          "name": "ChildrenAlign",
+          "xml": "childrenAlign",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:FormChildrenAlign"
+        },
+        {
+          "id": "0x21",
+          "skip_if": 0,
+          "name": "HorizontalSpacing",
+          "xml": "horizontalSpacing",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x22",
+          "skip_if": 0,
+          "name": "VerticalSpacing",
+          "xml": "verticalSpacing",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 3,
+          "name": "HorizontalAlign",
+          "xml": "horizontalAlign",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 3,
+          "name": "VerticalAlign",
+          "xml": "verticalAlign",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x25",
+          "skip_if": null,
+          "name": "Behavior",
+          "xml": "behavior",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:UsualGroupBehavior"
+        },
+        {
+          "id": "0x26",
+          "skip_if": null,
+          "name": "CollapsedRepresentationTitle",
+          "xml": "collapsedRepresentationTitle",
+          "default": null,
+          "owner": "UsualGroup",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x27",
+          "skip_if": null,
+          "name": "CollapsedRepresentationItem",
+          "xml": "collapsedRepresentationItem",
+          "default": null,
+          "owner": "UsualGroup",
+          "type": null
+        },
+        {
+          "id": "0x28",
+          "skip_if": null,
+          "name": "Collapsed",
+          "xml": "collapsed",
+          "default": "false",
+          "owner": "UsualGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x29",
+          "skip_if": 0,
+          "name": "ControlRepresentation",
+          "xml": "controlRepresentation",
+          "default": "TitleHyperlink",
+          "owner": "UsualGroup",
+          "type": "d4p1:UsualGroupControlRepresentation"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 4,
+          "name": "Representation",
+          "xml": "representation",
+          "default": "WeakSeparation",
+          "owner": "UsualGroup",
+          "type": "d4p1:UsualGroupRepresentation"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null,
+          "name": "ShowLeftMargin",
+          "xml": "showLeftMargin",
+          "default": "true",
+          "owner": "UsualGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": null,
+          "name": "United",
+          "xml": "united",
+          "default": "true",
+          "owner": "UsualGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2d",
+          "skip_if": 0,
+          "name": "ChildItemsWidth",
+          "xml": "childItemsWidth",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:FormChildrenWidth"
+        },
+        {
+          "id": "0x2e",
+          "skip_if": 0,
+          "name": "ChildItemsTitleLocation",
+          "xml": "childItemsTitleLocation",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:ChildrenTitleLocation"
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null,
+          "name": "Format",
+          "xml": "format",
+          "default": null,
+          "owner": "UsualGroup",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x30",
+          "skip_if": 2,
+          "name": "ShowTitle",
+          "xml": "showTitle",
+          "default": "auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x31",
+          "skip_if": null,
+          "name": "TitleDataPath",
+          "xml": "titleDataPath",
+          "default": "",
+          "owner": "UsualGroup",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x32",
+          "skip_if": null,
+          "name": "BackColor",
+          "xml": "backColor",
+          "default": "auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x33",
+          "skip_if": null,
+          "name": "HiddenStateTitleBackColor",
+          "xml": "hiddenStateTitleBackColor",
+          "default": "auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x34",
+          "skip_if": 2,
+          "name": "ThroughAlign",
+          "xml": "throughAlign",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:UsualGroupThroughAlign"
+        },
+        {
+          "id": "0x35",
+          "skip_if": 2,
+          "name": "CurrentRowUse",
+          "xml": "currentRowUse",
+          "default": "DontUse",
+          "owner": "UsualGroup",
+          "type": "d4p1:CurrentRowUse"
+        },
+        {
+          "id": "0x36",
+          "skip_if": null,
+          "name": "AssociatedTableElementId",
+          "xml": "associatedTableElementId",
+          "default": null,
+          "owner": "UsualGroup",
+          "type": null
+        },
+        {
+          "id": "0x37",
+          "skip_if": null,
+          "name": "ShowAsCard",
+          "xml": "showAsCard",
+          "default": "false",
+          "owner": "UsualGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x38",
+          "skip_if": 0,
+          "name": "BackPictureEffect",
+          "xml": "backPictureEffect",
+          "default": "Auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:PictureRepresentationEffect"
+        },
+        {
+          "id": "0x39",
+          "skip_if": 0,
+          "name": "CardRepresentationType",
+          "xml": "cardRepresentationType",
+          "default": "Usual",
+          "owner": "UsualGroup",
+          "type": "d4p1:CardRepresentationType"
+        },
+        {
+          "id": "0x3a",
+          "skip_if": null,
+          "name": "Hyperlink",
+          "xml": "hyperlink",
+          "default": "false",
+          "owner": "UsualGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x3b",
+          "skip_if": null,
+          "name": "BackPicture",
+          "xml": "backPicture",
+          "default": null,
+          "owner": "UsualGroup",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x3c",
+          "skip_if": 2,
+          "name": "ScrollOnCompress",
+          "xml": "scrollOnCompress",
+          "default": "auto",
+          "owner": "UsualGroup",
+          "type": "d4p1:BWAValue"
+        }
+      ]
+    },
+    {
+      "element": "Table",
+      "properties": [
+        {
+          "id": "0xc",
+          "skip_if": null,
+          "name": "name",
+          "xml": "name",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:string"
+        },
+        {
+          "id": "0xb",
+          "skip_if": null,
+          "name": "id",
+          "xml": "id",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0xd",
+          "skip_if": 0,
+          "name": "DisplayImportance",
+          "xml": "displayImportance",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "d4p1:DisplayImportance"
+        },
+        {
+          "id": "0xe",
+          "skip_if": 1,
+          "name": "Representation",
+          "xml": "representation",
+          "default": "HierarchicalList",
+          "owner": "Table",
+          "type": "d4p1:TableRepresentation"
+        },
+        {
+          "id": "0xf",
+          "skip_if": null,
+          "name": "Visible",
+          "xml": "visible",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x10",
+          "skip_if": null,
+          "name": "UserVisible",
+          "xml": "userVisible",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:AdjustableBoolean"
+        },
+        {
+          "id": "0x51",
+          "skip_if": 0,
+          "name": "TitleLocation",
+          "xml": "titleLocation",
+          "default": "None",
+          "owner": "Table",
+          "type": "d4p1:FormElementTitleLocation"
+        },
+        {
+          "id": "0x4e",
+          "skip_if": 0,
+          "name": "TitleHeight",
+          "xml": "titleHeight",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x11",
+          "skip_if": 1,
+          "name": "CommandBarLocation",
+          "xml": "commandBarLocation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:FormElementCommandBarLocation"
+        },
+        {
+          "id": "0x12",
+          "skip_if": null,
+          "name": "Autofill",
+          "xml": "autofill",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x13",
+          "skip_if": null,
+          "name": "Enabled",
+          "xml": "enabled",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x14",
+          "skip_if": null,
+          "name": "ReadOnly",
+          "xml": "readOnly",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x15",
+          "skip_if": 2,
+          "name": "SkipOnInput",
+          "xml": "skipOnInput",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x16",
+          "skip_if": null,
+          "name": "DefaultItem",
+          "xml": "defaultItem",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x17",
+          "skip_if": null,
+          "name": "ChangeRowSet",
+          "xml": "changeRowSet",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x18",
+          "skip_if": null,
+          "name": "ChangeRowOrder",
+          "xml": "changeRowOrder",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x19",
+          "skip_if": 0,
+          "name": "Width",
+          "xml": "width",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1a",
+          "skip_if": null,
+          "name": "AutoMaxWidth",
+          "xml": "autoMaxWidth",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x1b",
+          "skip_if": 0,
+          "name": "MaxWidth",
+          "xml": "maxWidth",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1c",
+          "skip_if": 0,
+          "name": "MinWidth",
+          "xml": "minWidth",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 0,
+          "name": "Height",
+          "xml": "height",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1e",
+          "skip_if": null,
+          "name": "AutoMaxHeight",
+          "xml": "autoMaxHeight",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x1f",
+          "skip_if": 0,
+          "name": "MaxHeight",
+          "xml": "maxHeight",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 0,
+          "name": "HeightInTableRows",
+          "xml": "heightInTableRows",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x21",
+          "skip_if": 0,
+          "name": "HeightControlVariant",
+          "xml": "heightControlVariant",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableHeightControlVariant"
+        },
+        {
+          "id": "0x22",
+          "skip_if": null,
+          "name": "AutoMaxRowsCount",
+          "xml": "autoMaxRowsCount",
+          "default": null,
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 0,
+          "name": "MaxRowsCount",
+          "xml": "maxRowsCount",
+          "default": null,
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x24",
+          "skip_if": null,
+          "name": "ChoiceMode",
+          "xml": "choiceMode",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x25",
+          "skip_if": null,
+          "name": "MultipleChoice",
+          "xml": "multipleChoice",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x26",
+          "skip_if": 0,
+          "name": "RowInputMode",
+          "xml": "rowInputMode",
+          "default": "EndOfList",
+          "owner": "Table",
+          "type": "d4p1:TableRowInputMode"
+        },
+        {
+          "id": "0x27",
+          "skip_if": 1,
+          "name": "SelectionMode",
+          "xml": "selectionMode",
+          "default": "MultiRow",
+          "owner": "Table",
+          "type": "d4p1:TableSelectionMode"
+        },
+        {
+          "id": "0x28",
+          "skip_if": 2,
+          "name": "RowSelectionMode",
+          "xml": "rowSelectionMode",
+          "default": "Cell",
+          "owner": "Table",
+          "type": "d4p1:TableRowSelectionMode"
+        },
+        {
+          "id": "0x29",
+          "skip_if": null,
+          "name": "Header",
+          "xml": "header",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 1,
+          "name": "HeaderHeight",
+          "xml": "headerHeight",
+          "default": "1",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null,
+          "name": "Footer",
+          "xml": "footer",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": 1,
+          "name": "FooterHeight",
+          "xml": "footerHeight",
+          "default": "1",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x2d",
+          "skip_if": 2,
+          "name": "HorizontalScrollBar",
+          "xml": "horizontalScrollBar",
+          "default": "AutoUse",
+          "owner": "Table",
+          "type": "d4p1:TableScrollBarUse"
+        },
+        {
+          "id": "0x2e",
+          "skip_if": 2,
+          "name": "VerticalScrollBar",
+          "xml": "verticalScrollBar",
+          "default": "AutoUse",
+          "owner": "Table",
+          "type": "d4p1:TableScrollBarUse"
+        },
+        {
+          "id": "0x31",
+          "skip_if": 2,
+          "name": "HorizontalLinesBWA",
+          "xml": "horizontalLinesBWA",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x32",
+          "skip_if": 2,
+          "name": "VerticalLinesBWA",
+          "xml": "verticalLinesBWA",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x33",
+          "skip_if": null,
+          "name": "FixedLeft",
+          "xml": "fixedLeft",
+          "default": "4294967295",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x34",
+          "skip_if": null,
+          "name": "FixedRight",
+          "xml": "fixedRight",
+          "default": "4294967295",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x36",
+          "skip_if": 2,
+          "name": "UseAlternationRowColorBWA",
+          "xml": "useAlternationRowColorBWA",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x37",
+          "skip_if": null,
+          "name": "AutoInsertNewRow",
+          "xml": "autoInsertNewRow",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x38",
+          "skip_if": 2,
+          "name": "AutoAddIncomplete",
+          "xml": "autoAddIncomplete",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x39",
+          "skip_if": 2,
+          "name": "AutoMarkIncomplete",
+          "xml": "autoMarkIncomplete",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x3a",
+          "skip_if": 2,
+          "name": "MarkRequiredComplete",
+          "xml": "markRequiredComplete",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x3b",
+          "skip_if": 2,
+          "name": "SearchOnInput",
+          "xml": "searchOnInput",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:SearchOnInput"
+        },
+        {
+          "id": "0x3c",
+          "skip_if": 2,
+          "name": "InitialListView",
+          "xml": "initialListView",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableInitialListView"
+        },
+        {
+          "id": "0x3d",
+          "skip_if": 0,
+          "name": "InitialTreeView",
+          "xml": "initialTreeView",
+          "default": "NoExpand",
+          "owner": "Table",
+          "type": "d4p1:TableInitialTreeView"
+        },
+        {
+          "id": "0x3e",
+          "skip_if": 0,
+          "name": "InitialRowActivation",
+          "xml": "initialRowActivation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableInitialRowActivation"
+        },
+        {
+          "id": "0x3f",
+          "skip_if": 0,
+          "name": "RowActionsShowType",
+          "xml": "rowActionsShowType",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableRowActionsShowType"
+        },
+        {
+          "id": "0x40",
+          "skip_if": 0,
+          "name": "Output",
+          "xml": "output",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:UseOutput"
+        },
+        {
+          "id": "0x41",
+          "skip_if": null,
+          "name": "HorizontalStretch",
+          "xml": "horizontalStretch",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x42",
+          "skip_if": null,
+          "name": "VerticalStretch",
+          "xml": "verticalStretch",
+          "default": "true",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x43",
+          "skip_if": null,
+          "name": "EnableStartDrag",
+          "xml": "enableStartDrag",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x44",
+          "skip_if": null,
+          "name": "EnableDrag",
+          "xml": "enableDrag",
+          "default": "false",
+          "owner": "Table",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x45",
+          "skip_if": 1,
+          "name": "FileDragMode",
+          "xml": "fileDragMode",
+          "default": "AsFileRef",
+          "owner": "Table",
+          "type": "d4p1:FileDragMode"
+        },
+        {
+          "id": "0x46",
+          "skip_if": null,
+          "name": "DataPath",
+          "xml": "dataPath",
+          "default": "",
+          "owner": "Table",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x47",
+          "skip_if": null,
+          "name": "RowPictureDataPath",
+          "xml": "rowPictureDataPath",
+          "default": "",
+          "owner": "Table",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x48",
+          "skip_if": null,
+          "name": "RowsPicture",
+          "xml": "rowsPicture",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x49",
+          "skip_if": null,
+          "name": "TextColor",
+          "xml": "textColor",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x4a",
+          "skip_if": null,
+          "name": "BackColor",
+          "xml": "backColor",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x4b",
+          "skip_if": null,
+          "name": "BorderColor",
+          "xml": "borderColor",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x4c",
+          "skip_if": null,
+          "name": "Font",
+          "xml": "font",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x4d",
+          "skip_if": null,
+          "name": "Title",
+          "xml": "title",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x50",
+          "skip_if": null,
+          "name": "TitleTextColor",
+          "xml": "titleTextColor",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x4f",
+          "skip_if": null,
+          "name": "TitleFont",
+          "xml": "titleFont",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x52",
+          "skip_if": 0,
+          "name": "Shortcut",
+          "xml": "shortcut",
+          "default": "",
+          "owner": "Table",
+          "type": "d4p1:ShortCutType"
+        },
+        {
+          "id": "0x53",
+          "skip_if": null,
+          "name": "CommandSet",
+          "xml": "commandSet",
+          "default": null,
+          "owner": "Table",
+          "type": "d3p1:CommandsContent"
+        },
+        {
+          "id": "0x54",
+          "skip_if": null,
+          "name": "ToolTip",
+          "xml": "toolTip",
+          "default": null,
+          "owner": "Table",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x55",
+          "skip_if": 0,
+          "name": "ToolTipRepresentation",
+          "xml": "toolTipRepresentation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TooltipRepresentation"
+        },
+        {
+          "id": "0x56",
+          "skip_if": 0,
+          "name": "SearchStringLocation",
+          "xml": "searchStringLocation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:SearchStringLocation"
+        },
+        {
+          "id": "0x57",
+          "skip_if": 0,
+          "name": "ViewStatusLocation",
+          "xml": "viewStatusLocation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:ViewStatusLocation"
+        },
+        {
+          "id": "0x58",
+          "skip_if": 0,
+          "name": "SearchControlLocation",
+          "xml": "searchControlLocation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:SearchControlLocation"
+        },
+        {
+          "id": "0x59",
+          "skip_if": 3,
+          "name": "GroupHorizontalAlign",
+          "xml": "groupHorizontalAlign",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x5a",
+          "skip_if": 3,
+          "name": "GroupVerticalAlign",
+          "xml": "groupVerticalAlign",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x5b",
+          "skip_if": 0,
+          "name": "RefreshRequest",
+          "xml": "refreshRequest",
+          "default": "None",
+          "owner": "Table",
+          "type": "d4p1:RefreshRequestMethod"
+        },
+        {
+          "id": "0x5c",
+          "skip_if": 0,
+          "name": "CurrentRowUse",
+          "xml": "currentRowUse",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableCurrentRowUse"
+        },
+        {
+          "id": "0x5d",
+          "skip_if": 0,
+          "name": "BehaviorOnHorizontalCompression",
+          "xml": "behaviorOnHorizontalCompression",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:TableBehaviorOnHorizontalCompression"
+        },
+        {
+          "id": "0x78",
+          "skip_if": 0,
+          "name": "OnMainServerUnavalableBehavior",
+          "xml": "onMainServerUnavalableBehavior",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:OnMainServerUnavalableBehavior"
+        },
+        {
+          "id": "0x5e",
+          "skip_if": 0,
+          "name": "HierarchyPanelLocation",
+          "xml": "hierarchyPanelLocation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:HierarchyPanelLocation"
+        },
+        {
+          "id": "0x5f",
+          "skip_if": 0,
+          "name": "SaveColors",
+          "xml": "saveColors",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:SaveTableAppearance"
+        },
+        {
+          "id": "0x60",
+          "skip_if": 0,
+          "name": "IconSaveColorsKey",
+          "xml": "iconSaveColorsKey",
+          "default": null,
+          "owner": "Table",
+          "type": "xs:string"
+        },
+        {
+          "id": "0x61",
+          "skip_if": null,
+          "name": "ShapeSaveColorsKey",
+          "xml": "shapeSaveColorsKey",
+          "default": null,
+          "owner": "Table",
+          "type": "xs:string"
+        },
+        {
+          "id": "0x62",
+          "skip_if": null,
+          "name": "ShowCommandBar",
+          "xml": "showCommandBar",
+          "default": "auto",
+          "owner": "Table",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x65",
+          "skip_if": 0,
+          "name": "MaxCardHeight",
+          "xml": "maxCardHeight",
+          "default": "0",
+          "owner": "Table",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x66",
+          "skip_if": 0,
+          "name": "CardBehaviorOnVerticalCompression",
+          "xml": "cardBehaviorOnVerticalCompression",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:CardBehaviorOnVerticalCompression"
+        },
+        {
+          "id": "0x67",
+          "skip_if": 0,
+          "name": "CellHyperlinksRepresentation",
+          "xml": "cellHyperlinksRepresentation",
+          "default": "Auto",
+          "owner": "Table",
+          "type": "d4p1:CellHyperlinksRepresentation"
+        }
+      ]
+    },
+    {
+      "element": "Button",
+      "properties": [
+        {
+          "id": "0xc",
+          "skip_if": null,
+          "name": "name",
+          "xml": "name",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:string"
+        },
+        {
+          "id": "0xb",
+          "skip_if": null,
+          "name": "id",
+          "xml": "id",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0xd",
+          "skip_if": 0,
+          "name": "DisplayImportance",
+          "xml": "displayImportance",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "d4p1:DisplayImportance"
+        },
+        {
+          "id": "0xe",
+          "skip_if": 0,
+          "name": "Type",
+          "xml": "type",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:ManagedFormButtonType"
+        },
+        {
+          "id": "0x12",
+          "skip_if": null,
+          "name": "Visible",
+          "xml": "visible",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x13",
+          "skip_if": null,
+          "name": "UserVisible",
+          "xml": "userVisible",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:AdjustableBoolean"
+        },
+        {
+          "id": "0x2e",
+          "skip_if": 0,
+          "name": "TitleHeight",
+          "xml": "titleHeight",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x14",
+          "skip_if": 3,
+          "name": "Representation",
+          "xml": "representation",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ButtonRepresentation"
+        },
+        {
+          "id": "0x15",
+          "skip_if": null,
+          "name": "DefaultButton",
+          "xml": "defaultButton",
+          "default": "false",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x16",
+          "skip_if": 2,
+          "name": "SkipOnInput",
+          "xml": "skipOnInput",
+          "default": "auto",
+          "owner": "Button",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x17",
+          "skip_if": null,
+          "name": "Enabled",
+          "xml": "enabled",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x18",
+          "skip_if": null,
+          "name": "DefaultItem",
+          "xml": "defaultItem",
+          "default": "false",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0,
+          "name": "Width",
+          "xml": "width",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1b",
+          "skip_if": null,
+          "name": "AutoMaxWidth",
+          "xml": "autoMaxWidth",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x1c",
+          "skip_if": 0,
+          "name": "MaxWidth",
+          "xml": "maxWidth",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 0,
+          "name": "MinWidth",
+          "xml": "minWidth",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1e",
+          "skip_if": 0,
+          "name": "Height",
+          "xml": "height",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1f",
+          "skip_if": null,
+          "name": "AutoMaxHeight",
+          "xml": "autoMaxHeight",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 0,
+          "name": "MaxHeight",
+          "xml": "maxHeight",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x21",
+          "skip_if": null,
+          "name": "HorizontalStretch",
+          "xml": "horizontalStretch",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x22",
+          "skip_if": null,
+          "name": "VerticalStretch",
+          "xml": "verticalStretch",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 3,
+          "name": "GroupHorizontalAlign",
+          "xml": "groupHorizontalAlign",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 3,
+          "name": "GroupVerticalAlign",
+          "xml": "groupVerticalAlign",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x25",
+          "skip_if": 2,
+          "name": "PlacementArea",
+          "xml": "placementArea",
+          "default": "userCmds",
+          "owner": "Button",
+          "type": "d4p1:MenuElementPlacementArea"
+        },
+        {
+          "id": "0x26",
+          "skip_if": null,
+          "name": "Check",
+          "xml": "check",
+          "default": "false",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x10",
+          "skip_if": null,
+          "name": "CommandName",
+          "xml": "commandName",
+          "default": "",
+          "owner": "Button",
+          "type": "xs:string"
+        },
+        {
+          "id": "0x11",
+          "skip_if": null,
+          "name": "Parameter",
+          "xml": "parameter",
+          "default": null,
+          "owner": "Button",
+          "type": null
+        },
+        {
+          "id": "0xf",
+          "skip_if": null,
+          "name": "DataPath",
+          "xml": "dataPath",
+          "default": "",
+          "owner": "Button",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x27",
+          "skip_if": null,
+          "name": "TextColor",
+          "xml": "textColor",
+          "default": "auto",
+          "owner": "Button",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x28",
+          "skip_if": null,
+          "name": "BackColor",
+          "xml": "backColor",
+          "default": "auto",
+          "owner": "Button",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x29",
+          "skip_if": null,
+          "name": "BorderColor",
+          "xml": "borderColor",
+          "default": "auto",
+          "owner": "Button",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": null,
+          "name": "Font",
+          "xml": "font",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": 0,
+          "name": "Shortcut",
+          "xml": "shortcut",
+          "default": "",
+          "owner": "Button",
+          "type": "d4p1:ShortCutType"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": null,
+          "name": "Picture",
+          "xml": "picture",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x2d",
+          "skip_if": null,
+          "name": "Title",
+          "xml": "title",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x2f",
+          "skip_if": 0,
+          "name": "ToolTipRepresentation",
+          "xml": "toolTipRepresentation",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:TooltipRepresentation"
+        },
+        {
+          "id": "0x30",
+          "skip_if": 3,
+          "name": "RepresentationInContextMenu",
+          "xml": "representationInContextMenu",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:RepresentationInContextMenu"
+        },
+        {
+          "id": "0x31",
+          "skip_if": 0,
+          "name": "Shape",
+          "xml": "shape",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ButtonShape"
+        },
+        {
+          "id": "0x32",
+          "skip_if": 0,
+          "name": "ShapeRepresentation",
+          "xml": "shapeRepresentation",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ButtonShapeRepresentation"
+        },
+        {
+          "id": "0x33",
+          "skip_if": 0,
+          "name": "PictureLocation",
+          "xml": "pictureLocation",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:FormButtonPictureLocation"
+        },
+        {
+          "id": "0x34",
+          "skip_if": 0,
+          "name": "LocationInCommandBar",
+          "xml": "locationInCommandBar",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:ButtonLocationInCommandBar"
+        },
+        {
+          "id": "0x35",
+          "skip_if": null,
+          "name": "CommandUniqueness",
+          "xml": "commandUniqueness",
+          "default": "true",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x36",
+          "skip_if": 0,
+          "name": "OnMainServerUnavalableBehavior",
+          "xml": "onMainServerUnavalableBehavior",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:OnMainServerUnavalableBehavior"
+        },
+        {
+          "id": "0x37",
+          "skip_if": null,
+          "name": "ShowAsCard",
+          "xml": "showAsCard",
+          "default": "false",
+          "owner": "Button",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x39",
+          "skip_if": null,
+          "name": "BackPicture",
+          "xml": "backPicture",
+          "default": null,
+          "owner": "Button",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x38",
+          "skip_if": 0,
+          "name": "BackPictureEffect",
+          "xml": "backPictureEffect",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:PictureRepresentationEffect"
+        },
+        {
+          "id": "0x3a",
+          "skip_if": 0,
+          "name": "CardPictureAndTitleAlign",
+          "xml": "cardPictureAndTitleAlign",
+          "default": "Auto",
+          "owner": "Button",
+          "type": "d4p1:CardPictureAndTitleAlignVariant"
+        },
+        {
+          "id": "0x3b",
+          "skip_if": 0,
+          "name": "PictureHeight",
+          "xml": "pictureHeight",
+          "default": "0",
+          "owner": "Button",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x3c",
+          "skip_if": 1,
+          "name": "ButtonImportance",
+          "xml": "buttonImportance",
+          "default": "Normal",
+          "owner": "Button",
+          "type": "d4p1:ButtonImportance"
+        }
+      ]
+    },
+    {
+      "element": "Field",
+      "properties": [
+        {
+          "id": "0xc",
+          "skip_if": null,
+          "name": "name",
+          "xml": "name",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:string"
+        },
+        {
+          "id": "0xb",
+          "skip_if": null,
+          "name": "id",
+          "xml": "id",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0xd",
+          "skip_if": 0,
+          "name": "DisplayImportance",
+          "xml": "displayImportance",
+          "default": null,
+          "owner": "FormItemBase",
+          "type": "d4p1:DisplayImportance"
+        },
+        {
+          "id": "0xe",
+          "skip_if": null,
+          "name": "DataPath",
+          "xml": "dataPath",
+          "default": "",
+          "owner": "Field",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0xf",
+          "skip_if": null,
+          "name": "Visible",
+          "xml": "visible",
+          "default": "true",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x10",
+          "skip_if": null,
+          "name": "UserVisible",
+          "xml": "userVisible",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:AdjustableBoolean"
+        },
+        {
+          "id": "0x11",
+          "skip_if": null,
+          "name": "DefaultItem",
+          "xml": "defaultItem",
+          "default": "false",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x12",
+          "skip_if": null,
+          "name": "Enabled",
+          "xml": "enabled",
+          "default": "true",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x13",
+          "skip_if": null,
+          "name": "ReadOnly",
+          "xml": "readOnly",
+          "default": "false",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x14",
+          "skip_if": 2,
+          "name": "SkipOnInput",
+          "xml": "skipOnInput",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x15",
+          "skip_if": null,
+          "name": "Title",
+          "xml": "title",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x16",
+          "skip_if": null,
+          "name": "TitleTextColor",
+          "xml": "titleTextColor",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x17",
+          "skip_if": null,
+          "name": "TitleBackColor",
+          "xml": "titleBackColor",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x18",
+          "skip_if": null,
+          "name": "TitleFont",
+          "xml": "titleFont",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x19",
+          "skip_if": 1,
+          "name": "TitleLocation",
+          "xml": "titleLocation",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:FormElementTitleLocation"
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0,
+          "name": "TitleHeight",
+          "xml": "titleHeight",
+          "default": "0",
+          "owner": "Field",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x1b",
+          "skip_if": null,
+          "name": "ToolTip",
+          "xml": "toolTip",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x1c",
+          "skip_if": 0,
+          "name": "ToolTipRepresentation",
+          "xml": "toolTipRepresentation",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:TooltipRepresentation"
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 2,
+          "name": "WarningOnEditRepresentation",
+          "xml": "warningOnEditRepresentation",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:WarningOnEditRepresentation"
+        },
+        {
+          "id": "0x1e",
+          "skip_if": null,
+          "name": "WarningOnEdit",
+          "xml": "warningOnEdit",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x1f",
+          "skip_if": 0,
+          "name": "Shortcut",
+          "xml": "shortcut",
+          "default": "",
+          "owner": "Field",
+          "type": "d4p1:ShortCutType"
+        },
+        {
+          "id": "0x20",
+          "skip_if": null,
+          "name": "CommandSet",
+          "xml": "commandSet",
+          "default": null,
+          "owner": "Field",
+          "type": "d3p1:CommandsContent"
+        },
+        {
+          "id": "0x21",
+          "skip_if": 3,
+          "name": "HorizontalAlign",
+          "xml": "horizontalAlign",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x22",
+          "skip_if": 3,
+          "name": "VerticalAlign",
+          "xml": "verticalAlign",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 3,
+          "name": "GroupHorizontalAlign",
+          "xml": "groupHorizontalAlign",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 3,
+          "name": "GroupVerticalAlign",
+          "xml": "groupVerticalAlign",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x26",
+          "skip_if": 1,
+          "name": "EditMode",
+          "xml": "editMode",
+          "default": "EnterOnInput",
+          "owner": "Field",
+          "type": "d4p1:TableFieldEditMode"
+        },
+        {
+          "id": "0x27",
+          "skip_if": 0,
+          "name": "FixingInTable",
+          "xml": "fixingInTable",
+          "default": "None",
+          "owner": "Field",
+          "type": "d4p1:FormFixedInTable"
+        },
+        {
+          "id": "0x28",
+          "skip_if": null,
+          "name": "CellHyperlink",
+          "xml": "cellHyperlink",
+          "default": "false",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x29",
+          "skip_if": null,
+          "name": "AutoCellHeight",
+          "xml": "autoCellHeight",
+          "default": "false",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": null,
+          "name": "ShowInHeader",
+          "xml": "showInHeader",
+          "default": "true",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null,
+          "name": "HeaderPicture",
+          "xml": "headerPicture",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": 0,
+          "name": "HeaderHorizontalAlign",
+          "xml": "headerHorizontalAlign",
+          "default": "Left",
+          "owner": "Field",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x2d",
+          "skip_if": null,
+          "name": "ShowInFooter",
+          "xml": "showInFooter",
+          "default": "true",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2e",
+          "skip_if": null,
+          "name": "FooterDataPath",
+          "xml": "footerDataPath",
+          "default": "",
+          "owner": "Field",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null,
+          "name": "FooterText",
+          "xml": "footerText",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x30",
+          "skip_if": null,
+          "name": "FooterTextColor",
+          "xml": "footerTextColor",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x31",
+          "skip_if": null,
+          "name": "FooterBackColor",
+          "xml": "footerBackColor",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x32",
+          "skip_if": null,
+          "name": "FooterFont",
+          "xml": "footerFont",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x33",
+          "skip_if": null,
+          "name": "FooterPicture",
+          "xml": "footerPicture",
+          "default": null,
+          "owner": "Field",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x34",
+          "skip_if": 3,
+          "name": "FooterHorizontalAlign",
+          "xml": "footerHorizontalAlign",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x35",
+          "skip_if": 0,
+          "name": "OnMainServerUnavalableBehavior",
+          "xml": "onMainServerUnavalableBehavior",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:OnMainServerUnavalableBehavior"
+        },
+        {
+          "id": "0x3c",
+          "skip_if": null,
+          "name": "ShowInCard",
+          "xml": "showInCard",
+          "default": "true",
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x3d",
+          "skip_if": 2,
+          "name": "FixInCard",
+          "xml": "fixInCard",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x36",
+          "skip_if": 2,
+          "name": "MarkRequiredComplete",
+          "xml": "markRequiredComplete",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x37",
+          "skip_if": 0,
+          "name": "CellMark",
+          "xml": "cellMark",
+          "default": "None",
+          "owner": "Field",
+          "type": "d4p1:TableCellMarkType"
+        },
+        {
+          "id": "0x38",
+          "skip_if": null,
+          "name": "AutoEditMode",
+          "xml": "autoEditMode",
+          "default": null,
+          "owner": "Field",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x39",
+          "skip_if": 0,
+          "name": "AppearanceInCard",
+          "xml": "appearanceInCard",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:AppearanceVariantInCard"
+        },
+        {
+          "id": "0x3a",
+          "skip_if": 2,
+          "name": "ShowTitleInCard",
+          "xml": "showTitleInCard",
+          "default": "auto",
+          "owner": "Field",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x3b",
+          "skip_if": 0,
+          "name": "WidthInCard",
+          "xml": "widthInCard",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:WidthVariantInCard"
+        },
+        {
+          "id": "0x3e",
+          "skip_if": 0,
+          "name": "AutoWidthInTable",
+          "xml": "autoWidthInTable",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:AutoWidthInTable"
+        },
+        {
+          "id": "0x35",
+          "skip_if": 0,
+          "name": "OnMainServerUnavalableBehavior",
+          "xml": "onMainServerUnavalableBehavior",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:OnMainServerUnavalableBehavior"
+        },
+        {
+          "id": "0x35",
+          "skip_if": 0,
+          "name": "OnMainServerUnavalableBehavior",
+          "xml": "onMainServerUnavalableBehavior",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:OnMainServerUnavalableBehavior"
+        },
+        {
+          "id": "0x3f",
+          "skip_if": 0,
+          "name": "CellHyperlinkRepresentation",
+          "xml": "cellHyperlinkRepresentation",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:CellHyperlinkRepresentation"
+        },
+        {
+          "id": "0x40",
+          "skip_if": 0,
+          "name": "CellHyperlinkDisplayVariant",
+          "xml": "cellHyperlinkDisplayVariant",
+          "default": "Auto",
+          "owner": "Field",
+          "type": "d4p1:CellHyperlinkDisplayVariant"
+        }
+      ]
+    },
+    {
+      "element": "Form",
+      "properties": [
+        {
+          "id": "0xc",
+          "skip_if": null,
+          "name": "Title",
+          "xml": "title",
+          "default": null,
+          "owner": "Form",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0xd",
+          "skip_if": 0,
+          "name": "Width",
+          "xml": "width",
+          "default": "0",
+          "owner": "Form",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0xe",
+          "skip_if": 0,
+          "name": "Height",
+          "xml": "height",
+          "default": "0",
+          "owner": "Form",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0xf",
+          "skip_if": 3,
+          "name": "WindowOpeningMode",
+          "xml": "windowOpeningMode",
+          "default": "DontBlock",
+          "owner": "Form",
+          "type": "d4p1:OnFormWindowOpenLockMode"
+        },
+        {
+          "id": "0x10",
+          "skip_if": 1,
+          "name": "EnterKeyBehavior",
+          "xml": "enterKeyBehavior",
+          "default": "ControlNavigation",
+          "owner": "Form",
+          "type": "d4p1:FormEnterKeyBehavior"
+        },
+        {
+          "id": "0x11",
+          "skip_if": 0,
+          "name": "AutoSaveDataInSettings",
+          "xml": "autoSaveDataInSettings",
+          "default": "DontUse",
+          "owner": "Form",
+          "type": "d4p1:AutoSaveFormDataInSettings"
+        },
+        {
+          "id": "0x12",
+          "skip_if": 0,
+          "name": "SaveDataInSettings",
+          "xml": "saveDataInSettings",
+          "default": "DontUse",
+          "owner": "Form",
+          "type": "d4p1:SaveFormDataInSettings"
+        },
+        {
+          "id": "0x13",
+          "skip_if": null,
+          "name": "SaveWindowSettings",
+          "xml": "saveWindowSettings",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x14",
+          "skip_if": null,
+          "name": "SettingsStorage",
+          "xml": "settingsStorage",
+          "default": "",
+          "owner": "Form",
+          "type": "d4p1:MDObjectRef"
+        },
+        {
+          "id": "0x15",
+          "skip_if": null,
+          "name": "AutoTitle",
+          "xml": "autoTitle",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x16",
+          "skip_if": null,
+          "name": "AutoURL",
+          "xml": "autoURL",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x17",
+          "skip_if": 4,
+          "name": "Group",
+          "xml": "group",
+          "default": "Vertical",
+          "owner": "Form",
+          "type": "d4p1:FormChildrenGroup"
+        },
+        {
+          "id": "0x18",
+          "skip_if": 0,
+          "name": "ChildrenAlign",
+          "xml": "childrenAlign",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormChildrenAlign"
+        },
+        {
+          "id": "0x19",
+          "skip_if": 0,
+          "name": "HorizontalSpacing",
+          "xml": "horizontalSpacing",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0,
+          "name": "VerticalSpacing",
+          "xml": "verticalSpacing",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x1b",
+          "skip_if": 3,
+          "name": "HorizontalAlign",
+          "xml": "horizontalAlign",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x1c",
+          "skip_if": 3,
+          "name": "VerticalAlign",
+          "xml": "verticalAlign",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 0,
+          "name": "ChildItemsWidth",
+          "xml": "childItemsWidth",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormChildrenWidth"
+        },
+        {
+          "id": "0x1e",
+          "skip_if": 0,
+          "name": "ChildItemsTitleLocation",
+          "xml": "childItemsTitleLocation",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:ChildrenTitleLocation"
+        },
+        {
+          "id": "0x1f",
+          "skip_if": null,
+          "name": "AutoFillCheck",
+          "xml": "autoFillCheck",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x20",
+          "skip_if": null,
+          "name": "Customizable",
+          "xml": "customizable",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x21",
+          "skip_if": null,
+          "name": "Enabled",
+          "xml": "enabled",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x22",
+          "skip_if": null,
+          "name": "ReadOnly",
+          "xml": "readOnly",
+          "default": "false",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 1,
+          "name": "CommandBarLocation",
+          "xml": "commandBarLocation",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormElementCommandBarLocation"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 0,
+          "name": "VerticalScroll",
+          "xml": "verticalScroll",
+          "default": "auto",
+          "owner": "Form",
+          "type": "d4p1:LogFormScrollMode"
+        },
+        {
+          "id": "0x25",
+          "skip_if": 0,
+          "name": "ScalingMode",
+          "xml": "scalingMode",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:FormBaseFontVariant"
+        },
+        {
+          "id": "0x26",
+          "skip_if": 100,
+          "name": "Scale",
+          "xml": "scale",
+          "default": "100",
+          "owner": "Form",
+          "type": "xs:decimal"
+        },
+        {
+          "id": "0x27",
+          "skip_if": 0,
+          "name": "ScaleVariant",
+          "xml": "scaleVariant",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:ClientApplicationFormScaleVariant"
+        },
+        {
+          "id": "0x28",
+          "skip_if": 0,
+          "name": "ConversationsRepresentation",
+          "xml": "conversationsRepresentation",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:LogFormShowConversations"
+        },
+        {
+          "id": "0x29",
+          "skip_if": 0,
+          "name": "MobileDeviceCommandBarContent",
+          "xml": "mobileDeviceCommandBarContent",
+          "default": null,
+          "owner": "Form",
+          "type": "d4p1:ValueList"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": null,
+          "name": "CommandSet",
+          "xml": "commandSet",
+          "default": null,
+          "owner": "Form",
+          "type": "d3p1:CommandsContent"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": 2,
+          "name": "ShowTitle",
+          "xml": "showTitle",
+          "default": "auto",
+          "owner": "Form",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": null,
+          "name": "ShowCloseButton",
+          "xml": "showCloseButton",
+          "default": "true",
+          "owner": "Form",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x2d",
+          "skip_if": 0,
+          "name": "CollapseItemsByImportanceVariant",
+          "xml": "collapseItemsByImportanceVariant",
+          "default": "Auto",
+          "owner": "Form",
+          "type": "d4p1:CollapseFormItemsByImportance"
+        },
+        {
+          "id": "0x2e",
+          "skip_if": null,
+          "name": "CreateButtonsGroupTitle",
+          "xml": "createButtonsGroupTitle",
+          "default": null,
+          "owner": "Form",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null,
+          "name": "CreateButtonsGroupPicture",
+          "xml": "createButtonsGroupPicture",
+          "default": null,
+          "owner": "Form",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x30",
+          "skip_if": 0,
+          "name": "WindowViewMode",
+          "xml": "windowViewMode",
+          "default": null,
+          "owner": "Form",
+          "type": null
+        },
+        {
+          "id": "0x31",
+          "skip_if": 2,
+          "name": "ShowCommandBar",
+          "xml": "showCommandBar",
+          "default": "auto",
+          "owner": "Form",
+          "type": "d4p1:BWAValue"
+        }
+      ]
+    },
+    {
+      "element": "Pages",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": 6,
+          "name": "PagesRepresentation",
+          "xml": "pagesRepresentation",
+          "default": "TabsOnTop",
+          "owner": "Pages",
+          "type": "d4p1:FormPagesRepresentation"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 2,
+          "name": "CurrentRowUse",
+          "xml": "currentRowUse",
+          "default": "DontUse",
+          "owner": "Pages",
+          "type": "d4p1:CurrentRowUse"
+        },
+        {
+          "id": "0x21",
+          "skip_if": null,
+          "name": "AssociatedTableElementId",
+          "xml": "associatedTableElementId",
+          "default": null,
+          "owner": "Pages",
+          "type": null
+        }
+      ]
+    },
+    {
+      "element": "Page",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": null,
+          "name": "Picture",
+          "xml": "picture",
+          "default": null,
+          "owner": "Page",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 4,
+          "name": "Group",
+          "xml": "group",
+          "default": "Vertical",
+          "owner": "Page",
+          "type": "d4p1:FormChildrenGroup"
+        },
+        {
+          "id": "0x21",
+          "skip_if": 0,
+          "name": "ChildrenAlign",
+          "xml": "childrenAlign",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:FormChildrenAlign"
+        },
+        {
+          "id": "0x22",
+          "skip_if": 0,
+          "name": "HorizontalSpacing",
+          "xml": "horizontalSpacing",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x23",
+          "skip_if": 0,
+          "name": "VerticalSpacing",
+          "xml": "verticalSpacing",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:FormItemSpacing"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 3,
+          "name": "HorizontalAlign",
+          "xml": "horizontalAlign",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x25",
+          "skip_if": 3,
+          "name": "VerticalAlign",
+          "xml": "verticalAlign",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:ItemVerticalAlignment"
+        },
+        {
+          "id": "0x26",
+          "skip_if": 0,
+          "name": "ChildItemsWidth",
+          "xml": "childItemsWidth",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:FormChildrenWidth"
+        },
+        {
+          "id": "0x27",
+          "skip_if": 0,
+          "name": "ChildItemsTitleLocation",
+          "xml": "childItemsTitleLocation",
+          "default": "Auto",
+          "owner": "Page",
+          "type": "d4p1:ChildrenTitleLocation"
+        },
+        {
+          "id": "0x28",
+          "skip_if": null,
+          "name": "Format",
+          "xml": "format",
+          "default": null,
+          "owner": "Page",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x29",
+          "skip_if": 2,
+          "name": "ShowTitle",
+          "xml": "showTitle",
+          "default": "auto",
+          "owner": "Page",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": null,
+          "name": "TitleDataPath",
+          "xml": "titleDataPath",
+          "default": "",
+          "owner": "Page",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null,
+          "name": "BackColor",
+          "xml": "backColor",
+          "default": "auto",
+          "owner": "Page",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x14",
+          "skip_if": null,
+          "name": "TitleTextColor",
+          "xml": "titleTextColor",
+          "default": "auto",
+          "owner": "GroupBase",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x15",
+          "skip_if": null,
+          "name": "TitleFont",
+          "xml": "titleFont",
+          "default": null,
+          "owner": "GroupBase",
+          "type": "d4p1:Font"
+        },
+        {
+          "id": "0x2c",
+          "skip_if": 2,
+          "name": "ScrollOnCompress",
+          "xml": "scrollOnCompress",
+          "default": "auto",
+          "owner": "Page",
+          "type": "d4p1:BWAValue"
+        }
+      ]
+    },
+    {
+      "element": "CommandBar",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": 0,
+          "name": "HorizontalLocation",
+          "xml": "horizontalLocation",
+          "default": "Left",
+          "owner": "CommandBar",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 0,
+          "name": "AppearanceMode",
+          "xml": "appearanceMode",
+          "default": "Auto",
+          "owner": "CommandBar",
+          "type": "d4p1:FormCommandBarAppearanceMode"
+        },
+        {
+          "id": "0x21",
+          "skip_if": null,
+          "name": "CommandSource",
+          "xml": "commandSource",
+          "default": "",
+          "owner": "CommandBar",
+          "type": "d3p1:CommandSourceName"
+        }
+      ]
+    },
+    {
+      "element": "ContextMenu",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": null,
+          "name": "Autofill",
+          "xml": "autofill",
+          "default": "true",
+          "owner": "ContextMenu",
+          "type": "xs:boolean"
+        }
+      ]
+    },
+    {
+      "element": "ColumnGroup",
+      "properties": [
+        {
+          "id": "0x1f",
+          "skip_if": 1,
+          "name": "Group",
+          "xml": "group",
+          "default": "Vertical",
+          "owner": "ColumnGroup",
+          "type": "d4p1:ColumnsGroup"
+        },
+        {
+          "id": "0x20",
+          "skip_if": 2,
+          "name": "ShowTitle",
+          "xml": "showTitle",
+          "default": "auto",
+          "owner": "ColumnGroup",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x21",
+          "skip_if": null,
+          "name": "TitleBackColor",
+          "xml": "titleBackColor",
+          "default": "auto",
+          "owner": "ColumnGroup",
+          "type": "d4p1:Color"
+        },
+        {
+          "id": "0x22",
+          "skip_if": null,
+          "name": "ShowInHeader",
+          "xml": "showInHeader",
+          "default": "false",
+          "owner": "ColumnGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x23",
+          "skip_if": null,
+          "name": "HeaderDataPath",
+          "xml": "headerDataPath",
+          "default": "",
+          "owner": "ColumnGroup",
+          "type": "d3p1:LFEDataPath"
+        },
+        {
+          "id": "0x24",
+          "skip_if": 3,
+          "name": "HeaderHorizontalAlign",
+          "xml": "headerHorizontalAlign",
+          "default": "Auto",
+          "owner": "ColumnGroup",
+          "type": "d4p1:ItemHorizontalAlignment"
+        },
+        {
+          "id": "0x26",
+          "skip_if": null,
+          "name": "HeaderPicture",
+          "xml": "headerPicture",
+          "default": null,
+          "owner": "ColumnGroup",
+          "type": "d4p1:Picture"
+        },
+        {
+          "id": "0x25",
+          "skip_if": null,
+          "name": "HeaderFormat",
+          "xml": "headerFormat",
+          "default": null,
+          "owner": "ColumnGroup",
+          "type": "d4p1:LocalStringType"
+        },
+        {
+          "id": "0x27",
+          "skip_if": 0,
+          "name": "FixingInTable",
+          "xml": "fixingInTable",
+          "default": "None",
+          "owner": "ColumnGroup",
+          "type": "d4p1:FormFixedInTable"
+        },
+        {
+          "id": "0x28",
+          "skip_if": null,
+          "name": "ShowInCard",
+          "xml": "showInCard",
+          "default": "true",
+          "owner": "ColumnGroup",
+          "type": "xs:boolean"
+        },
+        {
+          "id": "0x29",
+          "skip_if": 2,
+          "name": "FixInCard",
+          "xml": "fixInCard",
+          "default": "auto",
+          "owner": "ColumnGroup",
+          "type": "d4p1:BWAValue"
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 2,
+          "name": "ShowTitleInCard",
+          "xml": "showTitleInCard",
+          "default": "auto",
+          "owner": "ColumnGroup",
+          "type": "d4p1:BWAValue"
+        }
+      ]
+    }
+  ]
+}

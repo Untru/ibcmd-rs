@@ -25836,6 +25836,33 @@ fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<
     Ok(())
 }
 
+
+/// The legacy revision-`2` container: the whole body after the marker is one
+/// layout field, and there is no separate module-text slot.
+fn parse_form_body_plain_v2(plain: &str) -> Result<Option<ParsedFormBodyBlob>> {
+    let body_start = plain
+        .find('{')
+        .ok_or_else(|| anyhow!("Form body has no braced payload"))?;
+    let fields = scan_braced_fields(plain, body_start)?;
+    if fields.first().map(|range| plain[range.clone()].trim()) != Some("2") {
+        return Ok(None);
+    }
+    let layout_range = fields
+        .get(1)
+        .ok_or_else(|| anyhow!("Form body has no layout field"))?
+        .clone();
+    validate_form_body_layout(plain[layout_range.clone()].trim())?;
+    Ok(Some(ParsedFormBodyBlob {
+        revision: FormBodyRevision::V2,
+        layout: plain[layout_range].trim().to_string(),
+        module_text: String::new(),
+        // Revision 2 keeps the whole declaration in the layout field: there
+        // is no separate trailing block for a V3/V4 writer to read.
+        trailing: Vec::new(),
+        trailing_fields: 0,
+    }))
+}
+
 pub fn parse_form_body_blob(blob: &[u8]) -> Result<ParsedFormBodyBlob> {
     let inflated = inflate_raw(blob).context("failed to inflate Form body blob")?;
     let plain = String::from_utf8(inflated).context("Form body blob is not valid UTF-8")?;
@@ -25846,7 +25873,10 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
     // An older platform's root-`42` form is read as 8.3.27 re-saves it.
     let upgraded = form_root_42::upgrade_root_42_body(plain);
     let plain = upgraded.as_deref().unwrap_or(plain);
-    let container = FormBodyContainer::parse(&plain)?;
+    if let Some(parsed) = parse_form_body_plain_v2(plain)? {
+        return Ok(parsed);
+    }
+    let container = FormBodyContainer::parse(plain)?;
     let layout = plain[container.layout_range.clone()].trim().to_string();
     let module_text = parse_1c_quoted_string(plain[container.module_range.clone()].trim())
         .context("Form body module text field is not a quoted string")?;
@@ -25874,6 +25904,9 @@ pub(crate) fn parse_form_body_plain(plain: &str) -> Result<ParsedFormBodyBlob> {
 /// `docs/evidence/uh-form-body-container-revision-20260826.md`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub enum FormBodyRevision {
+    /// The legacy container: one layout field and no module slot. Accounting
+    /// 3.0 ExchangePlan forms are stored this way.
+    V2,
     V3,
     V4,
 }
@@ -25883,6 +25916,7 @@ impl FormBodyRevision {
     /// undeclared or unnamed revision is refused, never assumed.
     fn parse(declared: Option<&str>) -> Result<Self> {
         match declared {
+            Some("2") => Ok(Self::V2),
             Some("3") => Ok(Self::V3),
             Some("4") => Ok(Self::V4),
             Some(other) => Err(anyhow!(
@@ -25894,6 +25928,7 @@ impl FormBodyRevision {
 
     pub const fn declared_marker(self) -> &'static str {
         match self {
+            Self::V2 => "2",
             Self::V3 => "3",
             Self::V4 => "4",
         }

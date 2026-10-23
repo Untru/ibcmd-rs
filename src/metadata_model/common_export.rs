@@ -23,7 +23,8 @@ use crate::compiler::bodies::form_native::{
 };
 use crate::metadata_model::brace::Brace;
 use crate::metadata_model::export::values::{
-    Header, bool_text, code_text, header, header_elements, localized_element, type_element,
+    Header, bool_text, code_text, header, header_elements, header_wide, localized_element,
+    type_element,
 };
 use crate::metadata_model::export::{
     Build, ExportContext, GeneratedTypeName, NameIndex, ObjectNames, atom, el, item, leaf, list,
@@ -34,7 +35,7 @@ use crate::metadata_model::xml::Element;
 /// Decodes one stored row of a common kind into the object's element.
 pub(crate) fn decode(kind: &str, row: &Brace, context: &ExportContext) -> Result<Element> {
     if kind == "ExternalDataSource" {
-        return crate::metadata_model::external_data_source::decode(row);
+        return crate::metadata_model::external_data_source::decode_with_context(row, context);
     }
     let root = list(row)?;
     if atom(item(root, 0)?)? != "1" {
@@ -810,8 +811,9 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let mut children = Vec::new();
     let mut types = Vec::new();
     let head = match kind {
-        "CommonModule" | "CommonPicture" | "CommonTemplate" | "Role" | "Style" | "XDTOPackage"
-        | "PaletteColor" | "Bot" => header(item(fields, 1)?)?,
+        "XDTOPackage" => header_wide(item(fields, 1)?)?,
+        "CommonModule" | "CommonPicture" | "CommonTemplate" | "Role" | "Style" | "PaletteColor"
+        | "Bot" => header(item(fields, 1)?)?,
         "WebSocketClient" => {
             return Ok(
                 crate::metadata_model::websocket_client::WebSocketClient::from_brace(row)?.names(),

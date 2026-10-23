@@ -1,0 +1,748 @@
+{
+  "platform": {
+    "dll": "C:\\Program Files\\1cv8\\8.3.21.1895\\bin\\mngbase.dll",
+    "sha256": "cb1588321ba12265a9e999c35e3ab4bc09f94e2288133a0f3e8d4b19f0690655"
+  },
+  "elements": [
+    {
+      "element": "UsualGroup",
+      "entry": "0x18069df40",
+      "attributes": [
+        {
+          "id": "0x1d",
+          "skip_if": 2
+        },
+        {
+          "id": "0x1e",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1f",
+          "skip_if": 0
+        },
+        {
+          "id": "0x20",
+          "skip_if": 0
+        },
+        {
+          "id": "0x21",
+          "skip_if": 3
+        },
+        {
+          "id": "0x22",
+          "skip_if": 3
+        },
+        {
+          "id": "0x23",
+          "skip_if": 3
+        },
+        {
+          "id": "0x24",
+          "skip_if": null
+        },
+        {
+          "id": "0x25",
+          "skip_if": null
+        },
+        {
+          "id": "0x26",
+          "skip_if": 0
+        },
+        {
+          "id": "0x27",
+          "skip_if": 2
+        },
+        {
+          "id": "0x28",
+          "skip_if": null
+        },
+        {
+          "id": "0x29",
+          "skip_if": null
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null
+        },
+        {
+          "id": "0x2c",
+          "skip_if": null
+        },
+        {
+          "id": "0x2d",
+          "skip_if": null
+        },
+        {
+          "id": "0x2e",
+          "skip_if": null
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null
+        },
+        {
+          "id": "0x30",
+          "skip_if": 2
+        },
+        {
+          "id": "0x31",
+          "skip_if": 2
+        },
+        {
+          "id": "0x32",
+          "skip_if": null
+        }
+      ]
+    },
+    {
+      "element": "Table",
+      "entry": "0x1806a7fe0",
+      "attributes": [
+        {
+          "id": "0xb",
+          "skip_if": 0
+        },
+        {
+          "id": "0xc",
+          "skip_if": 1
+        },
+        {
+          "id": "0xd",
+          "skip_if": null
+        },
+        {
+          "id": "0xe",
+          "skip_if": null
+        },
+        {
+          "id": "0x49",
+          "skip_if": 0
+        },
+        {
+          "id": "0x46",
+          "skip_if": 0
+        },
+        {
+          "id": "0xf",
+          "skip_if": 1
+        },
+        {
+          "id": "0x10",
+          "skip_if": null
+        },
+        {
+          "id": "0x11",
+          "skip_if": null
+        },
+        {
+          "id": "0x12",
+          "skip_if": null
+        },
+        {
+          "id": "0x13",
+          "skip_if": 2
+        },
+        {
+          "id": "0x14",
+          "skip_if": null
+        },
+        {
+          "id": "0x15",
+          "skip_if": null
+        },
+        {
+          "id": "0x16",
+          "skip_if": null
+        },
+        {
+          "id": "0x17",
+          "skip_if": 0
+        },
+        {
+          "id": "0x18",
+          "skip_if": null
+        },
+        {
+          "id": "0x19",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1b",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1c",
+          "skip_if": null
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1e",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1f",
+          "skip_if": 0
+        },
+        {
+          "id": "0x20",
+          "skip_if": null
+        },
+        {
+          "id": "0x21",
+          "skip_if": 0
+        },
+        {
+          "id": "0x22",
+          "skip_if": null
+        },
+        {
+          "id": "0x23",
+          "skip_if": null
+        },
+        {
+          "id": "0x24",
+          "skip_if": 0
+        },
+        {
+          "id": "0x25",
+          "skip_if": 1
+        },
+        {
+          "id": "0x26",
+          "skip_if": 0
+        },
+        {
+          "id": "0x27",
+          "skip_if": null
+        },
+        {
+          "id": "0x28",
+          "skip_if": 1
+        },
+        {
+          "id": "0x29",
+          "skip_if": null
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 1
+        },
+        {
+          "id": "0x2b",
+          "skip_if": 2
+        },
+        {
+          "id": "0x2c",
+          "skip_if": 2
+        },
+        {
+          "id": "0x2d",
+          "skip_if": null
+        },
+        {
+          "id": "0x2e",
+          "skip_if": null
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null
+        },
+        {
+          "id": "0x30",
+          "skip_if": null
+        },
+        {
+          "id": "0x31",
+          "skip_if": null
+        },
+        {
+          "id": "0x32",
+          "skip_if": null
+        },
+        {
+          "id": "0x33",
+          "skip_if": 2
+        },
+        {
+          "id": "0x34",
+          "skip_if": 2
+        },
+        {
+          "id": "0x35",
+          "skip_if": 2
+        },
+        {
+          "id": "0x36",
+          "skip_if": 2
+        },
+        {
+          "id": "0x37",
+          "skip_if": 0
+        },
+        {
+          "id": "0x38",
+          "skip_if": 0
+        },
+        {
+          "id": "0x39",
+          "skip_if": null
+        },
+        {
+          "id": "0x3a",
+          "skip_if": null
+        },
+        {
+          "id": "0x3b",
+          "skip_if": null
+        },
+        {
+          "id": "0x3c",
+          "skip_if": null
+        },
+        {
+          "id": "0x3d",
+          "skip_if": 1
+        },
+        {
+          "id": "0x3e",
+          "skip_if": null
+        },
+        {
+          "id": "0x3f",
+          "skip_if": null
+        },
+        {
+          "id": "0x40",
+          "skip_if": null
+        },
+        {
+          "id": "0x41",
+          "skip_if": null
+        },
+        {
+          "id": "0x42",
+          "skip_if": null
+        },
+        {
+          "id": "0x43",
+          "skip_if": null
+        },
+        {
+          "id": "0x44",
+          "skip_if": null
+        },
+        {
+          "id": "0x45",
+          "skip_if": null
+        },
+        {
+          "id": "0x48",
+          "skip_if": null
+        },
+        {
+          "id": "0x47",
+          "skip_if": null
+        },
+        {
+          "id": "0x4a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x4b",
+          "skip_if": null
+        },
+        {
+          "id": "0x4c",
+          "skip_if": null
+        },
+        {
+          "id": "0x4d",
+          "skip_if": 0
+        },
+        {
+          "id": "0x4e",
+          "skip_if": 0
+        },
+        {
+          "id": "0x4f",
+          "skip_if": 0
+        },
+        {
+          "id": "0x50",
+          "skip_if": 0
+        },
+        {
+          "id": "0x51",
+          "skip_if": 3
+        },
+        {
+          "id": "0x52",
+          "skip_if": 3
+        },
+        {
+          "id": "0x53",
+          "skip_if": 0
+        },
+        {
+          "id": "0x54",
+          "skip_if": 0
+        },
+        {
+          "id": "0x55",
+          "skip_if": 0
+        },
+        {
+          "id": "0x65",
+          "skip_if": 0
+        }
+      ]
+    },
+    {
+      "element": "Button",
+      "entry": "0x1806a5ee0",
+      "attributes": [
+        {
+          "id": "0xb",
+          "skip_if": 0
+        },
+        {
+          "id": "0xc",
+          "skip_if": 0
+        },
+        {
+          "id": "0x10",
+          "skip_if": null
+        },
+        {
+          "id": "0x11",
+          "skip_if": null
+        },
+        {
+          "id": "0x2c",
+          "skip_if": 0
+        },
+        {
+          "id": "0x12",
+          "skip_if": 3
+        },
+        {
+          "id": "0x13",
+          "skip_if": null
+        },
+        {
+          "id": "0x14",
+          "skip_if": 2
+        },
+        {
+          "id": "0x15",
+          "skip_if": null
+        },
+        {
+          "id": "0x16",
+          "skip_if": null
+        },
+        {
+          "id": "0x18",
+          "skip_if": 0
+        },
+        {
+          "id": "0x19",
+          "skip_if": null
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1b",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1c",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1d",
+          "skip_if": null
+        },
+        {
+          "id": "0x1e",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1f",
+          "skip_if": null
+        },
+        {
+          "id": "0x20",
+          "skip_if": null
+        },
+        {
+          "id": "0x21",
+          "skip_if": 3
+        },
+        {
+          "id": "0x22",
+          "skip_if": 3
+        },
+        {
+          "id": "0x23",
+          "skip_if": 2
+        },
+        {
+          "id": "0x24",
+          "skip_if": null
+        },
+        {
+          "id": "0xe",
+          "skip_if": null
+        },
+        {
+          "id": "0xf",
+          "skip_if": null
+        },
+        {
+          "id": "0xd",
+          "skip_if": null
+        },
+        {
+          "id": "0x25",
+          "skip_if": null
+        },
+        {
+          "id": "0x26",
+          "skip_if": null
+        },
+        {
+          "id": "0x27",
+          "skip_if": null
+        },
+        {
+          "id": "0x28",
+          "skip_if": null
+        },
+        {
+          "id": "0x29",
+          "skip_if": 0
+        },
+        {
+          "id": "0x2a",
+          "skip_if": null
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null
+        },
+        {
+          "id": "0x2d",
+          "skip_if": 0
+        },
+        {
+          "id": "0x2e",
+          "skip_if": 3
+        },
+        {
+          "id": "0x2f",
+          "skip_if": 0
+        },
+        {
+          "id": "0x30",
+          "skip_if": 0
+        },
+        {
+          "id": "0x31",
+          "skip_if": 0
+        },
+        {
+          "id": "0x32",
+          "skip_if": 0
+        },
+        {
+          "id": "0x33",
+          "skip_if": null
+        },
+        {
+          "id": "0x34",
+          "skip_if": 0
+        }
+      ]
+    },
+    {
+      "element": "Field",
+      "entry": "0x18068d3a0",
+      "attributes": [
+        {
+          "id": "0xb",
+          "skip_if": 0
+        },
+        {
+          "id": "0xc",
+          "skip_if": null
+        },
+        {
+          "id": "0xd",
+          "skip_if": null
+        },
+        {
+          "id": "0xe",
+          "skip_if": null
+        },
+        {
+          "id": "0xf",
+          "skip_if": null
+        },
+        {
+          "id": "0x10",
+          "skip_if": null
+        },
+        {
+          "id": "0x11",
+          "skip_if": null
+        },
+        {
+          "id": "0x12",
+          "skip_if": 2
+        },
+        {
+          "id": "0x13",
+          "skip_if": null
+        },
+        {
+          "id": "0x14",
+          "skip_if": null
+        },
+        {
+          "id": "0x15",
+          "skip_if": null
+        },
+        {
+          "id": "0x16",
+          "skip_if": null
+        },
+        {
+          "id": "0x17",
+          "skip_if": 1
+        },
+        {
+          "id": "0x18",
+          "skip_if": 0
+        },
+        {
+          "id": "0x19",
+          "skip_if": null
+        },
+        {
+          "id": "0x1a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1b",
+          "skip_if": 2
+        },
+        {
+          "id": "0x1c",
+          "skip_if": null
+        },
+        {
+          "id": "0x1d",
+          "skip_if": 0
+        },
+        {
+          "id": "0x1e",
+          "skip_if": null
+        },
+        {
+          "id": "0x1f",
+          "skip_if": 3
+        },
+        {
+          "id": "0x20",
+          "skip_if": 3
+        },
+        {
+          "id": "0x21",
+          "skip_if": 3
+        },
+        {
+          "id": "0x22",
+          "skip_if": 3
+        },
+        {
+          "id": "0x24",
+          "skip_if": 1
+        },
+        {
+          "id": "0x25",
+          "skip_if": 0
+        },
+        {
+          "id": "0x26",
+          "skip_if": null
+        },
+        {
+          "id": "0x27",
+          "skip_if": null
+        },
+        {
+          "id": "0x28",
+          "skip_if": null
+        },
+        {
+          "id": "0x29",
+          "skip_if": null
+        },
+        {
+          "id": "0x2a",
+          "skip_if": 0
+        },
+        {
+          "id": "0x2b",
+          "skip_if": null
+        },
+        {
+          "id": "0x2c",
+          "skip_if": null
+        },
+        {
+          "id": "0x2d",
+          "skip_if": null
+        },
+        {
+          "id": "0x2e",
+          "skip_if": null
+        },
+        {
+          "id": "0x2f",
+          "skip_if": null
+        },
+        {
+          "id": "0x30",
+          "skip_if": null
+        },
+        {
+          "id": "0x31",
+          "skip_if": null
+        },
+        {
+          "id": "0x32",
+          "skip_if": 3
+        },
+        {
+          "id": "0x33",
+          "skip_if": 0
+        }
+      ]
+    }
+  ]
+}

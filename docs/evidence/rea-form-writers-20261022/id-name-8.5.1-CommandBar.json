@@ -1,0 +1,25 @@
+{
+  "platform": "8.5.1",
+  "element": "CommandBar",
+  "source_java": "C:\\Tools\\edt-form-export\\src\\com\\_1c\\g5\\v8\\dt\\form\\export\\xml\\writer\\ExtInfoWriter.java",
+  "mapping": [
+    {
+      "id": "0x1f",
+      "skip_if": 0,
+      "feature": "COMMAND_BAR_EXT_INFO__HORIZONTAL_ALIGN",
+      "xml": "horizontalAlign"
+    },
+    {
+      "id": "0x20",
+      "skip_if": 0,
+      "feature": "COMMAND_BAR_EXT_INFO__COMMAND_SOURCE",
+      "xml": "commandSource"
+    },
+    {
+      "id": "0x21",
+      "skip_if": null,
+      "feature": "COMMAND_BAR_EXT_INFO__APPEARANCE_MODE",
+      "xml": "appearanceMode"
+    }
+  ]
+}

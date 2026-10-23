@@ -43,6 +43,20 @@ pub(super) fn quiet_summaries() -> bool {
 pub(super) const MODEL_EXPORT_ENV: &str = "IBCMD_RS_MODEL_EXPORT";
 pub(super) const LEGACY_EXPORT_ENV: &str = "IBCMD_RS_LEGACY_EXPORT";
 
+/// `IBCMD_RS_FAIL_ON_MODEL_FALLBACK=1`: a row the model cannot write fails the
+/// export instead of being handed to the legacy converter. This is the
+/// fail-closed side of the assurance invariant: an export either reproduces
+/// every row through the model or stops, so a gap is never hidden by a
+/// successful-looking tree.
+pub(super) const FAIL_ON_FALLBACK_ENV: &str = "IBCMD_RS_FAIL_ON_MODEL_FALLBACK";
+
+pub(super) fn fail_on_fallback() -> bool {
+    static FAIL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *FAIL.get_or_init(|| {
+        std::env::var(FAIL_ON_FALLBACK_ENV).is_ok_and(|value| value.trim() == "1")
+    })
+}
+
 /// Whether a full export writes its descriptors through the model: yes,
 /// unless `--legacy-export`, `IBCMD_RS_LEGACY_EXPORT=1` or
 /// `IBCMD_RS_MODEL_EXPORT=0` asks for the legacy converters.
@@ -437,13 +451,30 @@ impl ModelExport {
                     }
                 }
             }
-            let Some(header) = texts_by_name
+            // A nested subsystem's row is not in `texts` (it is owned, not
+            // top-level), so its header is read from the stored row itself.
+            let header_name = texts_by_name
                 .get(uuid.as_str())
                 .and_then(|row| row.header.as_ref())
-            else {
+                .map(|header| header.name.clone())
+                .or_else(|| {
+                    raw_by_name
+                        .get(uuid.as_str())
+                        .and_then(|raw| raw_row_text(raw).ok())
+                        .and_then(|text| parse_row(&text).ok())
+                        .and_then(|tree| object_names(kind, &tree).ok())
+                        .map(|names| {
+                            names
+                                .full_name
+                                .split_once('.')
+                                .map(|(_, name)| name.to_string())
+                                .unwrap_or(names.full_name)
+                        })
+                });
+            let Some(header_name) = header_name else {
                 continue;
             };
-            index.set_name(uuid, &format!("{owner_name}.{kind}.{}", header.name));
+            index.set_name(uuid, &format!("{owner_name}.{kind}.{header_name}"));
             report.owned_names += 1;
         }
         // While some kind's rows cannot name themselves: what the owners'
@@ -664,17 +695,33 @@ pub fn configuration_compatibility_8_5_or_later(args: &MssqlDumpConfigArgs) -> R
 // Diagnostics.
 
 /// A row of a modelled kind the model could not write: said once per row on
-/// stderr (the first twenty), and the legacy converter writes it.
+/// stderr (the first twenty), and the legacy converter writes it. Every row is
+/// also collected so the fail-closed gate can name all gaps in one error.
 pub(super) fn report_fallback(file_name: &str, error: &anyhow::Error) {
     use std::sync::atomic::{AtomicUsize, Ordering};
     static REPORTED: AtomicUsize = AtomicUsize::new(0);
+    let text = format!("{error:#}");
+    let first = text.lines().next().unwrap_or_default().to_owned();
     if REPORTED.fetch_add(1, Ordering::Relaxed) < 20 {
-        let text = format!("{error:#}");
-        eprintln!(
-            "model export: {file_name}: {}; the legacy converter writes it",
-            text.lines().next().unwrap_or_default()
-        );
+        eprintln!("model export: {file_name}: {first}; the legacy converter writes it");
     }
+    if let Ok(mut rows) = fallback_rows_sink().lock() {
+        rows.push(format!("{file_name}: {first}"));
+    }
+}
+
+/// Every row the model handed to the legacy converter, in discovery order.
+pub(super) fn fallback_rows() -> Vec<String> {
+    fallback_rows_sink()
+        .lock()
+        .map(|rows| rows.clone())
+        .unwrap_or_default()
+}
+
+fn fallback_rows_sink() -> &'static std::sync::Mutex<Vec<String>> {
+    static ROWS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
+        std::sync::OnceLock::new();
+    ROWS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 
 /// The bytes a descriptor's file gets (`write_source_xml_file`).

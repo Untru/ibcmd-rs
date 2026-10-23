@@ -184,6 +184,12 @@ pub(crate) fn type_children(pattern: &Brace, names: &NameIndex) -> Result<Vec<El
                     None => match names.type_name(type_id) {
                         Some(name) => format!("cfg:{name}"),
                         None => {
+                            if std::env::var_os("DSH_DEBUG_TYPEID").is_some() {
+                                eprintln!(
+                                    "typeid miss {type_id} known={}",
+                                    names.type_count()
+                                );
+                            }
                             unnamed.push(leaf("v8:TypeId", type_id));
                             continue;
                         }

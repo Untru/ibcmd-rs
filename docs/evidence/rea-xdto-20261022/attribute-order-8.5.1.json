@@ -1,0 +1,1502 @@
+{
+  "UsualGroup": [
+    {
+      "id": "0x1f",
+      "name": "Group",
+      "default": "Vertical"
+    },
+    {
+      "id": "0x20",
+      "name": "ChildrenAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x21",
+      "name": "HorizontalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x22",
+      "name": "VerticalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x23",
+      "name": "HorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x24",
+      "name": "VerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x25",
+      "name": "Behavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x26",
+      "name": "CollapsedRepresentationTitle",
+      "default": null
+    },
+    {
+      "id": "0x27",
+      "name": "CollapsedRepresentationItem",
+      "default": null
+    },
+    {
+      "id": "0x28",
+      "name": "Collapsed",
+      "default": "false"
+    },
+    {
+      "id": "0x29",
+      "name": "ControlRepresentation",
+      "default": "TitleHyperlink"
+    },
+    {
+      "id": "0x2a",
+      "name": "Representation",
+      "default": "WeakSeparation"
+    },
+    {
+      "id": "0x2b",
+      "name": "ShowLeftMargin",
+      "default": "true"
+    },
+    {
+      "id": "0x2c",
+      "name": "United",
+      "default": "true"
+    },
+    {
+      "id": "0x2d",
+      "name": "ChildItemsWidth",
+      "default": "Auto"
+    },
+    {
+      "id": "0x2e",
+      "name": "ChildItemsTitleLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x2f",
+      "name": "Format",
+      "default": null
+    },
+    {
+      "id": "0x30",
+      "name": "ShowTitle",
+      "default": "auto"
+    },
+    {
+      "id": "0x31",
+      "name": "TitleDataPath",
+      "default": ""
+    },
+    {
+      "id": "0x32",
+      "name": "BackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x33",
+      "name": "HiddenStateTitleBackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x36",
+      "name": "AssociatedTableElementId",
+      "default": null
+    },
+    {
+      "id": "0x37",
+      "name": "ShowAsCard",
+      "default": "false"
+    },
+    {
+      "id": "0x38",
+      "name": "BackPictureEffect",
+      "default": "Auto"
+    },
+    {
+      "id": "0x39",
+      "name": "CardRepresentationType",
+      "default": "Usual"
+    },
+    {
+      "id": "0x3a",
+      "name": "Hyperlink",
+      "default": "false"
+    },
+    {
+      "id": "0x3b",
+      "name": "BackPicture",
+      "default": null
+    },
+    {
+      "id": "0x3c",
+      "name": "ScrollOnCompress",
+      "default": "auto"
+    },
+    {
+      "id": "0x35",
+      "name": "CurrentRowUse",
+      "default": "DontUse"
+    },
+    {
+      "id": "0x34",
+      "name": "ThroughAlign",
+      "default": "Auto"
+    }
+  ],
+  "Table": [
+    {
+      "id": "0xc",
+      "name": "name",
+      "default": null
+    },
+    {
+      "id": "0xb",
+      "name": "id",
+      "default": null
+    },
+    {
+      "id": "0xd",
+      "name": "DisplayImportance",
+      "default": null
+    },
+    {
+      "id": "0xe",
+      "name": "Representation",
+      "default": "HierarchicalList"
+    },
+    {
+      "id": "0xf",
+      "name": "Visible",
+      "default": "true"
+    },
+    {
+      "id": "0x10",
+      "name": "UserVisible",
+      "default": null
+    },
+    {
+      "id": "0x51",
+      "name": "TitleLocation",
+      "default": "None"
+    },
+    {
+      "id": "0x4e",
+      "name": "TitleHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x11",
+      "name": "CommandBarLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x12",
+      "name": "Autofill",
+      "default": "false"
+    },
+    {
+      "id": "0x13",
+      "name": "Enabled",
+      "default": "true"
+    },
+    {
+      "id": "0x14",
+      "name": "ReadOnly",
+      "default": "false"
+    },
+    {
+      "id": "0x15",
+      "name": "SkipOnInput",
+      "default": "auto"
+    },
+    {
+      "id": "0x16",
+      "name": "DefaultItem",
+      "default": "false"
+    },
+    {
+      "id": "0x17",
+      "name": "ChangeRowSet",
+      "default": "true"
+    },
+    {
+      "id": "0x18",
+      "name": "ChangeRowOrder",
+      "default": "true"
+    },
+    {
+      "id": "0x19",
+      "name": "Width",
+      "default": "0"
+    },
+    {
+      "id": "0x1a",
+      "name": "AutoMaxWidth",
+      "default": "true"
+    },
+    {
+      "id": "0x1b",
+      "name": "MaxWidth",
+      "default": "0"
+    },
+    {
+      "id": "0x1c",
+      "name": "MinWidth",
+      "default": "0"
+    },
+    {
+      "id": "0x1d",
+      "name": "Height",
+      "default": "0"
+    },
+    {
+      "id": "0x1e",
+      "name": "AutoMaxHeight",
+      "default": "true"
+    },
+    {
+      "id": "0x1f",
+      "name": "MaxHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x20",
+      "name": "HeightInTableRows",
+      "default": "0"
+    },
+    {
+      "id": "0x21",
+      "name": "HeightControlVariant",
+      "default": "Auto"
+    },
+    {
+      "id": "0x22",
+      "name": "AutoMaxRowsCount",
+      "default": null
+    },
+    {
+      "id": "0x23",
+      "name": "MaxRowsCount",
+      "default": null
+    },
+    {
+      "id": "0x24",
+      "name": "ChoiceMode",
+      "default": "false"
+    },
+    {
+      "id": "0x25",
+      "name": "MultipleChoice",
+      "default": "false"
+    },
+    {
+      "id": "0x26",
+      "name": "RowInputMode",
+      "default": "EndOfList"
+    },
+    {
+      "id": "0x27",
+      "name": "SelectionMode",
+      "default": "MultiRow"
+    },
+    {
+      "id": "0x28",
+      "name": "RowSelectionMode",
+      "default": "Cell"
+    },
+    {
+      "id": "0x29",
+      "name": "Header",
+      "default": "true"
+    },
+    {
+      "id": "0x2a",
+      "name": "HeaderHeight",
+      "default": "1"
+    },
+    {
+      "id": "0x2b",
+      "name": "Footer",
+      "default": "false"
+    },
+    {
+      "id": "0x2c",
+      "name": "FooterHeight",
+      "default": "1"
+    },
+    {
+      "id": "0x2d",
+      "name": "HorizontalScrollBar",
+      "default": "AutoUse"
+    },
+    {
+      "id": "0x2e",
+      "name": "VerticalScrollBar",
+      "default": "AutoUse"
+    },
+    {
+      "id": "0x31",
+      "name": "HorizontalLinesBWA",
+      "default": "auto"
+    },
+    {
+      "id": "0x32",
+      "name": "VerticalLinesBWA",
+      "default": "auto"
+    },
+    {
+      "id": "0x33",
+      "name": "FixedLeft",
+      "default": "4294967295"
+    },
+    {
+      "id": "0x34",
+      "name": "FixedRight",
+      "default": "4294967295"
+    },
+    {
+      "id": "0x36",
+      "name": "UseAlternationRowColorBWA",
+      "default": "auto"
+    },
+    {
+      "id": "0x37",
+      "name": "AutoInsertNewRow",
+      "default": "false"
+    },
+    {
+      "id": "0x38",
+      "name": "AutoAddIncomplete",
+      "default": "auto"
+    },
+    {
+      "id": "0x39",
+      "name": "AutoMarkIncomplete",
+      "default": "auto"
+    },
+    {
+      "id": "0x3a",
+      "name": "MarkRequiredComplete",
+      "default": "auto"
+    },
+    {
+      "id": "0x3b",
+      "name": "SearchOnInput",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3c",
+      "name": "InitialListView",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3d",
+      "name": "InitialTreeView",
+      "default": "NoExpand"
+    },
+    {
+      "id": "0x3e",
+      "name": "InitialRowActivation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3f",
+      "name": "RowActionsShowType",
+      "default": "Auto"
+    },
+    {
+      "id": "0x40",
+      "name": "Output",
+      "default": "Auto"
+    },
+    {
+      "id": "0x41",
+      "name": "HorizontalStretch",
+      "default": "true"
+    },
+    {
+      "id": "0x42",
+      "name": "VerticalStretch",
+      "default": "true"
+    },
+    {
+      "id": "0x43",
+      "name": "EnableStartDrag",
+      "default": "false"
+    },
+    {
+      "id": "0x44",
+      "name": "EnableDrag",
+      "default": "false"
+    },
+    {
+      "id": "0x45",
+      "name": "FileDragMode",
+      "default": "AsFileRef"
+    },
+    {
+      "id": "0x46",
+      "name": "DataPath",
+      "default": ""
+    },
+    {
+      "id": "0x47",
+      "name": "RowPictureDataPath",
+      "default": ""
+    },
+    {
+      "id": "0x48",
+      "name": "RowsPicture",
+      "default": null
+    },
+    {
+      "id": "0x49",
+      "name": "TextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x4a",
+      "name": "BackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x4b",
+      "name": "BorderColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x4c",
+      "name": "Font",
+      "default": null
+    },
+    {
+      "id": "0x4d",
+      "name": "Title",
+      "default": null
+    },
+    {
+      "id": "0x50",
+      "name": "TitleTextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x4f",
+      "name": "TitleFont",
+      "default": null
+    },
+    {
+      "id": "0x52",
+      "name": "Shortcut",
+      "default": ""
+    },
+    {
+      "id": "0x53",
+      "name": "CommandSet",
+      "default": null
+    },
+    {
+      "id": "0x54",
+      "name": "ToolTip",
+      "default": null
+    },
+    {
+      "id": "0x55",
+      "name": "ToolTipRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x56",
+      "name": "SearchStringLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x57",
+      "name": "ViewStatusLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x58",
+      "name": "SearchControlLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x59",
+      "name": "GroupHorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x5a",
+      "name": "GroupVerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x5b",
+      "name": "RefreshRequest",
+      "default": "None"
+    },
+    {
+      "id": "0x5c",
+      "name": "CurrentRowUse",
+      "default": "Auto"
+    },
+    {
+      "id": "0x5d",
+      "name": "BehaviorOnHorizontalCompression",
+      "default": "Auto"
+    },
+    {
+      "id": "0x78",
+      "name": "OnMainServerUnavalableBehavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x5e",
+      "name": "HierarchyPanelLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x5f",
+      "name": "SaveColors",
+      "default": "Auto"
+    },
+    {
+      "id": "0x60",
+      "name": "IconSaveColorsKey",
+      "default": null
+    },
+    {
+      "id": "0x61",
+      "name": "ShapeSaveColorsKey",
+      "default": null
+    },
+    {
+      "id": "0x62",
+      "name": "ShowCommandBar",
+      "default": "auto"
+    },
+    {
+      "id": "0x65",
+      "name": "MaxCardHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x66",
+      "name": "CardBehaviorOnVerticalCompression",
+      "default": "Auto"
+    },
+    {
+      "id": "0x67",
+      "name": "CellHyperlinksRepresentation",
+      "default": "Auto"
+    }
+  ],
+  "Button": [
+    {
+      "id": "0xc",
+      "name": "name",
+      "default": null
+    },
+    {
+      "id": "0xb",
+      "name": "id",
+      "default": null
+    },
+    {
+      "id": "0xd",
+      "name": "DisplayImportance",
+      "default": null
+    },
+    {
+      "id": "0xe",
+      "name": "Type",
+      "default": null
+    },
+    {
+      "id": "0x12",
+      "name": "Visible",
+      "default": "true"
+    },
+    {
+      "id": "0x13",
+      "name": "UserVisible",
+      "default": null
+    },
+    {
+      "id": "0x2e",
+      "name": "TitleHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x14",
+      "name": "Representation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x15",
+      "name": "DefaultButton",
+      "default": "false"
+    },
+    {
+      "id": "0x16",
+      "name": "SkipOnInput",
+      "default": "auto"
+    },
+    {
+      "id": "0x17",
+      "name": "Enabled",
+      "default": "true"
+    },
+    {
+      "id": "0x18",
+      "name": "DefaultItem",
+      "default": "false"
+    },
+    {
+      "id": "0x1a",
+      "name": "Width",
+      "default": "0"
+    },
+    {
+      "id": "0x1b",
+      "name": "AutoMaxWidth",
+      "default": "true"
+    },
+    {
+      "id": "0x1c",
+      "name": "MaxWidth",
+      "default": "0"
+    },
+    {
+      "id": "0x1d",
+      "name": "MinWidth",
+      "default": "0"
+    },
+    {
+      "id": "0x1e",
+      "name": "Height",
+      "default": "0"
+    },
+    {
+      "id": "0x1f",
+      "name": "AutoMaxHeight",
+      "default": "true"
+    },
+    {
+      "id": "0x20",
+      "name": "MaxHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x21",
+      "name": "HorizontalStretch",
+      "default": "true"
+    },
+    {
+      "id": "0x22",
+      "name": "VerticalStretch",
+      "default": "true"
+    },
+    {
+      "id": "0x23",
+      "name": "GroupHorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x24",
+      "name": "GroupVerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x25",
+      "name": "PlacementArea",
+      "default": "userCmds"
+    },
+    {
+      "id": "0x26",
+      "name": "Check",
+      "default": "false"
+    },
+    {
+      "id": "0x10",
+      "name": "CommandName",
+      "default": ""
+    },
+    {
+      "id": "0x11",
+      "name": "Parameter",
+      "default": null
+    },
+    {
+      "id": "0xf",
+      "name": "DataPath",
+      "default": ""
+    },
+    {
+      "id": "0x27",
+      "name": "TextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x28",
+      "name": "BackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x29",
+      "name": "BorderColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x2a",
+      "name": "Font",
+      "default": null
+    },
+    {
+      "id": "0x2b",
+      "name": "Shortcut",
+      "default": ""
+    },
+    {
+      "id": "0x2c",
+      "name": "Picture",
+      "default": null
+    },
+    {
+      "id": "0x2d",
+      "name": "Title",
+      "default": null
+    },
+    {
+      "id": "0x2f",
+      "name": "ToolTipRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x30",
+      "name": "RepresentationInContextMenu",
+      "default": "Auto"
+    },
+    {
+      "id": "0x31",
+      "name": "Shape",
+      "default": "Auto"
+    },
+    {
+      "id": "0x32",
+      "name": "ShapeRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x33",
+      "name": "PictureLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x34",
+      "name": "LocationInCommandBar",
+      "default": "Auto"
+    },
+    {
+      "id": "0x35",
+      "name": "CommandUniqueness",
+      "default": "true"
+    },
+    {
+      "id": "0x36",
+      "name": "OnMainServerUnavalableBehavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x37",
+      "name": "ShowAsCard",
+      "default": "false"
+    },
+    {
+      "id": "0x39",
+      "name": "BackPicture",
+      "default": null
+    },
+    {
+      "id": "0x38",
+      "name": "BackPictureEffect",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3a",
+      "name": "CardPictureAndTitleAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3b",
+      "name": "PictureHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x3c",
+      "name": "ButtonImportance",
+      "default": "Normal"
+    }
+  ],
+  "Field": [
+    {
+      "id": "0xc",
+      "name": "name",
+      "default": null
+    },
+    {
+      "id": "0xb",
+      "name": "id",
+      "default": null
+    },
+    {
+      "id": "0xd",
+      "name": "DisplayImportance",
+      "default": null
+    },
+    {
+      "id": "0xe",
+      "name": "DataPath",
+      "default": ""
+    },
+    {
+      "id": "0xf",
+      "name": "Visible",
+      "default": "true"
+    },
+    {
+      "id": "0x10",
+      "name": "UserVisible",
+      "default": null
+    },
+    {
+      "id": "0x11",
+      "name": "DefaultItem",
+      "default": "false"
+    },
+    {
+      "id": "0x12",
+      "name": "Enabled",
+      "default": "true"
+    },
+    {
+      "id": "0x13",
+      "name": "ReadOnly",
+      "default": "false"
+    },
+    {
+      "id": "0x14",
+      "name": "SkipOnInput",
+      "default": "auto"
+    },
+    {
+      "id": "0x15",
+      "name": "Title",
+      "default": null
+    },
+    {
+      "id": "0x16",
+      "name": "TitleTextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x17",
+      "name": "TitleBackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x18",
+      "name": "TitleFont",
+      "default": null
+    },
+    {
+      "id": "0x19",
+      "name": "TitleLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1a",
+      "name": "TitleHeight",
+      "default": "0"
+    },
+    {
+      "id": "0x1b",
+      "name": "ToolTip",
+      "default": null
+    },
+    {
+      "id": "0x1c",
+      "name": "ToolTipRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1d",
+      "name": "WarningOnEditRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1e",
+      "name": "WarningOnEdit",
+      "default": null
+    },
+    {
+      "id": "0x1f",
+      "name": "Shortcut",
+      "default": ""
+    },
+    {
+      "id": "0x20",
+      "name": "CommandSet",
+      "default": null
+    },
+    {
+      "id": "0x21",
+      "name": "HorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x22",
+      "name": "VerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x23",
+      "name": "GroupHorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x24",
+      "name": "GroupVerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x26",
+      "name": "EditMode",
+      "default": "EnterOnInput"
+    },
+    {
+      "id": "0x27",
+      "name": "FixingInTable",
+      "default": "None"
+    },
+    {
+      "id": "0x28",
+      "name": "CellHyperlink",
+      "default": "false"
+    },
+    {
+      "id": "0x29",
+      "name": "AutoCellHeight",
+      "default": "false"
+    },
+    {
+      "id": "0x2a",
+      "name": "ShowInHeader",
+      "default": "true"
+    },
+    {
+      "id": "0x2b",
+      "name": "HeaderPicture",
+      "default": null
+    },
+    {
+      "id": "0x2c",
+      "name": "HeaderHorizontalAlign",
+      "default": "Left"
+    },
+    {
+      "id": "0x2d",
+      "name": "ShowInFooter",
+      "default": "true"
+    },
+    {
+      "id": "0x2e",
+      "name": "FooterDataPath",
+      "default": ""
+    },
+    {
+      "id": "0x2f",
+      "name": "FooterText",
+      "default": null
+    },
+    {
+      "id": "0x30",
+      "name": "FooterTextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x31",
+      "name": "FooterBackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x32",
+      "name": "FooterFont",
+      "default": null
+    },
+    {
+      "id": "0x33",
+      "name": "FooterPicture",
+      "default": null
+    },
+    {
+      "id": "0x34",
+      "name": "FooterHorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x35",
+      "name": "OnMainServerUnavalableBehavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3c",
+      "name": "ShowInCard",
+      "default": "true"
+    },
+    {
+      "id": "0x3d",
+      "name": "FixInCard",
+      "default": "auto"
+    },
+    {
+      "id": "0x36",
+      "name": "MarkRequiredComplete",
+      "default": "auto"
+    },
+    {
+      "id": "0x37",
+      "name": "CellMark",
+      "default": "None"
+    },
+    {
+      "id": "0x38",
+      "name": "AutoEditMode",
+      "default": null
+    },
+    {
+      "id": "0x39",
+      "name": "AppearanceInCard",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3a",
+      "name": "ShowTitleInCard",
+      "default": "auto"
+    },
+    {
+      "id": "0x3b",
+      "name": "WidthInCard",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3e",
+      "name": "AutoWidthInTable",
+      "default": "Auto"
+    },
+    {
+      "id": "0x35",
+      "name": "OnMainServerUnavalableBehavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x35",
+      "name": "OnMainServerUnavalableBehavior",
+      "default": "Auto"
+    },
+    {
+      "id": "0x3f",
+      "name": "CellHyperlinkRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x40",
+      "name": "CellHyperlinkDisplayVariant",
+      "default": "Auto"
+    }
+  ],
+  "Form": [
+    {
+      "id": "0xc",
+      "name": "Title",
+      "default": null
+    },
+    {
+      "id": "0xd",
+      "name": "Width",
+      "default": "0"
+    },
+    {
+      "id": "0xe",
+      "name": "Height",
+      "default": "0"
+    },
+    {
+      "id": "0xf",
+      "name": "WindowOpeningMode",
+      "default": "DontBlock"
+    },
+    {
+      "id": "0x10",
+      "name": "EnterKeyBehavior",
+      "default": "ControlNavigation"
+    },
+    {
+      "id": "0x11",
+      "name": "AutoSaveDataInSettings",
+      "default": "DontUse"
+    },
+    {
+      "id": "0x12",
+      "name": "SaveDataInSettings",
+      "default": "DontUse"
+    },
+    {
+      "id": "0x13",
+      "name": "SaveWindowSettings",
+      "default": "true"
+    },
+    {
+      "id": "0x14",
+      "name": "SettingsStorage",
+      "default": ""
+    },
+    {
+      "id": "0x15",
+      "name": "AutoTitle",
+      "default": "true"
+    },
+    {
+      "id": "0x16",
+      "name": "AutoURL",
+      "default": "true"
+    },
+    {
+      "id": "0x17",
+      "name": "Group",
+      "default": "Vertical"
+    },
+    {
+      "id": "0x18",
+      "name": "ChildrenAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x19",
+      "name": "HorizontalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1a",
+      "name": "VerticalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1b",
+      "name": "HorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1c",
+      "name": "VerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1d",
+      "name": "ChildItemsWidth",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1e",
+      "name": "ChildItemsTitleLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x1f",
+      "name": "AutoFillCheck",
+      "default": "true"
+    },
+    {
+      "id": "0x20",
+      "name": "Customizable",
+      "default": "true"
+    },
+    {
+      "id": "0x21",
+      "name": "Enabled",
+      "default": "true"
+    },
+    {
+      "id": "0x22",
+      "name": "ReadOnly",
+      "default": "false"
+    },
+    {
+      "id": "0x23",
+      "name": "CommandBarLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x24",
+      "name": "VerticalScroll",
+      "default": "auto"
+    },
+    {
+      "id": "0x25",
+      "name": "ScalingMode",
+      "default": "Auto"
+    },
+    {
+      "id": "0x26",
+      "name": "Scale",
+      "default": "100"
+    },
+    {
+      "id": "0x27",
+      "name": "ScaleVariant",
+      "default": "Auto"
+    },
+    {
+      "id": "0x28",
+      "name": "ConversationsRepresentation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x2d",
+      "name": "CollapseItemsByImportanceVariant",
+      "default": "Auto"
+    },
+    {
+      "id": "0x2e",
+      "name": "CreateButtonsGroupTitle",
+      "default": null
+    },
+    {
+      "id": "0x2f",
+      "name": "CreateButtonsGroupPicture",
+      "default": null
+    },
+    {
+      "id": "0x30",
+      "name": "WindowViewMode",
+      "default": null
+    },
+    {
+      "id": "0x31",
+      "name": "ShowCommandBar",
+      "default": "auto"
+    },
+    {
+      "id": "0x2b",
+      "name": "ShowTitle",
+      "default": "auto"
+    },
+    {
+      "id": "0x2c",
+      "name": "ShowCloseButton",
+      "default": "true"
+    },
+    {
+      "id": "0x2a",
+      "name": "CommandSet",
+      "default": null
+    },
+    {
+      "id": "0x29",
+      "name": "MobileDeviceCommandBarContent",
+      "default": null
+    }
+  ],
+  "Pages": [
+    {
+      "id": "0x1f",
+      "name": "PagesRepresentation",
+      "default": "TabsOnTop"
+    },
+    {
+      "id": "0x20",
+      "name": "CurrentRowUse",
+      "default": "DontUse"
+    },
+    {
+      "id": "0x21",
+      "name": "AssociatedTableElementId",
+      "default": null
+    }
+  ],
+  "Page": [
+    {
+      "id": "0x1f",
+      "name": "Picture",
+      "default": null
+    },
+    {
+      "id": "0x20",
+      "name": "Group",
+      "default": "Vertical"
+    },
+    {
+      "id": "0x21",
+      "name": "ChildrenAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x22",
+      "name": "HorizontalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x23",
+      "name": "VerticalSpacing",
+      "default": "Auto"
+    },
+    {
+      "id": "0x24",
+      "name": "HorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x25",
+      "name": "VerticalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x26",
+      "name": "ChildItemsWidth",
+      "default": "Auto"
+    },
+    {
+      "id": "0x27",
+      "name": "ChildItemsTitleLocation",
+      "default": "Auto"
+    },
+    {
+      "id": "0x28",
+      "name": "Format",
+      "default": null
+    },
+    {
+      "id": "0x29",
+      "name": "ShowTitle",
+      "default": "auto"
+    },
+    {
+      "id": "0x2a",
+      "name": "TitleDataPath",
+      "default": ""
+    },
+    {
+      "id": "0x2b",
+      "name": "BackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x14",
+      "name": "TitleTextColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x15",
+      "name": "TitleFont",
+      "default": null
+    },
+    {
+      "id": "0x2c",
+      "name": "ScrollOnCompress",
+      "default": "auto"
+    }
+  ],
+  "CommandBar": [
+    {
+      "id": "0x1f",
+      "name": "HorizontalLocation",
+      "default": "Left"
+    },
+    {
+      "id": "0x20",
+      "name": "AppearanceMode",
+      "default": "Auto"
+    },
+    {
+      "id": "0x21",
+      "name": "CommandSource",
+      "default": ""
+    }
+  ],
+  "ContextMenu": [
+    {
+      "id": "0x1f",
+      "name": "Autofill",
+      "default": "true"
+    }
+  ],
+  "ColumnGroup": [
+    {
+      "id": "0x1f",
+      "name": "Group",
+      "default": "Vertical"
+    },
+    {
+      "id": "0x20",
+      "name": "ShowTitle",
+      "default": "auto"
+    },
+    {
+      "id": "0x21",
+      "name": "TitleBackColor",
+      "default": "auto"
+    },
+    {
+      "id": "0x22",
+      "name": "ShowInHeader",
+      "default": "false"
+    },
+    {
+      "id": "0x23",
+      "name": "HeaderDataPath",
+      "default": ""
+    },
+    {
+      "id": "0x24",
+      "name": "HeaderHorizontalAlign",
+      "default": "Auto"
+    },
+    {
+      "id": "0x26",
+      "name": "HeaderPicture",
+      "default": null
+    },
+    {
+      "id": "0x25",
+      "name": "HeaderFormat",
+      "default": null
+    },
+    {
+      "id": "0x27",
+      "name": "FixingInTable",
+      "default": "None"
+    },
+    {
+      "id": "0x28",
+      "name": "ShowInCard",
+      "default": "true"
+    },
+    {
+      "id": "0x29",
+      "name": "FixInCard",
+      "default": "auto"
+    },
+    {
+      "id": "0x2a",
+      "name": "ShowTitleInCard",
+      "default": "auto"
+    }
+  ]
+}

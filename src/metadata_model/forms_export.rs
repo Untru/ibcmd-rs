@@ -49,7 +49,15 @@ pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
     let root = list(row)?;
     let payload = item(root, 1)?;
     let head = match kind {
-        "Subsystem" => header(item(record(payload, "22", kind)?, 1)?)?,
+        // Accounting 3.0 stores the subsystem record as version 21 (the
+        // header, its members after `1`, keeps the same shape).
+        "Subsystem" => {
+            let fields = list(payload)?;
+            if !matches!(atom(item(fields, 0)?)?, "21" | "22") {
+                bail!("not a Subsystem record: {}", short(payload));
+            }
+            header(item(fields, 1)?)?
+        }
         "CommonForm" => {
             let fields = record(payload, "4", kind)?;
             header(item(list(item(fields, 1)?)?, 1)?)?

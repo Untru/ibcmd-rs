@@ -1905,7 +1905,12 @@ impl<'a> FormCommandSchema<'a> {
         picture_value: &[&str],
         picture_reference: &[&str],
     ) -> Option<Self> {
-        if !matches!(fields.first().map(|field| field.trim()), Some("9" | "11")) {
+        // Root-42 bodies keep command records under tag `8`; the arity and
+        // picture checks below still pin the shape.
+        if !matches!(
+            fields.first().map(|field| field.trim()),
+            Some("8" | "9" | "11")
+        ) {
             return None;
         }
         let bindings = fields
@@ -1913,7 +1918,12 @@ impl<'a> FormCommandSchema<'a> {
             .and_then(|field| field.trim().parse::<usize>().ok())
             .filter(|bindings| *bindings >= 1)?;
         let extra = bindings.checked_sub(1)?.checked_mul(2)?;
-        if fields.len() != 19usize.checked_add(extra)? {
+        let base: usize = if fields.first().map(|field| field.trim()) == Some("8") {
+            18
+        } else {
+            19
+        };
+        if fields.len() != base.checked_add(extra)? {
             return None;
         }
         for index in 0..bindings.checked_sub(1)? {
@@ -1927,6 +1937,7 @@ impl<'a> FormCommandSchema<'a> {
             }
         }
 
+        let picture = FormPictureValueSchema::from_raw_layout(picture_value);
         let picture = FormPictureValueSchema::from_raw_layout(picture_value)?;
         let picture_reference_is_exact = match picture.kind() {
             FormPictureValueKind::Empty => {
@@ -1950,11 +1961,19 @@ impl<'a> FormCommandSchema<'a> {
             return None;
         }
 
-        let current_row_use = match fields.get(18 + extra).map(|field| field.trim()) {
+        // The root-42 record closes one member earlier and does not carry the
+        // member at all: the platform writes `DontUse` for every one of them,
+        // which is the legacy default.
+        let legacy = fields.first().map(|field| field.trim()) == Some("8");
+        let current_row_use = if legacy {
+            Some(FormCommandCurrentRowUse::DontUse)
+        } else {
+            match fields.get(18 + extra).map(|field| field.trim()) {
             Some("0") => Some(FormCommandCurrentRowUse::Use),
             Some("1") => Some(FormCommandCurrentRowUse::DontUse),
-            Some("2") => None,
-            _ => return None,
+                Some("2") => None,
+                _ => return None,
+            }
         };
         let associated_table_element_id = match fields.get(14).map(|field| field.trim()) {
             Some("0") => None,
@@ -3851,6 +3870,10 @@ const FORM_PLANNER_BEFORE_CREATE_EVENT_UUID: &str = "2c8ad9e0-53f0-406d-9c8b-460
 const FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID: &str =
     "5e6c8466-44d0-4fd0-8d87-ac749c16ff60";
 const FORM_PLANNER_ON_EDIT_END_EVENT_UUID: &str = "68fc3ed6-a517-4843-a7a4-473cf4e27209";
+/// `DataProcessors/ТаймТрекер/Forms/Форма` `Планировщик`: the native element
+/// names this identifier `DimensionItemClick`.
+const FORM_PLANNER_DIMENSION_ITEM_CLICK_EVENT_UUID: &str =
+    "53d8653f-e73c-44f4-957c-0ecc97f3ed89";
 const FORM_PLANNER_BEFORE_DELETE_EVENT_UUID: &str = "6f758c30-b414-4949-a236-584bccb0102a";
 const FORM_PLANNER_BEFORE_START_EDIT_EVENT_UUID: &str = "82f5f464-5aa5-4efc-9813-51432c74ff8e";
 const FORM_PLANNER_BEFORE_START_QUICK_EDIT_EVENT_UUID: &str =
@@ -3863,6 +3886,12 @@ impl FormChildItemEventCollectionSchema {
         _field_schema: FormFieldSchema,
         item_tag: &str,
     ) -> Option<Self> {
+        Self::for_item_tag(item_tag)
+    }
+
+    /// The collection a tag's options tuple keeps its event record in, without
+    /// needing the tag's field schema (the schema is not consulted).
+    pub(crate) fn for_item_tag(item_tag: &str) -> Option<Self> {
         let (owner, collection_slot) = match item_tag {
             "LabelField" => (FormChildItemEventCollectionOwner::LabelField, 12),
             "PictureField" => (FormChildItemEventCollectionOwner::PictureField, 16),
@@ -4082,6 +4111,10 @@ impl FormChildItemEventCollectionSchema {
                 (FORM_ITEM_DRAG_START_EVENT_UUID, "DragStart"),
                 (FORM_ITEM_DRAG_END_EVENT_UUID, "DragEnd"),
                 (FORM_PLANNER_BEFORE_CREATE_EVENT_UUID, "BeforeCreate"),
+                (
+                    FORM_PLANNER_DIMENSION_ITEM_CLICK_EVENT_UUID,
+                    "DimensionItemClick",
+                ),
                 (
                     FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID,
                     "OnCurrentRepresentationPeriodChange",
@@ -8520,15 +8553,18 @@ impl FormTableSchema {
     const REFRESH_REQUEST_REVERSE_OFFSET: usize = 16;
 
     pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
-        if wrapper != "55"
+        let legacy = matches!(wrapper, "50" | "53");
+        let expected = if legacy { wrapper } else { "55" };
+        if (!legacy && wrapper != "55")
             || item_tag != "Table"
-            || fields.first().map(|field| field.trim()) != Some("55")
+            || fields.first().map(|field| field.trim()) != Some(expected)
             || fields.len() < Self::BASE_FIELD_COUNT
         {
             return None;
         }
         // The suffix combines several paired sections; the bag at slot 54 is only one of them.
-        if (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0 {
+        // The root-42 table record carries one extra member, so its parity differs.
+        if !legacy && (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0 {
             return None;
         }
 

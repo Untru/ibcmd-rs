@@ -109,6 +109,11 @@ impl NameIndex {
         self.types.get(type_id).map(String::as_str)
     }
 
+    /// Number of generated types the index knows (diagnostics).
+    pub fn type_count(&self) -> usize {
+        self.types.len()
+    }
+
     /// Name of a predefined item by its uuid; `None` when the uuid names
     /// items of several owners under different names (use
     /// [`Self::predefined_in`]).
@@ -241,8 +246,49 @@ pub fn decode_object(kind: &str, row: &Brace, context: &ExportContext) -> Result
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
             super::common::forms_export::decode(kind, row, context)
         }
+        "Table" => {
+            let table = super::external_data_source_table::from_brace(row)?;
+            let full = context
+                .names
+                .name(&table.uuid)
+                .ok_or_else(|| anyhow!("no name for table {}", table.uuid))?;
+            let owner = full
+                .strip_prefix("ExternalDataSource.")
+                .and_then(|rest| rest.split_once(".Table."))
+                .map(|(owner, _)| owner)
+                .ok_or_else(|| anyhow!("table {} has no source owner in its name", table.uuid))?;
+            super::external_data_source_table::to_element(&table, owner)
+        }
         other => bail!("not yet: no row decoder for {other}"),
     }
+}
+
+fn generic_object_names(kind: &str, row: &Brace) -> Result<ObjectNames> {
+    fn find(node: &Brace, depth: usize) -> Option<super::export::values::Header> {
+        if let Ok(header) = super::export::values::header(node)
+            && !header.name.is_empty()
+        {
+            return Some(header);
+        }
+        if depth == 0 {
+            return None;
+        }
+        if let Brace::List(items) = node {
+            for item in items {
+                if let Some(header) = find(item, depth - 1) {
+                    return Some(header);
+                }
+            }
+        }
+        None
+    }
+    let header = find(row, 2).ok_or_else(|| anyhow!("not yet: no row decoder for {kind}"))?;
+    Ok(ObjectNames {
+        uuid: header.uuid,
+        full_name: format!("{kind}.{}", header.name),
+        children: Vec::new(),
+        types: Vec::new(),
+    })
 }
 
 /// What one stored row contributes to a name index.
@@ -286,7 +332,10 @@ pub fn object_names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
             super::common::forms_export::names(kind, row)
         }
-        other => bail!("not yet: no row decoder for {other}"),
+        // Kinds without a decoder of their own still name themselves through
+        // the same md header every object carries. That is enough for the name
+        // index, which is all a reference needs.
+        other => generic_object_names(other, row),
     }
 }
 
@@ -325,6 +374,15 @@ pub fn owned_object_names(kind: &str, row: &Brace, owner: &str) -> Result<Object
             Ok(ObjectNames {
                 full_name: format!("{owner}.{kind}.{}", head.1),
                 uuid: head.0,
+                children: Vec::new(),
+                types: Vec::new(),
+            })
+        }
+        "Table" => {
+            let table = super::external_data_source_table::from_brace(row)?;
+            Ok(ObjectNames {
+                full_name: format!("{owner}.Table.{}", table.name),
+                uuid: table.uuid,
                 children: Vec::new(),
                 types: Vec::new(),
             })

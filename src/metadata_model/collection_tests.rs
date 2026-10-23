@@ -64,12 +64,13 @@ const ROOT_KINDS: [(&str, &str); 47] = [
 ];
 
 /// `(kind, folder)` of the five nested kinds the model's table also knew.
-const NESTED_KINDS: [(&str, &str); 5] = [
+const NESTED_KINDS: [(&str, &str); 6] = [
     ("Form", "Forms"),
     ("Template", "Templates"),
     ("Recalculation", "Recalculations"),
     ("Interface", "Interfaces"),
     ("PaletteColor", "PaletteColors"),
+    ("Table", "Tables"),
 ];
 
 #[test]
@@ -131,7 +132,7 @@ fn the_table_is_exactly_the_two_it_replaced() {
         .iter()
         .map(|&(kind, folder)| (folder, kind))
         .collect();
-    assert_eq!(NESTED_COLLECTIONS.len(), 5);
+    assert_eq!(NESTED_COLLECTIONS.len(), 6);
     assert_eq!(nested, expected_nested);
     // One folder per kind and one kind per folder, root and nested together.
     let all: Vec<_> = ROOT_COLLECTIONS.iter().chain(NESTED_COLLECTIONS).collect();

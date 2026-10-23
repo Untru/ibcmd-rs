@@ -54,12 +54,49 @@ pub(crate) struct Header {
 
 pub(crate) fn header(node: &Brace) -> Result<Header> {
     let items = list(node)?;
-    if atom(item(items, 0)?)? != "3" || items.len() != 9 {
+    // Modern rows open with `3`; legacy ones (Accounting 3.0 forms, templates
+    // and their owners) open with `2` and carry one member less.
+    let tag = atom(items.first().ok_or_else(|| anyhow!("empty header"))?)?;
+    // Owned legacy forms carry ten members (two version scalars after the
+    // comment); the first five slots are the same in every shape.
+    // Roles and other "simple" owners open with `1` and an identity of three
+    // members (`{0,0,<uuid>}`); the modern shape is `3`, the legacy `2`.
+    if !matches!(tag, "1" | "2" | "3") || !matches!(items.len(), 7 | 8 | 9 | 10) {
         bail!("not an md header: {}", short(node));
     }
     let identity = list(item(items, 1)?)?;
     Ok(Header {
-        uuid: atom(item(identity, 2)?)?.to_string(),
+        uuid: atom(
+            identity
+                .last()
+                .ok_or_else(|| anyhow!("empty md identity"))?,
+        )?
+        .to_string(),
+        name: string(item(items, 2)?)?.to_string(),
+        synonym: item(items, 3)?.clone(),
+        comment: string(item(items, 4)?)?.to_string(),
+    })
+}
+
+
+/// Like [`header`], but for descriptors whose header carries trailing
+/// reference pairs (`XDTOPackage` stores its namespace and type table behind
+/// the comment in the same tuple). Only the five leading slots are read, so
+/// the extra members do not matter.
+pub(crate) fn header_wide(node: &Brace) -> Result<Header> {
+    let items = list(node)?;
+    let tag = atom(items.first().ok_or_else(|| anyhow!("empty header"))?)?;
+    if !matches!(tag, "1" | "2" | "3") || items.len() < 7 {
+        bail!("not an md header: {}", short(node));
+    }
+    let identity = list(item(items, 1)?)?;
+    Ok(Header {
+        uuid: atom(
+            identity
+                .last()
+                .ok_or_else(|| anyhow!("empty md identity"))?,
+        )?
+        .to_string(),
         name: string(item(items, 2)?)?.to_string(),
         synonym: item(items, 3)?.clone(),
         comment: string(item(items, 4)?)?.to_string(),

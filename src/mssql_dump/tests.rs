@@ -10568,6 +10568,7 @@ fn formats_dynamic_list_server_state_xml_in_settings() {
                 dynamic_data_read_explicit: true,
                 query_text: Some("ВЫБРАТЬ".to_string()),
                 main_table: Some("Catalog.Товары".to_string()),
+                main_table_unresolved: None,
                 explicit_fields: Vec::new(),
                 fields: Vec::new(),
                 server_state_xml: Some(
@@ -10606,6 +10607,7 @@ fn fills_default_dynamic_list_list_settings_ids_and_view_modes() {
         dynamic_data_read_explicit: false,
         query_text: None,
         main_table: Some("Document.СчетНаОплату".to_string()),
+        main_table_unresolved: None,
         explicit_fields: Vec::new(),
         fields: Vec::new(),
         server_state_xml: None,
@@ -10837,6 +10839,27 @@ fn restores_accumulation_register_balance_main_table_from_raw_category() {
         normalize_form_main_table_category(Some("Task.TaskD".to_string()), Some("invalid"))
             .as_deref(),
         Some("Task.TaskD")
+    );
+}
+
+/// An `MDObjectRef` the name index cannot answer keeps the platform's
+/// `kind:uuid` spelling instead of disappearing. The record is the real shape
+/// of `Catalogs/узСпринты/Forms/ФормаЭлемента` `ТЧЗадачи`: a typed reference to
+/// `33ee2945-…` that the metadata name index does not carry.
+#[test]
+fn unnamed_main_table_keeps_the_platforms_kind_uuid_spelling() {
+    const TYPE_ID: &str = "fc01b5df-97fe-449b-83d4-218a090e681e";
+    const TABLE_ID: &str = "33ee2945-a302-44ac-a8b6-152205a57775";
+    let raw_attribute = format!(
+        r##"{{9,{{17}},0,"ListA",{{1,0}},{{"Pattern",{{"#",65abad24-838b-4987-8b35-ed9e2bd4d9c8}}}},{{0,{{0,{{"B",1}},0}}}},{{0,{{0,{{"B",1}},0}}}},{{0,0}},{{0,0}},0,0,0,0,{{0,4,"QueryText",{{"S","ВЫБРАТЬ 1"}},"ManualQuery",{{"B",1}},"MainTable",{{"#",{TYPE_ID},{TABLE_ID}}},"MainTableCategory",{{"N",1}}}},{{0,0}}}}"##
+    );
+    let attribute = parse_form_attribute(&raw_attribute, &BTreeMap::new(), &BTreeMap::new())
+        .expect("dynamic-list attribute");
+    let settings = attribute.settings.expect("dynamic-list settings");
+    assert_eq!(settings.main_table, None);
+    assert_eq!(
+        settings.main_table_unresolved.as_deref(),
+        Some("1:33ee2945-a302-44ac-a8b6-152205a57775")
     );
 }
 
@@ -11286,6 +11309,7 @@ fn adds_platform_default_filter_without_overwriting_custom_list_settings() {
         dynamic_data_read_explicit: false,
         query_text: None,
         main_table: Some("Document.ЖурналБилетовИБронирований".to_string()),
+        main_table_unresolved: None,
         explicit_fields: Vec::new(),
         fields: Vec::new(),
         server_state_xml: None,
@@ -11808,6 +11832,7 @@ fn formats_explicit_false_dynamic_data_read() {
             dynamic_data_read_explicit: true,
             query_text: None,
             main_table: Some("Catalog.Товары".to_string()),
+            main_table_unresolved: None,
             explicit_fields: Vec::new(),
             fields: Vec::new(),
             server_state_xml: None,
@@ -13269,6 +13294,7 @@ fn table_schema_trace_completion_is_end_to_end_fail_closed_and_matches_renderer(
                 dynamic_data_read_explicit: false,
                 query_text: None,
                 main_table: None,
+                main_table_unresolved: None,
                 explicit_fields: Vec::new(),
                 fields: Vec::new(),
                 server_state_xml: None,
@@ -22369,6 +22395,7 @@ fn formats_table_search_additions_as_direct_sections() {
         skip_on_input: None,
         strict_table_schema: false,
         title_location: None,
+        dimension_item_hyperlink: false,
         title_height: None,
         tooltip_representation: None,
         warning_on_edit_representation: None,
@@ -22636,6 +22663,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 skip_on_input: None,
                 strict_table_schema: false,
                 title_location: None,
+                dimension_item_hyperlink: false,
                 title_height: None,
                 tooltip_representation: None,
                 warning_on_edit_representation: None,
@@ -22904,6 +22932,7 @@ fn formats_table_search_additions_as_direct_sections() {
                 skip_on_input: None,
                 strict_table_schema: false,
                 title_location: None,
+                dimension_item_hyperlink: false,
                 title_height: None,
                 tooltip_representation: None,
                 warning_on_edit_representation: None,
@@ -25926,6 +25955,9 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
         Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
             primary_slot,
             duplicate_slot,
+            reason: "mirror_mismatch",
+            primary_head: r#"{5006,1,"Filter.Owner",1,{27},0}"#.to_string(),
+            duplicate_head: r#"{5007,1,"Filter.Other",1,{27},0,"",""}"#.to_string(),
         })
     );
     let cluster = CanonicalFormChoiceParameterCluster::new(
@@ -25938,6 +25970,9 @@ fn input_field_choice_parameter_links_keep_empty_and_malformed_states_distinct()
         Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
             primary_slot,
             duplicate_slot,
+            reason: "mirror_mismatch",
+            primary_head: r#"{5006,1,"Filter.Owner",1,{27},0}"#.to_string(),
+            duplicate_head: r#"{5007,1,"Filter.Other",1,{27},0,"",""}"#.to_string(),
         })
     );
 }
@@ -26780,6 +26815,9 @@ fn detailed_form_extraction_preserves_malformed_link_rejection_diagnostics() {
             duplicate_slot:
                 crate::form_schema::FormInputFieldExtendedOptionSlot::ChoiceParameterLinksDuplicate
                     .index(),
+            reason: "mirror_mismatch",
+            primary_head: r#"{5006,1,"Filter.Owner",1,{3},0}"#.to_string(),
+            duplicate_head: r#"{5007,1,"Filter.Other",1,{3},0,"",""}"#.to_string(),
         }
     );
     assert_eq!(diagnostics.len(), 2);
@@ -70128,6 +70166,7 @@ fn data_path_dynamic_list_settings(fields: Vec<FormDynamicListField>) -> FormDyn
         dynamic_data_read_explicit: false,
         query_text: None,
         main_table: None,
+        main_table_unresolved: None,
         explicit_fields: Vec::new(),
         fields,
         server_state_xml: None,
@@ -80448,4 +80487,323 @@ fn form_root_read_only_uses_its_own_head_flag_and_native_xml_position() {
     let mut unsupported = vec!["1"; 18];
     unsupported[0] = "99";
     assert_eq!(extract_form_read_only(&unsupported), None);
+}
+
+#[test]
+fn graphical_scheme_82_parses() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = include_str!("fixtures/graphical_scheme_82.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let parsed = super::parse_business_process_flowchart_text_with_types(
+        text,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    );
+    assert!(parsed.is_some(), "scheme 82 must parse");
+}
+
+#[test]
+fn graphical_scheme_profit_parses() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = include_str!("fixtures/graphical_scheme_profit.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let parsed = super::parse_business_process_flowchart_text_with_types(
+        text,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    );
+    assert!(parsed.is_some(), "scheme profit must parse");
+}
+
+#[test]
+fn graphical_scheme_envd_parses() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = include_str!("fixtures/graphical_scheme_envd.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let parsed = super::parse_business_process_flowchart_text_with_types(
+        text,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    );
+    assert!(parsed.is_some(), "scheme envd must parse");
+}
+
+#[test]
+fn graphical_scheme_map_parses() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = include_str!("fixtures/graphical_scheme_map.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let parsed = super::parse_business_process_flowchart_text_with_types(
+        text,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    );
+    assert!(parsed.is_some(), "scheme map must parse");
+}
+
+#[test]
+fn graphical_scheme_card82_parses() {
+    use std::collections::{BTreeMap, BTreeSet};
+    let text = include_str!("fixtures/graphical_scheme_card82.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let parsed = super::parse_business_process_flowchart_text_with_types(
+        text,
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeMap::new(),
+        &BTreeSet::new(),
+    );
+    assert!(parsed.is_some(), "scheme card82 must parse");
+}
+
+#[test]
+fn moxel_sized_autofont_reads_height() {
+    use std::collections::BTreeMap;
+    let font = super::moxel::parse_moxel_font("{7,3,2,100,1,100}", &BTreeMap::new())
+        .expect("sized AutoFont parses");
+    assert_eq!(font.kind, "AutoFont");
+    assert_eq!(font.height.as_deref(), Some("10"));
+    let font = super::moxel::parse_moxel_font("{7,3,2,80,1,100}", &BTreeMap::new())
+        .expect("sized AutoFont parses");
+    assert_eq!(font.height.as_deref(), Some("8"));
+}
+
+#[test]
+fn flowchart_sized_autofont_reads_height() {
+    let font = super::parse_flowchart_font_tuple("{7,3,2,80,1,100}").expect("sized AutoFont");
+    assert_eq!(font.kind, "AutoFont");
+    assert_eq!(font.height.as_deref(), Some("8"));
+    let font = super::parse_flowchart_font_tuple("{7,3,2,100,1,100}").expect("sized AutoFont");
+    assert_eq!(font.height.as_deref(), Some("10"));
+}
+
+#[test]
+fn mxl_torg13_parses_all_rows() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_torg13.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    eprintln!(
+        "rows={} last={:?}",
+        sheet.rows.len(),
+        sheet.rows.last().map(|row| (row.index, row.columns_id.clone()))
+    );
+    assert_eq!(sheet.rows.len(), 36);
+    assert!(sheet.rows.last().and_then(|row| row.columns_id.as_deref())
+        == Some("97c79b94-d3a9-4813-af59-c74f73613b21"));
+}
+
+#[test]
+fn mxl_legacy_pictures_parse() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_pictures.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    assert_eq!(sheet.pictures.len(), 5);
+}
+
+#[test]
+fn mxl_legacy_absolute_fonts_parse() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_absolute_fonts.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    assert_eq!(sheet.fonts.len(), 2);
+    assert_eq!(sheet.fonts[0].kind, "Absolute");
+    assert_eq!(sheet.fonts[0].height.as_deref(), Some("10"));
+    assert_eq!(sheet.fonts[0].bold, Some(true));
+    assert_eq!(sheet.fonts[1].height.as_deref(), Some("8"));
+}
+
+#[test]
+fn accounting_catalog_row_yields_names_and_types() {
+    let text = include_str!("fixtures/catalog_row_accounting.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let tree = crate::metadata_model::brace::parse_row(text.as_bytes()).expect("row parses");
+    let names = crate::metadata_model::export::object_names("Catalog", &tree);
+    eprintln!("names: {:?}", names.as_ref().map(|n| (n.full_name.clone(), n.types.len())));
+    let names = names.expect("catalog names parse");
+    assert_eq!(names.full_name, "Catalog.ДенежныеДокументы");
+    assert!(!names.types.is_empty());
+}
+
+#[test]
+fn xdto_row_yields_a_name() {
+    let text = include_str!("fixtures/xdto_row.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let tree = crate::metadata_model::brace::parse_row(text.as_bytes()).expect("row parses");
+    let names = crate::metadata_model::export::object_names("XDTOPackage", &tree);
+    eprintln!("xdto names: {:?}", names.as_ref().map(|n| n.full_name.clone()));
+    let names = names.expect("xdto names parse");
+    assert_eq!(names.full_name, "XDTOPackage.Patch");
+}
+
+#[test]
+#[ignore = "reproduces the missing vertical page break"]
+fn mxl_page_break_parses() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_page_breaks.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    eprintln!("vertical={:?} horizontal={:?}", sheet.page_breaks.vertical, sheet.page_breaks.horizontal);
+    assert_eq!(sheet.page_breaks.vertical, vec![35]);
+}
+
+#[test]
+fn mxl_style_fonts_parse() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_style_fonts.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    eprintln!("fonts={} kinds={:?}", sheet.fonts.len(), sheet.fonts.iter().map(|f| f.kind).collect::<Vec<_>>());
+    assert_eq!(sheet.fonts.len(), 9);
+}
+
+#[test]
+fn mxl_merge_regions_are_unique() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/mxl_merges.txt");
+    let text = &text[text.find('{').expect("body brace")..];
+    let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
+        .expect("spreadsheet parses");
+    let mut unique = sheet
+        .merges
+        .iter()
+        .map(|merge| (merge.row, merge.column, merge.height, merge.width))
+        .collect::<Vec<_>>();
+    unique.sort();
+    unique.dedup();
+    eprintln!("merges={} unique={}", sheet.merges.len(), unique.len());
+    assert_eq!(sheet.merges.len(), 81);
+}
+
+#[test]
+fn catalog_row_registers_its_generated_types() {
+    let text = include_str!("fixtures/catalog_row_types.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let tree = crate::metadata_model::brace::parse_row(text.as_bytes()).expect("row parses");
+    let names = crate::metadata_model::export::object_names("Catalog", &tree).expect("names");
+    assert_eq!(names.full_name, "Catalog.ТипыДокументов");
+    eprintln!(
+        "types: {:?}",
+        names.types.iter().map(|t| (t.category.clone(), t.type_id.clone())).collect::<Vec<_>>()
+    );
+    assert!(names.types.iter().any(|t| t.category == "Object"));
+}
+
+#[test]
+fn catalog_row_yields_legacy_type_index_entries() {
+    let text = include_str!("fixtures/catalog_row_types.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let code = super::parse_metadata_object_code(text);
+    let header = super::parse_metadata_header_from_text(text, "b733af52-99f6-4369-8bab-df3ee91c6719");
+    eprintln!("code={code:?} header={:?}", header.as_ref().map(|h| h.name.clone()));
+    let row = super::MetadataTextRow {
+        file_name: "b733af52-99f6-4369-8bab-df3ee91c6719".to_string(),
+        text: text.to_string(),
+        object_code: code,
+        header,
+        kind: Some("Catalog".to_string()),
+        folder: None,
+    };
+    let entries = super::parse_indexed_generated_types_from_text(&row);
+    eprintln!(
+        "entries={:?}",
+        entries.as_ref().map(|list| list.iter().map(|e| e.type_id.clone()).collect::<Vec<_>>())
+    );
+    assert!(entries.is_some_and(|list| list.iter().any(|e| e.type_id == "6c7c7af3-5f07-4567-a025-286f9e5964e7")));
+}
+
+#[test]
+fn attribute_type_pattern_resolves_catalog_object() {
+    use std::collections::BTreeMap;
+    let mut index = BTreeMap::new();
+    index.insert(
+        "6c7c7af3-5f07-4567-a025-286f9e5964e7".to_string(),
+        "cfg:CatalogObject.ТипыДокументов".to_string(),
+    );
+    let pattern = "{\"Pattern\",\n{\"#\",6c7c7af3-5f07-4567-a025-286f9e5964e7}}";
+    let parsed = super::form_body::parse_form_type_pattern(pattern, &index);
+    eprintln!("parsed={parsed:?}");
+    assert!(parsed.is_some_and(|types| !types.is_empty()));
+}
+
+#[test]
+fn v33_form_writes_standard_attribute_data_path() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/form_v33_data_path.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let body = crate::module_blob::parse_form_body_plain(text).expect("body parses");
+    let type_index = BTreeMap::from([(
+        "6c7c7af3-5f07-4567-a025-286f9e5964e7".to_string(),
+        "cfg:CatalogObject.ТипыДокументов".to_string(),
+    )]);
+    let object_refs = BTreeMap::from([(
+        "d52ab7ed-2f8c-448c-95af-207b65386dc5".to_string(),
+        "Catalog.ТипыДокументов.Attribute.ПолноеНаименование".to_string(),
+    )]);
+    let xml = super::extract_form_body_xml_from_body(&body, &type_index, &object_refs)
+        .expect("xml");
+    eprintln!(
+        "has description path: {} has full name path: {}",
+        xml.contains("<DataPath>Объект.Description</DataPath>"),
+        xml.contains("<DataPath>Объект.ПолноеНаименование</DataPath>")
+    );
+    assert!(xml.contains("<DataPath>Объект.Description</DataPath>"), "{xml}");
+}
+
+#[test]
+fn root42_form_resolves_its_commands() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/form_root42_commands.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let body = crate::module_blob::parse_form_body_plain(text).expect("body parses");
+    let xml = super::extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new())
+        .expect("xml");
+    let raw = xml.matches("<CommandName>").count()
+        - xml.matches("<CommandName>Form.").count()
+        - xml.matches("<CommandName>0:").count();
+    eprintln!(
+        "raw command names: {raw} declared commands: {}",
+        xml.matches("<Command name=").count()
+    );
+    assert!(xml.contains("<CommandName>Form.Command.ПроверитьШаблон</CommandName>"), "{raw}");
+}
+
+#[test]
+fn root42_form_keeps_its_tables() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/form_root42_commands.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let body = crate::module_blob::parse_form_body_plain(text).expect("body parses");
+    let xml = super::extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new())
+        .expect("xml");
+    eprintln!("tables: {}", xml.matches("<Table ").count());
+    assert!(xml.contains("<Table name=\"ПоляДорожки1\""), "{}", xml.matches("<Table ").count());
+}
+
+#[test]
+#[ignore = "reproduces a dropped tag-53 list table on a root-48 form"]
+fn root48_list_form_keeps_its_table() {
+    use std::collections::BTreeMap;
+    let text = include_str!("fixtures/form_root48_list.txt");
+    let text = text.trim_start_matches('\u{feff}');
+    let body = crate::module_blob::parse_form_body_plain(text).expect("body parses");
+    let xml = super::extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new())
+        .expect("xml");
+    eprintln!("tables: {}", xml.matches("<Table ").count());
+    assert!(xml.contains("<Table name=\"Список\""), "{}", xml.matches("<Table ").count());
 }

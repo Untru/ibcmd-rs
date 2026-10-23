@@ -1,0 +1,718 @@
+{
+  "packages": [
+    {
+      "resource": "backbas_root.res",
+      "namespace": "http://v8.1c.ru/eventLog",
+      "file": "backbas_root-http-v8-1c-ru-eventLog.xsd",
+      "bytes": 18215,
+      "object_types": 127,
+      "properties": 60
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/enums",
+      "file": "backend_root-http-v8-1c-ru-8-3-xcf-enums.xsd",
+      "bytes": 22078,
+      "object_types": 0,
+      "properties": 0
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/readable",
+      "file": "backend_root-http-v8-1c-ru-8-3-xcf-readable.xsd",
+      "bytes": 13633,
+      "object_types": 32,
+      "properties": 104
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/extrnprops",
+      "file": "backend_root-http-v8-1c-ru-8-3-xcf-extrnprops.xsd",
+      "bytes": 13887,
+      "object_types": 33,
+      "properties": 86
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/predef",
+      "file": "backend_root-http-v8-1c-ru-8-3-xcf-predef.xsd",
+      "bytes": 4670,
+      "object_types": 13,
+      "properties": 31
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/MDClasses",
+      "file": "backend_root-http-v8-1c-ru-8-3-MDClasses.xsd",
+      "bytes": 196261,
+      "object_types": 186,
+      "properties": 1839
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.2/roles",
+      "file": "backend_root-http-v8-1c-ru-8-2-roles.xsd",
+      "bytes": 1706,
+      "object_types": 5,
+      "properties": 14
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/dumpinfo",
+      "file": "backend_root-http-v8-1c-ru-8-3-xcf-dumpinfo.xsd",
+      "bytes": 1284,
+      "object_types": 3,
+      "properties": 9
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/TestAndRepairExchangePlanIntegrityReport",
+      "file": "backend_root-http-v8-1c-ru-8-3-TestAndRepairExchangePlanIntegrityReport.xsd",
+      "bytes": 2216,
+      "object_types": 4,
+      "properties": 9
+    },
+    {
+      "resource": "backend_root.res",
+      "namespace": "http://v8.1c.ru/8.2/misc",
+      "file": "backend_root-http-v8-1c-ru-8-2-misc.xsd",
+      "bytes": 185,
+      "object_types": 2,
+      "properties": 0
+    },
+    {
+      "resource": "bsl_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/bsl",
+      "file": "bsl_root-http-v8-1c-ru-8-2-data-bsl.xsd",
+      "bytes": 3703,
+      "object_types": 6,
+      "properties": 33
+    },
+    {
+      "resource": "chart_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/chart",
+      "file": "chart_root-http-v8-1c-ru-8-2-data-chart.xsd",
+      "bytes": 63710,
+      "object_types": 56,
+      "properties": 529
+    },
+    {
+      "resource": "config_root.res",
+      "namespace": "http://v8.1c.ru/8.3/mobile-application/form",
+      "file": "config_root-http-v8-1c-ru-8-3-mobile-application-form.xsd",
+      "bytes": 80690,
+      "object_types": 49,
+      "properties": 661
+    },
+    {
+      "resource": "config_root.res",
+      "namespace": "http://v8.1c.ru/8.3/mobile-application/app",
+      "file": "config_root-http-v8-1c-ru-8-3-mobile-application-app.xsd",
+      "bytes": 54808,
+      "object_types": 59,
+      "properties": 439
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugBaseData",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugBaseData.xsd",
+      "bytes": 5975,
+      "object_types": 6,
+      "properties": 34
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugArea",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugArea.xsd",
+      "bytes": 1731,
+      "object_types": 5,
+      "properties": 14
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugCalculations",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugCalculations.xsd",
+      "bytes": 7234,
+      "object_types": 12,
+      "properties": 53
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugRTEInfo",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugRTEInfo.xsd",
+      "bytes": 1933,
+      "object_types": 2,
+      "properties": 15
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugMeasure",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugMeasure.xsd",
+      "bytes": 1527,
+      "object_types": 3,
+      "properties": 13
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugBreakpoints",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugBreakpoints.xsd",
+      "bytes": 2687,
+      "object_types": 5,
+      "properties": 24
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugForegroundData",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugForegroundData.xsd",
+      "bytes": 443,
+      "object_types": 1,
+      "properties": 3
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugDBGUICommands",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugDBGUICommands.xsd",
+      "bytes": 7087,
+      "object_types": 15,
+      "properties": 32
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugAutoAttach",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugAutoAttach.xsd",
+      "bytes": 783,
+      "object_types": 2,
+      "properties": 3
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugRTEFilter",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugRTEFilter.xsd",
+      "bytes": 745,
+      "object_types": 2,
+      "properties": 5
+    },
+    {
+      "resource": "dbgbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/debugRDBGRequestResponse",
+      "file": "dbgbase_root-http-v8-1c-ru-8-3-debugger-debugRDBGRequestResponse.xsd",
+      "bytes": 17933,
+      "object_types": 65,
+      "properties": 82
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtData",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtData.xsd",
+      "bytes": 3762,
+      "object_types": 8,
+      "properties": 28
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtErrorInfo",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtErrorInfo.xsd",
+      "bytes": 1307,
+      "object_types": 3,
+      "properties": 11
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtBP",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtBP.xsd",
+      "bytes": 1791,
+      "object_types": 2,
+      "properties": 8
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtCommands",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtCommands.xsd",
+      "bytes": 7874,
+      "object_types": 21,
+      "properties": 28
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtRequestResponse",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtRequestResponse.xsd",
+      "bytes": 5663,
+      "object_types": 17,
+      "properties": 18
+    },
+    {
+      "resource": "dbgtgt_root.res",
+      "namespace": "http://v8.1c.ru/8.3/debugger/dbgtgtRemoteRequestResponse",
+      "file": "dbgtgt_root-http-v8-1c-ru-8-3-debugger-dbgtgtRemoteRequestResponse.xsd",
+      "bytes": 12320,
+      "object_types": 31,
+      "properties": 65
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/common",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-common.xsd",
+      "bytes": 2940,
+      "object_types": 2,
+      "properties": 18
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/area-template",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-area-template.xsd",
+      "bytes": 5497,
+      "object_types": 23,
+      "properties": 29
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/composition-template",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-composition-template.xsd",
+      "bytes": 16881,
+      "object_types": 34,
+      "properties": 144
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/appearance-template",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-appearance-template.xsd",
+      "bytes": 1181,
+      "object_types": 4,
+      "properties": 4
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/result",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-result.xsd",
+      "bytes": 1526,
+      "object_types": 1,
+      "properties": 7
+    },
+    {
+      "resource": "dcs_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/schema",
+      "file": "dcs_root-http-v8-1c-ru-8-1-data-composition-system-schema.xsd",
+      "bytes": 12528,
+      "object_types": 21,
+      "properties": 109
+    },
+    {
+      "resource": "dcscore_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/core",
+      "file": "dcscore_root-http-v8-1c-ru-8-1-data-composition-system-core.xsd",
+      "bytes": 4766,
+      "object_types": 9,
+      "properties": 14
+    },
+    {
+      "resource": "dcscore_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/settings",
+      "file": "dcscore_root-http-v8-1c-ru-8-1-data-composition-system-settings.xsd",
+      "bytes": 35833,
+      "object_types": 53,
+      "properties": 247
+    },
+    {
+      "resource": "dcscore_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data-composition-system/details",
+      "file": "dcscore_root-http-v8-1c-ru-8-1-data-composition-system-details.xsd",
+      "bytes": 2720,
+      "object_types": 6,
+      "properties": 16
+    },
+    {
+      "resource": "ecscore_root.res",
+      "namespace": "http://v8.1c.ru/8.3/ecs/core",
+      "file": "ecscore_root-http-v8-1c-ru-8-3-ecs-core.xsd",
+      "bytes": 3827,
+      "object_types": 5,
+      "properties": 22
+    },
+    {
+      "resource": "entext_root.res",
+      "namespace": "http://v8.1c.ru/8.3/data/entext",
+      "file": "entext_root-http-v8-1c-ru-8-3-data-entext.xsd",
+      "bytes": 2032,
+      "object_types": 6,
+      "properties": 15
+    },
+    {
+      "resource": "enums_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data/enterprise",
+      "file": "enums_root-http-v8-1c-ru-8-1-data-enterprise.xsd",
+      "bytes": 15720,
+      "object_types": 11,
+      "properties": 54
+    },
+    {
+      "resource": "enums_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/data-analysis",
+      "file": "enums_root-http-v8-1c-ru-8-2-data-data-analysis.xsd",
+      "bytes": 4601,
+      "object_types": 0,
+      "properties": 0
+    },
+    {
+      "resource": "ext_root.res",
+      "namespace": "http://v8.1c.ru/8.3/data/ext",
+      "file": "ext_root-http-v8-1c-ru-8-3-data-ext.xsd",
+      "bytes": 6763,
+      "object_types": 9,
+      "properties": 35
+    },
+    {
+      "resource": "fmtd_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/formatted-document",
+      "file": "fmtd_root-http-v8-1c-ru-8-2-data-formatted-document.xsd",
+      "bytes": 4527,
+      "object_types": 9,
+      "properties": 29
+    },
+    {
+      "resource": "fmtd_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/formatted-document-internal",
+      "file": "fmtd_root-http-v8-1c-ru-8-2-data-formatted-document-internal.xsd",
+      "bytes": 14677,
+      "object_types": 54,
+      "properties": 94
+    },
+    {
+      "resource": "frntend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/config/merge/settings",
+      "file": "frntend_root-http-v8-1c-ru-8-3-config-merge-settings.xsd",
+      "bytes": 14385,
+      "object_types": 26,
+      "properties": 90
+    },
+    {
+      "resource": "frntend_root.res",
+      "namespace": "http://v8.1c.ru/8.3/config/objects",
+      "file": "frntend_root-http-v8-1c-ru-8-3-config-objects.xsd",
+      "bytes": 1657,
+      "object_types": 4,
+      "properties": 12
+    },
+    {
+      "resource": "map_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/geo",
+      "file": "map_root-http-v8-1c-ru-8-2-data-geo.xsd",
+      "bytes": 22349,
+      "object_types": 21,
+      "properties": 183
+    },
+    {
+      "resource": "mngbase_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/logform",
+      "file": "mngbase_root-http-v8-1c-ru-8-3-xcf-logform.xsd",
+      "bytes": 118106,
+      "object_types": 68,
+      "properties": 957
+    },
+    {
+      "resource": "mngbase_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/dynamic-list-server",
+      "file": "mngbase_root-http-v8-1c-ru-8-2-managed-application-dynamic-list-server.xsd",
+      "bytes": 930,
+      "object_types": 3,
+      "properties": 6
+    },
+    {
+      "resource": "mngbase_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/dynamic-list-composition-template",
+      "file": "mngbase_root-http-v8-1c-ru-8-2-managed-application-dynamic-list-composition-template.xsd",
+      "bytes": 2552,
+      "object_types": 7,
+      "properties": 18
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/uobjects",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-uobjects.xsd",
+      "bytes": 20128,
+      "object_types": 51,
+      "properties": 164
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/core",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-core.xsd",
+      "bytes": 63562,
+      "object_types": 110,
+      "properties": 528
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/logform",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-logform.xsd",
+      "bytes": 155795,
+      "object_types": 68,
+      "properties": 1047
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/modules",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-modules.xsd",
+      "bytes": 4043,
+      "object_types": 8,
+      "properties": 28
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/cmi",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-cmi.xsd",
+      "bytes": 14818,
+      "object_types": 27,
+      "properties": 120
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/dynamic-list",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-dynamic-list.xsd",
+      "bytes": 5819,
+      "object_types": 9,
+      "properties": 51
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/dynamic-list-data",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-dynamic-list-data.xsd",
+      "bytes": 2732,
+      "object_types": 8,
+      "properties": 14
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/logform/layouter",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-logform-layouter.xsd",
+      "bytes": 76805,
+      "object_types": 55,
+      "properties": 644
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.3/managed-application/logform/hippo",
+      "file": "mngcore_root-http-v8-1c-ru-8-3-managed-application-logform-hippo.xsd",
+      "bytes": 98051,
+      "object_types": 70,
+      "properties": 855
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/mngsrv/ws",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-mngsrv-ws.xsd",
+      "bytes": 201507,
+      "object_types": 421,
+      "properties": 2063
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.3/dbcopies",
+      "file": "mngcore_root-http-v8-1c-ru-8-3-dbcopies.xsd",
+      "bytes": 490,
+      "object_types": 2,
+      "properties": 2
+    },
+    {
+      "resource": "mngcore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/user-settings",
+      "file": "mngcore_root-http-v8-1c-ru-8-2-managed-application-user-settings.xsd",
+      "bytes": 2196,
+      "object_types": 7,
+      "properties": 18
+    },
+    {
+      "resource": "mob_root.res",
+      "namespace": "http://v8.1c.ru/8.3/data/mob",
+      "file": "mob_root-http-v8-1c-ru-8-3-data-mob.xsd",
+      "bytes": 9784,
+      "object_types": 19,
+      "properties": 94
+    },
+    {
+      "resource": "moxel_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/spreadsheet",
+      "file": "moxel_root-http-v8-1c-ru-8-2-data-spreadsheet.xsd",
+      "bytes": 36145,
+      "object_types": 34,
+      "properties": 300
+    },
+    {
+      "resource": "pdf_root.res",
+      "namespace": "http://v8.1c.ru/8.3/data/pdf",
+      "file": "pdf_root-http-v8-1c-ru-8-3-data-pdf.xsd",
+      "bytes": 3072,
+      "object_types": 5,
+      "properties": 22
+    },
+    {
+      "resource": "plnnr_root.res",
+      "namespace": "http://v8.1c.ru/8.3/data/planner",
+      "file": "plnnr_root-http-v8-1c-ru-8-3-data-planner.xsd",
+      "bytes": 11445,
+      "object_types": 9,
+      "properties": 104
+    },
+    {
+      "resource": "scheme_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/graphscheme",
+      "file": "scheme_root-http-v8-1c-ru-8-2-data-graphscheme.xsd",
+      "bytes": 8209,
+      "object_types": 7,
+      "properties": 76
+    },
+    {
+      "resource": "scheme_root.res",
+      "namespace": "http://v8.1c.ru/8.3/xcf/scheme",
+      "file": "scheme_root-http-v8-1c-ru-8-3-xcf-scheme.xsd",
+      "bytes": 15218,
+      "object_types": 35,
+      "properties": 123
+    },
+    {
+      "resource": "speechcore_root.res",
+      "namespace": "http://v8.1c.ru/8.3/stt/core",
+      "file": "speechcore_root-http-v8-1c-ru-8-3-stt-core.xsd",
+      "bytes": 5656,
+      "object_types": 12,
+      "properties": 46
+    },
+    {
+      "resource": "testbase_root.res",
+      "namespace": "http://v8.1c.ru/8.2/data/test",
+      "file": "testbase_root-http-v8-1c-ru-8-2-data-test.xsd",
+      "bytes": 33493,
+      "object_types": 155,
+      "properties": 148
+    },
+    {
+      "resource": "txtedt_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data/txtedt",
+      "file": "txtedt_root-http-v8-1c-ru-8-1-data-txtedt.xsd",
+      "bytes": 1221,
+      "object_types": 2,
+      "properties": 11
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/virtual-resource-system",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-virtual-resource-system.xsd",
+      "bytes": 13150,
+      "object_types": 26,
+      "properties": 118
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/logformexception",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-logformexception.xsd",
+      "bytes": 1219,
+      "object_types": 4,
+      "properties": 8
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/deployment",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-deployment.xsd",
+      "bytes": 969,
+      "object_types": 3,
+      "properties": 7
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/SecondFactorAuthException",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-SecondFactorAuthException.xsd",
+      "bytes": 608,
+      "object_types": 1,
+      "properties": 3
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/edbexception",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-edbexception.xsd",
+      "bytes": 467,
+      "object_types": 1,
+      "properties": 2
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/objectlocksexception",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-objectlocksexception.xsd",
+      "bytes": 1581,
+      "object_types": 2,
+      "properties": 15
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/seancecontextexception",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-seancecontextexception.xsd",
+      "bytes": 432,
+      "object_types": 1,
+      "properties": 1
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/InteractiveSecurityException",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-InteractiveSecurityException.xsd",
+      "bytes": 635,
+      "object_types": 1,
+      "properties": 3
+    },
+    {
+      "resource": "vrscore_root.res",
+      "namespace": "http://v8.1c.ru/8.2/managed-application/remoteexception",
+      "file": "vrscore_root-http-v8-1c-ru-8-2-managed-application-remoteexception.xsd",
+      "bytes": 469,
+      "object_types": 1,
+      "properties": 2
+    },
+    {
+      "resource": "websocket_root.res",
+      "namespace": "http://v8.1c.ru/8.3/websocket",
+      "file": "websocket_root-http-v8-1c-ru-8-3-websocket.xsd",
+      "bytes": 416,
+      "object_types": 0,
+      "properties": 0
+    },
+    {
+      "resource": "ws_root.res",
+      "namespace": "http://v8.1c.ru/8.1/ws/wsdefinitions-model",
+      "file": "ws_root-http-v8-1c-ru-8-1-ws-wsdefinitions-model.xsd",
+      "bytes": 2296,
+      "object_types": 5,
+      "properties": 22
+    },
+    {
+      "resource": "xdto_root.res",
+      "namespace": "http://www.w3.org/2001/XMLSchema",
+      "file": "xdto_root-http-www-w3-org-2001-XMLSchema.xsd",
+      "bytes": 33985,
+      "object_types": 34,
+      "properties": 333
+    },
+    {
+      "resource": "xdto_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data/core",
+      "file": "xdto_root-http-v8-1c-ru-8-1-data-core.xsd",
+      "bytes": 15454,
+      "object_types": 30,
+      "properties": 78
+    },
+    {
+      "resource": "xdto_root.res",
+      "namespace": "http://v8.1c.ru/8.1/data/ui",
+      "file": "xdto_root-http-v8-1c-ru-8-1-data-ui.xsd",
+      "bytes": 16613,
+      "object_types": 7,
+      "properties": 40
+    },
+    {
+      "resource": "xdto_root.res",
+      "namespace": "http://v8.1c.ru/8.2/bsl",
+      "file": "xdto_root-http-v8-1c-ru-8-2-bsl.xsd",
+      "bytes": 2091,
+      "object_types": 4,
+      "properties": 22
+    }
+  ],
+  "namespaces": 89,
+  "duplicate_namespaces": {}
+}

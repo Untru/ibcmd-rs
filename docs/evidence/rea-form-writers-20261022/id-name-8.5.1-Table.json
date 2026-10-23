@@ -1,0 +1,541 @@
+{
+  "platform": "8.5.1",
+  "element": "Table",
+  "source_java": "C:\\Tools\\edt-form-export\\src\\com\\_1c\\g5\\v8\\dt\\form\\export\\xml\\writer\\FormItemWriter.java",
+  "mapping": [
+    {
+      "id": "0xc",
+      "skip_if": null,
+      "feature": "TABLE__REPRESENTATION",
+      "xml": "representation"
+    },
+    {
+      "id": "0xb",
+      "skip_if": null,
+      "feature": "VISIBLE__VISIBLE",
+      "xml": "visible"
+    },
+    {
+      "id": "0xd",
+      "skip_if": 0,
+      "feature": "VISIBLE__USER_VISIBLE",
+      "xml": "userVisible"
+    },
+    {
+      "id": "0xe",
+      "skip_if": 1,
+      "feature": "DATA_ITEM__TITLE_LOCATION",
+      "xml": "titleLocation"
+    },
+    {
+      "id": "0xf",
+      "skip_if": null,
+      "feature": "DATA_ITEM__TITLE_HEIGHT",
+      "xml": "titleHeight"
+    },
+    {
+      "id": "0x10",
+      "skip_if": null,
+      "feature": "COMMAND_BAR_HOLDER__COMMAND_BAR_LOCATION",
+      "xml": "commandBarLocation"
+    },
+    {
+      "id": "0x51",
+      "skip_if": 0,
+      "feature": "TABLE__AUTO_FILL",
+      "xml": "autoFill"
+    },
+    {
+      "id": "0x4e",
+      "skip_if": 0,
+      "feature": "VISIBLE__ENABLED",
+      "xml": "enabled"
+    },
+    {
+      "id": "0x11",
+      "skip_if": 1,
+      "feature": "TABLE__READ_ONLY",
+      "xml": "readOnly"
+    },
+    {
+      "id": "0x12",
+      "skip_if": null,
+      "feature": "DATA_ITEM__SKIP_ON_INPUT",
+      "xml": "skipOnInput"
+    },
+    {
+      "id": "0x13",
+      "skip_if": null,
+      "feature": "DATA_ITEM__DEFAULT_ITEM",
+      "xml": "defaultItem"
+    },
+    {
+      "id": "0x14",
+      "skip_if": null,
+      "feature": "TABLE__CHANGE_ROW_SET",
+      "xml": "changeRowSet"
+    },
+    {
+      "id": "0x15",
+      "skip_if": 2,
+      "feature": "TABLE__CHANGE_ROW_ORDER",
+      "xml": "changeRowOrder"
+    },
+    {
+      "id": "0x16",
+      "skip_if": null,
+      "feature": "TABLE__WIDTH",
+      "xml": "width"
+    },
+    {
+      "id": "0x17",
+      "skip_if": null,
+      "feature": "TABLE__AUTO_MAX_WIDTH",
+      "xml": "autoMaxWidth"
+    },
+    {
+      "id": "0x18",
+      "skip_if": null,
+      "feature": "TABLE__MAX_WIDTH",
+      "xml": "maxWidth"
+    },
+    {
+      "id": "0x19",
+      "skip_if": 0,
+      "feature": "TABLE__MIN_WIDTH",
+      "xml": "minWidth"
+    },
+    {
+      "id": "0x1a",
+      "skip_if": null,
+      "feature": "TABLE__HEIGHT",
+      "xml": "height"
+    },
+    {
+      "id": "0x1b",
+      "skip_if": 0,
+      "feature": "TABLE__AUTO_MAX_HEIGHT",
+      "xml": "autoMaxHeight"
+    },
+    {
+      "id": "0x1c",
+      "skip_if": 0,
+      "feature": "TABLE__MAX_HEIGHT",
+      "xml": "maxHeight"
+    },
+    {
+      "id": "0x1d",
+      "skip_if": 0,
+      "feature": "TABLE__HEIGHT_IN_TABLE_ROWS",
+      "xml": "heightInTableRows"
+    },
+    {
+      "id": "0x1e",
+      "skip_if": null,
+      "feature": "TABLE__HEIGHT_CONTROL_VARIANT",
+      "xml": "heightControlVariant"
+    },
+    {
+      "id": "0x1f",
+      "skip_if": 0,
+      "feature": "TABLE__AUTO_MAX_ROWS_COUNT",
+      "xml": "autoMaxRowsCount"
+    },
+    {
+      "id": "0x20",
+      "skip_if": 0,
+      "feature": "TABLE__MAX_ROWS_COUNT",
+      "xml": "maxRowsCount"
+    },
+    {
+      "id": "0x21",
+      "skip_if": 0,
+      "feature": "TABLE__CHOICE_MODE",
+      "xml": "choiceMode"
+    },
+    {
+      "id": "0x22",
+      "skip_if": null,
+      "feature": "TABLE__MULTIPLE_CHOICE",
+      "xml": "multipleChoice"
+    },
+    {
+      "id": "0x23",
+      "skip_if": 0,
+      "feature": "TABLE__ROW_INPUT_MODE",
+      "xml": "rowInputMode"
+    },
+    {
+      "id": "0x24",
+      "skip_if": null,
+      "feature": "TABLE__SELECTION_MODE",
+      "xml": "selectionMode"
+    },
+    {
+      "id": "0x25",
+      "skip_if": null,
+      "feature": "TABLE__ROW_SELECTION_MODE",
+      "xml": "rowSelectionMode"
+    },
+    {
+      "id": "0x26",
+      "skip_if": 0,
+      "feature": "TABLE__HEADER",
+      "xml": "header"
+    },
+    {
+      "id": "0x27",
+      "skip_if": 1,
+      "feature": "TABLE__HEADER_HEIGHT",
+      "xml": "headerHeight"
+    },
+    {
+      "id": "0x28",
+      "skip_if": 2,
+      "feature": "TABLE__FOOTER",
+      "xml": "footer"
+    },
+    {
+      "id": "0x29",
+      "skip_if": null,
+      "feature": "TABLE__FOOTER_HEIGHT",
+      "xml": "footerHeight"
+    },
+    {
+      "id": "0x2a",
+      "skip_if": 1,
+      "feature": "TABLE__HORIZONTAL_SCROLL_BAR",
+      "xml": "horizontalScrollBar"
+    },
+    {
+      "id": "0x2b",
+      "skip_if": null,
+      "feature": "TABLE__VERTICAL_SCROLL_BAR",
+      "xml": "verticalScrollBar"
+    },
+    {
+      "id": "0x2c",
+      "skip_if": 1,
+      "feature": "TABLE__HORIZONTAL_LINES_BWA",
+      "xml": "horizontalLinesBwa"
+    },
+    {
+      "id": "0x2d",
+      "skip_if": 2,
+      "feature": "TABLE__VERTICAL_LINES_BWA",
+      "xml": "verticalLinesBwa"
+    },
+    {
+      "id": "0x2e",
+      "skip_if": 2,
+      "feature": "TABLE__USE_ALTERNATION_ROW_COLOR_BWA",
+      "xml": "useAlternationRowColorBwa"
+    },
+    {
+      "id": "0x31",
+      "skip_if": 2,
+      "feature": "TABLE__AUTO_INSERT_NEW_ROW",
+      "xml": "autoInsertNewRow"
+    },
+    {
+      "id": "0x32",
+      "skip_if": 2,
+      "feature": "TABLE__AUTO_ADD_INCOMPLETE",
+      "xml": "autoAddIncomplete"
+    },
+    {
+      "id": "0x33",
+      "skip_if": null,
+      "feature": "TABLE__AUTO_MARK_INCOMPLETE",
+      "xml": "autoMarkIncomplete"
+    },
+    {
+      "id": "0x34",
+      "skip_if": null,
+      "feature": "TABLE__MARK_REQUIRED_COMPLETE",
+      "xml": "markRequiredComplete"
+    },
+    {
+      "id": "0x36",
+      "skip_if": 2,
+      "feature": "TABLE__SEARCH_ON_INPUT",
+      "xml": "searchOnInput"
+    },
+    {
+      "id": "0x37",
+      "skip_if": null,
+      "feature": "TABLE__INITIAL_LIST_VIEW",
+      "xml": "initialListView"
+    },
+    {
+      "id": "0x38",
+      "skip_if": 2,
+      "feature": "TABLE__INITIAL_TREE_VIEW",
+      "xml": "initialTreeView"
+    },
+    {
+      "id": "0x39",
+      "skip_if": 2,
+      "feature": "TABLE__INITIAL_ROW_ACTIVATION",
+      "xml": "initialRowActivation"
+    },
+    {
+      "id": "0x3a",
+      "skip_if": 2,
+      "feature": "TABLE__ROW_ACTIONS_SHOW_TYPE",
+      "xml": "rowActionsShowType"
+    },
+    {
+      "id": "0x3b",
+      "skip_if": 2,
+      "feature": "TABLE__OUTPUT",
+      "xml": "output"
+    },
+    {
+      "id": "0x3c",
+      "skip_if": 2,
+      "feature": "TABLE__HORIZONTAL_STRETCH",
+      "xml": "horizontalStretch"
+    },
+    {
+      "id": "0x3d",
+      "skip_if": 0,
+      "feature": "TABLE__VERTICAL_STRETCH",
+      "xml": "verticalStretch"
+    },
+    {
+      "id": "0x3e",
+      "skip_if": 0,
+      "feature": "TABLE__ENABLE_START_DRAG",
+      "xml": "enableStartDrag"
+    },
+    {
+      "id": "0x3f",
+      "skip_if": 0,
+      "feature": "TABLE__ENABLE_DRAG",
+      "xml": "enableDrag"
+    },
+    {
+      "id": "0x40",
+      "skip_if": 0,
+      "feature": "TABLE__FILE_DRAG_MODE",
+      "xml": "fileDragMode"
+    },
+    {
+      "id": "0x41",
+      "skip_if": null,
+      "feature": "DATA_ITEM__DATA_PATH",
+      "xml": "dataPath"
+    },
+    {
+      "id": "0x42",
+      "skip_if": null,
+      "feature": "TABLE__ROW_PICTURE_DATA_PATH",
+      "xml": "rowPictureDataPath"
+    },
+    {
+      "id": "0x43",
+      "skip_if": null,
+      "feature": "TABLE__ROWS_PICTURE",
+      "xml": "rowsPicture"
+    },
+    {
+      "id": "0x44",
+      "skip_if": null,
+      "feature": "TABLE__TEXT_COLOR",
+      "xml": "textColor"
+    },
+    {
+      "id": "0x45",
+      "skip_if": 1,
+      "feature": "TABLE__BACK_COLOR",
+      "xml": "backColor"
+    },
+    {
+      "id": "0x46",
+      "skip_if": null,
+      "feature": "TABLE__BORDER_COLOR",
+      "xml": "borderColor"
+    },
+    {
+      "id": "0x47",
+      "skip_if": null,
+      "feature": "TABLE__FONT",
+      "xml": "font"
+    },
+    {
+      "id": "0x48",
+      "skip_if": null,
+      "feature": "TITLED__TITLE",
+      "xml": "title"
+    },
+    {
+      "id": "0x49",
+      "skip_if": null,
+      "feature": "TITLE_STYLE__TITLE_TEXT_COLOR",
+      "xml": "titleTextColor"
+    },
+    {
+      "id": "0x4a",
+      "skip_if": null,
+      "feature": "TITLE_STYLE__TITLE_FONT",
+      "xml": "titleFont"
+    },
+    {
+      "id": "0x4b",
+      "skip_if": null,
+      "feature": "DATA_ITEM__SHORTCUT",
+      "xml": "shortcut"
+    },
+    {
+      "id": "0x4c",
+      "skip_if": null,
+      "feature": "FORM_STANDARD_COMMAND_SOURCE__EXCLUDED_COMMANDS",
+      "xml": "excludedCommands"
+    },
+    {
+      "id": "0x4d",
+      "skip_if": null,
+      "feature": "TOOLTIP_CONTAINER__TOOL_TIP",
+      "xml": "toolTip"
+    },
+    {
+      "id": "0x50",
+      "skip_if": null,
+      "feature": "TOOLTIP_CONTAINER__TOOL_TIP_REPRESENTATION",
+      "xml": "toolTipRepresentation"
+    },
+    {
+      "id": "0x4f",
+      "skip_if": null,
+      "feature": "TABLE__SEARCH_STRING_LOCATION",
+      "xml": "searchStringLocation"
+    },
+    {
+      "id": "0x52",
+      "skip_if": 0,
+      "feature": "TABLE__VIEW_STATUS_LOCATION",
+      "xml": "viewStatusLocation"
+    },
+    {
+      "id": "0x53",
+      "skip_if": null,
+      "feature": "TABLE__SEARCH_CONTROL_LOCATION",
+      "xml": "searchControlLocation"
+    },
+    {
+      "id": "0x54",
+      "skip_if": null,
+      "feature": "TABLE__HIERARCHY_PANEL_LOCATION",
+      "xml": "hierarchyPanelLocation"
+    },
+    {
+      "id": "0x55",
+      "skip_if": 0,
+      "feature": "TABLE__VIEW_MODE",
+      "xml": "viewMode"
+    },
+    {
+      "id": "0x56",
+      "skip_if": 0,
+      "feature": "TABLE__COMPLEX_SETTINGS_VIEW_MODE",
+      "xml": "complexSettingsViewMode"
+    },
+    {
+      "id": "0x57",
+      "skip_if": 0,
+      "feature": "TABLE__SETTINGS_NAMED_ITEM_DETAILED_REPRESENTATION",
+      "xml": "settingsNamedItemDetailedRepresentation"
+    },
+    {
+      "id": "0x58",
+      "skip_if": 0,
+      "feature": "TABLE__GROUP_HORIZONTAL_ALIGN",
+      "xml": "groupHorizontalAlign"
+    },
+    {
+      "id": "0x59",
+      "skip_if": 3,
+      "feature": "TABLE__GROUP_VERTICAL_ALIGN",
+      "xml": "groupVerticalAlign"
+    },
+    {
+      "id": "0x5a",
+      "skip_if": 3,
+      "feature": "TABLE__REFRESH_REQUEST",
+      "xml": "refreshRequest"
+    },
+    {
+      "id": "0x5b",
+      "skip_if": 0,
+      "feature": "TABLE__CURRENT_ROW_USE",
+      "xml": "currentRowUse"
+    },
+    {
+      "id": "0x5c",
+      "skip_if": 0,
+      "feature": "TABLE__BEHAVIOR_ON_HORIZONTAL_COMPRESSION",
+      "xml": "behaviorOnHorizontalCompression"
+    },
+    {
+      "id": "0x5d",
+      "skip_if": 0,
+      "feature": "TABLE__SAVE_COLORS",
+      "xml": "saveColors"
+    },
+    {
+      "id": "0x78",
+      "skip_if": 0,
+      "feature": "TABLE__ICON_SAVE_COLORS_KEY",
+      "xml": "iconSaveColorsKey"
+    },
+    {
+      "id": "0x5e",
+      "skip_if": 0,
+      "feature": "TABLE__SHAPE_SAVE_COLORS_KEY",
+      "xml": "shapeSaveColorsKey"
+    },
+    {
+      "id": "0x5f",
+      "skip_if": 0,
+      "feature": "TABLE__CELL_HYPERLINKS_REPRESENTATION",
+      "xml": "cellHyperlinksRepresentation"
+    },
+    {
+      "id": "0x60",
+      "skip_if": 0,
+      "feature": "TABLE__ON_MAIN_SERVER_UNAVALABLE_BEHAVIOR",
+      "xml": "onMainServerUnavalableBehavior"
+    },
+    {
+      "id": "0x61",
+      "skip_if": null,
+      "feature": "COMMAND_BAR_HOLDER__SHOW_COMMAND_BAR",
+      "xml": "showCommandBar"
+    },
+    {
+      "id": "0x62",
+      "skip_if": null,
+      "feature": "TABLE__MOBILE_DEVICE_TABLE_TYPE",
+      "xml": "mobileDeviceTableType"
+    },
+    {
+      "id": "0x65",
+      "skip_if": 0,
+      "feature": "TABLE__AUTO_MAX_CARD_HEIGHT",
+      "xml": "autoMaxCardHeight"
+    },
+    {
+      "id": "0x66",
+      "skip_if": 0,
+      "feature": "TABLE__MAX_CARD_HEIGHT",
+      "xml": "maxCardHeight"
+    },
+    {
+      "id": "0x67",
+      "skip_if": 0,
+      "feature": "TABLE__CARD_BEHAVIOR_ON_VERTICAL_COMPRESSION",
+      "xml": "cardBehaviorOnVerticalCompression"
+    }
+  ]
+}

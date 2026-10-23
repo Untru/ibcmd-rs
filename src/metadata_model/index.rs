@@ -116,6 +116,8 @@ pub const NESTED_COLLECTIONS: &[(&str, &str)] = &[
     ("Recalculations", "Recalculation"),
     ("Interfaces", "Interface"),
     ("PaletteColors", "PaletteColor"),
+    // `ExternalDataSource/<owner>/Tables/<table>.xml`.
+    ("Tables", "Table"),
 ];
 
 /// `Catalogs` -> `Catalog`; nested collections use the same folder names.

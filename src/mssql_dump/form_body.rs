@@ -61,9 +61,11 @@ use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
     FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
-    FormChoiceParameterClusterMember, FormChoiceParameterLinkReference,
+    FormChoiceParameterClusterMember, FormChoiceParameterLink,
+    FormChoiceParameterLinkReference,
     FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTableCurrentDataTerminal,
-    FormChoiceParameterLinkTerminal, FormChoiceParameterLinks, FormChoiceParameterLinksParseError,
+    FormChoiceParameterLinkTerminal, FormChoiceParameterLinkValueChange, FormChoiceParameterLinks,
+    FormChoiceParameterLinksParseError,
     FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
     GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
     MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
@@ -1533,6 +1535,11 @@ pub(super) struct FormDynamicListSettings {
     pub(super) dynamic_data_read_explicit: bool,
     pub(super) query_text: Option<String>,
     pub(super) main_table: Option<String>,
+    /// An `MDObjectRef` the name index cannot answer, spelled as the platform
+    /// spells an unnamed `{kind, uuid}` record: `1:<uuid>`. Kept apart from
+    /// `main_table` so the field-resolution rules still see a list without a
+    /// resolvable main table.
+    pub(super) main_table_unresolved: Option<String>,
     pub(super) explicit_fields: Vec<FormDynamicListField>,
     pub(super) fields: Vec<FormDynamicListField>,
     pub(super) server_state_xml: Option<String>,
@@ -1956,6 +1963,9 @@ pub(super) struct FormChildItem {
     pub(super) skip_on_input: Option<bool>,
     pub(super) strict_table_schema: bool,
     pub(super) title_location: Option<&'static str>,
+    /// `PlannerField`'s `<DimensionItemHyperlink>`: member 9 of its `1`
+    /// options tuple.
+    pub(super) dimension_item_hyperlink: bool,
     pub(super) title_height: Option<String>,
     pub(super) tooltip_representation: Option<&'static str>,
     pub(super) warning_on_edit_representation: Option<FormWarningOnEditRepresentation>,
@@ -2261,6 +2271,12 @@ pub(super) enum FormSchemaWriteError {
     OpaqueChoiceParameterLinks {
         primary_slot: usize,
         duplicate_slot: usize,
+        /// Which cross-check failed (`primary_malformed`, `mirror_mismatch`, …).
+        reason: &'static str,
+        /// The first characters of the primary member, for diagnosis.
+        primary_head: String,
+        /// The first characters of the mirrored member, for diagnosis.
+        duplicate_head: String,
     },
     OpaqueChoiceParameterAvailableTypes {
         slot: usize,
@@ -2422,6 +2438,21 @@ fn validate_form_choice_list_writer_rules(
                     return Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
                         primary_slot: value.primary_slot,
                         duplicate_slot: value.duplicate_slot,
+                        reason: form_choice_parameter_links_parse_error_class(&value.error),
+                        primary_head: value
+                            .primary_raw
+                            .as_deref()
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect(),
+                        duplicate_head: value
+                            .duplicate_raw
+                            .as_deref()
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect(),
                     });
                 }
             }
@@ -2653,6 +2684,21 @@ pub(super) fn validate_canonical_form_choice_parameter_links(
             Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
                 primary_slot: value.primary_slot,
                 duplicate_slot: value.duplicate_slot,
+                reason: form_choice_parameter_links_parse_error_class(&value.error),
+                primary_head: value
+                    .primary_raw
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(120)
+                    .collect(),
+                duplicate_head: value
+                    .duplicate_raw
+                    .as_deref()
+                    .unwrap_or("")
+                    .chars()
+                    .take(120)
+                    .collect(),
             })
         }
     }
@@ -6136,6 +6182,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
     let mut dynamic_data_read_explicit = false;
     let mut query_text = None;
     let mut main_table = None;
+    let mut main_table_unresolved = None;
     let mut main_table_category = None;
     let mut explicit_fields = Vec::new();
     let mut fields = Vec::new();
@@ -6152,7 +6199,14 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
             .unwrap_or_default();
         match key.as_str() {
             "QueryText" => query_text = parse_form_setting_string(window[1]),
-            "MainTable" => main_table = parse_form_main_table_ref(window[1], object_refs),
+            "MainTable" => match parse_form_main_table_ref(window[1], object_refs) {
+                Some(table) if !table.contains('.') => {
+                    // Unnamed `MDObjectRef` records keep the platform's
+                    // `kind:uuid` spelling, kind 1 for this reference type.
+                    main_table_unresolved = Some(format!("1:{table}"));
+                }
+                other => main_table = other,
+            },
             "MainTableCategory" => main_table_category = parse_form_setting_number(window[1]),
             "Field" => {
                 let parsed_fields = parse_form_dynamic_list_fields(window[1]);
@@ -6274,6 +6328,7 @@ fn parse_form_dynamic_list_settings_with_dcs_type_index(
         dynamic_data_read_explicit,
         query_text,
         main_table,
+        main_table_unresolved,
         explicit_fields,
         fields,
         server_state_xml,
@@ -10203,9 +10258,19 @@ pub(super) fn parse_form_main_table_ref(
     if fields.first().map(|value| value.trim()) != Some("\"#\"") {
         return None;
     }
-    fields.iter().skip(1).find_map(|value| {
+    let resolved = fields.iter().skip(1).find_map(|value| {
         parse_non_zero_uuid(value).and_then(|uuid| object_refs.get(&uuid).cloned())
-    })
+    });
+    if resolved.is_some() {
+        return resolved;
+    }
+    // The name index cannot answer the reference: keep the identifier so the
+    // caller can write the platform's `1:<uuid>` spelling.
+    fields
+        .iter()
+        .skip(1)
+        .filter_map(|value| parse_non_zero_uuid(value))
+        .find(|uuid| uuid != FORM_METADATA_OBJECT_REFERENCE_TYPE_UUID)
 }
 
 /// The metadata object a command button hands its command, spelled as the
@@ -13097,6 +13162,22 @@ fn parse_form_child_item_with_metadata_owners(
             .collect::<Vec<_>>()
     });
     let fields = normalized_fields.as_deref().unwrap_or(&raw_fields);
+    // The root-48 table record carries one extra member at 15 relative to the
+    // layout the table properties are calibrated on; dropping it aligns every
+    // later forward slot (DefaultItem 16, InitialTreeView 39, EnableStartDrag
+    // 52).
+    let legacy_table_trimmed = (fields.first().map(|field| field.trim()) == Some("53")
+        && fields.len() > 15)
+        .then(|| {
+            let mut trimmed = fields.to_vec();
+            trimmed.remove(15);
+            // The record also closes one member later than the modern layout:
+            // the tail scalar the reverse offsets read sits one position
+            // further from the end.
+            trimmed.pop();
+            trimmed
+        });
+    let fields = legacy_table_trimmed.as_deref().unwrap_or(fields);
     let identity = split_1c_braced_fields(fields.get(1)?.trim(), 0)?;
     let id = identity.first()?.trim();
     // A Gantt chart's own nested table may carry id `0`: 1C:Документооборот
@@ -14082,7 +14163,7 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        row_selection_mode: if wrapper == "55" {
+        row_selection_mode: if matches!(wrapper, "55" | "50" | "53") {
             table_schema.and_then(|schema| schema.row_selection_mode(&fields))
         } else if tag == "Table" {
             if ordinary_table_layout {
@@ -14100,11 +14181,13 @@ fn parse_form_child_item_with_metadata_owners(
         // `FORM_DOCUMENT_FIELD_GEOMETRY`.
         enable_start_drag: table_schema
             .and_then(|schema| schema.enable_start_drag(&fields))
+            .or_else(|| legacy_table_flag(wrapper, &fields, 52))
             .or_else(|| {
                 parse_form_document_field_on_flag(tag, fields, |layout| layout.enable_start_drag)
             }),
         enable_drag: table_schema
             .and_then(|schema| schema.enable_drag(&fields))
+            .or_else(|| legacy_table_flag(wrapper, &fields, 53))
             .or_else(|| parse_planner_field_enable_drag(tag, fields)),
         file_drag_mode: if tag == "Table" {
             if let Some(schema) = table_schema {
@@ -14180,9 +14263,12 @@ fn parse_form_child_item_with_metadata_owners(
         table_search_on_input: table_schema.and_then(|schema| schema.search_on_input(&fields)),
         table_initial_list_view: table_schema.and_then(|schema| schema.initial_list_view(&fields)),
         use_alternation_row_color: table_schema
-            .and_then(|schema| schema.use_alternation_row_color(&fields)),
+            .and_then(|schema| schema.use_alternation_row_color(&fields))
+            .or_else(|| legacy_table_flag(wrapper, &fields, 36)),
         default_item: if tag == "Table" {
-            table_schema.and_then(|schema| schema.default_item(&fields))
+            table_schema
+                .and_then(|schema| schema.default_item(&fields))
+                .or_else(|| legacy_table_flag(wrapper, &fields, 16))
         } else if let Some(properties) = spreadsheet_document_properties.as_ref() {
             properties.default_item
         } else if tag == "Button" && form_button_layout_is_extended(&fields) {
@@ -14225,7 +14311,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        initial_tree_view: table_schema.and_then(|schema| schema.initial_tree_view(&fields)),
+        initial_tree_view: table_schema
+            .and_then(|schema| schema.initial_tree_view(&fields))
+            .or_else(|| legacy_table_initial_tree_view(wrapper, &fields)),
         row_input_mode: table_schema.and_then(|schema| schema.row_input_mode(&fields)),
         table_choice_mode: table_schema.and_then(|schema| schema.choice_mode(&fields)),
         table_multiple_choice: table_schema.and_then(|schema| schema.multiple_choice(&fields)),
@@ -14257,6 +14345,8 @@ fn parse_form_child_item_with_metadata_owners(
         },
         choice_folders_and_items: if let Some(schema) = table_schema {
             parse_form_table_choice_folders_and_items(schema, &fields)
+        } else if tag == "Table" && matches!(wrapper, "50" | "53") {
+            Some("Items")
         } else if tag == "InputField" {
             field_schema_and_options
                 .as_ref()
@@ -14287,6 +14377,18 @@ fn parse_form_child_item_with_metadata_owners(
         row_picture_data_path: if tag == "Table" {
             parse_form_table_property_bag_string(&fields, TableBagKey::RowPictureDataPath)
                 .filter(|value| !value.is_empty())
+                // The bag spells an empty string here, so the legacy fallback
+                // runs only after the emptiness filter.
+                .or_else(|| {
+                    (matches!(wrapper, "50" | "53"))
+                        .then(|| {
+                            data_path_resolution
+                                .as_ref()
+                                .map(|resolved| format!("{}.DefaultPicture", resolved.data_path))
+                        })
+                        .flatten()
+                        .filter(|value| !value.is_empty())
+                })
                 .or_else(|| {
                     table_schema.and_then(|schema| {
                         parse_form_table_row_picture_data_path(
@@ -14422,7 +14524,9 @@ fn parse_form_child_item_with_metadata_owners(
         } else {
             None
         },
-        group_horizontal_align: if let Some((schema, _)) = field_schema_and_options.as_ref() {
+        group_horizontal_align: if tag == "Table" && matches!(wrapper, "50" | "53") {
+            None
+        } else if let Some((schema, _)) = field_schema_and_options.as_ref() {
             schema
                 .group_horizontal_align(&fields)
                 .map(FormFieldGroupHorizontalAlign::xml_value)
@@ -14741,6 +14845,7 @@ fn parse_form_child_item_with_metadata_owners(
             None
         },
         strict_table_schema: table_schema.is_some(),
+        dimension_item_hyperlink: tag == "PlannerField" && parse_form_planner_hyperlink(&fields),
         title_location: title_location_schema
             .and_then(|schema| schema.title_location(&fields))
             .or_else(|| table_schema.and_then(|schema| schema.title_location(&fields))),
@@ -14832,7 +14937,9 @@ fn parse_form_child_item_with_metadata_owners(
         vertical_align: field_schema_and_options
             .as_ref()
             .and_then(|(schema, _)| schema.vertical_align(&fields)),
-        group_vertical_align: if let Some((schema, _)) = field_schema_and_options.as_ref() {
+        group_vertical_align: if tag == "Table" && matches!(wrapper, "50" | "53") {
+            None
+        } else if let Some((schema, _)) = field_schema_and_options.as_ref() {
             schema
                 .group_vertical_align(&fields)
                 .map(FormFieldVerticalAlign::xml_value)
@@ -15164,6 +15271,18 @@ fn parse_form_child_item_with_metadata_owners(
                     .then(|| {
                         let (_, options) = form_document_field_geometry_options(tag, &fields)?;
                         crate::form_schema::form_output_code(options.get(3).copied())
+                    })
+                    .flatten()
+            })
+            .or_else(|| {
+                // A `FormattedDocumentField` keeps `Output` in slot 5 of its
+                // own 16-member `1` tuple: `0` where the platform writes
+                // nothing, `1` on `<Output>Enable</Output>`; the neighbouring
+                // field of the same form reads `0` there.
+                (tag == "FormattedDocumentField")
+                    .then(|| {
+                        let (_, options) = form_document_field_geometry_options(tag, &fields)?;
+                        crate::form_schema::form_output_code(options.get(5).copied())
                     })
                     .flatten()
             }),
@@ -16295,6 +16414,19 @@ fn parse_form_child_item_with_metadata_owners(
             // cannot name the row-editing events it carries.
             let names_events = tag != "Table" || data_path_resolution.is_some();
             let mut events = parse_form_child_item_event_fields(&fields, names_events);
+            if tag == "PlannerField" {
+                let mut nested = parse_form_nested_event_records(&fields, names_events);
+                let collection =
+                    crate::form_schema::FormChildItemEventCollectionSchema::for_item_tag(tag);
+                for event in &mut nested {
+                    if let Some(name) =
+                        collection.and_then(|collection| collection.event_name(&event.name))
+                    {
+                        event.name = name.to_string();
+                    }
+                }
+                append_unique_form_body_events(&mut events, nested);
+            }
             append_unique_form_body_events(
                 &mut events,
                 parse_form_schema_backed_child_item_events(
@@ -16948,8 +17080,7 @@ fn parse_form_control_color_space(
             .trim()
             .parse::<i32>()
             .ok()
-            .and_then(form_control_web_color_name)
-            .map(ToOwned::to_owned),
+            .and_then(form_control_web_color_name),
         "3" if payload.len() == 1 => payload
             .first()?
             .trim()
@@ -17075,53 +17206,8 @@ fn form_control_window_color_name(code: i32) -> Option<&'static str> {
 /// override. The five it adds are the ones neither table carried:
 /// `14`/`91`/`106`/`122`/`132`. An unmapped code declines the whole colour, so
 /// each of them cost the element outright.
-fn form_control_web_color_name(code: i32) -> Option<&'static str> {
-    match code {
-        1 => Some("web:AliceBlue"),       // 6
-        6 => Some("web:Beige"),           // 7
-        14 => Some("web:CadetBlue"),      // 1
-        30 => Some("web:DarkOliveGreen"), // 3
-        31 => Some("web:DarkOrange"),     // 2
-        41 => Some("web:DeepSkyBlue"),    // 1
-        42 => Some("web:DimGray"),        // 22
-        43 => Some("web:DodgerBlue"),     // 1
-        57 => Some("web:IndianRed"),      // 1
-        70 => Some("web:LightGreen"),     // 15
-        75 => Some("web:LightSkyBlue"),   // 1
-        // Монитор `DataProcessors/НастройкаМониторинг/Forms/Форма`.
-        81 => Some("web:LimeGreen"),
-        91 => Some("web:MediumSeaGreen"), // 6
-        // 1C:Документооборот `Documents/Отсутствие/Forms/ФормаДокумента`
-        // `ЗаместителиТекст` holds `{3,2,{125}}` and writes `web:Seagreen`.
-        125 => Some("web:Seagreen"),
-        100 => Some("web:NavajoWhite"), // 2
-        106 => Some("web:OrangeRed"),   // 2
-        109 => Some("web:PaleGreen"),   // 5
-        115 => Some("web:Pink"),        // 4
-        122 => Some("web:SaddleBrown"), // 20
-        132 => Some("web:Snow"),        // 2
-        143 => Some("web:White"),       // 12
-        // Three codes the same join names that neither this table nor the
-        // shared style palette behind it answers. Re-run over the dumped item
-        // layouts of all seven stand corpora that carry forms, item by item
-        // rather than file by file, the pairing produces 46 distinct codes with
-        // no ambiguity, reproduces every code the two tables already answer --
-        // 43 of them, index for index, including the `31` override -- and
-        // leaves exactly these three unanswered. Each cost the element
-        // outright: ERP УХ
-        // `DataProcessors/ДокументооборотСКонтролирующимиОрганами/Forms/
-        // Мастер_ПаспортныеДанные` writes `<TextColor>web:LightSalmon</...>` on
-        // its `КраснаяРазделительнаяЛиния` label decoration and
-        // `<BorderColor>web:LightSalmon</...>` on its `Силуэт` picture
-        // decoration; `DataProcessors/АналитическийБланкСводнаяТаблица/Forms/
-        // ФормаМакетаСводнаяТаблица` writes `web:Lime`; and
-        // `Documents/ЗаказНаПроизводство2_2/Forms/ФормаДокумента` writes
-        // `web:PapayaWhip`.
-        73 => Some("web:LightSalmon"), // 2
-        80 => Some("web:Lime"),        // 1
-        112 => Some("web:PapayaWhip"), // 2
-        _ => style_web_color_name(code),
-    }
+fn form_control_web_color_name(code: i32) -> Option<String> {
+    crate::compiler::bodies::form_native::web_color_name(code).map(|name| format!("web:{name}"))
 }
 
 pub(super) fn parse_form_label_decoration_options(
@@ -18509,6 +18595,125 @@ pub(super) fn parse_form_radio_button_options<'a>(fields: &'a [&'a str]) -> Opti
     })
 }
 
+
+/// The physical spelling of a legacy link chain (`1/0:<uuid>`,
+/// `7:<uuid>/0:<uuid>`), which the platform writes when the binding does not
+/// resolve to a named data path.
+fn physical_choice_parameter_link_path(members: &[&str]) -> Option<String> {
+    let mut segments = Vec::new();
+    for member in members {
+        let fields = split_1c_braced_fields(member.trim(), 0)?;
+        match fields.as_slice() {
+            [kind] => segments.push(kind.trim().to_string()),
+            [kind, uuid] => segments.push(format!("{}:{}", kind.trim(), uuid.trim())),
+            _ => return None,
+        }
+    }
+    Some(segments.join("/"))
+}
+
+/// The legacy `{5004,…}` link collection: each link stores the bound data path
+/// itself (`{1}` + `{0,<attribute binding>}` for a form attribute,
+/// `{7,<table item>}` + `{0,<column binding>}` for a table column), and the
+/// `5007` mirror is usually empty, so the collection has to be read alone.
+fn parse_legacy_5004_choice_parameter_links(
+    primary: &str,
+    table_name_by_id: &BTreeMap<String, String>,
+    table_column_names_by_id: &BTreeMap<String, BTreeMap<String, String>>,
+    type_link_data_path_by_table_column: &BTreeMap<(String, String), String>,
+    data_path_by_binding_key: &BTreeMap<String, String>,
+) -> Option<Vec<FormChoiceParameterLink>> {
+    let fields = split_1c_braced_fields(primary.trim(), 0)?;
+    if fields.first()?.trim() != "5004" {
+        return None;
+    }
+    let count = fields.get(1)?.trim().parse::<usize>().ok()?;
+    let mut index = 2usize;
+    let mut links = Vec::new();
+    for _ in 0..count {
+        let name = parse_1c_string(fields.get(index)?)?;
+        index += 1;
+        let member_count = fields.get(index)?.trim().parse::<usize>().ok()?;
+        index += 1;
+        if member_count != 2 {
+            return None;
+        }
+        let first = fields.get(index)?.trim().to_string();
+        index += 1;
+        let second = fields.get(index)?.trim().to_string();
+        index += 1;
+        let physical = physical_choice_parameter_link_path(&[first.as_str(), second.as_str()]);
+        let debug = std::env::var_os("DSH_DEBUG_5004").is_some();
+        let value_change_token = fields.get(index)?.trim().to_string();
+        let value_change = match value_change_token.as_str() {
+            "0" => FormChoiceParameterLinkValueChange::Clear,
+            other => {
+                return None;
+            }
+        };
+        index += 1;
+        let table_head = split_1c_braced_fields(&first, 0)?;
+        let data_path = if first == "{1}" {
+            let semantic = parse_form_binding_key(&second)
+                .and_then(|key| data_path_by_binding_key.get(&key).cloned())
+                // The legacy link names the choice parameter's own path
+                // (`Объект.Организация`); the route map holds the attribute's
+                // type path (`ВалютаРегламентированногоУчета.Организация`).
+                .map(|path| format!("Объект.{}", path.rsplit('.').next().unwrap_or(&path)));
+            match semantic.or(physical) {
+                Some(path) => path,
+                None => return None,
+            }
+        } else if table_head.first()?.trim() == "7" {
+            // The uuid in `{7,<uuid>}` is the form container, not a table id;
+            // the table is the one owning this column binding.
+            let semantic = parse_form_binding_key(&second).and_then(|column_key| {
+                let mut found = Vec::new();
+                for (table_id, columns) in table_column_names_by_id {
+                    if let Some(column) = columns.get(&column_key) {
+                        if let Some(table) = table_name_by_id.get(table_id) {
+                            found.push((table_id.clone(), format!("Items.{table}.CurrentData.{column}")));
+                        }
+                    }
+                }
+                match found.as_slice() {
+                    [(table_id, path)] => Some(
+                        type_link_data_path_by_table_column
+                            .get(&(table_id.clone(), column_key.clone()))
+                            .cloned()
+                            .unwrap_or_else(|| path.clone()),
+                    ),
+                    _ => {
+                        let uuid = column_key.rsplit('|').next().unwrap_or(&column_key);
+                        let mut routes = Vec::new();
+                        for ((table_key, candidate), path) in type_link_data_path_by_table_column {
+                            if candidate == &column_key || candidate.contains(uuid) || table_key.contains(uuid) {
+                                routes.push(path.clone());
+                            }
+                        }
+                        routes.sort();
+                        routes.dedup();
+                        routes.first().cloned()
+                    }
+                }
+            });
+            match semantic.or(physical) {
+                Some(path) => path,
+                None => return None,
+            }
+        } else {
+            // `{1,<container>}`/`{1}` and other spellings name no table; the
+            // platform writes the chain physically.
+            match physical {
+                Some(path) => path,
+                None => return None,
+            }
+        };
+        links.push(FormChoiceParameterLink::new(name, data_path, value_change));
+    }
+    (index == fields.len()).then_some(links)
+}
+
 pub(super) fn form_input_field_top_level_offset(fields: &[&str]) -> usize {
     fields
         .get(6)
@@ -18525,6 +18730,7 @@ fn parse_exact_1c_quoted_string(field: &str) -> Option<String> {
 }
 
 #[cfg(test)]
+
 pub(super) fn parse_form_input_field_choice_parameter_links(
     primary: &str,
     duplicate: &str,
@@ -18893,6 +19099,21 @@ pub(super) fn canonical_form_input_field_choice_parameter_links_with_metadata(
         };
         Some(duplicate)
     };
+    if primary.trim_start().starts_with("{5004,") {
+        if let Some(links) = parse_legacy_5004_choice_parameter_links(
+            primary,
+            table_name_by_id,
+            table_column_names_by_id,
+            type_link_data_path_by_table_column,
+            data_path_by_binding_key,
+        ) {
+            return if links.is_empty() {
+                FormChoiceParameterLinks::Empty
+            } else {
+                FormChoiceParameterLinks::Typed(links)
+            };
+        }
+    }
     match parse_form_input_field_choice_parameter_links_with_metadata(
         primary,
         duplicate,
@@ -19958,6 +20179,13 @@ pub(super) fn parse_form_font_style_ref(
     let style_slot = split_1c_braced_fields(fields.get(3)?.trim(), 0)?;
     if style_slot.len() == 1 {
         let code = style_slot.first()?.trim().parse::<i32>().ok()?;
+        // Code zero is printed literally (`<Font ref="0" height="10"
+        // kind="StyleItem"/>`, CommonForms
+        // `ВводДанныхДляРасчетаСреднегоЗаработкаОбщий`/`…ФСС`); every other
+        // code names a standard style.
+        if code == 0 {
+            return Some("0".to_string());
+        }
         return standard_style_item_for_code(code).map(|(_, name)| format!("style:{name}"));
     }
     if style_slot.first().map(|value| value.trim()) != Some("0") {
@@ -20995,7 +21223,7 @@ pub(super) fn parse_form_table_representation_from_fields(
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" => fields
+        "55" | "50" | "53" => fields
             .get(3)
             .and_then(|field| parse_form_table_representation(field)),
         "73" => fields
@@ -21019,7 +21247,7 @@ pub(super) fn parse_form_table_command_bar_location(
     fields: &[&str],
 ) -> Option<&'static str> {
     match wrapper {
-        "55" => fields
+        "55" | "50" | "53" => fields
             .get(8)
             .and_then(|field| parse_form_table_command_bar_location_field(field)),
         _ => None,
@@ -21064,7 +21292,7 @@ pub(super) fn parse_form_table_file_drag_mode_from_fields(
     wrapper: &str,
     fields: &[&str],
 ) -> Option<&'static str> {
-    if wrapper == "55"
+    if matches!(wrapper, "55" | "50" | "53")
         && !form_table_wrapper55_uses_split_head_slots(fields)
         && fields.get(53).map(|field| field.trim()) == Some("0")
         && form_table_wrapper55_root_defaults(wrapper, fields)
@@ -22294,6 +22522,8 @@ pub(super) fn form_child_item_tag(wrapper: &str, fields: &[&str]) -> Option<&'st
         },
         "73" => Some("Table"),
         "55" => Some("Table"),
+        "50" => Some("Table"),
+        "53" => Some("Table"),
         _ => None,
     }
 }
@@ -22361,7 +22591,7 @@ pub(super) fn parse_form_child_item_name(wrapper: &str, fields: &[&str]) -> Opti
             .filter(|value| !value.is_empty());
     }
     let indexes: &[usize] = match wrapper {
-        "73" | "55" => &[5],
+        "73" | "55" | "50" => &[5],
         "31" | "34" => &[5, 6],
         "35" | "37" | "48" => &[6, 7],
         _ => &[6],
@@ -22659,7 +22889,7 @@ fn form_braced_leading_member(field: &str) -> Option<(&str, u8)> {
 /// [`form_child_item_tag`] names, and the older revisions
 /// `form_item_record_canonical_revision` normalizes to one of them.
 const FORM_CHILD_ITEM_LEADING_MEMBERS: &[&str] = &[
-    "5", "6", "11", "12", "22", "29", "30", "31", "34", "35", "37", "48", "54", "55", "73",
+    "5", "6", "11", "12", "22", "29", "30", "31", "34", "35", "37", "48", "50", "53", "54", "55", "73",
 ];
 
 /// Whether a member could be a child-item record, by its leading member.
@@ -23796,6 +24026,64 @@ pub(super) fn collect_form_nested_child_item_event_records(
         );
         collect_form_nested_child_item_event_records(&nested, events);
     }
+}
+
+/// `PlannerField`'s `<DimensionItemHyperlink>`, member 9 of the `{1,50,10,…}`
+/// options tuple: `1` on the one `ТаймТрекер` planner whose native element
+/// carries the property, `0` on the other three planners of the configuration.
+fn parse_form_planner_hyperlink(fields: &[&str]) -> bool {
+    for field in fields {
+        let Some(members) = split_1c_braced_fields(field.trim(), 0) else {
+            continue;
+        };
+        if members.len() >= 10
+            && members[0].trim() == "1"
+            && members[1].trim() == "50"
+            && members[2].trim() == "10"
+        {
+            return members[9].trim() == "1";
+        }
+    }
+    false
+}
+
+pub(super) fn parse_form_nested_event_records(
+    fields: &[&str],
+    names_events: bool,
+) -> Vec<FormBodyEvent> {
+    let mut events = Vec::new();
+    for field in fields {
+        let Some(members) = split_1c_braced_fields(field.trim(), 0) else {
+            continue;
+        };
+        for member in members {
+            let Some(nested) = split_1c_braced_fields(member.trim(), 0) else {
+                continue;
+            };
+            let count = nested
+                .first()
+                .and_then(|value| value.trim().parse::<usize>().ok())
+                .unwrap_or(0);
+            // The record is `<count>,<event id>,"<handler>",…`.
+            if count == 0
+                || nested.len() < 1 + count * 2
+                || !(1..=count * 2).any(|index| {
+                    nested
+                        .get(index)
+                        .and_then(|value| parse_1c_quoted_string_with_len(value.trim()))
+                        .is_some()
+                })
+            {
+                continue;
+            }
+            let head = parse_form_child_item_event_record(&nested, names_events);
+            append_unique_form_body_events(
+                &mut events,
+                interleave_form_child_item_event_bindings(&nested, names_events, head),
+            );
+        }
+    }
+    events
 }
 
 pub(super) fn parse_form_child_item_event_pair(
@@ -27984,14 +28272,34 @@ pub(super) fn parse_form_title_data_path(
         // the platform writes nothing.
         .or_else(|| {
             let segments = parse_form_bound_chain_segments(binding)?;
-            let [root] = segments.as_slice() else {
+            if let [root] = segments.as_slice()
+                && let [id] = root.as_slice()
+            {
+                let id = parse_form_chain_numeric_id(id)?;
+                return (!attribute_metadata_owners_by_id.contains_key(id))
+                    .then(|| id.to_string());
+            }
+            // A chain that reaches a reference the configuration cannot name
+            // is written physically, segment by segment. Evidence:
+            // `DataProcessors/БотТелеграм/Forms/Форма` stores
+            // `{3,{1},{0,dff8c7e9-…},{100000000}}` and the native element is
+            // `1/0:dff8c7e9-…/100000000`. Chains without such a reference keep
+            // the old behaviour (nothing is written when no route names them).
+            if !segments
+                .iter()
+                .any(|segment| matches!(segment.as_slice(), [kind, _] if kind.trim() == "0"))
+            {
                 return None;
-            };
-            let [id] = root.as_slice() else {
-                return None;
-            };
-            let id = parse_form_chain_numeric_id(id)?;
-            (!attribute_metadata_owners_by_id.contains_key(id)).then(|| id.to_string())
+            }
+            let mut parts = Vec::with_capacity(segments.len());
+            for segment in segments {
+                match segment.as_slice() {
+                    [value] => parts.push(value.trim().to_string()),
+                    [kind, uuid] => parts.push(format!("{}:{}", kind.trim(), uuid.trim())),
+                    _ => return None,
+                }
+            }
+            Some(parts.join("/"))
         })
 }
 
@@ -32477,6 +32785,27 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     xml
 }
 
+
+/// A boolean property of the legacy table layouts (`50`, `53`), read at the
+/// forward slot the modern layout uses once the record's insertion is removed.
+fn legacy_table_flag(wrapper: &str, fields: &[&str], slot: usize) -> Option<bool> {
+    matches!(wrapper, "50" | "53")
+        .then(|| fields.get(slot).map(|field| field.trim()))
+        .flatten()
+        .and_then(|value| (value == "1").then_some(true))
+}
+
+fn legacy_table_initial_tree_view(wrapper: &str, fields: &[&str]) -> Option<&'static str> {
+    if !matches!(wrapper, "50" | "53") {
+        return None;
+    }
+    match fields.get(39).map(|field| field.trim()) {
+        Some("1") => Some("ExpandTopLevel"),
+        Some("2") => Some("ExpandAllLevels"),
+        _ => None,
+    }
+}
+
 fn format_form_table_properties_xml(item: &FormChildItem, indent: usize) -> String {
     if item.tag != "Table" {
         return String::new();
@@ -33561,6 +33890,7 @@ pub(super) fn format_form_child_item_xml(
             ));
         }
     }
+
     // `TitleFont` follows the title block on every owner that writes it (native
     // `Title` before `TitleFont` on all 11 owners, never the reverse).  The
     // owners whose title is written further down - `Table`, `Page`, `Popup`,
@@ -35770,8 +36100,10 @@ pub(super) fn format_form_child_item_xml(
     // counted both ways. The one `GraphicalSchemaField` of the stand that
     // carries the element writes it in the same place -- behind `DataPath` and
     // `TitleLocation`, ahead of `ContextMenu`, `ExtendedTooltip` and `Events`.
-    if matches!(item.tag, "HTMLDocumentField" | "GraphicalSchemaField")
-        && let Some(output) = item.document_field_output
+    if matches!(
+        item.tag,
+        "HTMLDocumentField" | "GraphicalSchemaField" | "FormattedDocumentField"
+    ) && let Some(output) = item.document_field_output
     {
         xml.push_str(&format!(
             "{tab}\t<Output>{}</Output>\r\n",
@@ -35929,6 +36261,13 @@ pub(super) fn format_form_child_item_xml(
                 xml_bool(value)
             ));
         }
+    }
+    // `PlannerField` writes `<DimensionItemHyperlink>` behind its scalar run,
+    // directly ahead of the context menu.
+    if item.tag == "PlannerField" && item.dimension_item_hyperlink {
+        xml.push_str(&format!(
+            "{tab}\t<DimensionItemHyperlink>true</DimensionItemHyperlink>\r\n"
+        ));
     }
     if !direct_context_menu_xml.is_empty() {
         xml.push_str(&direct_context_menu_xml);
@@ -37327,6 +37666,21 @@ pub(super) fn format_form_choice_parameter_cluster_xml(
                     return Err(FormSchemaWriteError::OpaqueChoiceParameterLinks {
                         primary_slot: value.primary_slot,
                         duplicate_slot: value.duplicate_slot,
+                        reason: form_choice_parameter_links_parse_error_class(&value.error),
+                        primary_head: value
+                            .primary_raw
+                            .as_deref()
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect(),
+                        duplicate_head: value
+                            .duplicate_raw
+                            .as_deref()
+                            .unwrap_or("")
+                            .chars()
+                            .take(120)
+                            .collect(),
                     });
                 }
             },
@@ -37635,7 +37989,11 @@ fn format_form_attributes_items_xml_with_dcs_profiles(
                     xml.push_str("\t\t\t\t</Field>\r\n");
                 }
             }
-            if let Some(main_table) = &settings.main_table {
+            if let Some(main_table) = settings
+                .main_table
+                .as_ref()
+                .or(settings.main_table_unresolved.as_ref())
+            {
                 xml.push_str(&format!(
                     "\t\t\t\t<MainTable>{}</MainTable>\r\n",
                     escape_xml_text(main_table)

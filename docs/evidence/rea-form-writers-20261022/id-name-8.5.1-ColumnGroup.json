@@ -1,0 +1,79 @@
+{
+  "platform": "8.5.1",
+  "element": "ColumnGroup",
+  "source_java": "C:\\Tools\\edt-form-export\\src\\com\\_1c\\g5\\v8\\dt\\form\\export\\xml\\writer\\ExtInfoWriter.java",
+  "mapping": [
+    {
+      "id": "0x1f",
+      "skip_if": 1,
+      "feature": "COLUMN_GROUP_EXT_INFO__GROUP",
+      "xml": "group"
+    },
+    {
+      "id": "0x20",
+      "skip_if": 2,
+      "feature": "COLUMN_GROUP_EXT_INFO__SHOW_TITLE851",
+      "xml": "showTitle"
+    },
+    {
+      "id": "0x21",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__TITLE_BACK_COLOR",
+      "xml": "titleBackColor"
+    },
+    {
+      "id": "0x22",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__SHOW_IN_HEADER",
+      "xml": "showInHeader"
+    },
+    {
+      "id": "0x23",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__HEADER_DATA_PATH",
+      "xml": "headerDataPath"
+    },
+    {
+      "id": "0x24",
+      "skip_if": 3,
+      "feature": "COLUMN_GROUP_EXT_INFO__HEADER_HORIZONTAL_ALIGN",
+      "xml": "headerHorizontalAlign"
+    },
+    {
+      "id": "0x26",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__HEADER_FORMAT",
+      "xml": "headerFormat"
+    },
+    {
+      "id": "0x25",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__HEADER_PICTURE",
+      "xml": "headerPicture"
+    },
+    {
+      "id": "0x27",
+      "skip_if": 0,
+      "feature": "COLUMN_GROUP_EXT_INFO__FIXING_IN_TABLE",
+      "xml": "fixingInTable"
+    },
+    {
+      "id": "0x28",
+      "skip_if": null,
+      "feature": "COLUMN_GROUP_EXT_INFO__SHOW_IN_CARD",
+      "xml": "showInCard"
+    },
+    {
+      "id": "0x29",
+      "skip_if": 2,
+      "feature": "COLUMN_GROUP_EXT_INFO__FIX_IN_CARD",
+      "xml": "fixInCard"
+    },
+    {
+      "id": "0x2a",
+      "skip_if": 2,
+      "feature": "COLUMN_GROUP_EXT_INFO__SHOW_TITLE_IN_CARD",
+      "xml": "showTitleInCard"
+    }
+  ]
+}

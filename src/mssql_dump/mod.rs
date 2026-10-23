@@ -2441,6 +2441,20 @@ fn dump_config_inner(
             .context("strict full source asset check failed")?;
     }
 
+    // The fail-closed side of the assurance invariant: one error naming every
+    // row the model had to hand to the legacy converter, so a gap can never
+    // hide behind a successful-looking tree.
+    if model_export::fail_on_fallback() {
+        let fallbacks = model_export::fallback_rows();
+        if !fallbacks.is_empty() {
+            bail!(
+                "model export fell back on {} row(s) with fail-closed enabled:\n  {}",
+                fallbacks.len(),
+                fallbacks.join("\n  ")
+            );
+        }
+    }
+
     Ok(MssqlDumpConfigReport {
         database: args.database.clone(),
         output_dir: args.output_dir.clone(),
@@ -6770,40 +6784,39 @@ fn dump_table_row_bytes(
                 "unknown",
                 "output_path_collision",
             ))
-        } else if let Some(row) = context.metadata_texts_by_file_name.get(file_name)
-            && let Some(modelled) = context
-                .model_export
-                .and_then(|model| model.export_row(row, bytes))
-                .and_then(|result| match result {
-                    Ok(extracted) => Some(extracted),
-                    Err(error) => {
-                        model_export::report_fallback(file_name, &error);
-                        timings.model_fallback_rows += 1;
-                        None
-                    }
-                })
-        {
-            timings.model_metadata_xml_rows += 1;
-            timings.model_metadata_xml_convert_us += micros(started);
-            model_row = true;
-            if model_export::shadow() {
-                let shadow_started = Instant::now();
-                let legacy = legacy_from_text(row);
-                shadow_us = micros(shadow_started);
-                timings.model_shadow_rows += 1;
-                timings.model_shadow_legacy_convert_us += shadow_us;
-                if !model_export::same_as_written(
-                    legacy.as_ref().ok(),
-                    &modelled,
-                    context.source_version,
-                ) {
-                    timings.model_shadow_differing_rows += 1;
-                    model_export::report_shadow_difference(file_name, &modelled.relative_path);
-                }
-            }
-            Ok(modelled)
         } else if let Some(row) = context.metadata_texts_by_file_name.get(file_name) {
-            legacy_from_text(row)
+            let modelled = context
+                .model_export
+                .and_then(|model| model.export_row(row, bytes));
+            match modelled {
+                Some(Ok(modelled)) => {
+                    timings.model_metadata_xml_rows += 1;
+                    timings.model_metadata_xml_convert_us += micros(started);
+                    model_row = true;
+                    if model_export::shadow() {
+                        let shadow_started = Instant::now();
+                        let legacy = legacy_from_text(row);
+                        shadow_us = micros(shadow_started);
+                        timings.model_shadow_rows += 1;
+                        timings.model_shadow_legacy_convert_us += shadow_us;
+                        if !model_export::same_as_written(
+                            legacy.as_ref().ok(),
+                            &modelled,
+                            context.source_version,
+                        ) {
+                            timings.model_shadow_differing_rows += 1;
+                            model_export::report_shadow_difference(file_name, &modelled.relative_path);
+                        }
+                    }
+                    Ok(modelled)
+                }
+                Some(Err(error)) => {
+                    model_export::report_fallback(file_name, &error);
+                    timings.model_fallback_rows += 1;
+                    legacy_from_text(row)
+                }
+                None => legacy_from_text(row),
+            }
         } else {
             extract_metadata_source_xml_with_recalculation_refs_with_object_ref_resolutions(
                 &bytes,
@@ -7568,8 +7581,11 @@ fn parse_flowchart_color(value: &str, object_refs: &BTreeMap<String, String>) ->
         return None;
     }
     if fields.get(1)?.trim() == "4" {
+        // Kind `4` is the automatic colour; the single payload member is a
+        // default hint the platform does not print (`{3,4,{-14}}` publishes
+        // `auto` in КартаЕНВД).
         let payload = split_1c_braced_fields(fields.get(2)?, 0)?;
-        return (payload.len() == 1 && payload.first()?.trim() == "0").then(|| "auto".to_string());
+        return (payload.len() == 1).then(|| "auto".to_string());
     }
     parse_form_control_color(value, object_refs)
 }
@@ -7823,12 +7839,15 @@ fn parse_flowchart_item_style(
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FlowchartItemStyle> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.len() != 14
-        || fields.first()?.trim() != "7"
-        || fields.get(12)?.trim() != "0"
-        || fields.get(13)?.trim() != "0"
-    {
-        return None;
+    // Kind `7` is the fourteen-member record; kind `6` is the same record one
+    // member shorter (13), as `МакетКарты82` stores its decorations.
+    match fields.first()?.trim() {
+        "7" if fields.len() == 14
+            && fields.get(12).map(|value| value.trim()) == Some("0")
+            && fields.get(13).map(|value| value.trim()) == Some("0") => {}
+        "6" if fields.len() == 13
+            && fields.get(12).map(|value| value.trim()) == Some("0") => {}
+        _ => return None,
     }
     Some(FlowchartItemStyle {
         back_color: parse_flowchart_color(fields.get(1)?, object_refs)?,
@@ -7876,6 +7895,42 @@ fn parse_flowchart_picture_size(value: &str) -> Option<&'static str> {
 /// kind refuses the whole scheme rather than dropping the picture.
 fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
     let fields = split_1c_braced_fields(text, 0)?;
+    // 8.5.1.1529 heads the embedded picture with `3` and stores the base64 at
+    // member 7 (`{3,3,{0},"",-1,-1,0,{{#base64:…}}}`, nine members).
+    if fields.first()?.trim() == "3" {
+        // The empty picture is the same head: `{3,0,{0},"",-1,-1,1,0}`.
+        if fields.get(1)?.trim() == "0" {
+            if fields.len() != 8
+                || split_1c_braced_fields(fields.get(2)?, 0)? != vec!["0"]
+                || fields.get(6)?.trim() != "1"
+            {
+                return None;
+            }
+            return Some(FlowchartPicture::Empty);
+        }
+        if fields.len() != 9
+            || fields.get(1)?.trim() != "3"
+            || split_1c_braced_fields(fields.get(2)?, 0)? != vec!["0"]
+        {
+            return None;
+        }
+        let mut payload = fields.get(7)?.trim();
+        let mut inner = split_1c_braced_fields(payload, 0)?;
+        while inner.len() == 1 && inner.first()?.trim_start().starts_with('{') {
+            payload = inner.first()?.trim();
+            inner = split_1c_braced_fields(payload, 0)?;
+        }
+        if inner.len() != 1 {
+            return None;
+        }
+        let encoded = inner.first()?.trim().strip_prefix("#base64:")?;
+        let data = crate::module_blob::decode_base64_mime(encoded)?;
+        return Some(FlowchartPicture::Embedded {
+            file_name: format!("Picture.{}", flowchart_picture_extension(&data)?),
+            data,
+            load_transparent: parse_flowchart_flag(fields.get(6)?)?,
+        });
+    }
     if fields.first()?.trim() != "4"
         || fields.get(3)?.trim() != "\"\""
         || fields.get(4)?.trim() != "-1"
@@ -7910,10 +7965,11 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
             })
         }
         "3" => {
-            if fields.len() != 10
+            // The members after the payload are not read by the writer and
+            // vary across corpora (10 with `0`/empty, 9, 8); only the payload,
+            // the flag and the image itself matter.
+            if !(8..=10).contains(&fields.len())
                 || split_1c_braced_fields(fields.get(2)?, 0)? != vec!["0"]
-                || fields.get(8)?.trim() != "0"
-                || fields.get(9)?.trim() != "\"\""
             {
                 return None;
             }
@@ -7948,6 +8004,8 @@ fn flowchart_picture_extension(data: &[u8]) -> Option<&'static str> {
         Some("jpg")
     } else if data.starts_with(b"BM") {
         Some("bmp")
+    } else if data.starts_with(b"GIF87a") || data.starts_with(b"GIF89a") {
+        Some("gif")
     } else {
         None
     }
@@ -8033,11 +8091,18 @@ fn parse_flowchart_decoration_graphics(
     text: &str,
     object_refs: &BTreeMap<String, String>,
 ) -> Option<FlowchartItemProperties> {
-    let outer = split_1c_braced_fields(text, 0)?;
-    if outer.len() != 1 {
-        return None;
+    // Some 8.5 schemes wrap the decoration geometry one brace deeper
+    // (`{{{7,…}}}`); unwrap single-member levels before reading it.
+    let mut current = text.trim();
+    loop {
+        let level = split_1c_braced_fields(current, 0)?;
+        if level.len() == 1 && level.first()?.trim_start().starts_with('{') {
+            current = level.first()?.trim();
+        } else {
+            break;
+        }
     }
-    let geometry = split_1c_braced_fields(outer.first()?, 0)?;
+    let geometry = split_1c_braced_fields(current, 0)?;
     if geometry.len() != 12
         || geometry.get(1)?.trim() != "6"
         || !matches!(geometry.get(8)?.trim(), "0" | "1")
@@ -8163,7 +8228,9 @@ impl Default for FlowchartFont {
 /// written with no reference at all.
 fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
     let fields = split_1c_braced_fields(text, 0)?;
-    if fields.first()?.trim() != "7" {
+    // The record's own marker is `7` on most schemes and `6` where the style
+    // itself is `{6,…}` (МакетКарты82 writes `{6,3,6,120,700,1}`).
+    if !matches!(fields.first()?.trim(), "6" | "7") {
         return None;
     }
     let kind = fields.get(1).map(|field| field.trim()).unwrap_or("1");
@@ -8183,25 +8250,66 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
             (reference, "StyleItem")
         }
         "3" => {
-            if fields.len() != 5
-                || fields.get(2)?.trim() != "0"
-                || fields.get(3)?.trim() != "1"
-                || fields.get(4)?.trim() != "100"
+            // `{7,3,0,1,100}` is the sizeless form; the 8.5 record carries
+            // explicit height and weight: `{6,3,6,120,700,1}` publishes
+            // `<Font height="12" bold="true" kind="AutoFont"/>`, and
+            // `{6,3,2,100,1}` publishes `height="10"` alone.
+            if fields.len() == 5
+                && fields.get(2)?.trim() == "0"
+                && fields.get(3)?.trim() == "1"
+                && fields.get(4)?.trim() == "100"
             {
-                return None;
+                return Some(FlowchartFont {
+                    reference: String::new(),
+                    kind: "AutoFont",
+                    ..FlowchartFont::default()
+                });
             }
-            return Some(FlowchartFont {
-                reference: String::new(),
-                kind: "AutoFont",
-                ..FlowchartFont::default()
-            });
+            // The sized `AutoFont` keeps height (tenths) at member 3 and
+            // weight at member 4; the trailing member is a flag. Both the
+            // five-member `{6,3,2,100,1}` and six-member
+            // `{6,3,6,120,700,1}` spellings occur.
+            // The sized form comes under both markers (`{6,…}` and `{7,…}`)
+            // and in two lengths; the sizeless `{7,3,0,1,100}` is told apart by
+            // its own fixed members, not by the marker.
+            if matches!(fields.len(), 4 | 5 | 6 | 7) {
+                if (fields.len() == 4
+                    && fields.get(2)?.trim() == "0"
+                    && fields.get(3)?.trim() == "1")
+                    || (fields.len() == 5
+                        && fields.get(2)?.trim() == "0"
+                        && fields.get(3)?.trim() == "1"
+                        && fields.get(4)?.trim() == "100")
+                {
+                    return Some(FlowchartFont {
+                        reference: String::new(),
+                        kind: "AutoFont",
+                        ..FlowchartFont::default()
+                    });
+                }
+                // `font_height_xml` divides the stored tenths itself.
+                let tenths = fields.get(3)?.trim();
+                let weight = fields.get(4)?.trim().parse::<i64>().ok()?;
+                return Some(FlowchartFont {
+                    reference: String::new(),
+                    kind: "AutoFont",
+                    height: font_height_xml(Some(tenths)),
+                    // A non-bold weight is the absence of the attribute, not
+                    // `bold="false"` (native `<Font height="8" kind="AutoFont"/>`
+                    // comes from the `{7,3,2,80,1,100}` record).
+                    bold: (weight >= 700).then_some(true),
+                    ..FlowchartFont::default()
+                });
+            }
+            return None;
         }
         _ => return None,
     };
     let mask = fields.get(2)?.trim().parse::<u32>().ok()?;
     // Only the five member bits below are evidenced; any other bit is a
     // member layout nothing in the corpus describes, so the font refuses.
-    if mask & !0b11_1110 != 0 {
+    // Bit 0 marks an explicit face name (`{6,1,63,{0},200,700,0,0,0,"Arial",1}`).
+    if mask & !0b11_1111 != 0 {
         return None;
     }
     let mut index = 4usize;
@@ -8218,11 +8326,27 @@ fn parse_flowchart_font_tuple(text: &str) -> Option<FlowchartFont> {
     let italic = member(8)?;
     let underline = member(16)?;
     let strikeout = member(32)?;
-    if fields.len() != index + 2 || fields.get(index)?.trim() != "1" {
+    let face_name = if mask & 1 != 0 {
+        let value = parse_1c_string(fields.get(index)?)?;
+        index += 1;
+        Some(value)
+    } else {
+        None
+    };
+    let (reference, kind_xml) = match face_name {
+        Some(name) => (name, "WindowsFont"),
+        None => (reference, kind_xml),
+    };
+    // The trailing `1` and the optional scale close the record; the sized
+    // record may omit the scale member.
+    let scale = if fields.len() == index + 1 && fields.get(index)?.trim() == "1" {
+        None
+    } else if fields.len() == index + 2 && fields.get(index)?.trim() == "1" {
+        let scale = fields.get(index + 1)?.trim();
+        (scale != "100").then(|| scale.to_string())
+    } else {
         return None;
-    }
-    let scale = fields.get(index + 1)?.trim();
-    let scale = (scale != "100").then(|| scale.to_string());
+    };
     let flag = |value: Option<&str>| -> Option<Option<bool>> {
         match value {
             None => Some(None),
@@ -8600,9 +8724,15 @@ fn format_exchange_plan_content_xml_with_extension(
     items: &[ExchangePlanContentItem],
     extension: &[(String, &'static str)],
 ) -> String {
-    let mut xml = String::from(
-        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n\
-<ExchangePlanContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n",
+    let root = "<ExchangePlanContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\"";
+    // An empty content is a self-closing element, as the platform writes it.
+    if items.is_empty() && extension.is_empty() {
+        return format!(
+            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}/>"
+        );
+    }
+    let mut xml = format!(
+        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}>\r\n"
     );
     for item in items {
         xml.push_str(&format!(
@@ -8796,15 +8926,15 @@ fn push_flowchart_localized_indented_xml(
 }
 
 fn push_flowchart_font_xml(xml: &mut String, font: &FlowchartFont) {
-    if font.kind == "AutoFont" {
-        xml.push_str("\t\t\t\t<Font kind=\"AutoFont\"/>\r\n");
-        return;
-    }
     xml.push_str("\t\t\t\t<Font");
-    if font.reference.starts_with("sys:") {
-        xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+    // An `AutoFont` carries no ref but may carry an explicit height and style
+    // (`<Font height="12" bold="true" kind="AutoFont"/>`).
+    if font.kind != "AutoFont" {
+        if font.reference.starts_with("sys:") {
+            xml.push_str(" xmlns:sys=\"http://v8.1c.ru/8.1/data/ui/fonts/system\"");
+        }
+        xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(&font.reference)));
     }
-    xml.push_str(&format!(" ref=\"{}\"", escape_xml_text(&font.reference)));
     if let Some(height) = &font.height {
         xml.push_str(&format!(" height=\"{}\"", escape_xml_text(height)));
     }

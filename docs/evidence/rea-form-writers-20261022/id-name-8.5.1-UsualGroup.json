@@ -1,0 +1,187 @@
+{
+  "platform": "8.5.1",
+  "element": "UsualGroup",
+  "source_java": "C:\\Tools\\edt-form-export\\src\\com\\_1c\\g5\\v8\\dt\\form\\export\\xml\\writer\\ExtInfoWriter.java",
+  "mapping": [
+    {
+      "id": "0x1f",
+      "skip_if": 4,
+      "feature": "USUAL_GROUP_EXT_INFO__GROUP",
+      "xml": "group"
+    },
+    {
+      "id": "0x20",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__CHILDREN_ALIGN",
+      "xml": "childrenAlign"
+    },
+    {
+      "id": "0x21",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__HORIZONTAL_SPACING",
+      "xml": "horizontalSpacing"
+    },
+    {
+      "id": "0x22",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__VERTICAL_SPACING",
+      "xml": "verticalSpacing"
+    },
+    {
+      "id": "0x23",
+      "skip_if": 3,
+      "feature": "USUAL_GROUP_EXT_INFO__HORIZONTAL_ALIGN",
+      "xml": "horizontalAlign"
+    },
+    {
+      "id": "0x24",
+      "skip_if": 3,
+      "feature": "USUAL_GROUP_EXT_INFO__VERTICAL_ALIGN",
+      "xml": "verticalAlign"
+    },
+    {
+      "id": "0x25",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__BEHAVIOR",
+      "xml": "behavior"
+    },
+    {
+      "id": "0x26",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__COLLAPSED_REPRESENTATION_TITLE",
+      "xml": "collapsedRepresentationTitle"
+    },
+    {
+      "id": "0x27",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__COLLAPSED_REPRESENTATION_ITEM",
+      "xml": "collapsedRepresentationItem"
+    },
+    {
+      "id": "0x28",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__COLLAPSED",
+      "xml": "collapsed"
+    },
+    {
+      "id": "0x29",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__CONTROL_REPRESENTATION",
+      "xml": "controlRepresentation"
+    },
+    {
+      "id": "0x2a",
+      "skip_if": 4,
+      "feature": "USUAL_GROUP_EXT_INFO__REPRESENTATION",
+      "xml": "representation"
+    },
+    {
+      "id": "0x2b",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__CHILD_ITEMS_TITLE_LOCATION",
+      "xml": "childItemsTitleLocation"
+    },
+    {
+      "id": "0x2c",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__SHOW_LEFT_MARGIN",
+      "xml": "showLeftMargin"
+    },
+    {
+      "id": "0x2d",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__UNITED",
+      "xml": "united"
+    },
+    {
+      "id": "0x2e",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__SLAVE_ITEMS_WIDTH",
+      "xml": "slaveItemsWidth"
+    },
+    {
+      "id": "0x2f",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__FORMAT",
+      "xml": "format"
+    },
+    {
+      "id": "0x30",
+      "skip_if": 2,
+      "feature": "USUAL_GROUP_EXT_INFO__SHOW_TITLE851",
+      "xml": "showTitle"
+    },
+    {
+      "id": "0x31",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__TITLE_DATA_PATH",
+      "xml": "titleDataPath"
+    },
+    {
+      "id": "0x32",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__BACK_COLOR",
+      "xml": "backColor"
+    },
+    {
+      "id": "0x33",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__HIDDEN_STATE_TITLE_BACK_COLOR",
+      "xml": "hiddenStateTitleBackColor"
+    },
+    {
+      "id": "0x34",
+      "skip_if": 2,
+      "feature": "USUAL_GROUP_EXT_INFO__CURRENT_ROW_USE",
+      "xml": "currentRowUse"
+    },
+    {
+      "id": "0x35",
+      "skip_if": 2,
+      "feature": "USUAL_GROUP_EXT_INFO__ASSOCIATED_TABLE_ELEMENT_ID8315",
+      "xml": "associatedTableElementId"
+    },
+    {
+      "id": "0x36",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__SHOW_AS_CARD",
+      "xml": "showAsCard"
+    },
+    {
+      "id": "0x37",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__BACK_PICTURE_EFFECT",
+      "xml": "backPictureEffect"
+    },
+    {
+      "id": "0x38",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__CARD_REPRESENTATION_TYPE",
+      "xml": "cardRepresentationType"
+    },
+    {
+      "id": "0x39",
+      "skip_if": 0,
+      "feature": "USUAL_GROUP_EXT_INFO__HYPERLINK",
+      "xml": "hyperlink"
+    },
+    {
+      "id": "0x3a",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__BACK_PICTURE",
+      "xml": "backPicture"
+    },
+    {
+      "id": "0x3b",
+      "skip_if": null,
+      "feature": "USUAL_GROUP_EXT_INFO__SCROLL_ON_COMPRESS",
+      "xml": "scrollOnCompress"
+    },
+    {
+      "id": "0x3c",
+      "skip_if": 2,
+      "feature": "USUAL_GROUP_EXT_INFO__THROUGH_ALIGN",
+      "xml": "throughAlign"
+    }
+  ]
+}
