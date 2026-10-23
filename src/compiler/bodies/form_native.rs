@@ -297,14 +297,14 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("LightCyan", "67"),
     ("LightGoldenRod", "68"),
     ("LightGoldenRodYellow", "69"),
-    ("LightGray", "70"),
-    ("LightGreen", "71"),
+    ("LightGray", "71"),
+    ("LightGreen", "70"),
     ("LightPink", "72"),
     ("LightSalmon", "73"),
     ("LightSeaGreen", "74"),
     ("LightSkyBlue", "75"),
-    ("LightSlateGray", "76"),
-    ("LightSlateBlue", "77"),
+    ("LightSlateGray", "77"),
+    ("LightSlateBlue", "76"),
     ("LightSteelBlue", "78"),
     ("LightYellow", "79"),
     ("Lime", "80"),
@@ -323,10 +323,10 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("MediumSpringGreen", "93"),
     ("MediumTurquoise", "94"),
     ("MediumVioletRed", "95"),
-    ("MidnightBlue", "96"),
+    ("MidnightBlue", "99"),
     ("MintCream", "97"),
     ("MistyRose", "98"),
-    ("Moccasin", "99"),
+    ("Moccasin", "96"),
     ("NavajoWhite", "100"),
     ("Navy", "101"),
     ("OldLace", "102"),
@@ -10194,6 +10194,52 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The codes the form corpora of seven stands attest (the export table
+    /// this palette replaced), plus 71 LightGray, 77 LightSlateGray and 96
+    /// Moccasin, on which the style, MXL and former compile tables agree. The
+    /// palette read from core85.dll had those three transposed with their
+    /// neighbours, which keep the codes they left (76, 99).
+    #[test]
+    fn web_palette_keeps_the_corpus_attested_codes() {
+        let attested = [
+            (1, "AliceBlue"),
+            (6, "Beige"),
+            (14, "CadetBlue"),
+            (30, "DarkOliveGreen"),
+            (31, "DarkOrange"),
+            (41, "DeepSkyBlue"),
+            (42, "DimGray"),
+            (43, "DodgerBlue"),
+            (57, "IndianRed"),
+            (70, "LightGreen"),
+            (71, "LightGray"),
+            (75, "LightSkyBlue"),
+            (76, "LightSlateBlue"),
+            (77, "LightSlateGray"),
+            (81, "LimeGreen"),
+            (91, "MediumSeaGreen"),
+            (96, "Moccasin"),
+            (99, "MidnightBlue"),
+            (100, "NavajoWhite"),
+            (106, "OrangeRed"),
+            (109, "PaleGreen"),
+            (115, "Pink"),
+            (122, "SaddleBrown"),
+            (125, "Seagreen"),
+            (132, "Snow"),
+            (143, "White"),
+        ];
+        let actual: Vec<(i32, &str)> = attested
+            .iter()
+            .map(|(code, _)| (*code, web_color_name(*code).unwrap_or("<none>")))
+            .collect();
+        assert_eq!(actual, attested);
+        let mut codes: Vec<&str> = WEB_COLOR_CODES.iter().map(|(_, code)| *code).collect();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(codes.len(), WEB_COLOR_CODES.len(), "a code names two colours");
+    }
 
     #[test]
     fn root_scale_rejects_non_numeric_and_extra_member_input() {

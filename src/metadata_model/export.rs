@@ -109,11 +109,6 @@ impl NameIndex {
         self.types.get(type_id).map(String::as_str)
     }
 
-    /// Number of generated types the index knows (diagnostics).
-    pub fn type_count(&self) -> usize {
-        self.types.len()
-    }
-
     /// Name of a predefined item by its uuid; `None` when the uuid names
     /// items of several owners under different names (use
     /// [`Self::predefined_in`]).

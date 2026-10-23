@@ -7515,15 +7515,12 @@ fn parse_moxel_gantt_chart(
     if chart_triple.len() != 3 || chart_triple.first()?.trim() != "0" {
         return None;
     }
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step chart"); }
     let chart = parse_moxel_chart(
         &format!("{{{},{}}}", chart_triple.get(1)?, chart_triple.get(2)?),
         object_refs,
     )?;
 
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step points"); }
     let points = parse_gantt_points_data(fields.get(2)?)?;
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step series"); }
     let series = parse_gantt_series_data(fields.get(3)?)?;
     // Two more design-time-only fields no observation ties to any XML
     // content, same treatment as the plain `Chart`'s own literal-heavy
@@ -7531,22 +7528,18 @@ fn parse_moxel_gantt_chart(
     if fields.get(4)?.trim() != "0" || fields.get(5)?.trim() != "0" {
         return None;
     }
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step draw_empty"); }
     let draw_empty = parse_moxel_chart_bool(fields.get(6)?)?;
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step time_scale"); }
     let time_scale = parse_gantt_time_scale(fields.get(7)?)?;
     // `keepScaleVariant`: only `"2"` (`AllData`) observed on either record.
     if fields.get(8)?.trim() != "2" {
         return None;
     }
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step measure"); }
     let fixed_variant_measure = moxel_gantt_time_measure(fields.get(9)?)?;
     // `fixedVariantInterval` (`1`) and `autoFullInterval` (`true`): literals,
     // unvaried between the two records.
     if fields.get(10)?.trim() != "1" || fields.get(11)?.trim() != "1" {
         return None;
     }
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step date_begin"); }
     let full_interval_begin = parse_moxel_gantt_date(fields.get(12)?)?;
     let full_interval_end = parse_moxel_gantt_date(fields.get(13)?)?;
     let visual_begin = parse_moxel_gantt_date(fields.get(14)?)?;
@@ -7566,9 +7559,7 @@ fn parse_moxel_gantt_chart(
     {
         return None;
     }
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step vertical_scroll"); }
     let vertical_scroll_enable = parse_moxel_chart_bool(fields.get(19)?)?;
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step outbound"); }
     let outbound_color = parse_moxel_chart_color(fields.get(22)?)?;
     // `backIntervals` (`collection.ticks`/`ticks` both `0`): literal,
     // unvaried between the two records.
@@ -7588,9 +7579,7 @@ fn parse_moxel_gantt_chart(
         return None;
     }
     let back_interval_ticks = collection[2].trim().parse::<u64>().ok()?;
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step links"); }
     let links_color = parse_moxel_chart_color(fields.get(25)?)?;
-    if std::env::var_os("DSH_DEBUG_MXL").is_some() { eprintln!("gantt step links_line"); }
     let links_line = parse_moxel_chart_line(fields.get(26)?)?;
     if links_line.width != 1 {
         return None;

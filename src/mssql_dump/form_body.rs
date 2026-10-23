@@ -18643,13 +18643,10 @@ fn parse_legacy_5004_choice_parameter_links(
         let second = fields.get(index)?.trim().to_string();
         index += 1;
         let physical = physical_choice_parameter_link_path(&[first.as_str(), second.as_str()]);
-        let debug = std::env::var_os("DSH_DEBUG_5004").is_some();
         let value_change_token = fields.get(index)?.trim().to_string();
         let value_change = match value_change_token.as_str() {
             "0" => FormChoiceParameterLinkValueChange::Clear,
-            other => {
-                return None;
-            }
+            _ => return None,
         };
         index += 1;
         let table_head = split_1c_braced_fields(&first, 0)?;

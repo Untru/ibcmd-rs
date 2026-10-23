@@ -1937,7 +1937,6 @@ impl<'a> FormCommandSchema<'a> {
             }
         }
 
-        let picture = FormPictureValueSchema::from_raw_layout(picture_value);
         let picture = FormPictureValueSchema::from_raw_layout(picture_value)?;
         let picture_reference_is_exact = match picture.kind() {
             FormPictureValueKind::Empty => {
