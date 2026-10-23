@@ -357,6 +357,8 @@ pub fn own_header(row: &Brace) -> Option<(String, String)> {
 /// form, template, recalculation and nested subsystem of their trees).
 const OWNED_CLASSES: &[(&str, &str)] = &[
     ("3daea016-69b7-4ed4-9453-127911372fe6", "Template"),
+    // An `ExternalDataSource`'s tables: `{e3403acd-…,<count>,<uuid>…}`.
+    ("e3403acd-1c95-421b-87e4-4dfa29d38b52", "Table"),
     ("37f2fa9a-b276-11d4-9435-004095e12fc7", "Subsystem"),
     ("274bf899-db0e-4df6-8ab5-67bf6371ec0b", "Recalculation"),
     // Forms, one class per owner kind.

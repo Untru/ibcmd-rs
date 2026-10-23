@@ -864,9 +864,14 @@ pub(super) fn parse_configuration_root_object_rights(
     {
         for name in CONFIGURATION_MODE_RIGHT_NAMES {
             if !entries.iter().any(|entry| entry.name == name) {
+                // The launch-mode rights' type default is `true`: a role that
+                // stores the other five and not the analytics client prints
+                // the missing one as `true` (Accounting 3.0
+                // `Roles/ПросмотрОтчетаАнализРасхожденийПриПоступлении…`,
+                // whose `setForNewObjects` is false).
                 entries.push(RoleRight {
                     name: name.to_string(),
-                    value: set_for_new_objects,
+                    value: true,
                     restrictions: Vec::new(),
                 });
             }

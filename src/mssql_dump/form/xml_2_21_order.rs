@@ -160,6 +160,9 @@ pub(in crate::mssql_dump) fn child_order(parent: &str) -> Option<&'static [&'sta
             "WarningOnEditRepresentation",
             "WarningOnEdit",
             "HorizontalAlign",
+            // `AccountingRegisters/Хозрасчетный/Forms/ФормаСписка` keeps it
+            // between `HorizontalAlign` and `ShowInHeader`.
+            "AutoCellHeight",
             "VerticalAlign",
             "TitleBackColor",
             "Shortcut",

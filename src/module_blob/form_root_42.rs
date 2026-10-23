@@ -630,12 +630,45 @@ pub(super) fn upgrade_root_42_body(plain: &str) -> Option<String> {
     if !container_ok {
         return None;
     }
-    let upgraded = upgrade(body, &root, 0, None, None);
+    let mut upgraded = upgrade(body, &root, 0, None, None);
+    if root == "46" {
+        renumber_root_46_attribute_chains(&mut upgraded);
+    }
     let mut out = String::with_capacity(plain.len() + plain.len() / 8);
     out.push_str(&plain[..start]);
     upgraded.render(&mut out);
     out.push_str(&plain[end..]);
     Some(out)
+}
+
+/// Root-46 numbers a chain's attribute one higher than the attribute record's
+/// own id: the rule table swaps the chain's first and second segments
+/// (`{2,{1},{-3}}` -> `{2,{2},{-3}}`) while the attribute record keeps id `1`,
+/// so the reader looks for an attribute the form does not have. Undo the shift
+/// on the chain itself: `2` names the first attribute.
+fn renumber_root_46_attribute_chains(node: &mut Node) {
+    let Node::List(items) = node else {
+        return;
+    };
+    let is_chain = items.len() >= 3
+        && matches!(items.first(), Some(Node::Leaf(tag)) if tag == "2")
+        && matches!(items.get(1), Some(Node::List(root)) if root.len() == 1)
+        // A member is one id (`{-3}`) or an id and a uuid (`{0,d52ab7ed…}`);
+        // both belong to the chain, and only `items[1]` is the attribute root.
+        && items[2..].iter().all(|member| {
+            matches!(member, Node::List(member) if matches!(member.len(), 1 | 2))
+        });
+    if is_chain
+        && let Some(Node::List(root)) = items.get_mut(1)
+        && let Some(Node::Leaf(id)) = root.first_mut()
+        && let Ok(value) = id.parse::<usize>()
+        && value > 1
+    {
+        *id = (value - 1).to_string();
+    }
+    for item in items {
+        renumber_root_46_attribute_chains(item);
+    }
 }
 
 include!("form_root_42_rules.rs");

@@ -229,35 +229,68 @@ pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
 /// items, and the rest of the table the exporter reads the index back with.
 pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("AliceBlue", "1"),
+    ("AntiqueWhite", "2"),
+    ("Aqua", "3"),
+    ("Aquamarine", "4"),
+    ("Azure", "5"),
     ("Beige", "6"),
+    ("Bisque", "7"),
     ("Black", "8"),
+    ("BlanchedAlmond", "9"),
     ("Blue", "10"),
+    ("BlueViolet", "11"),
+    ("Brown", "12"),
+    ("BurlyWood", "13"),
     ("CadetBlue", "14"),
+    ("Chartreuse", "15"),
+    ("Chocolate", "16"),
+    ("Coral", "17"),
+    ("CornFlowerBlue", "18"),
+    ("CornSilk", "19"),
     ("Cream", "20"),
     ("Crimson", "21"),
+    ("Cyan", "22"),
     ("DarkBlue", "23"),
+    ("DarkCyan", "24"),
+    ("DarkGoldenRod", "25"),
     ("DarkGray", "26"),
     ("DarkGreen", "27"),
+    ("DarkKhaki", "28"),
+    ("DarkMagenta", "29"),
     ("DarkOliveGreen", "30"),
     ("DarkOrange", "31"),
+    ("DarkOrchid", "32"),
     ("DarkRed", "33"),
+    ("DarkSalmon", "34"),
+    ("DarkSeaGreen", "35"),
+    ("DarkSlateBlue", "36"),
     ("DarkSlateGray", "37"),
+    ("DarkTurquoise", "38"),
+    ("DarkViolet", "39"),
+    ("DeepPink", "40"),
     ("DeepSkyBlue", "41"),
     ("DimGray", "42"),
     ("DodgerBlue", "43"),
     ("FireBrick", "44"),
     ("FloralWhite", "45"),
     ("ForestGreen", "46"),
+    ("Fuchsia", "47"),
     ("Gainsboro", "48"),
     ("GhostWhite", "49"),
     ("Gold", "50"),
     ("Goldenrod", "51"),
     ("Gray", "52"),
     ("Green", "53"),
+    ("GreenYellow", "54"),
     ("HoneyDew", "55"),
+    ("HotPink", "56"),
     ("IndianRed", "57"),
+    ("Indigo", "58"),
+    ("Ivory", "59"),
+    ("Khaki", "60"),
     ("Lavender", "61"),
     ("LavenderBlush", "62"),
+    ("LawnGreen", "63"),
     ("LemonChiffon", "64"),
     ("LightBlue", "65"),
     ("LightCoral", "66"),
@@ -268,49 +301,92 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("LightGreen", "70"),
     ("LightPink", "72"),
     ("LightSalmon", "73"),
+    ("LightSeaGreen", "74"),
     ("LightSkyBlue", "75"),
     ("LightSlateGray", "77"),
+    ("LightSlateBlue", "76"),
     ("LightSteelBlue", "78"),
     ("LightYellow", "79"),
     ("Lime", "80"),
     ("LimeGreen", "81"),
+    ("Linen", "82"),
+    ("Magenta", "83"),
     ("Maroon", "84"),
+    ("MediumAquaMarine", "85"),
     ("MediumBlue", "86"),
     ("MediumGray", "87"),
+    ("MediumGreen", "88"),
+    ("MediumOrchid", "89"),
+    ("MediumPurple", "90"),
     ("MediumSeaGreen", "91"),
+    ("MediumSlateBlue", "92"),
+    ("MediumSpringGreen", "93"),
+    ("MediumTurquoise", "94"),
+    ("MediumVioletRed", "95"),
+    ("MidnightBlue", "99"),
     ("MintCream", "97"),
     ("MistyRose", "98"),
     ("Moccasin", "96"),
     ("NavajoWhite", "100"),
+    ("Navy", "101"),
+    ("OldLace", "102"),
+    ("Olive", "103"),
+    ("Olivedrab", "104"),
     ("Orange", "105"),
     ("OrangeRed", "106"),
+    ("Orchid", "107"),
+    ("PaleGoldenrod", "108"),
     ("PaleGreen", "109"),
     ("PaleTurquoise", "110"),
+    ("PaleVioletRed", "111"),
     ("PapayaWhip", "112"),
+    ("PeachPuff", "113"),
+    ("Peru", "114"),
     ("Pink", "115"),
+    ("Plum", "116"),
     ("PowderBlue", "117"),
+    ("Purple", "118"),
     ("Red", "119"),
     ("RosyBrown", "120"),
     ("RoyalBlue", "121"),
     ("SaddleBrown", "122"),
-    // 1C:Документооборот `Documents/Отсутствие/Forms/ФормаДокумента`
-    // `ЗаместителиТекст` holds `{3,2,{125}}` and the platform writes
-    // `web:Seagreen` (the exporter's `form_control_web_color_name`).
-    ("Seagreen", "125"),
     ("Salmon", "123"),
+    ("SandyBrown", "124"),
+    ("Seagreen", "125"),
+    ("SeaShell", "126"),
     ("Sienna", "127"),
     ("Silver", "128"),
     ("SkyBlue", "129"),
     ("SlateBlue", "130"),
     ("SlateGray", "131"),
     ("Snow", "132"),
+    ("SpringGreen", "133"),
     ("SteelBlue", "134"),
+    ("Tan", "135"),
+    ("Teal", "136"),
+    ("Thistle", "137"),
+    ("Tomato", "138"),
+    ("Turquoise", "139"),
     ("Violet", "140"),
     ("VioletRed", "141"),
+    ("Wheat", "142"),
     ("White", "143"),
     ("WhiteSmoke", "144"),
     ("Yellow", "145"),
+    ("YellowGreen", "146"),
 ];
+
+/// Имя web-цвета по коду: обратный поиск по `WEB_COLOR_CODES`.
+pub(crate) fn web_color_name(code: i32) -> Option<&'static str> {
+    let target = u16::try_from(code).ok()?;
+    WEB_COLOR_CODES.iter().find_map(|(name, value)| {
+        value
+            .parse::<u16>()
+            .ok()
+            .filter(|parsed| *parsed == target)
+            .map(|_| *name)
+    })
+}
 
 /// The Windows system colours the corpus names, with the index a body stores
 /// under `{3,1,{n}}` -- the ones the form exporter reads back.
@@ -10118,6 +10194,56 @@ fn resolve_metadata_data_path_part(
 mod tests {
     use super::*;
 
+    /// The codes the form corpora of seven stands attest (the export table
+    /// this palette replaced), plus 71 LightGray, 77 LightSlateGray and 96
+    /// Moccasin, on which the style, MXL and former compile tables agree. The
+    /// palette read from core85.dll had those three transposed with their
+    /// neighbours, which keep the codes they left (76, 99).
+    #[test]
+    fn web_palette_keeps_the_corpus_attested_codes() {
+        let attested = [
+            (1, "AliceBlue"),
+            (6, "Beige"),
+            (14, "CadetBlue"),
+            (30, "DarkOliveGreen"),
+            (31, "DarkOrange"),
+            (41, "DeepSkyBlue"),
+            (42, "DimGray"),
+            (43, "DodgerBlue"),
+            (57, "IndianRed"),
+            (70, "LightGreen"),
+            (71, "LightGray"),
+            (75, "LightSkyBlue"),
+            (76, "LightSlateBlue"),
+            (77, "LightSlateGray"),
+            (81, "LimeGreen"),
+            (91, "MediumSeaGreen"),
+            (96, "Moccasin"),
+            (99, "MidnightBlue"),
+            (100, "NavajoWhite"),
+            (106, "OrangeRed"),
+            (109, "PaleGreen"),
+            (115, "Pink"),
+            (122, "SaddleBrown"),
+            (125, "Seagreen"),
+            (132, "Snow"),
+            (143, "White"),
+        ];
+        let actual: Vec<(i32, &str)> = attested
+            .iter()
+            .map(|(code, _)| (*code, web_color_name(*code).unwrap_or("<none>")))
+            .collect();
+        assert_eq!(actual, attested);
+        let mut codes: Vec<&str> = WEB_COLOR_CODES.iter().map(|(_, code)| *code).collect();
+        codes.sort_unstable();
+        codes.dedup();
+        assert_eq!(
+            codes.len(),
+            WEB_COLOR_CODES.len(),
+            "a code names two colours"
+        );
+    }
+
     #[test]
     fn root_scale_rejects_non_numeric_and_extra_member_input() {
         let expected = format_root_tail(&NativeRootTail::default()).unwrap();
@@ -11879,7 +12005,13 @@ mod tests {
             Some("{3,3,{0,757b547b-b79c-459a-a64a-eef19a09a38f}}")
         );
         // A spelling the writer cannot place is refused, not defaulted.
-        assert_eq!(format_native_color(Some("web:Chartreuse"), none), None);
+        // The full platform palette now covers every CSS colour name, so an
+        // unknown spelling is a name outside that palette.
+        assert_eq!(
+            format_native_color(Some("web:Chartreuse"), none).as_deref(),
+            Some("{3,2,{15}}")
+        );
+        assert_eq!(format_native_color(Some("web:NotAColour"), none), None);
         assert_eq!(format_native_color(Some("style:Неизвестный"), none), None);
         assert_eq!(format_native_color(Some("#12345"), none), None);
     }

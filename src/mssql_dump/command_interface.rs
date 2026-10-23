@@ -174,7 +174,11 @@ pub(super) struct ClientApplicationInterfaceGroup {
 
 pub(super) enum ClientApplicationInterfaceNode {
     Group(ClientApplicationInterfaceGroup),
-    Panel { id: String, uuid: String },
+    Panel {
+        id: String,
+        uuid: String,
+        height: Option<String>,
+    },
 }
 
 pub(super) fn parse_command_interface_blob(
@@ -832,7 +836,14 @@ fn parse_client_application_interface_children_with_panel_wrapper(
         } else {
             let id = parse_non_zero_uuid(child_fields.get(1)?.trim())?;
             let uuid = parse_non_zero_uuid(child_fields.get(2)?.trim())?;
-            let panel = ClientApplicationInterfaceNode::Panel { id, uuid };
+            // `[0, id, uuid, area, height]`: the fifth member is the panel's
+            // own `<height>`, `0` when the platform writes none.
+            let height = child_fields
+                .get(4)
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .filter(|height| *height != 0)
+                .map(|height| height.to_string());
+            let panel = ClientApplicationInterfaceNode::Panel { id, uuid, height };
             if wrap_panels_in_anonymous_group {
                 children.push(ClientApplicationInterfaceNode::Group(
                     ClientApplicationInterfaceGroup {
@@ -1154,15 +1165,21 @@ fn push_client_application_interface_node_xml(
         ClientApplicationInterfaceNode::Group(group) => {
             push_client_application_interface_group_xml(xml, group, indent);
         }
-        ClientApplicationInterfaceNode::Panel { id, uuid } => {
+        ClientApplicationInterfaceNode::Panel { id, uuid, height } => {
             let tab = "\t".repeat(indent);
             xml.push_str(&format!(
                 "{tab}<panel id=\"{}\">\r\n\
-{tab}\t<uuid>{}</uuid>\r\n\
-{tab}</panel>\r\n",
+{tab}\t<uuid>{}</uuid>\r\n",
                 escape_xml_text(id),
                 escape_xml_text(uuid)
             ));
+            if let Some(height) = height {
+                xml.push_str(&format!(
+                    "{tab}\t<height>{}</height>\r\n",
+                    escape_xml_text(height)
+                ));
+            }
+            xml.push_str(&format!("{tab}</panel>\r\n"));
         }
     }
 }

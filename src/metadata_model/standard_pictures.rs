@@ -25,6 +25,15 @@ use std::sync::LazyLock;
 pub(crate) const STANDARD_PICTURES: &[(&str, &str)] = &[
     // Matched stored UUIDs against 8.3.27.2214 native exports of src and IR.
     ("3646acb9-a91e-4163-bbe1-2006041cd65d", "StdPicture.SpreadsheetShowGrid"),
+    // ServiceDesk 3.10.28 (8.5.1.1529): the native export of
+    // `DataProcessors/ТелеграмОбновлениеВерсии` writes
+    // `<xr:Ref>StdPicture.GotoURL</xr:Ref>` for the stored picture record
+    // `3b2a508b-…`; without this row the model handed the whole descriptor to
+    // the legacy converter, which wrote the bare `0:<uuid>`.
+    (
+        "3b2a508b-f36e-4e0b-9dc0-70b2b56276a9",
+        "StdPicture.GotoURL",
+    ),
     ("8729a534-9f88-47b0-8d6b-ec213689580d", "StdPicture.FilterHistory"),
     ("3a32aa35-c679-4c5b-91bd-72ae038e5bb4", "StdPicture.ExternalDataSource"),
     ("4b54770b-d069-4c0e-9b17-5cc2a01134d9", "StdPicture.Information"),
@@ -405,9 +414,11 @@ mod tests {
             "3646acb9-a91e-4163-bbe1-2006041cd65d StdPicture.SpreadsheetShowGrid",
             "8729a534-9f88-47b0-8d6b-ec213689580d StdPicture.FilterHistory",
             "3a32aa35-c679-4c5b-91bd-72ae038e5bb4 StdPicture.ExternalDataSource",
+            // Added from the 8.5.1.1529 native export of ServiceDesk 3.10.28.
+            "3b2a508b-f36e-4e0b-9dc0-70b2b56276a9 StdPicture.GotoURL",
         ]);
         snapshot.sort_unstable();
-        assert_eq!(rows.len(), 221);
+        assert_eq!(rows.len(), 222);
         assert_eq!(rows, snapshot);
     }
 

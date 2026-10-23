@@ -194,7 +194,14 @@ fn decode_plain(
     // same way: 21 and 24 spreadsheets of the same two configurations, 19 of
     // the first's 21 byte-identical read so.
     let language = required_list(&fields[3], "MOXCEL language descriptor")?;
-    let short_language_record = matches!(fields[2].as_token(), Some("8" | "9"));
+    // Revision 6 (бухгалтерия 3.0) stores the same short record as 8 and 9:
+    // `{"ru","ru",1,1,"ru","Русский","Русский"}` is `count*3+4` members.
+    // Revisions below 12 store the language record without its closing `0`;
+    // `12` (the 8.3.27 corpus) is the one that carries it.
+    let short_language_record = fields[2]
+        .as_token()
+        .and_then(|token| token.trim().parse::<u32>().ok())
+        .is_some_and(|revision| revision < 12);
     let language_shape_ok = language.len() >= 5
         && required_token(&language[3], "MOXCEL language count")
             .ok()
@@ -305,8 +312,8 @@ mod tests {
 	<format><width>72</width></format>
 </document>"#;
 
-    /// Root revisions `8` and `9` store the language record without its closing `0`;
-    /// the same record under revision `12` still has to carry it.
+    /// Root revisions `6`, `8` and `9` store the language record without its
+    /// closing `0`; the same record under revision `12` still has to carry it.
     #[test]
     fn revisions_8_and_9_read_the_short_language_record() {
         let profile = MxlCodecProfile::fixture();
@@ -325,7 +332,7 @@ mod tests {
             &plain[record_end..]
         );
         assert!(decode_inflated_compatible_mxl(short_12.as_bytes()).is_err());
-        for revision in ["8", "9"] {
+        for revision in ["6", "8", "9"] {
             let short = short_12.replacen("{8,1,12,", &format!("{{8,1,{revision},"), 1);
             let decoded = decode_inflated_compatible_mxl(short.as_bytes()).unwrap();
             assert!(

@@ -23,6 +23,10 @@ struct Record {
     head: Header,
     generated: [(String, String); 3],
     lock_mode: i64,
+    /// Table ids from the `Tables` collection (`e3403acd-…`). The collection
+    /// is empty on a source without tables; the names live in the tables'
+    /// own rows.
+    tables: Vec<String>,
 }
 
 /// Exact original source admission precedes the legacy local-name DOM.
@@ -93,6 +97,9 @@ pub(crate) fn compile_admitted(
         head,
         generated,
         lock_mode,
+        // The compile direction still writes the empty-source layout; the
+        // table collection is export-only until the table compiler exists.
+        tables: Vec::new(),
     }
     .to_brace())
 }
@@ -176,9 +183,30 @@ impl Record {
         let mode = schema::data_lock_name(atom(&body[9])?)
             .ok_or_else(|| anyhow!("ExternalDataSource unknown lock mode"))?;
         let lock_mode = schema::data_lock_code(mode).expect("schema inverse");
-        for (collection, expected) in outer[3..].iter().zip(schema::EMPTY_COLLECTIONS) {
+        let mut tables = Vec::new();
+        for (index, (collection, expected)) in
+            outer[3..].iter().zip(schema::EMPTY_COLLECTIONS).enumerate()
+        {
             let fields = list(collection)?;
-            if fields.len() != 2 || atom(&fields[0])? != expected || atom(&fields[1])? != "0" {
+            if fields.first().and_then(Brace::as_atom) != Some(expected) {
+                bail!("ExternalDataSource unknown child collection {expected}");
+            }
+            let count = fields
+                .get(1)
+                .and_then(Brace::as_atom)
+                .and_then(|value| value.parse::<usize>().ok())
+                .ok_or_else(|| anyhow!("ExternalDataSource collection count"))?;
+            if index == 2 {
+                // The `Tables` collection: `{id, count, <table uuid>…}`.
+                tables = fields
+                    .iter()
+                    .skip(2)
+                    .map(|value| atom(value).map(str::to_string))
+                    .collect::<Result<Vec<_>>>()?;
+                if tables.len() != count {
+                    bail!("ExternalDataSource table count differs from its collection");
+                }
+            } else if count != 0 || fields.len() != 2 {
                 bail!("ExternalDataSource requires the exact empty child collections");
             }
         }
@@ -186,6 +214,7 @@ impl Record {
             head,
             generated,
             lock_mode,
+            tables,
         })
     }
 
@@ -214,10 +243,64 @@ impl Record {
             )))
             .child(el("ChildObjects"))
     }
+
+    /// The same element with `<ChildObjects>` naming the given tables.
+    fn element_with_tables(&self, tables: &[String]) -> Element {
+        let mut element = self.element();
+        if let Some(child) = element
+            .children
+            .iter_mut()
+            .find(|child| child.name == "ChildObjects")
+        {
+            *child =
+                el("ChildObjects").children(tables.iter().map(|name| leaf("Table", name.clone())));
+        }
+        element
+    }
+}
+
+/// The source's element with its `<ChildObjects>` naming the given tables.
+pub(crate) fn decode_with_tables(row: &Brace, tables: &[String]) -> Result<Element> {
+    let record = Record::from_brace(row)?;
+    if record.tables.len() != tables.len() {
+        bail!("ExternalDataSource table count differs from the stored collection");
+    }
+    Ok(record.element_with_tables(tables))
+}
+
+/// The source element, naming its tables through the export name index.
+pub(crate) fn decode_with_context(
+    row: &Brace,
+    context: &super::export::ExportContext,
+) -> Result<Element> {
+    let record = Record::from_brace(row)?;
+    if record.tables.is_empty() {
+        return Ok(record.element());
+    }
+    let mut names = Vec::with_capacity(record.tables.len());
+    for uuid in &record.tables {
+        let full = context
+            .names
+            .name(uuid)
+            .ok_or_else(|| anyhow!("no name for table {uuid}"))?;
+        let name = full
+            .rsplit_once(".Table.")
+            .map(|(_, name)| name)
+            .unwrap_or(full);
+        names.push(name.to_string());
+    }
+    Ok(record.element_with_tables(&names))
 }
 
 pub(crate) fn decode(row: &Brace) -> Result<Element> {
-    Ok(Record::from_brace(row)?.element())
+    let record = Record::from_brace(row)?;
+    if !record.tables.is_empty() {
+        // The table rows carry the names; a caller that has them uses
+        // `decode_with_tables`. Refusing here keeps a half-written source from
+        // looking complete.
+        bail!("ExternalDataSource with tables needs their names");
+    }
+    Ok(record.element())
 }
 
 pub(crate) fn names(row: &Brace) -> Result<ObjectNames> {
@@ -680,5 +763,35 @@ mod tests {
         );
         let (_, output) = export_source(&serialize(&row), fixture::OBJECT_UUID, "2.20").unwrap();
         assert_eq!(compile(&output, "2.20").unwrap(), row);
+    }
+}
+
+#[cfg(test)]
+mod table_collection_tests {
+    use super::*;
+
+    const ROW: &str = include_str!("fixtures/external_data_source_row.txt");
+
+    #[test]
+    fn reads_the_table_collection_and_names_its_children() {
+        let row = parse_row(ROW.as_bytes()).expect("a source row");
+        let record = Record::from_brace(&row).expect("a record");
+        assert_eq!(
+            record.tables,
+            vec!["78afc3f6-2d63-4482-a33e-fd11f668c2b6".to_string()]
+        );
+        let element =
+            decode_with_tables(&row, &["oc_product_to_1c".to_string()]).expect("a source element");
+        let children = element
+            .children
+            .iter()
+            .find(|child| child.name == "ChildObjects")
+            .expect("ChildObjects");
+        assert_eq!(children.children.len(), 1);
+        assert_eq!(children.children[0].name, "Table");
+        assert_eq!(children.children[0].text, "oc_product_to_1c");
+        // Without the table names the source refuses rather than writing an
+        // empty list.
+        assert!(decode(&row).is_err());
     }
 }
