@@ -3297,15 +3297,13 @@ fn write_source_asset_inner(
                 // the grammar's own arithmetic, the original text is the one
                 // the parser still understands.
                 let flowchart = parse(converted_text)
-                    .or_else(|| {
-                        (converted_text != raw).then(|| parse(raw)).flatten()
-                    })
-                .with_context(|| {
-                    format!(
-                        "failed to extract graphical scheme from source asset {}",
-                        asset.primary_path.display()
-                    )
-                })?;
+                    .or_else(|| (converted_text != raw).then(|| parse(raw)).flatten())
+                    .with_context(|| {
+                        format!(
+                            "failed to extract graphical scheme from source asset {}",
+                            asset.primary_path.display()
+                        )
+                    })?;
                 context.output.write_xml(
                     &path,
                     format_business_process_flowchart_xml(&flowchart),

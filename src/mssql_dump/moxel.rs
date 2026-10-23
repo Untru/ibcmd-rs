@@ -2170,7 +2170,10 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     // empty row that only carries its `<columnsID>` (Accounting 3.0
     // `CommonTemplates/ПФ_MXL_ТОРГ13` row 35) has no cells and no record of
     // its own, and the map is the only place it is stated.
-    let known = rows.iter().map(|row| row.index).collect::<std::collections::BTreeSet<_>>();
+    let known = rows
+        .iter()
+        .map(|row| row.index)
+        .collect::<std::collections::BTreeSet<_>>();
     let missing = row_column_ids
         .keys()
         .filter(|index| !known.contains(index))
@@ -3905,7 +3908,6 @@ pub(super) fn is_moxel_compactable_empty_row(row: &MoxelRow) -> bool {
     row.format_index <= 1 && row.columns_id.is_none() && row.cells.is_empty()
 }
 
-
 #[cfg(test)]
 pub(super) fn parse_moxel_rows_for_test(text: &str) -> Vec<MoxelRow> {
     let Some(start) = text.find('{') else {
@@ -4949,7 +4951,6 @@ pub(super) fn parse_moxel_group_header_colors(
     }
     colors
 }
-
 
 /// `{6,0,<mask>? ,<height>,…,"<face>",<flag>}`: the layout an absolute font
 /// carries when the tuple is stored with the older leading marker.
@@ -6224,7 +6225,9 @@ pub(super) fn parse_moxel_pictures(
         }
         let mut pictures = Vec::with_capacity(count);
         for (picture_index, field) in fields[index + 1..=index + count].iter().enumerate() {
-            let Some(mut picture) = parse_moxel_picture_with_index(field, object_refs, picture_index) else {
+            let Some(mut picture) =
+                parse_moxel_picture_with_index(field, object_refs, picture_index)
+            else {
                 pictures.clear();
                 break;
             };
@@ -7261,7 +7264,9 @@ fn parse_gantt_series_data(text: &str) -> Option<MoxelGanttSeriesLikeData> {
         return None;
     }
     let base_data = gantt_series_key_record_base_data(value.get(1)?)?;
-    if compact_moxel_auto_color_token(inner.get(5)?) != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,0,{0}}}}" {
+    if compact_moxel_auto_color_token(inner.get(5)?)
+        != "{0,1,{0,{0,{3,0,{0}},{3,0,{0}}},{3,0,{0}}}}"
+    {
         return None;
     }
     let auto_text = parse_moxel_chart_bool(inner.get(6)?)?;
@@ -7732,7 +7737,6 @@ fn parse_moxel_chart_localized(text: &str) -> Option<Vec<MoxelLocalizedValue>> {
     }
     Some(values)
 }
-
 
 /// A style-reference colour code, shared by the 8.3 (`{3,3,{code}}`) and the
 /// 8.5 (`{4,3,{code},3}`) spellings.
@@ -11826,9 +11830,9 @@ pub(super) fn parse_moxel_merge_regions(
                     && merge.column >= 0
                     && previous.as_ref().is_some_and(|candidate| {
                         candidate.row == merge.row
-                        && candidate.column == merge.column
-                        && candidate.height == merge.height
-                        && candidate.width == merge.width
+                            && candidate.column == merge.column
+                            && candidate.height == merge.height
+                            && candidate.width == merge.width
                             && candidate.columns_id == merge.columns_id
                     });
                 if !duplicate {

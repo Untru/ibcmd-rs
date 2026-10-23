@@ -1174,7 +1174,10 @@ fn push_client_application_interface_node_xml(
                 escape_xml_text(uuid)
             ));
             if let Some(height) = height {
-                xml.push_str(&format!("{tab}\t<height>{}</height>\r\n", escape_xml_text(height)));
+                xml.push_str(&format!(
+                    "{tab}\t<height>{}</height>\r\n",
+                    escape_xml_text(height)
+                ));
             }
             xml.push_str(&format!("{tab}</panel>\r\n"));
         }

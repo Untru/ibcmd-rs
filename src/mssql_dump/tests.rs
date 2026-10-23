@@ -80595,11 +80595,16 @@ fn mxl_torg13_parses_all_rows() {
     eprintln!(
         "rows={} last={:?}",
         sheet.rows.len(),
-        sheet.rows.last().map(|row| (row.index, row.columns_id.clone()))
+        sheet
+            .rows
+            .last()
+            .map(|row| (row.index, row.columns_id.clone()))
     );
     assert_eq!(sheet.rows.len(), 36);
-    assert!(sheet.rows.last().and_then(|row| row.columns_id.as_deref())
-        == Some("97c79b94-d3a9-4813-af59-c74f73613b21"));
+    assert!(
+        sheet.rows.last().and_then(|row| row.columns_id.as_deref())
+            == Some("97c79b94-d3a9-4813-af59-c74f73613b21")
+    );
 }
 
 #[test]
@@ -80632,7 +80637,10 @@ fn accounting_catalog_row_yields_names_and_types() {
     let text = text.trim_start_matches('\u{feff}');
     let tree = crate::metadata_model::brace::parse_row(text.as_bytes()).expect("row parses");
     let names = crate::metadata_model::export::object_names("Catalog", &tree);
-    eprintln!("names: {:?}", names.as_ref().map(|n| (n.full_name.clone(), n.types.len())));
+    eprintln!(
+        "names: {:?}",
+        names.as_ref().map(|n| (n.full_name.clone(), n.types.len()))
+    );
     let names = names.expect("catalog names parse");
     assert_eq!(names.full_name, "Catalog.ДенежныеДокументы");
     assert!(!names.types.is_empty());
@@ -80644,7 +80652,10 @@ fn xdto_row_yields_a_name() {
     let text = text.trim_start_matches('\u{feff}');
     let tree = crate::metadata_model::brace::parse_row(text.as_bytes()).expect("row parses");
     let names = crate::metadata_model::export::object_names("XDTOPackage", &tree);
-    eprintln!("xdto names: {:?}", names.as_ref().map(|n| n.full_name.clone()));
+    eprintln!(
+        "xdto names: {:?}",
+        names.as_ref().map(|n| n.full_name.clone())
+    );
     let names = names.expect("xdto names parse");
     assert_eq!(names.full_name, "XDTOPackage.Patch");
 }
@@ -80657,7 +80668,10 @@ fn mxl_page_break_parses() {
     let text = &text[text.find('{').expect("body brace")..];
     let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
         .expect("spreadsheet parses");
-    eprintln!("vertical={:?} horizontal={:?}", sheet.page_breaks.vertical, sheet.page_breaks.horizontal);
+    eprintln!(
+        "vertical={:?} horizontal={:?}",
+        sheet.page_breaks.vertical, sheet.page_breaks.horizontal
+    );
     assert_eq!(sheet.page_breaks.vertical, vec![35]);
 }
 
@@ -80668,7 +80682,11 @@ fn mxl_style_fonts_parse() {
     let text = &text[text.find('{').expect("body brace")..];
     let sheet = super::moxel::parse_moxel_spreadsheet_text(text, &BTreeMap::new())
         .expect("spreadsheet parses");
-    eprintln!("fonts={} kinds={:?}", sheet.fonts.len(), sheet.fonts.iter().map(|f| f.kind).collect::<Vec<_>>());
+    eprintln!(
+        "fonts={} kinds={:?}",
+        sheet.fonts.len(),
+        sheet.fonts.iter().map(|f| f.kind).collect::<Vec<_>>()
+    );
     assert_eq!(sheet.fonts.len(), 9);
 }
 
@@ -80699,7 +80717,11 @@ fn catalog_row_registers_its_generated_types() {
     assert_eq!(names.full_name, "Catalog.ТипыДокументов");
     eprintln!(
         "types: {:?}",
-        names.types.iter().map(|t| (t.category.clone(), t.type_id.clone())).collect::<Vec<_>>()
+        names
+            .types
+            .iter()
+            .map(|t| (t.category.clone(), t.type_id.clone()))
+            .collect::<Vec<_>>()
     );
     assert!(names.types.iter().any(|t| t.category == "Object"));
 }
@@ -80709,8 +80731,12 @@ fn catalog_row_yields_legacy_type_index_entries() {
     let text = include_str!("fixtures/catalog_row_types.txt");
     let text = text.trim_start_matches('\u{feff}');
     let code = super::parse_metadata_object_code(text);
-    let header = super::parse_metadata_header_from_text(text, "b733af52-99f6-4369-8bab-df3ee91c6719");
-    eprintln!("code={code:?} header={:?}", header.as_ref().map(|h| h.name.clone()));
+    let header =
+        super::parse_metadata_header_from_text(text, "b733af52-99f6-4369-8bab-df3ee91c6719");
+    eprintln!(
+        "code={code:?} header={:?}",
+        header.as_ref().map(|h| h.name.clone())
+    );
     let row = super::MetadataTextRow {
         file_name: "b733af52-99f6-4369-8bab-df3ee91c6719".to_string(),
         text: text.to_string(),
@@ -80722,9 +80748,14 @@ fn catalog_row_yields_legacy_type_index_entries() {
     let entries = super::parse_indexed_generated_types_from_text(&row);
     eprintln!(
         "entries={:?}",
-        entries.as_ref().map(|list| list.iter().map(|e| e.type_id.clone()).collect::<Vec<_>>())
+        entries
+            .as_ref()
+            .map(|list| list.iter().map(|e| e.type_id.clone()).collect::<Vec<_>>())
     );
-    assert!(entries.is_some_and(|list| list.iter().any(|e| e.type_id == "6c7c7af3-5f07-4567-a025-286f9e5964e7")));
+    assert!(entries.is_some_and(|list| {
+        list.iter()
+            .any(|e| e.type_id == "6c7c7af3-5f07-4567-a025-286f9e5964e7")
+    }));
 }
 
 #[test]
@@ -80755,14 +80786,17 @@ fn v33_form_writes_standard_attribute_data_path() {
         "d52ab7ed-2f8c-448c-95af-207b65386dc5".to_string(),
         "Catalog.ТипыДокументов.Attribute.ПолноеНаименование".to_string(),
     )]);
-    let xml = super::extract_form_body_xml_from_body(&body, &type_index, &object_refs)
-        .expect("xml");
+    let xml =
+        super::extract_form_body_xml_from_body(&body, &type_index, &object_refs).expect("xml");
     eprintln!(
         "has description path: {} has full name path: {}",
         xml.contains("<DataPath>Объект.Description</DataPath>"),
         xml.contains("<DataPath>Объект.ПолноеНаименование</DataPath>")
     );
-    assert!(xml.contains("<DataPath>Объект.Description</DataPath>"), "{xml}");
+    assert!(
+        xml.contains("<DataPath>Объект.Description</DataPath>"),
+        "{xml}"
+    );
 }
 
 #[test]
@@ -80780,7 +80814,10 @@ fn root42_form_resolves_its_commands() {
         "raw command names: {raw} declared commands: {}",
         xml.matches("<Command name=").count()
     );
-    assert!(xml.contains("<CommandName>Form.Command.ПроверитьШаблон</CommandName>"), "{raw}");
+    assert!(
+        xml.contains("<CommandName>Form.Command.ПроверитьШаблон</CommandName>"),
+        "{raw}"
+    );
 }
 
 #[test]
@@ -80792,7 +80829,11 @@ fn root42_form_keeps_its_tables() {
     let xml = super::extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new())
         .expect("xml");
     eprintln!("tables: {}", xml.matches("<Table ").count());
-    assert!(xml.contains("<Table name=\"ПоляДорожки1\""), "{}", xml.matches("<Table ").count());
+    assert!(
+        xml.contains("<Table name=\"ПоляДорожки1\""),
+        "{}",
+        xml.matches("<Table ").count()
+    );
 }
 
 #[test]
@@ -80805,5 +80846,9 @@ fn root48_list_form_keeps_its_table() {
     let xml = super::extract_form_body_xml_from_body(&body, &BTreeMap::new(), &BTreeMap::new())
         .expect("xml");
     eprintln!("tables: {}", xml.matches("<Table ").count());
-    assert!(xml.contains("<Table name=\"Список\""), "{}", xml.matches("<Table ").count());
+    assert!(
+        xml.contains("<Table name=\"Список\""),
+        "{}",
+        xml.matches("<Table ").count()
+    );
 }

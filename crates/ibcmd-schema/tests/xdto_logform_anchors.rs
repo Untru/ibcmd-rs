@@ -4,7 +4,7 @@
 //! последовательностями ID (писатель пишет `0xc, 0xb` — сначала `name`,
 //! затем `id`; `0x1f` у `UsualGroup` — `Group` с умолчанием `Vertical`).
 
-use ibcmd_schema::{xdto_logform_v8327 as v8327, xdto_logform_v851 as v851};
+use ibcmd_schema::{xdto_logform_v851 as v851, xdto_logform_v8327 as v8327};
 
 #[test]
 fn ids_are_contiguous_and_ordered() {
@@ -14,7 +14,10 @@ fn ids_are_contiguous_and_ordered() {
     for type_name in ["UsualGroup", "Table", "Button", "Field", "Form"] {
         let properties = v851::properties(type_name).expect("тип есть в модели 8.5.1");
         for (index, property) in properties.iter().enumerate() {
-            assert_eq!(property.id as usize, index, "{type_name}: ID не совпадает с позицией");
+            assert_eq!(
+                property.id as usize, index,
+                "{type_name}: ID не совпадает с позицией"
+            );
         }
     }
 }

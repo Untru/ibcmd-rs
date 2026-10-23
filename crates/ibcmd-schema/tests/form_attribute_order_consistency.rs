@@ -29,9 +29,7 @@ fn every_attribute_matches_xdto() {
             let property = properties
                 .iter()
                 .find(|property| property.id == attribute.id)
-                .unwrap_or_else(|| {
-                    panic!("{element}: ID {} отсутствует в XDTO", attribute.id)
-                });
+                .unwrap_or_else(|| panic!("{element}: ID {} отсутствует в XDTO", attribute.id));
             assert_eq!(
                 property.name, attribute.name,
                 "{element}: ID {} — имя в XDTO не совпало",

@@ -25836,7 +25836,6 @@ fn replace_braced_field(text: &mut String, index: usize, value: &str) -> Result<
     Ok(())
 }
 
-
 /// The legacy revision-`2` container: the whole body after the marker is one
 /// layout field, and there is no separate module-text slot.
 fn parse_form_body_plain_v2(plain: &str) -> Result<Option<ParsedFormBodyBlob>> {

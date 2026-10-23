@@ -184,10 +184,8 @@ impl Record {
             .ok_or_else(|| anyhow!("ExternalDataSource unknown lock mode"))?;
         let lock_mode = schema::data_lock_code(mode).expect("schema inverse");
         let mut tables = Vec::new();
-        for (index, (collection, expected)) in outer[3..]
-            .iter()
-            .zip(schema::EMPTY_COLLECTIONS)
-            .enumerate()
+        for (index, (collection, expected)) in
+            outer[3..].iter().zip(schema::EMPTY_COLLECTIONS).enumerate()
         {
             let fields = list(collection)?;
             if fields.first().and_then(Brace::as_atom) != Some(expected) {
@@ -254,8 +252,8 @@ impl Record {
             .iter_mut()
             .find(|child| child.name == "ChildObjects")
         {
-            *child = el("ChildObjects")
-                .children(tables.iter().map(|name| leaf("Table", name.clone())));
+            *child =
+                el("ChildObjects").children(tables.iter().map(|name| leaf("Table", name.clone())));
         }
         element
     }
@@ -782,8 +780,8 @@ mod table_collection_tests {
             record.tables,
             vec!["78afc3f6-2d63-4482-a33e-fd11f668c2b6".to_string()]
         );
-        let element = decode_with_tables(&row, &["oc_product_to_1c".to_string()])
-            .expect("a source element");
+        let element =
+            decode_with_tables(&row, &["oc_product_to_1c".to_string()]).expect("a source element");
         let children = element
             .children
             .iter()

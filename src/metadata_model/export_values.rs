@@ -78,7 +78,6 @@ pub(crate) fn header(node: &Brace) -> Result<Header> {
     })
 }
 
-
 /// Like [`header`], but for descriptors whose header carries trailing
 /// reference pairs (`XDTOPackage` stores its namespace and type table behind
 /// the comment in the same tuple). Only the five leading slots are read, so

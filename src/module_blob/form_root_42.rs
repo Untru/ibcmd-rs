@@ -641,7 +641,6 @@ pub(super) fn upgrade_root_42_body(plain: &str) -> Option<String> {
     Some(out)
 }
 
-
 /// Root-46 numbers a chain's attribute one higher than the attribute record's
 /// own id: the rule table swaps the chain's first and second segments
 /// (`{2,{1},{-3}}` -> `{2,{2},{-3}}`) while the attribute record keeps id `1`,

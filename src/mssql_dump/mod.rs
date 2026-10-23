@@ -6805,7 +6805,10 @@ fn dump_table_row_bytes(
                             context.source_version,
                         ) {
                             timings.model_shadow_differing_rows += 1;
-                            model_export::report_shadow_difference(file_name, &modelled.relative_path);
+                            model_export::report_shadow_difference(
+                                file_name,
+                                &modelled.relative_path,
+                            );
                         }
                     }
                     Ok(modelled)
@@ -7845,8 +7848,7 @@ fn parse_flowchart_item_style(
         "7" if fields.len() == 14
             && fields.get(12).map(|value| value.trim()) == Some("0")
             && fields.get(13).map(|value| value.trim()) == Some("0") => {}
-        "6" if fields.len() == 13
-            && fields.get(12).map(|value| value.trim()) == Some("0") => {}
+        "6" if fields.len() == 13 && fields.get(12).map(|value| value.trim()) == Some("0") => {}
         _ => return None,
     }
     Some(FlowchartItemStyle {
@@ -8727,13 +8729,9 @@ fn format_exchange_plan_content_xml_with_extension(
     let root = "<ExchangePlanContent xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xr=\"http://v8.1c.ru/8.3/xcf/readable\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\"";
     // An empty content is a self-closing element, as the platform writes it.
     if items.is_empty() && extension.is_empty() {
-        return format!(
-            "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}/>"
-        );
+        return format!("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}/>");
     }
-    let mut xml = format!(
-        "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}>\r\n"
-    );
+    let mut xml = format!("\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n{root}>\r\n");
     for item in items {
         xml.push_str(&format!(
             "\t<Item>\r\n\

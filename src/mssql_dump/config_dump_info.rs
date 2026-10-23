@@ -309,7 +309,11 @@ fn add_external_data_source_table_references(
     let collection = ibcmd_schema::external_data_source::EMPTY_COLLECTIONS[2];
     let names: BTreeMap<&str, &str> = rows
         .iter()
-        .filter_map(|row| row.header.as_ref().map(|header| (header.uuid.as_str(), header.name.as_str())))
+        .filter_map(|row| {
+            row.header
+                .as_ref()
+                .map(|header| (header.uuid.as_str(), header.name.as_str()))
+        })
         .collect();
     let marker = format!("{{{collection},");
     for row in rows {
@@ -330,7 +334,9 @@ fn add_external_data_source_table_references(
                 };
                 canonical_refs
                     .entry(candidate.to_owned())
-                    .or_insert_with(|| format!("ExternalDataSource.{}.Table.{table_name}", header.name));
+                    .or_insert_with(|| {
+                        format!("ExternalDataSource.{}.Table.{table_name}", header.name)
+                    });
             }
             rest = &after[end..];
         }

@@ -61,17 +61,16 @@ use ibcmd_schema::{
     FormChoiceListEmptyCollection, FormChoiceListEmptyStringValue,
     FormChoiceListItem as SchemaFormChoiceListItem, FormChoiceListItemPart,
     FormChoiceListLayoutProfile, FormChoiceParameterAvailableTypes, FormChoiceParameterCluster,
-    FormChoiceParameterClusterMember, FormChoiceParameterLink,
-    FormChoiceParameterLinkReference,
+    FormChoiceParameterClusterMember, FormChoiceParameterLink, FormChoiceParameterLinkReference,
     FormChoiceParameterLinkStandardTerminal, FormChoiceParameterLinkTableCurrentDataTerminal,
     FormChoiceParameterLinkTerminal, FormChoiceParameterLinkValueChange, FormChoiceParameterLinks,
-    FormChoiceParameterLinksParseError,
-    FormChoiceParameters, FormTextDocumentContextMenu, FormTextDocumentContextMenuParseError,
-    GeneratedMetadataOwner, GeneratedMetadataOwnerFamily, GeneratedMetadataOwnerRole,
-    MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey, WriterRuleLookupError,
-    bundled_dcs_conditional_appearance_policy, bundled_dcs_form_server_state_policy,
-    bundled_writer_rules, form_choice_parameter_cluster_order,
-    form_text_document_context_menu_owner_fields, parse_form_choice_list,
+    FormChoiceParameterLinksParseError, FormChoiceParameters, FormTextDocumentContextMenu,
+    FormTextDocumentContextMenuParseError, GeneratedMetadataOwner, GeneratedMetadataOwnerFamily,
+    GeneratedMetadataOwnerRole, MetadataDataPathRole, SchemaError, WriterPolicy, WriterRuleKey,
+    WriterRuleLookupError, bundled_dcs_conditional_appearance_policy,
+    bundled_dcs_form_server_state_policy, bundled_writer_rules,
+    form_choice_parameter_cluster_order, form_text_document_context_menu_owner_fields,
+    parse_form_choice_list,
     parse_form_choice_parameter_links_with_optional_mirror as parse_schema_form_choice_parameter_links_with_optional_mirror,
     parse_form_choice_parameters,
     parse_form_text_document_context_menu as parse_schema_form_text_document_context_menu,
@@ -13166,9 +13165,8 @@ fn parse_form_child_item_with_metadata_owners(
     // layout the table properties are calibrated on; dropping it aligns every
     // later forward slot (DefaultItem 16, InitialTreeView 39, EnableStartDrag
     // 52).
-    let legacy_table_trimmed = (fields.first().map(|field| field.trim()) == Some("53")
-        && fields.len() > 15)
-        .then(|| {
+    let legacy_table_trimmed =
+        (fields.first().map(|field| field.trim()) == Some("53") && fields.len() > 15).then(|| {
             let mut trimmed = fields.to_vec();
             trimmed.remove(15);
             // The record also closes one member later than the modern layout:
@@ -18595,7 +18593,6 @@ pub(super) fn parse_form_radio_button_options<'a>(fields: &'a [&'a str]) -> Opti
     })
 }
 
-
 /// The physical spelling of a legacy link chain (`1/0:<uuid>`,
 /// `7:<uuid>/0:<uuid>`), which the platform writes when the binding does not
 /// resolve to a named data path.
@@ -18669,7 +18666,10 @@ fn parse_legacy_5004_choice_parameter_links(
                 for (table_id, columns) in table_column_names_by_id {
                     if let Some(column) = columns.get(&column_key) {
                         if let Some(table) = table_name_by_id.get(table_id) {
-                            found.push((table_id.clone(), format!("Items.{table}.CurrentData.{column}")));
+                            found.push((
+                                table_id.clone(),
+                                format!("Items.{table}.CurrentData.{column}"),
+                            ));
                         }
                     }
                 }
@@ -18684,7 +18684,10 @@ fn parse_legacy_5004_choice_parameter_links(
                         let uuid = column_key.rsplit('|').next().unwrap_or(&column_key);
                         let mut routes = Vec::new();
                         for ((table_key, candidate), path) in type_link_data_path_by_table_column {
-                            if candidate == &column_key || candidate.contains(uuid) || table_key.contains(uuid) {
+                            if candidate == &column_key
+                                || candidate.contains(uuid)
+                                || table_key.contains(uuid)
+                            {
                                 routes.push(path.clone());
                             }
                         }
@@ -22886,7 +22889,8 @@ fn form_braced_leading_member(field: &str) -> Option<(&str, u8)> {
 /// [`form_child_item_tag`] names, and the older revisions
 /// `form_item_record_canonical_revision` normalizes to one of them.
 const FORM_CHILD_ITEM_LEADING_MEMBERS: &[&str] = &[
-    "5", "6", "11", "12", "22", "29", "30", "31", "34", "35", "37", "48", "50", "53", "54", "55", "73",
+    "5", "6", "11", "12", "22", "29", "30", "31", "34", "35", "37", "48", "50", "53", "54", "55",
+    "73",
 ];
 
 /// Whether a member could be a child-item record, by its leading member.
@@ -28273,8 +28277,7 @@ pub(super) fn parse_form_title_data_path(
                 && let [id] = root.as_slice()
             {
                 let id = parse_form_chain_numeric_id(id)?;
-                return (!attribute_metadata_owners_by_id.contains_key(id))
-                    .then(|| id.to_string());
+                return (!attribute_metadata_owners_by_id.contains_key(id)).then(|| id.to_string());
             }
             // A chain that reaches a reference the configuration cannot name
             // is written physically, segment by segment. Evidence:
@@ -32781,7 +32784,6 @@ fn format_form_spreadsheet_document_properties_xml(item: &FormChildItem, indent:
     }
     xml
 }
-
 
 /// A boolean property of the legacy table layouts (`50`, `53`), read at the
 /// forward slot the modern layout uses once the record's insertion is removed.

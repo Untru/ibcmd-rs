@@ -1968,8 +1968,8 @@ impl<'a> FormCommandSchema<'a> {
             Some(FormCommandCurrentRowUse::DontUse)
         } else {
             match fields.get(18 + extra).map(|field| field.trim()) {
-            Some("0") => Some(FormCommandCurrentRowUse::Use),
-            Some("1") => Some(FormCommandCurrentRowUse::DontUse),
+                Some("0") => Some(FormCommandCurrentRowUse::Use),
+                Some("1") => Some(FormCommandCurrentRowUse::DontUse),
                 Some("2") => None,
                 _ => return None,
             }
@@ -3871,8 +3871,7 @@ const FORM_PLANNER_ON_CURRENT_REPRESENTATION_PERIOD_CHANGE_EVENT_UUID: &str =
 const FORM_PLANNER_ON_EDIT_END_EVENT_UUID: &str = "68fc3ed6-a517-4843-a7a4-473cf4e27209";
 /// `DataProcessors/ТаймТрекер/Forms/Форма` `Планировщик`: the native element
 /// names this identifier `DimensionItemClick`.
-const FORM_PLANNER_DIMENSION_ITEM_CLICK_EVENT_UUID: &str =
-    "53d8653f-e73c-44f4-957c-0ecc97f3ed89";
+const FORM_PLANNER_DIMENSION_ITEM_CLICK_EVENT_UUID: &str = "53d8653f-e73c-44f4-957c-0ecc97f3ed89";
 const FORM_PLANNER_BEFORE_DELETE_EVENT_UUID: &str = "6f758c30-b414-4949-a236-584bccb0102a";
 const FORM_PLANNER_BEFORE_START_EDIT_EVENT_UUID: &str = "82f5f464-5aa5-4efc-9813-51432c74ff8e";
 const FORM_PLANNER_BEFORE_START_QUICK_EDIT_EVENT_UUID: &str =

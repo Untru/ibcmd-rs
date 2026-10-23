@@ -97,11 +97,8 @@ pub(crate) fn from_brace(row: &Brace) -> Result<TableRecord> {
         .skip(3)
         .find_map(|candidate| {
             let collection = list(candidate).ok()?;
-            (collection
-                .first()
-                .and_then(|first| first.as_atom())
-                == Some(FIELD_COLLECTION))
-            .then_some(collection)
+            (collection.first().and_then(|first| first.as_atom()) == Some(FIELD_COLLECTION))
+                .then_some(collection)
         })
         .map(|collection| {
             collection
@@ -128,10 +125,7 @@ pub(crate) fn from_brace(row: &Brace) -> Result<TableRecord> {
         }
     }
     // `InputByString` is stored one level deeper, inside a `{1,…}` wrapper.
-    if let Some(ids) = find_typed_ref_list(
-        &Brace::List(body.to_vec()),
-        INPUT_BY_STRING_REF_TYPE,
-    ) {
+    if let Some(ids) = find_typed_ref_list(&Brace::List(body.to_vec()), INPUT_BY_STRING_REF_TYPE) {
         input_by_string = resolve(ids);
     }
     Ok(TableRecord {
@@ -201,7 +195,9 @@ fn field_record(entry: &Brace) -> Result<FieldRecord> {
             part.as_atom()
                 .or_else(|| part.as_str())
                 .map(str::to_string)
-                .ok_or_else(|| anyhow::anyhow!("external-data-source table: non-scalar type member"))
+                .ok_or_else(|| {
+                    anyhow::anyhow!("external-data-source table: non-scalar type member")
+                })
         })
         .collect::<Result<Vec<_>>>()?;
     Ok(FieldRecord {
@@ -314,37 +310,35 @@ fn table_properties(table: &TableRecord, full: &str) -> Result<Element> {
 
 fn field_element(field: &FieldRecord, table_full: &str) -> Result<Element> {
     let type_element = field_type(&field.pattern)?;
-    Ok(el("Field")
-        .attr("uuid", &field.uuid)
-        .child(
-            el("Properties")
-                .child(leaf("Name", &field.name))
-                .child(localized_element("Synonym", &field.synonym)?)
-                .child(leaf("Comment", xml_text(&field.comment)))
-                .child(type_element)
-                .child(leaf("PasswordMode", "false"))
-                .child(leaf("Format", ""))
-                .child(leaf("EditFormat", ""))
-                .child(leaf("ToolTip", ""))
-                .child(leaf("MarkNegatives", "false"))
-                .child(leaf("Mask", ""))
-                .child(leaf("MultiLine", "false"))
-                .child(leaf("ExtendedEdit", "false"))
-                .child(el("MinValue").attr("nil", "true"))
-                .child(el("MaxValue").attr("nil", "true"))
-                .child(leaf("FillFromFillingValue", "false"))
-                .child(fill_value(&field.pattern)?)
-                .child(leaf("FillChecking", "DontCheck"))
-                .child(leaf("ChoiceParameterLinks", ""))
-                .child(leaf("ChoiceParameters", ""))
-                .child(leaf("QuickChoice", "Auto"))
-                .child(leaf("CreateOnInput", "Auto"))
-                .child(leaf("ChoiceHistoryOnInput", "Auto"))
-                .child(leaf("ChoiceForm", ""))
-                .child(leaf("NameInDataSource", &field.name_in_source))
-                .child(leaf("ReadOnly", "false"))
-                .child(leaf("AllowNull", "false")),
-        ))
+    Ok(el("Field").attr("uuid", &field.uuid).child(
+        el("Properties")
+            .child(leaf("Name", &field.name))
+            .child(localized_element("Synonym", &field.synonym)?)
+            .child(leaf("Comment", xml_text(&field.comment)))
+            .child(type_element)
+            .child(leaf("PasswordMode", "false"))
+            .child(leaf("Format", ""))
+            .child(leaf("EditFormat", ""))
+            .child(leaf("ToolTip", ""))
+            .child(leaf("MarkNegatives", "false"))
+            .child(leaf("Mask", ""))
+            .child(leaf("MultiLine", "false"))
+            .child(leaf("ExtendedEdit", "false"))
+            .child(el("MinValue").attr("nil", "true"))
+            .child(el("MaxValue").attr("nil", "true"))
+            .child(leaf("FillFromFillingValue", "false"))
+            .child(fill_value(&field.pattern)?)
+            .child(leaf("FillChecking", "DontCheck"))
+            .child(leaf("ChoiceParameterLinks", ""))
+            .child(leaf("ChoiceParameters", ""))
+            .child(leaf("QuickChoice", "Auto"))
+            .child(leaf("CreateOnInput", "Auto"))
+            .child(leaf("ChoiceHistoryOnInput", "Auto"))
+            .child(leaf("ChoiceForm", ""))
+            .child(leaf("NameInDataSource", &field.name_in_source))
+            .child(leaf("ReadOnly", "false"))
+            .child(leaf("AllowNull", "false")),
+    ))
 }
 
 /// The platform's field type element: `{"N",digits,fraction}` -> decimal
@@ -356,14 +350,12 @@ fn field_type(pattern: &[String]) -> Result<Element> {
         Some("N") => {
             let digits = pattern.get(1).cloned().unwrap_or_default();
             let fraction = pattern.get(2).cloned().unwrap_or_default();
-            element = element
-                .child(leaf("v8:Type", "xs:decimal"))
-                .child(
-                    el("v8:NumberQualifiers")
-                        .child(leaf("v8:Digits", digits))
-                        .child(leaf("v8:FractionDigits", fraction))
-                        .child(leaf("v8:AllowedSign", "Any")),
-                );
+            element = element.child(leaf("v8:Type", "xs:decimal")).child(
+                el("v8:NumberQualifiers")
+                    .child(leaf("v8:Digits", digits))
+                    .child(leaf("v8:FractionDigits", fraction))
+                    .child(leaf("v8:AllowedSign", "Any")),
+            );
         }
         Some("S") => {
             let length = pattern.get(1).cloned().unwrap_or_default();
@@ -372,13 +364,11 @@ fn field_type(pattern: &[String]) -> Result<Element> {
                 Some("2") => "Fixed",
                 other => bail!("external-data-source table: unknown string length rule {other:?}"),
             };
-            element = element
-                .child(leaf("v8:Type", "xs:string"))
-                .child(
-                    el("v8:StringQualifiers")
-                        .child(leaf("v8:Length", length))
-                        .child(leaf("v8:AllowedLength", allowed)),
-                );
+            element = element.child(leaf("v8:Type", "xs:string")).child(
+                el("v8:StringQualifiers")
+                    .child(leaf("v8:Length", length))
+                    .child(leaf("v8:AllowedLength", allowed)),
+            );
         }
         other => bail!("external-data-source table: unknown field type code {other:?}"),
     }

@@ -52,9 +52,7 @@ pub(super) const FAIL_ON_FALLBACK_ENV: &str = "IBCMD_RS_FAIL_ON_MODEL_FALLBACK";
 
 pub(super) fn fail_on_fallback() -> bool {
     static FAIL: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *FAIL.get_or_init(|| {
-        std::env::var(FAIL_ON_FALLBACK_ENV).is_ok_and(|value| value.trim() == "1")
-    })
+    *FAIL.get_or_init(|| std::env::var(FAIL_ON_FALLBACK_ENV).is_ok_and(|value| value.trim() == "1"))
 }
 
 /// Whether a full export writes its descriptors through the model: yes,
@@ -719,8 +717,7 @@ pub(super) fn fallback_rows() -> Vec<String> {
 }
 
 fn fallback_rows_sink() -> &'static std::sync::Mutex<Vec<String>> {
-    static ROWS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> =
-        std::sync::OnceLock::new();
+    static ROWS: std::sync::OnceLock<std::sync::Mutex<Vec<String>>> = std::sync::OnceLock::new();
     ROWS.get_or_init(|| std::sync::Mutex::new(Vec::new()))
 }
 

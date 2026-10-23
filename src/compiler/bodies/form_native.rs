@@ -388,7 +388,6 @@ pub(crate) fn web_color_name(code: i32) -> Option<&'static str> {
     })
 }
 
-
 /// The Windows system colours the corpus names, with the index a body stores
 /// under `{3,1,{n}}` -- the ones the form exporter reads back.
 pub(crate) const WINDOWS_COLOR_CODES: &[(&str, &str)] = &[
@@ -10238,7 +10237,11 @@ mod tests {
         let mut codes: Vec<&str> = WEB_COLOR_CODES.iter().map(|(_, code)| *code).collect();
         codes.sort_unstable();
         codes.dedup();
-        assert_eq!(codes.len(), WEB_COLOR_CODES.len(), "a code names two colours");
+        assert_eq!(
+            codes.len(),
+            WEB_COLOR_CODES.len(),
+            "a code names two colours"
+        );
     }
 
     #[test]
