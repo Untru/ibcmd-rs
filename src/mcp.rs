@@ -14,15 +14,15 @@ use std::{
     collections::BTreeMap,
     fs,
     io::Read,
-    path::{Component, Path, PathBuf},
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
 };
 
-const MAX_RESULT: usize = 1024 * 1024;
-const MAX_OBJECTS: usize = 32;
+pub mod platform;
+use platform::{Access, MAX_OBJECTS, MAX_RESULT, Target};
 const TOOLS: &[(&str, &str)] = &[
     (
         "tree",
@@ -186,6 +186,17 @@ impl Bound {
             .transpose()?;
         let file_handle = file_path.as_deref().map(open_regular).transpose()?;
         let agent_write = original.get("agent-write").and_then(toml::Value::as_bool) == Some(true);
+        platform::admit(
+            platform::host_adapter(),
+            if file_path.is_some() {
+                Target::FileDatabase
+            } else {
+                Target::RowsFixture
+            },
+            !entry.mask,
+            agent_write,
+            Access::Read,
+        )?;
         Ok(Self {
             agent_write,
             invalidated: AtomicBool::new(false),
@@ -317,10 +328,7 @@ impl Bound {
             snapshot.validate(&self.root_handle)?;
         }
         self.authorize()?;
-        ensure!(
-            before == self.rows_fingerprint()?,
-            "target_changed: restart or retry with a stable target"
-        );
+        platform::verify_binding(&before, &self.rows_fingerprint()?)?;
         crate::cancel::check()?;
         ensure!(
             serde_json::to_vec(&result)?.len() <= MAX_RESULT,
@@ -358,10 +366,17 @@ impl Bound {
 
     fn prepare_import(&self, objects: &[String]) -> Result<PreparedImport> {
         self.authorize()?;
-        ensure!(
-            self.agent_write && self.file_path.is_some(),
-            "write_denied: fixed file database opt-in required"
-        );
+        platform::admit(
+            platform::host_adapter(),
+            if self.file_path.is_some() {
+                Target::FileDatabase
+            } else {
+                Target::RowsFixture
+            },
+            !self.entry.mask,
+            self.agent_write,
+            Access::Stage,
+        )?;
         ensure!(
             !objects.is_empty() && objects.len() <= MAX_OBJECTS,
             "select 1..32 objects"
@@ -788,19 +803,7 @@ fn open_confined(root: &fs::File, path: &str) -> Result<Option<fs::File>> {
 }
 
 fn validate_relative(path: &str) -> Result<()> {
-    ensure!(
-        !path.is_empty() && !path.contains('\\') && !path.contains(':') && path.len() <= 4096,
-        "invalid relative path"
-    );
-    ensure!(
-        Path::new(path)
-            .components()
-            .all(|c| matches!(c, Component::Normal(_)))
-            && !path
-                .split('/')
-                .any(|c| c.is_empty() || c == "." || c == ".."),
-        "invalid relative path"
-    );
+    platform::validate_relative_path(path)?;
     Ok(())
 }
 // Shared by the MCP export arm and portable semantic tests; authorization and
@@ -810,14 +813,13 @@ fn export_payload(
     objects: &[String],
 ) -> Result<Value> {
     let objects = config.export_complete(objects, &|_, _, _| {})?;
-    let mut used = 0usize;
+    let mut budget = platform::Budget::new(MAX_RESULT / 2, 100_000);
     let mut output = Vec::new();
     for object in objects {
         let mut files = BTreeMap::new();
         for (path, bytes) in &object.files {
             crate::cancel::check()?;
-            used = used.checked_add(bytes.len()).context("output limit")?;
-            ensure!(used <= MAX_RESULT / 2, "output_limit: select fewer objects");
+            budget.charge(bytes.len(), 1)?;
             let value = encoded(bytes)?;
             files.insert(path.clone(), value);
         }
@@ -899,14 +901,11 @@ impl ServerHandler for Adapter {
             ));
         }
         let raw = Value::Object(request.arguments.unwrap_or_default());
-        let permitted = match request.name.as_ref() {
-            "tree" => "node",
-            "read" => "path",
-            _ => "objects",
-        };
-        if raw
-            .as_object()
-            .is_some_and(|map| map.keys().any(|key| key != permitted))
+        if platform::validate_argument_keys(
+            request.name.as_ref(),
+            raw.as_object().unwrap().keys().map(String::as_str),
+        )
+        .is_err()
         {
             return Ok(CallToolResult::error(vec![ContentBlock::text(
                 "invalid_arguments: parameter not allowed for this tool",
@@ -1040,8 +1039,13 @@ pub fn run(args: McpArgs) -> Result<()> {
             "MCP refuses research environment overrides"
         );
     }
-    #[cfg(not(unix))]
-    bail!("secure MCP input snapshots currently require Unix");
+    platform::admit(
+        platform::host_adapter(),
+        Target::RowsFixture,
+        true,
+        false,
+        Access::Read,
+    )?;
     let adapter = Adapter(
         Arc::new(
             Bound::open(
