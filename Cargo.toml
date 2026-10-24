@@ -64,6 +64,9 @@ walkdir = "2.5"
 yaml_serde = "0.10"
 
 [dev-dependencies]
+# Substring search in tests/platform_oracle_boundary.rs; already in the
+# runtime graph (tiberius, futures-util).
+memchr = "2.8"
 rmcp = { version = "=3.6.0", default-features = false, features = ["client", "transport-child-process"] }
 
 [target.'cfg(unix)'.dependencies]
@@ -105,3 +108,8 @@ harness = false
 name = "managed_command_deadline"
 path = "tests/managed_command_deadline.rs"
 harness = false
+
+# tests/platform_oracle_boundary.rs searches the whole debug executable
+# (hundreds of MB) with memchr; unoptimized, that search takes about a minute.
+[profile.dev.package.memchr]
+opt-level = 3

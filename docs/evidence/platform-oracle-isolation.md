@@ -52,8 +52,9 @@ JNI/JVM/OSGi markers, JAR payloads, runtime SBOM dependencies and nonallowlisted
 archive entries still fail. Negative controls combine valid project IDs with
 forbidden runtime markers so legitimate scaffolding cannot mask a runtime.
 
-The portable Windows/Linux CI lane now compiles all root targets with
-`--no-default-features` and runs that boundary test. The Windows legacy lane
+The offline matrix (Linux, Windows, macOS; formerly a separate portable
+Windows/Linux lane) compiles all root targets with `--no-default-features` and
+runs that boundary test. The Windows legacy lane
 does the inverse check with `--features platform-oracle`, proving that research
 commands were isolated rather than deleted.
 

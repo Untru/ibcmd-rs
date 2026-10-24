@@ -32,17 +32,15 @@ const EDT_SOURCE_IDS: &[&[u8]] = &[
 
 fn exclude_declarative_edt_ids(bytes: &mut [u8]) {
     for identifier in EDT_SOURCE_IDS {
-        let positions: Vec<_> = bytes
-            .windows(identifier.len())
-            .enumerate()
-            .filter_map(|(index, window)| {
-                (window == *identifier
-                    && (identifier.starts_with(b".settings/")
-                        || !matches!(
-                            bytes.get(index + identifier.len()),
-                            Some(b'.' | b'/' | b'$')
-                        )))
-                .then_some(index)
+        // `memmem` rather than a window scan: the debug test binary scans
+        // the whole debug executable, which a window scan takes minutes on.
+        let positions: Vec<_> = memchr::memmem::find_iter(bytes, identifier)
+            .filter(|&index| {
+                identifier.starts_with(b".settings/")
+                    || !matches!(
+                        bytes.get(index + identifier.len()),
+                        Some(b'.' | b'/' | b'$')
+                    )
             })
             .collect();
         for index in positions {
@@ -141,10 +139,7 @@ fn default_binary_has_no_known_platform_or_edt_payload_markers() {
     exclude_declarative_edt_ids(&mut bytes);
 
     for marker in FORBIDDEN_BINARY_MARKERS {
-        if let Some(offset) = bytes
-            .windows(marker.len())
-            .position(|window| window == *marker)
-        {
+        if let Some(offset) = memchr::memmem::find(&bytes, marker) {
             let start = offset.saturating_sub(32);
             let end = (offset + marker.len() + 32).min(bytes.len());
             panic!(

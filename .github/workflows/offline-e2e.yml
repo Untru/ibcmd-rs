@@ -199,6 +199,12 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo check --locked --workspace --all-targets --no-default-features
 
+      - name: Lint standalone workspace crates on Windows
+        if: runner.os == 'Windows'
+        env:
+          CARGO_NET_OFFLINE: "true"
+        run: cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+
       - name: Test standalone workspace crates offline
         env:
           CARGO_NET_OFFLINE: "true"
@@ -209,58 +215,13 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo test --locked -p ibcmd-rs --test '*' --no-default-features
 
-      - name: Test Configuration root contracts offline
+      # Every unit test of the root library (the converters and the load and
+      # export engines). Their paths are built portably, so all five targets
+      # run them.
+      - name: Test the root library offline
         env:
           CARGO_NET_OFFLINE: "true"
-        run: cargo test --locked -p ibcmd-rs --lib configuration_ --no-default-features
-
-      - name: Test editor export read scope offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib read_scope_tests --no-default-features
-
-      - name: Test scoped active-generation rows offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib snapshot_uses_active_generation_and_preserves_no_marker_semantics --no-default-features
-
-      - name: Test export SQL certificate policy offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib export_sql_constructor_validates_certificates --no-default-features
-
-      - name: Test editor SQL certificate policy offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib editor_sql_sessions_validate_server_certificates --no-default-features
-
-      - name: Test objects SQL certificate policy offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib object_sql_constructor_validates_certificates --no-default-features
-
-      - name: Test explicit certificate trust policy offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib explicit_certificate_trust_policy --no-default-features
-
-      - name: Test empty CommonCommand help routing offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib common_command_empty_help --no-default-features
-
-      - name: Test registered Help compilation route offline
-        env:
-          CARGO_NET_OFFLINE: "true"
-          IBCMD_TEST_KEEP_FIXTURES: "1"
-        run: cargo test --locked -p ibcmd-rs --lib help_compilation_uses_the_exact_registered_graph_route --no-default-features
+        run: cargo test --locked -p ibcmd-rs --lib --no-default-features
 
       - name: Retain binary for failed release boundary investigation
         if: failure()

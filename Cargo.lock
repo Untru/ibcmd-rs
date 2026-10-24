@@ -737,6 +737,7 @@ dependencies = [
  "ibcmd-schema",
  "ibcmd-v8",
  "ibcmd-xml",
+ "memchr",
  "mimalloc",
  "quick-xml 0.38.4",
  "rayon",

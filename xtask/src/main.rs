@@ -266,14 +266,13 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         ],
     ));
     steps.push(Step::cargo(
-        "test (root configuration contracts)",
+        "test (root library)",
         &[
             "test",
             "--locked",
             "-p",
             ROOT_PACKAGE,
             "--lib",
-            "configuration_",
             "--no-default-features",
         ],
     ));

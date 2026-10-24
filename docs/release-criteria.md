@@ -22,20 +22,21 @@ generation. It runs:
 1. `cargo check --locked --workspace --all-targets --no-default-features`;
 2. all tests in the standalone workspace crates;
 3. all root integration targets (`--test '*'`) with default features disabled;
-4. clean-environment XML to CF, CF to XML, same-profile, and cross-profile
+4. every unit test of the root library (`--lib`), and on Windows clippy of the
+   standalone crates;
+5. clean-environment XML to CF, CF to XML, same-profile, and cross-profile
    conversion for the registered Format15/Format16 and XCF 2.20/2.21 routes;
-5. malformed/truncated input and unknown-profile cases, which must fail before
+6. malformed/truncated input and unknown-profile cases, which must fail before
    publication;
-6. the evidence-derived compatibility matrix and bootstrap manifest checks;
-7. the default `LossPolicy::Error` downgrade case, which must report the exact
+7. the evidence-derived compatibility matrix and bootstrap manifest checks;
+8. the default `LossPolicy::Error` downgrade case, which must report the exact
    loss and block publication;
-8. a release-binary boundary audit with an empty child-process `PATH` and all
+9. a release-binary boundary audit with an empty child-process `PATH` and all
    known 1C/Java discovery variables removed.
 
-The legacy root unit harness contains database-export research tests and is not
-part of the standalone product contract. Its targets are compile-checked; the
-portable root behavior is covered by integration suites. Live database and
-external-corpus features remain opt-in and are never enabled by these gates.
+The root library's unit tests run in full on every target; the research
+probes and the live database tests are behind the `research-corpus-tests` and
+`mssql-live-tests` features, which these gates never enable.
 
 GitHub Actions can report these checks but cannot make them mandatory by
 itself. After the workflow exists on the default branch, the branch protection

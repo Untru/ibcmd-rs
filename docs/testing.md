@@ -4,43 +4,33 @@ The repository has explicit portable, research-corpus, and live MSSQL test
 boundaries. CI selects them through Cargo packages and features; it does not
 maintain a list of tests to skip.
 
-## Portable release gate
+## Merge gate
 
-The standalone layer crates (`ibcmd-core`, `ibcmd-xml`, `ibcmd-v8`, and
-`ibcmd-cf`) and the explicit root smoke test require neither SQL Server nor a
-1C installation, platform executable, or local research corpus. CI runs these
-commands on both Windows and Linux:
+Nothing in the gate needs SQL Server, a 1C installation, a platform
+executable or a local research corpus: the tests read `tests/fixtures` and
+build what else they need in the system temporary directory. The offline
+matrix of `.github/workflows/offline-e2e.yml` runs on Linux x86-64 and ARM64,
+Windows and macOS ARM64 and Intel; its Linux and Windows lanes are required.
+The test commands of each lane:
 
 ```text
-cargo check --locked --workspace --exclude ibcmd-rs --all-targets
-cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings
+cargo check --locked --workspace --all-targets --no-default-features
+cargo clippy --locked --workspace --exclude ibcmd-rs --all-targets -- -D warnings   # Windows; Quality on Linux
 cargo test --locked --workspace --exclude ibcmd-rs
-cargo test --locked -p ibcmd-rs --test portable_root_smoke
+cargo test --locked -p ibcmd-rs --test '*' --no-default-features
+cargo test --locked -p ibcmd-rs --lib --no-default-features
 ```
 
-The root smoke test covers public, platform-free root APIs against a temporary
-source tree. It is deliberately narrower than the legacy root unit-test
-harness.
+`cargo xtask ci` runs the same commands locally.
 
-The `ibcmd-rs` package still contains the Windows-oriented CLI, legacy MSSQL
-integration code, and reverse-engineering assertions. CI checks all of its
-targets and compiles its test harness in a separate Windows lane:
+The research probes and the live MSSQL tests below are behind features and
+not part of the gate. `.github/workflows/ci.yml` also compiles the root
+package with `platform-oracle` on Windows:
 
 ```text
-cargo check --locked -p ibcmd-rs --all-targets
-cargo test --locked -p ibcmd-rs --no-run
+cargo check --locked -p ibcmd-rs --all-targets --features platform-oracle
+cargo test --locked -p ibcmd-rs --no-run --features platform-oracle
 ```
-
-This is an explicit temporary boundary, not a portability claim for the whole
-root package. Plain `cargo test --locked --workspace` is therefore not the
-portable release gate.
-
-The bounded BASE-004 inventory run, before the three dormant debug probes were
-moved into the opt-in research runner, reported 1,276 passed, 179 failed, and 3
-ignored tests. Two failures are `module_blob` serialization assertions; the
-other 177 are `mssql_dump` reverse-engineering assertions. The same 179
-failures remain visible legacy debt and are not relabeled as portable, live, or
-research merely to make CI green.
 
 ## Research corpus suite
 
