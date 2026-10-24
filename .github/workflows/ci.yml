@@ -15,29 +15,6 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  sql-ut11-collector:
-    name: SQL UT11 offline collector (Python ${{ matrix.python }})
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python: ['3.12', '3.14']
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ matrix.python }}
-
-      - name: Test full-tree evidence collector (synthetic only)
-        env:
-          PYTHONDONTWRITEBYTECODE: '1'
-          IBCMD_TEST_KEEP_FIXTURES: '1'
-          IBCMD_SQL_UT11_TEST_ROOT: ${{ runner.temp }}/issue359-collector-tests
-        run: python3 tests/scripts/test_compare_sql_ut11.py
-
   platform-evidence-harness:
     name: Platform evidence harness
     runs-on: ubuntu-latest

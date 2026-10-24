@@ -169,7 +169,8 @@ These synthetic tests retain fixtures and exercise equality, both diff legs,
 missing/extra paths, version-file differences, budgets, aliases, symlinks,
 partial trees, physical root/ancestor/mounted-subtree aliases, case aliases
 where supported, output containment, symlink loops and no overwrite.
-The collector CI runs Python 3.12 and 3.14 to cover both resolution-error
-behaviors. Local tests also run the existing Python 3.9 and 3.14 runtimes.
+CI does not run them: the collector is used only in the #359 run, so run
+them before it under Python 3.12 or older and 3.13 or newer to cover both
+resolution-error behaviors.
 All fixture directories are retained. They are collector
 verification only and do not constitute SQL acceptance or native testing.
