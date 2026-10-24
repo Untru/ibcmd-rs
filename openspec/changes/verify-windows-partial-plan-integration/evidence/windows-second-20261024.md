@@ -1,0 +1,7 @@
+# Second hosted Windows recovery observation
+
+[Run40096803060/job120880661322](https://github.com/Untru/ibcmd-rs/actions/runs/40096803060/job/120880661322), published77697eb72cc088bde84e14e6b3fd388d336c9958, functional4052d80e, again compiled successfully and passed the first four-child positive plus suite00..16. Actual harness SHA770c44ba8d011168d3705bd198c9dae7113805081dcb4a6007fb57bff12f3e12.
+
+The before/held/after probe now ACTUALLY passed all byte/attribute/rename controls with measured code5, and actual Error::Published matched code5. The next assertion at line957 failed because the returned recovery path uses the canonical verbatim Windows namespace (`\\?\D:`), while the expected sibling was derived from raw `D:`. This is a test namespace mismatch, not a timeout/cap or failed denial discriminator. Later CONFIG/recovery/module assertions remain unexecuted and18/18 is not claimed.
+
+[Artifact12561571059](https://github.com/Untru/ibcmd-rs/actions/runs/40096803060/artifacts/12561571059), ZIP SHA513df2911159224363432c83523e251248e72520b4d3047c25f4304301f178e4, is retained unchanged. The focused correction captures the exact expected sibling from the public Plan summary's already-canonical consumed target BEFORE publication. It retains exact PathBuf equality and all postcommit assertions; no prefix stripping, suffix-only match, production normalization or writer change is introduced. Corrected runtime is pending.

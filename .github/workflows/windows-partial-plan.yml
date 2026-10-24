@@ -1,0 +1,64 @@
+name: Windows partial Plan integration
+
+on:
+  pull_request:
+    paths:
+      - 'tests/editor_partial_import_windows.rs'
+      - 'src/file_import.rs'
+      - 'src/mssql_source_change.rs'
+      - 'src/mssql_source_change/**'
+      - 'crates/ibcmd-filedb/**'
+      - 'openspec/changes/verify-windows-partial-plan-integration/**'
+      - 'tools/run-windows-partial-plan-ci.py'
+      - '.github/workflows/windows-partial-plan.yml'
+      - 'tools/run-source-custody-ci.py'
+      - '.github/workflows/source-custody.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: windows-partial-plan-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  plan:
+    if: github.event.pull_request.head.repo.full_name == 'Jimmo910/ibcmd-rs' && github.event.pull_request.head.ref == 'agent/issue-382-windows-editor-e2e'
+    name: Windows Plan (positive then18)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CARGO_BUILD_JOBS: '1'
+      CARGO_TERM_COLOR: never
+      IBCMD_TEST_KEEP_FIXTURES: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Checkout exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install pinned Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify classifiers and protected HEAD guard
+        run: python tools/run-windows-partial-plan-ci.py self-test
+      - name: Compile once and run first positive then18 serial controls
+        run: python tools/run-windows-partial-plan-ci.py windows
+      - name: Retain public receipts and fixtures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-partial-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/windows-partial-plan-evidence
+            ${{ runner.temp }}/windows-partial-head-guard-*
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
