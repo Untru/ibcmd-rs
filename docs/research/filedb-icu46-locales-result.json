@@ -1,0 +1,283 @@
+{
+  "schema_version": 1,
+  "icu_version": [
+    4,
+    6,
+    0,
+    0
+  ],
+  "dll_sha256": {
+    "icudt46.dll": "2f7e6b454038073255b2c22b5b513e23bfa717ff60477b851474708950be8dd0",
+    "icuuc46.dll": "34b919a3ddbac34200f9202b4b42398b25da248a2e98db7f63ba7acb09b53144",
+    "icuin46.dll": "c5814166c52f474171362780f281b080a8e91b543dfe20f20aed26500f0ed001"
+  },
+  "helper_sha256": "91b29c45d71f45a44c363ae85dd365e6062590947ed823bced1707d04e4e42d7",
+  "baseline_helper_sha256": "7870167065a9ec8c1b1c9f11c5b3a858e0b8a4d99b244a9ec3c26a31467db3ed",
+  "probe_sha256": "c71f54db286a3978abd3b6987affbf557ccbd66d374e116cae939da8a6b1d307",
+  "baseline": {
+    "full_key_comparisons": 30810,
+    "refusal_checks": 17,
+    "mismatch_count": 0
+  },
+  "distinct_names": 5135,
+  "parts": [
+    0,
+    1,
+    4294967295
+  ],
+  "key_bytes": 392,
+  "per_locale_template_comparisons": 15405,
+  "template_comparisons": 123240,
+  "unsupported_refusal_checks": 61629,
+  "second_invocation_verified_candidate_keys": 30810,
+  "input_sha256": "b8ba90863487a30ccefd8d69075ce4d942a41402a3f824d3c58f19d5c663dc3d",
+  "probe_output_sha256": "3d045f577b418289ae719590118683e6d30f10d11a228c5c16d4f16dfd291494",
+  "locales": {
+    "en_US": {
+      "metadata": {
+        "open_status": -127,
+        "collation_version": [
+          50,
+          0,
+          6,
+          48
+        ],
+        "uca_version": [
+          6,
+          0,
+          0,
+          0
+        ],
+        "valid_locale": "en_US",
+        "actual_locale": "root",
+        "attributes": {
+          "0": 16,
+          "1": 21,
+          "2": 16,
+          "3": 16,
+          "4": 16,
+          "5": 1,
+          "6": 16,
+          "7": 16
+        }
+      },
+      "candidate_profiles": {
+        "en_US_POSIX": {
+          "equal": 0,
+          "different": 15405,
+          "first_difference": {
+            "name": "-",
+            "part": 0,
+            "first_byte_offset": 0,
+            "icu_prefix_16": "06100105001000000000000000000000",
+            "candidate_prefix_16": "28110105001000000000000000000000"
+          }
+        },
+        "ru_RU": {
+          "equal": 15405,
+          "different": 0,
+          "first_difference": null
+        }
+      },
+      "oracle_full_keys_sha256": "489422ae46486ea837b40680d5de56ed0b0fcccecf88587c80e9c2af54bcfd28",
+      "I_i_sort_keys": {
+        "I": "37010500",
+        "i": "37010500"
+      }
+    },
+    "de_DE": {
+      "metadata": {
+        "open_status": -128,
+        "collation_version": [
+          50,
+          0,
+          6,
+          48
+        ],
+        "uca_version": [
+          6,
+          0,
+          0,
+          0
+        ],
+        "valid_locale": "de_DE",
+        "actual_locale": "de",
+        "attributes": {
+          "0": 16,
+          "1": 21,
+          "2": 16,
+          "3": 16,
+          "4": 16,
+          "5": 1,
+          "6": 16,
+          "7": 16
+        }
+      },
+      "candidate_profiles": {
+        "en_US_POSIX": {
+          "equal": 0,
+          "different": 15405,
+          "first_difference": {
+            "name": "-",
+            "part": 0,
+            "first_byte_offset": 0,
+            "icu_prefix_16": "06100105001000000000000000000000",
+            "candidate_prefix_16": "28110105001000000000000000000000"
+          }
+        },
+        "ru_RU": {
+          "equal": 15405,
+          "different": 0,
+          "first_difference": null
+        }
+      },
+      "oracle_full_keys_sha256": "489422ae46486ea837b40680d5de56ed0b0fcccecf88587c80e9c2af54bcfd28",
+      "I_i_sort_keys": {
+        "I": "37010500",
+        "i": "37010500"
+      }
+    },
+    "tr_TR": {
+      "metadata": {
+        "open_status": -128,
+        "collation_version": [
+          50,
+          0,
+          0,
+          48
+        ],
+        "uca_version": [
+          6,
+          0,
+          0,
+          0
+        ],
+        "valid_locale": "tr_TR",
+        "actual_locale": "tr",
+        "attributes": {
+          "0": 16,
+          "1": 21,
+          "2": 16,
+          "3": 16,
+          "4": 16,
+          "5": 1,
+          "6": 16,
+          "7": 16
+        }
+      },
+      "candidate_profiles": {
+        "en_US_POSIX": {
+          "equal": 0,
+          "different": 15405,
+          "first_difference": {
+            "name": "-",
+            "part": 0,
+            "first_byte_offset": 0,
+            "icu_prefix_16": "06100105001000000000000000000000",
+            "candidate_prefix_16": "28110105001000000000000000000000"
+          }
+        },
+        "ru_RU": {
+          "equal": 14517,
+          "different": 888,
+          "first_difference": {
+            "name": "-I",
+            "part": 0,
+            "first_byte_offset": 2,
+            "icu_prefix_16": "06103651010600100000000000000000",
+            "candidate_prefix_16": "06103701060010000000000000000000"
+          }
+        }
+      },
+      "oracle_full_keys_sha256": "a922134fe06f9c11c257addb79fb5a079dce42b33105b1c62bdbfec34ac34cd8",
+      "I_i_sort_keys": {
+        "I": "3651010500",
+        "i": "37010500"
+      }
+    },
+    "sv_SE": {
+      "metadata": {
+        "open_status": -128,
+        "collation_version": [
+          50,
+          0,
+          0,
+          48
+        ],
+        "uca_version": [
+          6,
+          0,
+          0,
+          0
+        ],
+        "valid_locale": "sv_SE",
+        "actual_locale": "sv",
+        "attributes": {
+          "0": 16,
+          "1": 21,
+          "2": 16,
+          "3": 16,
+          "4": 16,
+          "5": 1,
+          "6": 16,
+          "7": 16
+        }
+      },
+      "candidate_profiles": {
+        "en_US_POSIX": {
+          "equal": 0,
+          "different": 15405,
+          "first_difference": {
+            "name": "-",
+            "part": 0,
+            "first_byte_offset": 0,
+            "icu_prefix_16": "06100105001000000000000000000000",
+            "candidate_prefix_16": "28110105001000000000000000000000"
+          }
+        },
+        "ru_RU": {
+          "equal": 15405,
+          "different": 0,
+          "first_difference": null
+        }
+      },
+      "oracle_full_keys_sha256": "489422ae46486ea837b40680d5de56ed0b0fcccecf88587c80e9c2af54bcfd28",
+      "I_i_sort_keys": {
+        "I": "37010500",
+        "i": "37010500"
+      }
+    }
+  },
+  "fallback_control": {
+    "requested": "zz_ZZ",
+    "open_status": -128,
+    "collation_version": [
+      50,
+      0,
+      0,
+      48
+    ],
+    "uca_version": [
+      6,
+      0,
+      0,
+      0
+    ],
+    "valid_locale": "ru_RU",
+    "actual_locale": "ru",
+    "attributes": {
+      "0": 16,
+      "1": 21,
+      "2": 16,
+      "3": 16,
+      "4": 16,
+      "5": 1,
+      "6": 16,
+      "7": 16
+    }
+  },
+  "fallback_counted_as_locale_evidence": false,
+  "native_platform_run": false,
+  "tool1cd_executable_run": false,
+  "additional_locales_admitted": false
+}
