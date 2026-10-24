@@ -1,0 +1,119 @@
+{
+  "icu_version": [
+    4,
+    6,
+    0,
+    0
+  ],
+  "dll_sha256": {
+    "icudt46.dll": "2f7e6b454038073255b2c22b5b513e23bfa717ff60477b851474708950be8dd0",
+    "icuuc46.dll": "34b919a3ddbac34200f9202b4b42398b25da248a2e98db7f63ba7acb09b53144",
+    "icuin46.dll": "c5814166c52f474171362780f281b080a8e91b543dfe20f20aed26500f0ed001"
+  },
+  "runtime_archive": "icu4c-4_6-Win64-msvc10.zip",
+  "runtime_archive_sha256": "c64bd3b9fade2c7cefbb1c8c16f765febda8b0f4de771d5f50d88a150d1cf41b",
+  "key_bytes": 392,
+  "parts": [
+    0,
+    1,
+    4294967295
+  ],
+  "probe_sha256": "c71f54db286a3978abd3b6987affbf557ccbd66d374e116cae939da8a6b1d307",
+  "locales": {
+    "en_US_POSIX": {
+      "open_status": 0,
+      "collation_version": [
+        50,
+        0,
+        0,
+        48
+      ],
+      "uca_version": [
+        6,
+        0,
+        0,
+        0
+      ],
+      "valid_locale": "en_US_POSIX",
+      "actual_locale": "en_US_POSIX",
+      "attributes": {
+        "0": 16,
+        "1": 21,
+        "2": 16,
+        "3": 16,
+        "4": 16,
+        "5": 1,
+        "6": 16,
+        "7": 16
+      }
+    },
+    "ru_RU": {
+      "open_status": -128,
+      "collation_version": [
+        50,
+        0,
+        0,
+        48
+      ],
+      "uca_version": [
+        6,
+        0,
+        0,
+        0
+      ],
+      "valid_locale": "ru_RU",
+      "actual_locale": "ru",
+      "attributes": {
+        "0": 16,
+        "1": 21,
+        "2": 16,
+        "3": 16,
+        "4": 16,
+        "5": 1,
+        "6": 16,
+        "7": 16
+      }
+    },
+    "de_DE": {
+      "open_status": -128,
+      "collation_version": [
+        50,
+        0,
+        6,
+        48
+      ],
+      "uca_version": [
+        6,
+        0,
+        0,
+        0
+      ],
+      "valid_locale": "de_DE",
+      "actual_locale": "de",
+      "attributes": {
+        "0": 16,
+        "1": 21,
+        "2": 16,
+        "3": 16,
+        "4": 16,
+        "5": 1,
+        "6": 16,
+        "7": 16
+      },
+      "ICU_only_sort_keys": {
+        "root": "4943434d010800",
+        "\u00e4": "2701869d00",
+        "Z": "59010500"
+      }
+    }
+  },
+  "distinct_names": 5135,
+  "full_key_comparisons": 30810,
+  "refusal_checks": 17,
+  "input_sha256": "235cec368ce6e2e3c751833758e7a8845c0962d68941cc5a26f76834a0ba15d4",
+  "probe_output_sha256": "919d844e9aa3b6d04bc9b0ff4151b9b796834c59fa82164844b78c07d9082d91",
+  "mismatch_count": 0,
+  "first_mismatches": [],
+  "native_platform_run": false,
+  "tool1cd_executable_run": false
+}

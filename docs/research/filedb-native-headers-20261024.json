@@ -1,0 +1,6083 @@
+{
+  "schema_version": 1,
+  "scope": "finite native-only object-header measurement; no product writes",
+  "source_base": "6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4",
+  "branch_before_measurement": "add84be801ed7a19e062efe9606f5b084e702856",
+  "platform": "Windows x64",
+  "native_version": "8.5.1.1529",
+  "native_sha256": "4dde71c1d061cc14c619255ec524b4ca8aca1f9bc38a92d1d766eb7d57721d20",
+  "process_LANG": "ru_RU.UTF-8",
+  "format": "8.3.8",
+  "page_size": 8192,
+  "probe_source_sha256": "a3c23490f35a91bfa7c9aa73de73a18da3837aa885e4317d060ed5d89db88542",
+  "probe_binary_sha256": "5c358aa9cadc3987b4f05d24b5e494299b916639bb599925301774f7a826a60a",
+  "static_library_sha256": "a19a5d36f53eaabf857a4a4dfab922932ba075e110fa54738a7bad9808264815",
+  "measured_inspector_sha256": "40c1954dbe816e4261a264bf70076d9fb65a8774b066b62eea39b4ce9c417f7d",
+  "final_inspector_sha256": "417132518d5d37cef672d6dff2fd948d2d246b0b23636a85918c1dd8f6caf5b8",
+  "generator_sha256": "181b5408185fc4777e0a5633f37733b82105df89678bc5aeff98c2e6606c4259",
+  "fixture_tree_sha256": "5e6eb21fb8d5658b8479c8f79453c2710dde1843bac118ff445024cc65f52250",
+  "variants": {
+    "small": {
+      "tree_sha256": "5e6eb21fb8d5658b8479c8f79453c2710dde1843bac118ff445024cc65f52250",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 166,
+        "sha256": "ce07c225dd2769a6da42009f336cd8b5554ff5372ed5774f9559c09e99de6758"
+      }
+    },
+    "same_length": {
+      "tree_sha256": "8c78238c1053ec7dd22207ad41302b38a6607fdd6750585bbd23621c865d7055",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 166,
+        "sha256": "d404e1c30bfbc71fc87b01c40ddb006064bb5624e64ba700e20e0cace3daf3bb"
+      }
+    },
+    "large": {
+      "tree_sha256": "72960594a87cc3e340c632252fa2367921d0c23d79f6e10a350a3033438b93ef",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 34952705,
+        "sha256": "1c57e02d070197d449149efe2e3fd030231ebba2e7b4b945445c13d002fec4a4"
+      }
+    },
+    "medium_growth": {
+      "tree_sha256": "a51c246a5d0d3b0ec98eb8c9e68a2439c97dd29f336e8fef6215d160b54a54e8",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 52428971,
+        "sha256": "c7a861863f7a86f7b72ca7386719e991657cac2ebbb3ab2c8226fc6745a5434e"
+      }
+    },
+    "extra_growth": {
+      "tree_sha256": "8cda50f510d60f0dab0193f9681ce9d7b43d5420b175fc79afe1d15ebc011040",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 69905237,
+        "sha256": "7e0ee9e96faa89db95e8575513b3e9f35d23938556906a99d34f2f2bf3ccdc30"
+      }
+    },
+    "boundary": {
+      "tree_sha256": "364484720f86f8d97158bd1959721dbeb9d3ecd4921c8f34b6e34340bf7392d0",
+      "module": {
+        "path": "CommonModules/\u0424\u0430\u0439\u043b\u043e\u0432\u0430\u044f\u0411\u0430\u0437\u0430\u041f\u0440\u043e\u0432\u0435\u0440\u043a\u0430/Ext/Module.bsl",
+        "bytes": 22005443,
+        "sha256": "27119a7c32a1a48df41a657282e2c85ddb7f8fe7f7118f5102cb623c4dfc735c"
+      }
+    }
+  },
+  "tree_hash_protocol": "POSIX relative paths sorted by code point; UTF8(path)+NUL+ASCII(SHA256(file))+LF",
+  "boundary_random_bytes": 15843794,
+  "header_columns": [
+    "header_page",
+    "fat_level",
+    "u32_4",
+    "u32_8",
+    "u32_12",
+    "length",
+    "required_fat_pages"
+  ],
+  "counts": {
+    "states": 24,
+    "headers": 456,
+    "native_exits_zero": 24,
+    "final_reinspections_equal": 24
+  },
+  "chains": [
+    {
+      "id": "matrix/ru_RU",
+      "completion_sha256": "26f95f584b891086904e6f584ca10a7182013f2053380ef494ec369d89661c5e",
+      "runner_sha256": "5799a65781e7966ceff4f1776167dfa671a606f5e1b6404cf6a8e1a2da50b769"
+    },
+    {
+      "id": "matrix/en_US_POSIX",
+      "completion_sha256": "1cc0991a69e3b9561f30fac494c660365ffac54d6ec3e71041de00119827178f",
+      "runner_sha256": "c81da7b842257b3674734cdcc0cf39acbea39ffa1d5fb010ffb5430a0d2a515f"
+    },
+    {
+      "id": "boundary",
+      "completion_sha256": "921a84d9d6ce1d63a48ce58eb2c56a540c2dd26526f2acdcce40af5a248a7237",
+      "runner_sha256": "15f8aedef45e0f591910449eb08d47ff2521bfce0917e0eeb92db44b0253ec53"
+    }
+  ],
+  "states": [
+    {
+      "id": "matrix/ru_RU/00-create",
+      "parent": null,
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 3448832,
+      "file_sha256": "e3c6776126c6b967ee196094c4b149b255ba3eea1973f100c52805c6da480efe",
+      "native_exit": 0,
+      "original_inventory_sha256": "8fea9d6d4ca772bb6534bce1c0db65ee2716764fbd051c198dd6f03e37fd0d8b",
+      "final_inventory_sha256": "beff4a13639453d82a050001af303d1dc596b7e407be18dbb4377733582320e9",
+      "command_sha256": "cc8fb56b27f60b6ff5ffc68c8e2367c093fa5713e9614b414a168ff8ed9debc2",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          15,
+          1,
+          0,
+          2107,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          8,
+          1,
+          0,
+          2560,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          2,
+          1,
+          0,
+          602,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          1,
+          1,
+          0,
+          512,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          2,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 1,
+          "stored_bytes": 8,
+          "largest_stored_part": 8
+        },
+        "PARAMS": {
+          "parts": 6,
+          "stored_bytes": 1176,
+          "largest_stored_part": 567
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/01-import-small",
+      "parent": "matrix/ru_RU/00-create",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 3465216,
+      "file_sha256": "0152efe09563e553d24ca2fbd3e42d9cb31fb184d575d8c564503489090137b9",
+      "native_exit": 0,
+      "original_inventory_sha256": "1ddf2ea6bac93f6294f8dd319b6579a2bc321298a80aaad0fa08ff75d8b0fc89",
+      "final_inventory_sha256": "33ed038484df2efb609af352af6321cb510258407fa6f15d73f56adca4afe129",
+      "command_sha256": "6eb4510de9529d51dfa1cd44e1216ec6864aadf7c3fdc624584bf2be8abcf25f",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          9,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          8,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          10,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          15,
+          1,
+          0,
+          2107,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          8,
+          1,
+          0,
+          2560,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          2,
+          1,
+          0,
+          602,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          1,
+          1,
+          0,
+          512,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          2,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 8,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3625,
+          "largest_stored_part": 1963
+        },
+        "FILES": {
+          "parts": 1,
+          "stored_bytes": 8,
+          "largest_stored_part": 8
+        },
+        "PARAMS": {
+          "parts": 6,
+          "stored_bytes": 1176,
+          "largest_stored_part": 567
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/02-apply-small",
+      "parent": "matrix/ru_RU/01-import-small",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 3514368,
+      "file_sha256": "e9a2d12c90da73481bd93d667921f9250325ce4901f6a8e838ce385a49e03bb0",
+      "native_exit": 0,
+      "original_inventory_sha256": "3528ad2eaeffed6dc1eedacda2aa4b8f36e9b64cb9650507defefe045860caab",
+      "final_inventory_sha256": "2b99c7407d3bfbea8ae607e9a32e8b52c40bcfef887aa29ac0c05c44691563cd",
+      "command_sha256": "88db95f68e1506b9b208ae2007e068d000583c27a1eeda3bfc2c2771ac512ef9",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          22,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          10,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          11,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          72,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          30,
+          3,
+          0,
+          33280,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          43,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          5,
+          1,
+          0,
+          903,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          2,
+          1,
+          0,
+          768,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          4,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "f7bc2a91ebb23ef755fa6fd27967807a4331dd4ed97b4b9eb776671a68a92cb1"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3619,
+          "largest_stored_part": 1963
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 51,
+          "largest_stored_part": 43
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/03-import-same-length",
+      "parent": "matrix/ru_RU/02-apply-small",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 3514368,
+      "file_sha256": "f473be253f7176b42121e3bc3f6b0c1d104c08096bbc9f705b5c362c14277e54",
+      "native_exit": 0,
+      "original_inventory_sha256": "9597234e4cc30e9d7a443acbd6c26e8c41d738fc5fae3e2140c16e8d26e48a73",
+      "final_inventory_sha256": "e2af96493699ba99c0be181700c5b2c21ea09df264c5388a46f7f85eaa29d14a",
+      "command_sha256": "dacfff4a3837e528e62c070f192e02d065af6e51a180bdb3a8d9b4b8ba712e97",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          22,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          19,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          17,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          20,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          72,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          30,
+          3,
+          0,
+          33280,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          43,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          5,
+          1,
+          0,
+          903,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          2,
+          1,
+          0,
+          768,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          4,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "f7bc2a91ebb23ef755fa6fd27967807a4331dd4ed97b4b9eb776671a68a92cb1"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 17,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3619,
+          "largest_stored_part": 1963
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3627,
+          "largest_stored_part": 1966
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 51,
+          "largest_stored_part": 43
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/04-apply-same-length",
+      "parent": "matrix/ru_RU/03-import-same-length",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 3530752,
+      "file_sha256": "f3a7e4fdbc735a5cb6301283b105e4f786b96e20fa20babb47fb33c8365a91b2",
+      "native_exit": 0,
+      "original_inventory_sha256": "0e627856df00f5642d1a450f2ec218ddae88245be7dbc42ca4356e4e39f01049",
+      "final_inventory_sha256": "ab5c1603fa443df653ba0a86e13863782a6ae444c2d577b69ae8465ee254fbfe",
+      "command_sha256": "831491a79ad4ac72ad1aa54963b7ee3e7b76f41d079abc28658ede7e146fe8d3",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          44,
+          1,
+          0,
+          5418,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          25,
+          2,
+          0,
+          9728,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          20,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          18,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          123,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          65,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          75,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          8,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          4,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          6,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 25,
+          "u32_8": 2,
+          "u32_12": 0,
+          "length": 9728,
+          "used_data_pages": 2,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "4f581bef550b3ef00675e89080607bd8dcd005430dd71d4bf1e571eb7b00fd64"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 18,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3621,
+          "largest_stored_part": 1966
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 88,
+          "largest_stored_part": 80
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/05-import-large",
+      "parent": "matrix/ru_RU/04-apply-same-length",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 30154752,
+      "file_sha256": "c9169b42f854375ea0dc8521845e0377d6f6199065cdfe9ad7c61d489b007055",
+      "native_exit": 0,
+      "original_inventory_sha256": "7cf7d373d2d8c8cf34a2b9461a5cd9b7d170624bb0de90788023365faf0dcebb",
+      "final_inventory_sha256": "88a4ecf3579c43e472ad595d16e157a6f8537f05869f35840288553e11234a13",
+      "command_sha256": "9313b0132580ed467db8a32f881d923eee2b7e83f3e624e983eb8011069c36d5",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          44,
+          1,
+          0,
+          5418,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          25,
+          2,
+          0,
+          9728,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          29,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          26,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          30,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          123,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          65,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          75,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          8,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          4,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          6,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 25,
+          "u32_8": 2,
+          "u32_12": 0,
+          "length": 9728,
+          "used_data_pages": 2,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "4f581bef550b3ef00675e89080607bd8dcd005430dd71d4bf1e571eb7b00fd64"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 26,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3621,
+          "largest_stored_part": 1966
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 10,
+          "stored_bytes": 25984418,
+          "largest_stored_part": 10000000
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 88,
+          "largest_stored_part": 80
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/06-apply-large",
+      "parent": "matrix/ru_RU/05-import-large",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 56770560,
+      "file_sha256": "05c2e38fc02159f01096b9e60d11825fe80eddab192b02d9347102de70952741",
+      "native_exit": 0,
+      "original_inventory_sha256": "d4facf4a6614e8d4d141c7cb31f48c317a08166607e8938629e58de474ac1264",
+      "final_inventory_sha256": "f59637a241b8794ccd71e3b3f74227ebc82154cf23e3aa5b386420c05d83aecb",
+      "command_sha256": "10bcf709f5851317be0d2aac2bedbb50863b751d36d1c5c6781004219c471e69",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          66,
+          1,
+          0,
+          6020,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          41,
+          3,
+          1,
+          26614016,
+          2
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          61,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          30,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          27,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          31,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          174,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          100,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          107,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          11,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          6,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 41,
+          "u32_8": 3,
+          "u32_12": 1,
+          "length": 26614016,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            3681,
+            3682
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "ea69808a58a1836c08a4316c3f7b423403c190627909d49df56ca4766bbd5cbe"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 27,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 9,
+          "stored_bytes": 25984412,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 125,
+          "largest_stored_part": 117
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/07-import-small",
+      "parent": "matrix/ru_RU/06-apply-large",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 56770560,
+      "file_sha256": "900e0d8e26c33e98fdc27b50da7d7cd429ae7610e8dfdd8a1f58aa129103e761",
+      "native_exit": 0,
+      "original_inventory_sha256": "0d052e4e9eeb0ae0633daac04b24a779bf0ea3257d274596ad0283d39be218c0",
+      "final_inventory_sha256": "507e2157cbd846c58c4465a02f8f87548ca42ae00c269dd03f293e6eb5fbacd7",
+      "command_sha256": "74ef10c7425e6f9ef7c58011967f61c9ba927c9de1a8fa649db43eb22ae68dd4",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          66,
+          1,
+          0,
+          6020,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          41,
+          3,
+          1,
+          26614016,
+          2
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          61,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          39,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          35,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          40,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          174,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          100,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          107,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          11,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          6,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 41,
+          "u32_8": 3,
+          "u32_12": 1,
+          "length": 26614016,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            3681,
+            3682
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "ea69808a58a1836c08a4316c3f7b423403c190627909d49df56ca4766bbd5cbe"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 35,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 9,
+          "stored_bytes": 25984412,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3629,
+          "largest_stored_part": 1965
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 125,
+          "largest_stored_part": 117
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/ru_RU/08-apply-small",
+      "parent": "matrix/ru_RU/07-import-small",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 56770560,
+      "file_sha256": "dc9239a7b9184bd6624961592512c152e21550144836ec1b98a1617a3a61be26",
+      "native_exit": 0,
+      "original_inventory_sha256": "7ec27142ffd69e56254b9cdfb7daf0129dd9174571a3ae2624b904eb9fa76d4c",
+      "final_inventory_sha256": "ce64f4e7f491824a2e1d4b6ecdb4998807ccb5866c30245defd3fba49a723937",
+      "command_sha256": "63d14f4dcab6a40e53a1221c00d95132e35e891be2b821fe22ec8b9861328a75",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          88,
+          1,
+          0,
+          6020,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          57,
+          3,
+          1,
+          26614016,
+          2
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          81,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          40,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          36,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          225,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          135,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          139,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          14,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          8,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          10,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 57,
+          "u32_8": 3,
+          "u32_12": 1,
+          "length": 26614016,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            3681,
+            3682
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "ea69808a58a1836c08a4316c3f7b423403c190627909d49df56ca4766bbd5cbe"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 36,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3623,
+          "largest_stored_part": 1965
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 162,
+          "largest_stored_part": 154
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/00-create",
+      "parent": null,
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 3448832,
+      "file_sha256": "3120a0798646bf854f870f277ccf0f0cb8530fdecd8f032b306d1a63f2cd7818",
+      "native_exit": 0,
+      "original_inventory_sha256": "a5ad86aa94c09ae0f1c802e2d3c983e0b3d392739f516fc7bbda93cdd5bb7513",
+      "final_inventory_sha256": "be3aa840f96982914c2b9d6201d416a7777d683c31b5918d85cd8659ccaaa5e1",
+      "command_sha256": "c5838ca89de283c71e02a68a54c2c6e93c0be4cfcc107f9fd0191f8ee70817e5",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          15,
+          1,
+          0,
+          2107,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          8,
+          1,
+          0,
+          2560,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          2,
+          1,
+          0,
+          602,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          1,
+          1,
+          0,
+          512,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          2,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 1,
+          "stored_bytes": 8,
+          "largest_stored_part": 8
+        },
+        "PARAMS": {
+          "parts": 6,
+          "stored_bytes": 1181,
+          "largest_stored_part": 567
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/01-import-small",
+      "parent": "matrix/en_US_POSIX/00-create",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 3465216,
+      "file_sha256": "ee3661944bcdb6b97a65d69be000b1157cdd32a60b12f0c8c7176686f95f5cfd",
+      "native_exit": 0,
+      "original_inventory_sha256": "45e28aaf421bfe43461304f4816c9bb650c9e07391872b5bea61eaa3496f4518",
+      "final_inventory_sha256": "bacf2d177331c8bef24dce92c632e24531dd646d1ebb4d3cc1bd4221e790014a",
+      "command_sha256": "7449e016eac1657e43da1883cf8d56918a6c9c314d2d1c697ad07c3b7e643187",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          9,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          8,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          10,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          15,
+          1,
+          0,
+          2107,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          8,
+          1,
+          0,
+          2560,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          2,
+          1,
+          0,
+          602,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          1,
+          1,
+          0,
+          512,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          2,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 0,
+          "u32_8": 0,
+          "u32_12": 0,
+          "length": 0,
+          "used_data_pages": 0,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 0,
+          "data_page_vector_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 8,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3620,
+          "largest_stored_part": 1962
+        },
+        "FILES": {
+          "parts": 1,
+          "stored_bytes": 8,
+          "largest_stored_part": 8
+        },
+        "PARAMS": {
+          "parts": 6,
+          "stored_bytes": 1181,
+          "largest_stored_part": 567
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/02-apply-small",
+      "parent": "matrix/en_US_POSIX/01-import-small",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 3514368,
+      "file_sha256": "e6ab5a53060c96d51996fa0b2f80995cc7c0c8194ac79b87eabf0da928f4cefc",
+      "native_exit": 0,
+      "original_inventory_sha256": "fb97c117d6b4fa158d8dacf9dcd32d49bb58254cad318536717bfedb2d0a8c14",
+      "final_inventory_sha256": "97aed2cfbf0864c2b62d4edf876e7584b76a27a838e7a7043d090e4df59ca1bd",
+      "command_sha256": "6beb081b2d7d6a715f43fb6a337adc3b4b1996d99ac9b069d67ae3d9a0c49974",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          22,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          10,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          11,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          72,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          30,
+          3,
+          0,
+          33280,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          43,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          5,
+          1,
+          0,
+          903,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          2,
+          1,
+          0,
+          768,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          4,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "f7bc2a91ebb23ef755fa6fd27967807a4331dd4ed97b4b9eb776671a68a92cb1"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3614,
+          "largest_stored_part": 1962
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 51,
+          "largest_stored_part": 43
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/03-import-same-length",
+      "parent": "matrix/en_US_POSIX/02-apply-small",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 3514368,
+      "file_sha256": "6ff36ca85802f19a865b1d473e5d5acb15a23d9e7ee2780c454c7d9ac5a7841c",
+      "native_exit": 0,
+      "original_inventory_sha256": "16fd4dcc449c7d4ceb45b6fb995853c0a68099fa7ca96946e68bdcb77c5c4d6e",
+      "final_inventory_sha256": "e0616de05ac70eaad442f988396bb123879dc44c53743fd497168b8a5c08e13b",
+      "command_sha256": "80f2a7f6922225d3d9dd072c087f97d8fb6086087ec0ba18c38ed5f6aabd2cea",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          22,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          19,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          17,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          20,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          72,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          30,
+          3,
+          0,
+          33280,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          43,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          5,
+          1,
+          0,
+          903,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          2,
+          1,
+          0,
+          768,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          4,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "f7bc2a91ebb23ef755fa6fd27967807a4331dd4ed97b4b9eb776671a68a92cb1"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 17,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3614,
+          "largest_stored_part": 1962
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3623,
+          "largest_stored_part": 1964
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 51,
+          "largest_stored_part": 43
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/04-apply-same-length",
+      "parent": "matrix/en_US_POSIX/03-import-same-length",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 3530752,
+      "file_sha256": "e9275f6e8c9f5b51112b6f31e2da7b2288bbcca13f122fabeba7ea29b95665f7",
+      "native_exit": 0,
+      "original_inventory_sha256": "3d2ba9894240412c4eb45f23fb7a040757af23e789b5de86f16cc8bf6324b2e5",
+      "final_inventory_sha256": "03670f81d89793c77ba1e78aad0d39aca169a7dea8377dbd2eff466a56f36738",
+      "command_sha256": "0f6bd59ad56819d3ef3569ae3faedfd66a9d11de8177d2cacadd8f55708d91fa",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          44,
+          1,
+          0,
+          5418,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          25,
+          2,
+          0,
+          9728,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          20,
+          1,
+          0,
+          2709,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          0,
+          18,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          123,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          65,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          75,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          8,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          4,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          6,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 25,
+          "u32_8": 2,
+          "u32_12": 0,
+          "length": 9728,
+          "used_data_pages": 2,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "4f581bef550b3ef00675e89080607bd8dcd005430dd71d4bf1e571eb7b00fd64"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 0,
+          "u32_4": 18,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "18cd02ea70ccc17d43036f829ec86efca12fe08f7e2ec177777c99746eeca756"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3617,
+          "largest_stored_part": 1964
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 88,
+          "largest_stored_part": 80
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/05-import-large",
+      "parent": "matrix/en_US_POSIX/04-apply-same-length",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 30154752,
+      "file_sha256": "a23b8d8e380b31599b5262d4b89adbf87659a4c3269099f7252b3e8a4c930a6d",
+      "native_exit": 0,
+      "original_inventory_sha256": "6b072e253f0f7e4c0d1ddd6ddaf39883b77c84de1e7c5436cc59f3653842d3a7",
+      "final_inventory_sha256": "7f210456c208ebd0040abf02c4fa227a6727d4a61445a384461002515fde40a9",
+      "command_sha256": "4c0af01f941e85acc7972f74fe30e35682ee7967dfe1a243883b3a285623f406",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          44,
+          1,
+          0,
+          5418,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          25,
+          2,
+          0,
+          9728,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          29,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          26,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          30,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          123,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          65,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          75,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          8,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          4,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          6,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 25,
+          "u32_8": 2,
+          "u32_12": 0,
+          "length": 9728,
+          "used_data_pages": 2,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "4f581bef550b3ef00675e89080607bd8dcd005430dd71d4bf1e571eb7b00fd64"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 26,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3617,
+          "largest_stored_part": 1964
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 10,
+          "stored_bytes": 25984408,
+          "largest_stored_part": 10000000
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 88,
+          "largest_stored_part": 80
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/06-apply-large",
+      "parent": "matrix/en_US_POSIX/05-import-large",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 56770560,
+      "file_sha256": "939ea6a857a53f5db3d62f7c28e2ac4ff2472d37560a01cf9f9777d4346d473d",
+      "native_exit": 0,
+      "original_inventory_sha256": "010b53003acf9a829219094993ce80b3d2aa61f33370732e1a0a5f75017e6f94",
+      "final_inventory_sha256": "213b0bd0a72f73e05427216a4182ce1bb52991edcd912d85dc0d5748303d47c9",
+      "command_sha256": "cf0d32af3da8494c70304df2c21687e1339795782699c0c2b726c391ba1c017b",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          66,
+          1,
+          0,
+          6020,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          41,
+          3,
+          1,
+          26614016,
+          2
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          61,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          30,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          27,
+          2,
+          1,
+          26609408,
+          2
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          31,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          174,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          100,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          107,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          11,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          6,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 41,
+          "u32_8": 3,
+          "u32_12": 1,
+          "length": 26614016,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            3681,
+            3682
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "ea69808a58a1836c08a4316c3f7b423403c190627909d49df56ca4766bbd5cbe"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 27,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 26609408,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            431,
+            432
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "f7d4882361cde4a631d308b29d2596ae13858978d1f6286c1e05fa98bc10f2d7"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 9,
+          "stored_bytes": 25984402,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 125,
+          "largest_stored_part": 117
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/07-import-medium",
+      "parent": "matrix/en_US_POSIX/06-apply-large",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 70082560,
+      "file_sha256": "1c52a46fa98c7221f0c308fed950f7e4aabe8d9791eb8166b43dee9a2f05e7c5",
+      "native_exit": 0,
+      "original_inventory_sha256": "db8178c65c2beda0284de97b106f23f9a2406ebd385a8a4a5664b7fa298813d4",
+      "final_inventory_sha256": "68726d73c4f3fe5997367c497e031a994e590b32350079588691275ede4b0e0d",
+      "command_sha256": "32c5dc04e32fc8ddcd654d75f0c28ac92d1e7acde4161c889febdf96b011765b",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          66,
+          1,
+          0,
+          6020,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          41,
+          3,
+          1,
+          26614016,
+          2
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          61,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          39,
+          1,
+          0,
+          3612,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          35,
+          4,
+          2,
+          39911680,
+          3
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          40,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          174,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          100,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          107,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          11,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          6,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          8,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 41,
+          "u32_8": 3,
+          "u32_12": 1,
+          "length": 26614016,
+          "used_data_pages": 3249,
+          "required_fat_pages": 2,
+          "fat_page_numbers": [
+            3681,
+            3682
+          ],
+          "nonzero_direct_slots": 2,
+          "data_page_vector_sha256": "ea69808a58a1836c08a4316c3f7b423403c190627909d49df56ca4766bbd5cbe"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 35,
+          "u32_8": 4,
+          "u32_12": 2,
+          "length": 39911680,
+          "used_data_pages": 4873,
+          "required_fat_pages": 3,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930
+          ],
+          "nonzero_direct_slots": 3,
+          "data_page_vector_sha256": "a9445076fe11480b30db8223cb0cd04e5d10dad5f2e35d862d5956321568d489"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 9,
+          "stored_bytes": 25984402,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 11,
+          "stored_bytes": 38974786,
+          "largest_stored_part": 10000000
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 125,
+          "largest_stored_part": 117
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/08-apply-medium",
+      "parent": "matrix/en_US_POSIX/07-import-medium",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 110010368,
+      "file_sha256": "63217660903dca5abe76f93f267527a2add58809e70c32233324af22e164fef7",
+      "native_exit": 0,
+      "original_inventory_sha256": "325815ffec66d790c4fbb46099b27086931baa6f56bde5cd9294167869ae8caf",
+      "final_inventory_sha256": "08fab26766c697cd43c6609e205cd6c911d0f2684de7811d41db30eee517e835",
+      "command_sha256": "2ff183a28263fdbeed9a2d1500cafc92aaa4d237c0f18c80ea4be39aaa7c3f1f",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          88,
+          1,
+          0,
+          6923,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          57,
+          5,
+          2,
+          66520576,
+          4
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          81,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          40,
+          1,
+          0,
+          3612,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          36,
+          4,
+          2,
+          39911680,
+          3
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          225,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          135,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          139,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          14,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          8,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          10,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 57,
+          "u32_8": 5,
+          "u32_12": 2,
+          "length": 66520576,
+          "used_data_pages": 8121,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            3681,
+            3682,
+            8555,
+            8556
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "cc46fd7564ff9928bf9b342a36b5c52e1ad427d086be324efbf7f6ba58b021ee"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 36,
+          "u32_8": 4,
+          "u32_12": 2,
+          "length": 39911680,
+          "used_data_pages": 4873,
+          "required_fat_pages": 3,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930
+          ],
+          "nonzero_direct_slots": 3,
+          "data_page_vector_sha256": "a9445076fe11480b30db8223cb0cd04e5d10dad5f2e35d862d5956321568d489"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 10,
+          "stored_bytes": 38974780,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 162,
+          "largest_stored_part": 154
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/09-import-extra",
+      "parent": "matrix/en_US_POSIX/08-apply-medium",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 123314176,
+      "file_sha256": "b8926c9563ecbef6df34c3be5de13c565264c3942942ed77e9109e23f1e61d9d",
+      "native_exit": 0,
+      "original_inventory_sha256": "9e27f9c764f3d15b87234d216b8ff58bdc10e20b4dec664f99e054dd1bb57da9",
+      "final_inventory_sha256": "ebf3007d28fc289a3d5d379deda7f71d87f14ae6512ebf979006cee5d6ff1c53",
+      "command_sha256": "3388188c2a637db288ba215772333aa8227a3e3bae9eca279acab47fe702bf7b",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          88,
+          1,
+          0,
+          6923,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          57,
+          5,
+          2,
+          66520576,
+          4
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          81,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          49,
+          1,
+          0,
+          4214,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          44,
+          5,
+          3,
+          53213696,
+          4
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          50,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          225,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          135,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          139,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          14,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          8,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          10,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 57,
+          "u32_8": 5,
+          "u32_12": 2,
+          "length": 66520576,
+          "used_data_pages": 8121,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            3681,
+            3682,
+            8555,
+            8556
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "cc46fd7564ff9928bf9b342a36b5c52e1ad427d086be324efbf7f6ba58b021ee"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 44,
+          "u32_8": 5,
+          "u32_12": 3,
+          "length": 53213696,
+          "used_data_pages": 6496,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930,
+            13429
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "2ff31ff386661f9df9b40c53619b22f1002f30cf1c65225acf00b60db3ce3c7d"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 10,
+          "stored_bytes": 38974780,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 13,
+          "stored_bytes": 51965180,
+          "largest_stored_part": 10000000
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 162,
+          "largest_stored_part": 154
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/10-apply-extra",
+      "parent": "matrix/en_US_POSIX/09-import-extra",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 149929984,
+      "file_sha256": "32cbc10ead1f3c9b327501c9cbbce95d62ce4472ef90f2654c19ab2d82cca59d",
+      "native_exit": 0,
+      "original_inventory_sha256": "db07ba3e5fd4fc611be322a2be8b87d98fc4886628a27321a7c9bda1811b0e26",
+      "final_inventory_sha256": "9206f1e1065639d247de97dab279c283dabaa71f929e014977ce9d911ef7e10d",
+      "command_sha256": "f1b08f8f594b70f2eccd9be773c3f24fb2f55e566cac21bebd24ad49dc96d7ca",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          110,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          73,
+          6,
+          3,
+          93124864,
+          6
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          101,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          50,
+          1,
+          0,
+          4214,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          45,
+          5,
+          3,
+          53213696,
+          4
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          51,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          276,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          170,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          171,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          17,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          10,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          12,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 73,
+          "u32_8": 6,
+          "u32_12": 3,
+          "length": 93124864,
+          "used_data_pages": 11368,
+          "required_fat_pages": 6,
+          "fat_page_numbers": [
+            3681,
+            3682,
+            8555,
+            8556,
+            15053,
+            15054
+          ],
+          "nonzero_direct_slots": 6,
+          "data_page_vector_sha256": "959f0770a29f143ac942e0844cd51576df8b2ff9b5c7e226aa9252487708766a"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 45,
+          "u32_8": 5,
+          "u32_12": 3,
+          "length": 53213696,
+          "used_data_pages": 6496,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930,
+            13429
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "2ff31ff386661f9df9b40c53619b22f1002f30cf1c65225acf00b60db3ce3c7d"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 12,
+          "stored_bytes": 51965174,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 199,
+          "largest_stored_part": 191
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/11-import-small",
+      "parent": "matrix/en_US_POSIX/10-apply-extra",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 149929984,
+      "file_sha256": "4648715f1664e5338cf64db703870271f9b70c200dbdfc93f865a0952a3be445",
+      "native_exit": 0,
+      "original_inventory_sha256": "523fb48dbd24f52beec8e1dbc9efccf35fe7e227b5bb637682b405c328768f90",
+      "final_inventory_sha256": "58398b1638c3be7fa702706d0aabc5c15e433de962381931932c52b1b4476b5d",
+      "command_sha256": "35b6e597b9c2663afa3b3f9a0c84059db8c7f6284b233f1387e9fec5034fa378",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          110,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          73,
+          6,
+          3,
+          93124864,
+          6
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          101,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          59,
+          1,
+          0,
+          4214,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          53,
+          5,
+          3,
+          53213696,
+          4
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          60,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          276,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          170,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          171,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          17,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          10,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          12,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 73,
+          "u32_8": 6,
+          "u32_12": 3,
+          "length": 93124864,
+          "used_data_pages": 11368,
+          "required_fat_pages": 6,
+          "fat_page_numbers": [
+            3681,
+            3682,
+            8555,
+            8556,
+            15053,
+            15054
+          ],
+          "nonzero_direct_slots": 6,
+          "data_page_vector_sha256": "959f0770a29f143ac942e0844cd51576df8b2ff9b5c7e226aa9252487708766a"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 53,
+          "u32_8": 5,
+          "u32_12": 3,
+          "length": 53213696,
+          "used_data_pages": 6496,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930,
+            13429
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "2ff31ff386661f9df9b40c53619b22f1002f30cf1c65225acf00b60db3ce3c7d"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 12,
+          "stored_bytes": 51965174,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 8,
+          "stored_bytes": 3626,
+          "largest_stored_part": 1963
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 199,
+          "largest_stored_part": 191
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "matrix/en_US_POSIX/12-apply-small",
+      "parent": "matrix/en_US_POSIX/11-import-small",
+      "locale": "en_US_POSIX",
+      "page_size": 8192,
+      "file_bytes": 149929984,
+      "file_sha256": "a3ef7260e1dcc20a1a9feddf6d6a88bbd6aec3ec0e590440539344426b0518cd",
+      "native_exit": 0,
+      "original_inventory_sha256": "a86528910f0771ad764b927841f9c0e750f49fa95022f7694d03057e71a72b61",
+      "final_inventory_sha256": "04a703dc5c87507482ec8b7620ca1b7d4d09ef6aac078fcf0cac2e7f3986d639",
+      "command_sha256": "c5913e0c618d396631d54e19767c79218ee06bafc4dbd1aa396a31a414023a8e",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          132,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          89,
+          6,
+          3,
+          93124864,
+          6
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          121,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          60,
+          1,
+          0,
+          4214,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          54,
+          5,
+          3,
+          53213696,
+          4
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          61,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          327,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          205,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          203,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          20,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          12,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          14,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 89,
+          "u32_8": 6,
+          "u32_12": 3,
+          "length": 93124864,
+          "used_data_pages": 11368,
+          "required_fat_pages": 6,
+          "fat_page_numbers": [
+            3681,
+            3682,
+            8555,
+            8556,
+            15053,
+            15054
+          ],
+          "nonzero_direct_slots": 6,
+          "data_page_vector_sha256": "959f0770a29f143ac942e0844cd51576df8b2ff9b5c7e226aa9252487708766a"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 54,
+          "u32_8": 5,
+          "u32_12": 3,
+          "length": 53213696,
+          "used_data_pages": 6496,
+          "required_fat_pages": 4,
+          "fat_page_numbers": [
+            431,
+            432,
+            6930,
+            13429
+          ],
+          "nonzero_direct_slots": 4,
+          "data_page_vector_sha256": "2ff31ff386661f9df9b40c53619b22f1002f30cf1c65225acf00b60db3ce3c7d"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3620,
+          "largest_stored_part": 1963
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 236,
+          "largest_stored_part": 228
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27188,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "boundary/import",
+      "parent": "matrix/ru_RU/02-apply-small",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 20275200,
+      "file_sha256": "95f28f9e473c685529fa2b7760aa58d4cd3afb6f2965444056c50315e1ff4293",
+      "native_exit": 0,
+      "original_inventory_sha256": "1333a56105a6b15a1848a46103853bce61e5569fd57fb5b4327f0c63d1be1adc",
+      "final_inventory_sha256": "e73f6ea131aab347596ea3bc4800cea36091b1cd02305f79f53396b67a123f8a",
+      "command_sha256": "bf1c50e7328ad1f824e3c5bc1f0a4f1b91cf39589a84f63c34ed7ba9ee75ff02",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          22,
+          1,
+          0,
+          3311,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          0,
+          9,
+          1,
+          0,
+          5120,
+          0
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          19,
+          1,
+          0,
+          3010,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          17,
+          2,
+          1,
+          16754688,
+          1
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          20,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          72,
+          1,
+          0,
+          7826,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          30,
+          3,
+          0,
+          33280,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          43,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          5,
+          1,
+          0,
+          903,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          2,
+          1,
+          0,
+          768,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          4,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 0,
+          "u32_4": 9,
+          "u32_8": 1,
+          "u32_12": 0,
+          "length": 5120,
+          "used_data_pages": 1,
+          "required_fat_pages": 0,
+          "fat_page_numbers": [],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "f7bc2a91ebb23ef755fa6fd27967807a4331dd4ed97b4b9eb776671a68a92cb1"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 17,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 16754688,
+          "used_data_pages": 2046,
+          "required_fat_pages": 1,
+          "fat_page_numbers": [
+            429
+          ],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "2fd8d2c256f56795f5d8d31bf8652ac5b1c3c16e466ffca6b022838e072f31e2"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 7,
+          "stored_bytes": 3619,
+          "largest_stored_part": 1963
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 9,
+          "stored_bytes": 16360654,
+          "largest_stored_part": 10000000
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 51,
+          "largest_stored_part": 43
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    },
+    {
+      "id": "boundary/apply",
+      "parent": "boundary/import",
+      "locale": "ru_RU",
+      "page_size": 8192,
+      "file_bytes": 37044224,
+      "file_sha256": "a6652a55dc6df67d2869b90f3157cd4d50a56076f6d5db38a4849ed692f6709f",
+      "native_exit": 0,
+      "original_inventory_sha256": "b71ccc5fcf3d36dcf6a9b1f88dcf4bc97a7d83a753920570500c9662f040e3d7",
+      "final_inventory_sha256": "f82c06272850041dd0a3900a5154314aea29f55d0e2e3e292f3cc69ff9bd0582",
+      "command_sha256": "bf03c163e49b0c12a1ef548345da9baebff026793cb9b3337d439f4747749000",
+      "headers": {
+        "ROOT": [
+          2,
+          0,
+          222,
+          5,
+          0,
+          35584,
+          0
+        ],
+        "CONFIG/records": [
+          6,
+          0,
+          44,
+          1,
+          0,
+          5719,
+          0
+        ],
+        "CONFIG/blob": [
+          7,
+          1,
+          25,
+          2,
+          1,
+          16759296,
+          1
+        ],
+        "CONFIG/index": [
+          8,
+          0,
+          41,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGSAVE/records": [
+          12,
+          0,
+          20,
+          1,
+          0,
+          3010,
+          0
+        ],
+        "CONFIGSAVE/blob": [
+          13,
+          1,
+          18,
+          2,
+          1,
+          16754688,
+          1
+        ],
+        "CONFIGSAVE/index": [
+          14,
+          0,
+          21,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "PARAMS/records": [
+          18,
+          0,
+          123,
+          2,
+          0,
+          12642,
+          0
+        ],
+        "PARAMS/blob": [
+          19,
+          0,
+          65,
+          3,
+          0,
+          38400,
+          0
+        ],
+        "PARAMS/index": [
+          20,
+          0,
+          75,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "FILES/records": [
+          24,
+          0,
+          8,
+          1,
+          0,
+          1204,
+          0
+        ],
+        "FILES/blob": [
+          25,
+          0,
+          4,
+          1,
+          0,
+          1024,
+          0
+        ],
+        "FILES/index": [
+          26,
+          0,
+          6,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCAS/records": [
+          36,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/blob": [
+          37,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCAS/index": [
+          38,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ],
+        "CONFIGCASSAVE/records": [
+          42,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/blob": [
+          43,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "CONFIGCASSAVE/index": [
+          44,
+          0,
+          1,
+          1,
+          0,
+          24576,
+          0
+        ]
+      },
+      "blobs": {
+        "CONFIG/blob": {
+          "header_page": 7,
+          "fat_level": 1,
+          "u32_4": 25,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 16759296,
+          "used_data_pages": 2046,
+          "required_fat_pages": 1,
+          "fat_page_numbers": [
+            2475
+          ],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "8f81cd2c18ee69f53a2be69c1e5cb0bf3a1beb5d865268e3f6884d6e3f42cb48"
+        },
+        "CONFIGSAVE/blob": {
+          "header_page": 13,
+          "fat_level": 1,
+          "u32_4": 18,
+          "u32_8": 2,
+          "u32_12": 1,
+          "length": 16754688,
+          "used_data_pages": 2046,
+          "required_fat_pages": 1,
+          "fat_page_numbers": [
+            429
+          ],
+          "nonzero_direct_slots": 1,
+          "data_page_vector_sha256": "2fd8d2c256f56795f5d8d31bf8652ac5b1c3c16e466ffca6b022838e072f31e2"
+        }
+      },
+      "rows": {
+        "CONFIG": {
+          "parts": 8,
+          "stored_bytes": 16360648,
+          "largest_stored_part": 10000000
+        },
+        "CONFIGCAS": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGCASSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "CONFIGSAVE": {
+          "parts": 0,
+          "stored_bytes": 0,
+          "largest_stored_part": 0
+        },
+        "FILES": {
+          "parts": 2,
+          "stored_bytes": 88,
+          "largest_stored_part": 80
+        },
+        "PARAMS": {
+          "parts": 25,
+          "stored_bytes": 27183,
+          "largest_stored_part": 23095
+        }
+      }
+    }
+  ]
+}
