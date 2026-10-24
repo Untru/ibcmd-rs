@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-accumulationregisters",
+  "collection": "AccumulationRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "958be3d4caad767c9dffa507fae4b53b07921bd966bba3f2b980b6a40bbe13b1",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 80455,
+    "decoded_sha256": "77063a6fd9b1c8b5b7cc9a0e630ed25b63dd07b4e19c4d620ca5675ddcc6630c",
+    "encoded_sha256": "6dfb0ced4416920e8eab40ed29722903503a0c0cab76e4945f4fa5bdf272b968"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11484,
+          "sha256": "fa3887e50288cd6c844538731c127f18f2f24a330301eb6092351805f3270d0f"
+        },
+        {
+          "path": "Documents/CovAccumulationRecorder.xml",
+          "size": 4859,
+          "sha256": "a16edd986de74e7b2abb7a5d6ce56f024556a7acf8e2b207c37a1effb90b197b"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "68f703b7c351859760ccdfb74e79dfba421cd9d03a7d50343080845b52a4a6fc"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccumulationRegisters/CovTemplate.xml",
+          "size": 4250,
+          "sha256": "3ab97dd507e085aa985194c1e7b0f4969fe1c97cfc4c4eed663b8c7f55a0fc8e"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccumulationRegisters/CovUseStandardCommands_false.xml",
+          "size": 4370,
+          "sha256": "42cd6d6c3cd6c2ae42afd617b02d3faacd53359319823508bd8ce6ee4dbbbded"
+        }
+      ]
+    },
+    {
+      "name": "CovRegisterType_Turnovers",
+      "property": "RegisterType",
+      "kind": "enum",
+      "value": "Turnovers",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccumulationRegisters/CovRegisterType_Turnovers.xml",
+          "size": 4350,
+          "sha256": "bb5d5e044513c9f7f0b881e5d0e429a5fecf246173afac8a06c29bc207fa4d16"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccumulationRegisters/CovIncludeHelpInContents_true.xml",
+          "size": 4375,
+          "sha256": "02c4b592fa0136a46d61ea19e33400b55e564f06b36919c38acf448472290046"
+        }
+      ]
+    },
+    {
+      "name": "CovEnableTotalsSplitting_true",
+      "property": "EnableTotalsSplitting",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "AccumulationRegisters/CovEnableTotalsSplitting_true.xml",
+          "size": 4375,
+          "sha256": "435ab0d170c35e549388ec478a76cb62c996662352ca811e1dbfb0024a0b4b9e"
+        }
+      ]
+    }
+  ]
+}

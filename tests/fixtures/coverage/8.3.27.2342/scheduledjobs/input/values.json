@@ -1,0 +1,89 @@
+{
+  "schema_version": 1,
+  "collection": "ScheduledJobs",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 59,
+  "properties": [
+    {
+      "name": "MethodName",
+      "kind": "other",
+      "template": "CommonModule.CovHandlers.CovJob",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Description",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Key",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Use",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "Predefined",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "RestartCountOnFailure",
+      "kind": "number",
+      "template": "3",
+      "values": [
+        {
+          "value": "0",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "10",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "RestartIntervalOnFailure",
+      "kind": "number",
+      "template": "10",
+      "values": [
+        {
+          "value": "0",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "15",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "25",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "60",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    }
+  ]
+}

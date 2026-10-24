@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "collection": "WebServices",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 13,
+  "properties": [
+    {
+      "name": "Namespace",
+      "kind": "other",
+      "template": "http://ibcmd-rs.coverage/ws",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "XDTOPackages",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "DescriptorFileName",
+      "kind": "other",
+      "template": "ws1.1cws",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ReuseSessions",
+      "kind": "enum",
+      "template": "AutoUse",
+      "values": [
+        {
+          "value": "DontUse",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "SessionMaxAge",
+      "kind": "number",
+      "template": "20",
+      "values": []
+    }
+  ]
+}

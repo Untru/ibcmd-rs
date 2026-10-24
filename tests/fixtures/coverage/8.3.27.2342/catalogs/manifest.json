@@ -1,0 +1,713 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-catalogs",
+  "collection": "Catalogs",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "6c981d091fa2090f4cb140aa06fec702610c626293b1e9d5f5c94901f48e6f3c",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 110638,
+    "decoded_sha256": "606f174530e9f8d50a69bacbac676aa6456c1793965592cda030c1ba15a6e1e9",
+    "encoded_sha256": "65ce65792aac606b66c5baf16cf6e173535ab8995103dfdd720d25d88179a00b"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 12435,
+          "sha256": "0d4b521a00dd9e597068b394fe6a11bb3091ebf918405ea47f1e95cba0fe35ac"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "6b08f5aa864e291924f7ac6ef047e7d335aaaaef691e891ac693e00d07e60510"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovTemplate.xml",
+          "size": 4490,
+          "sha256": "71158db80e4e5c3eedbe6bf9bad3a1d397aae0d4a26967a0bc9651b0c5c859b4"
+        }
+      ]
+    },
+    {
+      "name": "CovHierarchical_true",
+      "property": "Hierarchical",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovHierarchical_true.xml",
+          "size": 4561,
+          "sha256": "1841462a8e6ab376327797bf24ca2dcd7ed3877083c0a431e1aff65bd3058b14"
+        }
+      ]
+    },
+    {
+      "name": "CovHierarchyType_HierarchyOfItems",
+      "property": "HierarchyType",
+      "kind": "enum",
+      "value": "HierarchyOfItems",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovHierarchyType_HierarchyOfItems.xml",
+          "size": 4658,
+          "sha256": "c02f841584e198450c6a0d223d0068dc731356b865d081f1b493f28caadc07f7"
+        }
+      ]
+    },
+    {
+      "name": "CovLimitLevelCount_true",
+      "property": "LimitLevelCount",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovLimitLevelCount_true.xml",
+          "size": 4585,
+          "sha256": "66fa79c0898bbc90d53eab7df65c4433ee8b6e106178c0461b8a021fe620e5c8"
+        }
+      ]
+    },
+    {
+      "name": "CovLevelCount_1",
+      "property": "LevelCount",
+      "kind": "number",
+      "value": "1",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovLevelCount_1.xml",
+          "size": 4522,
+          "sha256": "e2667a0656387abe76142ed62bf0d181dafdc41929e731a483e089ab2d8c6fa0"
+        }
+      ]
+    },
+    {
+      "name": "CovLevelCount_3",
+      "property": "LevelCount",
+      "kind": "number",
+      "value": "3",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovLevelCount_3.xml",
+          "size": 4522,
+          "sha256": "4043dfe5b098714828744ec30e9957312e1beae4e86d3f79299bf56c9f79bcd0"
+        }
+      ]
+    },
+    {
+      "name": "CovFoldersOnTop_false",
+      "property": "FoldersOnTop",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovFoldersOnTop_false.xml",
+          "size": 4571,
+          "sha256": "895e8980d0c158dea807c4567031600e3533e0d3676a4355d2d711663afffdc4"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovUseStandardCommands_false.xml",
+          "size": 4627,
+          "sha256": "143a1cc9cf6a20f4ae5fd463f81dd5912790a7f0b182316b0c3f0b8cb10e2db2"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_0",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "0",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] Справочник.CovCodeLength_0 - Указано неверное поле для ввода по строке: Код",
+      "files": []
+    },
+    {
+      "name": "CovCodeLength_3",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "3",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeLength_3.xml",
+          "size": 4522,
+          "sha256": "8c2db0a47a597dcd4c975f886ed2b3e705de11b33276967aad96b494f3f948f1"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_5",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "5",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeLength_5.xml",
+          "size": 4522,
+          "sha256": "6eb9fc3bfe484bd03712e0b65065ead6e23ff3ce9afbaaed672f81261db5878b"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_11",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "11",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeLength_11.xml",
+          "size": 4531,
+          "sha256": "1ed2604f4fc0a8f08cfc1d840d14cbebe51bf4616d48e5c382f45a43161cfcf8"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_0",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "0",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] Справочник.CovDescriptionLength_0 - Указано неверное поле для ввода по строке: Наименование",
+      "files": []
+    },
+    {
+      "name": "CovDescriptionLength_10",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "10",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDescriptionLength_10.xml",
+          "size": 4586,
+          "sha256": "d25477e4546f18cdbf69a2cf59b93a51cf60e53d6b684ecc4a872999dd56a640"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_36",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "36",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDescriptionLength_36.xml",
+          "size": 4586,
+          "sha256": "64c88a86ecd9f28609c8816ad5eb912117e6585936f5b4e11fc99a3978bce0fc"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_50",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "50",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDescriptionLength_50.xml",
+          "size": 4586,
+          "sha256": "aa56f02b947955af31642d8891813678590949f600bde73e72f3d5ea9afa6085"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeType_Number",
+      "property": "CodeType",
+      "kind": "enum",
+      "value": "Number",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeType_Number.xml",
+          "size": 4546,
+          "sha256": "c5f35b5646f04827029ae805f01f22632e07aacc50c94feba0532b73ec3759b5"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeAllowedLength_Fixed",
+      "property": "CodeAllowedLength",
+      "kind": "enum",
+      "value": "Fixed",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeAllowedLength_Fixed.xml",
+          "size": 4607,
+          "sha256": "433a95a6fddc7de440dd81b668ac8344084c6f96ff37693bde15881c1522854f"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeSeries_WithinOwnerSubordination",
+      "property": "CodeSeries",
+      "kind": "enum",
+      "value": "WithinOwnerSubordination",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeSeries_WithinOwnerSubordination.xml",
+          "size": 4718,
+          "sha256": "ed434a522242e057cac0d975ee071278d91b6a1b4c781b476ac525148c886120"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeSeries_WithinSubordination",
+      "property": "CodeSeries",
+      "kind": "enum",
+      "value": "WithinSubordination",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeSeries_WithinSubordination.xml",
+          "size": 4673,
+          "sha256": "795c70da43b4c0f27ea45027479f275f98f22e23149cd2bf820c7ef4d5707938"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCheckUnique_false.xml",
+          "size": 4563,
+          "sha256": "9f9786c647a624bcc5ff29ccc30275adbd57b8685723184d2856d5c629f1c5ec"
+        }
+      ]
+    },
+    {
+      "name": "CovAutonumbering_false",
+      "property": "Autonumbering",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovAutonumbering_false.xml",
+          "size": 4579,
+          "sha256": "a9d863ab82ad4fd20e117e6633fb2e46f3da61367450ff5faf1f09bce7e40000"
+        }
+      ]
+    },
+    {
+      "name": "CovDefaultPresentation_AsCode",
+      "property": "DefaultPresentation",
+      "kind": "enum",
+      "value": "AsCode",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDefaultPresentation_AsCode.xml",
+          "size": 4627,
+          "sha256": "63277865b2fcca14389ceefaed13fff5102c1303850c4976ccc489f22aa907a9"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefinedDataUpdate_AutoUpdate",
+      "property": "PredefinedDataUpdate",
+      "kind": "enum",
+      "value": "AutoUpdate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovPredefinedDataUpdate_AutoUpdate.xml",
+          "size": 4680,
+          "sha256": "3811ee1f7b50ccc3e27b895aeefe334897f9cd854bfd445f6e8a3f6cd52747f1"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefinedDataUpdate_DontAutoUpdate",
+      "property": "PredefinedDataUpdate",
+      "kind": "enum",
+      "value": "DontAutoUpdate",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovPredefinedDataUpdate_DontAutoUpdate.xml",
+          "size": 4716,
+          "sha256": "2d8a21ef8a44c0aadd287e8ac8d7592b76a8e19ec1555184c832fd0b4086b887"
+        }
+      ]
+    },
+    {
+      "name": "CovEditType_BothWays",
+      "property": "EditType",
+      "kind": "enum",
+      "value": "BothWays",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovEditType_BothWays.xml",
+          "size": 4562,
+          "sha256": "a7e6547e33a0aab6155b716d6b0984a9c78ff5c72c5410b24afe27c28ecf5299"
+        }
+      ]
+    },
+    {
+      "name": "CovEditType_InList",
+      "property": "EditType",
+      "kind": "enum",
+      "value": "InList",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovEditType_InList.xml",
+          "size": 4544,
+          "sha256": "abb0fa6002a2095f43c33e4cc7197a410605352c2ed8e5115679b5ffb2d7c116"
+        }
+      ]
+    },
+    {
+      "name": "CovQuickChoice_true",
+      "property": "QuickChoice",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovQuickChoice_true.xml",
+          "size": 4553,
+          "sha256": "931b02308add2865c872a81d122d8d00275cba0de2e29263c44b01bb53fde7df"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceMode_FromForm",
+      "property": "ChoiceMode",
+      "kind": "enum",
+      "value": "FromForm",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovChoiceMode_FromForm.xml",
+          "size": 4578,
+          "sha256": "ecee0844fd42201f533ed9ea3bc8eace838462a811fcab8e79090ac85379e9d1"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceMode_QuickChoice",
+      "property": "ChoiceMode",
+      "kind": "enum",
+      "value": "QuickChoice",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovChoiceMode_QuickChoice.xml",
+          "size": 4605,
+          "sha256": "51379fc45a1a199db0263326fe02f61380a942f3ffb276b9b58c226d61639fc8"
+        }
+      ]
+    },
+    {
+      "name": "CovSearchStringModeOnInputByString_AnyPart",
+      "property": "SearchStringModeOnInputByString",
+      "kind": "enum",
+      "value": "AnyPart",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovSearchStringModeOnInputByString_AnyPart.xml",
+          "size": 4740,
+          "sha256": "6e7bd8fc3f2eaa3d820d9a1649fcab50390e5573f5aaf22a1fd2152c48c215fb"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovIncludeHelpInContents_true.xml",
+          "size": 4633,
+          "sha256": "01cf043f6d195e82eb0b152ec550c6612b04633109643b72719227ccc1df951b"
+        }
+      ]
+    },
+    {
+      "name": "CovDataLockControlMode_Automatic",
+      "property": "DataLockControlMode",
+      "kind": "enum",
+      "value": "Automatic",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDataLockControlMode_Automatic.xml",
+          "size": 4660,
+          "sha256": "9df7f6b3ef5aedb79d1d349cd9803a1295747053125a4350beef220a64b69f29"
+        }
+      ]
+    },
+    {
+      "name": "CovFullTextSearch_DontUse",
+      "property": "FullTextSearch",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovFullTextSearch_DontUse.xml",
+          "size": 4606,
+          "sha256": "daae88ba58918e23d82f96ff453956f523e8b865516fc7e0fa27fa308864a017"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectPresentation_Cov",
+      "property": "ObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovObjectPresentation_Cov.xml",
+          "size": 4721,
+          "sha256": "1ae0c3efb7c9fc89bfe9ccd7790720c2ca3c6e4fec51085e51ff77efa80b4087"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedObjectPresentation_Cov",
+      "property": "ExtendedObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovExtendedObjectPresentation_Cov.xml",
+          "size": 4793,
+          "sha256": "9516f7fc91f0fb405b11198973ca47e9a1a92bf48361b5ce53deb1478866ae09"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovListPresentation_Cov.xml",
+          "size": 4703,
+          "sha256": "3a16390fe003d43530b8eea18ea402679d7bd156462f86ac765457ad5b7b26f1"
+        }
+      ]
+    },
+    {
+      "name": "CovExtendedListPresentation_Cov",
+      "property": "ExtendedListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovExtendedListPresentation_Cov.xml",
+          "size": 4775,
+          "sha256": "73b33e43e23eab0ff3dbb3279cca169c61bcb8eccd8033dd3804fe73e37ccdb5"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovExplanation_Cov.xml",
+          "size": 4658,
+          "sha256": "dfc61bdb01e9c1c3b8bd5fba17432472020cbd1799a292468237dd4181cde778"
+        }
+      ]
+    },
+    {
+      "name": "CovCreateOnInput_DontUse",
+      "property": "CreateOnInput",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCreateOnInput_DontUse.xml",
+          "size": 4598,
+          "sha256": "88c051a0b8585cfd88429bad071a482b722451bca729c4779874669315dd37bf"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceHistoryOnInput_DontUse",
+      "property": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovChoiceHistoryOnInput_DontUse.xml",
+          "size": 4653,
+          "sha256": "db41c94fb03e7e9cd2f4487422b59e6324d2962a0192c286e0a4f1a20644b388"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 4769,
+          "sha256": "adb95faa21c009d186588beba0f74861b7a08aec207b13d649083c25f4d978fe"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 4825,
+          "sha256": "eb3287fbcaa4384c5be38834c509a5b575a04bff9ba809bebffa6a1c6e63b1ec"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_0__InputByStringDescription",
+      "property": [
+        "CodeLength",
+        "InputByString"
+      ],
+      "kind": "combination",
+      "value": {
+        "CodeLength": "0",
+        "InputByString": "\n\t\t\t\t<xr:Field>Catalog.CovTemplate.StandardAttribute.Description</xr:Field>\n\t\t\t"
+      },
+      "source": "platform refusal of CodeLength_0: input by string names the code",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovCodeLength_0__InputByStringDescription.xml",
+          "size": 4631,
+          "sha256": "885f01d8d991b6c409f6169d009e7ce7d6aacf5a37a16c62c2bf4d59c84a6a5b"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_0__InputByStringCode",
+      "property": [
+        "DescriptionLength",
+        "InputByString"
+      ],
+      "kind": "combination",
+      "value": {
+        "DescriptionLength": "0",
+        "InputByString": "\n\t\t\t\t<xr:Field>Catalog.CovTemplate.StandardAttribute.Code</xr:Field>\n\t\t\t"
+      },
+      "source": "platform refusal of DescriptionLength_0: input by string names the description",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Catalogs/CovDescriptionLength_0__InputByStringCode.xml",
+          "size": 4623,
+          "sha256": "4495ccb613438cc411b644da5bfc9be0a0f8bdd266b21b865e1e4629a307718d"
+        }
+      ]
+    }
+  ]
+}

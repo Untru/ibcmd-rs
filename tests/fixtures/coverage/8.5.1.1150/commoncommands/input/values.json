@@ -1,0 +1,133 @@
+{
+  "schema_version": 1,
+  "collection": "CommonCommands",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 96,
+  "properties": [
+    {
+      "name": "Group",
+      "kind": "enum",
+      "template": "ActionsPanelTools",
+      "values": [
+        {
+          "value": "ActionsPanelCreate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "ActionsPanelReports",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormCommandBarCreateBasedOn",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormCommandBarImportant",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormNavigationPanelGoTo",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormNavigationPanelImportant",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "NavigationPanelOrdinary",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "NavigationPanelSeeAlso",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "Representation",
+      "kind": "enum",
+      "template": "Auto",
+      "values": [
+        {
+          "value": "Picture",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "PictureAndText",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ToolTip",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    },
+    {
+      "name": "Picture",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Shortcut",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "CommandParameterType",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "ParameterUseMode",
+      "kind": "enum",
+      "template": "Single",
+      "values": [
+        {
+          "value": "Multiple",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ModifiesData",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "OnMainServerUnavalableBehavior",
+      "kind": "enum",
+      "template": "Auto",
+      "values": []
+    }
+  ]
+}

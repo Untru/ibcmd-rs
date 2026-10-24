@@ -1,0 +1,206 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-businessprocesses",
+  "collection": "BusinessProcesses",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "45ba4cbc6927433fadd76517e7b0493533b257609a4736d7e2d18956e813877a",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 85544,
+    "decoded_sha256": "d66828c99a9397d0888f792f0c0f02aaf32636872762d53fedd95269d550d192",
+    "encoded_sha256": "73aafb93c4c628ce2e3dd6d1a4c887229e5842e7369d490ae40ca75d02c7fed9"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11831,
+          "sha256": "076f3c9b2545b3f4a5052801e1ab2b47dd0824e37c370e174a60f97072e46a31"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "c627801e51f01f409b4eea9c22bbceaf78de66ba90fdb5015714fd0eaa70ced8"
+        },
+        {
+          "path": "Tasks/CovTask.xml",
+          "size": 4071,
+          "sha256": "10d9d5b0fd4f8e2b642de0cd8ed4bf93815999dc3b887256b60c5fb70243df2a"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovTemplate.xml",
+          "size": 4286,
+          "sha256": "d0788d9b4583619bdc3a66590bb927cb806732fa94612d76a8f1dd682082dd86"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovUseStandardCommands_false.xml",
+          "size": 4423,
+          "sha256": "a5b5efdc780c4ce22c38e83c531223e8c78a56164a9a88f398f62212d04a1e4d"
+        }
+      ]
+    },
+    {
+      "name": "CovNumberLength_11",
+      "property": "NumberLength",
+      "kind": "number",
+      "value": "11",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovNumberLength_11.xml",
+          "size": 4343,
+          "sha256": "d4f46394d84ef78f9d1a9c169806f50759dd2837f0cd172ce1eae26fa09908c0"
+        }
+      ]
+    },
+    {
+      "name": "CovCheckUnique_false",
+      "property": "CheckUnique",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovCheckUnique_false.xml",
+          "size": 4359,
+          "sha256": "9fe0937aaa083980c49c1d80f0431a88f30f63b22d1fb1200873a0337f7a7be9"
+        }
+      ]
+    },
+    {
+      "name": "CovAutonumbering_false",
+      "property": "Autonumbering",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovAutonumbering_false.xml",
+          "size": 4375,
+          "sha256": "be8577574d6186f86a9ce8034ea5fa746265db8bf4e75f71d24a78140015d637"
+        }
+      ]
+    },
+    {
+      "name": "CovCreateTaskInPrivilegedMode_false",
+      "property": "CreateTaskInPrivilegedMode",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovCreateTaskInPrivilegedMode_false.xml",
+          "size": 4479,
+          "sha256": "5ce0839d8df3c8bfc7e992511b1d289218b17dc3b7ac36e35f9d8f64adb2a9a9"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovIncludeHelpInContents_true.xml",
+          "size": 4429,
+          "sha256": "fea7ef974ad5e05d69e5c49eea094c0ab8fb4331bf157107f1b9dd64b5944b18"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovListPresentation_Cov.xml",
+          "size": 4499,
+          "sha256": "4668987fc39d597a302b395c9e61a24f9ee7e355a2af669c4d3290e4d9ce3a06"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovExplanation_Cov.xml",
+          "size": 4454,
+          "sha256": "fed2bac8d0333730cfc2fdcf6fb20cf38cd2b846d619cb460e825f38458c995b"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 4565,
+          "sha256": "9e1f74e098ebe3ba0294002f25eb3b7f359e2976d7f2110367def9ee9cf05454"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "BusinessProcesses/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 4621,
+          "sha256": "57c5c91de2eeaf784bcec27c16eec12a4bae53a9742ff27b57b3448971cb85d0"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-palettecolors",
+  "collection": "PaletteColors",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "41e874b8c19bf34504af03c769424ceaf2351e19874e2a9f4d7c789f78dc7de7",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76166,
+    "decoded_sha256": "7e7cc3cdd76c276434ff56c4bd48f25ff992cb16bcfef64e8fa6f402bc3d83ed",
+    "encoded_sha256": "f25ecd1715b12a2ae113705b2bc9c8ee321f971b6290df83e4518449b6648af2"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11108,
+          "sha256": "2dbb863b1778f0262ca2c94f4c9f03273dfa14e5ca95458e713dea9799b6701b"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "4f1999e74675d439aca0140c0299878dca7938baa5fc89342f47a6b945b5e8b6"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "PaletteColors/CovTemplate.xml",
+          "size": 1183,
+          "sha256": "62cbe059ff7733ffecd83b3c8ef4657f5dc2165c273537d8ca76bed59cf88c0d"
+        }
+      ]
+    }
+  ]
+}

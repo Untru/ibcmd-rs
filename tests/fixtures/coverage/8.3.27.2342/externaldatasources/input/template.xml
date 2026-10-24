@@ -1,0 +1,26 @@
+﻿<?xml version="1.0" encoding="UTF-8"?>
+<MetaDataObject xmlns="http://v8.1c.ru/8.3/MDClasses" xmlns:app="http://v8.1c.ru/8.2/managed-application/core" xmlns:cfg="http://v8.1c.ru/8.1/data/enterprise/current-config" xmlns:cmi="http://v8.1c.ru/8.2/managed-application/cmi" xmlns:ent="http://v8.1c.ru/8.1/data/enterprise" xmlns:lf="http://v8.1c.ru/8.2/managed-application/logform" xmlns:style="http://v8.1c.ru/8.1/data/ui/style" xmlns:sys="http://v8.1c.ru/8.1/data/ui/fonts/system" xmlns:v8="http://v8.1c.ru/8.1/data/core" xmlns:v8ui="http://v8.1c.ru/8.1/data/ui" xmlns:web="http://v8.1c.ru/8.1/data/ui/colors/web" xmlns:win="http://v8.1c.ru/8.1/data/ui/colors/windows" xmlns:xen="http://v8.1c.ru/8.3/xcf/enums" xmlns:xpr="http://v8.1c.ru/8.3/xcf/predef" xmlns:xr="http://v8.1c.ru/8.3/xcf/readable" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" version="2.20">
+	<ExternalDataSource uuid="a67a2fd3-8f71-58f9-beea-5d1c6a064f72">
+		<InternalInfo>
+			<xr:GeneratedType name="ExternalDataSourceManager.CovTemplate" category="Manager">
+				<xr:TypeId>8727c54d-ed9c-5cbe-af5c-f286459d1ecf</xr:TypeId>
+				<xr:ValueId>265c23c2-9e13-514a-ac46-44128df9ed74</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExternalDataSourceTablesManager.CovTemplate" category="TablesManager">
+				<xr:TypeId>622c68bb-71f1-54d9-aaf3-6dcd0623f852</xr:TypeId>
+				<xr:ValueId>5afd4d78-9e25-53d5-8f0e-0c3052913512</xr:ValueId>
+			</xr:GeneratedType>
+			<xr:GeneratedType name="ExternalDataSourceCubesManager.CovTemplate" category="CubesManager">
+				<xr:TypeId>fa2a91fd-633c-5b0e-acc2-d6683b776da5</xr:TypeId>
+				<xr:ValueId>ace12858-d47b-5ac5-a159-e317092c2433</xr:ValueId>
+			</xr:GeneratedType>
+		</InternalInfo>
+		<Properties>
+			<Name>CovTemplate</Name>
+			<Synonym/>
+			<Comment/>
+			<DataLockControlMode>Automatic</DataLockControlMode>
+		</Properties>
+		<ChildObjects/>
+	</ExternalDataSource>
+</MetaDataObject>

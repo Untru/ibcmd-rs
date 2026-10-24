@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-subsystems",
+  "collection": "Subsystems",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "6966bbb545ae017a80fdfd128a7704d96c3773bd32d77c05a468a39d7c13ae33",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79098,
+    "decoded_sha256": "6af4a12e23ad8bb9b37369f119d62d87bad354dbdc568ae56025cf904b81902a",
+    "encoded_sha256": "64eecf3cc5c0bb8ec838a00d3b918bfaf671dbf9bbab28c03fd1475cd79c44a7"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10560,
+          "sha256": "2869dfc7df81705799ac09ae14b6ecb26475cff405af952f8e455871408b50b4"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "f4e4c369619839b860cf6ec35016e4b1d61f44fd1e2b24611d2cde2a27b9bab1"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Subsystems/CovTemplate.xml",
+          "size": 1324,
+          "sha256": "1eb2ecda0fa6aa17e132e608adc85acad4ddf2a6e722fb4953d1561010b8bfe5"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_false",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Subsystems/CovIncludeHelpInContents_false.xml",
+          "size": 1344,
+          "sha256": "09920e4bc28c69d024585ea8d0cad6171a2c7729bf9db24246d485c3c420a56d"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeInCommandInterface_false",
+      "property": "IncludeInCommandInterface",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Subsystems/CovIncludeInCommandInterface_false.xml",
+          "size": 1348,
+          "sha256": "d3656214de5942562cd51a91f2932fc2130cb61ba5774024248f6a698a35a360"
+        }
+      ]
+    },
+    {
+      "name": "CovUseOneCommand_true",
+      "property": "UseOneCommand",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Subsystems/CovUseOneCommand_true.xml",
+          "size": 1333,
+          "sha256": "1c1a68bdaf883e3c59fa0e61b5cc623ebd7978fc3c449ef3132236ec4e6194b5"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Subsystems/CovExplanation_Cov.xml",
+          "size": 1443,
+          "sha256": "4158c1dd2a3fe61457719d622c20c295cf31bfe23f15118986015fca649b0abb"
+        }
+      ]
+    }
+  ]
+}

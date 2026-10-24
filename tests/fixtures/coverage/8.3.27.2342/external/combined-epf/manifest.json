@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "kind": "external",
+  "set": "8.3.27.2342-xml-2.20-external-combined-epf",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "rounds": "config import --out -> config export --file (1) -> config import --out -> config export --file (2); identical"
+  },
+  "inputs_sha256": "d5d559fb2a394a7935ea70013afdfdc9464158a7c051dbf6bb39bd0d705eaa78",
+  "sources": [
+    {
+      "set": "8.3.27.2342-xml-2.20-external-epf-attributes",
+      "path": "epf-attributes",
+      "manifest_sha256": "3acc30e129cec58a40e810b87876dfdf45723ad0330748252a0abe02433dbe3a"
+    }
+  ],
+  "variants": [
+    {
+      "name": "CovCombined",
+      "property": "Combined",
+      "value": "epf-attributes",
+      "source": "combined",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovCombined.epf.b64",
+        "decoded_sha256": "05c79cfef2487fadf73fe9ce1b1e2570464c2a86efdfcc7211ee27b425621f0d"
+      },
+      "files": [
+        {
+          "path": "CovCombined.xml",
+          "size": 108761,
+          "sha256": "49e65f401735560d93218aa70fc899076784d15c9ab239f1c186a77b1113724f"
+        }
+      ]
+    }
+  ]
+}

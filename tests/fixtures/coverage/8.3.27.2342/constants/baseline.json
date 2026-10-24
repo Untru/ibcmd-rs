@@ -1,0 +1,16 @@
+{
+  "equal": [
+    "CovDataLockControlMode_Automatic",
+    "CovExplanation_Cov",
+    "CovExtendedEdit_true",
+    "CovExtendedPresentation_Cov",
+    "CovFillChecking_ShowError",
+    "CovMarkNegatives_true",
+    "CovMultiLine_true",
+    "CovPasswordMode_true",
+    "CovTemplate",
+    "CovToolTip_Cov",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

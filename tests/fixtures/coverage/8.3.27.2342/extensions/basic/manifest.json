@@ -1,0 +1,1001 @@
+{
+  "schema_version": 1,
+  "kind": "extension",
+  "set": "8.3.27.2342-xml-2.20-extensions-basic",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "extension create -> config import --extension -> export (1) -> config save --extension -> extension create + config load --extension in a fresh base -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "dccce01f177ed886fd399e8d6b5aa79bd014c11206cb0f1bf9224568203169ac",
+  "variants": [
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovTemplate.cfe.b64",
+        "decoded_sha256": "d3dc79601bb3c22a21b4c2567b3c0bcb496216e4d3e2ae38e2efe01da7a747b9"
+      },
+      "files": [
+        {
+          "path": "CovTemplate/Configuration.xml",
+          "size": 3203,
+          "sha256": "f53a08b94686153c4a2839354352288143b4e117ad0843505cfe45ea5ce30694"
+        },
+        {
+          "path": "CovTemplate/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtKeepMappingToExtendedConfigurationObjectsByIDs_false",
+      "property": "KeepMappingToExtendedConfigurationObjectsByIDs",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtKeepMappingToExtendedConfigurationObjectsByIDs_false.cfe.b64",
+        "decoded_sha256": "ac2b8fee97e40959c01994be6b6de1d7a79cc5b200b1f2f155727b5cb4a91954"
+      },
+      "files": [
+        {
+          "path": "CovExtKeepMappingToExtendedConfigurationObjectsByIDs_false/Configuration.xml",
+          "size": 3251,
+          "sha256": "e1b107268cf8084297d7cfea58bb309a0e57e6b48cba9bb1b1a60dbebf65fd3b"
+        },
+        {
+          "path": "CovExtKeepMappingToExtendedConfigurationObjectsByIDs_false/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtPurpose_Customization",
+      "property": "ConfigurationExtensionPurpose",
+      "value": "Customization",
+      "source": "declared:ibcmd extension create --purpose",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtPurpose_Customization.cfe.b64",
+        "decoded_sha256": "94976511dcb6107c5bd7cab83fda099ccba37ae676fa0f7f5c78a99156a48962"
+      },
+      "files": [
+        {
+          "path": "CovExtPurpose_Customization/Configuration.xml",
+          "size": 3227,
+          "sha256": "bca736ee9b0e84745deb5e7fcd4dc7d29d6ed16584bd696a7ab11b459ae03246"
+        },
+        {
+          "path": "CovExtPurpose_Customization/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtPurpose_Patch",
+      "property": "ConfigurationExtensionPurpose",
+      "value": "Patch",
+      "source": "declared:ibcmd extension create --purpose",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtPurpose_Patch.cfe.b64",
+        "decoded_sha256": "fcb9c3a91cf9b9750f15e2de33a48ac6c37b88a72fbf3584ecc82c9070befbd3"
+      },
+      "files": [
+        {
+          "path": "CovExtPurpose_Patch/Configuration.xml",
+          "size": 3211,
+          "sha256": "db9ee98bec071e53008ef1944e6a335197eb0c30e87c96cc575a8451c6adde74"
+        },
+        {
+          "path": "CovExtPurpose_Patch/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtOwnCatalog",
+      "property": "OwnObject",
+      "value": "Catalog",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtOwnCatalog.cfe.b64",
+        "decoded_sha256": "bff77b1bdaebcdc2b497101dca30fa5ae6ba1b2567e4bb517b19b0a0d182615c"
+      },
+      "files": [
+        {
+          "path": "CovExtOwnCatalog/Catalogs/Cov_Own.xml",
+          "size": 4458,
+          "sha256": "81225e5745e247adc39b254747b7edb099372fcf5b0c1f4e968d03aee7c68203"
+        },
+        {
+          "path": "CovExtOwnCatalog/Configuration.xml",
+          "size": 3239,
+          "sha256": "7dc0260bab44ece780fd2f250053d1a872be27c9a2be1264953f43a731985d6d"
+        },
+        {
+          "path": "CovExtOwnCatalog/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtAdoptedCatalog",
+      "property": "AdoptedObject",
+      "value": "Catalog",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtAdoptedCatalog.cfe.b64",
+        "decoded_sha256": "05568297fbd3da5fc42567d6496d029054fe90b82877211493f6e32986c654d4"
+      },
+      "files": [
+        {
+          "path": "CovExtAdoptedCatalog/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtAdoptedCatalog/Configuration.xml",
+          "size": 3243,
+          "sha256": "f74dfa5a693dd2c68b4a2cb3a6a372cba9c388b0a63ee1635171b98701dcd81d"
+        },
+        {
+          "path": "CovExtAdoptedCatalog/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_Hierarchical",
+      "property": "ControlledProperty",
+      "value": "Hierarchical",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_Hierarchical.cfe.b64",
+        "decoded_sha256": "e210d38c724d4d553b7dc736ead686868bb2e6d495875271c9a8bb8eaec1c740"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_Hierarchical/Catalogs/CovBase.xml",
+          "size": 2442,
+          "sha256": "799a7ec03c15a165a17e9fc01f4d46a510a1549c1e1da65550406ddc87f7f18b"
+        },
+        {
+          "path": "CovExtControl_Hierarchical/Configuration.xml",
+          "size": 3249,
+          "sha256": "36adcdcac5a686e9ec84e849cc20ca06badd2d133d125888a34dabe55e0d3e55"
+        },
+        {
+          "path": "CovExtControl_Hierarchical/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_HierarchyType",
+      "property": "ControlledProperty",
+      "value": "HierarchyType",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_HierarchyType.cfe.b64",
+        "decoded_sha256": "32242806520cdd61fb0a2fc1cd483fcb28d1d8a5001fe96a2f1378f4c389aba2"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_HierarchyType/Catalogs/CovBase.xml",
+          "size": 2463,
+          "sha256": "62212bcc8fb95df404ccff14346410b9c3557015311e88f83c5d8a2730615bea"
+        },
+        {
+          "path": "CovExtControl_HierarchyType/Configuration.xml",
+          "size": 3250,
+          "sha256": "421970100c44e43fa304bbc3dcce4e4deb17530eb1e360e0b846b7b660f337e3"
+        },
+        {
+          "path": "CovExtControl_HierarchyType/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_LimitLevelCount",
+      "property": "ControlledProperty",
+      "value": "LimitLevelCount",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_LimitLevelCount.cfe.b64",
+        "decoded_sha256": "43382f6308d0d5452244aeb15804fe432ef236756b802e0ae6ec188b2182702a"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_LimitLevelCount/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_LimitLevelCount/Configuration.xml",
+          "size": 3252,
+          "sha256": "5b77b4bed71ffcb1ff9d3ce48cc9c41c8d67d3473d33b0e5490e9435ccb81eba"
+        },
+        {
+          "path": "CovExtControl_LimitLevelCount/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_LevelCount",
+      "property": "ControlledProperty",
+      "value": "LevelCount",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_LevelCount.cfe.b64",
+        "decoded_sha256": "93c14320961132c9aa96f8a4bd248682e88254a20d78a03abd992273d93c3b2f"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_LevelCount/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_LevelCount/Configuration.xml",
+          "size": 3247,
+          "sha256": "13fbf0432de8686f0af1ee16ee7e5401c13e197a4046eb45d0358a077797e96f"
+        },
+        {
+          "path": "CovExtControl_LevelCount/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_FoldersOnTop",
+      "property": "ControlledProperty",
+      "value": "FoldersOnTop",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_FoldersOnTop.cfe.b64",
+        "decoded_sha256": "6df10cd6d022790262e9e8141f4510a578e5189b5975eda1dd4737efbce98c9a"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_FoldersOnTop/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_FoldersOnTop/Configuration.xml",
+          "size": 3249,
+          "sha256": "c7b5db33a0ebc3b64744b3ae7579809faeac875611864dec8bb0f2d8157418f2"
+        },
+        {
+          "path": "CovExtControl_FoldersOnTop/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_UseStandardCommands",
+      "property": "ControlledProperty",
+      "value": "UseStandardCommands",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_UseStandardCommands.cfe.b64",
+        "decoded_sha256": "ab4f3bb7e2b51a33d651d59c68cb7516cfa4581f47a9eb53698df8dc4bc0f378"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_UseStandardCommands/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_UseStandardCommands/Configuration.xml",
+          "size": 3256,
+          "sha256": "a20b7b59870f1c4c45115d4e04908ccd9e57ec1c92969222d8a9204a244add6d"
+        },
+        {
+          "path": "CovExtControl_UseStandardCommands/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_SubordinationUse",
+      "property": "ControlledProperty",
+      "value": "SubordinationUse",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_SubordinationUse.cfe.b64",
+        "decoded_sha256": "2ba2898d3cf06a2a2d48a0fe990a78366eb90bb92cf34a88d5d5d130708f9032"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_SubordinationUse/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_SubordinationUse/Configuration.xml",
+          "size": 3253,
+          "sha256": "546c686aaf2692624109d53279bcbdc07cdfe5694eef030d444e1c1737a2c222"
+        },
+        {
+          "path": "CovExtControl_SubordinationUse/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CodeLength",
+      "property": "ControlledProperty",
+      "value": "CodeLength",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CodeLength.cfe.b64",
+        "decoded_sha256": "480189ad291021faccdc208b584ce7381e91f0057bca6369907a8b7ec9642b19"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CodeLength/Catalogs/CovBase.xml",
+          "size": 2434,
+          "sha256": "5407be13a238c7772f240e8342ba140d40fbd0d215682f24bbab584e8b7a90d2"
+        },
+        {
+          "path": "CovExtControl_CodeLength/Configuration.xml",
+          "size": 3247,
+          "sha256": "7f7ab80324ae91097136bcc691a9736ae227592ac88f76b5b42ef8616724bbe9"
+        },
+        {
+          "path": "CovExtControl_CodeLength/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_DescriptionLength",
+      "property": "ControlledProperty",
+      "value": "DescriptionLength",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_DescriptionLength.cfe.b64",
+        "decoded_sha256": "e553e9058d9a2de425b36312e1b1612b2549db8cff9ae6156882a10456c30f68"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_DescriptionLength/Catalogs/CovBase.xml",
+          "size": 2449,
+          "sha256": "3d642ea31f7dafb0870cab48ec12018c695bec95ecf36df2cef1fc4afe95e305"
+        },
+        {
+          "path": "CovExtControl_DescriptionLength/Configuration.xml",
+          "size": 3254,
+          "sha256": "29e265bf83a6e373a72558999ee1fc638e82ece2a539dffa9e2b1f082fe70ec2"
+        },
+        {
+          "path": "CovExtControl_DescriptionLength/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CodeType",
+      "property": "ControlledProperty",
+      "value": "CodeType",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CodeType.cfe.b64",
+        "decoded_sha256": "33ffb28f8fc55865b8065f51fc1e3c288c4e48e06031dde69cc54cd5d01e85c8"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CodeType/Catalogs/CovBase.xml",
+          "size": 2435,
+          "sha256": "5f60fcc65c9e51db3d42633368d61df0a0f2955109aa63f482db925f1f35dd34"
+        },
+        {
+          "path": "CovExtControl_CodeType/Configuration.xml",
+          "size": 3245,
+          "sha256": "c432162473de155647db7b2b6a405a05b199762b9672a6c0e05ec518a52094be"
+        },
+        {
+          "path": "CovExtControl_CodeType/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CodeAllowedLength",
+      "property": "ControlledProperty",
+      "value": "CodeAllowedLength",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CodeAllowedLength.cfe.b64",
+        "decoded_sha256": "5c647562b1cf660914c4256fda3dec588bf38a36d0843b65bd1d13fff58c4abe"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CodeAllowedLength/Catalogs/CovBase.xml",
+          "size": 2455,
+          "sha256": "7b6f914cb48bd4b6a830dc98ef2a70532cd41e1026da2c07fa3de7ef1a4ecab7"
+        },
+        {
+          "path": "CovExtControl_CodeAllowedLength/Configuration.xml",
+          "size": 3254,
+          "sha256": "4ebff9310d5ba633c4031840a977e634c1000fa5e5c40926cd59a31ce4a80282"
+        },
+        {
+          "path": "CovExtControl_CodeAllowedLength/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CodeSeries",
+      "property": "ControlledProperty",
+      "value": "CodeSeries",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CodeSeries.cfe.b64",
+        "decoded_sha256": "c983ffabad02817589521689ca5f9ba0e7e9d43a2ee789c4e26e6c7a6f9e5359"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CodeSeries/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_CodeSeries/Configuration.xml",
+          "size": 3247,
+          "sha256": "70036f4c5f0adf51e0caf86bd47e7b3534d8274dc7cc6dd283cef38b37ee92f9"
+        },
+        {
+          "path": "CovExtControl_CodeSeries/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CheckUnique",
+      "property": "ControlledProperty",
+      "value": "CheckUnique",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CheckUnique.cfe.b64",
+        "decoded_sha256": "31d5482678c8e0f8cc28d547fa0418a1a2cba1bcfe679c866e8b2bbeb504cac2"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CheckUnique/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_CheckUnique/Configuration.xml",
+          "size": 3248,
+          "sha256": "c2b94b156b355961d6b8bcee160c4a458944d4be46bd3b7c39ed1954bda28335"
+        },
+        {
+          "path": "CovExtControl_CheckUnique/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_Autonumbering",
+      "property": "ControlledProperty",
+      "value": "Autonumbering",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_Autonumbering.cfe.b64",
+        "decoded_sha256": "6f9cd37a9b270aee77ef02eee3fb5f0ee78a5d081b43dab5cfeed7b10bc56b2c"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_Autonumbering/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_Autonumbering/Configuration.xml",
+          "size": 3250,
+          "sha256": "33c248b53a724e7cbac11ffc0bea4c68d6c3dcc55e88ff4cb5e14111e3e6c7d7"
+        },
+        {
+          "path": "CovExtControl_Autonumbering/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_DefaultPresentation",
+      "property": "ControlledProperty",
+      "value": "DefaultPresentation",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_DefaultPresentation.cfe.b64",
+        "decoded_sha256": "0891adbad0b79a4094ce09432fa22fdfb6faff3ccfd30f4c434b80d42f92e506"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_DefaultPresentation/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_DefaultPresentation/Configuration.xml",
+          "size": 3256,
+          "sha256": "8389d06e151ced8139b561984751770bd7486462d369c9223f2f543b839986d8"
+        },
+        {
+          "path": "CovExtControl_DefaultPresentation/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_PredefinedDataUpdate",
+      "property": "ControlledProperty",
+      "value": "PredefinedDataUpdate",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_PredefinedDataUpdate.cfe.b64",
+        "decoded_sha256": "85c2b7b82c73f2ff884a8fd88efb524400f5a654dd36406018bdbaa8cd68b9b8"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_PredefinedDataUpdate/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_PredefinedDataUpdate/Configuration.xml",
+          "size": 3257,
+          "sha256": "83c9bf102a9a5be1f95ab3cb6a72b61dcf98fa3f524cc3d3c22e90322d80e0be"
+        },
+        {
+          "path": "CovExtControl_PredefinedDataUpdate/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_EditType",
+      "property": "ControlledProperty",
+      "value": "EditType",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_EditType.cfe.b64",
+        "decoded_sha256": "b03dc272907edd0b50c3175a8e56fea7deadb74c5a976205ec678f512cd85c6a"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_EditType/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_EditType/Configuration.xml",
+          "size": 3245,
+          "sha256": "e8919d14165c3a6ce8dd9bc27727bd18820952bcfa5c6961a83e44885394b1f8"
+        },
+        {
+          "path": "CovExtControl_EditType/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_QuickChoice",
+      "property": "ControlledProperty",
+      "value": "QuickChoice",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_QuickChoice.cfe.b64",
+        "decoded_sha256": "a403b13d6604b2f5dd53a526881d4a4cbebed2a5a83205ab189516c37d689a58"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_QuickChoice/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_QuickChoice/Configuration.xml",
+          "size": 3248,
+          "sha256": "98823bd7e0b13830da0f626820ce9ca7057a10105352c696ddcee9b87ecb5e4e"
+        },
+        {
+          "path": "CovExtControl_QuickChoice/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_ChoiceMode",
+      "property": "ControlledProperty",
+      "value": "ChoiceMode",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_ChoiceMode.cfe.b64",
+        "decoded_sha256": "cad7b837e951bf32b848cceb44af196b00e62a6c2553c0a94e6b992634b5cc2e"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_ChoiceMode/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_ChoiceMode/Configuration.xml",
+          "size": 3247,
+          "sha256": "8fa0d2469425273b5953cdcf2166a147e2c586db8a7003f82fd343b527cd1c8c"
+        },
+        {
+          "path": "CovExtControl_ChoiceMode/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_SearchStringModeOnInputByString",
+      "property": "ControlledProperty",
+      "value": "SearchStringModeOnInputByString",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_SearchStringModeOnInputByString.cfe.b64",
+        "decoded_sha256": "1d5d65230308cf2b8166b06dc9464011dc960d9acfe211ff209002028aa2b939"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_SearchStringModeOnInputByString/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_SearchStringModeOnInputByString/Configuration.xml",
+          "size": 3268,
+          "sha256": "74c6b3dd432348927317872d25e531778b8a019354ec7d4fd667c933bd62a6a6"
+        },
+        {
+          "path": "CovExtControl_SearchStringModeOnInputByString/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_FullTextSearchOnInputByString",
+      "property": "ControlledProperty",
+      "value": "FullTextSearchOnInputByString",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_FullTextSearchOnInputByString.cfe.b64",
+        "decoded_sha256": "74075e1ccbf159b504c68224fb55b752fcea0099f0b99dee4c2134b48852e593"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_FullTextSearchOnInputByString/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_FullTextSearchOnInputByString/Configuration.xml",
+          "size": 3266,
+          "sha256": "9e888b4f57fe45e2d016e3d358a563f4036374e66e732c2929daeafadaa6764c"
+        },
+        {
+          "path": "CovExtControl_FullTextSearchOnInputByString/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_ChoiceDataGetModeOnInputByString",
+      "property": "ControlledProperty",
+      "value": "ChoiceDataGetModeOnInputByString",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_ChoiceDataGetModeOnInputByString.cfe.b64",
+        "decoded_sha256": "f81c27f94c648d2e7e5ff0a08f68b92442a60bf6d17f1f03141b4f8e2bf3c0e6"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_ChoiceDataGetModeOnInputByString/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_ChoiceDataGetModeOnInputByString/Configuration.xml",
+          "size": 3269,
+          "sha256": "95b4e33628865e870eef48f41af62ce912343c21b232843002b69ff2d3bdbddf"
+        },
+        {
+          "path": "CovExtControl_ChoiceDataGetModeOnInputByString/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_IncludeHelpInContents",
+      "property": "ControlledProperty",
+      "value": "IncludeHelpInContents",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_IncludeHelpInContents.cfe.b64",
+        "decoded_sha256": "f51df6393eee112594eeaae0a6aec68ac3b0ba9307e1b4abed5350283dae3c4b"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_IncludeHelpInContents/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_IncludeHelpInContents/Configuration.xml",
+          "size": 3258,
+          "sha256": "a2937ac9469a78403c71a2413e876bacaf288f3e610ede20b55cee449622c280"
+        },
+        {
+          "path": "CovExtControl_IncludeHelpInContents/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_DataLockControlMode",
+      "property": "ControlledProperty",
+      "value": "DataLockControlMode",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_DataLockControlMode.cfe.b64",
+        "decoded_sha256": "b42c8a320b6a71ad4284d5549bf318a2f1ec9d9cfde352a32f22418c65e5bd9f"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_DataLockControlMode/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_DataLockControlMode/Configuration.xml",
+          "size": 3256,
+          "sha256": "fa4ad0da8246dbdf4150540b9712f8304138161f8977dc9ce6528d5537aad812"
+        },
+        {
+          "path": "CovExtControl_DataLockControlMode/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_FullTextSearch",
+      "property": "ControlledProperty",
+      "value": "FullTextSearch",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_FullTextSearch.cfe.b64",
+        "decoded_sha256": "176b9f3e6f4be314bd3f678d3fc09932d61464b996518ba1a8c41dc83c5c4f4a"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_FullTextSearch/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_FullTextSearch/Configuration.xml",
+          "size": 3251,
+          "sha256": "011d33bfe242aa45bfbdceff2c07e79facb6ad0a6e74a78a2ae9302ad89d6887"
+        },
+        {
+          "path": "CovExtControl_FullTextSearch/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_CreateOnInput",
+      "property": "ControlledProperty",
+      "value": "CreateOnInput",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_CreateOnInput.cfe.b64",
+        "decoded_sha256": "f51d1d14578646b8f33d9446c49ced8ef2a10d5cfcf0e891162a89efe5d6ab86"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_CreateOnInput/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_CreateOnInput/Configuration.xml",
+          "size": 3250,
+          "sha256": "04cf7f0ced64af88d8f7528b03bf2eac0345bcf8f235e1a8b5fb1103cbf3df58"
+        },
+        {
+          "path": "CovExtControl_CreateOnInput/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_ChoiceHistoryOnInput",
+      "property": "ControlledProperty",
+      "value": "ChoiceHistoryOnInput",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_ChoiceHistoryOnInput.cfe.b64",
+        "decoded_sha256": "28f9f46a9677b84be8630221d59a30fd73e4ba9c5dea5e7589c2eaa83172eb7e"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_ChoiceHistoryOnInput/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_ChoiceHistoryOnInput/Configuration.xml",
+          "size": 3257,
+          "sha256": "7715ecc6323205121e0cad81a832b01707ab3f4aaa1708e2d12349f019bb4c92"
+        },
+        {
+          "path": "CovExtControl_ChoiceHistoryOnInput/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_DataHistory",
+      "property": "ControlledProperty",
+      "value": "DataHistory",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_DataHistory.cfe.b64",
+        "decoded_sha256": "f2a5ea144c1162359f5509f554414f39f0cc85a6c198f54cb965c47cf79f1002"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_DataHistory/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_DataHistory/Configuration.xml",
+          "size": 3248,
+          "sha256": "9ea2a6b70a8f3a03fcd66b9de424173692eac46751186a456f58a3f217b3f697"
+        },
+        {
+          "path": "CovExtControl_DataHistory/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_UpdateDataHistoryImmediatelyAfterWrite",
+      "property": "ControlledProperty",
+      "value": "UpdateDataHistoryImmediatelyAfterWrite",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_UpdateDataHistoryImmediatelyAfterWrite.cfe.b64",
+        "decoded_sha256": "762fbe476e6ae1f6d8b5649ff00121bd27ba7eaa862690afc5d6812511004859"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_UpdateDataHistoryImmediatelyAfterWrite/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_UpdateDataHistoryImmediatelyAfterWrite/Configuration.xml",
+          "size": 3275,
+          "sha256": "839a67e00dce74461500c69cb2311a8e74453963898871bf486961b4482a756f"
+        },
+        {
+          "path": "CovExtControl_UpdateDataHistoryImmediatelyAfterWrite/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    },
+    {
+      "name": "CovExtControl_ExecuteAfterWriteDataHistoryVersionProcessing",
+      "property": "ControlledProperty",
+      "value": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "source": "template",
+      "status": "platform_proven",
+      "file": {
+        "path": "variants/CovExtControl_ExecuteAfterWriteDataHistoryVersionProcessing.cfe.b64",
+        "decoded_sha256": "c7ed0c4d93666e97bde0220ea739e9f343b59bdcef56fc489a83a5540af66a45"
+      },
+      "files": [
+        {
+          "path": "CovExtControl_ExecuteAfterWriteDataHistoryVersionProcessing/Catalogs/CovBase.xml",
+          "size": 2403,
+          "sha256": "5e708660493cbd5b45e1a34964ef0894ee326235078c06d1508eecc019e8552e"
+        },
+        {
+          "path": "CovExtControl_ExecuteAfterWriteDataHistoryVersionProcessing/Configuration.xml",
+          "size": 3282,
+          "sha256": "3a83566fc3f380d76c615e59fb4b927d93064bfc2287abb34fcad0d0ad42e5e5"
+        },
+        {
+          "path": "CovExtControl_ExecuteAfterWriteDataHistoryVersionProcessing/Roles/ОсновнаяРоль.xml",
+          "size": 1098,
+          "sha256": "d0d582ba8b4763019f5344631bfe36b350177e2d0c24f2a494815e47dd2ac3dd"
+        }
+      ]
+    }
+  ]
+}

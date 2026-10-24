@@ -1,0 +1,116 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-calculationregisters",
+  "collection": "CalculationRegisters",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "5087a934e2205d7dacadb7391bb64ebf26dd6306f38d16990e8146be14e14bc2",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 80778,
+    "decoded_sha256": "82b32ef81e9897bcd701b0301e67a174a0dcb4aa028523d5540844d55bbe304a",
+    "encoded_sha256": "25d5b0b45c65fa05ad25a70113735399938a35c975c2b12f1fc9812c17567e20"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ChartsOfCalculationTypes/CovCalculationTypes.xml",
+          "size": 6001,
+          "sha256": "5b6be4ce1e73120b767cf5c75877aa6912298918fe00c2b64fac5d3e426409f6"
+        },
+        {
+          "path": "Configuration.xml",
+          "size": 11464,
+          "sha256": "985632680a1b0ba5bcb78f1c735429e523f98b3620633830fcf28d4d453a3e3f"
+        },
+        {
+          "path": "Documents/CovCalculationRecorder.xml",
+          "size": 4740,
+          "sha256": "a3e6a3df3d191dc878889f2b17eee5e9276b810e1409340d8cc1a4130dce1a13"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "2a4f6359d0db0dc7162fcd2c02afc0922983cfab992cffe9d6f39fd5001b129e"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CalculationRegisters/CovTemplate.xml",
+          "size": 3532,
+          "sha256": "e696b7a60d505e9825044c4f2d75bfec4a656cfa18fd946de0372ca5cfc0e29e"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CalculationRegisters/CovUseStandardCommands_false.xml",
+          "size": 3669,
+          "sha256": "65a426c567c86a1ed8155a09deee17efef9e9b59be27478d8ddff9e53c95a728"
+        }
+      ]
+    },
+    {
+      "name": "CovActionPeriod_true",
+      "property": "ActionPeriod",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_refused",
+      "message": "[ERROR] РегистрРасчета.CovActionPeriod_true - Не назначен график регистру с периодом действия",
+      "files": []
+    },
+    {
+      "name": "CovBasePeriod_true",
+      "property": "BasePeriod",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CalculationRegisters/CovBasePeriod_true.xml",
+          "size": 3587,
+          "sha256": "724aee22044ecabbd6bcee7fe7e091862220e9c037aed5d23ceda5875758f705"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CalculationRegisters/CovIncludeHelpInContents_true.xml",
+          "size": 3675,
+          "sha256": "9287579ef8e5b429d242e12976f4ed4554c224f33bebee29e092d53235d2c355"
+        }
+      ]
+    }
+  ]
+}

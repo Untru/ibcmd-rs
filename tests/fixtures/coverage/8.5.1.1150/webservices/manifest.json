@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-webservices",
+  "collection": "WebServices",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "9820ae9821f64dc3b3705f6539eff0d59013a59d814e3c3e79771bd9aaa67091",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76162,
+    "decoded_sha256": "bb63bfe4c5fbb814867524c684756bdec2a930f2000c730a178ae5ffce3b67b7",
+    "encoded_sha256": "07db2eadc4be50bde83bc53fad28383960f79a4addbd410ba5811e4a9a5f09c8"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11064,
+          "sha256": "2d29df3616f304facfba9113d75f43cf8fcb68f6e23b5ede352ebf7129b23c67"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "2af1e47ce39ae4381f30c1dc7e37d62a0bd58d50b741a87aff407b118cbccb5a"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebServices/CovTemplate.xml",
+          "size": 1381,
+          "sha256": "a0eba841317e3588eb9fa7e2ba203b391d3283749a31d222f4545adecff8031e"
+        }
+      ]
+    },
+    {
+      "name": "CovReuseSessions_DontUse",
+      "property": "ReuseSessions",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] WebСервис.CovTemplate - Неуникальное имя файла публикации ws1.1cws",
+      "files": []
+    }
+  ]
+}

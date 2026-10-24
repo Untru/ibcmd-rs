@@ -1,0 +1,20 @@
+{
+  "equal": [
+    "CovGroup_ActionsPanelCreate",
+    "CovGroup_ActionsPanelReports",
+    "CovGroup_FormCommandBarCreateBasedOn",
+    "CovGroup_FormCommandBarImportant",
+    "CovGroup_FormNavigationPanelGoTo",
+    "CovGroup_FormNavigationPanelImportant",
+    "CovGroup_NavigationPanelOrdinary",
+    "CovGroup_NavigationPanelSeeAlso",
+    "CovIncludeHelpInContents_true",
+    "CovModifiesData_true",
+    "CovParameterUseMode_Multiple",
+    "CovRepresentation_Picture",
+    "CovRepresentation_PictureAndText",
+    "CovTemplate",
+    "CovToolTip_Cov",
+    "configuration"
+  ]
+}

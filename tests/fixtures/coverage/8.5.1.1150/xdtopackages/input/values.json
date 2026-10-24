@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "collection": "XDTOPackages",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 66,
+  "properties": [
+    {
+      "name": "Namespace",
+      "kind": "other",
+      "template": "http://www.sample-package.org",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

@@ -33,6 +33,9 @@ Before a long run, check that the binary you start is the one you just built.
 
 ## 3. Run and compare
 
+Every difference that survives classification becomes a coverage variant
+before anyone fixes it (skill `coverage-case`).
+
 Write both sides into new directories that are never reused, then compare
 the trees (`diff -r`, or `source-diff` of the platform-oracle build). Full
 SQL Server runs follow `docs/parity-protocol.md`: immutable run directories

@@ -1,0 +1,226 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-exchangeplans",
+  "collection": "ExchangePlans",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "4ba4fd752eee1c5f0e6c2465365eadfe302946c4ce7416fd79810b161fcfd35f",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 85167,
+    "decoded_sha256": "daaa4001e4cb6e51f7c3605ada1eb181684e62c0335326378964aabe328b4717",
+    "encoded_sha256": "10d0e0c5006c002ed005a1200c62225a1c4a35e7278aaef7b6b46d985ca4ac4f"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10999,
+          "sha256": "d07fcc018f06f51df68697bc6a352d06a8ed178e5c9f5941819227742a78435b"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "3febaf342d30ec3ffcc1ca3cde1af4d52c5da834e0938ed8a9a8fcd3f00541bb"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovTemplate.xml",
+          "size": 4139,
+          "sha256": "41af69c935e3f791885ba3206d1b086c5c197510aad1c22ded53f2aaa277c15a"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_false",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovUseStandardCommands_false.xml",
+          "size": 4276,
+          "sha256": "413d5d2abf18d621e27df58f8e4795a9be9a6c739958a0dd6ce494c91ea2262b"
+        }
+      ]
+    },
+    {
+      "name": "CovCodeLength_36",
+      "property": "CodeLength",
+      "kind": "number",
+      "value": "36",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovCodeLength_36.xml",
+          "size": 4180,
+          "sha256": "b705ba2781d69bfbc551418890268ceef9c5bb3061cc35cc9d3b962643ece5c5"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_150",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "150",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovDescriptionLength_150.xml",
+          "size": 4244,
+          "sha256": "41c14f02fe9549da252734af3b76e0add60e3f34b478754b069b353a15032a4c"
+        }
+      ]
+    },
+    {
+      "name": "CovDescriptionLength_250",
+      "property": "DescriptionLength",
+      "kind": "number",
+      "value": "250",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovDescriptionLength_250.xml",
+          "size": 4244,
+          "sha256": "277c23083cf6779bacdea0c136317465f1813b202ab5d3e88fa1d89733a45d64"
+        }
+      ]
+    },
+    {
+      "name": "CovQuickChoice_true",
+      "property": "QuickChoice",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovQuickChoice_true.xml",
+          "size": 4202,
+          "sha256": "880a08dcaa882d859f9e5788b95eefbaf2e2f63722b5b1a298b5ae183a837582"
+        }
+      ]
+    },
+    {
+      "name": "CovDistributedInfoBase_true",
+      "property": "DistributedInfoBase",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovDistributedInfoBase_true.xml",
+          "size": 4266,
+          "sha256": "469ecad145711223314de16baf731c4438c1535359c88755518b8838d11241e1"
+        }
+      ]
+    },
+    {
+      "name": "CovIncludeConfigurationExtensions_true",
+      "property": "IncludeConfigurationExtensions",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_refused",
+      "message": "[ERROR] ПланОбмена.CovIncludeConfigurationExtensions_true - Недопустимое значение поля ВключатьРасширенияКонфигурации",
+      "files": []
+    },
+    {
+      "name": "CovIncludeHelpInContents_true",
+      "property": "IncludeHelpInContents",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovIncludeHelpInContents_true.xml",
+          "size": 4282,
+          "sha256": "d688f327a50e5dd7c20adfa7adbc4ffb256f69d981f0168f84227cc0d8a82713"
+        }
+      ]
+    },
+    {
+      "name": "CovObjectPresentation_Cov",
+      "property": "ObjectPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovObjectPresentation_Cov.xml",
+          "size": 4370,
+          "sha256": "cfad51aa12f02605ffafaabf0f71b71f6a63d6e759fdcc01b8cedc7eeb753b1c"
+        }
+      ]
+    },
+    {
+      "name": "CovListPresentation_Cov",
+      "property": "ListPresentation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovListPresentation_Cov.xml",
+          "size": 4352,
+          "sha256": "210cc3a7719ad9439de03836b3d796a932c42b820e32c22e69513c48b178cd74"
+        }
+      ]
+    },
+    {
+      "name": "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+      "property": "UpdateDataHistoryImmediatelyAfterWrite",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+          "size": 4418,
+          "sha256": "28151423e3771d76fd6f4968fd53b6076defd9a7279e79967e090b1410e32785"
+        }
+      ]
+    },
+    {
+      "name": "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+      "property": "ExecuteAfterWriteDataHistoryVersionProcessing",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+          "size": 4474,
+          "sha256": "c2bbf1adcbdd36ce748df86f9ff076510089e21dc8005d69c0885953cc7230ff"
+        }
+      ]
+    }
+  ]
+}

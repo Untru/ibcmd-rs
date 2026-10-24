@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovCheckUnique_false",
+    "CovNumberAllowedLength_Fixed",
+    "CovNumberLength_11",
+    "CovNumberPeriodicity_Year",
+    "CovTemplate",
+    "configuration"
+  ]
+}

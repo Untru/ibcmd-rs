@@ -1,0 +1,15 @@
+{
+  "equal": [
+    "CovCodeLength_36",
+    "CovDescriptionLength_150",
+    "CovDescriptionLength_250",
+    "CovDistributedInfoBase_true",
+    "CovIncludeHelpInContents_true",
+    "CovListPresentation_Cov",
+    "CovObjectPresentation_Cov",
+    "CovQuickChoice_true",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "equal": [
+    "CovCategory_ActionsPanel",
+    "CovCategory_FormCommandBar",
+    "CovRepresentation_Picture",
+    "CovTemplate",
+    "CovToolTip_Cov",
+    "configuration"
+  ]
+}

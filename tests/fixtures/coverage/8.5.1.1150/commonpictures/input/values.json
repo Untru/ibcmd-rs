@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "collection": "CommonPictures",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 659,
+  "properties": [
+    {
+      "name": "AvailabilityForChoice",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "AvailabilityForAppearance",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    }
+  ]
+}

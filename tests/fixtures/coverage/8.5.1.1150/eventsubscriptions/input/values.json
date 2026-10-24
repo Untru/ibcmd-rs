@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "collection": "EventSubscriptions",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 143,
+  "properties": [
+    {
+      "name": "Source",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Event",
+      "kind": "enum",
+      "template": "BeforeWrite",
+      "values": [
+        {
+          "value": "BeforeDelete",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FillCheckProcessing",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "Filling",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "FormGetProcessing",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnCopy",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnReceiveDataFromMaster",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnReceiveDataFromSlave",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnSendDataToMaster",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnSendDataToSlave",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnSendNodeDataToSlave",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnSetNewCode",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnSetNewNumber",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "OnWrite",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "Posting",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "PresentationFieldsGetProcessing",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "PresentationGetProcessing",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "Handler",
+      "kind": "other",
+      "template": "CommonModule.CovHandlers.CovSubscription",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-externaldatasources",
+  "collection": "ExternalDataSources",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "0007c925bdb9336712585cbb14530d29e7d021a320fb38e7af4253162a3cdb7d",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76169,
+    "decoded_sha256": "f3bd8d81745fcf025a67cd495683905d353574a80c8f467bfd84f9b087375622",
+    "encoded_sha256": "e56323b45c23f70dc8750107d1c19f5c518100d462df3cda22901a0b26683bdb"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11120,
+          "sha256": "b095e96736ae3722621b4de1e43cfe0d18931e6f160c0f92834304119fa63708"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "fd9306bdd278cbfa948595323d9ef88be800f07e9c7f88be344cb85432a5b35e"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "ExternalDataSources/CovTemplate.xml",
+          "size": 2032,
+          "sha256": "ec663d80c5d4bbaf1a9f36d931164f805c78492e911f165c60b5a1de6d094a59"
+        }
+      ]
+    }
+  ]
+}

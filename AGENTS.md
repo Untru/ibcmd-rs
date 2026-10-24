@@ -43,7 +43,11 @@ cargo build --locked --profile iter                                      # binar
    `agent/issue-<N>-<slug>` in your own worktree.
 2. New capability (command, format, route, gate): write the OpenSpec change
    first (skill `openspec-change`). Bug: write the failing test first and see
-   it fail for the right reason.
+   it fail for the right reason. A mismatch found on a typical configuration
+   (ERP, Бухгалтерия, БСП…) is first reproduced as a coverage variant and seen
+   red in `tests/coverage_corpus.rs` (skill `coverage-case`); only then fixed.
+   The variant also enters the platform's combined configuration: rebuild it
+   with `tools/coverage/combine.py` (the coverage test fails until you do).
 3. Change in small steps; after each, run the narrowest test that covers it.
 4. `cargo xtask check` until green. A failure is pre-existing only after you
    reproduce it on the merge base and say so, with the command.
@@ -82,7 +86,10 @@ cargo build --locked --profile iter                                      # binar
   Approved scopes are recorded in `docs/morph1c-local-adaptations.md`.
 - Never commit private `.cf`/`.1CD` files, native export trees, raw blobs,
   application XML/BSL, credentials, or reports with application paths.
-  Fixtures are clean-room or minimized sanitized fragments.
+  Fixtures are clean-room or minimized sanitized fragments. A typical
+  configuration's object never becomes a fixture: its mismatch becomes a
+  generated coverage variant; only a legacy layout the current platform cannot
+  write gets a minimized raw fragment, marked as such.
 - Commands that write to an infobase run only against disposable copies.
 - No full parity run until the exact raw fixture, extraction on a saved BCP,
   the policy gate and the targeted tests pass locally. Check the binary's

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "epf",
+  "attributes_donor": null,
+  "sources": [
+    {
+      "set": "8.3.27.2342-xml-2.20-external-epf-attributes",
+      "path": "epf-attributes",
+      "manifest_sha256": "3acc30e129cec58a40e810b87876dfdf45723ad0330748252a0abe02433dbe3a"
+    }
+  ],
+  "variants": [
+    "CovCombined"
+  ]
+}

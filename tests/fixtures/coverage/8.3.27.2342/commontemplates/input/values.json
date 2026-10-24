@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "collection": "CommonTemplates",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 23,
+  "properties": [
+    {
+      "name": "TemplateType",
+      "kind": "enum",
+      "template": "SpreadsheetDocument",
+      "values": [
+        {
+          "value": "AddIn",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "BinaryData",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "DataCompositionAppearanceTemplate",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "DataCompositionSchema",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "HTMLDocument",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "TextDocument",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    }
+  ]
+}

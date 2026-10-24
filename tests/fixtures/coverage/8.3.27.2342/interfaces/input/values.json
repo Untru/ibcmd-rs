@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "collection": "Interfaces",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 0,
+  "properties": [
+    {
+      "name": "Switchable",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    }
+  ]
+}

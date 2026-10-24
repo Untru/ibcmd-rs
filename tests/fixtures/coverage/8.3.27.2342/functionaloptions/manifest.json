@@ -1,0 +1,71 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-functionaloptions",
+  "collection": "FunctionalOptions",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "c6b3d3d47ad76dc5afffb7b70a59445688e6c59e1ca50ee22e91422f53790740",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 77618,
+    "decoded_sha256": "21be4cfeaa6cb34f8e6623cbf614b034aa62e26f03b62cebdd43cf2157f5a42d",
+    "encoded_sha256": "d5e33085d48ec612e5513d477ce52847faaf09fdb75f09c68b68b0049937026c"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10460,
+          "sha256": "7c6beb4a11b369d7e488d946a4bf70c899825f0ba21dfe4fb63b610bd1612465"
+        },
+        {
+          "path": "Constants/CovFlag.xml",
+          "size": 2842,
+          "sha256": "f4359b1ef79e3a4c230707cbd0e3b9e419a66d1edac1527c6c20e091a19292a9"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "99ffed6689b7429a932f63fb627aee553e4e1537179b8f70fc3035ab34f0a230"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "FunctionalOptions/CovTemplate.xml",
+          "size": 1214,
+          "sha256": "39d7ebbfa1d6ee7f37fff03890b9e9ca8b5f3df374b6ab83a85898c9012cf34e"
+        }
+      ]
+    },
+    {
+      "name": "CovPrivilegedGetMode_false",
+      "property": "PrivilegedGetMode",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "FunctionalOptions/CovPrivilegedGetMode_false.xml",
+          "size": 1230,
+          "sha256": "5b117a3c708c37dc911e8338f2b321f85d77785de307598c003885d54fb75216"
+        }
+      ]
+    }
+  ]
+}

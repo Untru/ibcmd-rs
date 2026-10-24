@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "collection": "HTTPServices",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 4,
+  "properties": [
+    {
+      "name": "RootURL",
+      "kind": "enum",
+      "template": "cov",
+      "values": [
+        {
+          "value": "billing",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "dt",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "exchange_dsl_1_0_0_1",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        },
+        {
+          "value": "oauth2_mail",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "ReuseSessions",
+      "kind": "enum",
+      "template": "AutoUse",
+      "values": [
+        {
+          "value": "Use",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "SessionMaxAge",
+      "kind": "number",
+      "template": "20",
+      "values": []
+    }
+  ]
+}

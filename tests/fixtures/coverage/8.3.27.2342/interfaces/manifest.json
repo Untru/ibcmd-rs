@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-interfaces",
+  "collection": "Interfaces",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "9ac5c3811c102120b37c146706d679c3364d4e7165a8713dcb2436c58dc5fcb0",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76869,
+    "decoded_sha256": "c391a0c151ff6e754f93a5f6726edbca224d731ee7d56f62cb6a8435e01f9415",
+    "encoded_sha256": "5ffa382b2caf41969a655ee1d8d952f218f7cb3815c753ac4f6a231d572c7ace"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10392,
+          "sha256": "b9979f5b09811fa375bdbbbf5772f52959a1d9ac16d657bd389d3e46579b5b89"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "0eca147b598dd58dfc871848a426120c08dac200db786b0f05bf35b1cad73a14"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Interfaces/CovTemplate.xml",
+          "size": 1129,
+          "sha256": "4801f64f27bf5de0fc30a89db72c86ace0074329ebf316ced02089d4187e3f38"
+        }
+      ]
+    },
+    {
+      "name": "CovSwitchable_false",
+      "property": "Switchable",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Interfaces/CovSwitchable_false.xml",
+          "size": 1138,
+          "sha256": "6423a6ca995a7d30407bc2de00c78da1e0c76ac159fa5d503d7f8d1100ceba59"
+        }
+      ]
+    }
+  ]
+}

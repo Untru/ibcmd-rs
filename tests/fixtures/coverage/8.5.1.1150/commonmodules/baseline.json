@@ -1,0 +1,15 @@
+{
+  "equal": [
+    "CovClientManagedApplication_true",
+    "CovClientOrdinaryApplication_false",
+    "CovExternalConnection_true",
+    "CovGlobal_true",
+    "CovPrivileged_true",
+    "CovReturnValuesReuse_DuringRequest",
+    "CovReturnValuesReuse_DuringSession",
+    "CovServerCall_true",
+    "CovServer_true",
+    "CovTemplate",
+    "configuration"
+  ]
+}

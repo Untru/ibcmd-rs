@@ -1,0 +1,26 @@
+{
+  "schema_version": 1,
+  "collection": "StyleItems",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 119,
+  "properties": [
+    {
+      "name": "Type",
+      "kind": "enum",
+      "template": "Color",
+      "values": [
+        {
+          "value": "Font",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "Value",
+      "kind": "other",
+      "template": "#000000",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    }
+  ]
+}

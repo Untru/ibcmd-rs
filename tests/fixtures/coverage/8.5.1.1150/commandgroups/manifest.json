@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-commandgroups",
+  "collection": "CommandGroups",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "4a8a326da9c11a096ff9b3131482b4419f995afed279e1592bfb65ef07332a5c",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79130,
+    "decoded_sha256": "c7312eb942a69e51c4a7dda4bd8f3b8ef62db5337d612cc14ba363f93cd8e194",
+    "encoded_sha256": "3aaca6719ddb3ec800b4d60702e05c21ed895bdff28e0b0f8b8a5493ae81a17d"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11333,
+          "sha256": "b59cb140430a7585f46542f5a580c7d8b5acf070fb5476cf85f04fabec9d1920"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "c642f0c72656be133ffb58d658f6f1924aa6135504ce8dc41bbe5f216e9033a0"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommandGroups/CovTemplate.xml",
+          "size": 1269,
+          "sha256": "0870490977a94135694fff432a163af3c805eb141bf3275e7112131e7ed3f0ff"
+        }
+      ]
+    },
+    {
+      "name": "CovRepresentation_Picture",
+      "property": "Representation",
+      "kind": "enum",
+      "value": "Picture",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommandGroups/CovRepresentation_Picture.xml",
+          "size": 1286,
+          "sha256": "75e4fb4ff89a8667f4896ad45975185b55d4a3f2f42dcf81928c3fb6f4b69fa3"
+        }
+      ]
+    },
+    {
+      "name": "CovToolTip_Cov",
+      "property": "ToolTip",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommandGroups/CovToolTip_Cov.xml",
+          "size": 1380,
+          "sha256": "10c89121c198820d12557c500617e0356ea79cf14607592a03a5cbe4ead7ebad"
+        }
+      ]
+    },
+    {
+      "name": "CovCategory_ActionsPanel",
+      "property": "Category",
+      "kind": "enum",
+      "value": "ActionsPanel",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommandGroups/CovCategory_ActionsPanel.xml",
+          "size": 1279,
+          "sha256": "40eadd77378db52cba5f50f82774666283f7b1c87fff2d55e30c1ace9cb61803"
+        }
+      ]
+    },
+    {
+      "name": "CovCategory_FormCommandBar",
+      "property": "Category",
+      "kind": "enum",
+      "value": "FormCommandBar",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "CommandGroups/CovCategory_FormCommandBar.xml",
+          "size": 1283,
+          "sha256": "4a1975586f4b68a7825d62d18742817fceb3e5528ec2fca615a34477d6d0da44"
+        }
+      ]
+    }
+  ]
+}

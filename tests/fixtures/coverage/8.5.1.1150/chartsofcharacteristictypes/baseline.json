@@ -1,0 +1,21 @@
+{
+  "equal": [
+    "CovAutonumbering_false",
+    "CovCheckUnique_false",
+    "CovChoiceHistoryOnInput_DontUse",
+    "CovCodeAllowedLength_Fixed",
+    "CovDescriptionLength_100",
+    "CovDescriptionLength_150",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
+    "CovFoldersOnTop_false",
+    "CovHierarchical_true",
+    "CovIncludeHelpInContents_true",
+    "CovObjectPresentation_Cov",
+    "CovPredefinedDataUpdate_DontAutoUpdate",
+    "CovQuickChoice_true",
+    "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
+    "configuration"
+  ]
+}

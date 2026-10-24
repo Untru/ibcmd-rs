@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "kind": "erf",
+  "attributes_donor": null,
+  "sources": [
+    {
+      "set": "8.3.27.2342-xml-2.20-external-erf-attributes",
+      "path": "erf-attributes",
+      "manifest_sha256": "c6768470bb6415eaefc95acc99426b3497b20331267257e8912e35e6141dd128"
+    }
+  ],
+  "variants": [
+    "CovCombined"
+  ]
+}

@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "collection": "CommonForms",
+  "corpus": "servicedesk-bsp-demo-8.5.1.1150",
+  "corpus_objects": 121,
+  "properties": [
+    {
+      "name": "FormType",
+      "kind": "enum",
+      "template": "Ordinary",
+      "values": [
+        {
+          "value": "Managed",
+          "source": "observed:servicedesk-bsp-demo-8.5.1.1150"
+        }
+      ]
+    },
+    {
+      "name": "IncludeHelpInContents",
+      "kind": "boolean",
+      "template": "false",
+      "values": [
+        {
+          "value": "true",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "UsePurposes",
+      "kind": "nested",
+      "template": null,
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "UseInInterfaceCompatibilityMode",
+      "kind": "enum",
+      "template": "Any",
+      "values": []
+    },
+    {
+      "name": "UseStandardCommands",
+      "kind": "boolean",
+      "template": "true",
+      "values": [
+        {
+          "value": "false",
+          "source": "boolean"
+        }
+      ]
+    },
+    {
+      "name": "ExtendedPresentation",
+      "kind": "empty",
+      "template": "",
+      "values": [],
+      "skip": "reference or structured property; needs other objects"
+    },
+    {
+      "name": "Explanation",
+      "kind": "localized",
+      "template": "",
+      "values": [
+        {
+          "value": "Cov",
+          "source": "generated"
+        }
+      ]
+    }
+  ]
+}

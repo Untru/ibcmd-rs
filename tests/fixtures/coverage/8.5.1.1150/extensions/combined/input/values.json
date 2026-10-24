@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "kind": "extension",
+  "sources": [
+    {
+      "set": "8.5.1.1150-xml-2.21-extensions-basic",
+      "path": "basic",
+      "manifest_sha256": "c7e91c39dea4f71a27546a0ded3f455234bc566a90cea7d3d8612f97c23117a2"
+    }
+  ],
+  "variants": [
+    "CovCombined"
+  ]
+}

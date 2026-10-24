@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-enums",
+  "collection": "Enums",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "16fa6861f7fd0499e2d0fe05205098d6ca6c8536e2dc395b36ebefa18ddb7d6c",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79877,
+    "decoded_sha256": "4790315df8aa3bd38b2275e17765da2e84e12a0550419f2451cf313dcd57394b",
+    "encoded_sha256": "f64a645077ea83e9dd0dad65c068cc00541da6548ea1a279cb2826eebff27906"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11303,
+          "sha256": "bbe5264879382d345f041e0ca80137538fdc620f099cf11390b287d645cb0c48"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "12f8cd3e04b1d9061bb5fedd44936bfddbef5d8e388e094180fc9b8bdb0f0955"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovTemplate.xml",
+          "size": 2248,
+          "sha256": "ce2ca4e01787d6f2f5a465a8b74d72b95fcc8f784964f3f7fea178cb27d35f79"
+        }
+      ]
+    },
+    {
+      "name": "CovUseStandardCommands_true",
+      "property": "UseStandardCommands",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovUseStandardCommands_true.xml",
+          "size": 2311,
+          "sha256": "ea66b5ea929238cc465b02036e587cea509e5741225de332deb69efd57fe84bc"
+        }
+      ]
+    },
+    {
+      "name": "CovQuickChoice_false",
+      "property": "QuickChoice",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovQuickChoice_false.xml",
+          "size": 2285,
+          "sha256": "129ac2857651de7ce7e8440179b883b613a98fe1b463758d4980960b65095f89"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceMode_QuickChoice",
+      "property": "ChoiceMode",
+      "kind": "enum",
+      "value": "QuickChoice",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovChoiceMode_QuickChoice.xml",
+          "size": 2307,
+          "sha256": "5fcc9e1f949a3993ad6727cee9856b5c47f55651d094d438d26ceab363103534"
+        }
+      ]
+    },
+    {
+      "name": "CovExplanation_Cov",
+      "property": "Explanation",
+      "kind": "localized",
+      "value": "Cov",
+      "source": "generated",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovExplanation_Cov.xml",
+          "size": 2388,
+          "sha256": "c800309c2d37673cf622ca8fb6be1b7e5ec3945cb2d663cb59f4aee7ca4789b3"
+        }
+      ]
+    },
+    {
+      "name": "CovChoiceHistoryOnInput_DontUse",
+      "property": "ChoiceHistoryOnInput",
+      "kind": "enum",
+      "value": "DontUse",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Enums/CovChoiceHistoryOnInput_DontUse.xml",
+          "size": 2331,
+          "sha256": "f35538f0e4fc236e0bb5171c21ef279a2c0e65a5bc83f6d3a3f49fa339aa0bf1"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "equal": [
+    "CovPredefined_true",
+    "CovRestartCountOnFailure_0",
+    "CovRestartCountOnFailure_10",
+    "CovRestartIntervalOnFailure_0",
+    "CovRestartIntervalOnFailure_15",
+    "CovRestartIntervalOnFailure_25",
+    "CovRestartIntervalOnFailure_60",
+    "CovTemplate",
+    "CovUse_false",
+    "configuration"
+  ]
+}

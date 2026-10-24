@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-websocketclients",
+  "collection": "WebSocketClients",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "2b7f3b4ee2524695b2833038ea4d93066e481feaa55a9d919ab9e07857d3f828",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79135,
+    "decoded_sha256": "d699229fbf7cb7684e6a59cab479373cc6d1e4923d47117a912dfd6792dd19f4",
+    "encoded_sha256": "24705cc9993808c4d454383868ee2eb1f4463d4c90282f686c74edd5d213530a"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11356,
+          "sha256": "508d7e68b3cfb398c2a3521641ec53974029741792a7ae90a07161da2bdc8919"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "356f841a8c156783f6114b5da11dc34c8971c3eeaa5084deac17c85a2bb539d8"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebSocketClients/CovTemplate.xml",
+          "size": 1432,
+          "sha256": "6511a48b59134dd034edeb6ca391fb3d66719e15436e81fd43688563d37ba2e7"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefined_true",
+      "property": "Predefined",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebSocketClients/CovPredefined_true.xml",
+          "size": 1438,
+          "sha256": "d6a1725fccf8c0fc8975cddedbdd678760f821b58e0cc42d1d57f9b838320884"
+        }
+      ]
+    },
+    {
+      "name": "CovAutoConnect_true",
+      "property": "AutoConnect",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebSocketClients/CovAutoConnect_true.xml",
+          "size": 1439,
+          "sha256": "aab5bc0c46720cf3a44021e1e88d68cb44f6627e249abb35818888f3594992fb"
+        }
+      ]
+    },
+    {
+      "name": "CovUseOSProxy_true",
+      "property": "UseOSProxy",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebSocketClients/CovUseOSProxy_true.xml",
+          "size": 1438,
+          "sha256": "ab0a96a0e6a621a6a8283df658f497c64b6d307f9a137d607be1c807e86b9733"
+        }
+      ]
+    },
+    {
+      "name": "CovUseOSAuthentication_true",
+      "property": "UseOSAuthentication",
+      "kind": "boolean",
+      "value": "true",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "WebSocketClients/CovUseOSAuthentication_true.xml",
+          "size": 1447,
+          "sha256": "531620d1363ea472286d2f1d6076cf5e026c9d3b69e4a6010316cbd214400f3d"
+        }
+      ]
+    }
+  ]
+}

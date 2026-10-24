@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "set": "8.5.1.1150-xml-2.21-httpservices",
+  "collection": "HTTPServices",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.5.1.1150",
+    "source_version": "2.21",
+    "ibcmd_sha256": "62e72e15bb4550c4ffcf421f962c27fd1e1ddde1ba31e5bc0d7c9e0c2352dde7",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "ade1aacfe6375632eb86f8b6c801f02198b865a0fd82bbe23e57f14967db9b56",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 79129,
+    "decoded_sha256": "bd20a9403e8595a2acf99298aab5f3bf752a07c37bb875b9858390972a926e5d",
+    "encoded_sha256": "b85d3949ef75be6de9dbe92f9201a6e6b78a113d1709f30cdaf61864a07e9e34"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 11278,
+          "sha256": "e0949bccc2fc297ed438c1d872cade21dc2b1e718d341fc043ae11115251277a"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1306,
+          "sha256": "6d578477d5b0d98063b695e3a1f91e89c626791aab01fdc102b57966db9993d0"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "HTTPServices/CovTemplate.xml",
+          "size": 1281,
+          "sha256": "030ffc2c14a597ca0c840992ad30d0018a2259e598bfdd824c7bacf8aa14428b"
+        }
+      ]
+    },
+    {
+      "name": "CovRootURL_billing",
+      "property": "RootURL",
+      "kind": "enum",
+      "value": "billing",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "HTTPServices/CovRootURL_billing.xml",
+          "size": 1292,
+          "sha256": "881f9b3787b2f59765d4cd47568aa6399686859cd2a4d4b969944279b3ad674d"
+        }
+      ]
+    },
+    {
+      "name": "CovRootURL_dt",
+      "property": "RootURL",
+      "kind": "enum",
+      "value": "dt",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "HTTPServices/CovRootURL_dt.xml",
+          "size": 1282,
+          "sha256": "4052dbd3c6541ae46d8bb80d547e9895b75172793dec3ef20f75d47df2237551"
+        }
+      ]
+    },
+    {
+      "name": "CovRootURL_exchange_dsl_1_0_0_1",
+      "property": "RootURL",
+      "kind": "enum",
+      "value": "exchange_dsl_1_0_0_1",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "HTTPServices/CovRootURL_exchange_dsl_1_0_0_1.xml",
+          "size": 1318,
+          "sha256": "dcc94092fe83d48036d52fedcbc837974e592d6323c41b4a0f8f9a4d4f3fa726"
+        }
+      ]
+    },
+    {
+      "name": "CovRootURL_oauth2_mail",
+      "property": "RootURL",
+      "kind": "enum",
+      "value": "oauth2_mail",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "HTTPServices/CovRootURL_oauth2_mail.xml",
+          "size": 1300,
+          "sha256": "8141892efb281e10c3ed98e7dfebd2e42809abf4b3f3a56c52c2407b6fb71b8d"
+        }
+      ]
+    },
+    {
+      "name": "CovReuseSessions_Use",
+      "property": "ReuseSessions",
+      "kind": "enum",
+      "value": "Use",
+      "source": "observed:servicedesk-bsp-demo-8.5.1.1150",
+      "status": "platform_refused",
+      "message": "[ERROR] HTTPСервис.CovReuseSessions_Use - Корневой URL совпадает с корневым URL сервиса CovTemplate",
+      "files": []
+    }
+  ]
+}

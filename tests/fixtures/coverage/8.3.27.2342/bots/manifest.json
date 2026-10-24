@@ -1,0 +1,66 @@
+{
+  "schema_version": 1,
+  "set": "8.3.27.2342-xml-2.20-bots",
+  "collection": "Bots",
+  "evidence": {
+    "status": "platform_proven",
+    "created_on": "2026-10-24",
+    "platform_version": "8.3.27.2342",
+    "source_version": "2.20",
+    "ibcmd_sha256": "d4e1892f270bf01877b61c0696c3624ce5f79c06d5b743755542aedad4596baa",
+    "database_kind": "isolated_file_infobase",
+    "rounds": "import -> export (1) -> config save -> load -> export (2); identical outside ConfigDumpInfo.xml"
+  },
+  "inputs_sha256": "ce6fb54387d870bab0493d73c68b55be13b84f26ea369ca7800a486d692928f1",
+  "configuration_cf": {
+    "path": "configuration.cf.b64",
+    "decoded_size": 76865,
+    "decoded_sha256": "dac0b1586f5103f81f7ef753638df013d8d58fc3a9d2c347dec086578e396f62",
+    "encoded_sha256": "df5e186676d80025425ade554bfd0244da9750164b439b290567b18c1cda5cb2"
+  },
+  "variants": [
+    {
+      "name": "configuration",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Configuration.xml",
+          "size": 10368,
+          "sha256": "b1506e9c7b2130429e4341c6b742002609bbbeac24fe2d6adbd2ede235edcb0c"
+        },
+        {
+          "path": "Languages/Русский.xml",
+          "size": 1251,
+          "sha256": "c675ce2312f6222068ab08662e81921ebb34d8837952f610228a9d8047a73244"
+        }
+      ]
+    },
+    {
+      "name": "CovTemplate",
+      "property": null,
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Bots/CovTemplate.xml",
+          "size": 1132,
+          "sha256": "5039afe0fba7c4125b0f44c3cd6713bc944d1f5f7323dd54192441b52ea44c3f"
+        }
+      ]
+    },
+    {
+      "name": "CovPredefined_false",
+      "property": "Predefined",
+      "kind": "boolean",
+      "value": "false",
+      "source": "boolean",
+      "status": "platform_proven",
+      "files": [
+        {
+          "path": "Bots/CovPredefined_false.xml",
+          "size": 1141,
+          "sha256": "822e343d297991f740cbb69e05a3664375463cc783989c9dbd875f9f0bc804bb"
+        }
+      ]
+    }
+  ]
+}
