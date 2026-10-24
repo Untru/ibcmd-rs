@@ -30,3 +30,9 @@ tests/fixtures/native-export-commands/**/*.gz binary
 # Native EDS oracle bytes must be identical on every checkout platform.
 tests/fixtures/eds-matrix/**/*.xml -text whitespace=cr-at-eol
 tests/fixtures/eds-corpus2/*.xml -text whitespace=cr-at-eol
+
+# Status-lab source/API receipts bind exact LF bytes on every checkout.
+scripts/status-lab/** text eol=lf
+src/server/mod.rs text eol=lf
+src/server/rpc.rs text eol=lf
+src/stored_objects.rs text eol=lf
