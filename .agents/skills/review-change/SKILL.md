@@ -66,3 +66,11 @@ Move the issue to In review and read the value back (AGENTS.md, Tracking).
 If you hit a trap AGENTS.md does not mention, propose the rule under
 "Suggested AGENTS.md changes" in the PR body. A rule earns its place when it
 is non-obvious, keeps recurring and is specific enough to act on.
+
+## 7. Clean up
+
+Scratch infobases, native exports and corpus outputs go as soon as their
+run is reported. When the PR is merged or you leave the worktree, run
+`cargo clean` in it, or `git worktree remove` it. Leave a target directory
+alone while another cargo process uses it. Say in your final report what you
+removed and what you kept, and why.
