@@ -16,8 +16,10 @@ tool1cd полезен как второй источник описаний ф�
   в этой ревизии возвращает false.
 
 Эти различия не доказывают баг ibcmd-rs. Ограничения его writer не ослаблялись.
-**Побайтовое равенство CONFIG-ключа с ICU 4.6 не установлено.**
-Исходники выбора ICU прочитаны, но независимый runtime не запускался.
+**30 810 полных CONFIG-ключей совпали с независимым ICU 4.6** на описанной
+ниже матрице: 5 135 имён × две локали × три PARTNO. Это конечная выборка,
+не доказательство для всех возможных имён. tool1cd как приложение и новая
+native mutation не запускались; домен записи не расширялся.
 
 ## Источники
 
@@ -51,8 +53,8 @@ C++ читался в CP1251. Новые native измерения не выпо
 | Заголовок листа 30 байт, left/right и хвосты ключей | [index.rs:204–250](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L204-L250) | [Class_1CD.h:314–327](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.h#L314-L327), [cpp:2290–2323](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2290-L2323) | Раскладка совпадает; next/prev в 8.3.8 задают номера страниц | Сверка unpack и offsets | Повреждение индекса |
 | Граница left | [index.rs:294–305](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L294-L305) | [cpp:2376–2400](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2376-L2400) | Различается: ibcmd-rs ограничивает left значением key_len−previous_right; сохранять измеренное ограничение | Сверка границ pack | Повреждение индекса при mutation |
 | Битовые ширины и запас листа | [index.rs:38–42](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L38-L42), [287–317](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L287-L317) | [cpp:2421–2450](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2421-L2450), [2813–2849](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2813-L2849) | ibcmd-rs writer использует 32/16/16 и 8 байт с запасом; tool1cd вычисляет ширины и делит при переполнении. Не эквивалентные алгоритмы | Сверка pack/split | Переполнение при удалении/вставке |
-| Составной CONFIG-ключ | [index.rs:120–142](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L120-L142) | [cpp:2469–2480](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2469-L2480), [3965–3993](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L3965-L3993) | Специальный ключ 392 байта против общей сборки по полям с zero padding. Равенство конкретных ключей не измерено | Сверка цепочки сборки ключа | Коллизия или неверный порядок |
-| ICU и CI/CS | [index.rs:44–117](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L44-L117) | [ICU.cpp:70–103](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ICU.cpp#L70-L103), [115–138](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ICU.cpp#L115-L138), [CI/CS](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L4674-L4675) | Для 8.3.8 выбран ICU 4.6, CI использует SECONDARY. Формулы ibcmd-rs для en_US_POSIX/ru_RU этим не доказаны равными ICU | Сверка выбора версии/strength | Расширение недоказанного домена записи |
+| Составной CONFIG-ключ | [index.rs:120–142](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L120-L142) | [cpp:2469–2480](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L2469-L2480), [3965–3993](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L3965-L3993) | Специальный ключ 392 байта против общей сборки по полям с zero padding. 30 810 ключей совпали с ICU 4.6 + N(10) + padding; приложение tool1cd не исполнялось | Сверка цепочки сборки ключа | Коллизия или неверный порядок |
+| ICU и CI/CS | [index.rs:44–117](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/index.rs#L44-L117) | [ICU.cpp:70–103](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ICU.cpp#L70-L103), [115–138](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ICU.cpp#L115-L138), [CI/CS](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L4674-L4675) | Для 8.3.8 выбран ICU 4.6, CI использует SECONDARY. Независимый ICU 4.6 подтвердил матрицу двух локалей ниже, не весь допустимый домен | Сверка выбора версии/strength | Расширение недоказанного домена записи |
 | Общий интерфейс файлов | [ConfigRow](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/config.rs#L24-L35), [CF layer](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-cf/src/lib.rs#L1-L7) | [ConfigStorage.h:27–71](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ConfigStorage.h#L27-L71), [104–153](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ConfigStorage.h#L104-L153) | Полезный пример границы носителя; profile/provenance/locking ibcmd-rs требуют отдельного контракта | Сверка границ интерфейса | Потеря profile/provenance гарантий |
 | Запись таблиц через ConfigStorage | [filedb writer](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-filedb/src/lib.rs#L6-L10) | [ConfigStorage.cpp:475–478](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/ConfigStorage.cpp#L475-L478) | В ibcmd-rs есть writer; ConfigStorageTable::writefile tool1cd возвращает false | Чтение тела writefile | Ложное обещание общей записи |
 | Recovery и depot | Весь ibcmd-rs на наличие аналогов не инвентаризировался | [Class_1CD.h:873–939](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.h#L873-L939) | Есть точки входа для следующего исследования; отсутствие аналогов в ibcmd-rs не утверждается | Инвентарь точек входа | Необоснованное расширение возможностей |
@@ -115,25 +117,89 @@ target пути. Windows fixtures требуют доступного отдел
 | Пустые/усечённые данные | Тест broken_chains_fail_closed и отказ на повреждённую длину объекта; пустое имя в probe | Одинаковые усечённые файлы в tool1cd/native и классификация каждого отказа |
 | Границы страницы | rebuilt_trees_read_back_in_order, objects_grow_to_second_level_tables_and_shrink_onto_free_chains | Native resize/mutation на границах 4/8/64 KiB и FAT 0/1 |
 | Blob-цепочки | values_round_trip_and_free_tail_is_chained и broken_chains_fail_closed | Независимое чтение пустых, циклических, усечённых цепочек и free-list на одинаковых файлах |
-| Длины имён | Обе локали, 0/1/43/44, отказ недопущенных символов в probe | ICU 4.6, полные ключи на 1/42/43 и совпадение native порядка |
+| Длины имён | Обе локали, 0/1/43/44, отказ недопущенных символов в probe | ICU 4.6: полные ключи на 1/42/43 совпали; новый native порядок не измерен |
 | Неизмеренная локаль | de_DE не выбирает writer; существующий тест read-but-not-write | Native/ICU evidence перед любым расширением списка разрешённых локалей |
 
 Табличные риски — оценка последствий преждевременной правки, а не перечень
-доказанных дефектов. Здесь нет заявленного runtime differential tool1cd/native.
+доказанных дефектов. Runtime differential выполнен с ICU 4.6; tool1cd/native как приложения не запускались.
 
-## Как проверить равенство ICU
+## Независимое сравнение с ICU 4.6
 
-Ответ пока: **не установлено**. Нужен независимый ICU 4.6 с закреплёнными
-build/data/version/hash, параметрами locale/SECONDARY/CI и обработкой
-trailing spaces как у tool1cd. Сравнивать весь 392-байтовый CONFIG-ключ:
-ICU sort key, PARTNO, padding.
+Исполнен официальный **ICU 4.6.0.0, Windows x64, MSVC10**:
+[исторический выпуск Unicode](https://icu.unicode.org/download/46),
+[архив Win64](https://sourceforge.net/projects/icu/files/ICU4C/4.6/icu4c-4_6-Win64-msvc10.zip/download).
+SHA-256 скачанного архива:
+`c64bd3b9fade2c7cefbb1c8c16f765febda8b0f4de771d5f50d88a150d1cf41b`.
+Это локально вычисленный идентификатор, не проверенная цифровая подпись.
+Архив содержит license.html с ICU permission notice (IBM, 1995–2010).
+Библиотеки, данные ICU и материалы tool1cd в репозиторий не добавлены.
 
-Матрица: все разрешённые одиночные символы, пары, технические имена,
-длины 1/42/43, case pairs, разделители, PARTNO 0/1/u32::MAX, обе локали
-и отдельно неизмеренная. Отказы 0/44 фиксируются отдельно от возможностей ICU.
-Затем native mutation на disposable копии с проверкой индекса и данных.
-Совпадение коротких ASCII-имён не разрешает Unicode, длинные имена или новую
-локаль; современный ICU не заменяет исторический ICU 4.6.
+[Результат](filedb-icu46-result.json) сохраняет хеши icuin46/icuuc46/icudt46,
+версии runtime/UCA/collation, фактические локали, восемь атрибутов collator,
+хеш входного потока и хеш ответа Rust. Python 3.12.14 x64 вызывает
+`ucol_open_46`, `ucol_setStrength_46(SECONDARY)` и `ucol_getSortKey_46`
+через ctypes; ICU 4.6 сообщает UCA 6.0.0.0. Для ru_RU получен допустимый
+`U_USING_FALLBACK_WARNING` (-128), actual locale — ru, valid — ru_RU;
+для en_US_POSIX status 0 и actual/valid en_US_POSIX. Этот fallback сохранён,
+а не представлен как точная локаль без предупреждений.
+
+Матрица генерируется clean-room скриптом:
+
+- все 66 разрешённых одиночных символов и все 4 356 упорядоченных пар;
+- каждый символ, повторённый 42/43 раза; последовательности длин 1…43;
+- технические имена, UUID, case pairs, разделители и 512 воспроизводимых
+  последовательностей из SHA-512; после удаления повторов — 5 135 имён;
+- en_US_POSIX и ru_RU, PARTNO 0/1/4294967295: **30 810 сравнений всех
+  392 байт, 0 расхождений**;
+- отдельно **17 отказов**: пустое имя, длина 44, пробелы, кириллица, é,
+  NUL и de_DE. ICU способен вычислить ключ de_DE, но Rust writer его отвергает.
+
+Rust bridge вызывает публичный `config_key`; формулы весов не повторяются
+в Python. Ожидаемый ключ — реальный ICU sort key с завершающим NUL,
+положительное N(10) для PARTNO и нулевой хвост до 392 байт. Числовая упаковка
+в helper проверена тремя явными byte anchors. tool1cd для положительного
+numeric копирует байты поля ([Class_1CD.cpp:3826–3899](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Class_1CD.cpp#L3826-L3899)).
+Это сравнение с ICU плюс независимая сборка составного ключа; весь tool1cd
+writer не исполнялся. TrimSpacesRight не проверен на равенство: допустимые
+имена не содержат пробелов, а Rust их отвергает.
+
+Воспроизведение в PowerShell из checkout; `$icuRoot` — распакованный каталог
+icu с bin64, `$python` — Python x64 с доступным MSVC10 runtime:
+
+```powershell
+cargo build --locked -p ibcmd-filedb
+rustc --edition=2024 tools/research/filedb-config-key-probe.rs --extern ibcmd_filedb=target/debug/libibcmd_filedb.rlib -L dependency=target/debug/deps -o target/issue525-config-key-probe.exe
+& $python tools/research/compare-filedb-icu46.py --icu-root $icuRoot --probe target/issue525-config-key-probe.exe --output target/issue525-icu46.json
+```
+
+Helper отказывается запускаться с другим хешем DLL, версией ICU, архитектурой
+или заданным ICU_DATA. Несовпадение ключа/отказа даёт ненулевой exit code.
+Локальные negative controls обнаружили намеренную порчу одного ключа
+(ровно одно расхождение) и отклонили неверный хеш данных ICU.
+
+Вывод ограничен этой матрицей. Равенство выборки не разрешает Unicode,
+длину >43 или новую локаль и не заменяет native delete/apply с проверкой
+индекса. Порядок ключей и мутации в новом запуске платформы не измерялись.
+
+## Контейнер и текстовое дерево: статическая сверка
+
+Здесь сравниваются конкретные участки, без запуска C++Builder, переносов
+MetaTree и заявления полной эквивалентности парсеров.
+
+| Правило | ibcmd-rs (та же закреплённая ревизия) | tool1cd (та же закреплённая ревизия) | Вывод / метод | Риск преждевременного переноса |
+| --- | --- | --- | --- | --- |
+| Контейнер с 32-битными адресами | [format15.rs:15–37](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-v8/src/format15.rs#L15-L37), [block.rs:9–10](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-v8/src/block.rs#L9-L10) | [APIcfBase.h:34–54](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/APIcfBase.h#L34-L54), [cpp:56–93](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/APIcfBase.cpp#L56-L93) | Совпадают 16-байтовый заголовок каталога, 12-байтовый FAT item, 31-байтовый текстовый заголовок блока и sentinel 0x7fffffff; статическая сверка размеров | Смешение ревизий контейнера |
+| Продолжение цепочки | [block.rs:240–328](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-v8/src/block.rs#L240-L328) | [APIcfBase.cpp:56–93](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/APIcfBase.cpp#L56-L93) | В выбранном read_block tool1cd нет аналога seen/range/size проверок Rust; неверный start возвращает пустой stream. Сверка ветвей, не общий аудит безопасности tool1cd | Ослабление fail-closed поведения |
+| 64-битный контейнер | [format16.rs:12–37](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-v8/src/format16.rs#L12-L37) | [APIcfBase.h:42–54](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/APIcfBase.h#L42-L54) | У Rust отдельно u64 addresses, header 20/FAT item 24; выбранные структуры tool1cd с int этого не подтверждают. Статическая граница применимости | Ошибочная экстраполяция старого API на Format16 |
+| Сжатие payload отдельно от блока | [payload.rs:1–24](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/crates/ibcmd-cf/src/payload.rs#L1-L24) | [APIcfBase.cpp:1124–1143](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/APIcfBase.cpp#L1124-L1143) | Оба разделяют цепочку блока и декодирование, но Rust явно различает Stored/RawDeflate и задаёт budgets; zipped bool tool1cd не доказывает равенство политик. Чтение API | Потеря лимитов/профиля при общем адаптере |
+| Типы дерева | [metadata_model/brace.rs:10–18](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/src/metadata_model/brace.rs#L10-L18) | [NodeTypes.h:8–20](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/NodeTypes.h#L8-L20), [Parse_tree.cpp:14–20](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Parse_tree.cpp#L14-L20), [235–246](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Parse_tree.cpp#L235-L246) | Выбранное Rust дерево хранит List/Str/Atom; tool1cd классифицирует number/exp/GUID/#base64/bare binary/link/#data через regex. Это дополнительная классификация, не доказанная семантика всех Atom | Ошибочная типизация непрозрачных токенов |
+| Кавычки и вывод списков | [brace.rs:105–132](https://github.com/Untru/ibcmd-rs/blob/6ca6ade04ceee151f056e29acb5cd6deaaa9fbc4/src/metadata_model/brace.rs#L105-L132) | [Parse_tree.cpp:176–217](https://github.com/jjzhang166/tool1cd/blob/7c4b91cb7a7bb48a32be00b9f32afe740dada6e1/Parse_tree.cpp#L176-L217) | В обоих writer кавычка удваивается; правило CRLF совпадает для непустых списков. Пустой nd_list tool1cd выводит через value, Rust пишет {}. Сверка ветвей writer, не round-trip differential | Непроверенное равенство BOM/пустого дерева/ошибок |
+
+Практический результат: сохранить границы block/payload/profile в Rust;
+не заменять их общим интерфейсом только из-за похожего API. Для текстового
+дерева полезна отдельная clean-room матрица пустых элементов, escaped quotes,
+экспонент, binary/link и отказов. Копировать MetaTree для этой матрицы
+не требуется. Этот обзор не инвентаризирует все парсеры ibcmd-rs.
 
 ## Кандидаты в отдельные задачи
 
@@ -141,7 +207,7 @@ ICU sort key, PARTNO, padding.
 | --- | --- | --- | --- |
 | P1 | Семантика offset 12 объекта | Exact-build native create/grow/shrink/rewrite, FAT 0/1, все три u32 до/после | Нарушение версии или неизвестного header-поля |
 | P1 | Допустимые left и битовые ширины | Clean-room ключи на границе нулевого хвоста, native delete/apply | Повреждение индекса |
-| P2 | Равенство CONFIG-ключа ICU 4.6 | Полные differential отчёты по допущенному домену | Коллизии/неверный порядок и запись |
+| P2 | Расширение матрицы CONFIG-ключа | Текущая выборка совпала с ICU 4.6; для расширения нужны новые полные ключи и native mutation | Коллизии/неверный порядок и запись |
 | P2 | Trailing bytes и page count | Контролируемое усечение/добавление и native отказ/допуск | Принятие неполного состояния или лишний отказ |
 | P3 | Общий readfile-адаптер CF/filedb | Инвентарь реального дублирования с profile/provenance/locking | Потеря гарантий записи ради формального интерфейса |
 
@@ -150,15 +216,28 @@ ICU sort key, PARTNO, padding.
 
 ## Остаток
 
-- Независимый runtime tool1cd/ICU 4.6 и differential матрица.
+- Исполнение самого tool1cd и differential за пределами матрицы ICU 4.6.
 - Новые native измерения header/index изменений.
-- APIcfBase/V8-container и Parse_tree/NodeTypes/MetaTree определены как
-  следующие области, но до байтового оракула не разобраны.
+- APIcfBase и Parse_tree/NodeTypes сверены статически; общий byte-level
+  round-trip oracle и семантика MetaTree не проверены.
 - Hosted merge gate, release build, native micro-corpus, SBOM и release audit
-  не выполнялись. Отдельный `cargo xtask check` не запускался.
+  не выполнялись.
 
 ## Общие локальные проверки
 
+После добавления ICU helper: `cargo xtask check` — **3 passed** (format,
+clippy workspace crates, root compile check). Отдельный запуск
+`cargo test --locked -p ibcmd-filedb -p ibcmd-v8` — **79 passed, 0 failed,
+0 ignored** (40 filedb + 39 v8). Standalone API probe — прежние 26 групп PASS;
+оба standalone Rust helper прошли rustfmt. Это проверки Rust, не runtime
+differential контейнера или текстового дерева.
+
+Итоговый запуск после добавления ICU helper:
+`cargo xtask ci --keep-going` — **19 passed, exit 0, без SKIP**.
+Это единый полный локальный запуск с PYTHONUTF8=1, MSVC /utf-8 и
+CARGO_BUILD_JOBS=1. Hosted/release проверки из раздела «Остаток» он не заменяет.
+
+История предыдущей статической фазы:
 `cargo xtask ci --keep-going` в исходном окружении: 15 passed / 4 failed.
 Python EDT oracle воспроизвёл тот же отказ на неизменённой базе.
 Контролируемая проверка показала необходимость UTF-8 для чтения JSON и
@@ -176,9 +255,9 @@ cargo test --locked -p ibcmd-rs --test '*' --no-default-features
 ```
 
 Результат отдельного повтора: **PASS, exit 0**.
-Таким образом проверены все 19 шагов с учётом повтора; единый успешный
-запуск `cargo xtask ci` не заявляется. Уже успешные 18 шагов не повторялись
-после изменения только параллелизма сборки. Для перевода будущего PR
-из draft всё равно нужен полный gate на его окончательной ревизии.
+В предыдущей фазе все 19 шагов были покрыты с учётом отдельного повтора,
+но единого успешного запуска тогда не было. Новый полный запуск на этапе
+ICU выше прошёл все 19 шагов. После публикации будущего PR остаётся
+обязательным hosted CI на его окончательной ревизии.
 
 Issue #525 остаётся открытым; будущий PR должен использовать `Refs #525`.
