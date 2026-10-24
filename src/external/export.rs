@@ -191,14 +191,16 @@ pub fn export_if_external(
         }
     }
 
-    let mut report = mssql_dump::export_packed_entries_to_source(
-        archive.source_profile().as_str(),
-        adapted,
-        output_dir,
-        overwrite,
-        source_version,
-        Some(&foreign),
-    )?;
+    let mut report = mssql_dump::with_unresolved_type_ids_allowed(|| {
+        mssql_dump::export_packed_entries_to_source(
+            archive.source_profile().as_str(),
+            adapted,
+            output_dir,
+            overwrite,
+            source_version,
+            Some(&foreign),
+        )
+    })?;
     finish(output_dir, &main, &mut report, &stored)?;
     Ok(Some(report))
 }
@@ -221,20 +223,31 @@ fn finish(
     // names start with a letter): an object named like it (`DataProcessors`)
     // would otherwise be moved onto it, clearing the whole export first.
     let parked = output_dir.join(".ibcmd-external");
-    if parked.exists() {
-        fs::remove_dir_all(&parked)
-            .with_context(|| format!("failed to clear {}", parked.display()))?;
+    // A report whose whole export is the root XML (its attributes are plain
+    // types like `v8:Null`, a `TypeId` or `dcsset:SettingsComposer`) leaves no
+    // `Reports` folder at all: the platform's own dump of such a variant is a
+    // single `<name>.xml` beside no object folder. Park only what exists.
+    let folder_exists = folder.exists();
+    let mut parked_used = false;
+    if folder_exists {
+        if parked.exists() {
+            fs::remove_dir_all(&parked)
+                .with_context(|| format!("failed to clear {}", parked.display()))?;
+        }
+        rename_directory(&folder, &parked)
+            .with_context(|| format!("failed to move {}", folder.display()))?;
+        parked_used = true;
     }
-    rename_directory(&folder, &parked)
-        .with_context(|| format!("failed to move {}", folder.display()))?;
-    let (from_dir, to_dir) = (parked.join(name), output_dir.join(name));
-    let from_xml = parked.join(format!("{name}.xml"));
+    let source = if parked_used { &parked } else { output_dir };
+    let from_dir = source.join(name);
+    let to_dir = output_dir.join(name);
+    let from_xml = source.join(format!("{name}.xml"));
     let to_xml = output_dir.join(format!("{name}.xml"));
-    if to_dir.exists() {
+    if from_dir != to_dir && to_dir.exists() {
         fs::remove_dir_all(&to_dir)
             .with_context(|| format!("failed to clear {}", to_dir.display()))?;
     }
-    if from_dir.exists() {
+    if from_dir != to_dir && from_dir.exists() {
         rename_directory(&from_dir, &to_dir)
             .with_context(|| format!("failed to move {}", from_dir.display()))?;
     }
@@ -242,12 +255,16 @@ fn finish(
         .with_context(|| format!("pipeline wrote no root XML {}", from_xml.display()))?;
     fs::write(&to_xml, root_xml::to_external_root(&root, main)?)
         .with_context(|| format!("failed to write {}", to_xml.display()))?;
-    fs::remove_file(&from_xml)?;
-    if fs::read_dir(&parked).is_ok_and(|mut dir| dir.next().is_none()) {
-        fs::remove_dir(&parked)?;
-    } else {
-        // Nothing else is expected there; whatever is keeps its place.
-        rename_directory(&parked, &folder)?;
+    if from_xml != to_xml {
+        fs::remove_file(&from_xml)?;
+    }
+    if parked_used {
+        if fs::read_dir(&parked).is_ok_and(|mut dir| dir.next().is_none()) {
+            fs::remove_dir(&parked)?;
+        } else {
+            // Nothing else is expected there; whatever is keeps its place.
+            rename_directory(&parked, &folder)?;
+        }
     }
     if to_dir.exists() {
         rename_tree(&to_dir, main)?;

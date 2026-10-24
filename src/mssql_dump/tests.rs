@@ -80807,3 +80807,37 @@ fn root48_list_form_keeps_its_table() {
     eprintln!("tables: {}", xml.matches("<Table ").count());
     assert!(xml.contains("<Table name=\"Список\""), "{}", xml.matches("<Table ").count());
 }
+
+#[test]
+fn report_attribute_type_patterns_cover_null_empty_and_type_id() {
+    let index = BTreeMap::new();
+    assert!(
+        parse_information_register_type_pattern("{\"Pattern\"}", &index)
+            .unwrap()
+            .is_empty()
+    );
+    let null = parse_information_register_type_pattern("{\"Pattern\",{\"L\"}}", &index).unwrap();
+    assert!(matches!(
+        null.as_slice(),
+        [ConstantValueType::Reference { reference }] if reference == "v8:Null"
+    ));
+    let type_id = "99999999-9999-4999-8999-999999999999";
+    assert!(
+        parse_information_register_type_pattern(
+            &format!("{{\"Pattern\",{{\"#\",{type_id}}}}}"),
+            &index,
+        )
+        .is_none()
+    );
+    let external = with_unresolved_type_ids_allowed(|| {
+        parse_information_register_type_pattern(
+            &format!("{{\"Pattern\",{{\"#\",{type_id}}}}}"),
+            &index,
+        )
+    })
+    .unwrap();
+    assert!(matches!(
+        external.as_slice(),
+        [ConstantValueType::TypeId { type_id: seen }] if seen == type_id
+    ));
+}

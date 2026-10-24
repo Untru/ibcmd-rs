@@ -21728,6 +21728,11 @@ fn parse_information_register_type_pattern_element(
                 _ => return None,
             },
         }),
+        // `{"L"}` is the platform's `Null` type; it writes as a bare
+        // `<v8:Type>v8:Null</v8:Type>` (see `NULL_TYPE_REFERENCE`).
+        (r#""L""#, 1) => Some(ConstantValueType::Reference {
+            reference: NULL_TYPE_REFERENCE.to_string(),
+        }),
         (r##""#""##, 2) => {
             let type_id = parse_uuid_field(fields.get(1)?.trim())?;
             let Some(reference) = type_index
@@ -21736,11 +21741,13 @@ fn parse_information_register_type_pattern_element(
                 .or_else(|| information_register_builtin_reference(&type_id).map(str::to_string))
                 .or_else(|| builtin_type_reference(&type_id).map(str::to_string))
             else {
-                // A type of the extended configuration (see
-                // `parse_metadata_type_pattern_element_with_builtin`).
-                return extension::active()
-                    .is_some()
-                    .then_some(ConstantValueType::TypeId { type_id });
+                // A type the index cannot name: an external report's own
+                // attribute may be such a type, and the platform prints its
+                // identifier (`<xr:TypeId>`), which is what
+                // `ConstantValueType::TypeId` writes. Configuration rows stay
+                // fail-closed unless the caller opted in (see
+                // `with_unresolved_type_ids_allowed`).
+                return unresolved_type_ids_allowed().then_some(ConstantValueType::TypeId { type_id });
             };
             if metadata_reference_is_type_set(&reference) {
                 Some(ConstantValueType::ReferenceTypeSet { reference })
@@ -21750,6 +21757,30 @@ fn parse_information_register_type_pattern_element(
         }
         _ => None,
     }
+}
+
+thread_local! {
+    /// Set only around an external object's export: its own attribute types are
+    /// not in the configuration's type index, and the platform writes their
+    /// identifiers rather than refusing the object.
+    static UNRESOLVED_TYPE_IDS_ALLOWED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+fn unresolved_type_ids_allowed() -> bool {
+    UNRESOLVED_TYPE_IDS_ALLOWED.with(std::cell::Cell::get)
+}
+
+/// Runs `body` with unresolved type identifiers written as `<xr:TypeId>`.
+pub(crate) fn with_unresolved_type_ids_allowed<R>(body: impl FnOnce() -> R) -> R {
+    struct Reset(bool);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            UNRESOLVED_TYPE_IDS_ALLOWED.with(|cell| cell.set(self.0));
+        }
+    }
+    let previous = UNRESOLVED_TYPE_IDS_ALLOWED.with(|cell| cell.replace(true));
+    let _reset = Reset(previous);
+    body()
 }
 
 fn information_register_builtin_reference(type_id: &str) -> Option<&'static str> {
