@@ -1520,12 +1520,10 @@ pub(super) struct MoxelChart {
     title: Vec<MoxelLocalizedValue>,
     is_show_title: bool,
     is_show_legend: bool,
-    /// The one thing the old `post[0]`/`post[1]` two-state gate still stands
-    /// for: whether a real series publishes its stored name or the automatic
-    /// one. Derived now from the document palette being named at all, which
-    /// agrees with the old reading on every record of the stand -- every
-    /// record that names a palette has no real series -- and is the reading
-    /// that was actually measured. See `push_moxel_chart_series_text_xml`.
+    /// Existing name-projection exclusion inferred from a named palette.
+    /// Preserve this exclusion pending separate evidence; it does not select
+    /// the native target or imply that an English extra name needs a real
+    /// series. See `push_moxel_chart_series_text_xml`.
     has_extended_scales: bool,
     is_title_init: bool,
     ttl_border: MoxelChartBorder,
@@ -14156,25 +14154,42 @@ pub(super) fn push_moxel_drawing_xml(
 }
 
 fn push_moxel_chart_xml(xml: &mut String, chart: &MoxelChart) {
+    push_moxel_chart_xml_with_automatic_name(xml, chart, MoxelChartSeriesAutomaticName::host());
+}
+
+fn push_moxel_chart_xml_with_automatic_name(
+    xml: &mut String,
+    chart: &MoxelChart,
+    automatic_name: MoxelChartSeriesAutomaticName,
+) {
     xml.push_str(
         "\t\t<object xmlns:d3p1=\"http://v8.1c.ru/8.2/data/chart\" xsi:type=\"d3p1:Chart\">\r\n",
     );
     push_moxel_chart_text(xml, "seriesCurId", chart.series_cur_id);
     push_moxel_chart_text(xml, "pointsCurId", chart.points_cur_id);
     push_moxel_chart_bool(xml, "isSeriesDesign", chart.is_series_design);
-    // Gated on both `has_extended_scales` being clear AND at least one real
-    // series existing -- see `push_moxel_chart_series_text_xml`'s doc
-    // comment.
-    let automatic_names_apply = !chart.has_extended_scales && !chart.real_series.is_empty();
+    // The explicit English projection also republishes the mandatory extra
+    // series when no real series exists. Keep the legacy exclusion and the
+    // Stored/default projection unchanged; this does not select a native target.
+    let automatic_names_apply = !chart.has_extended_scales
+        && (!chart.real_series.is_empty()
+            || automatic_name == MoxelChartSeriesAutomaticName::RepublishedInEnglish);
     push_moxel_chart_text(xml, "realSeriesCount", chart.real_series.len());
     for series in &chart.real_series {
-        push_moxel_chart_series_xml(xml, "realSeriesData", series, automatic_names_apply);
+        push_moxel_chart_series_xml(
+            xml,
+            "realSeriesData",
+            series,
+            automatic_names_apply,
+            automatic_name,
+        );
     }
     push_moxel_chart_series_xml(
         xml,
         "realExSeriesData",
         &chart.real_extra_series,
         automatic_names_apply,
+        automatic_name,
     );
     push_moxel_chart_bool(xml, "isPointsDesign", chart.is_points_design);
     push_moxel_chart_text(xml, "realPointCount", chart.real_points.len());
@@ -14601,105 +14616,41 @@ fn push_moxel_gantt_chart_xml(xml: &mut String, gantt: &MoxelGanttChart) {
     xml.push_str("\t\t</object>\r\n");
 }
 
-/// The name the platform writes for a series whose own name the user never
-/// changed.
+/// Public English automatic-name representation over an unchanged cached name.
+/// The localized item's language is retained; only its content is republished.
 ///
-/// A series record stores its name beside a `strIsChanged` flag, and the
-/// stored name is a cache of the automatic one until that flag is set.
-/// Where the flag is clear the platform publishes the automatic name only
-/// when **both** `has_extended_scales`
-/// (`pointsScale`/`valuesScale`/`colorPaletteDescription` etc., see
-/// `parse_moxel_chart`) is clear **and** the chart has at least one real
-/// series; the corpus spells the automatic name `Pivot` in every one of the
-/// 14 series blocks that meet both conditions -
-/// `ПроверкаКонтрагента/ФинансовыйАнализ` (6),
-/// `ДосьеКонтрагента/ФинансовыйАнализ` (6),
-/// `АнализЖурналаРегистрации/ПродолжительностьРаботыРегламентныхЗаданий` and
-/// `ДлительностьОтложенногоОбновления/ДиаграммаГанта` - while all 14 store
-/// `Сводная`. Derived from the first document and confirmed on the other
-/// three, which the derivation never saw. The item's own language is the
-/// stored one; only the content is the platform's.
-///
-/// Both conditions are independently necessary, proven by three seeds built
-/// from native UT 11.5.27.75's
-/// `Reports/СравнительныйАнализПоказателейРаботыМенеджеров/Templates/СравнительныйАнализМенеджеров`
-/// (`has_extended_scales == true`, `realSeriesCount == 0`, publishes the
-/// stored `Сводная`): adding one real series (`realSeriesCount == 1`,
-/// `has_extended_scales` still `true`) still publishes `Сводная` -- ruling
-/// out "no real series to pivot against" as sufficient on its own; clearing
-/// `has_extended_scales` back to the corpus's shape while keeping
-/// `realSeriesCount == 0` *also* still publishes `Сводная` -- ruling out
-/// `has_extended_scales` alone too. All three round-trip through the
-/// platform byte for byte.
-///
-/// No series in the corpus carries the flag set, so that branch is left
-/// publishing the stored name - what this writer already did - rather than
-/// being given a rule nothing evidences.
-///
-/// **The republication itself is host-dependent, and the derivation above was
-/// made against a Windows capture.** The stored name is the automatic name,
-/// cached in the configuration's own language, for exactly as long as
-/// `strIsChanged` stays clear; Windows re-derives it in English and publishes
-/// `Pivot` over the cache, macOS publishes the cache. See
-/// `MoxelChartSeriesAutomaticName`.
+/// Native captures publish both this name and the stored cache. The public
+/// source-owned CF in `ut-chart-policy/explicit-english-zero-series` was loaded
+/// and exported by 8.3.27.2342 with `Pivot` at zero real series, disproving the
+/// earlier universal positive-count claim. That name observation does not prove
+/// a host, build, source-language or global target selector, nor full parity.
 const MOXEL_CHART_AUTOMATIC_SERIES_NAME: &str = "Pivot";
 
-/// Whether this host's platform republishes a chart series' automatic name
-/// over the cache the document stores.
-///
-/// The two conditions documented on `MOXEL_CHART_AUTOMATIC_SERIES_NAME` decide
-/// whether the *document* is in the republishing case at all; this decides
-/// what the platform then writes, and it depends on the host exactly as
-/// `<Shortcut>`'s modifier spelling does (see
-/// `docs/evidence/shortcut-host-spelling-20260825.md`).
-///
-/// Every reference tree on the stand is a macOS capture, and not one of them
-/// contains `Pivot` anywhere -- uh, ut, БСП демо, БСП базовая, WMS,
-/// MDM_Management and Web_Service alike -- while 28 of their `Template.xml`
-/// publish the stored `Сводная`. Neither does any native evidence fixture in
-/// this repository: every seed round-tripped through the platform here
-/// published the cache.
-///
-/// The decisive pair is УТ 11.5.27.75's
-/// `DataProcessors/ПроверкаКонтрагента/Templates/ФинансовыйАнализ` and
-/// `Reports/ДосьеКонтрагента/Templates/ФинансовыйАнализ`. Both *are* in the
-/// republishing case -- `has_extended_scales` clear, real series present --
-/// and the macOS capture publishes `Сводная` for both, where the Windows
-/// round-2 capture the rule was derived from published `Pivot`.
-///
-/// That case is the one the three `moxel-chart-series-count-zero` seeds never
-/// reached: they hold `has_extended_scales` set, or clear it while leaving
-/// `realSeriesCount` at 0, so all three sit outside the republishing case and
-/// could only ever show the cache. They remain valid for what they do prove --
-/// that each condition is necessary -- and are untouched by this.
+/// An explicitly selected output representation, never an OS/build detector.
+/// Stored remains the compatibility default and the compiler source-roundtrip
+/// representation. Existing exclusions and user-changed names stay unchanged.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub(super) enum MoxelChartSeriesAutomaticName {
-    /// Windows: the automatic name is re-derived in English and published
-    /// over the cache.
+    /// Explicit English republication over an eligible unchanged name cache.
     RepublishedInEnglish,
-    /// macOS: the cached name the document stores is published unchanged.
+    /// Preserve the document's localized name cache.
     Stored,
 }
 
 impl MoxelChartSeriesAutomaticName {
-    /// What `ibcmd` itself publishes on the host this export is running on.
+    /// Compatibility default when no explicit projection was selected.
     ///
-    /// The cache, everywhere. The operating system is not the discriminator it
-    /// was taken for: on 20.09.2026 the native `ibcmd` of 8.3.27.2214 exported
-    /// ERP УХ 3.3.3.3 **on Windows** and published `Сводная` on all 36 series
-    /// of the 16 files that carry one, `Pivot` on none -- including the two
-    /// `ФинансовыйАнализ` templates the earlier Windows round-2 capture of УТ
-    /// 11.5.27.75 published `Pivot` for, and 5 of which this export was
-    /// therefore republishing against the very tree it is measured on.
+    /// A retained Windows 8.3.27.2214 capture published the stored cache on
+    /// 36 series in 16 files, whereas earlier Windows captures published
+    /// `Pivot`. The public source-owned 8.3.27.2342 Windows baseline also
+    /// publishes `Pivot`, including an unchanged extra series at zero real
+    /// series. Operating system alone therefore cannot select a projection.
+    /// These observations do not isolate build, source script language,
+    /// opaque language flags or load origin as the causal discriminator.
     ///
-    /// Whatever separates those two Windows captures -- the platform's
-    /// interface language is the likeliest candidate, since `Pivot` is the
-    /// English derivation of the same automatic name -- is not something this
-    /// export can observe, so it publishes what every capture on the stand
-    /// publishes and what the one reproducible capture on this host publishes.
-    /// [`Self::RepublishedInEnglish`] stays expressible, and
-    /// `push_moxel_chart_series_text_xml_with_host` still takes the choice, so
-    /// the alternative behaviour remains available and tested.
+    /// Keep this default and compiler source validation Stored. The explicit
+    /// English representation is available independently; selecting it for
+    /// an export remains a separate, unresolved target-context decision.
     pub(super) const fn host() -> Self {
         Self::Stored
     }
@@ -14709,13 +14660,9 @@ fn push_moxel_chart_series_text_xml(
     xml: &mut String,
     series: &MoxelChartSeries,
     automatic_names_apply: bool,
+    automatic_name: MoxelChartSeriesAutomaticName,
 ) {
-    push_moxel_chart_series_text_xml_with_host(
-        xml,
-        series,
-        automatic_names_apply,
-        MoxelChartSeriesAutomaticName::host(),
-    );
+    push_moxel_chart_series_text_xml_with_host(xml, series, automatic_names_apply, automatic_name);
 }
 
 fn push_moxel_chart_series_text_xml_with_host(
@@ -14747,13 +14694,14 @@ fn push_moxel_chart_series_xml(
     tag: &str,
     series: &MoxelChartSeries,
     automatic_names_apply: bool,
+    automatic_name: MoxelChartSeriesAutomaticName,
 ) {
     _ = write!(xml, "\t\t\t<d3p1:{tag}>\r\n");
     push_moxel_chart_text_indented(xml, "id", series.id, 4);
     push_moxel_chart_literal_indented(xml, "color", &series.color, 4);
     push_moxel_chart_line_xml(xml, "line", &series.line, 4, "Solid");
     push_moxel_chart_literal_indented(xml, "marker", series.marker, 4);
-    push_moxel_chart_series_text_xml(xml, series, automatic_names_apply);
+    push_moxel_chart_series_text_xml(xml, series, automatic_names_apply, automatic_name);
     push_moxel_chart_bool_indented(xml, "strIsChanged", series.str_is_changed, 4);
     push_moxel_chart_bool_indented(xml, "isExpand", series.is_expand, 4);
     push_moxel_chart_bool_indented(xml, "isIndicator", series.is_indicator, 4);
@@ -15673,6 +15621,11 @@ mod moxel_exact_parity_tests {
     fn reconciliation_report_headers() -> MoxelSpreadsheet {
         parse_moxel_spreadsheet_text(RECONCILIATION_REPORT_HEADERS_RAW, &BTreeMap::new()).unwrap()
     }
+
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/fixtures/ut-chart-policy/explicit-english-zero-series/projection_tests.rs"
+    ));
 
     #[test]
     fn the_automatic_series_name_is_republished_only_where_the_host_does_it() {

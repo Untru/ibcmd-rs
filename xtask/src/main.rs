@@ -233,6 +233,20 @@ fn ci_steps(root: &Path) -> Vec<Step> {
         let path = format!("tests/scripts/{script}.py");
         steps.push(Step::new(format!("python {script}"), python, &[path.as_str()]).needs_program());
     }
+    let provenance_fixtures = root.join("target/xtask-fixtures/observer-provenance");
+    let provenance_fixtures = provenance_fixtures.to_string_lossy();
+    steps.push(
+        Step::new(
+            "python form_observer_provenance_test",
+            python,
+            &[
+                "tests/scripts/form_observer_provenance_test.py",
+                provenance_fixtures.as_ref(),
+            ],
+        )
+        .env("IBCMD_TEST_KEEP_FIXTURES", "1")
+        .needs_program(),
+    );
     steps.push(Step::cargo(
         "test -p ibcmd-schema",
         &["test", "--locked", "-p", "ibcmd-schema"],
@@ -276,6 +290,30 @@ fn ci_steps(root: &Path) -> Vec<Step> {
             "--no-default-features",
         ],
     ));
+    for (name, filter) in [
+        ("bounded Form field-map observation", "field_map_observer"),
+        ("bounded Form query identity", "query_identity_observer"),
+        (
+            "shared Form observer schema",
+            "form_observer_shared_schema_tests",
+        ),
+    ] {
+        steps.push(
+            Step::cargo(
+                format!("test ({name})"),
+                &[
+                    "test",
+                    "--locked",
+                    "-p",
+                    ROOT_PACKAGE,
+                    "--lib",
+                    filter,
+                    "--no-default-features",
+                ],
+            )
+            .env("IBCMD_TEST_KEEP_FIXTURES", "1"),
+        );
+    }
     steps
 }
 

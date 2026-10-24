@@ -213,6 +213,15 @@ jobs:
           CARGO_NET_OFFLINE: "true"
         run: cargo test --locked -p ibcmd-rs --lib configuration_ --no-default-features
 
+      - name: Test bounded Form field-map observation offline
+        shell: bash
+        env:
+          CARGO_NET_OFFLINE: "true"
+          IBCMD_TEST_KEEP_FIXTURES: "1"
+        run: |
+          cargo test --locked -p ibcmd-rs --lib field_map_observer --no-default-features
+          cargo test --locked -p ibcmd-rs --lib form_observer_shared_schema_tests --no-default-features
+
       - name: Test editor export read scope offline
         env:
           CARGO_NET_OFFLINE: "true"

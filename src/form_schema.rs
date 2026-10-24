@@ -9998,12 +9998,20 @@ pub(crate) fn form_nondefault_percent_scale(value: &str) -> Option<String> {
 /// token keeps the binding walker independent of the query punctuation.
 pub(crate) enum FormQueryLexeme {
     MemberSeparator,
+    OpenParenthesis,
+    CloseParenthesis,
+    OpenBrace,
+    CloseBrace,
     Other,
 }
 impl FormQueryLexeme {
     pub(crate) fn classify(token: &str) -> Self {
         match token {
             "." => Self::MemberSeparator,
+            "(" => Self::OpenParenthesis,
+            ")" => Self::CloseParenthesis,
+            "{" => Self::OpenBrace,
+            "}" => Self::CloseBrace,
             _ => Self::Other,
         }
     }
@@ -10199,5 +10207,72 @@ mod form_layout_policy_tests {
         assert_eq!(form_nondefault_percent_scale("100"), None);
         assert_eq!(form_nondefault_percent_scale("0100"), Some("0100".into()));
         assert_eq!(form_nondefault_percent_scale("1,0"), None);
+    }
+}
+
+/// Named DynamicList query properties shared by settings decode and diagnostics.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum FormDynamicListQueryProperty {
+    ManualQuery,
+    QueryText,
+    Other,
+}
+impl FormDynamicListQueryProperty {
+    pub(crate) fn classify(key: &str) -> Self {
+        match key {
+            "ManualQuery" => Self::ManualQuery,
+            "QueryText" => Self::QueryText,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// The zero marker used by 1C record envelopes. This retains exact lexical
+/// recognition: alternate integer spellings are not equivalent markers.
+pub(crate) fn form_record_has_zero_marker(marker: &str) -> bool {
+    marker.trim() == "0"
+}
+
+#[cfg(test)]
+mod form_observer_shared_schema_tests {
+    use super::*;
+    #[test]
+    fn query_properties_and_envelopes_preserve_exact_lexical_rules() {
+        assert_eq!(
+            FormDynamicListQueryProperty::classify("ManualQuery"),
+            FormDynamicListQueryProperty::ManualQuery
+        );
+        assert_eq!(
+            FormDynamicListQueryProperty::classify("QueryText"),
+            FormDynamicListQueryProperty::QueryText
+        );
+        for key in ["manualquery", "QueryText ", "Unknown"] {
+            assert_eq!(
+                FormDynamicListQueryProperty::classify(key),
+                FormDynamicListQueryProperty::Other
+            );
+        }
+        assert!(form_record_has_zero_marker(" 0\r\n"));
+        for marker in ["00", "+0", "0.0", "", "1"] {
+            assert!(!form_record_has_zero_marker(marker));
+        }
+        assert!(matches!(
+            FormQueryLexeme::classify("("),
+            FormQueryLexeme::OpenParenthesis
+        ));
+        assert!(matches!(
+            FormQueryLexeme::classify(")"),
+            FormQueryLexeme::CloseParenthesis
+        ));
+        assert!(matches!(
+            FormQueryLexeme::classify("{"),
+            FormQueryLexeme::OpenBrace
+        ));
+        assert!(matches!(
+            FormQueryLexeme::classify("}"),
+            FormQueryLexeme::CloseBrace
+        ));
+        assert!(FormQueryLexeme::classify(".").is_member_separator());
+        assert!(!FormQueryLexeme::classify("(").is_member_separator());
     }
 }
