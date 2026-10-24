@@ -481,24 +481,36 @@ impl WriteSession {
     }
 
     /// Digest of the locked data file including its filesystem identity.
-    /// A preflight revalidation fingerprint under the advisory lock. This is
-    /// not an atomic filesystem CAS against noncooperating leaf-entry writers.
+    /// An opaque equality fingerprint under the held lock, not an atomic
+    /// filesystem CAS or universal ABA guarantee. Windows admits local fixed
+    /// NTFS only; Unix retains the existing dev/inode token construction.
     pub fn snapshot(&self) -> Result<String> {
-        #[cfg(not(unix))]
+        #[cfg(not(any(unix, windows)))]
         {
             Err(Error::Refused(
                 "file import CAS identity is not supported on this OS".into(),
             ))
         }
-        #[cfg(unix)]
+        #[cfg(any(unix, windows))]
         {
             use sha2::{Digest, Sha256};
-            use std::os::unix::fs::MetadataExt;
+            self.check_read()?;
             self.check_binding()?;
             let mut hash = Sha256::new();
-            let metadata = self.file.metadata()?;
-            hash.update(metadata.dev().to_le_bytes());
-            hash.update(metadata.ino().to_le_bytes());
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                let metadata = self.file.metadata()?;
+                hash.update(metadata.dev().to_le_bytes());
+                hash.update(metadata.ino().to_le_bytes());
+            }
+            #[cfg(windows)]
+            let identity = {
+                let identity = self.paths.snapshot_identity(&self.path, &self.file)?;
+                hash.update(b"ibcmd-filedb:windows-ntfs-snapshot:v1\0");
+                hash.update(identity);
+                identity
+            };
             let mut file = &self.file;
             file.seek(SeekFrom::Start(0))?;
             let mut buffer = vec![0; 1 << 20];
@@ -510,7 +522,15 @@ impl WriteSession {
                 }
                 hash.update(&buffer[..n]);
             }
+            self.check_read()?;
             self.check_binding()?;
+            #[cfg(windows)]
+            if self.paths.snapshot_identity(&self.path, &self.file)? != identity {
+                return Err(Error::Refused(
+                    "Windows snapshot descriptor identity changed".into(),
+                ));
+            }
+            self.check_read()?;
             Ok(format!("{:x}", hash.finalize()))
         }
     }
