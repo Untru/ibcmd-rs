@@ -6996,5 +6996,57 @@
       "class": "I030",
       "diagnostic": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
     }
+  ],
+  "xml_diagnostic_totals": {
+    "current_unique": 105,
+    "previous_unique": 106,
+    "current_existing_lab": 103,
+    "current_additional": 2
+  },
+  "additional_xml_diagnostics": [
+    {
+      "diagnostic": "<chart:chartType> spells StackedLine, which the chart writer has not measured",
+      "reproductions": [
+        {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartMissingSeries.xml"
+        },
+        {
+          "set": "8.5.1.1529/combined",
+          "source": "CommonForms/CovChartMissingSeries.xml"
+        }
+      ],
+      "already_observed_before": true
+    },
+    {
+      "diagnostic": "Form Attribute type is not supported yet: xs:base64Binary",
+      "reproductions": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        },
+        {
+          "set": "8.3.27.2214/combined",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        },
+        {
+          "set": "8.5.1.1150/combined",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        },
+        {
+          "set": "8.5.1.1529/combined",
+          "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml"
+        }
+      ],
+      "already_observed_before": true
+    }
   ]
 }
