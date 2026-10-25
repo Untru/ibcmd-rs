@@ -1451,7 +1451,7 @@
       ]
     },
     "after": {
-      "binary_sha256": "f2c839a929b6492bd755d8ed6f80ae757d41680a2f1f024d54d80ea04045f2d7",
+      "binary_sha256": "b55e4756dc4de31396983cbf3702130fb2c8c67e169a9933a7833c0e16b479a8",
       "failed_rows": 132,
       "export_differing_paths": 171,
       "sets": [
@@ -2521,7 +2521,8 @@
             }
           ]
         }
-      ]
+      ],
+      "initial_debug_binary_sha256": "f2c839a929b6492bd755d8ed6f80ae757d41680a2f1f024d54d80ea04045f2d7"
     }
   },
   "stored_row_baseline_additions": [
@@ -2601,5 +2602,29 @@
       "set": "8.5.1.1529/corpus-modern-spreadsheet",
       "added_paths": 2
     }
-  ]
+  ],
+  "final_build": {
+    "code_commit": "94634ce6e5a379006ce42f88bc31fdd9a2827d16",
+    "profile": "iter",
+    "binary_sha256": "b55e4756dc4de31396983cbf3702130fb2c8c67e169a9933a7833c0e16b479a8",
+    "public_sets_rechecked": 44,
+    "earlier_measurements_unchanged": true
+  },
+  "verification": {
+    "xtask_check": "8 passed",
+    "xtask_ci": "22 passed",
+    "workspace_tests_passed": 1306,
+    "integration_tests_passed": 508,
+    "root_tests_passed": 4214,
+    "root_tests_failed": 0,
+    "root_unchanged_ignored": 16,
+    "independent_code_review": "APPROVE",
+    "sql_writes": false,
+    "not_run_locally": [
+      "release build",
+      "native micro-corpus parity",
+      "SBOM",
+      "release audit"
+    ]
+  }
 }
