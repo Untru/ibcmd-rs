@@ -1,12 +1,19 @@
 {
   "equal": [
     "CommonForms/CovButtonPictureAccountingRegister.xml",
+    "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
     "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+    "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
     "CommonForms/CovButtonPictureFormattedString.xml",
+    "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
     "CommonForms/CovButtonPictureGotoURL.xml",
+    "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
     "CommonForms/CovButtonPictureNewConversation.xml",
+    "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
     "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+    "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
     "CommonForms/CovButtonPictureToday.xml",
+    "CommonForms/CovButtonPictureToday/Ext/Form.xml",
     "CommonForms/CovChartField.xml",
     "CommonForms/CovChartField/Ext/Form.xml",
     "CommonForms/CovEmbeddedSpreadsheetCells.xml",
@@ -29,6 +36,6 @@
     "CommonForms/CovUsualGroupBackColorTomato.xml",
     "CommonForms/CovValueTableChildDataPath.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+    "Languages/Русский.xml"
   ]
 }

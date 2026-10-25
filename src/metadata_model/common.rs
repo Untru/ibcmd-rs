@@ -494,6 +494,7 @@ impl Picture {
 const STD_PICTURE_CODES: &[(&str, i64)] = &[
     ("CheckAll", -10),
     ("Clear", -200),
+    ("GrayedAll", -12),
     ("InputFieldCalculator", -6),
     ("InputFieldCalendar", -5),
     ("InputFieldChooseType", -14),
@@ -835,6 +836,7 @@ pub enum StyleItemValue {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct StyleItem {
     pub header: Header,
+    pub declared_kind: ibcmd_schema::style_item::StyleItemKind,
     pub value: StyleItemValue,
 }
 
@@ -850,14 +852,18 @@ impl StyleItem {
                 .uuid_of(&format!("StyleItem.{name}"))
                 .map(str::to_string)
         };
-        let value = match text(p, "Type").trim() {
-            "Color" => {
+        let declared_kind =
+            ibcmd_schema::style_item::StyleItemKind::from_name(text(p, "Type").trim())
+                .ok_or_else(|| anyhow!("unsupported StyleItem declared type"))?;
+        // The declaration does not determine the variant stored in Value.
+        let value = match value.attr("type").unwrap_or("") {
+            "v8ui:Color" => {
                 let spelled = value.text.trim();
                 let native = format_native_color(Some(spelled), style_item)
                     .ok_or_else(|| anyhow!("unsupported colour {spelled:?}"))?;
                 StyleItemValue::Color(primitive_8_5_1(literal(&native)?, context))
             }
-            "Font" => {
+            "v8ui:Font" => {
                 let attributes = value
                     .attrs
                     .iter()
@@ -868,7 +874,7 @@ impl StyleItem {
                     .ok_or_else(|| anyhow!("unsupported font {attributes:?}"))?;
                 StyleItemValue::Font(primitive_8_5_1(literal(&native)?, context))
             }
-            "Border" => {
+            "v8ui:Border" => {
                 let style = value.child_text("style").map(str::trim);
                 let width = value.attr("width").unwrap_or("1").trim();
                 let native = format_native_control_border(style, width)
@@ -879,6 +885,7 @@ impl StyleItem {
         };
         Ok(Self {
             header: Header::of(object)?,
+            declared_kind,
             value,
         })
     }
@@ -887,7 +894,7 @@ impl StyleItem {
     /// font: `{1,{3,1,{"#",<font type>,1,<font>,0},<header>},0}`;
     /// border: `{1,{3,2,{"#",<border type>,1,<border>,0},<header>},0}`.
     pub fn to_brace(&self) -> Brace {
-        let (kind, value) = match &self.value {
+        let (_, value) = match &self.value {
             StyleItemValue::Color(color) => (
                 0,
                 brace_list![
@@ -922,7 +929,7 @@ impl StyleItem {
             Brace::num(1),
             brace_list![
                 Brace::num(3),
-                Brace::num(kind),
+                Brace::num(self.declared_kind.code()),
                 value,
                 self.header.to_brace()
             ],
@@ -2128,4 +2135,21 @@ mod tests {
         );
         assert_eq!(String::from_utf8(compiled).unwrap(), expected);
     }
+}
+
+/// Canonical WSReference scalar projection shared with the descriptor writer.
+pub(crate) fn ws_reference_location_xml(location: &str) -> String {
+    super::export::write_fragment(
+        &super::export::leaf("LocationURL", super::export::xml_text(location)),
+        3,
+    )
+}
+
+/// Render a typed colour with the descriptor writer's canonical empty/text rules.
+pub(crate) fn style_item_color_value_xml(value: &str) -> String {
+    use super::export::Build;
+    let element =
+        super::export::leaf("Value", super::export::xml_text(value)).attr("type", "v8ui:Color");
+    let xml = super::export::write_fragment(&element, 0);
+    xml.strip_suffix("\r\n").unwrap_or(&xml).to_owned()
 }

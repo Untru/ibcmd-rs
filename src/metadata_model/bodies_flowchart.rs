@@ -43,6 +43,65 @@ use super::xml::{Element, parse_element_tree_raw_line_breaks};
 use crate::brace_list;
 use crate::compiler::bodies::form_native::{format_native_color, format_native_font};
 
+pub(crate) struct FlowchartPrintParameters {
+    pub(crate) paper: Option<String>,
+    pub(crate) page_orientation: Option<&'static str>,
+    pub(crate) collate: Option<String>,
+    pub(crate) copies: Option<String>,
+    pub(crate) paper_source: Option<String>,
+    pub(crate) top_margin: String,
+    pub(crate) left_margin: String,
+    pub(crate) bottom_margin: String,
+    pub(crate) right_margin: String,
+    pub(crate) black_and_white: bool,
+    pub(crate) fit_page_mode: &'static str,
+}
+
+/// Native ordering and declared decimal types of the graphical-schema print block.
+pub(crate) fn format_print_parameters_xml(print: &FlowchartPrintParameters) -> String {
+    fn xml_text(value: &str) -> String {
+        quick_xml::escape::escape(value).into_owned()
+    }
+    let mut xml = String::new();
+    xml.push_str("\t<PrintParameters>\r\n");
+    let decimal = |xml: &mut String, name: &str, value: Option<&str>| {
+        if let Some(value) = value {
+            xml.push_str(&format!(
+                "\t\t<{name} xsi:type=\"xs:decimal\">{}</{name}>\r\n",
+                xml_text(value)
+            ));
+        }
+    };
+    decimal(&mut xml, "Paper", print.paper.as_deref());
+    if let Some(value) = print.page_orientation {
+        xml.push_str(&format!(
+            "\t\t<PageOrientation>{value}</PageOrientation>\r\n"
+        ));
+    }
+    decimal(&mut xml, "Collate", print.collate.as_deref());
+    if let Some(value) = &print.copies {
+        xml.push_str(&format!("\t\t<Copies>{}</Copies>\r\n", xml_text(value)));
+    }
+    xml.push_str(&format!(
+        "\t\t<TopMargin>{}</TopMargin>\r\n\
+\t\t<LeftMargin>{}</LeftMargin>\r\n\
+\t\t<BottomMargin>{}</BottomMargin>\r\n\
+\t\t<RightMargin>{}</RightMargin>\r\n\
+\t\t<BlackAndWhite>{}</BlackAndWhite>\r\n",
+        xml_text(&print.top_margin),
+        xml_text(&print.left_margin),
+        xml_text(&print.bottom_margin),
+        xml_text(&print.right_margin),
+        print.black_and_white,
+    ));
+    decimal(&mut xml, "PaperSource", print.paper_source.as_deref());
+    xml.push_str(&format!(
+        "\t\t<FitPageMode>{}</FitPageMode>\r\n\t</PrintParameters>\r\n",
+        print.fit_page_mode
+    ));
+    xml
+}
+
 /// The border and line record's constant member.
 const LINE_RECORD_UUID: &str = "e45c0cd8-a878-4bcb-8e1a-af934481e1cc";
 
@@ -187,6 +246,10 @@ const TEXT_LOCATIONS: &[(&str, i64)] = &[("FirstSegment", 0), ("Middle", 1)];
 const ARROWS: &[(&str, i64)] = &[("None", 0), ("Filled", 1), ("Blank", 2)];
 const SHAPES: &[(&str, i64)] = &[
     ("None", 0),
+    (
+        "VerticalBrackets",
+        ibcmd_schema::tool1cd_templates::TemplateEnumCodes::VERTICAL_BRACKETS,
+    ),
     ("Document", 10),
     ("Block", 11),
     ("HorizontalBrackets", 12),
@@ -234,12 +297,57 @@ impl<'a> Flowchart<'a> {
         let print = schema
             .child("PrintParameters")
             .ok_or_else(|| anyhow!("flowchart without <PrintParameters>"))?;
-        let parameter = |key: i64, value: i64| {
-            [
-                Brace::num(key),
-                brace_list![Brace::str("N"), Brace::num(value)],
-            ]
-        };
+        use ibcmd_schema::tool1cd_templates::FlowchartPrintKeys as Keys;
+        let allowed = [
+            "Paper",
+            "PageOrientation",
+            "Collate",
+            "Copies",
+            "TopMargin",
+            "LeftMargin",
+            "BottomMargin",
+            "RightMargin",
+            "BlackAndWhite",
+            "PaperSource",
+            "FitPageMode",
+        ];
+        for child in &print.children {
+            if !allowed.contains(&child.name.as_str()) {
+                bail!("unsupported flowchart print parameter {}", child.name);
+            }
+            if print.children_named(&child.name).count() != 1 {
+                bail!("duplicate flowchart print parameter {}", child.name);
+            }
+        }
+        let mut parameters = std::collections::BTreeMap::<i64, i64>::from([
+            (6, number(text(print, "TopMargin"), "TopMargin")?),
+            (7, number(text(print, "LeftMargin"), "LeftMargin")?),
+            (8, number(text(print, "BottomMargin"), "BottomMargin")?),
+            (9, number(text(print, "RightMargin"), "RightMargin")?),
+            (13, i64::from(flag(print, "BlackAndWhite"))),
+            (
+                16,
+                code(FIT_PAGE_MODES, text(print, "FitPageMode"), "FitPageMode")?,
+            ),
+        ]);
+        for (name, key) in [
+            ("Paper", Keys::PAPER),
+            ("Collate", Keys::COLLATE),
+            ("Copies", Keys::COPIES),
+            ("PaperSource", Keys::PAPER_SOURCE),
+        ] {
+            if let Some(value) = print.child(name) {
+                parameters.insert(i64::from(key), number(&value.text, name)?);
+            }
+        }
+        if let Some(value) = print.child("PageOrientation") {
+            parameters.insert(
+                i64::from(Keys::ORIENTATION),
+                Keys::orientation_code(value.text.trim()).ok_or_else(|| {
+                    anyhow!("unsupported flowchart page orientation {}", value.text)
+                })?,
+            );
+        }
         let mut items = vec![
             Brace::num(1),
             self.color(text(schema, "BackColor"))?,
@@ -257,26 +365,12 @@ impl<'a> Flowchart<'a> {
                 text(schema, "DrawGridMode"),
                 "DrawGridMode",
             )?),
-            Brace::num(6),
+            Brace::num(parameters.len() as i64),
         ];
-        items.extend(parameter(6, number(text(print, "TopMargin"), "TopMargin")?));
-        items.extend(parameter(
-            7,
-            number(text(print, "LeftMargin"), "LeftMargin")?,
-        ));
-        items.extend(parameter(
-            8,
-            number(text(print, "BottomMargin"), "BottomMargin")?,
-        ));
-        items.extend(parameter(
-            9,
-            number(text(print, "RightMargin"), "RightMargin")?,
-        ));
-        items.extend(parameter(13, i64::from(flag(print, "BlackAndWhite"))));
-        items.extend(parameter(
-            16,
-            code(FIT_PAGE_MODES, text(print, "FitPageMode"), "FitPageMode")?,
-        ));
+        for (key, value) in parameters {
+            items.push(Brace::num(key));
+            items.push(brace_list![Brace::str("N"), Brace::num(value)]);
+        }
         Ok(Brace::List(items))
     }
 
@@ -969,5 +1063,46 @@ mod tests {
             outline("Completion", false, 0, 0, 150, 38).unwrap(),
             vec![(75, 0), (149, 19), (149, 37), (0, 37), (0, 19)]
         );
+    }
+    #[test]
+    fn tool1cd_template_flowchart_print_writer_retains_native_extended_keys() {
+        use super::*;
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("tests/fixtures/coverage/8.3.27.2214/corpus-business-process-flowchart/native");
+        let context = DescriptorContext::new(&root, "2.20").unwrap();
+        let path = root.join("BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml");
+        let bytes = std::fs::read(&path).unwrap();
+        let xml = parse_element_tree_raw_line_breaks(&bytes).unwrap();
+        let chart = Flowchart::new(
+            &xml,
+            &context,
+            SchemeOwner::BusinessProcess,
+            path.with_extension("").join("Items"),
+        )
+        .unwrap();
+        let record = chart.scheme().unwrap();
+        let fields = record.as_list().unwrap();
+        assert_eq!(fields[6].as_atom(), Some("11"));
+        let keys = fields[7..]
+            .chunks_exact(2)
+            .map(|v| v[0].as_atom().unwrap())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            keys,
+            ["0", "1", "3", "4", "6", "7", "8", "9", "13", "15", "16"]
+        );
+        let changed = String::from_utf8(bytes).unwrap().replace(
+            "</PrintParameters>",
+            "<FutureFlag>true</FutureFlag></PrintParameters>",
+        );
+        let xml = parse_element_tree_raw_line_breaks(changed.as_bytes()).unwrap();
+        let chart = Flowchart::new(
+            &xml,
+            &context,
+            SchemeOwner::BusinessProcess,
+            path.with_extension("").join("Items"),
+        )
+        .unwrap();
+        assert!(chart.scheme().is_err());
     }
 }

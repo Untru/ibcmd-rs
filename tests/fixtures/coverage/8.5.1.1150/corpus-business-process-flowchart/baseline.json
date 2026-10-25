@@ -2,6 +2,8 @@
   "equal": [
     "CovCompoundFlowchart",
     "CovFlowchartProcess",
+    "CovGifFlowchart",
+    "CovPrintedFlowchart",
     "CovProcessingFlowchart",
     "configuration"
   ]

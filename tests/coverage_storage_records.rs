@@ -486,14 +486,26 @@ fn minimized_xml_probes_keep_their_precise_known_failures() {
             .flat_map(|(_, rows)| rows.as_array().unwrap())
             .filter(|row| row["source"] == case["failure_source"])
             .collect();
-        assert!(
-            rows.iter().any(|row| row["detail"]
-                .as_str()
-                .unwrap()
-                .contains(case["expected_failure"].as_str().unwrap())),
-            "{}: retain the precise known refusal; replace this assertion with an equivalence check when supported: {rows:?}",
-            case["id"]
-        );
+        if matches!(
+            case["id"].as_str(),
+            Some("existing-interfaces-8.3.27.2342" | "existing-interfaces-8.5.1.1150")
+        ) {
+            assert!(
+                rows.is_empty(),
+                "{}: supported Interface refused: {rows:?}",
+                case["id"]
+            );
+            assert_native_interface_round_trip(&xml, &work);
+        } else {
+            assert!(
+                rows.iter().any(|row| row["detail"]
+                    .as_str()
+                    .unwrap()
+                    .contains(case["expected_failure"].as_str().unwrap())),
+                "{}: retain the precise known refusal; replace this assertion with an equivalence check when supported: {rows:?}",
+                case["id"]
+            );
+        }
         reports.push(serde_json::json!({"case":case,"failures":rows}));
     }
     if let Some(path) = std::env::var_os("IBCMD_COVERAGE_SOURCE_REPORT") {
@@ -502,8 +514,67 @@ fn minimized_xml_probes_keep_their_precise_known_failures() {
     fs::remove_dir_all(temp).unwrap();
 }
 
+/// An advanced source probe must compare to native bytes, not merely stop failing.
+fn assert_native_interface_round_trip(source: &std::path::Path, work: &std::path::Path) {
+    use ibcmd_rs::metadata_model::{
+        DescriptorContext,
+        brace::parse_row,
+        compile_descriptor,
+        export::{object_names, tree_version},
+    };
+    use ibcmd_v8::writer::{Format15Document, Format15Element, write_format15_to_vec};
+    let version = tree_version(source).unwrap();
+    let context = DescriptorContext::new(source, &version).unwrap();
+    let mut count = 0;
+    for entry in fs::read_dir(source.join("Interfaces")).unwrap() {
+        let path = entry.unwrap().path();
+        if path.extension().and_then(|e| e.to_str()) != Some("xml") {
+            continue;
+        }
+        let expected = fs::read(&path).unwrap();
+        let descriptor = compile_descriptor("Interface", &path, &expected, &context).unwrap();
+        let identity = object_names("Interface", &parse_row(&descriptor).unwrap()).unwrap();
+        let packed = encode_payload(
+            PayloadEncoding::RawDeflate,
+            &descriptor,
+            ResourceLimits::default(),
+        )
+        .unwrap();
+        let cf = work.join(format!("interface-{}.cf", identity.uuid));
+        fs::write(
+            &cf,
+            write_format15_to_vec(&Format15Document::new(
+                7,
+                vec![Format15Element::named(&identity.uuid, Some(packed))],
+            ))
+            .unwrap(),
+        )
+        .unwrap();
+        let out = work.join(format!("interface-{}", identity.uuid));
+        let result = Command::new(env!("CARGO_BIN_EXE_ibcmd-rs"))
+            .args(["cf", "export"])
+            .arg(cf)
+            .arg(&out)
+            .args(["--source-version", &version, "--fail-on-opaque"])
+            .env("PATH", "")
+            .output()
+            .unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        assert_eq!(
+            fs::read(out.join("Interfaces").join(path.file_name().unwrap())).unwrap(),
+            expected
+        );
+        count += 1;
+    }
+    assert_eq!(count, 2, "both native Switchable variants must be tested");
+}
+
 #[test]
-fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
+fn coverage_empty_html_stored_record_exports_the_exact_empty_template() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     let fixture = root.join("tests/fixtures/coverage/8.3.27.2342/commontemplates");
     let temp = std::env::temp_dir().join(format!(
@@ -563,24 +634,20 @@ fn coverage_empty_html_stored_record_has_a_precise_known_gap() {
         .output()
         .unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);
-    if output.status.success() {
-        // A future fix is accepted only if the body remains an empty HTML template.
-        let xml =
-            fs::read_to_string(temp.join("out/CommonTemplates/CovTemplateType_HTMLDocument.xml"));
-        assert!(
-            xml.as_ref()
-                .is_ok_and(|s| s.contains("<TemplateType>HTMLDocument</TemplateType>")),
-            "fixed export must retain the descriptor: {stderr}"
-        );
-        println!("coverage stored-empty-html: newly equal");
-    } else {
-        assert!(
-            stderr.contains("failed to extract help")
-                && stderr.contains("CovTemplateType_HTMLDocument"),
-            "unexpected refusal: {stderr}"
-        );
-        println!("coverage stored-empty-html: refused (known, not in parity baseline): {stderr}");
-    }
+    assert!(
+        output.status.success(),
+        "empty HTML export failed: {stderr}"
+    );
+    let descriptor =
+        fs::read_to_string(temp.join("out/CommonTemplates/CovTemplateType_HTMLDocument.xml"))
+            .unwrap();
+    assert!(descriptor.contains("<TemplateType>HTMLDocument</TemplateType>"));
+    let body =
+        fs::read(temp.join("out/CommonTemplates/CovTemplateType_HTMLDocument/Ext/Template.xml"))
+            .unwrap();
+    let expected = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.20\">\r\n</Help>";
+    assert_eq!(body, expected.as_bytes());
+    println!("coverage stored-empty-html: equal, exact empty body");
     let manifest_path = temp.join("out/manifest.json");
     if let Ok(bytes) = fs::read(manifest_path) {
         let _: Value = serde_json::from_slice(&bytes).unwrap();

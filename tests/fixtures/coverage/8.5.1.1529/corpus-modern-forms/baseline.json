@@ -2,6 +2,7 @@
   "equal": [
     "CovModernCollapseUse",
     "CovModernFormTemplate",
+    "CovModernPictureChar",
     "configuration"
   ]
 }

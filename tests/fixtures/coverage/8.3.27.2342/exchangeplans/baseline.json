@@ -4,11 +4,13 @@
     "CovDescriptionLength_150",
     "CovDescriptionLength_250",
     "CovDistributedInfoBase_true",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
     "CovIncludeHelpInContents_true",
     "CovListPresentation_Cov",
     "CovObjectPresentation_Cov",
     "CovQuickChoice_true",
     "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
     "CovUseStandardCommands_false",
     "configuration"
   ]

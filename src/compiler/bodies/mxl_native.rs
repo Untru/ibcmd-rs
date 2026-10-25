@@ -37,6 +37,7 @@ use quick_xml::escape::{resolve_xml_entity, unescape};
 use quick_xml::events::{BytesStart, Event};
 
 use crate::module_blob::MetadataSourceContext;
+use ibcmd_schema::tool1cd_templates::TemplateEnumCodes;
 
 const NIL_UUID: &str = "00000000-0000-0000-0000-000000000000";
 const CELL_LINE_KIND: &str = "f527dc88-1d39-40b3-bcbb-d98b690ead68";
@@ -556,6 +557,8 @@ struct Document<'a> {
     vg_levels: Option<usize>,
     row_groups: Vec<&'a Node>,
     column_groups: Vec<&'a Node>,
+    vertical_page_breaks: Vec<&'a Node>,
+    horizontal_page_breaks: Vec<&'a Node>,
     merges: Vec<&'a Node>,
     vertical_unmerges: Vec<&'a Node>,
     horizontal_unmerges: Vec<&'a Node>,
@@ -600,6 +603,8 @@ impl<'a> Document<'a> {
                 "vgLevels" => document.vg_levels = Some(parse_usize(&child.text, "<vgLevels>")?),
                 "vg" => document.row_groups.push(child),
                 "hg" => document.column_groups.push(child),
+                "verticalPageBreak" => document.vertical_page_breaks.push(child),
+                "horizontalPageBreak" => document.horizontal_page_breaks.push(child),
                 "merge" => document.merges.push(child),
                 "verticalUnmerge" => document.vertical_unmerges.push(child),
                 "horizontalUnmerge" => document.horizontal_unmerges.push(child),
@@ -1589,7 +1594,39 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             out.record(record);
             out.raw(",-1");
         }
-        out.raw(",0,0");
+        // Native Coverage stores the two count-prefixed break runs directly
+        // after the row and column groups. Horizontal positions carry -1.
+        for (breaks, horizontal) in [
+            (&document.vertical_page_breaks, false),
+            (&document.horizontal_page_breaks, true),
+        ] {
+            out.comma();
+            out.raw(&breaks.len().to_string());
+            for page_break in breaks {
+                page_break.only_attributes(&[], &page_break.name)?;
+                ensure!(
+                    page_break.text.trim().is_empty(),
+                    "<{}> contains mixed text",
+                    page_break.name
+                );
+                page_break.only_children(&["position"], &page_break.name)?;
+                let positions = page_break.children_named("position").collect::<Vec<_>>();
+                ensure!(
+                    positions.len() == 1,
+                    "<{}> needs exactly one position",
+                    page_break.name
+                );
+                let position = positions[0];
+                position.only_attributes(&[], "position")?;
+                position.only_children(&[], "position")?;
+                let value = parse_i64(&position.text, "page break position")?;
+                out.comma();
+                out.raw(&value.to_string());
+                if horizontal {
+                    out.raw(",-1");
+                }
+            }
+        }
         Ok(out.text)
     }
 
@@ -1733,6 +1770,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let what = format!("<printSettings><{}>", member.name);
             let (key, stored) = match member.name.as_str() {
                 "paper" => (0, number(value, &what)?),
+                "pageSize" => (0, format!("{{\"S\",{}}}", quote(value))),
                 "pageOrientation" => (
                     1,
                     match value {
@@ -2449,10 +2487,17 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 ))
             }
             "AutoFont" => {
-                if !node.attributes.iter().all(|(key, _)| key == "kind") {
-                    bail!("an AutoFont <font> spells members");
+                if !node
+                    .attributes
+                    .iter()
+                    .all(|(key, _)| matches!(key.as_str(), "kind" | "height"))
+                {
+                    bail!("an AutoFont <font> spells unmeasured members");
                 }
-                Ok("{7,3,0,1,100}".to_string())
+                Ok(match height {
+                    Some(height) => format!("{{7,3,2,{height},1,100}}"),
+                    None => "{7,3,0,1,100}".to_string(),
+                })
             }
             "StyleItem" | "WindowsFont" => {
                 let reference = node
@@ -2461,6 +2506,7 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                 let (code, reference) = if kind == "WindowsFont" {
                     let index = match reference {
                         "sys:DefaultGUIFont" => "0",
+                        "sys:OEMFixedFont" => TemplateEnumCodes::OEM_FIXED_FONT,
                         "sys:ANSIFixedFont" => "2",
                         other => bail!("system font {other} has no stored code"),
                     };
@@ -2540,9 +2586,11 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
             let node = self.document.lines[self.lines.order[position]];
             node.only_attributes(&["width", "gap"], "line")?;
             node.only_children(&["style"], "line")?;
-            if node.attribute("gap").is_some_and(|gap| gap != "false") {
-                bail!("a <line> with a gap has no writer");
-            }
+            let gap = node
+                .attribute("gap")
+                .map(|value| parse_bool(value, "line gap"))
+                .transpose()?
+                .unwrap_or(false);
             let width = parse_usize(node.attribute("width").unwrap_or("0"), "line width")?;
             let style = node
                 .child("style")
@@ -2567,12 +2615,17 @@ impl<'a, 'd> BodyWriter<'a, 'd> {
                         "None" => 0,
                         "Solid" => 1,
                         "Dotted" => 3,
+                        "Dashed" => TemplateEnumCodes::DRAWING_DASHED,
+                        "DashDotted" => TemplateEnumCodes::DRAWING_DASH_DOTTED,
                         other => bail!("drawing line style {other} has no stored code"),
                     },
                 ),
                 other => bail!("a line style of type {other:?} has no writer"),
             };
-            record.push_str(&format!(",1,{{4,0,{{0}},{code},{width},0,{kind},0}},0"));
+            record.push_str(&format!(
+                ",1,{{4,0,{{0}},{code},{width},0,{kind},{}}},0",
+                u8::from(gap)
+            ));
         }
         record.push('}');
         let mut out = Out::default();
@@ -3089,6 +3142,8 @@ fn web_color_code(name: &str) -> Option<u32> {
         "RosyBrown" => 120,
         "RoyalBlue" => 121,
         "SaddleBrown" => 122,
+        "SandyBrown" => TemplateEnumCodes::SANDY_BROWN,
+        "SkyBlue" => TemplateEnumCodes::SKY_BLUE,
         "Silver" => 128,
         "SlateBlue" => 130,
         "SlateGray" => 131,
@@ -3472,5 +3527,38 @@ mod tests {
         let exported = read_back(&body);
         assert!(exported.contains("<backColor>style:ReportHeaderBackColor</backColor>"));
         assert!(exported.contains("<backColor>#F4ECC5</backColor>"));
+    }
+
+    fn coverage_template(platform: &str, set: &str, name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/coverage")
+                .join(platform)
+                .join(set)
+                .join("native/CommonTemplates")
+                .join(name)
+                .join("Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn tool1cd_template_page_breaks_refuse_unknown_members_and_fractional_positions() {
+        let xml = String::from_utf8(coverage_template(
+            "8.3.27.2214",
+            "corpus-spreadsheet-facets",
+            "CovSheetVerticalPageBreak",
+        ))
+        .unwrap();
+        for changed in [
+            xml.replace("<position>1</position>", "<position>1.5</position>"),
+            xml.replace(
+                "<position>1</position>",
+                "<position>1</position><unknown>3</unknown>",
+            ),
+            xml.replace("<verticalPageBreak>", "<verticalPageBreak code=\"1\">"),
+        ] {
+            assert!(write_native_moxel_body(changed.as_bytes(), None).is_err());
+        }
     }
 }

@@ -514,6 +514,13 @@ fn push_qname(out: &mut String, element: &Element) {
     out.push_str(&element.name);
 }
 
+/// Serialize an owned metadata subtree using the same scalar and namespace rules.
+pub(crate) fn write_fragment(element: &Element, depth: usize) -> String {
+    let mut out = String::new();
+    write_element(&mut out, element, depth, false);
+    out
+}
+
 fn write_element(out: &mut String, element: &Element, depth: usize, raw_text_crlf: bool) {
     for _ in 0..depth {
         out.push('\t');

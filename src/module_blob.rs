@@ -4450,8 +4450,14 @@ fn format_native_child_item(
     if item.tag == "Button" {
         let tooltip = extended_tooltip
             .ok_or_else(|| anyhow!("a button with no extended tooltip is not measured"))?;
-        let command =
-            native_button_command(item, command_ids, items, main_attribute_class, source)?;
+        let command = native_button_command(
+            item,
+            command_ids,
+            items,
+            main_attribute_class,
+            source,
+            &data_paths.form,
+        )?;
         // Presence is pure: 85 254 buttons with no `<Picture>` store the empty
         // constant and all 3 461 that spell one store a picture. The writer
         // emitted the constant either way because the call site never passed
@@ -5062,6 +5068,7 @@ fn format_native_table_record(
                 dynamic_list,
                 item.data_path.as_deref(),
                 name,
+                &data_paths.form,
             )
             .ok_or_else(|| anyhow!("<{}> excludes {name}, which has no measured uuid", item.tag))
         })
@@ -5844,6 +5851,7 @@ fn native_button_command(
     items: &BTreeMap<String, NativeItemTarget>,
     main_attribute_class: &str,
     source: Option<&MetadataSourceContext>,
+    data_path_form: &crate::compiler::bodies::form_native::DataPathForm,
 ) -> Result<String> {
     use crate::compiler::bodies::form_native as native;
     let Some(path) = item.command_name.as_deref() else {
@@ -5883,6 +5891,7 @@ fn native_button_command(
                 target.dynamic_list,
                 target.data_path.as_deref(),
                 name,
+                data_path_form,
             )
         }
         .ok_or_else(|| anyhow!("no measured uuid for {path} on <{}>", target.tag))?;
@@ -6917,6 +6926,7 @@ fn native_field_payload(
             let representation = match item.scalars.get("Representation").map(String::as_str) {
                 None => "1",
                 Some("Broken") => "0",
+                Some("BrokenTilt") => "2",
                 Some(other) => {
                     return Err(anyhow!(
                         "a progress bar's <Representation>{other} is not measured"
@@ -7863,6 +7873,13 @@ fn native_picture_of(
         let value = STD_PICTURE_VALUES
             .iter()
             .find_map(|(candidate, value)| (*candidate == name).then(|| (*value).to_owned()))
+            .or_else(|| {
+                crate::metadata_model::registers::parts::STANDARD_PICTURE_CODES
+                    .iter()
+                    .find_map(|(candidate, code)| {
+                        (*candidate == name).then(|| format!("{{{code}}}"))
+                    })
+            })
             .or_else(|| {
                 crate::mssql_dump::standard_picture_uuid(reference)
                     .map(|uuid| format!("{{0,{uuid}}}"))
@@ -28958,8 +28975,8 @@ pub fn pack_help_blob_from_parts(
     pages: &[(String, Vec<u8>)],
     files: &[(String, Vec<u8>)],
 ) -> Result<PackedHelpBlob> {
-    if pages.is_empty() {
-        return Err(anyhow!("at least one Help page is required"));
+    if pages.is_empty() && !files.is_empty() {
+        return Err(anyhow!("Help attachments require at least one page"));
     }
     // The platform's own layout, measured on every help row of both corpora
     // (БСП 641 + 1, ERP УХ 6 329 + 44 + 66 with files): the BOM, each
@@ -31285,13 +31302,16 @@ fn common_command_standard_picture_uuid(reference: &str) -> Option<&'static str>
 /// uuids the exporter names back.
 fn std_picture_value_uuid(reference: &str) -> Option<&'static str> {
     let name = reference.trim().strip_prefix("StdPicture.")?;
-    let value = STD_PICTURE_VALUES
+    match STD_PICTURE_VALUES
         .iter()
-        .find_map(|(candidate, value)| (*candidate == name).then_some(*value))?;
-    value
-        .strip_prefix("{0,")
-        .and_then(|rest| rest.strip_suffix('}'))
-        .filter(|uuid| is_uuid_text(uuid))
+        .find_map(|(candidate, value)| (*candidate == name).then_some(*value))
+    {
+        Some(value) => value
+            .strip_prefix("{0,")
+            .and_then(|rest| rest.strip_suffix('}'))
+            .filter(|uuid| is_uuid_text(uuid)),
+        None => crate::mssql_dump::standard_picture_uuid(reference),
+    }
 }
 
 fn parse_command_group_picture(
@@ -45217,7 +45237,7 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
     #[test]
     fn std_picture_values_agree_with_the_one_standard_picture_table() {
         for (name, value) in super::STD_PICTURE_VALUES {
-            // The seventeen pictures stored by a bare code, not a uuid, are
+            // The coded pictures, stored by a bare code rather than a uuid, are
             // the descriptor compiler's `STANDARD_PICTURE_CODES`.
             if let Some(code) = value
                 .strip_prefix("{-")
@@ -45236,6 +45256,53 @@ aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa,bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb,dddddd
             .unwrap_or_else(|| panic!("StdPicture.{name} is not in the standard picture table"));
             assert_eq!(*value, format!("{{0,{uuid}}}"), "StdPicture.{name}");
         }
+    }
+
+    #[test]
+    fn tool1cd_picture_values_match_native_coverage_and_reject_unknown() {
+        for (name, value) in [
+            (
+                "AccountingRegister",
+                "{0,20175a6d-7510-46a8-9077-75a5d0d97802}",
+            ),
+            ("GotoURL", "{0,3b2a508b-f36e-4e0b-9dc0-70b2b56276a9}"),
+            (
+                "QueryWizardTempTableDescription",
+                "{0,6b322d7c-3fa2-437d-b311-fd70c4c7ed46}",
+            ),
+            ("GrayedAll", "{-12}"),
+        ] {
+            let picture = super::FormXmlItemPicture {
+                reference: Some(format!("StdPicture.{name}")),
+                load_transparent: Some("true".to_string()),
+                ..Default::default()
+            };
+            assert_eq!(
+                super::native_picture_of("Button", "Probe", Some(&picture), true, None, None)
+                    .unwrap(),
+                format!("{{4,1,{value},\"\",-1,-1,1,0,\"\"}}")
+            );
+        }
+        for (name, expected) in [
+            ("AccountingRegister", "20175a6d-7510-46a8-9077-75a5d0d97802"),
+            ("GotoURL", "3b2a508b-f36e-4e0b-9dc0-70b2b56276a9"),
+            (
+                "QueryWizardTempTableDescription",
+                "6b322d7c-3fa2-437d-b311-fd70c4c7ed46",
+            ),
+        ] {
+            assert_eq!(
+                super::common_command_standard_picture_uuid(&format!("StdPicture.{name}")),
+                Some(expected)
+            );
+        }
+        let unknown = super::FormXmlItemPicture {
+            reference: Some("StdPicture.NoSuchTool1cdPicture".to_string()),
+            ..Default::default()
+        };
+        assert!(
+            super::native_picture_of("Button", "Probe", Some(&unknown), true, None, None).is_err()
+        );
     }
 
     #[test]

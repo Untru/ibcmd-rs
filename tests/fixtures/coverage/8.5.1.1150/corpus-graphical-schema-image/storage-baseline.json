@@ -1,0 +1,14 @@
+{
+  "equal": [
+    "CommonTemplates/CovGraphicalSchemaGif.xml",
+    "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+    "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+    "CommonTemplates/CovGraphicalSchemaImage.xml",
+    "CommonTemplates/CovGraphicalSchemaImage/Ext/Template.xml",
+    "CommonTemplates/CovGraphicalSchemaPng.xml",
+    "CommonTemplates/CovGraphicalSchemaPng/Ext/Template.xml",
+    "CommonTemplates/CovGraphicalSchemaPng/Ext/Template/Items/Probe/Picture.png",
+    "Configuration.xml",
+    "Languages/Русский.xml"
+  ]
+}

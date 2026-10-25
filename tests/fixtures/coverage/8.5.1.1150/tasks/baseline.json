@@ -1,11 +1,15 @@
 {
   "equal": [
+    "CovAutonumbering_false",
+    "CovCheckUnique_false",
     "CovDescriptionLength_150",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
     "CovIncludeHelpInContents_true",
     "CovListPresentation_Cov",
     "CovNumberAllowedLength_Fixed",
     "CovNumberLength_14",
     "CovTemplate",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
     "CovUseStandardCommands_false",
     "configuration"
   ]

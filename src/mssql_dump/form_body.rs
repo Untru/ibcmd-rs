@@ -30356,7 +30356,7 @@ pub(super) fn form_table_standard_command_suffix(uuid: &str) -> Option<&'static 
         // already names `AddGroup` and `Copy` on the same item -- and which
         // this export wrote through as the bare `3:<uuid>` reference.
         "46647493-f1bf-4cd6-9110-6bfab80b62de" => Some("AddTable"),
-        _ => None,
+        _ => crate::compiler::bodies::form_native::tool1cd_table_item_command_name(uuid),
     }
 }
 

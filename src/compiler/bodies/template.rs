@@ -536,9 +536,9 @@ fn validate_html_parts(
     pages: &[(String, Vec<u8>)],
     files: &[(String, Vec<u8>)],
 ) -> Result<(), TemplateCodecError> {
-    if pages.is_empty() {
+    if pages.is_empty() && !files.is_empty() {
         return Err(TemplateCodecError::InvalidSource(
-            "HTML Template requires at least one page".to_string(),
+            "HTML Template attachments require at least one page".to_string(),
         ));
     }
     for (label, values) in [("page", pages), ("file", files)] {
@@ -736,5 +736,34 @@ mod tests {
         ));
         let unknown = deflate_bytes(b"{2,{#base64:YQ==}}").unwrap();
         assert!(decode_template(&profile, TemplateKind::BinaryData, &unknown).is_err());
+    }
+    #[test]
+    fn tool1cd_empty_html_codec_round_trip_preserves_the_exact_legacy_record() {
+        let profile = TemplateCodecProfile::fixture();
+        let blob = compile_template(
+            &profile,
+            TemplateKind::HtmlDocument,
+            TemplateSource::Html {
+                pages: &[],
+                files: &[],
+            },
+        )
+        .unwrap();
+        assert_eq!(inflate(&blob).unwrap(), b"\xef\xbb\xbf{5,0,0}");
+        let decoded = decode_template(&profile, TemplateKind::HtmlDocument, &blob).unwrap();
+        assert!(decoded.html().unwrap().pages().is_empty());
+        assert!(decoded.html().unwrap().files().is_empty());
+        let files = vec![("orphan.bin".to_string(), vec![1])];
+        assert!(
+            compile_template(
+                &profile,
+                TemplateKind::HtmlDocument,
+                TemplateSource::Html {
+                    pages: &[],
+                    files: &files
+                }
+            )
+            .is_err()
+        );
     }
 }

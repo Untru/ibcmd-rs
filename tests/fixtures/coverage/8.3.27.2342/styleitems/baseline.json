@@ -1,6 +1,7 @@
 {
   "equal": [
     "CovTemplate",
+    "CovType_Font",
     "configuration"
   ]
 }

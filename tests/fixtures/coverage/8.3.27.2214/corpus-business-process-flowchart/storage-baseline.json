@@ -1,0 +1,18 @@
+{
+  "equal": [
+    "BusinessProcesses/CovCompoundFlowchart.xml",
+    "BusinessProcesses/CovCompoundFlowchart/Ext/Flowchart.xml",
+    "BusinessProcesses/CovFlowchartProcess.xml",
+    "BusinessProcesses/CovFlowchartProcess/Ext/Flowchart.xml",
+    "BusinessProcesses/CovGifFlowchart.xml",
+    "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+    "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+    "BusinessProcesses/CovPrintedFlowchart.xml",
+    "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+    "BusinessProcesses/CovProcessingFlowchart.xml",
+    "BusinessProcesses/CovProcessingFlowchart/Ext/Flowchart.xml",
+    "Configuration.xml",
+    "Languages/Русский.xml",
+    "Tasks/CovTask.xml"
+  ]
+}

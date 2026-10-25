@@ -25,11 +25,12 @@
     "CommonForms/CovFacetRootURLProcessing.xml",
     "CommonForms/CovFacetRootURLProcessing/Ext/Form.xml",
     "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+    "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
     "CommonForms/CovFacetTableExcludesSelectAll.xml",
     "CommonForms/CovFacetTableExcludesSelectAll/Ext/Form.xml",
     "CommonForms/CovFacetTemplate.xml",
     "CommonForms/CovFacetTemplate/Ext/Form.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+    "Languages/Русский.xml"
   ]
 }

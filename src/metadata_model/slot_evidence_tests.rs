@@ -401,13 +401,14 @@ fn chart_of_accounts_properties_ride_their_stored_slots() {
 
 /// Chart of calculation types, 63 slots (five charts on record). Slot 27 is
 /// DependenceOnCalculationTypes (`0` on the extension's chart, `1` on the
-/// other four) and 35 the edit type: the pair the model once swapped.
+/// other four). Native single-property Coverage establishes EditType at 24
+/// and UseStandardCommands at 35; their equal default code hid the mismatch.
 #[test]
 fn chart_of_calculation_types_properties_ride_their_stored_slots() {
     check(
         "ChartOfCalculationTypes",
         &[
-            ("UseStandardCommands", "true", "false", 24, "0"),
+            ("UseStandardCommands", "true", "false", 35, "0"),
             ("CodeLength", "9", "5", 25, "5"),
             ("CodeType", "String", "Number", 26, "0"),
             (
@@ -427,7 +428,7 @@ fn chart_of_calculation_types_properties_ride_their_stored_slots() {
             ("ActionPeriodUse", "false", "true", 29, "1"),
             ("DescriptionLength", "40", "100", 30, "100"),
             ("DefaultPresentation", "AsDescription", "AsCode", 31, "0"),
-            ("EditType", "InDialog", "InList", 35, "0"),
+            ("EditType", "InDialog", "InList", 24, "0"),
             ("IncludeHelpInContents", "false", "true", 37, "1"),
             ("ChoiceMode", "BothWays", "QuickChoice", 38, "1"),
             ("QuickChoice", "false", "true", 39, "1"),

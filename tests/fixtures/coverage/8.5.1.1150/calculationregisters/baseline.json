@@ -1,5 +1,9 @@
 {
   "equal": [
+    "CovBasePeriod_true",
+    "CovIncludeHelpInContents_true",
+    "CovTemplate",
+    "CovUseStandardCommands_false",
     "configuration"
   ]
 }

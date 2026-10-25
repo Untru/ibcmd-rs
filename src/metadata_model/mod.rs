@@ -22,6 +22,7 @@ pub mod types;
 // Kind families, one track each.
 pub mod common;
 pub(crate) mod interface;
+pub(crate) mod legacy_property_xml;
 pub mod websocket_client;
 // Base-free body rows of track D: predefined data, flowcharts, aggregates.
 pub mod bodies_aggregates;

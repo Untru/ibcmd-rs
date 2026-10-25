@@ -1,7 +1,10 @@
 {
   "equal": [
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml",
-    "StyleItems/CovStyleColorTemplate.xml"
+    "Languages/Русский.xml",
+    "StyleItems/CovStyleColorLinen.xml",
+    "StyleItems/CovStyleColorMediumGreen.xml",
+    "StyleItems/CovStyleColorTemplate.xml",
+    "StyleItems/CovStyleColorTomato.xml"
   ]
 }

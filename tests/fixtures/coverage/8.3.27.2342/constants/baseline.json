@@ -1,6 +1,7 @@
 {
   "equal": [
     "CovDataLockControlMode_Automatic",
+    "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
     "CovExplanation_Cov",
     "CovExtendedEdit_true",
     "CovExtendedPresentation_Cov",
@@ -10,6 +11,7 @@
     "CovPasswordMode_true",
     "CovTemplate",
     "CovToolTip_Cov",
+    "CovUpdateDataHistoryImmediatelyAfterWrite_true",
     "CovUseStandardCommands_false",
     "configuration"
   ]
