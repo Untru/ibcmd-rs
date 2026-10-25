@@ -7,8 +7,10 @@
     "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
     "CovIncludeHelpInContents_true",
     "CovListPresentation_Cov",
+    "CovQuickChoice_true",
     "CovTemplate",
     "CovUpdateDataHistoryImmediatelyAfterWrite_true",
+    "CovUseStandardCommands_false",
     "configuration"
   ]
 }

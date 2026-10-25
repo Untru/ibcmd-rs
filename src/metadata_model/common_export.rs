@@ -33,6 +33,9 @@ use crate::metadata_model::xml::Element;
 
 /// Decodes one stored row of a common kind into the object's element.
 pub(crate) fn decode(kind: &str, row: &Brace, context: &ExportContext) -> Result<Element> {
+    if kind == "Interface" {
+        return crate::metadata_model::interface::Interface::from_brace(row)?.to_xml();
+    }
     if kind == "ExternalDataSource" {
         return crate::metadata_model::external_data_source::decode(row, &context.names);
     }
@@ -400,8 +403,16 @@ fn style_item(payload: &Brace, names: &NameIndex) -> Result<Element> {
     let fields = record(payload, "3", "StyleItem")?;
     let head = header(item(fields, 3)?)?;
     let value = item(fields, 2)?;
-    let (type_name, element) = match atom(item(fields, 1)?)? {
-        "0" => (
+    let type_name = ibcmd_schema::style_item::StyleItemKind::from_code(atom(item(fields, 1)?)?)
+        .ok_or_else(|| anyhow!("unknown StyleItem declared kind"))?
+        .name();
+    let value_fields = list(value)?;
+    let value_type = atom(item(
+        value_fields,
+        ibcmd_schema::style_item::StyleItemLayout::TYPED_VALUE_TYPE,
+    )?)?;
+    let (_, element) = match value_type {
+        COLOR_TYPE => (
             "Color",
             leaf(
                 "Value",
@@ -409,14 +420,14 @@ fn style_item(payload: &Brace, names: &NameIndex) -> Result<Element> {
             )
             .attr("type", "v8ui:Color"),
         ),
-        "1" => {
+        FONT_TYPE => {
             let mut element = el("Value").attr("type", "v8ui:Font");
             for (key, text) in font_attributes(typed_payload(value, FONT_TYPE)?, names)? {
                 element = element.attr(key, text);
             }
             ("Font", element)
         }
-        "2" => {
+        BORDER_TYPE => {
             let border = list(typed_payload(value, BORDER_TYPE)?)?;
             let style = code_text(item(border, 3)?, BORDER_STYLES)?;
             (
@@ -427,7 +438,7 @@ fn style_item(payload: &Brace, names: &NameIndex) -> Result<Element> {
                     .child(leaf("v8ui:style", style).attr("type", "v8ui:ControlBorderType")),
             )
         }
-        other => bail!("unknown style item kind {other}"),
+        other => bail!("unknown style item Value type {other}"),
     };
     let properties = header_properties(&head)?
         .child(leaf("Type", type_name))
@@ -802,6 +813,9 @@ fn manager_name(name: String, type_id: &Brace, value_id: &Brace) -> Result<Gener
 
 /// What a common object's row contributes to a name index.
 pub(crate) fn names(kind: &str, row: &Brace) -> Result<ObjectNames> {
+    if kind == "Interface" {
+        return Ok(crate::metadata_model::interface::Interface::from_brace(row)?.names());
+    }
     if kind == "ExternalDataSource" {
         return crate::metadata_model::external_data_source::names(row);
     }
@@ -964,6 +978,36 @@ mod tests {
             "StyleItem",
             r##"<StyleItem uuid="2d2a4e7c-0000-4000-8000-000000000003"><Properties><Name>Шрифт2</Name><Synonym/><Comment/><Type>Font</Type><Value xsi:type="v8ui:Font" faceName="Arial" height="8" bold="false" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/></Properties></StyleItem>"##,
         );
+    }
+
+    #[test]
+    fn tool1cd_presentation_declared_kind_and_value_type_are_independent() {
+        round_trip(
+            "StyleItem",
+            r##"<StyleItem uuid="10000000-0000-4000-8000-000000000570"><Properties><Name>OwnStyle</Name><Synonym/><Comment/><Type>Font</Type><Value xsi:type="v8ui:Color">#000000</Value></Properties></StyleItem>"##,
+        );
+        round_trip(
+            "StyleItem",
+            r##"<StyleItem uuid="10000000-0000-4000-8000-000000000571"><Properties><Name>OwnStyle2</Name><Synonym/><Comment/><Type>Color</Type><Value xsi:type="v8ui:Font" faceName="Arial" height="8" bold="false" italic="false" underline="false" strikeout="false" kind="Absolute" scale="100"/></Properties></StyleItem>"##,
+        );
+    }
+
+    #[test]
+    fn tool1cd_presentation_unknown_kind_or_typed_value_refuses() {
+        let context = context();
+        for (kind, value_type) in [("Future", "v8ui:Color"), ("Font", "xs:string")] {
+            let original = element(&format!(
+                r##"<StyleItem uuid="10000000-0000-4000-8000-000000000570"><Properties><Name>OwnStyle</Name><Synonym/><Comment/><Type>{kind}</Type><Value xsi:type="{value_type}">#000000</Value></Properties></StyleItem>"##
+            ));
+            let object = ObjectXml {
+                element: &original,
+                kind: "StyleItem",
+                uuid: "10000000-0000-4000-8000-000000000570".into(),
+                name: "OwnStyle".into(),
+                path: Path::new("."),
+            };
+            assert!(super::super::compile(&object, &context).is_err());
+        }
     }
 
     #[test]

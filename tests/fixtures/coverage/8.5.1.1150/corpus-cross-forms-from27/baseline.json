@@ -1,5 +1,12 @@
 {
   "equal": [
+    "CovCommandPictureAccountingRegister",
+    "CovCommandPictureAppearanceStarHalfFilled",
+    "CovCommandPictureFormattedString",
+    "CovCommandPictureGotoURL",
+    "CovCommandPictureNewConversation",
+    "CovCommandPictureQueryWizardTempTableDescription",
+    "CovCommandPictureToday",
     "CovPictureTitleFontStyleItem",
     "CovRootCollapseImportance",
     "CovRootEventChoiceProcessing",

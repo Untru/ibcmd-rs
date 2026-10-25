@@ -17,7 +17,10 @@ pub const USE_PURPOSES: &[(&str, i64)] =
 
 pub const FORM_TYPES: &[(&str, i64)] = &[("Ordinary", 0), ("Managed", 1)];
 
-pub const INTERFACE_COMPATIBILITY_MODES: &[(&str, i64)] = &[("Any", 0)];
+// Record 14's appended domain, independently measured on native Coverage
+// 8.5.1.1529; the old tool1cd Form descriptor establishes only its prefix.
+pub const INTERFACE_COMPATIBILITY_MODES: &[(&str, i64)] =
+    &[("Any", 0), ("Taxi", 1), ("Version85", 2)];
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExternalNamedKind {
     Form,

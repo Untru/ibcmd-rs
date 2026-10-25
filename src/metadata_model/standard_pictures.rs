@@ -23,6 +23,21 @@ use std::sync::LazyLock;
 
 #[rustfmt::skip]
 pub(crate) const STANDARD_PICTURES: &[(&str, &str)] = &[
+    // tool1cd MetaTree predefined identities, independently confirmed by
+    // both native Coverage corpus-managed-forms profiles (8.3.27 / 8.5.1).
+    ("20175a6d-7510-46a8-9077-75a5d0d97802", "StdPicture.AccountingRegister"),
+    ("3b2a508b-f36e-4e0b-9dc0-70b2b56276a9", "StdPicture.GotoURL"),
+    ("6b322d7c-3fa2-437d-b311-fd70c4c7ed46", "StdPicture.QueryWizardTempTableDescription"),
+    // Native Coverage identities carried by the existing tool1cd picture grammar.
+    ("26abd244-8dd5-417e-aed0-247a573394ca", "StdPicture.AppearanceStarHalfFilled"),
+    ("4781692b-60eb-47e4-acfb-2caf0f49e977", "StdPicture.Char"),
+    ("517ed1af-55eb-42da-a1d4-a9960ef7c1f3", "StdPicture.DontNotify"),
+    ("66c18df5-d7a6-465e-92b5-bcc6c1032504", "StdPicture.CollaborationSystemExternalUser"),
+    ("6ca1af75-2aa5-48a6-820d-efa0ccb8f4f1", "StdPicture.Today"),
+    ("9c7f3c8c-a4b4-4a0a-84c8-d60d9feeca16", "StdPicture.NewConversation"),
+    ("a5d108f7-17d6-42dc-a789-45d71fb50ecd", "StdPicture.AppearanceUpArrowGray"),
+    ("a636287d-8d6f-4ef3-94bb-a8f986ab52bb", "StdPicture.FormattedString"),
+    ("e7f605f9-53d4-4e07-b56a-4715dc3a3e50", "StdPicture.StartVideoconference"),
     // Matched stored UUIDs against 8.3.27.2214 native exports of src and IR.
     ("3646acb9-a91e-4163-bbe1-2006041cd65d", "StdPicture.SpreadsheetShowGrid"),
     ("8729a534-9f88-47b0-8d6b-ec213689580d", "StdPicture.FilterHistory"),
@@ -405,9 +420,21 @@ mod tests {
             "3646acb9-a91e-4163-bbe1-2006041cd65d StdPicture.SpreadsheetShowGrid",
             "8729a534-9f88-47b0-8d6b-ec213689580d StdPicture.FilterHistory",
             "3a32aa35-c679-4c5b-91bd-72ae038e5bb4 StdPicture.ExternalDataSource",
+            "20175a6d-7510-46a8-9077-75a5d0d97802 StdPicture.AccountingRegister",
+            "3b2a508b-f36e-4e0b-9dc0-70b2b56276a9 StdPicture.GotoURL",
+            "6b322d7c-3fa2-437d-b311-fd70c4c7ed46 StdPicture.QueryWizardTempTableDescription",
+            "26abd244-8dd5-417e-aed0-247a573394ca StdPicture.AppearanceStarHalfFilled",
+            "4781692b-60eb-47e4-acfb-2caf0f49e977 StdPicture.Char",
+            "517ed1af-55eb-42da-a1d4-a9960ef7c1f3 StdPicture.DontNotify",
+            "66c18df5-d7a6-465e-92b5-bcc6c1032504 StdPicture.CollaborationSystemExternalUser",
+            "6ca1af75-2aa5-48a6-820d-efa0ccb8f4f1 StdPicture.Today",
+            "9c7f3c8c-a4b4-4a0a-84c8-d60d9feeca16 StdPicture.NewConversation",
+            "a5d108f7-17d6-42dc-a789-45d71fb50ecd StdPicture.AppearanceUpArrowGray",
+            "a636287d-8d6f-4ef3-94bb-a8f986ab52bb StdPicture.FormattedString",
+            "e7f605f9-53d4-4e07-b56a-4715dc3a3e50 StdPicture.StartVideoconference",
         ]);
         snapshot.sort_unstable();
-        assert_eq!(rows.len(), 221);
+        assert_eq!(rows.len(), 233);
         assert_eq!(rows, snapshot);
     }
 

@@ -12,9 +12,10 @@ use crate::metadata_model::index::{
 };
 use crate::mssql_dump::root_family_folder;
 
-/// Original root families plus the independently supported WebSocketClient family.
-const ROOT_KINDS: [(&str, &str); 47] = [
+/// Original root families plus the independently supported WebSocketClient and Interface families.
+const ROOT_KINDS: [(&str, &str); 48] = [
     ("Role", "Roles"),
+    ("Interface", "Interfaces"),
     ("CommonTemplate", "CommonTemplates"),
     ("CommonModule", "CommonModules"),
     ("HTTPService", "HTTPServices"),
@@ -63,12 +64,11 @@ const ROOT_KINDS: [(&str, &str); 47] = [
     ("IntegrationService", "IntegrationServices"),
 ];
 
-/// `(kind, folder)` of the five nested kinds the model's table also knew.
-const NESTED_KINDS: [(&str, &str); 8] = [
+/// `(kind, folder)` of the remaining nested kinds.
+const NESTED_KINDS: [(&str, &str); 7] = [
     ("Form", "Forms"),
     ("Template", "Templates"),
     ("Recalculation", "Recalculations"),
-    ("Interface", "Interfaces"),
     ("PaletteColor", "PaletteColors"),
     ("Cube", "Cubes"),
     ("Table", "Tables"),
@@ -127,14 +127,14 @@ fn the_table_is_exactly_the_two_it_replaced() {
         .iter()
         .map(|&(kind, folder)| (folder, kind))
         .collect();
-    assert_eq!(ROOT_COLLECTIONS.len(), 47);
+    assert_eq!(ROOT_COLLECTIONS.len(), 48);
     assert_eq!(table, expected);
     let nested: BTreeSet<_> = NESTED_COLLECTIONS.iter().copied().collect();
     let expected_nested: BTreeSet<_> = NESTED_KINDS
         .iter()
         .map(|&(kind, folder)| (folder, kind))
         .collect();
-    assert_eq!(NESTED_COLLECTIONS.len(), 8);
+    assert_eq!(NESTED_COLLECTIONS.len(), 7);
     assert_eq!(nested, expected_nested);
     // One folder per kind and one kind per folder, root and nested together.
     let all: Vec<_> = ROOT_COLLECTIONS.iter().chain(NESTED_COLLECTIONS).collect();

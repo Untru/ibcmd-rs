@@ -1,7 +1,14 @@
 {
   "equal": [
+    "CovAuthenticationSeparation_Separate",
+    "CovAutoUse_Use",
     "CovConfigurationExtensionsSeparation_Separate",
+    "CovExtendedEdit_true",
+    "CovFillFromFillingValue_true",
     "CovIndexing_IndexWithAdditionalOrder",
+    "CovMarkNegatives_true",
+    "CovMultiLine_true",
+    "CovPasswordMode_true",
     "CovSeparatedDataUse_IndependentlyAndSimultaneously",
     "CovTemplate",
     "CovUsersSeparation_Separate",

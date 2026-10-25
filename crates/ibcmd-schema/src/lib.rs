@@ -14,6 +14,10 @@ pub mod external_artifact;
 pub mod external_data_source;
 pub mod external_data_source_children;
 pub mod external_named;
+pub mod interface;
+pub mod style_item;
+pub mod tool1cd_metadata;
+pub mod tool1cd_templates;
 
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};

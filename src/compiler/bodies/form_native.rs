@@ -181,6 +181,7 @@ pub(crate) fn format_native_shortcut(text: &str) -> Option<String> {
         "BackSpace" => 8,
         "Enter" => 13,
         "Esc" => 27,
+        "Space" => 32,
         "Num *" => 106,
         "Num +" => 107,
         "Num -" => 109,
@@ -274,9 +275,11 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("LightYellow", "79"),
     ("Lime", "80"),
     ("LimeGreen", "81"),
+    ("Linen", "82"),
     ("Maroon", "84"),
     ("MediumBlue", "86"),
     ("MediumGray", "87"),
+    ("MediumGreen", "88"),
     ("MediumSeaGreen", "91"),
     ("MintCream", "97"),
     ("MistyRose", "98"),
@@ -305,6 +308,7 @@ pub(crate) const WEB_COLOR_CODES: &[(&str, &str)] = &[
     ("SlateGray", "131"),
     ("Snow", "132"),
     ("SteelBlue", "134"),
+    ("Tomato", "138"),
     ("Violet", "140"),
     ("VioletRed", "141"),
     ("White", "143"),
@@ -5592,11 +5596,17 @@ pub(crate) fn table_item_standard_command_uuid(
     dynamic_list: bool,
     data_path: Option<&str>,
     name: &str,
+    form: &DataPathForm,
 ) -> Option<&'static str> {
     if tag == "Table" && !dynamic_list {
         let path = data_path.unwrap_or("").trim();
         let last = path.rsplit('.').next().unwrap_or("");
         match name {
+            "AddAutoSelectedField" if dynamic_list_selection_path(form, path) => {
+                return TOOL1CD_TABLE_COMMANDS
+                    .iter()
+                    .find_map(|(_, command, uuid)| (*command == name).then_some(*uuid));
+            }
             "Ungroup" if path.ends_with(".Settings") => {
                 return Some("23802256-7145-47c7-b379-8d60ca1b1262");
             }
@@ -5609,6 +5619,35 @@ pub(crate) fn table_item_standard_command_uuid(
     item_standard_command_uuid(tag, dynamic_list, name)
 }
 
+/// The measured selection table belongs to a declared dynamic list, not
+/// an arbitrary ValueTable whose column names resemble the DCS path.
+fn dynamic_list_selection_path(form: &DataPathForm, path: &str) -> bool {
+    let mut parts = path.split('.');
+    let Some(attribute) = parts.next().and_then(|name| form.attributes.get(name)) else {
+        return false;
+    };
+    attribute.types.as_slice() == ["cfg:DynamicList"]
+        && parts.eq(["SettingsComposer", "Settings", "Selection"])
+}
+
+// The public Coverage table controls confirm these tool1cd command
+// identities; DeselectAll is a modern native extension of the same grammar.
+const TOOL1CD_TABLE_COMMANDS: &[(bool, &str, &str)] = &[
+    (true, "SelectAll", "51c99108-107c-43e1-8918-e48835bf2495"),
+    (false, "DeselectAll", "03022d03-1986-4dc4-93c2-03d995332357"),
+    (
+        false,
+        "AddAutoSelectedField",
+        "eaab4e19-897e-464c-9674-262fddb1dce9",
+    ),
+];
+
+pub(crate) fn tool1cd_table_item_command_name(uuid: &str) -> Option<&'static str> {
+    TOOL1CD_TABLE_COMMANDS
+        .iter()
+        .find_map(|(_, name, candidate)| (*candidate == uuid).then_some(*name))
+}
+
 pub(crate) fn item_standard_command_uuid(
     tag: &str,
     dynamic_list: bool,
@@ -5618,6 +5657,20 @@ pub(crate) fn item_standard_command_uuid(
         .iter()
         .find_map(|(candidate, dynamic, command, uuid)| {
             (*candidate == tag && *dynamic == dynamic_list && *command == name).then_some(*uuid)
+        })
+        .or_else(|| {
+            (tag == "Table")
+                .then(|| {
+                    TOOL1CD_TABLE_COMMANDS
+                        .iter()
+                        .find_map(|(dynamic, command, uuid)| {
+                            (*dynamic == dynamic_list
+                                && *command == name
+                                && *command != "AddAutoSelectedField")
+                                .then_some(*uuid)
+                        })
+                })
+                .flatten()
         })
 }
 
@@ -10122,6 +10175,81 @@ fn resolve_metadata_data_path_part(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tool1cd_shortcut_and_table_commands_match_native_coverage() {
+        assert_eq!(format_native_shortcut("Space").as_deref(), Some("{0,32,0}"));
+        assert_eq!(
+            format_native_shortcut("Ctrl+Space").as_deref(),
+            Some("{0,32,8}")
+        );
+        assert!(format_native_shortcut("NoSuchTool1cdKey").is_none());
+        for (dynamic, name, expected) in TOOL1CD_TABLE_COMMANDS {
+            assert_eq!(
+                item_standard_command_uuid("Table", *dynamic, name),
+                (*name != "AddAutoSelectedField").then_some(*expected)
+            );
+            assert_eq!(tool1cd_table_item_command_name(expected), Some(*name));
+        }
+        assert_eq!(
+            item_standard_command_uuid("Table", false, "NoSuchTool1cdCommand"),
+            None
+        );
+        assert_eq!(
+            tool1cd_table_item_command_name("00000000-0000-0000-0000-000000000000"),
+            None
+        );
+    }
+
+    #[test]
+    fn tool1cd_auto_selection_requires_declared_dynamic_list_owner() {
+        let mut form = DataPathForm::default();
+        form.attributes.insert(
+            "Rows".to_string(),
+            DataPathAttribute {
+                types: vec!["cfg:DynamicList".to_string()],
+                ..DataPathAttribute::default()
+            },
+        );
+        let resolve = |form: &DataPathForm, path| {
+            table_item_standard_command_uuid("Table", false, path, "AddAutoSelectedField", form)
+        };
+        let path = Some("Rows.SettingsComposer.Settings.Selection");
+        assert_eq!(
+            resolve(&form, path),
+            Some("eaab4e19-897e-464c-9674-262fddb1dce9")
+        );
+        assert_eq!(resolve(&form, None), None);
+        assert_eq!(
+            resolve(
+                &form,
+                Some("Rows.SettingsComposer.Settings.Selection.Other")
+            ),
+            None
+        );
+        assert_eq!(
+            resolve(&form, Some("Missing.SettingsComposer.Settings.Selection")),
+            None
+        );
+        form.attributes.get_mut("Rows").unwrap().types = vec!["v8:ValueTable".to_string()];
+        assert_eq!(resolve(&form, path), None);
+    }
+
+    #[test]
+    fn tool1cd_web_colors_match_native_coverage_values() {
+        for (name, expected) in [
+            ("Linen", "{3,2,{82}}"),
+            ("MediumGreen", "{3,2,{88}}"),
+            ("Tomato", "{3,2,{138}}"),
+        ] {
+            assert_eq!(
+                format_native_color(Some(&format!("web:{name}")), |_| None).as_deref(),
+                Some(expected)
+            );
+        }
+        assert!(format_native_color(Some("web:NoSuchTool1cdColor"), |_| None).is_none());
+        assert!(format_native_color(Some("web:Tomato.Extra"), |_| None).is_none());
+    }
 
     #[test]
     fn root_scale_rejects_non_numeric_and_extra_member_input() {

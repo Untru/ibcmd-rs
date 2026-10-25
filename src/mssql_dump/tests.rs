@@ -34052,6 +34052,7 @@ fn parses_and_formats_moxel_vertical_groups() {
         group_header_colors: [None, None, None, None],
         print_settings: None,
         lines: vec![MoxelLine {
+            gap: false,
             style: "Solid",
             line_type: "v8ui:SpreadsheetDocumentCellLineType",
             width: 1,
@@ -34255,13 +34256,94 @@ fn formats_moxel_row_column_ids_accept_row_zero_pair_mapping() {
     );
 }
 
+// Complete native 8/1/12 framing, measured on public Coverage's
+// CovSheetPageSizeA4 body. Only the focused row/column/resource data below is
+// synthetic. Header/footer slots, counted groups/breaks, merge lists and the
+// trailing resource tables remain present, so format tests do not rely on
+// successful decoding of an otherwise truncated native document.
+fn moxel_native_framed_test_document(
+    rows: &str,
+    columns: &str,
+    formats: &str,
+    number_formats: &str,
+) -> String {
+    let fields = [
+        "8",
+        "1",
+        "12",
+        r#"{"ru","ru",0,1,"ru","Русский","Русский",0}"#,
+        "{128,72}",
+        "{0}",
+        "0",
+        "{0,0}",
+        "{0,0}",
+        "{0,0}",
+        "{0,0}",
+        "{0,0}",
+        "{0,0}",
+        "1",
+        "2",
+        rows,
+        columns,
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "{0}",
+        "{0}",
+        "{0}",
+        "{0}",
+        r#""""#,
+        r#"{{0,7,0,{"S","A4"},6,{"N",1000},7,{"N",1000},8,{"N",1000},9,{"N",1000},10,{"N",1000},11,{"N",1000}}}"#,
+        "{0,-1,-1,-1,-1,00000000-0000-0000-0000-000000000000}",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "0",
+        "1",
+        "0",
+        "1",
+        formats,
+        "1",
+        r#"{7,0,575,100,0,0,0,400,0,0,0,0,0,0,0,0,"Arial",1,100}"#,
+        number_formats,
+        "0",
+        "0",
+        "2",
+        "{3,3,{-1}}",
+        "{3,3,{-3}}",
+        "0",
+        "0",
+        "0",
+        r#""""#,
+        "0",
+        r#"{3,0,0,100,1,1,0,1,1,0,0,0,0,0,0,0,0,0,0,0,0,"",0,0,0,0,0,0,0}"#,
+        "{0}",
+        "0",
+        "0",
+        "0",
+        "1",
+        "0",
+        "0",
+        "0",
+    ];
+    format!("{{{}}}", fields.join(","))
+}
+
 #[test]
 fn formats_moxel_scanning_does_not_treat_column_mapping_as_empty_row() {
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{0},{0},0,1,1,5,{16,2,{1,1,{\"ru\",\"Hello\"}},0},{10,0,00000000-0000-0000-0000-000000000000,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,1,{10,0,cab491a9-17d5-47b2-96fc-7a31b2075a1c,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,0,0,{0}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,1,1,5,{16,2,{1,1,{"ru","Hello"}},0}"#,
+        r#"{10,0,00000000-0000-0000-0000-000000000000,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,1,{10,0,cab491a9-17d5-47b2-96fc-7a31b2075a1c,10,0,1,1,2,2,3,3,4,4,5,5,11,6,7,7,12,8,13,9,14},1,0,0"#,
+        r#"2,{0},{0}"#,
+        r#"0"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert_eq!(xml.matches("<rowsItem>").count(), 1);
@@ -35257,11 +35339,13 @@ fn formats_moxel_decodes_bottom_vertical_alignment() {
 
     assert_eq!(format.vertical_alignment, Some("Bottom"));
 
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{512,48},{1,0}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,0,1,0,{16,1,{1,1,{"","Name"}},0}"#,
+        r#"{1,0,00000000-0000-0000-0000-000000000000,1,0,1},1,0,0"#,
+        r#"2,{512,48},{1,0}"#,
+        r#"0"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains(
@@ -35275,11 +35359,13 @@ fn formats_moxel_decodes_cut_text_placement() {
 
     assert_eq!(format.text_placement, Some("Cut"));
 
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{16384,1},{1,0}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,0,1,0,{16,1,{1,1,{"","Name"}},0}"#,
+        r#"{1,0,00000000-0000-0000-0000-000000000000,1,0,1},1,0,0"#,
+        r#"2,{16384,1},{1,0}"#,
+        r#"0"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains("\t<format>\r\n\t\t<textPlacement>Cut</textPlacement>\r\n\t</format>"));
@@ -35402,14 +35488,19 @@ fn formats_moxel_width_table_accepts_extended_129_default_width_entries() {
 
 #[test]
 fn formats_moxel_table_with_unknown_format_bits_preserves_known_format_indexes() {
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{278656,72,3,900},{1,0}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,0,1,0,{16,1,{1,1,{"","Name"}},0}"#,
+        // Native first-use order visits columns before cells. Claim the
+        // font-only source format 2 first, so source format 1 (the target
+        // width/placement/orientation record) keeps output slot 2 below.
+        r#"{1,0,00000000-0000-0000-0000-000000000000,1,0,2},1,0,0"#,
+        r#"2,{278656,72,3,900},{1,0}"#,
+        r#"0"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
-    assert!(xml.contains("<f>2</f>"));
+    assert!(xml.contains("<f>2</f>"), "{xml}");
     assert!(xml.contains(
             "\t<format>\r\n\t\t<width>72</width>\r\n\t\t<textPlacement>Wrap</textPlacement>\r\n\t\t<textOrientation>900</textOrientation>\r\n\t</format>"
         ));
@@ -35417,11 +35508,13 @@ fn formats_moxel_table_with_unknown_format_bits_preserves_known_format_indexes()
 
 #[test]
 fn formats_moxel_number_format_string_table() {
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{16777216,0},{1,0},1,{1,1,{\"ru\",\"БЛ=; БИ=√\"}}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,0,1,0,{16,1,{1,1,{"","Name"}},0}"#,
+        r#"{1,0,00000000-0000-0000-0000-000000000000,1,0,1},1,0,0"#,
+        r#"2,{16777216,0},{1,0}"#,
+        r#"1,{1,1,{"ru","БЛ=; БИ=√"}}"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains(
@@ -35431,11 +35524,13 @@ fn formats_moxel_number_format_string_table() {
 
 #[test]
 fn formats_moxel_edit_format_string_table() {
-    let spreadsheet = parse_moxel_spreadsheet_text(
-            "{8,1,12,{\"ru\",\"ru\",0,1,\"ru\",\"Русский\",\"Русский\",0},{128,72},{0},1,2,1,0,0,1,0,{16,1,{1,1,{\"\",\"Name\"}},0},{1,0,00000000-0000-0000-0000-000000000000,1,0,1},2,{4311744512,0,0},{1,0},1,{1,1,{\"ru\",\"ЧДЦ=2\"}}}",
-            &BTreeMap::new(),
-        )
-        .unwrap();
+    let body = moxel_native_framed_test_document(
+        r#"1,0,0,1,0,{16,1,{1,1,{"","Name"}},0}"#,
+        r#"{1,0,00000000-0000-0000-0000-000000000000,1,0,1},1,0,0"#,
+        r#"2,{4311744512,0,0},{1,0}"#,
+        r#"1,{1,1,{"ru","ЧДЦ=2"}}"#,
+    );
+    let spreadsheet = parse_moxel_spreadsheet_text(&body, &BTreeMap::new()).unwrap();
     let xml = format_moxel_spreadsheet_xml(&spreadsheet);
 
     assert!(xml.contains(
@@ -39021,6 +39116,7 @@ fn moxel_line_table_refuses_an_unknown_line_descriptor() {
     assert_eq!(
         parse_moxel_line_table(&fields),
         Some(vec![MoxelLine {
+            gap: false,
             style: "Solid",
             line_type: "v8ui:SpreadsheetDocumentCellLineType",
             width: 2,
@@ -42786,9 +42882,9 @@ fn extracts_exact_exchange_plan_owner_properties_atomically_and_in_native_order(
         (43, "{1,2,1}"),
         (44, "2"),
         (45, "2"),
-        (46, "1"),
-        (47, "1"),
-        (48, "1"),
+        (46, "2"),
+        (47, "2"),
+        (48, "2"),
         (49, "1"),
     ];
     for (slot, invalid) in invalid_slots {
@@ -47998,7 +48094,8 @@ fn accepts_short_configuration_root_property_header() {
             (39, &roles_raw),
         ],
     );
-    let object_refs = BTreeMap::from([
+    let mut object_refs = flat_configuration_fixture().2;
+    object_refs.extend([
         (role_uuids[0].to_string(), "Role.FullRights".to_string()),
         (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
     ]);
@@ -48193,10 +48290,11 @@ fn flat_configuration_children_fail_closed_for_unproven_references() {
             &uuid,
             &refs,
             InfobaseConfigSourceVersion::V2_20,
-        )
-        .unwrap();
-        assert!(xml.contains("<InternalInfo>"), "{case}: {xml}");
-        assert!(!xml.contains("<ChildObjects"), "{case}: {xml}");
+        );
+        assert!(
+            xml.is_none(),
+            "{case}: an unresolved inventory must refuse the root"
+        );
     }
 }
 
@@ -48262,7 +48360,7 @@ fn extracts_configuration_use_purposes_for_proven_layouts() {
         let xml = extract_configuration_source_xml(
             &text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -48331,7 +48429,7 @@ fn configuration_use_purposes_fail_closed() {
         let xml = extract_configuration_source_xml(
             &text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -48384,7 +48482,8 @@ fn extracts_configuration_default_roles_for_proven_layouts() {
         "50000000-0000-4000-8000-000000000003",
     ];
     let raw = configuration_default_roles_raw(3, &role_uuids);
-    let object_refs = BTreeMap::from([
+    let mut object_refs = flat_configuration_fixture().2;
+    object_refs.extend([
         (role_uuids[0].to_string(), "Role.FullRights".to_string()),
         (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
         (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
@@ -48438,7 +48537,8 @@ fn configuration_default_roles_fail_closed() {
         "{{\"#\",157fa490-4ce9-11d4-9415-008048da11f9,{{1,{}}}}}",
         role_uuids[0]
     );
-    let object_refs = BTreeMap::from([
+    let mut object_refs = flat_configuration_fixture().2;
+    object_refs.extend([
         (role_uuids[0].to_string(), "Role.FullRights".to_string()),
         (role_uuids[1].to_string(), "Role.SystemAdmin".to_string()),
         (role_uuids[2].to_string(), "Role.ExternalOpen".to_string()),
@@ -48661,7 +48761,7 @@ fn extracts_atomic_configuration_localized_properties_for_proven_layouts() {
         let xml = extract_configuration_source_xml(
             &text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -48757,7 +48857,7 @@ fn configuration_localized_properties_fail_closed_atomically() {
         let xml = extract_configuration_source_xml(
             &text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -48891,7 +48991,7 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
         let v20_xml = extract_configuration_source_xml(
             &v20_text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -48947,7 +49047,7 @@ fn extracts_configuration_used_mobile_application_functionalities_for_proven_lay
         let v21_xml = extract_configuration_source_xml(
             &v21_text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_21,
         )
         .unwrap();
@@ -49028,7 +49128,7 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
         let xml = extract_configuration_source_xml(
             &text,
             &uuid,
-            &BTreeMap::new(),
+            &flat_configuration_fixture().2,
             InfobaseConfigSourceVersion::V2_20,
         )
         .unwrap();
@@ -49112,7 +49212,7 @@ fn configuration_used_mobile_application_functionalities_fail_closed() {
     let xml = extract_configuration_source_xml(
         &decoy,
         &uuid,
-        &BTreeMap::new(),
+        &flat_configuration_fixture().2,
         InfobaseConfigSourceVersion::V2_20,
     )
     .unwrap();
@@ -49998,6 +50098,8 @@ fn constant_shadow_properties(value_type: ConstantValueType) -> ConstantProperti
         choice_folders_and_items: "Items",
         quick_choice: "Auto",
         data_history: "DontUse",
+        update_data_history_immediately_after_write: false,
+        execute_after_write_data_history_version_processing: false,
     }
 }
 
@@ -50287,6 +50389,41 @@ fn an_empty_typed_pattern_is_only_valid_for_an_uncontrolled_adopted_type() {
     }
 }
 
+/// Completes the property and owner envelopes of focused synthetic probes.
+/// The 23-field typed tail and 15-field owner match native Coverage CovTemplate;
+/// identity, type, content references and separation references stay test-specific.
+fn native_common_attribute_probe_for_test(plain: &str, auto_use: bool) -> String {
+    use crate::metadata_model::brace::{Brace, parse_row, serialize};
+    let mut root = parse_row(plain.as_bytes()).unwrap();
+    let root = root.as_list_mut().unwrap();
+    if root.len() == 2 {
+        root.push(Brace::num(0));
+    }
+    let owner = root[1].as_list_mut().unwrap();
+    let typed = owner[1].as_list_mut().unwrap();
+    if typed.len() == 2 {
+        let tail = parse_row(br#"{0,{0},{0},0,"",0,{"U"},{"U"},0,00000000-0000-0000-0000-000000000000,2,0,{5006,0},{3,0,0},{0,0},0,{0},{"S",""},0,0,0}"#).unwrap();
+        typed.extend_from_slice(tail.as_list().unwrap());
+    }
+    assert_eq!(typed.len(), 23);
+    let content = owner[2].as_list().unwrap().to_vec();
+    if content[0].as_atom() != Some("3") {
+        let mut native_content = vec![Brace::num(3), content[1].clone()];
+        for entry in &content[2..] {
+            native_content.push(entry.as_list().unwrap()[0].clone());
+            native_content.push(parse_row(b"{2,1,00000000-0000-0000-0000-000000000000}").unwrap());
+        }
+        owner[2] = Brace::list(native_content);
+    }
+    if owner.len() == 3 {
+        let tail = parse_row(b"{0,1,1,1,{1,00000000-0000-0000-0000-000000000000},{1,00000000-0000-0000-0000-000000000000},{1,00000000-0000-0000-0000-000000000000},0,0,0,0,1}").unwrap();
+        owner.extend_from_slice(tail.as_list().unwrap());
+    }
+    assert_eq!(owner.len(), 15);
+    owner[6] = Brace::flag(!auto_use);
+    serialize(&Brace::List(root.clone()))
+}
+
 #[test]
 fn extracts_common_attribute_xml_with_type_from_metadata_blob() {
     let uuid = "33333333-3333-4333-8333-333333333333";
@@ -50294,6 +50431,7 @@ fn extracts_common_attribute_xml_with_type_from_metadata_blob() {
     let plain = format!(
         "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"ExternalCode\",{{1,\"en\",\"External code\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"S\",50,1}}}}\r\n}}\r\n}},\r\n{{0,1,\r\n{{{catalog_uuid}}}\r\n}}\r\n}}\r\n}}"
     );
+    let plain = native_common_attribute_probe_for_test(&plain, false);
     let blob = deflate_for_test(plain.as_bytes());
     let object_refs = BTreeMap::from([(catalog_uuid.to_string(), "Catalog.Products".to_string())]);
 
@@ -50377,6 +50515,7 @@ fn extracts_common_attribute_xml_with_native_content_pairs() {
         .replace("@CATALOG_UUID@", catalog_uuid)
         .replace("@DOCUMENT_UUID@", document_uuid)
         .replace("@ZERO_UUID@", zero_uuid);
+    let plain = native_common_attribute_probe_for_test(&plain, true);
     let blob = deflate_for_test(plain.as_bytes());
     let object_refs = BTreeMap::from([
         (catalog_uuid.to_string(), "Catalog.Products".to_string()),
@@ -50440,6 +50579,7 @@ fn extracts_common_attribute_xml_with_conditional_separation_refs() {
         .replace("@CATALOG_UUID@", catalog_uuid)
         .replace("@CONDITIONAL_UUID@", conditional_uuid)
         .replace("@ZERO_UUID@", zero_uuid);
+    let plain = native_common_attribute_probe_for_test(&plain, true);
     let blob = deflate_for_test(plain.as_bytes());
     let object_refs = BTreeMap::from([
         (catalog_uuid.to_string(), "Catalog.Products".to_string()),
@@ -50488,6 +50628,7 @@ fn extracts_common_attribute_xml_with_auto_use_flag() {
     let plain = format!(
         "{{1,\r\n{{5,\r\n{{27,\r\n{{2,\r\n{{3,\r\n{{1,0,{uuid}}},\"CompanyScope\",{{1,\"en\",\"Company scope\"}},\"\",0,0,00000000-0000-0000-0000-000000000000,0}},\r\n{{\"Pattern\",{{\"B\"}}}}\r\n}}\r\n}},\r\n{{1,0}}\r\n}}\r\n}}"
     );
+    let plain = native_common_attribute_probe_for_test(&plain, true);
     let blob = deflate_for_test(plain.as_bytes());
 
     let extracted = extract_metadata_source_xml_with_refs(
@@ -50538,6 +50679,7 @@ fn extracts_common_attribute_xml_with_native_property_details() {
 {1,@ZERO_UUID@},0,0,0,0,1},0}"#
         .replace("@UUID@", uuid)
         .replace("@ZERO_UUID@", zero_uuid);
+    let plain = native_common_attribute_probe_for_test(&plain, true);
     let blob = deflate_for_test(plain.as_bytes());
 
     for source_version in [
@@ -50697,12 +50839,12 @@ fn extracts_common_attribute_fill_checking_from_native_property_tail() {
 {0},
 {0},0,"",0,
 {"U"},
-{"U"},0,@ZERO_UUID@,2,0,
+{"U"},0,@ZERO_UUID@,2,1,
 {5006,0},
 {3,0,0},
 {0,0},0,
 {0},
-{"S",""},1,0,0},
+{"S",""},0,0,0},
 {0,0}},0}"#
         .replace("@UUID@", uuid)
         .replace("@ZERO_UUID@", zero_uuid);
@@ -50777,6 +50919,7 @@ fn extracts_common_attribute_xml_with_native_separation_tail() {
         .replace("@DATA_USE_UUID@", data_use_uuid)
         .replace("@CONDITIONAL_UUID@", conditional_uuid)
         .replace("@ZERO_UUID@", zero_uuid);
+    let plain = native_common_attribute_probe_for_test(&plain, true);
     let blob = deflate_for_test(plain.as_bytes());
     let object_refs = BTreeMap::from([
         (
@@ -65829,7 +65972,7 @@ impl CalculationRegisterPresentationsFixture {
         ));
         fields.extend((16..33).map(|index| match index {
             16 => "2".to_string(),
-            17 | 18 => "1".to_string(),
+            17 | 18 | 24 => "1".to_string(),
             22 => CALCULATION_PRESENTATIONS_TYPE_UUID.to_string(),
             23 => CALCULATION_DEFAULT_FORM_TEST_UUID.to_string(),
             29 => ACCUMULATION_TOTALS_ZERO_UUID.to_string(),
@@ -66829,9 +66972,10 @@ fn calculation_period_alternative_scalars_remain_accepted_omissions() {
             assert!(!xml.contains("<Periodicity>"));
             assert!(!xml.contains("<ActionPeriod>"));
             assert!(!xml.contains("<BasePeriod>"));
-            if slot == 16 && value == "0" {
-                assert!(xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
-            }
+            // Native Coverage separates Periodicity (16) from UseStandardCommands (24).
+            // Alternative period atoms must preserve the fixture's true command flag.
+            assert!(xml.contains("<UseStandardCommands>true</UseStandardCommands>"));
+            assert!(!xml.contains("<UseStandardCommands>false</UseStandardCommands>"));
 
             let mut register = parse_register_properties_from_text(
                 "CalculationRegister",
@@ -67052,16 +67196,32 @@ fn calculation_include_help_emits_fixed_false_once_in_schema_order() {
 }
 
 #[test]
-fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
+fn calculation_include_help_true_is_preserved_and_unknown_atoms_are_refused() {
     let exact = CalculationRegisterPresentationsFixture::exact()
         .xml()
         .unwrap();
-    let include_help_line = "\t\t\t<IncludeHelpInContents>false</IncludeHelpInContents>\r\n";
-    let expected_omission = exact.replace(include_help_line, "");
-
+    let expected_true = exact.replace(
+        "<IncludeHelpInContents>false</IncludeHelpInContents>",
+        "<IncludeHelpInContents>true</IncludeHelpInContents>",
+    );
+    for value in ["1", " 1 "] {
+        let mut fixture = CalculationRegisterPresentationsFixture::exact();
+        fixture.fields[25] = value.to_string();
+        let raw = fixture.raw();
+        let fields = fixture
+            .fields
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        let header =
+            parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
+        assert_eq!(
+            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header),
+            Some(Some(true))
+        );
+        assert_eq!(fixture.xml().unwrap(), expected_true, "native bool {value}");
+    }
     for value in [
-        "1",
-        " 1 ",
         "2",
         "-1",
         "00",
@@ -67081,16 +67241,15 @@ fn calculation_include_help_alternative_atoms_remain_accepted_omissions() {
             .collect::<Vec<_>>();
         let header =
             parse_metadata_header_from_text(&raw, CALCULATION_PRESENTATIONS_TEST_UUID).unwrap();
-
-        assert!(matches!(
-            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header,),
-            Some(None)
-        ));
-        let xml = fixture
-            .xml()
-            .expect("alternative include-help atom must remain accepted");
-        assert!(!xml.contains("<IncludeHelpInContents>"));
-        assert_eq!(xml, expected_omission, "consumed field 25 value {value}");
+        assert!(
+            parse_calculation_register_fixed_include_help("CalculationRegister", &fields, &header)
+                .is_none(),
+            "unknown bool {value}"
+        );
+        assert!(
+            fixture.xml().is_none(),
+            "unknown include-help atom {value} must refuse owner"
+        );
     }
 }
 

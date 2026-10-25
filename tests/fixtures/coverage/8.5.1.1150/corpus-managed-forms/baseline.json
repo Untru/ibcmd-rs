@@ -1,5 +1,12 @@
 {
   "equal": [
+    "CovButtonPictureAccountingRegister",
+    "CovButtonPictureAppearanceStarHalfFilled",
+    "CovButtonPictureFormattedString",
+    "CovButtonPictureGotoURL",
+    "CovButtonPictureNewConversation",
+    "CovButtonPictureQueryWizardTempTableDescription",
+    "CovButtonPictureToday",
     "CovChartField",
     "CovEmbeddedSpreadsheetCells",
     "CovFormEventOnOpen",

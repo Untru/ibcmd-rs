@@ -1,0 +1,77 @@
+{
+  "coverage_snapshot_commit": "718aef51",
+  "inputs": [
+    {
+      "set": "8.3.27.2214/corpus-catalog-pictures",
+      "decoded_cf_sha256": "814e6dde98dea40035b48e897f708915fee1b4b9f6d69051af3cdca88b82e8ad"
+    },
+    {
+      "set": "8.3.27.2214/corpus-form-facets",
+      "decoded_cf_sha256": "eb5623ee0c8c8e3119c1631eb69017fd24a940b22a640f8b8cccf800a8255652"
+    },
+    {
+      "set": "8.3.27.2214/corpus-managed-forms",
+      "decoded_cf_sha256": "c1b9f0504f35f999ca61c8a8e4262eeac5c5e225eb3e9c2def0d139322d06c77"
+    },
+    {
+      "set": "8.3.27.2214/corpus-owned-catalog-forms",
+      "decoded_cf_sha256": "08f28000a675cc4f47dfa185f823a5a0802a510944caf994f1f19c5b102b0751"
+    },
+    {
+      "set": "8.3.27.2214/corpus-reference-network",
+      "decoded_cf_sha256": "60f91f1d3473916874396326abd79daf58b4c0bb1ebd6c1749c210914f45b3af"
+    },
+    {
+      "set": "8.3.27.2214/corpus-style-colors",
+      "decoded_cf_sha256": "1a02c7353003ea2f450363e5d242feccef221509f61b8e5acc692338729e91cc"
+    },
+    {
+      "set": "8.5.1.1150/corpus-catalog-pictures",
+      "decoded_cf_sha256": "a537e66120e55dbc012ca84f7bb9c405c6ed552ecb5d21a30e53358a2c19dcfb"
+    },
+    {
+      "set": "8.5.1.1150/corpus-form-facets",
+      "decoded_cf_sha256": "87b3213960f931cb294ad6e47439331f573305991ac01e419eab27cf2ad4a448"
+    },
+    {
+      "set": "8.5.1.1150/corpus-managed-forms",
+      "decoded_cf_sha256": "66901bcba3d460d88b4b6ce7198a31b39b502f7c87af64a35e51fd39f2875604"
+    },
+    {
+      "set": "8.5.1.1150/corpus-owned-catalog-forms",
+      "decoded_cf_sha256": "dee7f0668be42908c92521898cd7b2baadc637bbd84582cf76a28ce82db09b3a"
+    },
+    {
+      "set": "8.5.1.1150/corpus-reference-network",
+      "decoded_cf_sha256": "870621a066f836621683ee3277566b7392a9d7cff4965827374044854b71aec9"
+    },
+    {
+      "set": "8.5.1.1150/corpus-style-colors",
+      "decoded_cf_sha256": "55e03e57bb3f460ad253493345e8b3efc0fe2af472e2be7fe2fcf51b8df20f53"
+    },
+    {
+      "set": "8.5.1.1529/corpus-hybrid-interface",
+      "decoded_cf_sha256": "dc18afd914f2b98f39edd97c1ece3fced7de4b028ac10bf3e52cbf9cf1240037"
+    },
+    {
+      "set": "8.5.1.1529/corpus-legacy-form-properties",
+      "decoded_cf_sha256": "4243f736968336785d025708f9a8fb1b0710faf1377d712de1502bd2469a3114"
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-details",
+      "decoded_cf_sha256": "56d525dcf24628687c88f3d07e260b824dafa2d277f05b9edd35b9055a57d892"
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-forms",
+      "decoded_cf_sha256": "0f141e519be26f61acb7ddf854564c5ec6c8bb4ed80f4ddd78495c08bdf1093a"
+    },
+    {
+      "set": "8.5.1.1529/corpus-modern-owned-interface",
+      "decoded_cf_sha256": "3d5a5df693772922426585d08cb2aedc69f636221c4590563e49a980efacb1a9"
+    },
+    {
+      "set": "8.5.1.1529/corpus-navigation-commands",
+      "decoded_cf_sha256": "5b1e7d4bb694c531bc362530c37b7822da847146a07308d747be63fa24dddbc5"
+    }
+  ]
+}

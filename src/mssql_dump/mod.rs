@@ -4055,6 +4055,9 @@ fn dump_table_rows_with_options_mode(
         MetadataTextRowsAudit::default()
     };
     let metadata_texts = &metadata_audit.rows;
+    if extract_metadata_xml && inventory_scope == RootMetadataInventoryScope::Full {
+        validate_interface_descriptors(metadata_texts)?;
+    }
     let metadata_texts_by_file_name = metadata_texts
         .iter()
         .map(|row| (row.file_name.as_str(), row))
@@ -5390,6 +5393,9 @@ fn dump_table_rows_streamed(
         Vec::new()
     };
     timings.prepare_metadata_texts_ms += elapsed_ms(metadata_texts_started);
+    if extract_metadata_xml && inventory_scope == RootMetadataInventoryScope::Full {
+        validate_interface_descriptors(&index_metadata_texts)?;
+    }
     // `--model-export`: what each row is, from the rows alone and before the
     // legacy indexes, so the ones only the legacy descriptor converters of
     // modelled kinds read are left out. The index needs the whole row set;
@@ -7787,14 +7793,7 @@ struct FlowchartScheme {
     print_parameters: FlowchartPrintParameters,
 }
 
-struct FlowchartPrintParameters {
-    top_margin: String,
-    left_margin: String,
-    bottom_margin: String,
-    right_margin: String,
-    black_and_white: bool,
-    fit_page_mode: &'static str,
-}
+use crate::metadata_model::bodies_flowchart::FlowchartPrintParameters;
 
 struct FlowchartItem {
     tag: &'static str,
@@ -8254,10 +8253,20 @@ fn parse_flowchart_scheme(
             return None;
         }
     }
-    if values.len() != 6 {
+    use ibcmd_schema::tool1cd_templates::FlowchartPrintKeys as Keys;
+    if values.keys().any(|key| !Keys::admits(*key)) {
         return None;
     }
+    let page_orientation = match values.remove(&Keys::ORIENTATION) {
+        Some(value) => Some(Keys::orientation_name(&value)?),
+        None => None,
+    };
     let print_parameters = FlowchartPrintParameters {
+        paper: values.remove(&Keys::PAPER),
+        page_orientation,
+        collate: values.remove(&Keys::COLLATE),
+        copies: values.remove(&Keys::COPIES),
+        paper_source: values.remove(&Keys::PAPER_SOURCE),
         top_margin: values.remove(&6)?,
         left_margin: values.remove(&7)?,
         bottom_margin: values.remove(&8)?,
@@ -8680,15 +8689,7 @@ fn parse_flowchart_picture(text: &str) -> Option<FlowchartPicture> {
 /// image's own format, not the item: PNG, JPEG and BMP are the three formats
 /// the ERP УХ corpus carries.
 fn flowchart_picture_extension(data: &[u8]) -> Option<&'static str> {
-    if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        Some("png")
-    } else if data.starts_with(&[0xff, 0xd8, 0xff]) {
-        Some("jpg")
-    } else if data.starts_with(b"BM") {
-        Some("bmp")
-    } else {
-        None
-    }
+    ibcmd_schema::tool1cd_templates::TemplatePictureLayout::extension(data)
 }
 
 /// A `{4, 0, {0}, style, width, gap, uuid, 0}` record. Both the connection
@@ -8794,13 +8795,13 @@ fn parse_flowchart_decoration_graphics(
     });
     properties.picture_size = parse_flowchart_picture_size(geometry.get(6)?)?;
     properties.picture = parse_flowchart_picture(geometry.get(7)?)?;
-    properties.shape = Some(match geometry.get(9)?.trim() {
-        "0" => "None",
-        "10" => "Document",
-        "11" => "Block",
-        "12" => "HorizontalBrackets",
-        _ => return None,
-    });
+    properties.shape = Some(
+        ibcmd_schema::tool1cd_templates::TemplateEnumCodes::graphical_shape_name(
+            geometry
+                .get(ibcmd_schema::tool1cd_templates::TemplateEnumCodes::SHAPE_INDEX)?
+                .trim(),
+        )?,
+    );
     Some(properties)
 }
 
@@ -9385,22 +9386,7 @@ fn format_business_process_flowchart_xml(flowchart: &BusinessProcessFlowchart) -
         escape_xml_element_text(&scheme.grid_vertical_step),
     ));
     let print = &scheme.print_parameters;
-    xml.push_str(&format!(
-        "\t<PrintParameters>\r\n\
-\t\t<TopMargin>{}</TopMargin>\r\n\
-\t\t<LeftMargin>{}</LeftMargin>\r\n\
-\t\t<BottomMargin>{}</BottomMargin>\r\n\
-\t\t<RightMargin>{}</RightMargin>\r\n\
-\t\t<BlackAndWhite>{}</BlackAndWhite>\r\n\
-\t\t<FitPageMode>{}</FitPageMode>\r\n\
-\t</PrintParameters>\r\n",
-        escape_xml_element_text(&print.top_margin),
-        escape_xml_element_text(&print.left_margin),
-        escape_xml_element_text(&print.bottom_margin),
-        escape_xml_element_text(&print.right_margin),
-        xml_bool(print.black_and_white),
-        print.fit_page_mode,
-    ));
+    xml.push_str(&crate::metadata_model::bodies_flowchart::format_print_parameters_xml(print));
     // A scheme with no items at all closes `<Items/>` in one element.
     if flowchart.items.is_empty() {
         xml.push_str("\t<Items/>\r\n</GraphicalSchema>");
@@ -11893,6 +11879,8 @@ struct ConstantProperties {
     choice_folders_and_items: &'static str,
     quick_choice: &'static str,
     data_history: &'static str,
+    update_data_history_immediately_after_write: bool,
+    execute_after_write_data_history_version_processing: bool,
 }
 
 struct ChoiceParameter {
@@ -12179,6 +12167,11 @@ struct CommonAttributeProperties {
 
 #[derive(Debug, Clone, Eq, PartialEq)]
 struct CommonAttributePropertyDetails {
+    password_mode: bool,
+    mark_negatives: bool,
+    multi_line: bool,
+    extended_edit: bool,
+    fill_from_filling_value: bool,
     fill_value: Option<CommonAttributeFillValue>,
     fill_checking: &'static str,
     /// `<ToolTip>`. Read at typed slot 4, the localized value the record puts
@@ -14322,6 +14315,14 @@ fn extract_metadata_source_xml_from_text_row_with_owner_graph_diagnostic(
         let document_numerator = parse_document_numerator_properties_from_text(text, uuid)?;
         format_document_numerator_source_xml(&header, &document_numerator, source_version)
             .into_bytes()
+    } else if kind == ibcmd_schema::interface::InterfaceLayout::KIND {
+        let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
+        let interface = crate::metadata_model::interface::Interface::from_brace(&row).ok()?;
+        crate::metadata_model::export::write_document(
+            &interface.to_xml().ok()?,
+            source_version.as_str(),
+        )
+        .into_bytes()
     } else if kind == ibcmd_schema::websocket_client::WebSocketClientLayout::KIND {
         let row = crate::metadata_model::brace::parse_row(text.as_bytes()).ok()?;
         let client =
@@ -15343,17 +15344,10 @@ fn parse_exchange_plan_properties_from_text(
 ) -> Option<ExchangePlanProperties> {
     let header = parse_metadata_header_from_text(text, uuid)?;
     let fields = parse_exchange_plan_owner_fields(text, &header)?;
-    if fields.get(16)?.trim() != "0"
-        || fields.get(21)?.trim() != "1"
-        || fields.get(22)?.trim() != "2"
-        || fields.get(25)?.trim() != "1"
-        || !exchange_plan_characteristics_is_empty(fields.get(40)?)
-        || fields.get(41)?.trim() != "1"
+    if !ibcmd_schema::tool1cd_metadata::ExchangePlanHistoryLayout::reserved_profile_is_known(
+        &fields.physical,
+    ) || !exchange_plan_characteristics_is_empty(fields.get(40)?)
         || !exchange_plan_choice_data_get_mode_is_direct(fields.get(43)?)
-        || fields.get(46)?.trim() != "0"
-        || fields.get(47)?.trim() != "0"
-        || fields.get(48)?.trim() != "0"
-        || fields.get(49)?.trim() != "0"
     {
         return None;
     }
@@ -15451,9 +15445,19 @@ fn parse_exchange_plan_properties_from_text(
             fields.get(37)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(38)?)?,
-        data_history: "DontUse",
-        update_data_history_immediately_after_write: false,
-        execute_after_write_data_history_version_processing: false,
+        data_history: metadata_data_history_xml(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::ExchangePlanHistoryLayout::DATA_HISTORY)?
+                .trim(),
+        )?,
+        update_data_history_immediately_after_write: information_register_bool(
+            fields.get(
+                ibcmd_schema::tool1cd_metadata::ExchangePlanHistoryLayout::UPDATE_IMMEDIATELY,
+            )?,
+        )?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(ibcmd_schema::tool1cd_metadata::ExchangePlanHistoryLayout::AFTER_VERSION)?,
+        )?,
         child_objects,
         emit_empty_child_objects,
     })
@@ -18407,6 +18411,12 @@ fn parse_register_properties_from_text(
             .unwrap_or(true)
     } else if let Some(properties) = exact_accumulation_register.as_ref() {
         properties.use_standard_commands
+    } else if ibcmd_schema::tool1cd_metadata::CalculationRegisterScalarLayout::matches_kind(kind)
+        && exact_calculation_register.is_some()
+    {
+        information_register_bool(fields.get(
+            ibcmd_schema::tool1cd_metadata::CalculationRegisterScalarLayout::USE_STANDARD_COMMANDS,
+        )?)?
     } else {
         parse_register_use_standard_commands(&fields, uuid)
     };
@@ -19617,10 +19627,9 @@ fn parse_calculation_register_fixed_include_help(
     {
         return Some(None);
     }
-    if fields.get(25)?.trim() != "0" {
-        return Some(None);
-    }
-    Some(Some(false))
+    Some(Some(information_register_bool(fields.get(
+        ibcmd_schema::tool1cd_metadata::CalculationRegisterScalarLayout::INCLUDE_HELP,
+    )?)?))
 }
 
 fn parse_calculation_register_fixed_full_text_search(
@@ -26056,16 +26065,11 @@ fn parse_chart_of_calculation_types_properties(
     }
 
     let input_modes = parse_catalog_input_modes(fields.get(58)?)?;
-    // Fields 27 and 55 are `1` on every chart of calculation types of the stand
-    // and used to be read as `<CodeAllowedLength>` and `<DataLockControlMode>`,
-    // whose separating carriers are fields 53 and 41. Both are kept as
-    // validated constants so an unobserved value fails closed.
-    if fields.get(35)?.trim() != "1" || fields.get(55)?.trim() != "1" {
-        return None;
-    }
     Some(ChartOfCalculationTypesProperties {
         generated_types,
-        use_standard_commands: information_register_bool(fields.get(24)?)?,
+        use_standard_commands: information_register_bool(fields.get(
+            ibcmd_schema::tool1cd_metadata::CalculationTypeScalarLayout::USE_STANDARD_COMMANDS,
+        )?)?,
         code_length: parse_exchange_plan_u32(fields.get(25)?)?,
         description_length: parse_exchange_plan_u32(fields.get(30)?)?,
         code_type: match fields.get(26)?.trim() {
@@ -26087,12 +26091,14 @@ fn parse_chart_of_calculation_types_properties(
             "1" => "AsDescription",
             _ => return None,
         },
-        edit_type: parse_chart_edit_type(fields.get(38)?)?,
-        // No chart of calculation types of the stand separates `<QuickChoice>`:
-        // all three export `false`. Field 37, against which this used to be
-        // read, carries `<IncludeHelpInContents>` and is `1` on the two charts
-        // that include help.
-        quick_choice: false,
+        edit_type: ibcmd_schema::tool1cd_metadata::edit_type_from_code(
+            fields.get(ibcmd_schema::tool1cd_metadata::CalculationTypeScalarLayout::EDIT_TYPE)?,
+        )?,
+        // Native single-property Coverage establishes the independent bool.
+        quick_choice: information_register_bool(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::CalculationTypeScalarLayout::QUICK_CHOICE)?,
+        )?,
         // No chart of calculation types of the stand separates `<ChoiceMode>`:
         // all three export `BothWays`. Field 41, against which this used to be
         // pinned, carries `<DataLockControlMode>` below.
@@ -26111,7 +26117,11 @@ fn parse_chart_of_calculation_types_properties(
         search_string_mode_on_input_by_string: input_modes.0,
         full_text_search_on_input_by_string: input_modes.1,
         choice_data_get_mode_on_input_by_string: input_modes.2,
-        create_on_input: (fields.get(39)?.trim() == "0").then_some("DontUse")?,
+        create_on_input: metadata_create_on_input_xml(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::CalculationTypeScalarLayout::CREATE_ON_INPUT)?
+                .trim(),
+        )?,
         choice_history_on_input: metadata_choice_history_on_input_xml(fields.get(59)?.trim())?,
         default_object_form: parse_strict_chart_owned_form_ref(
             fields.get(32)?,
@@ -31118,7 +31128,11 @@ fn parse_business_process_properties_from_text(
             _ => return None,
         },
         input_by_string,
-        create_on_input: metadata_create_on_input_xml(fields.get(19)?.trim())?,
+        create_on_input: metadata_create_on_input_xml(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::BusinessProcessScalarLayout::CREATE_ON_INPUT)?
+                .trim(),
+        )?,
         search_string_mode_on_input_by_string,
         choice_data_get_mode_on_input_by_string,
         full_text_search_on_input_by_string,
@@ -31165,20 +31179,31 @@ fn parse_business_process_properties_from_text(
         },
         number_length: parse_exchange_plan_u32(fields.get(18)?)?,
         number_allowed_length: parse_business_process_number_allowed_length(fields)?,
-        check_unique: information_register_bool(fields.get(20)?)?,
+        check_unique: information_register_bool(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::BusinessProcessScalarLayout::CHECK_UNIQUE)?,
+        )?,
         standard_attributes: parse_business_process_standard_attributes(
             fields.get(30)?,
             type_index,
             metadata_object_refs,
         )?,
-        autonumbering: information_register_bool(fields.get(21)?)?,
+        autonumbering: information_register_bool(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::BusinessProcessScalarLayout::AUTONUMBERING)?,
+        )?,
         based_on: parse_business_process_based_on(fields.get(15)?, object_refs)?,
-        number_periodicity: match fields.get(31)?.trim() {
+        number_periodicity: match fields
+            .get(ibcmd_schema::tool1cd_metadata::BusinessProcessScalarLayout::NUMBER_PERIODICITY)?
+            .trim()
+        {
             "1" => "Nonperiodical",
             _ => return None,
         },
         task: parse_owner_optional_reference(fields.get(25)?, object_refs, "Task.")?,
-        create_task_in_privileged_mode: information_register_bool(fields.get(29)?)?,
+        create_task_in_privileged_mode: information_register_bool(fields.get(
+            ibcmd_schema::tool1cd_metadata::BusinessProcessScalarLayout::CREATE_TASK_PRIVILEGED,
+        )?)?,
         data_lock_fields,
         data_lock_control_mode: parse_business_process_data_lock_control_mode(fields)?,
         include_help_in_contents: information_register_bool(fields.get(26)?)?,
@@ -31852,23 +31877,9 @@ fn parse_task_properties_from_text(
         }
     };
 
-    // Field 45 is constant "1" across all five cross-edition captures
-    // (УТ, БСП демо, WMS5, ERP WE, БСП WE) and does not track any XML
-    // property discovered so far -- it is not `IncludeHelpInContents`,
-    // which lives at field 24 (see below). Kept as a validated reserved
-    // constant rather than invented XML: unknown values fail closed.
-    //
-    // Field 20 joins the same reserved-constant treatment: it used to be
-    // read directly as the `NumberAllowedLength` slot, but it is `"1"` on
-    // every native `Task` object traced (`ЗадачаИсполнителя` across three
-    // editions and the synthetic `CorpusTask` fixture alike) regardless of
-    // which `<NumberAllowedLength>` the platform actually writes -- see
-    // `task_number_allowed_length_from_auto_prefix` for the slot that
-    // really carries it. Kept validated rather than dropped, so a future
-    // corpus record where it varies fails closed instead of silently
-    // reusing a stale assumption.
-    if fields.get(45)?.trim() != "1"
-        || fields.get(20)?.trim() != "1"
+    // CreateOnInput at 45 is kept in the admitted DontUse profile. The
+    // independent CheckUnique/Autonumbering bits are decoded below.
+    if !ibcmd_schema::tool1cd_metadata::TaskScalarLayout::create_on_input_profile_is_known(&fields)
         || !owner_graph::task_reserved_tail_is_zero(&fields)
     {
         return None;
@@ -31919,8 +31930,12 @@ fn parse_task_properties_from_text(
         },
         number_length: parse_exchange_plan_u32(fields.get(19)?)?,
         number_allowed_length: parse_task_number_allowed_length_slot(fields.get(43)?)?.xml_value(),
-        check_unique: information_register_bool(fields.get(21)?)?,
-        autonumbering: information_register_bool(fields.get(23)?)?,
+        check_unique: information_register_bool(
+            fields.get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::CHECK_UNIQUE)?,
+        )?,
+        autonumbering: information_register_bool(
+            fields.get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::AUTONUMBERING)?,
+        )?,
         task_number_auto_prefix: task_number_auto_prefix.xml_value(),
         description_length: parse_exchange_plan_u32(fields.get(22)?)?,
         addressing,
@@ -31940,11 +31955,9 @@ fn parse_task_properties_from_text(
             "1" => "AsDescription",
             _ => return None,
         },
-        // No corpus slot varies with EditType across the five cross-edition
-        // captures; it is a fixed structural constant for Task objects, the
-        // same way the encoder validates it (`require_enum_value(..,
-        // "EditType", "InDialog")`) without ever writing a field for it.
-        edit_type: "InDialog",
+        edit_type: ibcmd_schema::tool1cd_metadata::edit_type_from_code(
+            fields.get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::EDIT_TYPE)?,
+        )?,
         input_by_string,
         search_string_mode_on_input_by_string,
         full_text_search_on_input_by_string,
@@ -31979,9 +31992,17 @@ fn parse_task_properties_from_text(
             fields.get(41)?,
         )?,
         explanation: parse_information_register_owner_localized_value(fields.get(42)?)?,
-        data_history: "DontUse",
-        update_data_history_immediately_after_write: false,
-        execute_after_write_data_history_version_processing: false,
+        data_history: metadata_data_history_xml(
+            fields
+                .get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::DATA_HISTORY)?
+                .trim(),
+        )?,
+        update_data_history_immediately_after_write: information_register_bool(
+            fields.get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::UPDATE_IMMEDIATELY)?,
+        )?,
+        execute_after_write_data_history_version_processing: information_register_bool(
+            fields.get(ibcmd_schema::tool1cd_metadata::TaskScalarLayout::AFTER_VERSION)?,
+        )?,
         child_attributes,
         child_tabular_sections,
         child_forms,
@@ -34302,6 +34323,15 @@ fn parse_constant_properties_from_text(
         "ValueKey",
     );
 
+    use ibcmd_schema::tool1cd_metadata::ConstantHistoryLayout as History;
+    let (update_immediately, after_version) = match constant_fields.len() {
+        History::LEGACY_ARITY => (false, false),
+        History::ARITY => (
+            information_register_bool(constant_fields.get(History::UPDATE_IMMEDIATELY)?)?,
+            information_register_bool(constant_fields.get(History::AFTER_VERSION)?)?,
+        ),
+        _ => return None,
+    };
     Some(ConstantProperties {
         mark_negatives,
         extended_edit,
@@ -34327,6 +34357,8 @@ fn parse_constant_properties_from_text(
         choice_folders_and_items,
         quick_choice,
         data_history,
+        update_data_history_immediately_after_write: update_immediately,
+        execute_after_write_data_history_version_processing: after_version,
     })
 }
 
@@ -34880,20 +34912,38 @@ fn parse_common_attribute_properties_from_text(
     let use_fields = fields
         .get(2)
         .and_then(|field| split_1c_braced_fields(field, 0));
-    let auto_use = parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())
-        .unwrap_or("DontUse");
+    let auto_use = parse_common_attribute_declared_auto_use(&fields, use_fields.as_deref())?;
+    let property_details = parse_common_attribute_property_details(&fields);
+    let typed_fields = split_1c_braced_fields(
+        fields.get(ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::TYPED)?,
+        0,
+    )?;
+    if typed_fields.first()?.trim()
+        == ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::TYPED_CODE
+        && (property_details.is_none()
+            || typed_fields.len()
+                != ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::TYPED_ARITY)
+    {
+        return None;
+    }
     let content = use_fields
         .as_deref()
         .map(|fields| parse_common_attribute_content(fields, object_refs))
         .unwrap_or_default();
 
+    let separation = additional_order_tail
+        .or_else(|| parse_common_attribute_separation_properties(&fields, object_refs));
+    if fields.len() == ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::OWNER_ARITY
+        && separation.is_none()
+    {
+        return None;
+    }
     Some(CommonAttributeProperties {
         value_types: typed.value_types,
-        property_details: parse_common_attribute_property_details(&fields),
+        property_details,
         auto_use,
         content,
-        separation: additional_order_tail
-            .or_else(|| parse_common_attribute_separation_properties(&fields, object_refs)),
+        separation,
     })
 }
 
@@ -34998,12 +35048,21 @@ fn parse_common_attribute_property_details(
     let fill_value = typed_fields
         .get(19)
         .and_then(|field| parse_common_attribute_fill_value(field));
-    let fill_checking = metadata_fill_checking_xml(typed_fields.get(20).copied());
+    use ibcmd_schema::tool1cd_metadata::CommonAttributeLayout as Layout;
+    let fill_checking =
+        Layout::fill_checking_from_code(typed_fields.get(Layout::FILL_CHECKING)?.trim())?;
     let tooltip = typed_fields
         .get(4)
         .map(|field| parse_1c_synonyms(field))
         .unwrap_or_default();
-    (fields.len() > 3 || fill_value.is_some()).then_some(CommonAttributePropertyDetails {
+    Some(CommonAttributePropertyDetails {
+        password_mode: parse_1c_bool_field(typed_fields.get(Layout::PASSWORD_MODE).copied())?,
+        mark_negatives: parse_1c_bool_field(typed_fields.get(Layout::MARK_NEGATIVES).copied())?,
+        multi_line: parse_1c_bool_field(typed_fields.get(Layout::MULTI_LINE).copied())?,
+        extended_edit: parse_1c_bool_field(typed_fields.get(Layout::EXTENDED_EDIT).copied())?,
+        fill_from_filling_value: parse_1c_bool_field(
+            typed_fields.get(Layout::FILL_FROM_FILLING_VALUE).copied(),
+        )?,
         fill_value,
         fill_checking,
         tooltip,
@@ -35054,7 +35113,7 @@ fn parse_common_attribute_separation_properties(
         // ConfigurationExtensionsSeparation, swapping both on every one of
         // 11 differing CommonAttributes in the corpus.
         users_separation: common_attribute_separation_xml(fields.get(10)?.trim())?,
-        authentication_separation: common_attribute_reversed_separation_xml(fields.get(6)?.trim())?,
+        authentication_separation: common_attribute_separation_xml(fields.get(ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::AUTHENTICATION_SEPARATION)?.trim())?,
         data_separation_value: parse_common_attribute_optional_ref(fields.get(7)?, object_refs),
         data_separation_use: parse_common_attribute_optional_ref(fields.get(8)?, object_refs),
         conditional_separation: parse_common_attribute_optional_ref(fields.get(9)?, object_refs),
@@ -35081,10 +35140,8 @@ fn parse_common_attribute_optional_ref(
 /// `<AutoUse>` as the common attribute's own record declares it, or `None` when
 /// neither shape of the record names it.
 ///
-/// The writer below defaults an unreadable declaration to `DontUse`; the
-/// field-declaration index refuses it instead, because there a missing
-/// declaration must withhold nothing -- see
-/// [`refs::MetadataCommonAttributeContent`].
+/// Unknown codes withhold both the owner XML and its field declaration;
+/// callers must not substitute a default for an unreadable declaration.
 fn parse_common_attribute_declared_auto_use(
     fields: &[&str],
     use_fields: Option<&[&str]>,
@@ -35092,7 +35149,7 @@ fn parse_common_attribute_declared_auto_use(
     if let Some(auto_use) = use_fields.and_then(parse_common_attribute_auto_use) {
         return Some(auto_use);
     }
-    if fields.len() != 15
+    if fields.len() != ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::OWNER_ARITY
         || use_fields
             .and_then(|content_fields| content_fields.first())
             .map(|field| field.trim())
@@ -35100,9 +35157,11 @@ fn parse_common_attribute_declared_auto_use(
     {
         return None;
     }
-    fields
-        .get(11)
-        .and_then(|field| common_attribute_auto_use_xml(field.trim()))
+    ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::auto_use_from_code(
+        fields
+            .get(ibcmd_schema::tool1cd_metadata::CommonAttributeLayout::AUTO_USE)?
+            .trim(),
+    )
 }
 
 fn parse_common_attribute_auto_use(fields: &[&str]) -> Option<&'static str> {
@@ -36603,6 +36662,14 @@ fn parse_common_command_picture_value(
     }
     if picture_kind == 1 {
         let ref_fields = split_1c_braced_fields(fields.get(2)?, 0)?;
+        if ref_fields.len() == 1
+            && let Ok(code) = ref_fields.first()?.trim().parse::<i64>()
+            && let Some(name) = crate::metadata_model::registers::parts::STANDARD_PICTURE_CODES
+                .iter()
+                .find_map(|(name, candidate)| (*candidate == code).then_some(*name))
+        {
+            return Some((Some(format!("StdPicture.{name}")), load_transparent));
+        }
         if ref_fields.first()?.trim() == "-1" {
             return Some((
                 Some("StdPicture.InputFieldSelect".to_string()),
@@ -37055,30 +37122,27 @@ fn command_group_category_xml(value: u8) -> &'static str {
 }
 
 fn parse_style_item_properties_from_text(text: &str, uuid: &str) -> Option<StyleItemProperties> {
+    use ibcmd_schema::style_item::{StyleItemKind, StyleItemLayout as Layout};
     let fields = metadata_object_fields(text)?;
-    if metadata_header_field_index(&fields, uuid) != Some(3) {
+    if metadata_header_field_index(&fields, uuid) != Some(Layout::HEADER) {
         return None;
     }
-    let style_kind = fields.get(1)?.trim().parse::<u8>().ok()?;
-    let value = fields.get(2)?;
-    match style_kind {
-        0 => Some(StyleItemProperties {
-            item_type: "Color",
-            value_xml: format!(
-                "<Value xsi:type=\"v8ui:Color\">{}</Value>",
-                escape_xml_text(&parse_style_color_value(value)?)
-            ),
-        }),
-        1 => Some(StyleItemProperties {
-            item_type: "Font",
-            value_xml: parse_style_font_value_xml(value),
-        }),
-        2 => Some(StyleItemProperties {
-            item_type: "Border",
-            value_xml: parse_style_border_value_xml(value)?,
-        }),
-        _ => None,
-    }
+    let item_type = StyleItemKind::from_code(fields.get(Layout::DECLARED_KIND)?.trim())?.name();
+    let value = fields.get(Layout::VALUE)?;
+    let typed = split_1c_braced_fields(value, 0)?;
+    let value_type = typed.get(Layout::TYPED_VALUE_TYPE)?.trim();
+    let value_xml = match value_type {
+        Layout::COLOR_TYPE => crate::metadata_model::common::style_item_color_value_xml(
+            &parse_style_color_value(value)?,
+        ),
+        Layout::FONT_TYPE => parse_style_font_value_xml(value),
+        Layout::BORDER_TYPE => parse_style_border_value_xml(value)?,
+        _ => return None,
+    };
+    Some(StyleItemProperties {
+        item_type,
+        value_xml,
+    })
 }
 
 fn parse_scheduled_job_properties_from_text(
@@ -37582,7 +37646,8 @@ fn parse_style_color_value(value: &str) -> Option<String> {
     if let Some(name) = form::layout_8_5_1::palette_color_8_5_1(fields.get(3)?) {
         return Some(name.to_owned());
     }
-    let color_fields = split_1c_braced_fields(fields.get(3)?, 0)?;
+    let normalized = form::layout_8_5_1::down_convert_primitives_8_5_1_text(fields.get(3)?).ok()?;
+    let color_fields = split_1c_braced_fields(&normalized, 0)?;
     if color_fields.first()?.trim() != "3" {
         return None;
     }
@@ -40494,6 +40559,9 @@ fn format_register_source_xml(
         }
     }
     if register.child_objects.is_empty() && register.recalculations.is_empty() {
+        crate::metadata_model::legacy_property_xml::insert_empty_calculation_register_children(
+            &mut xml, kind,
+        );
         return xml;
     }
     let mut child_objects = String::new();
@@ -44481,6 +44549,19 @@ fn format_choice_parameters_xml(parameters: &[ChoiceParameter]) -> String {
     xml
 }
 
+fn legacy_property_bound_view(
+    value: Option<&str>,
+) -> crate::metadata_model::legacy_property_xml::BoundXml<'_> {
+    use crate::metadata_model::legacy_property_xml::BoundXml;
+    match value {
+        Some(value) => match split_typed_bound(value) {
+            Some((xsi_type, text)) => BoundXml::Typed { xsi_type, text },
+            None => BoundXml::String(value),
+        },
+        None => BoundXml::Nil,
+    }
+}
+
 fn format_constant_source_xml(
     header: &MetadataHeader,
     constant: &ConstantProperties,
@@ -44533,48 +44614,34 @@ fn format_constant_source_xml(
     push_localized_property(&mut insert, "\t\t\t", "Format", &constant.format);
     push_localized_property(&mut insert, "\t\t\t", "EditFormat", &constant.edit_format);
     push_localized_property(&mut insert, "\t\t\t", "ToolTip", &constant.tooltip);
-    insert.push_str(&format!(
-        "\t\t\t<MarkNegatives>{}</MarkNegatives>\r\n\
-\t\t\t{}\r\n\
-\t\t\t<MultiLine>{}</MultiLine>\r\n\
-\t\t\t<ExtendedEdit>{}</ExtendedEdit>\r\n\
-\t\t\t{}\r\n\
-\t\t\t{}\r\n\
-\t\t\t<FillChecking>{}</FillChecking>\r\n\
-\t\t\t<ChoiceFoldersAndItems>{}</ChoiceFoldersAndItems>\r\n\
-{}\
-\t\t\t{}\r\n\
-\t\t\t<QuickChoice>{}</QuickChoice>\r\n\
-\t\t\t<ChoiceForm/>\r\n\
-\t\t\t<LinkByType/>\r\n\
-\t\t\t<ChoiceHistoryOnInput>{}</ChoiceHistoryOnInput>\r\n\
-\t\t\t<DataLockControlMode>{}</DataLockControlMode>\r\n\
-\t\t\t<DataHistory>{}</DataHistory>\r\n\
-\t\t\t<UpdateDataHistoryImmediatelyAfterWrite>false</UpdateDataHistoryImmediatelyAfterWrite>\r\n\
-\t\t\t<ExecuteAfterWriteDataHistoryVersionProcessing>false</ExecuteAfterWriteDataHistoryVersionProcessing>\r\n",
-        xml_bool(constant.mark_negatives),
-        format_simple_property_xml("Mask", &constant.mask),
-        xml_bool(constant.multi_line),
-        xml_bool(constant.extended_edit),
-        format_constant_bound_xml("MinValue", constant.min_value.as_deref()),
-        format_constant_bound_xml("MaxValue", constant.max_value.as_deref()),
-        constant.fill_checking,
-        constant.choice_folders_and_items,
-        {
-            let mut links = String::new();
-            push_metadata_child_choice_parameter_links_xml(
-                &mut links,
-                "\t\t\t",
-                &Some(constant.choice_parameter_links.clone()),
-            );
-            links
-        },
-        format_choice_parameters_xml(&constant.choice_parameters),
-        constant.quick_choice,
-        constant.choice_history_on_input,
-        constant.data_lock_control_mode,
-        constant.data_history
-    ));
+    let mut links = String::new();
+    push_metadata_child_choice_parameter_links_xml(
+        &mut links,
+        "\t\t\t",
+        &Some(constant.choice_parameter_links.clone()),
+    );
+    insert.push_str(
+        &crate::metadata_model::legacy_property_xml::constant_details_xml(
+            crate::metadata_model::legacy_property_xml::ConstantDetailsXml {
+                mark_negatives: constant.mark_negatives,
+                mask: &constant.mask,
+                multi_line: constant.multi_line,
+                extended_edit: constant.extended_edit,
+                min_value: legacy_property_bound_view(constant.min_value.as_deref()),
+                max_value: legacy_property_bound_view(constant.max_value.as_deref()),
+                fill_checking: constant.fill_checking,
+                choice_folders_and_items: constant.choice_folders_and_items,
+                choice_parameter_links_xml: &links,
+                choice_parameters_xml: &format_choice_parameters_xml(&constant.choice_parameters),
+                quick_choice: constant.quick_choice,
+                choice_history_on_input: constant.choice_history_on_input,
+                data_lock_control_mode: constant.data_lock_control_mode,
+                data_history: constant.data_history,
+                update_immediately: constant.update_data_history_immediately_after_write,
+                after_version: constant.execute_after_write_data_history_version_processing,
+            },
+        ),
+    );
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -44695,20 +44762,19 @@ fn format_common_attribute_source_xml(
 fn format_common_attribute_property_details_xml(
     details: &CommonAttributePropertyDetails,
 ) -> String {
-    let mut xml = "\t\t\t<PasswordMode>false</PasswordMode>\r\n\
-\t\t\t<Format/>\r\n\
-\t\t\t<EditFormat/>\r\n"
-        .to_string();
+    let mut xml = crate::metadata_model::legacy_property_xml::common_attribute_prefix_xml(
+        details.password_mode,
+    );
     push_localized_property(&mut xml, "\t\t\t", "ToolTip", &details.tooltip);
     xml.push_str(
-        "\t\t\t<MarkNegatives>false</MarkNegatives>\r\n\
-\t\t\t<Mask/>\r\n\
-\t\t\t<MultiLine>false</MultiLine>\r\n\
-\t\t\t<ExtendedEdit>false</ExtendedEdit>\r\n\
-\t\t\t<MinValue xsi:nil=\"true\"/>\r\n\
-\t\t\t<MaxValue xsi:nil=\"true\"/>\r\n\
-\t\t\t<FillFromFillingValue>false</FillFromFillingValue>\r\n\
-\t\t\t",
+        &crate::metadata_model::legacy_property_xml::common_attribute_flags_xml(
+            crate::metadata_model::legacy_property_xml::CommonAttributeFlags {
+                mark_negatives: details.mark_negatives,
+                multi_line: details.multi_line,
+                extended_edit: details.extended_edit,
+                fill_from_filling_value: details.fill_from_filling_value,
+            },
+        ),
     );
     if let Some(fill_value) = &details.fill_value {
         xml.push_str(&format_common_attribute_fill_value_xml(fill_value));
@@ -46298,10 +46364,7 @@ fn format_ws_reference_source_xml(
     if let Some(index) = xml.find("\t\t<Properties>\r\n") {
         xml.insert_str(index, &internal);
     }
-    let insert = format!(
-        "\t\t\t<LocationURL>{}</LocationURL>\r\n",
-        escape_xml_element_text(&properties.location_url)
-    );
+    let insert = crate::metadata_model::common::ws_reference_location_xml(&properties.location_url);
     let marker = "\t\t</Properties>\r\n";
     if let Some(index) = xml.find(marker) {
         xml.insert_str(index, &insert);
@@ -47646,6 +47709,12 @@ mod catalog_tabular_section_wrapper_tests {
 
 #[cfg(test)]
 mod configuration_interface_pair_tests;
+#[cfg(test)]
+mod interface_root_tests;
+#[cfg(test)]
+mod tool1cd_metadata_tests;
+#[cfg(test)]
+mod tool1cd_presentation_tests;
 
 #[cfg(test)]
 mod tests;

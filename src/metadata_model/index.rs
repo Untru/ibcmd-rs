@@ -63,6 +63,10 @@ pub const ROOT_COLLECTIONS: &[(&str, &str)] = &[
     ("CommonPictures", "CommonPicture"),
     ("SessionParameters", "SessionParameter"),
     ("Roles", "Role"),
+    (
+        ibcmd_schema::interface::InterfaceLayout::FOLDER,
+        ibcmd_schema::interface::InterfaceLayout::KIND,
+    ),
     ("CommonTemplates", "CommonTemplate"),
     ("FilterCriteria", "FilterCriterion"),
     ("CommonModules", "CommonModule"),
@@ -114,7 +118,6 @@ pub const NESTED_COLLECTIONS: &[(&str, &str)] = &[
     ("Forms", "Form"),
     ("Templates", "Template"),
     ("Recalculations", "Recalculation"),
-    ("Interfaces", "Interface"),
     ("PaletteColors", "PaletteColor"),
     // ExternalDataSource children; their owner chain is EDS -> Cube -> DimensionTable.
     ("Cubes", "Cube"),

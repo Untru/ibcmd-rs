@@ -676,13 +676,11 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Generated("BaseCalculationTypesRow"),
         Generated("LeadingCalculationTypes"),
         Generated("LeadingCalculationTypesRow"),
-        Flag("UseStandardCommands"),
+        Code("EditType", EDIT_TYPE),
         Number("CodeLength"),
         Code("CodeType", CODE_TYPE),
-        // The chart of an extension separates slot 27 from EditType
-        // (DependenceOnCalculationTypes DontUse, EditType InDialog): the
-        // dependence rides slot 27 and the edit type slot 35, `1` (InDialog)
-        // on every chart on record.
+        // Native single-property Coverage separates UseStandardCommands (35)
+        // from EditType (24); dependence remains at 27.
         Code(
             "DependenceOnCalculationTypes",
             DEPENDENCE_ON_CALCULATION_TYPES,
@@ -694,7 +692,7 @@ static CHART_OF_CALCULATION_TYPES: Layout = Layout {
         Reference("DefaultObjectForm"),
         Reference("DefaultListForm"),
         Reference("DefaultChoiceForm"),
-        Code("EditType", EDIT_TYPE),
+        Flag("UseStandardCommands"),
         References("BasedOn"),
         Flag("IncludeHelpInContents"),
         Code("ChoiceMode", CHOICE_MODE),
@@ -760,9 +758,9 @@ static BUSINESS_PROCESS: Layout = Layout {
         Code("EditType", EDIT_TYPE),
         Code("NumberType", BP_NUMBER_TYPE),
         Number("NumberLength"),
-        Code("CreateOnInput", CREATE_ON_INPUT),
         Flag("CheckUnique"),
         Flag("Autonumbering"),
+        Code("CreateOnInput", CREATE_ON_INPUT),
         Reference("DefaultObjectForm"),
         Reference("DefaultListForm"),
         Reference("DefaultChoiceForm"),
@@ -770,9 +768,9 @@ static BUSINESS_PROCESS: Layout = Layout {
         Flag("IncludeHelpInContents"),
         Fields("InputByString"),
         Code("DataLockControlMode", DATA_LOCK_CONTROL_MODE),
-        Flag("CreateTaskInPrivilegedMode"),
-        StandardAttributes(BUSINESS_PROCESS_STANDARD),
         Code("NumberPeriodicity", BP_NUMBER_PERIODICITY),
+        StandardAttributes(BUSINESS_PROCESS_STANDARD),
+        Flag("CreateTaskInPrivilegedMode"),
         Reference("AuxiliaryObjectForm"),
         Reference("AuxiliaryListForm"),
         Reference("AuxiliaryChoiceForm"),
@@ -828,10 +826,10 @@ static TASK: Layout = Layout {
         Reference("DefaultChoiceForm"),
         Code("NumberType", CODE_TYPE),
         Number("NumberLength"),
-        Code("EditType", EDIT_TYPE),
         Flag("CheckUnique"),
-        Number("DescriptionLength"),
         Flag("Autonumbering"),
+        Number("DescriptionLength"),
+        Code("EditType", EDIT_TYPE),
         Flag("IncludeHelpInContents"),
         Reference("Addressing"),
         Reference("MainAddressingAttribute"),

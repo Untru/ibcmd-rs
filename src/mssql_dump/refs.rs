@@ -4048,11 +4048,10 @@ pub(super) fn extract_configuration_source_xml(
     }
     if let Some(root_layout) = &root_layout {
         insert_configuration_internal_info_xml(&mut xml, &root_layout.contained_objects).ok()?;
-        if let Some(child_objects) =
-            resolve_configuration_root_child_objects(root_layout, object_refs)
-        {
-            insert_configuration_root_child_objects_xml(&mut xml, &child_objects);
-        }
+        // An unresolved family is not an empty inventory: refuse the root
+        // instead of publishing Properties alone and dropping all children.
+        let child_objects = resolve_configuration_root_child_objects(root_layout, object_refs)?;
+        insert_configuration_root_child_objects_xml(&mut xml, &child_objects);
     } else if !child_objects.is_empty() {
         let mut child_xml = String::new();
         for child_object in &child_objects {

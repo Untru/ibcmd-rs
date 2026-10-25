@@ -1,0 +1,16 @@
+{
+  "equal": [
+    "CommonTemplates/CovBodyTemplate.xml",
+    "CommonTemplates/CovBodyTemplate/Ext/Template.xml",
+    "CommonTemplates/CovDataCompositionParameters.xml",
+    "CommonTemplates/CovDataCompositionParameters/Ext/Template.xml",
+    "CommonTemplates/CovGraphicalSchemaBody.xml",
+    "CommonTemplates/CovGraphicalSchemaBody/Ext/Template.xml",
+    "CommonTemplates/CovSpreadsheetMergedCells.xml",
+    "CommonTemplates/CovSpreadsheetMergedCells/Ext/Template.xml",
+    "CommonTemplates/CovVerticalBrackets.xml",
+    "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+    "Configuration.xml",
+    "Languages/Русский.xml"
+  ]
+}

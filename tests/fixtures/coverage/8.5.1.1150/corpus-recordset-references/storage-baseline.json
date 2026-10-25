@@ -1,0 +1,17 @@
+{
+  "equal": [
+    "CommonModules/CovRecordsetHandlers.xml",
+    "Configuration.xml",
+    "Documents/CovRecorder.xml",
+    "Documents/CovRsRecorder.xml",
+    "EventSubscriptions/CovRsOneIndependent.xml",
+    "EventSubscriptions/CovRsOneSubordinate.xml",
+    "EventSubscriptions/CovRsSources.xml",
+    "InformationRegisters/CovRsAlpha.xml",
+    "InformationRegisters/CovRsBeta.xml",
+    "InformationRegisters/CovRsDelta.xml",
+    "InformationRegisters/CovRsEpsilon.xml",
+    "InformationRegisters/CovRsGamma.xml",
+    "Languages/Русский.xml"
+  ]
+}

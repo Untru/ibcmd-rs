@@ -1,0 +1,2085 @@
+{
+  "schema_version": 1,
+  "tool1cd_commit": "7c4b91cb7a7bb48a32be00b9f32afe740dada6e1",
+  "coverage_snapshot_commit": "718aef51",
+  "note": "Implemented is a code candidate; measured closure requires the final central Coverage/source audit. Runtime names do not establish storage. Template-agent scope covers the other23IDs.",
+  "classes": [
+    {
+      "id": "I002",
+      "signature": "no code for UseInInterfaceCompatibilityMode \"Version85\"",
+      "occurrences": 148,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeVersion85.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeVersion85.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-extension",
+      "tool1cd_lines": [
+        59644,
+        59685,
+        41019
+      ],
+      "reason": "Form record14 appends Any0/Taxi1/Version852 in native Coverage; tool1cd establishes only the older descriptor prefix. Configuration Taxi3 and ClientApplicationVariant Taxi1 are distinct enum domains and are not used as proof."
+    },
+    {
+      "id": "I003",
+      "signature": "no code for UseInInterfaceCompatibilityMode \"Taxi\"",
+      "occurrences": 117,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridModeTaxi.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernModeTaxi.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-extension",
+      "tool1cd_lines": [
+        59644,
+        59685,
+        41019
+      ],
+      "reason": "Form record14 appends Any0/Taxi1/Version852 in native Coverage; tool1cd establishes only the older descriptor prefix. Configuration Taxi3 and ClientApplicationVariant Taxi1 are distinct enum domains and are not used as proof."
+    },
+    {
+      "id": "I004",
+      "signature": "form <UsualGroup>: ControlRepresentation ButtonInParentElement has no 8.3.27 spelling",
+      "occurrences": 85,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridParentButton.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernParentButton.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I005",
+      "signature": "the form's tail names something the writer cannot place",
+      "occurrences": 48,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyChildrenAlign.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyVerticalSingle.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "profile-context-gap",
+      "tool1cd_lines": [
+        62494,
+        62516,
+        62561
+      ],
+      "reason": "This aggregate tail signature covers several properties; old root-tail grammar does not establish each modern owning coordinate."
+    },
+    {
+      "id": "I007",
+      "signature": "<LabelDecoration> names a font the writer cannot place",
+      "occurrences": 25,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelDecorationFont.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "native-identity-known-profile-context-gap",
+      "tool1cd_lines": [
+        4236,
+        62797,
+        62936
+      ],
+      "reason": "Native public Coverage 8.5.1.1529 confirms TitleLevel4=-51 and TitleLevel1=-48 in kind-2 font tuples; old tool1cd supplies the generic style-font grammar but not these modern identities. No 8.3 native witness was found. The shared writer currently emits an 8.3-shaped intermediate after the 2.21 adapter down-converts XML, losing the source profile context at font formatting. A context-aware follow-up or measured 8.3 witness is needed before admitting these names; current refusal is retained. This is an architectural dependency, not absent storage grammar or a permanent unsupported feature."
+    },
+    {
+      "id": "I010",
+      "signature": "<Table> excludes SelectAll, which has no measured uuid",
+      "occurrences": 16,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlySelectAll.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        43421,
+        43449,
+        43462,
+        62068
+      ],
+      "reason": "Native Coverage confirms dynamic Table SelectAll=51c99108-107c-43e1-8918-e48835bf2495 and settings-selection Table AddAutoSelectedField=eaab4e19-897e-464c-9674-262fddb1dce9. Target ownership is preserved."
+    },
+    {
+      "id": "I011",
+      "signature": "<LabelDecoration> names a colour the writer cannot place",
+      "occurrences": 14,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I013",
+      "signature": "a group names a background colour it cannot place",
+      "occurrences": 12,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernUsualGroupBackColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I014",
+      "signature": "a <ChartField> names a property whose slot is not measured",
+      "occurrences": 9,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartMaxWidth.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "widget-profile-gap",
+      "tool1cd_lines": [
+        60771,
+        62494
+      ],
+      "reason": "Old generic field grammar does not establish the missing owning widget record and property slots. Complete Period/GeographicalSchema controls and new chart/schema members require measured record families."
+    },
+    {
+      "id": "I015",
+      "signature": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>",
+      "occurrences": 8,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDecorationPictureColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "palette-version-gap",
+      "tool1cd_lines": [
+        4224,
+        62696,
+        62735
+      ],
+      "reason": "Old ColorType contains only Absolute/Windows/Web/Style/Auto; current PaletteColor/kind5 domain is not described. Old web/style constants cannot substitute for pal:<name>."
+    },
+    {
+      "id": "I018",
+      "signature": "form <InputField>: TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code",
+      "occurrences": 6,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridReducedText.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernReducedText.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I019",
+      "signature": "form <LabelField>: UseCopy: the 2.21 value Some(\"false\") has no 8.5 code",
+      "occurrences": 6,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldUseCopy.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldUseCopy.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I020",
+      "signature": "<Table> excludes DeselectAll, which has no measured uuid",
+      "occurrences": 5,
+      "coverage": [
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesDeselectAll.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-owned-interface",
+          "source": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovTableOnlyDeselectAll.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-extension",
+      "tool1cd_lines": [
+        43421,
+        62068
+      ],
+      "reason": "Native ValueTable-bound Table DeselectAll=03022d03-1986-4dc4-93c2-03d995332357. This identity is absent from old tool1cd, so only its count/UUID grammar is reused; no old enum inference."
+    },
+    {
+      "id": "I021",
+      "signature": "unsupported Form VerticalScroll: use",
+      "occurrences": 5,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovVerticalScrollAlways.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "candidate-needs-dual-slot-proof",
+      "tool1cd_lines": [
+        3772,
+        62494,
+        62561
+      ],
+      "reason": "VerticalFormScroll Use1 is documented, but current root stores a qualifier/mode pair. Known pairs2/2 and0/3 do not prove a guessed1/1 pair for use."
+    },
+    {
+      "id": "I022",
+      "signature": "unsupported colour \"pal:<name>\"",
+      "occurrences": 5,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "StyleItems/CovPaletteViolet.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "palette-version-gap",
+      "tool1cd_lines": [
+        4224,
+        62696,
+        62735
+      ],
+      "reason": "Old ColorType contains only Absolute/Windows/Web/Style/Auto; current PaletteColor/kind5 domain is not described. Old web/style constants cannot substitute for pal:<name>."
+    },
+    {
+      "id": "I023",
+      "signature": "<LabelField> cannot encode a bound path",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "reference-context-gap",
+      "tool1cd_lines": [
+        61888,
+        62019
+      ],
+      "reason": "Form attribute/type-link grammar identifies owner and link coordinates, but not these complete generated-type/bound-path contexts or a universal sentinel-2 meaning. No numeric sentinel or metadata-name guess."
+    },
+    {
+      "id": "I024",
+      "signature": "<LabelField> names a colour the writer cannot place",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I026",
+      "signature": "a <GraphicalSchemaField> names a property whose slot is not measured",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "widget-profile-gap",
+      "tool1cd_lines": [
+        60771,
+        62494
+      ],
+      "reason": "Old generic field grammar does not establish the missing owning widget record and property slots. Complete Period/GeographicalSchema controls and new chart/schema members require measured record families."
+    },
+    {
+      "id": "I027",
+      "signature": "no base-free compiler for Interface yet",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2342/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "probe": "existing-interfaces-8.3.27.2342",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/interfaces",
+          "source": "Interfaces/CovTemplate.xml",
+          "probe": "existing-interfaces-8.5.1.1150",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "already-fixed",
+      "tool1cd_lines": [
+        55949
+      ],
+      "reason": "Interface descriptor compiler and canonical-name support were measured and delivered in #558/#561 before this change."
+    },
+    {
+      "id": "I028",
+      "signature": "no measured value for StdPicture.NewConversation",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureNewConversation.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I029",
+      "signature": "the form names an event the writer cannot place",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-task-form-events",
+          "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "event-owner-gap",
+      "tool1cd_lines": [
+        54718,
+        62494
+      ],
+      "reason": "Old event collection grammar does not determine the requested TaskObject/Chart/Planner owner-specific event UUID and payload coordinate; global event-name substitution is unsafe."
+    },
+    {
+      "id": "I030",
+      "signature": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family",
+      "occurrences": 4,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-additional-index",
+          "source": "Catalogs/CovIndexedCatalog.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "additional-index-owner-gap",
+      "tool1cd_lines": [
+        61888
+      ],
+      "reason": "AdditionalIndexes maps target suffixes to generated metadata owner types. The old source has no corresponding modern AdditionalIndexes serialization rule; runtime Indexes names are insufficient."
+    },
+    {
+      "id": "I031",
+      "signature": "<InputField> cannot encode a bound path",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "reference-context-gap",
+      "tool1cd_lines": [
+        61888,
+        62019
+      ],
+      "reason": "Form attribute/type-link grammar identifies owner and link coordinates, but not these complete generated-type/bound-path contexts or a universal sentinel-2 meaning. No numeric sentinel or metadata-name guess."
+    },
+    {
+      "id": "I032",
+      "signature": "<LabelField> names a font the writer cannot place",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldTitleLevel4.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernLabelFieldFont.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "native-identity-known-profile-context-gap",
+      "tool1cd_lines": [
+        4236,
+        62797,
+        62936
+      ],
+      "reason": "Native public Coverage 8.5.1.1529 confirms TitleLevel4=-51 and TitleLevel1=-48 in kind-2 font tuples; old tool1cd supplies the generic style-font grammar but not these modern identities. No 8.3 native witness was found. The shared writer currently emits an 8.3-shaped intermediate after the 2.21 adapter down-converts XML, losing the source profile context at font formatting. A context-aware follow-up or measured 8.3 witness is needed before admitting these names; current refusal is retained. This is an architectural dependency, not absent storage grammar or a permanent unsupported feature."
+    },
+    {
+      "id": "I033",
+      "signature": "form <InputField>: WidthInCard: the 2.21 value Some(\"Full\") has no 8.5 code",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldWidthInCard.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldWidthInCard.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I034",
+      "signature": "form <InputField>: no measured value for StdPicture.CollaborationSystemExternalUser",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputPictureExternalUser.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputPictureExternalUser.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I035",
+      "signature": "form <RadioButtonField>: HorizontalStretch: the 2.21 value Some(\"false\") has no 8.5 code",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernRadioButtonFieldHorizontalStretch.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I036",
+      "signature": "no measured value for StdPicture.Char",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureChar.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernPictureChar.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I037",
+      "signature": "no measured value for StdPicture.Today",
+      "occurrences": 3,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureToday.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I038",
+      "signature": "<ChartField> names an event the writer cannot place",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetChartOnActivate.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "event-owner-gap",
+      "tool1cd_lines": [
+        54718,
+        62494
+      ],
+      "reason": "Old event collection grammar does not determine the requested TaskObject/Chart/Planner owner-specific event UUID and payload coordinate; global event-name substitution is unsafe."
+    },
+    {
+      "id": "I039",
+      "signature": "<CheckBoxField> cannot encode a bound path",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-deep-bindings",
+          "source": "CommonForms/CovDeepComposerBinding.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "reference-context-gap",
+      "tool1cd_lines": [
+        61888,
+        62019
+      ],
+      "reason": "Form attribute/type-link grammar identifies owner and link coordinates, but not these complete generated-type/bound-path contexts or a universal sentinel-2 meaning. No numeric sentinel or metadata-name guess."
+    },
+    {
+      "id": "I040",
+      "signature": "<PeriodField> has no writer yet",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovPeriodField.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "widget-profile-gap",
+      "tool1cd_lines": [
+        60771,
+        62494
+      ],
+      "reason": "Old generic field grammar does not establish the missing owning widget record and property slots. Complete Period/GeographicalSchema controls and new chart/schema members require measured record families."
+    },
+    {
+      "id": "I041",
+      "signature": "<PlannerField> names an event the writer cannot place",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "event-owner-gap",
+      "tool1cd_lines": [
+        54718,
+        62494
+      ],
+      "reason": "Old event collection grammar does not determine the requested TaskObject/Chart/Planner owner-specific event UUID and payload coordinate; global event-name substitution is unsafe."
+    },
+    {
+      "id": "I042",
+      "signature": "<SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridSheetFormattedString.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernSheetFormattedString.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I043",
+      "signature": "<Table> excludes AddAutoSelectedField, which has no measured uuid",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-facets",
+          "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        43421,
+        43449,
+        43462,
+        62068
+      ],
+      "reason": "Native Coverage confirms settings-selection Table AddAutoSelectedField=eaab4e19-897e-464c-9674-262fddb1dce9. Writer admission requires a declared cfg:DynamicList root and the exact SettingsComposer.Settings.Selection path; absent/malformed paths and a plain ValueTable owner are rejected. The context-free generic command lookup refuses it."
+    },
+    {
+      "id": "I044",
+      "signature": "ClientApplicationInterface: unsupported layout property",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-client-application-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-client-application-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "configuration-profile-gap",
+      "tool1cd_lines": [
+        60067,
+        41019
+      ],
+      "reason": "Current ClientApplicationInterface/mobile-roster source domain lies outside the old recorded grammar; the complete source roster and current owning tuple require independent measurements."
+    },
+    {
+      "id": "I045",
+      "signature": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-mobile-permission-messages",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-mobile-permission-messages",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "configuration-profile-gap",
+      "tool1cd_lines": [
+        60067,
+        41019
+      ],
+      "reason": "Current ClientApplicationInterface/mobile-roster source domain lies outside the old recorded grammar; the complete source roster and current owning tuple require independent measurements."
+    },
+    {
+      "id": "I053",
+      "signature": "a command names the shortcut Space, which is not measured",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-owned-catalog-forms",
+          "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        10391,
+        62130
+      ],
+      "reason": "Space ordinal32 and the version/key/modifier shortcut tuple match both native Coverage SpaceForm controls; shared encoder emits{0,32,mask}."
+    },
+    {
+      "id": "I054",
+      "signature": "a dynamic list's <KeyType>RowNumber is not measured",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-cross-forms-from27",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-form-settings",
+          "source": "CommonForms/CovDynamicListRowNumber.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "runtime-name-not-storage",
+      "tool1cd_lines": [
+        8293,
+        62494
+      ],
+      "reason": "PhoneNumber runtime contact data and an unrelated row-number enum do not establish AutofillHint/KeyType codes in the owning modern form payload."
+    },
+    {
+      "id": "I055",
+      "signature": "a progress bar's <Representation>BrokenTilt is not measured",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridBrokenTilt.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-forms",
+          "source": "CommonForms/CovModernBrokenTilt.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        40992
+      ],
+      "reason": "ProgressBarSmoothingMode BrokenTilt2 matches the native16-member Coverage progress payload. The existing writer now preserves that value."
+    },
+    {
+      "id": "I056",
+      "signature": "a table's <RowPictureDataPath> names <path>, which the writer cannot place",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovRecordSetRowPicture.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "reference-context-gap",
+      "tool1cd_lines": [
+        61888,
+        62019
+      ],
+      "reason": "Form attribute/type-link grammar identifies owner and link coordinates, but not these complete generated-type/bound-path contexts or a universal sentinel-2 meaning. No numeric sentinel or metadata-name guess."
+    },
+    {
+      "id": "I057",
+      "signature": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-reference-network",
+          "source": "InformationRegisters/CovNetworkOptions.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        52890,
+        52965,
+        53005,
+        53550
+      ],
+      "reason": "QueryWizardTempTableDescription/AccountingRegister/GotoURL identities match both native Coverage profiles. Existing picture grammar and shared lookup cover forms, descriptors and the legacy command UUID fallback."
+    },
+    {
+      "id": "I058",
+      "signature": "form <ColumnGroup>: ShowTitleInCard: the 2.21 value Some(\"true\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridColumnGroupCard.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernColumnGroupCard.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I059",
+      "signature": "form <CommandBar>: AppearanceMode: the 2.21 value Some(\"UsualGroup\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridCommandBarAppearance.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernCommandBarAppearance.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I060",
+      "signature": "form <LabelField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I061",
+      "signature": "no measured ordinal for AccountingRegister.StandardCommand.OpenList",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationAccountingRegister.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "generated-command-context-gap",
+      "tool1cd_lines": [
+        43421
+      ],
+      "reason": "Generated standard-command ordinals and owner names are not static picture UUIDs. The old catalogue does not establish OpenList ordinal or ExchangePlan.Create ownership in these contexts."
+    },
+    {
+      "id": "I062",
+      "signature": "no measured value for StdPicture.AccountingRegister",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        52890,
+        52965,
+        53005,
+        53550
+      ],
+      "reason": "QueryWizardTempTableDescription/AccountingRegister/GotoURL identities match both native Coverage profiles. Existing picture grammar and shared lookup cover forms, descriptors and the legacy command UUID fallback."
+    },
+    {
+      "id": "I063",
+      "signature": "no measured value for StdPicture.AppearanceStarHalfFilled",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I064",
+      "signature": "no measured value for StdPicture.FormattedString",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureFormattedString.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I065",
+      "signature": "no measured value for StdPicture.GotoURL",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureGotoURL.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        52890,
+        52965,
+        53005,
+        53550
+      ],
+      "reason": "QueryWizardTempTableDescription/AccountingRegister/GotoURL identities match both native Coverage profiles. Existing picture grammar and shared lookup cover forms, descriptors and the legacy command UUID fallback."
+    },
+    {
+      "id": "I066",
+      "signature": "no measured value for StdPicture.QueryWizardTempTableDescription",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-managed-forms",
+          "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        52890,
+        52965,
+        53005,
+        53550
+      ],
+      "reason": "QueryWizardTempTableDescription/AccountingRegister/GotoURL identities match both native Coverage profiles. Existing picture grammar and shared lookup cover forms, descriptors and the legacy command UUID fallback."
+    },
+    {
+      "id": "I067",
+      "signature": "no stored value for StdPicture.GotoURL",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-catalog-pictures",
+          "source": "Catalogs/CovCatalogPictureTemplate.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        52890,
+        52965,
+        53005,
+        53550
+      ],
+      "reason": "QueryWizardTempTableDescription/AccountingRegister/GotoURL identities match both native Coverage profiles. Existing picture grammar and shared lookup cover forms, descriptors and the legacy command UUID fallback."
+    },
+    {
+      "id": "I068",
+      "signature": "the exporter names no `ExchangePlan` standard command `Create`",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Subsystems/CovCommandSubsystem.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "generated-command-context-gap",
+      "tool1cd_lines": [
+        43421
+      ],
+      "reason": "Generated standard-command ordinals and owner names are not static picture UUIDs. The old catalogue does not establish OpenList ordinal or ExchangePlan.Create ownership in these contexts."
+    },
+    {
+      "id": "I069",
+      "signature": "unresolved reference -2",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-characteristics",
+          "source": "Catalogs/CovOrphanCharacteristics.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "reference-context-gap",
+      "tool1cd_lines": [
+        61888,
+        62019
+      ],
+      "reason": "Form attribute/type-link grammar identifies owner and link coordinates, but not these complete generated-type/bound-path contexts or a universal sentinel-2 meaning. No numeric sentinel or metadata-name guess."
+    },
+    {
+      "id": "I070",
+      "signature": "unsupported colour \"web:MediumGreen\"",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorMediumGreen.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I071",
+      "signature": "unsupported colour \"web:Tomato\"",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorTomato.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I072",
+      "signature": "unsupported picture reference 0",
+      "occurrences": 2,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-orphan-catalog-facets",
+          "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "existing-code-needs-current-retest",
+      "tool1cd_lines": [
+        53550
+      ],
+      "reason": "The current descriptor picture compiler already has an explicit0 reference branch; audit is pinned to an older product. Re-run the precise orphan-catalog witness before declaring closure or a new fix."
+    },
+    {
+      "id": "I073",
+      "signature": "<AutofillHint>PhoneNumber is not measured",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldAutofillHint.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldAutofillHint.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "runtime-name-not-storage",
+      "tool1cd_lines": [
+        8293,
+        62494
+      ],
+      "reason": "PhoneNumber runtime contact data and an unrelated row-number enum do not establish AutofillHint/KeyType codes in the owning modern form payload."
+    },
+    {
+      "id": "I074",
+      "signature": "<Button> names a colour the writer cannot place",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernButtonTextColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "color-context-needs-current-retest",
+      "tool1cd_lines": [
+        62696
+      ],
+      "reason": "Generic Color grammar is known; inspect the exact native source and current rerun to distinguish newly admitted web codes from modern palette or missing style-owner contexts."
+    },
+    {
+      "id": "I075",
+      "signature": "<GeographicalSchemaField> has no writer yet",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridGeographicalSchema.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernGeographicalSchema.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "widget-profile-gap",
+      "tool1cd_lines": [
+        60771,
+        62494
+      ],
+      "reason": "Old generic field grammar does not establish the missing owning widget record and property slots. Complete Period/GeographicalSchema controls and new chart/schema members require measured record families."
+    },
+    {
+      "id": "I076",
+      "signature": "<InputField> names an event the writer cannot place",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputMultipleValueEvent.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputMultipleValueEvent.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "event-owner-gap",
+      "tool1cd_lines": [
+        54718,
+        62494
+      ],
+      "reason": "Old event collection grammar does not determine the requested TaskObject/Chart/Planner owner-specific event UUID and payload coordinate; global event-name substitution is unsafe."
+    },
+    {
+      "id": "I077",
+      "signature": "<LabelDecoration> names a background colour it cannot place",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernLabelDecorationBackColorPalette.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "color-context-needs-current-retest",
+      "tool1cd_lines": [
+        62696
+      ],
+      "reason": "Generic Color grammar is known; inspect the exact native source and current rerun to distinguish newly admitted web codes from modern palette or missing style-owner contexts."
+    },
+    {
+      "id": "I078",
+      "signature": "<PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPdfGray.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPdfGray.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I080",
+      "signature": "<UsualGroup> names a font the writer cannot place",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-legacy-form-properties",
+          "source": "CommonForms/CovLegacyGroupTitleFont.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "native-identity-known-profile-context-gap",
+      "tool1cd_lines": [
+        4236,
+        62797,
+        62936
+      ],
+      "reason": "Native public Coverage 8.5.1.1529 confirms TitleLevel4=-51 and TitleLevel1=-48 in kind-2 font tuples; old tool1cd supplies the generic style-font grammar but not these modern identities. No 8.3 native witness was found. The shared writer currently emits an 8.3-shaped intermediate after the 2.21 adapter down-converts XML, losing the source profile context at font formatting. A context-aware follow-up or measured 8.3 witness is needed before admitting these names; current refusal is retained. This is an architectural dependency, not absent storage grammar or a permanent unsupported feature."
+    },
+    {
+      "id": "I083",
+      "signature": "Configuration <InterfaceCompatibilityMode> \"TaxiEnableVersion8_5\" has no known V76 pair",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Configuration.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        60067,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I087",
+      "signature": "a <ChoiceList> item names <variant>",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridChoicePeriod.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernChoicePeriod.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "value-profile-gap",
+      "tool1cd_lines": [
+        62142,
+        62164
+      ],
+      "reason": "Old versioned ValueList containers do not establish this current ChoiceList variant subtype; do not replace a variant with empty/default."
+    },
+    {
+      "id": "I088",
+      "signature": "a table settles into <panel>, which the form does not declare",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+          "probe": "generated-user-settings-group",
+          "scope": "accepted_then_normalized_away"
+        }
+      ],
+      "disposition": "legacy-generated-panel-gap",
+      "tool1cd_lines": [
+        62494,
+        60771
+      ],
+      "reason": "This source-only generated panel reference is normalized away by current native. Old group grammar does not prove safe reconstruction of an absent declared panel."
+    },
+    {
+      "id": "I089",
+      "signature": "a track bar's marking appearance is not measured",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "control-layout-needs-native-proof",
+      "tool1cd_lines": [
+        62494
+      ],
+      "reason": "The trackbar marking representation needs its owning payload coordinate as well as enum meaning. A runtime property name alone does not establish a modern stored code."
+    },
+    {
+      "id": "I090",
+      "signature": "form <InputField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "version-profile-gap",
+      "tool1cd_lines": [
+        62494,
+        62497,
+        41019
+      ],
+      "reason": "Old ManagedForm grammar lists body22..38, predating the modern owning tuples. The correct current slot and domain require a separate native-profile measurement; runtime names or older configuration enums alone are insufficient."
+    },
+    {
+      "id": "I092",
+      "signature": "no measured ordinal for ChartOfAccounts.StandardCommand.OpenList",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovNavigationChartOfAccounts.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "generated-command-context-gap",
+      "tool1cd_lines": [
+        43421
+      ],
+      "reason": "Generated standard-command ordinals and owner names are not static picture UUIDs. The old catalogue does not establish OpenList ordinal or ExchangePlan.Create ownership in these contexts."
+    },
+    {
+      "id": "I093",
+      "signature": "no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovExchangePlanHistory.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I094",
+      "signature": "no measured uuid for Form.Item.<name>.StandardCommand.Back on <PlannerField>",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovPlannerBackCommand.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I095",
+      "signature": "no measured uuid for Form.StandardCommand.CreateByParameter on cfg:DynamicList",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
+          "probe": "legacy-create-by-parameter",
+          "scope": "refused_by_current_native"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I096",
+      "signature": "no measured value for StdPicture.AppearanceUpArrowGray",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureAppearanceUpArrowGray.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I097",
+      "signature": "no measured value for StdPicture.DontNotify",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureDontNotify.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureDontNotify.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I098",
+      "signature": "no measured value for StdPicture.GrayedAll",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureGrayedAll.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureGrayedAll.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        42489,
+        42496,
+        53550
+      ],
+      "reason": "GrayedAll=-12 is documented and native8.5 Coverage stores{-12} in the picture reference. Shared code tables and writer/reader preserve it; no multi-member negative-value admission."
+    },
+    {
+      "id": "I099",
+      "signature": "no measured value for StdPicture.StartVideoconference",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-hybrid-interface",
+          "source": "CommonForms/CovHybridPictureStartVideoconference.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1529/corpus-modern-details",
+          "source": "CommonForms/CovModernPictureStartVideoconference.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-native-identities",
+      "tool1cd_lines": [
+        53550,
+        52818
+      ],
+      "reason": "Native Coverage pins these modern StdPicture UUID identities. Tool1cd picture grammar applies; modern names/IDs are explicitly not attributed to old tool1cd. Existing shared UUID table supplies reader and writer fallbacks."
+    },
+    {
+      "id": "I101",
+      "signature": "unsupported Form ExcludedCommand: EditList",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Catalogs/CovNavigationCatalog/Forms/EditListForm.xml",
+          "probe": "legacy-edit-list",
+          "scope": "refused_by_current_native"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I102",
+      "signature": "unsupported Form ExcludedCommand: Preview",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "CommonForms/CovReportExcludePreview.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "command-domain-gap",
+      "tool1cd_lines": [
+        43421,
+        43589,
+        62068
+      ],
+      "reason": "Old command catalogue gives some static identities, but owners and namespaces differ. Picture Back is not Planner command Back. I095/I101 are legacy source probes refused by current native creation, not freshly native-built command fixtures."
+    },
+    {
+      "id": "I103",
+      "signature": "unsupported colour \"web:Linen\"",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.3.27.2214/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml",
+          "scope": "native_cf"
+        },
+        {
+          "set": "8.5.1.1150/corpus-style-colors",
+          "source": "StyleItems/CovStyleColorLinen.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "implemented-tool1cd-and-native",
+      "tool1cd_lines": [
+        1062,
+        1116,
+        1127,
+        1187,
+        4224,
+        62696
+      ],
+      "reason": "Linen82/MediumGreen88/Tomato138 match both native Coverage profiles. Shared color encoder serves affected labels/groups/StyleItems; unknown names remain refused."
+    },
+    {
+      "id": "I104",
+      "signature": "unsupported enum value colour pal:<name>",
+      "occurrences": 1,
+      "coverage": [
+        {
+          "set": "8.5.1.1529/corpus-palette-help-and-interface",
+          "source": "Enums/CovPaletteEnum.xml",
+          "scope": "native_cf"
+        }
+      ],
+      "disposition": "palette-version-gap",
+      "tool1cd_lines": [
+        4224,
+        62696,
+        62735
+      ],
+      "reason": "Old ColorType contains only Absolute/Windows/Web/Style/Auto; current PaletteColor/kind5 domain is not described. Old web/style constants cannot substitute for pal:<name>."
+    }
+  ],
+  "export_clusters": [
+    {
+      "id": "E03",
+      "disposition": "resource-profile-gap",
+      "tool1cd_lines": [
+        59044,
+        59047
+      ],
+      "reason": "The old Resource grammar lists versions10/25/26/27, up to8.3.4. BinaryDataStorageLocationUse does not occur in the inspected source. Its current dependent resource/type profile needs an independent rule; a similarly named generic storage property is not substituted."
+    },
+    {
+      "id": "E04",
+      "disposition": "cross-version-font-profile-gap",
+      "tool1cd_lines": [
+        62797,
+        62800,
+        62494
+      ],
+      "reason": "Font grammar lists versions6/7 and ManagedForm bodies22..38. TitleFont runtime naming does not establish the current cross-version form/font wrapper. Native CF cross-version witness must remain unchanged because rebuilding XML erases the profile."
+    },
+    {
+      "id": "E05",
+      "disposition": "legacy-internal-panel-gap",
+      "tool1cd_lines": [
+        4821,
+        62494
+      ],
+      "reason": "TableBoxSelectedRows runtime class is not a stored internal selected-rows group subtype. Current source normalizes this probe; no exact data-free internal group body rule was located in the inspected old grammar."
+    },
+    {
+      "id": "E08",
+      "disposition": "modern-group-profile-gap",
+      "tool1cd_lines": [
+        62494
+      ],
+      "reason": "ButtonInParentElement was not located in the inspected pinned source. Generic old group/field grammar does not establish its current8.5 payload representation."
+    },
+    {
+      "id": "E09",
+      "disposition": "sql-extension-envelope-gap",
+      "tool1cd_lines": [
+        60067
+      ],
+      "reason": "No _ExtensionZippedInfo/_ExtensionsInfo envelope rule was located in the inspected MetaTree/MetaData source. Static Configuration metadata does not prove the SQL extension envelope or compression/version framing."
+    },
+    {
+      "id": "E11",
+      "disposition": "template-agent-scope",
+      "tool1cd_lines": [
+        60392
+      ],
+      "reason": "The old metadata names a separate help payload; normalization of multiple href spellings is assessed by the template/help owner. This form map does not claim that an HTML file reference alone establishes canonical-page identity."
+    },
+    {
+      "id": "E12",
+      "disposition": "contextual-reference-audit",
+      "tool1cd_lines": [
+        61888,
+        62019,
+        60067
+      ],
+      "reason": "Composite references and generated types must be tied to actual owner/type/policy contexts. Field observations are not independent root causes. Exact current reruns determine which are consequences of earlier aborted export and which need additional Coverage variants."
+    }
+  ]
+}

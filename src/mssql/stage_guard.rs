@@ -1308,6 +1308,7 @@ mod tests {
             ("Catalogs/A/Ext/ObjectModule.bsl", true),
             ("Ext/HomePageWorkArea.xml", true),
             ("Languages/Русский.xml", true),
+            ("Interfaces/OwnInterface.xml", true),
             ("ConfigDumpInfo.xml", false),
             ("README.md", false),
             ("notes/todo.txt", false),
@@ -1475,7 +1476,7 @@ mod tests {
     }
 
     #[test]
-    fn the_folders_of_the_8_5_kinds_are_configuration_files_too() {
+    fn the_folders_of_all_admitted_root_kinds_are_configuration_files_too() {
         // PaletteColors is a top-level folder of a 2.21 tree; a base-free stage lists the walk of the
         // tree, and a folder the listing does not know left the export's files "in the database".
         let files: &[(&str, &[u8])] = &[
@@ -1485,6 +1486,7 @@ mod tests {
             ("ExternalDataSources/Source.xml", b"<s/>"),
             ("Bots/Bot.xml", b"<b/>"),
             ("IntegrationServices/Service.xml", b"<i/>"),
+            ("Interfaces/OwnInterface.xml", b"<interface/>"),
         ];
         let (_, root) = comparer(files, &[]);
         let walked = source_listing::walk(&root);
@@ -1493,8 +1495,8 @@ mod tests {
             produce(&comparer, relative, bytes);
         }
         let result = comparer.finish().unwrap();
-        assert_eq!(result.compared, 6);
-        assert_eq!(result.identical, 6);
+        assert_eq!(result.compared, 7);
+        assert_eq!(result.identical, 7);
         assert!(result.differences.is_empty(), "{:?}", result.differences);
         fs::remove_dir_all(root).ok();
     }
@@ -1502,6 +1504,7 @@ mod tests {
     #[test]
     fn new_root_kinds_cannot_bypass_the_guard_when_missing_or_changed() {
         for folder in [
+            "Interfaces",
             "PaletteColors",
             "Bots",
             "IntegrationServices",

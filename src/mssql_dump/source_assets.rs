@@ -3752,7 +3752,16 @@ pub(super) fn parse_help_blob(bytes: &[u8]) -> Option<HelpContent> {
     }
 
     if pages.is_empty() {
-        return None;
+        use ibcmd_schema::tool1cd_templates::EmptyHtmlLayout as Layout;
+        // The measured empty HTML document is exactly {5,0,0}: zero pages
+        // followed by zero attachments. Do not swallow unknown trailing data.
+        let plain = text.trim_start_matches('\u{feff}').trim();
+        return (Layout::is_empty_tail(&fields)
+            && scan_1c_braced_value(plain, 0) == Some(plain.len()))
+        .then_some(HelpContent {
+            pages,
+            files: Vec::new(),
+        });
     }
 
     let mut files = Vec::new();
@@ -6247,5 +6256,316 @@ pub(super) fn push_job_schedule_list_xml(
             "{indent}<ent:{name}>{}</ent:{name}>\r\n",
             values.join(" ")
         ));
+    }
+}
+
+#[cfg(test)]
+mod tool1cd_empty_html_tests {
+    use super::*;
+
+    #[test]
+    fn tool1cd_empty_html_retains_zero_pages_and_refuses_unknown_tail() {
+        let compressed =
+            crate::compiler::families::native::deflate_bytes(b"\xef\xbb\xbf{5,0,0}").unwrap();
+        let body = parse_help_blob(&compressed).unwrap();
+        assert!(body.pages.is_empty());
+        assert!(body.files.is_empty());
+        let expected = "\u{feff}<?xml version=\"1.0\" encoding=\"UTF-8\"?>\r\n<Help xmlns=\"http://v8.1c.ru/8.3/xcf/extrnprops\" xmlns:xs=\"http://www.w3.org/2001/XMLSchema\" xmlns:xsi=\"http://www.w3.org/2001/XMLSchema-instance\" version=\"2.21\">\r\n</Help>";
+        assert_eq!(format_help_xml(&body.pages), expected);
+        for invalid in [
+            "{5,0}",
+            "{5,0,1}",
+            "{5,0,0,1}",
+            "{5,0,0}trailing",
+            "{4,0,0}",
+        ] {
+            let compressed =
+                crate::compiler::families::native::deflate_bytes(invalid.as_bytes()).unwrap();
+            assert!(parse_help_blob(&compressed).is_none(), "{invalid}");
+        }
+    }
+    #[test]
+    fn tool1cd_template_flowchart_print_keys_and_gif_are_not_silently_dropped() {
+        let record = r#"{{1,{3,4,{0}},0,20,20,3,11,0,{"N",9},1,{"N",1},3,{"N",1},4,{"N",1},6,{"N",10},7,{"N",10},8,{"N",10},9,{"N",10},13,{"N",0},15,{"N",7},16,{"N",0}}}"#;
+        let scheme = parse_flowchart_scheme(record, &BTreeMap::new()).unwrap();
+        let document = BusinessProcessFlowchart {
+            scheme,
+            items: Vec::new(),
+        };
+        let xml = format_business_process_flowchart_xml(&document);
+        let expected = "\t<PrintParameters>\r\n\t\t<Paper xsi:type=\"xs:decimal\">9</Paper>\r\n\t\t<PageOrientation>Portrait</PageOrientation>\r\n\t\t<Collate xsi:type=\"xs:decimal\">1</Collate>\r\n\t\t<Copies>1</Copies>\r\n\t\t<TopMargin>10</TopMargin>\r\n\t\t<LeftMargin>10</LeftMargin>\r\n\t\t<BottomMargin>10</BottomMargin>\r\n\t\t<RightMargin>10</RightMargin>\r\n\t\t<BlackAndWhite>false</BlackAndWhite>\r\n\t\t<PaperSource xsi:type=\"xs:decimal\">7</PaperSource>\r\n\t\t<FitPageMode>Auto</FitPageMode>\r\n\t</PrintParameters>\r\n";
+        let a = xml.find("\t<PrintParameters>").unwrap();
+        let b = xml[a..].find("\t</PrintParameters>\r\n").unwrap()
+            + a
+            + "\t</PrintParameters>\r\n".len();
+        assert_eq!(&xml[a..b], expected);
+        for invalid in [
+            record.replace("11,0,", "12,0,"),
+            record.replace("15,{\"N\",7}", "99,{\"N\",7}"),
+            record.replace("1,{\"N\",1}", "1,{\"N\",9}"),
+        ] {
+            assert!(parse_flowchart_scheme(&invalid, &BTreeMap::new()).is_none());
+        }
+        assert_eq!(flowchart_picture_extension(b"GIF89a"), Some("gif"));
+        assert_eq!(flowchart_picture_extension(b"GIF87a"), Some("gif"));
+        assert_eq!(flowchart_picture_extension(b"GIF88a"), None);
+    }
+    fn coverage_template(platform: &str, set: &str, name: &str) -> Vec<u8> {
+        std::fs::read(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("tests/fixtures/coverage")
+                .join(platform)
+                .join(set)
+                .join("native/CommonTemplates")
+                .join(name)
+                .join("Ext/Template.xml"),
+        )
+        .unwrap()
+    }
+    fn template_raw_blob(body: &str) -> Vec<u8> {
+        let plain = format!("MOXCEL\0\u{8}\0\u{1}\0\u{c}\0\u{feff}{body}");
+        crate::compiler::families::native::deflate_bytes(plain.as_bytes()).unwrap()
+    }
+    fn read_template_back(body: &str, platform: &str) -> Vec<u8> {
+        let blob = template_raw_blob(body);
+        let xml = try_extract_moxel_spreadsheet_xml(&blob, &BTreeMap::new()).unwrap();
+        let profile = if platform.starts_with("8.3") {
+            InfobaseConfigSourceVersion::V2_20
+        } else {
+            InfobaseConfigSourceVersion::V2_21
+        };
+        source_xml_file_bytes(xml, profile)
+    }
+    #[test]
+    fn tool1cd_template_page_breaks_round_trip_native_coverage() {
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let xml = coverage_template(
+                platform,
+                "corpus-spreadsheet-facets",
+                "CovSheetVerticalPageBreak",
+            );
+            let body =
+                crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+            assert_eq!(
+                read_template_back(&body, platform).as_slice(),
+                xml.as_slice(),
+                "{platform}"
+            );
+        }
+    }
+
+    #[test]
+    fn tool1cd_template_enum_values_round_trip_native_coverage() {
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            for name in [
+                "CovSheetDashDotted",
+                "CovSheetOEMFixedFont",
+                "CovSheetSandyBrown",
+                "CovSheetAutoFontHeight",
+                "CovSheetPageSizeA4",
+                "CovSheetGapLine",
+            ] {
+                let xml = coverage_template(platform, "corpus-spreadsheet-facets", name);
+                let body = crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None)
+                    .unwrap();
+                assert_eq!(
+                    read_template_back(&body, platform).as_slice(),
+                    xml.as_slice(),
+                    "{platform}/{name}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn tool1cd_template_modern_drawing_and_colour_round_trip_native_coverage() {
+        for name in ["CovModernSheetDashed", "CovModernSheetSkyBlue"] {
+            let xml = coverage_template("8.5.1.1529", "corpus-modern-spreadsheet", name);
+            let body =
+                crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+            assert_eq!(
+                read_template_back(&body, "8.5.1.1529").as_slice(),
+                xml.as_slice(),
+                "{name}"
+            );
+        }
+    }
+    #[test]
+    fn tool1cd_template_gap_refuses_non_boolean_source_and_stored_values() {
+        let xml = coverage_template(
+            "8.3.27.2214",
+            "corpus-spreadsheet-facets",
+            "CovSheetGapLine",
+        );
+        let source = String::from_utf8(xml.clone()).unwrap();
+        assert!(source.contains("gap=\"true\""));
+        let invalid_source = source.replace("gap=\"true\"", "gap=\"2\"");
+        assert!(
+            crate::compiler::bodies::mxl_native::write_native_moxel_body(
+                invalid_source.as_bytes(),
+                None
+            )
+            .is_err()
+        );
+        let body =
+            crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+        let mut fields = split_1c_braced_fields(&body, 0).unwrap();
+        assert!(
+            parse_moxel_line_table(&fields)
+                .unwrap()
+                .iter()
+                .any(|line| line.gap)
+        );
+        let mut table = split_1c_braced_fields(fields[5], 0)
+            .unwrap()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let mut changed = false;
+        for entry in table[1..].chunks_exact_mut(3) {
+            let mut descriptor = split_1c_braced_fields(&entry[1], 0)
+                .unwrap()
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let gap = &mut descriptor[ibcmd_schema::tool1cd_templates::MoxelLineLayout::GAP];
+            if gap.trim() == "1" {
+                *gap = "2".into();
+                entry[1] = format!("{{{}}}", descriptor.join(","));
+                changed = true;
+                break;
+            }
+        }
+        assert!(changed, "native witness must carry a true gap");
+        let invalid_table = format!("{{{}}}", table.join(","));
+        fields[5] = &invalid_table;
+        assert!(parse_moxel_line_table(&fields).is_none());
+        let invalid_body = format!("{{{}}}", fields.join(","));
+        assert!(
+            extract_moxel_source_asset_xml(
+                &template_raw_blob(&invalid_body),
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Path::new("CommonTemplates/CovSheetGapLine/Ext/Template.xml"),
+            )
+            .is_err(),
+            "the complete source-asset reader must refuse gap=2 rather than reconstructing lines"
+        );
+    }
+    #[test]
+    fn tool1cd_template_unknown_line_kind_refuses_raw_and_source_readers() {
+        use ibcmd_schema::tool1cd_templates::MoxelLineLayout as Layout;
+        for platform in ["8.3.27.2214", "8.5.1.1150"] {
+            let xml = coverage_template(platform, "corpus-spreadsheet-facets", "CovSheetGapLine");
+            let body =
+                crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+            let mut fields = split_1c_braced_fields(&body, 0).unwrap();
+            let mut table = split_1c_braced_fields(fields[Layout::TABLE_FIELD], 0)
+                .unwrap()
+                .into_iter()
+                .map(str::to_string)
+                .collect::<Vec<_>>();
+            let declared_count = table[0].trim().parse::<usize>().unwrap();
+            assert!(declared_count > 0);
+            let mut changed = 0;
+            for entry in table[Layout::TABLE_HEADER..].chunks_exact_mut(Layout::ENTRY_WIDTH) {
+                let mut descriptor = split_1c_braced_fields(&entry[Layout::ENTRY_DESCRIPTOR], 0)
+                    .unwrap()
+                    .into_iter()
+                    .map(str::to_string)
+                    .collect::<Vec<_>>();
+                // Keep revision/framing/style/width/gap intact. Replace every
+                // kind so no known UUID can accidentally rescue recognition.
+                descriptor[6] = "10000000-0000-4000-8000-000000000057".into();
+                entry[Layout::ENTRY_DESCRIPTOR] = format!("{{{}}}", descriptor.join(","));
+                changed += 1;
+            }
+            assert_eq!(changed, declared_count);
+            let invalid_table = format!("{{{}}}", table.join(","));
+            fields[Layout::TABLE_FIELD] = &invalid_table;
+            assert!(parse_moxel_line_table(&fields).is_none());
+            let invalid_body = format!("{{{}}}", fields.join(","));
+            let blob = template_raw_blob(&invalid_body);
+            let raw_result = try_extract_moxel_spreadsheet_xml(&blob, &BTreeMap::new());
+            let source_result = extract_moxel_source_asset_xml(
+                &blob,
+                &BTreeMap::new(),
+                &BTreeMap::new(),
+                Path::new("CommonTemplates/CovSheetGapLine/Ext/Template.xml"),
+            );
+            assert!(
+                raw_result.is_err() && source_result.is_err(),
+                "{platform}: unknown line kinds must refuse both complete readers, not reconstruct lines"
+            );
+        }
+    }
+    #[test]
+    fn tool1cd_template_known_page_break_profile_refuses_malformed_raw_bytes() {
+        let xml = coverage_template(
+            "8.3.27.2214",
+            "corpus-spreadsheet-facets",
+            "CovSheetVerticalPageBreak",
+        );
+        let body =
+            crate::compiler::bodies::mxl_native::write_native_moxel_body(&xml, None).unwrap();
+        let fields = split_1c_braced_fields(&body, 0).unwrap();
+        // Coordinates independently recorded for this native public witness:
+        // group counts at 27/28, vertical count=1 at 29 and position=1 at 30.
+        assert_eq!(&fields[27..31], &["0", "0", "1", "1"]);
+        for (index, value) in [(27, "1"), (30, "future-position")] {
+            let mut malformed = fields.clone();
+            malformed[index] = value;
+            assert!(parse_moxel_page_breaks(&malformed).is_none());
+            let malformed_body = format!("{{{}}}", malformed.join(","));
+            assert!(
+                extract_moxel_source_asset_xml(
+                    &template_raw_blob(&malformed_body),
+                    &BTreeMap::new(),
+                    &BTreeMap::new(),
+                    Path::new("CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml"),
+                )
+                .is_err(),
+                "a malformed matched group/break profile must refuse the whole source asset"
+            );
+        }
+    }
+    #[test]
+    fn tool1cd_template_groups_and_breaks_share_an_exact_counted_boundary() {
+        let source = String::from_utf8(coverage_template(
+            "8.3.27.2214",
+            "corpus-spreadsheet-facets",
+            "CovSheetVerticalPageBreak",
+        ))
+        .unwrap();
+        // Clean-room combination of the native page-break witness and a known
+        // six-member grouping record, not a claimed SDK-built combined case.
+        for group in ["vg", "hg"] {
+            let xml = source.replace(
+                "<vgRows>1</vgRows>",
+                &format!(
+                    "<vgRows>1</vgRows><vgLevels>{}</vgLevels><{group}><b>0</b></{group}>",
+                    if group == "vg" { 1 } else { 0 }
+                ),
+            );
+            let body =
+                crate::compiler::bodies::mxl_native::write_native_moxel_body(xml.as_bytes(), None)
+                    .unwrap();
+            let fields = split_1c_braced_fields(&body, 0).unwrap();
+            let breaks = parse_moxel_page_breaks(&fields).unwrap();
+            assert_eq!(breaks.vertical, vec![1]);
+            assert_eq!(breaks.horizontal, Vec::<i64>::new());
+            let (rows, columns) = parse_moxel_row_column_groups(&fields);
+            assert_eq!(
+                (rows.len(), columns.len()),
+                if group == "vg" { (1, 0) } else { (0, 1) }
+            );
+            let rendered = String::from_utf8(read_template_back(&body, "8.3.27.2214")).unwrap();
+            assert!(rendered.contains(
+                "<verticalPageBreak>\r\n\t\t<position>1</position>\r\n\t</verticalPageBreak>"
+            ));
+            let mut corrupt = fields.clone();
+            corrupt.truncate(ibcmd_schema::tool1cd_templates::MoxelGroupBreakLayout::ROWS);
+            assert!(parse_moxel_page_breaks(&corrupt).is_none());
+        }
     }
 }

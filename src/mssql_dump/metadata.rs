@@ -1,5 +1,42 @@
 use super::*;
 
+/// Interface has no permissive legacy decoder. Validate its records before
+/// the full source writer starts, including class-identified future layouts.
+pub(super) fn validate_interface_descriptors(rows: &[MetadataTextRow]) -> Result<()> {
+    use crate::metadata_model::{
+        brace::parse_row, export::configuration_objects, interface::Interface,
+    };
+    use ibcmd_schema::interface::InterfaceLayout as Layout;
+    let mut declared = BTreeSet::new();
+    for row in rows.iter().filter(|row| {
+        parse_configuration_reference_text_for_row(&row.text, &row.file_name).is_some()
+    }) {
+        if let Ok(tree) = parse_row(row.text.as_bytes())
+            && let Ok(objects) = configuration_objects(&tree)
+        {
+            declared.extend(
+                objects
+                    .into_iter()
+                    .filter_map(|(kind, id)| (kind == Layout::KIND).then_some(id)),
+            );
+        }
+    }
+    for id in &declared {
+        if !rows.iter().any(|row| &row.file_name == id) {
+            bail!("missing Interface descriptor {id}");
+        }
+    }
+    for row in rows.iter().filter(|row| {
+        declared.contains(&row.file_name)
+            || (!row.file_name.contains('.') && row.object_code == Some(Layout::RECORD_CODE))
+    }) {
+        let tree = parse_row(row.text.as_bytes()).context("Interface descriptor syntax")?;
+        Interface::from_brace(&tree)
+            .with_context(|| format!("unsupported Interface descriptor {}", row.file_name))?;
+    }
+    Ok(())
+}
+
 /// Why a Config row could not be promoted to a metadata XML candidate.
 ///
 /// This is deliberately an audit classification rather than an extraction
@@ -427,6 +464,11 @@ pub(super) fn metadata_source_for_object_fields(
     }
 
     match code {
+        ibcmd_schema::interface::InterfaceLayout::RECORD_CODE
+            if header_index == Some(ibcmd_schema::interface::InterfaceLayout::HEADER) =>
+        {
+            Some(ibcmd_schema::interface::InterfaceLayout::identity())
+        }
         0 if header_index == Some(1)
             && ibcmd_schema::websocket_client::WebSocketClientLayout::recognizes_fields(fields) =>
         {

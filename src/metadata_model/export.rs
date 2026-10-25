@@ -237,7 +237,7 @@ pub fn decode_object(kind: &str, row: &Brace, context: &ExportContext) -> Result
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "CommonCommand" | "CommandGroup"
         | "Role" | "XDTOPackage" | "StyleItem" | "Style" | "PaletteColor" | "WebService"
         | "HTTPService" | "WSReference" | "WebSocketClient" | "IntegrationService" | "Bot"
-        | "ExternalDataSource" => super::common::export::decode(kind, row, context),
+        | "ExternalDataSource" | "Interface" => super::common::export::decode(kind, row, context),
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
             super::common::forms_export::decode(kind, row, context)
         }
@@ -285,7 +285,7 @@ pub fn object_names(kind: &str, row: &Brace) -> Result<ObjectNames> {
         "CommonModule" | "CommonPicture" | "CommonTemplate" | "CommonCommand" | "CommandGroup"
         | "Role" | "XDTOPackage" | "StyleItem" | "Style" | "PaletteColor" | "WebService"
         | "HTTPService" | "WSReference" | "WebSocketClient" | "IntegrationService" | "Bot"
-        | "ExternalDataSource" => super::common::export::names(kind, row),
+        | "ExternalDataSource" | "Interface" => super::common::export::names(kind, row),
         "Subsystem" | "Form" | "Template" | "CommonForm" => {
             super::common::forms_export::names(kind, row)
         }
@@ -498,7 +498,10 @@ pub fn write_document(object: &Element, version: &str) -> String {
     out.push_str(" version=\"");
     out.push_str(version);
     out.push_str("\">\r\n");
-    write_element(&mut out, object, 1);
+    // Native Interface headers preserve a CRLF represented by a stored
+    // CR-CR-LF; their source reader/compiler keeps that distinction.
+    let raw_text_crlf = object.name == ibcmd_schema::interface::InterfaceLayout::KIND;
+    write_element(&mut out, object, 1, raw_text_crlf);
     out.push_str("</MetaDataObject>");
     out
 }
@@ -511,7 +514,14 @@ fn push_qname(out: &mut String, element: &Element) {
     out.push_str(&element.name);
 }
 
-fn write_element(out: &mut String, element: &Element, depth: usize) {
+/// Serialize an owned metadata subtree using the same scalar and namespace rules.
+pub(crate) fn write_fragment(element: &Element, depth: usize) -> String {
+    let mut out = String::new();
+    write_element(&mut out, element, depth, false);
+    out
+}
+
+fn write_element(out: &mut String, element: &Element, depth: usize, raw_text_crlf: bool) {
     for _ in 0..depth {
         out.push('\t');
     }
@@ -570,7 +580,18 @@ fn write_element(out: &mut String, element: &Element, depth: usize) {
             out.push_str("/>\r\n");
         } else {
             out.push('>');
-            escape(out, text, false);
+            if raw_text_crlf {
+                for part in text.split_inclusive("\r\n") {
+                    if let Some(text) = part.strip_suffix("\r\n") {
+                        escape(out, text, false);
+                        out.push_str("\r\n");
+                    } else {
+                        escape(out, part, false);
+                    }
+                }
+            } else {
+                escape(out, text, false);
+            }
             out.push_str("</");
             push_qname(out, element);
             out.push_str(">\r\n");
@@ -579,7 +600,7 @@ fn write_element(out: &mut String, element: &Element, depth: usize) {
     }
     out.push_str(">\r\n");
     for child in &element.children {
-        write_element(out, child, depth + 1);
+        write_element(out, child, depth + 1, raw_text_crlf);
     }
     for _ in 0..depth {
         out.push('\t');

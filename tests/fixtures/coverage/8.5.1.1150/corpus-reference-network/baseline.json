@@ -1,5 +1,6 @@
 {
   "equal": [
-    "CovNetworkSubscription"
+    "CovNetworkSubscription",
+    "configuration"
   ]
 }

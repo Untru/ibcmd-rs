@@ -4,6 +4,7 @@
     "CovDataCompositionParameters",
     "CovGraphicalSchemaBody",
     "CovSpreadsheetMergedCells",
+    "CovVerticalBrackets",
     "configuration"
   ]
 }

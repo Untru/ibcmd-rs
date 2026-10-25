@@ -1204,6 +1204,7 @@ pub(super) struct MoxelLine {
     pub(super) style: &'static str,
     pub(super) line_type: &'static str,
     pub(super) width: usize,
+    pub(super) gap: bool,
 }
 
 /// Internal provenance carried until the final `MoxelLine` projection.
@@ -1753,6 +1754,7 @@ pub(super) struct MoxelPrintSettings {
     pub(super) black_and_white: Option<bool>,
     pub(super) printer_name: Option<String>,
     pub(super) paper: Option<usize>,
+    pub(super) page_size: Option<String>,
     pub(super) paper_source: Option<usize>,
     /// Page geometry is a decimal, not an integer: key 16 stores `60.5` in
     /// three of the corpus's 56 print-settings records, and reading the whole
@@ -2580,9 +2582,14 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
     let mut leading_default_format = fields
         .get(MOXEL_LEADING_DEFAULT_FORMAT_FIELD)
         .and_then(|field| parse_moxel_format(field, &style_refs, &number_format_refs));
-    // The document's own line table is authoritative wherever it decodes; the
-    // legacy reconstruction below only runs when the slot refuses.
-    let resolved_lines = match parse_moxel_line_table(&fields)
+    // A recognized native descriptor must decode completely. Unknown fields
+    // cannot fall through to reconstruction, which would silently discard them.
+    // Historical alternative table representations retain their legacy route.
+    let decoded_line_table = parse_moxel_line_table(&fields);
+    if decoded_line_table.is_none() && has_native_moxel_line_table_profile(&fields) {
+        return None;
+    }
+    let resolved_lines = match decoded_line_table
         .filter(|lines| moxel_line_table_covers_references(lines, &all_formats))
     {
         Some(lines) => {
@@ -2811,7 +2818,7 @@ fn parse_moxel_spreadsheet_text_with_line_trace(
         merges,
         horizontal_unmerges,
         vertical_unmerges,
-        page_breaks: parse_moxel_page_breaks(&fields),
+        page_breaks: parse_moxel_page_breaks(&fields)?,
         named_items,
         areas,
         internal_sources,
@@ -3322,6 +3329,12 @@ fn moxel_group_run_shape(shapes: &[RootFieldShape], index: usize) -> MoxelGroupR
 pub(super) fn parse_moxel_row_column_groups(
     fields: &[&str],
 ) -> (Vec<MoxelVerticalGroup>, Vec<MoxelVerticalGroup>) {
+    if ibcmd_schema::tool1cd_templates::MoxelGroupBreakLayout::matches(fields) {
+        return parse_native_moxel_groups_and_breaks(fields)
+            .map(|(row, column, _)| (row, column))
+            .unwrap_or_default();
+    }
+
     // A document whose row count is non-zero carries its own decoy: the `0`
     // that sits right in front of that count reads as an empty row run
     // followed by the real run taken as the column one, and it comes first.
@@ -5047,6 +5060,9 @@ fn moxel_system_font_ref(index: &str) -> Option<&'static str> {
     match index {
         "0" => Some("sys:DefaultGUIFont"),
         "2" => Some("sys:ANSIFixedFont"),
+        ibcmd_schema::tool1cd_templates::TemplateEnumCodes::OEM_FIXED_FONT => {
+            Some("sys:OEMFixedFont")
+        }
         _ => None,
     }
 }
@@ -5075,6 +5091,38 @@ pub(super) fn parse_moxel_font(
                 ref_name: None,
                 face_name: None,
                 height: None,
+                bold: None,
+                italic: None,
+                underline: None,
+                strikeout: None,
+                kind: "AutoFont",
+                scale: None,
+            })
+        }
+        "3" if fields.len() == ibcmd_schema::tool1cd_templates::AutoFontHeightLayout::ARITY
+            && fields
+                .get(ibcmd_schema::tool1cd_templates::AutoFontHeightLayout::MASK)?
+                .trim()
+                == "2"
+            && fields
+                .get(ibcmd_schema::tool1cd_templates::AutoFontHeightLayout::MARKER)?
+                .trim()
+                == "1"
+            && fields
+                .get(ibcmd_schema::tool1cd_templates::AutoFontHeightLayout::SCALE)?
+                .trim()
+                == "100" =>
+        {
+            Some(MoxelFont {
+                ref_name: None,
+                face_name: None,
+                height: Some(format_moxel_font_height(
+                    fields
+                        .get(ibcmd_schema::tool1cd_templates::AutoFontHeightLayout::HEIGHT)?
+                        .trim()
+                        .parse::<usize>()
+                        .ok()?,
+                )),
                 bold: None,
                 italic: None,
                 underline: None,
@@ -5244,7 +5292,7 @@ pub(super) fn parse_moxel_lines(
 /// Root slot of the MOXCEL line table.  It sits directly behind the language
 /// settings and the column-size descriptor and holds the document's shared
 /// `<line>` resources verbatim.
-const MOXEL_LINE_TABLE_FIELD: usize = 5;
+const MOXEL_LINE_TABLE_FIELD: usize = ibcmd_schema::tool1cd_templates::MoxelLineLayout::TABLE_FIELD;
 /// Line-kind identities carried by every line descriptor.
 const MOXEL_CELL_LINE_KIND: &str = "f527dc88-1d39-40b3-bcbb-d98b690ead68";
 const MOXEL_DRAWING_LINE_KIND: &str = "b7438842-27cc-42a3-846f-2250cd9c1bc3";
@@ -5254,6 +5302,24 @@ const MOXEL_NIL_LINE_KIND: &str = "00000000-0000-0000-0000-000000000000";
 /// A shared line table is a document-level resource, not per-cell data.
 const MAX_MOXEL_LINE_TABLE_ENTRIES: usize = 2048;
 const MAX_MOXEL_LINE_WIDTH: usize = 1024;
+
+fn has_native_moxel_line_table_profile(fields: &[&str]) -> bool {
+    use ibcmd_schema::tool1cd_templates::MoxelLineLayout as Layout;
+    fields
+        .get(Layout::TABLE_FIELD)
+        .and_then(|table| split_1c_braced_fields(table, 0))
+        .and_then(|entries| {
+            entries.get(Layout::TABLE_HEADER..).map(|entries| {
+                entries.chunks(Layout::ENTRY_WIDTH).any(|entry| {
+                    entry
+                        .get(Layout::ENTRY_DESCRIPTOR)
+                        .and_then(|descriptor| split_1c_braced_fields(descriptor, 0))
+                        .is_some_and(|descriptor| Layout::matches_descriptor_profile(&descriptor))
+                })
+            })
+        })
+        .unwrap_or(false)
+}
 
 /// Decodes the document's shared line table from its own root slot.
 ///
@@ -5291,10 +5357,17 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
             || descriptor.first()?.trim() != "4"
             || descriptor.get(1)?.trim() != "0"
             || descriptor.get(2)?.trim() != "{0}"
-            || descriptor.get(7)?.trim() != "0"
         {
             return None;
         }
+        let gap = match descriptor
+            .get(ibcmd_schema::tool1cd_templates::MoxelLineLayout::GAP)?
+            .trim()
+        {
+            "0" => false,
+            "1" => true,
+            _ => return None,
+        };
         let width = descriptor.get(4)?.trim().parse::<usize>().ok()?;
         if width > MAX_MOXEL_LINE_WIDTH {
             return None;
@@ -5349,9 +5422,12 @@ pub(super) fn parse_moxel_line_table(fields: &[&str]) -> Option<Vec<MoxelLine>> 
             (MOXEL_DRAWING_LINE_KIND, "0") => "None",
             (MOXEL_DRAWING_LINE_KIND, "1") => "Solid",
             (MOXEL_DRAWING_LINE_KIND, "3") => "Dotted",
+            (MOXEL_DRAWING_LINE_KIND, "2") => "Dashed",
+            (MOXEL_DRAWING_LINE_KIND, "4") => "DashDotted",
             _ => return None,
         };
         lines.push(MoxelLine {
+            gap,
             style,
             line_type,
             width,
@@ -5431,6 +5507,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 std::slice::from_ref(source),
                 MoxelLine {
+                    gap: source.gap,
                     style: source.style,
                     line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                     width: source.width,
@@ -5488,6 +5565,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5499,6 +5577,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5510,6 +5589,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5521,6 +5601,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5550,6 +5631,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "ThinDashed",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 1,
@@ -5561,6 +5643,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 0,
@@ -5572,6 +5655,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "Solid",
                             line_type: "v8ui:SpreadsheetDocumentCellLineType",
                             width: 2,
@@ -5583,6 +5667,7 @@ fn parse_moxel_lines_with_raw_spans(
                     resolved_moxel_line_from_parents(
                         &lines[0..3],
                         MoxelLine {
+                            gap: false,
                             style: "None",
                             line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                             width: 1,
@@ -5600,6 +5685,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5611,6 +5697,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5622,6 +5709,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5633,6 +5721,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..3],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5655,6 +5744,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5666,6 +5756,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5677,6 +5768,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentDrawingLineType",
                         width: 1,
@@ -5703,6 +5795,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5714,6 +5807,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[2..3],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5740,6 +5834,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5751,6 +5846,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5762,6 +5858,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 3,
@@ -5788,6 +5885,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 2,
@@ -5799,6 +5897,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5810,6 +5909,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..2],
                     MoxelLine {
+                        gap: false,
                         style: "None",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 0,
@@ -5835,6 +5935,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[0..1],
                     MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5846,6 +5947,7 @@ fn parse_moxel_lines_with_raw_spans(
                 resolved_moxel_line_from_parents(
                     &lines[1..2],
                     MoxelLine {
+                        gap: false,
                         style: "Dotted",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,
@@ -5868,6 +5970,7 @@ fn parse_moxel_lines_with_raw_spans(
             vec![resolved_moxel_line_from_parents(
                 &lines[0..1],
                 MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -5885,6 +5988,7 @@ fn parse_moxel_lines_with_raw_spans(
     finalize_moxel_line_slots(
         vec![ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -9033,7 +9137,12 @@ pub(super) fn parse_moxel_print_settings_field(text: &str) -> Option<MoxelPrintS
             // reader cannot spell refuses the record rather than dropping the
             // member - the strictness the value parser used to get by refusing
             // any `"N"` that was not an integer.
-            0 => settings.paper = Some(value.as_usize()?),
+            0 => match value {
+                MoxelPrintSettingsValue::Number(token) => {
+                    settings.paper = Some(token.parse::<usize>().ok()?)
+                }
+                MoxelPrintSettingsValue::Text(token) => settings.page_size = Some(token),
+            },
             1 => settings.page_orientation = value.as_usize().and_then(moxel_page_orientation),
             2 => settings.scale = Some(value.as_usize()?),
             3 => settings.collate = Some(value.as_bool()?),
@@ -11287,6 +11396,8 @@ pub(super) fn parse_moxel_web_color(value: &str) -> Option<String> {
         120 => "RosyBrown",
         121 => "RoyalBlue",
         122 => "SaddleBrown",
+        ibcmd_schema::tool1cd_templates::TemplateEnumCodes::SANDY_BROWN => "SandyBrown",
+        ibcmd_schema::tool1cd_templates::TemplateEnumCodes::SKY_BLUE => "SkyBlue",
         128 => "Silver",
         130 => "SlateBlue",
         // `Reports/ОценкаРискаНалоговойПроверки/Templates/МакетОтчета` carries
@@ -11576,6 +11687,7 @@ pub(super) fn parse_moxel_line(text: &str) -> Option<MoxelLine> {
         _ => return None,
     };
     Some(MoxelLine {
+        gap: false,
         style,
         line_type: "v8ui:SpreadsheetDocumentCellLineType",
         width: 1,
@@ -11589,22 +11701,107 @@ pub(super) struct MoxelPageBreaks {
     pub(super) horizontal: Vec<i64>,
 }
 
-/// The page breaks, read off the root behind the grouping block.
-///
-/// Shape, from platform probes (`_onecdec/make_template_probe.py`, fixture
-/// `page_breaks`): the grouping block `{rowGroups…, columnGroups…, 0, 0}` is
-/// followed by the vertical breaks `count, position * count`, the horizontal
-/// breaks `count, (position, -1) * count`, and then the braced merge list. A
-/// document with breaks at rows 2 and 3 and at column 1 stores
-/// `…,0,0,2,2,3,1,1,-1,{<merges>}` where one without stores `…,0,0,0,0,{…}`;
-/// the platform writes every `<verticalPageBreak>` before any
-/// `<horizontalPageBreak>`, both behind the groups and ahead of `<merge>`.
-/// Two real configurations write 11 documents each with one vertical break.
-///
-/// The block is found from the back: the last root position at which empty
-/// or parsed group runs, the two zeros and both break lists end exactly at a
-/// braced member.
-pub(super) fn parse_moxel_page_breaks(fields: &[&str]) -> MoxelPageBreaks {
+/// Read groups and page breaks from the native 8/1/12 counted root prefix.
+/// Rows, column sets, row-to-column mappings and drawings locate the group runs.
+/// The two group runs are followed directly by vertical count/positions,
+/// horizontal count/(position, -1) pairs and three braced merge lists. There
+/// are no extra reserved zeros between groups and breaks. A malformed matched
+/// profile returns None; the historical scanner is used only outside it.
+fn parse_native_moxel_groups_and_breaks(
+    fields: &[&str],
+) -> Option<(
+    Vec<MoxelVerticalGroup>,
+    Vec<MoxelVerticalGroup>,
+    MoxelPageBreaks,
+)> {
+    use ibcmd_schema::tool1cd_templates::MoxelGroupBreakLayout as Layout;
+    let count = |at: usize| fields.get(at)?.trim().parse::<usize>().ok();
+    let mut cursor = Layout::ROWS;
+    for _ in 0..count(Layout::ROW_COUNT)? {
+        let cells = count(cursor.checked_add(Layout::ROW_CELL_COUNT)?)?;
+        cursor = cursor
+            .checked_add(Layout::ROW_HEADER)?
+            .checked_add(cells.checked_mul(Layout::PAIR_WIDTH)?)?;
+        if cursor > fields.len() {
+            return None;
+        }
+    }
+    // The default column set, declared height and additional column-set run.
+    if !fields.get(cursor)?.trim_start().starts_with('{') {
+        return None;
+    }
+    let columns = count(cursor.checked_add(Layout::COLUMN_EXTRA_COUNT)?)?;
+    cursor = cursor.checked_add(Layout::COLUMN_HEADER)?;
+    let column_end = cursor.checked_add(columns)?;
+    if !fields
+        .get(cursor..column_end)?
+        .iter()
+        .all(|field| field.trim_start().starts_with('{'))
+    {
+        return None;
+    }
+    cursor = column_end;
+    let row_sets = count(cursor)?;
+    cursor = cursor
+        .checked_add(Layout::COUNT_HEADER)?
+        .checked_add(row_sets.checked_mul(Layout::PAIR_WIDTH)?)?;
+    let drawings = count(cursor.checked_add(Layout::DRAWING_COUNT)?)?;
+    cursor = cursor.checked_add(Layout::DRAWING_HEADER)?;
+    let drawing_end = cursor.checked_add(drawings)?;
+    if !fields
+        .get(cursor..drawing_end)?
+        .iter()
+        .all(|field| field.trim_start().starts_with('{'))
+    {
+        return None;
+    }
+    cursor = drawing_end;
+    let (row_groups, next) = parse_moxel_group_run(fields, cursor)?;
+    let (column_groups, next) = parse_moxel_group_run(fields, next)?;
+    cursor = next;
+    let vertical_count = count(cursor)?;
+    let start = cursor.checked_add(Layout::COUNT_HEADER)?;
+    let end = start.checked_add(vertical_count)?;
+    let vertical = fields
+        .get(start..end)?
+        .iter()
+        .map(|field| field.trim().parse::<i64>().ok())
+        .collect::<Option<Vec<_>>>()?;
+    cursor = end;
+    let horizontal_count = count(cursor)?;
+    let start = cursor.checked_add(Layout::COUNT_HEADER)?;
+    let end = start.checked_add(horizontal_count.checked_mul(Layout::PAIR_WIDTH)?)?;
+    let horizontal = fields
+        .get(start..end)?
+        .chunks_exact(Layout::PAIR_WIDTH)
+        .map(|pair| {
+            if pair.get(Layout::HORIZONTAL_SENTINEL)?.trim() != Layout::HORIZONTAL_SENTINEL_VALUE {
+                return None;
+            }
+            pair.first()?.trim().parse::<i64>().ok()
+        })
+        .collect::<Option<Vec<_>>>()?;
+    let trailer = fields.get(end..end.checked_add(Layout::MERGE_LISTS)?)?;
+    if !trailer
+        .iter()
+        .all(|field| field.trim_start().starts_with('{'))
+    {
+        return None;
+    }
+    Some((
+        row_groups,
+        column_groups,
+        MoxelPageBreaks {
+            vertical,
+            horizontal,
+        },
+    ))
+}
+
+pub(super) fn parse_moxel_page_breaks(fields: &[&str]) -> Option<MoxelPageBreaks> {
+    if ibcmd_schema::tool1cd_templates::MoxelGroupBreakLayout::matches(fields) {
+        return parse_native_moxel_groups_and_breaks(fields).map(|(_, _, breaks)| breaks);
+    }
     let token = |index: usize| fields.get(index).map(|field| field.trim());
     let count_at = |index: usize| token(index).and_then(|value| value.parse::<usize>().ok());
     // A break position may be negative: one 8.3.27 corpus writes
@@ -11637,10 +11834,12 @@ pub(super) fn parse_moxel_page_breaks(fields: &[&str]) -> MoxelPageBreaks {
             horizontal,
         })
     };
-    (0..fields.len())
-        .rev()
-        .find_map(parse_at)
-        .unwrap_or_default()
+    Some(
+        (0..fields.len())
+            .rev()
+            .find_map(parse_at)
+            .unwrap_or_default(),
+    )
 }
 
 pub(super) fn parse_moxel_merge_regions(
@@ -13522,6 +13721,7 @@ pub(super) fn push_moxel_print_settings_xml(xml: &mut String, settings: &MoxelPr
         settings.page_placement_alternation,
     );
     push_moxel_format_usize(xml, "firstPageNumber", settings.first_page_number);
+    push_moxel_format_text(xml, "pageSize", settings.page_size.as_deref());
     xml.push_str("\t</printSettings>\r\n");
 }
 
@@ -13542,6 +13742,7 @@ impl MoxelPrintSettings {
             && self.black_and_white.is_none()
             && self.printer_name.is_none()
             && self.paper.is_none()
+            && self.page_size.is_none()
             && self.paper_source.is_none()
             && self.page_width.is_none()
             && self.page_height.is_none()
@@ -15211,7 +15412,11 @@ pub(super) fn push_moxel_merge_body_xml(xml: &mut String, merge: &MoxelMerge) {
 }
 
 pub(super) fn push_moxel_line_xml(xml: &mut String, line: &MoxelLine) {
-    _ = write!(xml, "\t<line width=\"{}\" gap=\"false\">\r\n", line.width);
+    _ = write!(
+        xml,
+        "\t<line width=\"{}\" gap=\"{}\">\r\n",
+        line.width, line.gap
+    );
     _ = write!(
         xml,
         "\t\t<v8ui:style xsi:type=\"{}\">{}</v8ui:style>\r\n",
@@ -16317,6 +16522,7 @@ mod moxel_exact_parity_tests {
         let mut lines = vec![
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Solid",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16334,6 +16540,7 @@ mod moxel_exact_parity_tests {
             },
             ResolvedMoxelLine {
                 line: MoxelLine {
+                    gap: false,
                     style: "Dotted",
                     line_type: "v8ui:SpreadsheetDocumentCellLineType",
                     width: 1,
@@ -16645,6 +16852,7 @@ mod moxel_exact_parity_tests {
 
         let line = ResolvedMoxelLine {
             line: MoxelLine {
+                gap: false,
                 style: "Solid",
                 line_type: "v8ui:SpreadsheetDocumentCellLineType",
                 width: 1,
@@ -16673,6 +16881,7 @@ mod moxel_exact_parity_tests {
                 line,
                 ResolvedMoxelLine {
                     line: MoxelLine {
+                        gap: false,
                         style: "Solid",
                         line_type: "v8ui:SpreadsheetDocumentCellLineType",
                         width: 1,

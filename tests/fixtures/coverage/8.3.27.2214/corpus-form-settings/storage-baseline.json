@@ -2,12 +2,19 @@
   "equal": [
     "CommonForms/CovBoundTableExcludesSelectAll.xml",
     "CommonForms/CovCommandPictureAccountingRegister.xml",
+    "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
     "CommonForms/CovCommandPictureAppearanceStarHalfFilled.xml",
+    "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
     "CommonForms/CovCommandPictureFormattedString.xml",
+    "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
     "CommonForms/CovCommandPictureGotoURL.xml",
+    "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
     "CommonForms/CovCommandPictureNewConversation.xml",
+    "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
     "CommonForms/CovCommandPictureQueryWizardTempTableDescription.xml",
+    "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
     "CommonForms/CovCommandPictureToday.xml",
+    "CommonForms/CovCommandPictureToday/Ext/Form.xml",
     "CommonForms/CovDynamicListRowNumber.xml",
     "CommonForms/CovPictureTitleFontEnterOnInput.xml",
     "CommonForms/CovPictureTitleFontEnterOnInput/Ext/Form.xml",
@@ -22,6 +29,6 @@
     "CommonForms/CovTablePictureTitleFont.xml",
     "CommonForms/CovVerticalScrollAlways.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+    "Languages/Русский.xml"
   ]
 }

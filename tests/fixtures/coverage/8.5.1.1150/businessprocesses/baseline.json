@@ -1,5 +1,8 @@
 {
   "equal": [
+    "CovAutonumbering_false",
+    "CovCheckUnique_false",
+    "CovCreateTaskInPrivilegedMode_false",
     "CovExecuteAfterWriteDataHistoryVersionProcessing_true",
     "CovExplanation_Cov",
     "CovIncludeHelpInContents_true",

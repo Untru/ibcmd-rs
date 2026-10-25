@@ -2,17 +2,23 @@
   "equal": [
     "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
     "CommonTemplates/CovSheetAutoFontHeight.xml",
+    "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
     "CommonTemplates/CovSheetDashDotted.xml",
+    "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
     "CommonTemplates/CovSheetGapLine.xml",
+    "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
     "CommonTemplates/CovSheetOEMFixedFont.xml",
+    "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
     "CommonTemplates/CovSheetPageSizeA4.xml",
+    "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
     "CommonTemplates/CovSheetSandyBrown.xml",
+    "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
     "CommonTemplates/CovSheetValueListDetail.xml",
     "CommonTemplates/CovSheetVerticalPageBreak.xml",
     "CommonTemplates/CovSheetVerticalPageBreak/Ext/Template.xml",
     "CommonTemplates/CovSpreadsheetFacetTemplate.xml",
     "CommonTemplates/CovSpreadsheetFacetTemplate/Ext/Template.xml",
     "Configuration.xml",
-    "Languages/\u0420\u0443\u0441\u0441\u043a\u0438\u0439.xml"
+    "Languages/Русский.xml"
   ]
 }

@@ -383,7 +383,7 @@ fn compiled_root_projects_owned_eds_before_integration_on_both_routes() {
                 .is_none()
         );
         let mut wrong_family = refs;
-        wrong_family.insert(fixture::OBJECT_UUID.into(), "Interface.Source435".into());
+        wrong_family.insert(fixture::OBJECT_UUID.into(), "Form.Source435".into());
         assert!(
             refs::extension_root_parts(&root, fixture::CONFIGURATION_UUID, &wrong_family)
                 .unwrap()

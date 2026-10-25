@@ -558,7 +558,8 @@ impl ModelExport {
             decode_object(kind, &tree, &self.context)
         })();
         if let Err(error) = result
-            && error.is::<crate::metadata_model::export::values::UnsupportedDescriptorValue>()
+            && (kind == ibcmd_schema::interface::InterfaceLayout::KIND
+                || error.is::<crate::metadata_model::export::values::UnsupportedDescriptorValue>())
         {
             return Err(error).context("stored descriptor has an unsupported value");
         }

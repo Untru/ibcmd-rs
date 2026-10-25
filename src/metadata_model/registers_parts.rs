@@ -554,6 +554,7 @@ fn command_group(name: &str, context: &DescriptorContext) -> Result<Brace> {
 pub(crate) const STANDARD_PICTURE_CODES: &[(&str, i64)] = &[
     ("CheckAll", -10),
     ("Clear", -200),
+    ("GrayedAll", -12),
     ("InputFieldCalculator", -6),
     ("InputFieldCalendar", -5),
     ("InputFieldChooseType", -14),
