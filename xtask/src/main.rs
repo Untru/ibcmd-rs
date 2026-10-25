@@ -45,7 +45,8 @@ const NOTE_GATES: &str =
     "manifests, workflows, tools, scripts or OpenSpec changed: run `cargo xtask ci`";
 const NOTE_ROOT_DEPENDENCY: &str = "the root may be affected by changed workspace dependencies: \
     run the covering root unit tests (`cargo test --locked -p ibcmd-rs --lib <module> --no-default-features`) \
-    and integration suites (`cargo test --locked -p ibcmd-rs --test <suite> --no-default-features`), \
+    and integration suites (`cargo test --locked -p ibcmd-rs --test integration <suite>:: --no-default-features`, \
+    `--test <suite>` for a standalone target), \
     then `cargo xtask ci`";
 const NOTE_DEPENDENCIES_UNAVAILABLE: &str =
     "reverse dependency graph unavailable: conservatively check the root consumers";
@@ -996,6 +997,10 @@ targeted = { path = "crates/targeted" }
                 .join("\n");
             assert!(guidance.contains("--lib"), "{package}: {guidance}");
             assert!(guidance.contains("--test"), "{package}: {guidance}");
+            assert!(
+                guidance.contains("--test integration <suite>::"),
+                "{package}: {guidance}"
+            );
             assert!(guidance.contains("cargo xtask ci"), "{package}: {guidance}");
             assert!(!guidance.contains("unavailable"), "{package}: {guidance}");
             assert_eq!(affected.packages, BTreeSet::from([package.to_owned()]));
