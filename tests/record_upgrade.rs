@@ -5,7 +5,7 @@
 //! older shapes the corpora keep; the platform's own dump of every derived
 //! copy equals the dump of the original (checked when the fixtures are made).
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 

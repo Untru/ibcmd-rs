@@ -4,7 +4,7 @@
 //! still be written -- dropping it shifts every later font index. The fixture
 //! is built and dumped by 8.3.27.2214 (`_onecdec/make_template_fonts_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

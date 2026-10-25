@@ -6,7 +6,7 @@
 //! Configuration.xml stub and its forms declared `dcssch` whatever its
 //! compatibility mode (MONITOR-TRIAL-2.cf, Src/1Cv8.cf).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -1,6 +1,6 @@
 //! Opt-in complete-image opaque accounting, without a platform or copied CF.
 
-mod common;
+use crate::common;
 
 use std::{
     fs,

@@ -2,7 +2,7 @@
 //! with one common form whose date input field lists three dates, built and
 //! dumped by 8.3.27.2214 (`_onecdec/make_choice_list_dates_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

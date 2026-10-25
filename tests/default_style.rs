@@ -4,7 +4,7 @@
 //! Configuration.xml was not written at all, and with that lifted it printed
 //! `<DefaultStyle/>`.
 
-mod common;
+use crate::common;
 
 use std::fs;
 

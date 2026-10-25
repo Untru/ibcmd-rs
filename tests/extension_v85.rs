@@ -4,7 +4,7 @@
 //! by 8.5.1.1529 over its base configuration and dumped by that platform
 //! (`_onecdec/make_v85_extension_fixtures.py`).
 
-mod common;
+use crate::common;
 
 use std::{path::Path, process::Command};
 

@@ -6,7 +6,7 @@
 //! (`_onecdec/make_template_probe.py`, sources in
 //! `_onecdec/fixture_src/probe_templates`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -1,6 +1,5 @@
 //! Real SDK client launches the binary over supported MCP stdio; no native platform.
 //! Current descriptor capability boundary is Unix-only.
-#![cfg(unix)]
 use rmcp::{ServiceExt, model::*, transport::TokioChildProcess};
 use serde_json::{Value, json};
 use std::{fs, path::PathBuf, process::Stdio};

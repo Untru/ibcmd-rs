@@ -29,11 +29,15 @@ usage: cargo xtask <task> [--keep-going] [--base <rev>]
 Logs of every step: target/xtask/<step>.log";
 
 const ROOT_PACKAGE: &str = "ibcmd-rs";
+/// The test target that builds the root suites as modules of one binary
+/// (`tests/integration.rs`); a suite outside it is a `[[test]]` of its own.
+const ROOT_INTEGRATION: &str = "integration";
 const MERGE_WORKFLOW: &str = ".github/workflows/offline-e2e.yml";
 const TAIL_LINES: usize = 40;
 
 const NOTE_ROOT_SRC: &str = "src/ changed: run the root suites that cover it \
-     (`cargo test --locked -p ibcmd-rs --test <suite> --no-default-features`, \
+     (`cargo test --locked -p ibcmd-rs --test integration <suite>:: --no-default-features`, \
+     `--test <suite>` for a suite with a `[[test]]` target of its own, \
      unit tests with `--lib <module>`), then `cargo xtask ci`";
 const NOTE_SHARED_TESTS: &str =
     "tests/common or tests/fixtures changed: run the suites that use them, or `cargo xtask ci`";
@@ -512,11 +516,17 @@ fn changed_files(root: &Path, base: &str) -> Result<Vec<String>, String> {
 struct Affected {
     packages: BTreeSet<String>,
     root_suites: BTreeSet<String>,
+    /// The root package's `[[test]]` targets; any other suite is a module of
+    /// [`ROOT_INTEGRATION`].
+    root_targets: BTreeSet<String>,
     notes: BTreeSet<&'static str>,
 }
 
 fn affected(root: &Path, files: &[String]) -> Affected {
-    let mut affected = Affected::default();
+    let mut affected = Affected {
+        root_targets: test_targets(&root.join("Cargo.toml")),
+        ..Affected::default()
+    };
     for file in files {
         let parts: Vec<&str> = file.split('/').collect();
         match parts.as_slice() {
@@ -606,7 +616,12 @@ fn affected_test_steps(affected: &Affected) -> Vec<Step> {
             &["test", "--locked", "-p", package],
         ));
     }
-    for suite in &affected.root_suites {
+    let (targets, modules): (Vec<_>, Vec<_>) = affected
+        .root_suites
+        .iter()
+        .partition(|suite| affected.root_targets.contains(*suite));
+    let whole_integration = targets.iter().any(|suite| *suite == ROOT_INTEGRATION);
+    for suite in targets {
         steps.push(Step::cargo(
             format!("test --test {suite}"),
             &[
@@ -620,7 +635,46 @@ fn affected_test_steps(affected: &Affected) -> Vec<Step> {
             ],
         ));
     }
+    if !modules.is_empty() && !whole_integration {
+        // libtest filters match substrings: `x::` also runs a suite named
+        // `<prefix>_x`, more tests rather than fewer.
+        let filters: Vec<String> = modules.iter().map(|suite| format!("{suite}::")).collect();
+        let mut args = vec![
+            "test",
+            "--locked",
+            "-p",
+            ROOT_PACKAGE,
+            "--test",
+            ROOT_INTEGRATION,
+            "--no-default-features",
+            "--",
+        ];
+        args.extend(filters.iter().map(String::as_str));
+        steps.push(Step::cargo(
+            format!("test --test {ROOT_INTEGRATION} {}", filters.join(" ")),
+            &args,
+        ));
+    }
     steps
+}
+
+/// The `name` of every `[[test]]` table of a manifest, by the same line scan
+/// as [`manifest_value`].
+fn test_targets(manifest: &Path) -> BTreeSet<String> {
+    let text = fs::read_to_string(manifest).unwrap_or_default();
+    let mut targets = BTreeSet::new();
+    let mut in_test = false;
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') {
+            in_test = line == "[[test]]";
+        } else if in_test
+            && let Some((name, value)) = line.split_once('=')
+            && name.trim() == "name"
+        {
+            targets.insert(value.trim().trim_matches('"').to_owned());
+        }
+    }
+    targets
 }
 
 /// The `name` of the `[package]` table; a line scan is enough for this
@@ -1033,9 +1087,46 @@ targeted = { path = "crates/targeted" }
             affected.root_suites.iter().collect::<Vec<_>>(),
             ["file_infobase"]
         );
+        assert_eq!(
+            affected_test_steps(&affected)
+                .iter()
+                .map(|step| step.name.as_str())
+                .collect::<Vec<_>>(),
+            [
+                "test -p ibcmd-filedb",
+                "test --test integration file_infobase::"
+            ]
+        );
         assert!(affected.notes.contains(NOTE_ROOT_SRC));
         assert!(affected.notes.contains(NOTE_SHARED_TESTS));
         assert!(affected.notes.contains(NOTE_GATES));
+    }
+
+    #[test]
+    fn maps_root_suites_to_their_test_targets() {
+        let root = repository_root();
+        let names = |files: &[&str]| {
+            let files: Vec<String> = files.iter().map(|file| (*file).to_owned()).collect();
+            affected_test_steps(&affected(&root, &files))
+                .into_iter()
+                .map(|step| step.name)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(
+            names(&[
+                "tests/xml_profiles.rs",
+                "tests/editor_server.rs",
+                "tests/cf_export.rs"
+            ]),
+            [
+                "test --test editor_server",
+                "test --test integration cf_export:: xml_profiles::"
+            ]
+        );
+        assert_eq!(
+            names(&["tests/integration.rs", "tests/cf_export.rs"]),
+            ["test --test integration"]
+        );
     }
 
     #[test]

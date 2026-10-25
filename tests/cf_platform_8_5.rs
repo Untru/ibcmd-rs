@@ -9,7 +9,7 @@
 //! loading that file (`_onecdec/make_home_page_fixtures.py`). No 2.21 dump of
 //! it by 8.5 is on record. See `docs/evidence/cf-platform-8.5.md`.
 
-mod common;
+use crate::common;
 
 use std::collections::BTreeMap;
 use std::ffi::OsStr;

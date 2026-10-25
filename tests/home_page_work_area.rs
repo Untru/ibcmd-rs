@@ -3,7 +3,7 @@
 //! page, built and dumped by 8.3.27.2214 (`one_column_v85` saved by
 //! 8.5.1.1529), `_onecdec/make_home_page_fixtures.py`.
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -4,7 +4,7 @@
 //! those whose index has that bit set
 //! (`_onecdec/make_adopted_properties_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::{fs, path::Path};
 

@@ -6,6 +6,7 @@ use std::{
     fs,
     path::{Path, PathBuf},
     process::{Command, Output},
+    sync::{Mutex, PoisonError},
 };
 
 pub fn fixture(name: &str) -> PathBuf {
@@ -61,11 +62,32 @@ pub fn export(input: &Path, out: &Path) -> Output {
 
 /// A scratch directory per test tag, cleared here and reused by the next run
 /// (a per-process name left a new one behind on every run).
+///
+/// Most suites run as modules of one test process (`tests/integration.rs`),
+/// in parallel with each other, so a tag belongs to the suite file that asks
+/// for it first: the same tag from another suite would clear the directory
+/// under a running test, and fails here instead. Only the tags of one run are
+/// compared: an ignored test's tags are checked when it runs with the rest
+/// (`-- --include-ignored`).
+#[track_caller]
 pub fn temp_dir(tag: &str) -> PathBuf {
+    claim_tag(tag, std::panic::Location::caller().file());
     if std::env::var_os("IBCMD_TEST_KEEP_FIXTURES").as_deref() == Some(std::ffi::OsStr::new("1")) {
         return std::env::temp_dir().join(format!("ibcmd-external-{tag}-{}", uuid::Uuid::new_v4()));
     }
     let dir = std::env::temp_dir().join(format!("ibcmd-external-{tag}"));
     let _ = fs::remove_dir_all(&dir);
     dir
+}
+
+/// Records `suite` (a source file) as the owner of `tag`; panics when another
+/// file owns it.
+pub fn claim_tag(tag: &str, suite: &'static str) {
+    static OWNERS: Mutex<BTreeMap<String, &'static str>> = Mutex::new(BTreeMap::new());
+    let mut owners = OWNERS.lock().unwrap_or_else(PoisonError::into_inner);
+    let owner = *owners.entry(tag.to_owned()).or_insert(suite);
+    assert_eq!(
+        owner, suite,
+        "scratch tag `{tag}` is used by both {owner} and {suite}: give each suite its own tags"
+    );
 }

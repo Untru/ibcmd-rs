@@ -3,7 +3,7 @@
 //! from the tree against the base's own rows (the staging compiler, offline).
 //! The loaded file must export back to exactly the edited tree.
 
-mod common;
+use crate::common;
 
 use std::{
     fs,

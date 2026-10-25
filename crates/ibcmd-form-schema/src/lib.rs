@@ -1,3 +1,14 @@
+//! Typed slot schemas of the records a managed-form body stores: which
+//! member of a form item, attribute, command or property-bag record carries
+//! which property, for each record revision the platform writes, and the
+//! codes those members hold.
+//!
+//! The root crate's form decoder (`mssql_dump::form_body`), the form packer
+//! (`module_blob`) and the form compilers (`compiler::bodies`) read the
+//! records through these schemas instead of numeric slot indices. The crate
+//! depends on none of them, so it builds once and in parallel with the root
+//! crate.
+
 /// Placeholder for a trailing member a short record or property-bag revision
 /// does not carry.  Deliberately unparseable as a 1C scalar, quoted string or
 /// block, so a reader that reaches one refuses (doctrine point 2) instead of
@@ -7,7 +18,7 @@
 /// schema has to recognize it too: a slot addressed by a schema that the short
 /// revision does not reach is *absent*, which is a different answer from
 /// *malformed*.
-pub(crate) const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
+pub const FORM_ABSENT_MEMBER: &str = "\u{1}absent";
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 enum FormChildItemKind {
@@ -39,7 +50,7 @@ impl FormChildItemRepresentation {
     }
 }
 
-pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) -> bool {
+pub fn form_child_item_representation_is_default(tag: &str, value: &str) -> bool {
     matches!(
         (
             FormChildItemKind::from_xml_tag(tag),
@@ -53,7 +64,7 @@ pub(crate) fn form_child_item_representation_is_default(tag: &str, value: &str) 
 }
 
 /// Schema bridge for the sole direct child admitted by a TextDocumentField.
-pub(crate) fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool {
+pub fn form_text_document_context_menu_child_is_valid(tag: &str) -> bool {
     tag == "ContextMenu"
 }
 
@@ -138,7 +149,7 @@ const FORM_COLUMN_BUILTIN_TYPE_REFERENCES: &[(&str, &str)] = &[
     ),
 ];
 
-pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Option<&'static str> {
+pub fn form_attribute_column_builtin_type_reference(type_id: &str) -> Option<&'static str> {
     FORM_COLUMN_BUILTIN_TYPE_REFERENCES
         .iter()
         .find_map(|(candidate, reference)| {
@@ -177,7 +188,14 @@ pub(crate) fn form_attribute_column_builtin_type_reference(type_id: &str) -> Opt
 //   spells the same three ordinals and the platform writes the same three
 //   members.  No other configuration of the eight writes a design-time
 //   platform value at all.
-const FORM_DESIGN_TIME_PLATFORM_VALUE_TYPES: &[(&str, &str, &[(&str, &str)])] = &[
+/// `(type uuid, QName, [(ordinal, member)])` of one platform-defined type.
+type DesignTimePlatformValueType = (
+    &'static str,
+    &'static str,
+    &'static [(&'static str, &'static str)],
+);
+
+const FORM_DESIGN_TIME_PLATFORM_VALUE_TYPES: &[DesignTimePlatformValueType] = &[
     (
         "dcbf2698-3c1f-4a22-997f-48070ae9bd64",
         "dcsset:DataCompositionComparisonType",
@@ -202,7 +220,7 @@ const FORM_DESIGN_TIME_PLATFORM_VALUE_TYPES: &[(&str, &str, &[(&str, &str)])] = 
 /// The QName and member spelling the platform writes for one design-time value
 /// of a platform-defined type, or `None` when the corpus has never shown what
 /// this type or this ordinal is spelled as.
-pub(crate) fn form_choice_list_design_time_platform_value(
+pub fn form_choice_list_design_time_platform_value(
     type_id: &str,
     member_ordinal: &str,
 ) -> Option<(&'static str, &'static str)> {
@@ -236,7 +254,7 @@ const FORM_LONG_BUTTON_FIELD_COUNT: usize = 52;
 /// layout is unobserved in every corpus available here (UT, the three reference
 /// trees and the nine bundled configurations contain no such Button), so it
 /// keeps reading the slot it always read rather than being changed on a guess.
-pub(crate) fn form_extended_button_type_slot(field_count: usize, offset: usize) -> usize {
+pub fn form_extended_button_type_slot(field_count: usize, offset: usize) -> usize {
     if field_count >= FORM_LONG_BUTTON_FIELD_COUNT + offset {
         FORM_LONG_BUTTON_TYPE_SLOT + offset
     } else {
@@ -245,7 +263,7 @@ pub(crate) fn form_extended_button_type_slot(field_count: usize, offset: usize) 
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
+pub enum FormAttributeAdditionalColumnsBindingKind {
     Attribute,
     Numeric,
     /// A single negative marker: the group is bound to a *standard* member of
@@ -256,13 +274,13 @@ pub(crate) enum FormAttributeAdditionalColumnsBindingKind {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormAttributeAdditionalColumnsGroupSchema {
+pub struct FormAttributeAdditionalColumnsGroupSchema {
     column_count: usize,
     binding_kind: FormAttributeAdditionalColumnsBindingKind,
 }
 
 impl FormAttributeAdditionalColumnsGroupSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         fields: &[&str],
         target: &[&str],
         owner: &[&str],
@@ -316,20 +334,20 @@ impl FormAttributeAdditionalColumnsGroupSchema {
         })
     }
 
-    pub(crate) const fn column_count(self) -> usize {
+    pub const fn column_count(self) -> usize {
         self.column_count
     }
 
-    pub(crate) const fn binding_kind(self) -> FormAttributeAdditionalColumnsBindingKind {
+    pub const fn binding_kind(self) -> FormAttributeAdditionalColumnsBindingKind {
         self.binding_kind
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormAttributeColumnSchema;
+pub struct FormAttributeColumnSchema;
 
 impl FormAttributeColumnSchema {
-    pub(crate) fn from_raw_layout(fields: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(fields: &[&str]) -> Option<Self> {
         (fields.len() == 10 && fields.first().map(|field| field.trim()) == Some("5"))
             .then_some(Self)
     }
@@ -355,7 +373,7 @@ impl FormAttributeColumnSchema {
 ///   5->LeftNarrowest`, `0` absent; same three owners, no counter-example.
 /// * alignment - `0->Left/Top 1->Center 2->Right/Bottom`, `3` absent, over all
 ///   18 owner tags that carry it (109 262 observations), no counter-example.
-pub(crate) fn form_item_spacing_xml(raw: &str) -> Option<&'static str> {
+pub fn form_item_spacing_xml(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "1" => Some("None"),
         "2" => Some("Half"),
@@ -366,7 +384,7 @@ pub(crate) fn form_item_spacing_xml(raw: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn form_children_width_xml(raw: &str) -> Option<&'static str> {
+pub fn form_children_width_xml(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "1" => Some("Equal"),
         "2" => Some("LeftWide"),
@@ -377,7 +395,7 @@ pub(crate) fn form_children_width_xml(raw: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn form_group_horizontal_align_xml(raw: &str) -> Option<&'static str> {
+pub fn form_group_horizontal_align_xml(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "0" => Some("Left"),
         "1" => Some("Center"),
@@ -386,7 +404,7 @@ pub(crate) fn form_group_horizontal_align_xml(raw: &str) -> Option<&'static str>
     }
 }
 
-pub(crate) fn form_group_vertical_align_xml(raw: &str) -> Option<&'static str> {
+pub fn form_group_vertical_align_xml(raw: &str) -> Option<&'static str> {
     match raw.trim() {
         "0" => Some("Top"),
         "1" => Some("Center"),
@@ -396,7 +414,7 @@ pub(crate) fn form_group_vertical_align_xml(raw: &str) -> Option<&'static str> {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormPageXmlProperty {
+pub enum FormPageXmlProperty {
     EnableContentChange,
     Title,
     TitleFont,
@@ -421,7 +439,7 @@ pub(crate) enum FormPageXmlProperty {
     ShowTitle,
 }
 
-pub(crate) const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
+pub const FORM_PAGE_XML_ORDER: &[FormPageXmlProperty] = &[
     FormPageXmlProperty::EnableContentChange,
     FormPageXmlProperty::Title,
     // `TitleFont` trails `Title` and leads `ToolTip` and `Group` on the one
@@ -542,14 +560,14 @@ impl FormPopupRepresentation {
 /// `PictureAndText` 440, `0` -> `Text` 8), so the shape guard keeps only the
 /// members that are constant across the corpus.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPopupSchema {
+pub struct FormPopupSchema {
     representation: FormPopupRepresentation,
 }
 
 impl FormPopupSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub const OPTIONS_SLOT: usize = 20;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -558,7 +576,7 @@ impl FormPopupSchema {
     ) -> Option<Self> {
         if wrapper != "22"
             || field_count < 30
-            || (field_count - 30) % 2 != 0
+            || !(field_count - 30).is_multiple_of(2)
             || item_tag != "Popup"
             || direct_discriminator != Some("1")
             || options.len() != 9
@@ -572,7 +590,7 @@ impl FormPopupSchema {
         })
     }
 
-    pub(crate) const fn representation(self) -> Option<&'static str> {
+    pub const fn representation(self) -> Option<&'static str> {
         self.representation.xml_value()
     }
 
@@ -602,7 +620,7 @@ impl FormPopupSchema {
     /// dumped tuples were joined with the platform's element (`3` on the 3 208
     /// written none, `1`/`2`/`0` on exactly the 1 373/540/22 written `Picture`,
     /// `PictureAndText` and `Text`).
-    pub(crate) fn shape(self, options: &[&str]) -> Option<&'static str> {
+    pub fn shape(self, options: &[&str]) -> Option<&'static str> {
         match options.get(5)?.trim() {
             "1" => Some("Usual"),
             "2" => Some("Oval"),
@@ -629,16 +647,16 @@ impl FormPopupSchema {
 /// agree exactly, and none of the 89 the narrow guard refuses carries a
 /// `<BackColor>`, so nothing this schema adds contradicts what it replaces.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPopupColorSchema;
+pub struct FormPopupColorSchema;
 
 impl FormPopupColorSchema {
-    pub(crate) const OPTIONS_SLOT: usize = FormPopupSchema::OPTIONS_SLOT;
+    pub const OPTIONS_SLOT: usize = FormPopupSchema::OPTIONS_SLOT;
     const OPTION_COUNT: usize = 9;
     const OPTION_KIND: &'static str = "7";
-    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 7;
-    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 8;
+    pub const BACK_COLOR_OPTION_SLOT: usize = 7;
+    pub const BORDER_COLOR_OPTION_SLOT: usize = 8;
 
-    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
         (wrapper == "22"
             && item_tag == "Popup"
             && options.len() == Self::OPTION_COUNT
@@ -648,7 +666,7 @@ impl FormPopupColorSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormNestedAutoCommandBarSchema {
+pub struct FormNestedAutoCommandBarSchema {
     marker: FormAutoCommandBarMarker,
     empty_shape: bool,
 }
@@ -679,11 +697,11 @@ impl FormAutoCommandBarHorizontalAlign {
 }
 
 impl FormNestedAutoCommandBarSchema {
-    pub(crate) const MARKER_SLOT: usize = 20;
+    pub const MARKER_SLOT: usize = 20;
     const MIN_FIELD_COUNT: usize = 29;
     const MAX_MARKER_BYTES: usize = 128;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         item_tag: &str,
         item_id: &str,
@@ -709,21 +727,21 @@ impl FormNestedAutoCommandBarSchema {
         })
     }
 
-    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+    pub const fn horizontal_align(self) -> Option<&'static str> {
         self.marker.horizontal_align.xml_value()
     }
 
-    pub(crate) const fn autofill(self) -> bool {
+    pub const fn autofill(self) -> bool {
         self.marker.autofill
     }
 
-    pub(crate) const fn is_empty_shape(self) -> bool {
+    pub const fn is_empty_shape(self) -> bool {
         self.empty_shape
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootAutoCommandBarSchema {
+pub struct FormRootAutoCommandBarSchema {
     marker: Option<FormAutoCommandBarMarker>,
 }
 
@@ -744,7 +762,7 @@ impl FormRootAutoCommandBarSchema {
     /// itself an auto command bar in slot 5, the same `9` the nested schema
     /// already requires.  On all 22 form records dumped for this package the
     /// two routes select the same record wherever the `-1` one selects any.
-    pub(crate) fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(wrapper: &str, item_id: &str, fields: &[&str]) -> Option<Self> {
         const AUTO_COMMAND_BAR_DISCRIMINATOR_SLOT: usize = 5;
         if wrapper != "22" {
             return None;
@@ -767,7 +785,7 @@ impl FormRootAutoCommandBarSchema {
         Some(Self { marker })
     }
 
-    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
         FormChildItemDisplayImportanceSchema::from_raw_layout(
             "22",
             fields.len(),
@@ -777,14 +795,14 @@ impl FormRootAutoCommandBarSchema {
         .and_then(|schema| schema.display_importance(fields))
     }
 
-    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+    pub const fn horizontal_align(self) -> Option<&'static str> {
         match self.marker {
             Some(marker) => marker.horizontal_align.xml_value(),
             None => None,
         }
     }
 
-    pub(crate) const fn autofill(self) -> Option<bool> {
+    pub const fn autofill(self) -> Option<bool> {
         match self.marker {
             Some(marker) => Some(marker.autofill),
             None => None,
@@ -971,10 +989,10 @@ mod nested_auto_command_bar_tests {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPageSchema;
+pub struct FormPageSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPageProperties {
+pub struct FormPageProperties {
     enable_content_change: Option<bool>,
     horizontal_stretch: Option<bool>,
     vertical_stretch: Option<bool>,
@@ -989,7 +1007,7 @@ pub(crate) struct FormPageProperties {
 }
 
 impl FormPageSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub const OPTIONS_SLOT: usize = 20;
     /// Option slots of the spacing pair and the children width on a `Page`.
     /// UT 11.5.27.75 native tree, 6 807 traced pages: slot 10 is a total
     /// function for `HorizontalSpacing` (95 present), slot 11 for
@@ -1000,7 +1018,7 @@ impl FormPageSchema {
     const CHILD_ITEMS_WIDTH_OPTION_SLOT: usize = 3;
     const SCROLL_ON_COMPRESS_OPTION_SLOT: usize = 15;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1009,7 +1027,7 @@ impl FormPageSchema {
     ) -> Option<Self> {
         (wrapper == "22"
             && field_count >= 30
-            && (field_count - 30) % 2 == 0
+            && (field_count - 30).is_multiple_of(2)
             && item_tag == "Page"
             && direct_discriminator == Some("4")
             && options.len() == 20
@@ -1035,7 +1053,7 @@ impl FormPageSchema {
     /// `УсловныйПереход`, all `(1,1,1)` -> `Horizontal`, against five sibling
     /// pages of the same three forms reading `(0,0,0)` with no element) put the
     /// same codes in the same three slots.
-    pub(crate) fn group_from_options(options: &[&str]) -> Option<&'static str> {
+    pub fn group_from_options(options: &[&str]) -> Option<&'static str> {
         match (
             options.get(2).map(|field| field.trim()),
             options.get(16).map(|field| field.trim()),
@@ -1065,7 +1083,7 @@ impl FormPageSchema {
     ) -> bool {
         wrapper == "22"
             && field_count >= 30
-            && (field_count - 30) % 2 == 0
+            && (field_count - 30).is_multiple_of(2)
             && item_tag == "Page"
             && direct_discriminator == Some("4")
             && options.len() == 18
@@ -1073,7 +1091,7 @@ impl FormPageSchema {
     }
 
     /// The grouping of a `Page` whose option bag is the short `17`/18 revision.
-    pub(crate) fn short_revision_group(
+    pub fn short_revision_group(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1105,7 +1123,7 @@ impl FormPageSchema {
     /// `CommonForms/РабочийСтолОператораОтправки` page
     /// `ГруппаПраваяОтчетность`, both short) and `1` on the other 26, of which
     /// thirteen are canonical and thirteen short.
-    pub(crate) fn short_revision_show_title(
+    pub fn short_revision_show_title(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1124,7 +1142,7 @@ impl FormPageSchema {
         (options.get(6).map(|field| field.trim()) == Some("0")).then_some(false)
     }
 
-    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {
+    pub fn properties(self, fields: &[&str], options: &[&str]) -> FormPageProperties {
         let group = Self::group_from_options(options);
         FormPageProperties {
             enable_content_change: match fields.get(9).map(|field| field.trim()) {
@@ -1231,7 +1249,7 @@ impl FormPageSchema {
     /// on exactly the one that carries `Top` -- the same codes, under the same
     /// two tables, the canonical revision uses. Every remaining member of the
     /// short bag stays unread: nothing measures it.
-    pub(crate) fn short_revision_properties(
+    pub fn short_revision_properties(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1261,14 +1279,14 @@ impl FormPageSchema {
         })
     }
 
-    pub(crate) const fn picture_option_slot(self) -> usize {
+    pub const fn picture_option_slot(self) -> usize {
         1
     }
 
     /// Option member 1 carries the page picture in both the canonical and
     /// short revisions. Across all 25 101 observed pages it is populated
     /// exactly when the platform publishes a picture value.
-    pub(crate) fn picture_revision(
+    pub fn picture_revision(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1307,59 +1325,59 @@ impl FormPageSchema {
     /// <xr:LoadTransparent>true</xr:LoadTransparent>
     /// <xr:TransparentPixel x="31" y="15"/></Picture>` for it, together with
     /// the `Picture.png` file beside the form; the exclusion dropped both.
-    pub(crate) fn picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+    pub fn picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
         FormPictureValueSchema::from_raw_layout(value)
     }
 }
 
 impl FormPageProperties {
-    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+    pub const fn enable_content_change(self) -> Option<bool> {
         self.enable_content_change
     }
 
-    pub(crate) const fn horizontal_stretch(self) -> Option<bool> {
+    pub const fn horizontal_stretch(self) -> Option<bool> {
         self.horizontal_stretch
     }
 
-    pub(crate) const fn vertical_stretch(self) -> Option<bool> {
+    pub const fn vertical_stretch(self) -> Option<bool> {
         self.vertical_stretch
     }
 
-    pub(crate) const fn group(self) -> Option<&'static str> {
+    pub const fn group(self) -> Option<&'static str> {
         self.group
     }
 
-    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+    pub const fn horizontal_align(self) -> Option<&'static str> {
         self.horizontal_align
     }
 
-    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+    pub const fn vertical_align(self) -> Option<&'static str> {
         self.vertical_align
     }
 
-    pub(crate) const fn children_align(self) -> Option<&'static str> {
+    pub const fn children_align(self) -> Option<&'static str> {
         self.children_align
     }
 
-    pub(crate) const fn child_items_width(self) -> Option<&'static str> {
+    pub const fn child_items_width(self) -> Option<&'static str> {
         self.child_items_width
     }
 
-    pub(crate) const fn horizontal_spacing(self) -> Option<&'static str> {
+    pub const fn horizontal_spacing(self) -> Option<&'static str> {
         self.horizontal_spacing
     }
 
-    pub(crate) const fn vertical_spacing(self) -> Option<&'static str> {
+    pub const fn vertical_spacing(self) -> Option<&'static str> {
         self.vertical_spacing
     }
 
-    pub(crate) const fn scroll_on_compress(self) -> Option<bool> {
+    pub const fn scroll_on_compress(self) -> Option<bool> {
         self.scroll_on_compress
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormUsualGroupHeaderXmlProperty {
+pub enum FormUsualGroupHeaderXmlProperty {
     Title,
     Shortcut,
     TitleTextColor,
@@ -1368,7 +1386,7 @@ pub(crate) enum FormUsualGroupHeaderXmlProperty {
     ToolTipRepresentation,
 }
 
-pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlProperty] = &[
+pub const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlProperty] = &[
     FormUsualGroupHeaderXmlProperty::Title,
     FormUsualGroupHeaderXmlProperty::TitleTextColor,
     FormUsualGroupHeaderXmlProperty::TitleFont,
@@ -1385,7 +1403,7 @@ pub(crate) const FORM_USUAL_GROUP_HEADER_XML_ORDER: &[FormUsualGroupHeaderXmlPro
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormUsualGroupXmlAnchor {
+pub enum FormUsualGroupXmlAnchor {
     BeforeTitle,
     BeforeGroup,
     BeforeBehavior,
@@ -1395,7 +1413,7 @@ pub(crate) enum FormUsualGroupXmlAnchor {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormUsualGroupXmlProperty {
+pub enum FormUsualGroupXmlProperty {
     ReadOnly,
     Enabled,
     EnableContentChange,
@@ -1419,7 +1437,7 @@ pub(crate) enum FormUsualGroupXmlProperty {
     CurrentRowUse,
 }
 
-pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
+pub const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
     // `Enabled` leads `ReadOnly` on all 3 native groups that carry both, and
     // both lead `EnableContentChange` (4 each); never the other way round.
     FormUsualGroupXmlProperty::Enabled,
@@ -1455,7 +1473,7 @@ pub(crate) const FORM_USUAL_GROUP_XML_ORDER: &[FormUsualGroupXmlProperty] = &[
 ];
 
 impl FormUsualGroupXmlProperty {
-    pub(crate) const fn anchor(self) -> FormUsualGroupXmlAnchor {
+    pub const fn anchor(self) -> FormUsualGroupXmlAnchor {
         match self {
             Self::ReadOnly | Self::Enabled | Self::EnableContentChange => {
                 FormUsualGroupXmlAnchor::BeforeTitle
@@ -1483,10 +1501,10 @@ impl FormUsualGroupXmlProperty {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormUsualGroupSchema;
+pub struct FormUsualGroupSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormUsualGroupProperties {
+pub struct FormUsualGroupProperties {
     enabled: Option<bool>,
     read_only: Option<bool>,
     enable_content_change: Option<bool>,
@@ -1506,7 +1524,7 @@ pub(crate) struct FormUsualGroupProperties {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormUsualGroupGroupVerticalAlign {
+pub enum FormUsualGroupGroupVerticalAlign {
     Top,
     Center,
     Bottom,
@@ -1515,7 +1533,7 @@ pub(crate) enum FormUsualGroupGroupVerticalAlign {
 impl FormUsualGroupGroupVerticalAlign {
     /// Decoded through the one shared alignment table, so this owner cannot
     /// drift away from the other seventeen that read the same enumeration.
-    pub(crate) fn from_raw_value(raw: &str) -> Option<Self> {
+    pub fn from_raw_value(raw: &str) -> Option<Self> {
         match form_group_vertical_align_xml(raw)? {
             "Top" => Some(Self::Top),
             "Center" => Some(Self::Center),
@@ -1524,7 +1542,7 @@ impl FormUsualGroupGroupVerticalAlign {
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Top => "Top",
             Self::Center => "Center",
@@ -1538,12 +1556,12 @@ impl FormUsualGroupGroupVerticalAlign {
 /// item id in option member 26 for `UsualGroup` and member 4 for `Pages`; zero
 /// is the unbound state and no observed value maps to two platform answers.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormGroupAssociatedTableElementSchema {
+pub struct FormGroupAssociatedTableElementSchema {
     option_slot: usize,
 }
 
 impl FormGroupAssociatedTableElementSchema {
-    pub(crate) fn for_item_tag(item_tag: &str) -> Option<Self> {
+    pub fn for_item_tag(item_tag: &str) -> Option<Self> {
         match item_tag {
             "UsualGroup" => Some(Self { option_slot: 26 }),
             "Pages" => Some(Self { option_slot: 4 }),
@@ -1551,14 +1569,14 @@ impl FormGroupAssociatedTableElementSchema {
         }
     }
 
-    pub(crate) fn item_id<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
+    pub fn item_id<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
         let value = options.get(self.option_slot)?.trim();
         (value != "0" && value.parse::<u64>().is_ok()).then_some(value)
     }
 }
 
 impl FormUsualGroupSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub const OPTIONS_SLOT: usize = 20;
     const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
     const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
     /// UT 11.5.27.75 native tree, 26 258 traced groups: option slot 15 is a
@@ -1569,7 +1587,7 @@ impl FormUsualGroupSchema {
     const VERTICAL_SPACING_OPTION_SLOT: usize = 16;
     const CHILD_ITEMS_WIDTH_OPTION_SLOT: usize = 2;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -1600,7 +1618,7 @@ impl FormUsualGroupSchema {
         .then_some(Self)
     }
 
-    pub(crate) fn properties(self, fields: &[&str], options: &[&str]) -> FormUsualGroupProperties {
+    pub fn properties(self, fields: &[&str], options: &[&str]) -> FormUsualGroupProperties {
         FormUsualGroupProperties {
             enabled: (fields.get(10).map(|field| field.trim()) == Some("0")).then_some(false),
             read_only: (fields.get(11).map(|field| field.trim()) == Some("1")).then_some(true),
@@ -1660,20 +1678,20 @@ impl FormUsualGroupSchema {
         }
     }
 
-    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+    pub fn height(self, fields: &[&str]) -> Option<String> {
         let value = fields.get(13)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
-    pub(crate) fn shortcut_field<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
+    pub fn shortcut_field<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
         fields.get(18).copied()
     }
 
-    pub(crate) fn format_field<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
+    pub fn format_field<'a>(self, options: &'a [&'a str]) -> Option<&'a str> {
         options.get(6).copied()
     }
 
-    pub(crate) fn collapsed_representation_title_field<'a>(
+    pub fn collapsed_representation_title_field<'a>(
         self,
         options: &'a [&'a str],
     ) -> Option<&'a str> {
@@ -1696,87 +1714,87 @@ impl FormUsualGroupSchema {
 }
 
 impl FormUsualGroupProperties {
-    pub(crate) const fn enabled(self) -> Option<bool> {
+    pub const fn enabled(self) -> Option<bool> {
         self.enabled
     }
 
-    pub(crate) const fn read_only(self) -> Option<bool> {
+    pub const fn read_only(self) -> Option<bool> {
         self.read_only
     }
 
-    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+    pub const fn enable_content_change(self) -> Option<bool> {
         self.enable_content_change
     }
 
-    pub(crate) const fn group_horizontal_align(self) -> Option<&'static str> {
+    pub const fn group_horizontal_align(self) -> Option<&'static str> {
         self.group_horizontal_align
     }
 
-    pub(crate) const fn group_vertical_align(self) -> Option<FormUsualGroupGroupVerticalAlign> {
+    pub const fn group_vertical_align(self) -> Option<FormUsualGroupGroupVerticalAlign> {
         self.group_vertical_align
     }
 
-    pub(crate) const fn child_items_width(self) -> Option<&'static str> {
+    pub const fn child_items_width(self) -> Option<&'static str> {
         self.child_items_width
     }
 
-    pub(crate) const fn children_align(self) -> Option<&'static str> {
+    pub const fn children_align(self) -> Option<&'static str> {
         self.children_align
     }
 
-    pub(crate) const fn horizontal_spacing(self) -> Option<&'static str> {
+    pub const fn horizontal_spacing(self) -> Option<&'static str> {
         self.horizontal_spacing
     }
 
-    pub(crate) const fn vertical_spacing(self) -> Option<&'static str> {
+    pub const fn vertical_spacing(self) -> Option<&'static str> {
         self.vertical_spacing
     }
 
-    pub(crate) const fn control_representation(self) -> Option<&'static str> {
+    pub const fn control_representation(self) -> Option<&'static str> {
         self.control_representation
     }
 
-    pub(crate) const fn collapsed(self) -> Option<bool> {
+    pub const fn collapsed(self) -> Option<bool> {
         self.collapsed
     }
 
-    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+    pub const fn horizontal_align(self) -> Option<&'static str> {
         self.horizontal_align
     }
 
-    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+    pub const fn vertical_align(self) -> Option<&'static str> {
         self.vertical_align
     }
 
-    pub(crate) const fn through_align(self) -> Option<&'static str> {
+    pub const fn through_align(self) -> Option<&'static str> {
         self.through_align
     }
 
-    pub(crate) const fn united(self) -> Option<bool> {
+    pub const fn united(self) -> Option<bool> {
         self.united
     }
 
-    pub(crate) const fn show_left_margin(self) -> Option<bool> {
+    pub const fn show_left_margin(self) -> Option<bool> {
         self.show_left_margin
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormPictureValueKind {
+pub enum FormPictureValueKind {
     Empty,
     Reference,
     Embedded,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPictureValueSchema {
+pub struct FormPictureValueSchema {
     kind: FormPictureValueKind,
     load_transparent: bool,
     transparent_pixel: Option<(i64, i64)>,
 }
 
 impl FormPictureValueSchema {
-    pub(crate) fn from_raw_layout(value: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(value: &[&str]) -> Option<Self> {
         if value.first().map(|field| field.trim()) != Some("4")
             || value.get(3).map(|field| field.trim()) != Some("\"\"")
         {
@@ -1849,27 +1867,27 @@ impl FormPictureValueSchema {
         })
     }
 
-    pub(crate) const fn kind(self) -> FormPictureValueKind {
+    pub const fn kind(self) -> FormPictureValueKind {
         self.kind
     }
 
-    pub(crate) const fn load_transparent(self) -> bool {
+    pub const fn load_transparent(self) -> bool {
         self.load_transparent
     }
 
-    pub(crate) const fn transparent_pixel(self) -> Option<(i64, i64)> {
+    pub const fn transparent_pixel(self) -> Option<(i64, i64)> {
         self.transparent_pixel
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormCommandCurrentRowUse {
+pub enum FormCommandCurrentRowUse {
     Use,
     DontUse,
 }
 
 impl FormCommandCurrentRowUse {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Use => "Use",
             Self::DontUse => "DontUse",
@@ -1878,7 +1896,7 @@ impl FormCommandCurrentRowUse {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCommandSchema<'a> {
+pub struct FormCommandSchema<'a> {
     picture: FormPictureValueSchema,
     current_row_use: Option<FormCommandCurrentRowUse>,
     associated_table_element_id: Option<&'a str>,
@@ -1900,7 +1918,7 @@ impl<'a> FormCommandSchema<'a> {
     /// the extra binding as their `<Action>`; this reader refused the whole
     /// record on its arity, so the form lost two `<Command>` elements and
     /// every `<CommandName>` that named them.
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         fields: &'a [&'a str],
         picture_value: &[&str],
         picture_reference: &[&str],
@@ -1972,31 +1990,31 @@ impl<'a> FormCommandSchema<'a> {
 
     /// The record slots that carry the command's action bindings past the
     /// first: a start slot and how many `<handler>,1` pairs follow it.
-    pub(crate) const fn extra_action_slots(self) -> (usize, usize) {
+    pub const fn extra_action_slots(self) -> (usize, usize) {
         self.extra_action_slots
     }
 
-    pub(crate) const fn picture(self) -> FormPictureValueSchema {
+    pub const fn picture(self) -> FormPictureValueSchema {
         self.picture
     }
 
-    pub(crate) const fn current_row_use(self) -> Option<FormCommandCurrentRowUse> {
+    pub const fn current_row_use(self) -> Option<FormCommandCurrentRowUse> {
         self.current_row_use
     }
 
-    pub(crate) const fn associated_table_element_id(self) -> Option<&'a str> {
+    pub const fn associated_table_element_id(self) -> Option<&'a str> {
         self.associated_table_element_id
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormFieldHeaderPictureSchema {
+pub struct FormFieldHeaderPictureSchema {
     picture_slot: usize,
     value: FormPictureValueSchema,
 }
 
 impl FormFieldHeaderPictureSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -2031,9 +2049,9 @@ impl FormFieldHeaderPictureSchema {
     /// the platform's answer: the empty picture record on exactly the 2 989 that
     /// carry no `<HeaderPicture>`, and a reference record on exactly the 19 that
     /// do, with no observation on an ambiguous key.
-    pub(crate) const COLUMN_GROUP_CONTAINER_SLOT: usize = 20;
-    pub(crate) const COLUMN_GROUP_CONTAINER_FIELDS: usize = 12;
-    pub(crate) const COLUMN_GROUP_PICTURE_SLOT: usize = 5;
+    pub const COLUMN_GROUP_CONTAINER_SLOT: usize = 20;
+    pub const COLUMN_GROUP_CONTAINER_FIELDS: usize = 12;
+    pub const COLUMN_GROUP_PICTURE_SLOT: usize = 5;
     /// The same header container carries the group's `TitleBackColor` one slot
     /// behind the picture, in the ordinary three-member control-colour record.
     ///
@@ -2045,9 +2063,9 @@ impl FormFieldHeaderPictureSchema {
     /// nine in its form whose container slot 6 holds a colour
     /// (`{3,3,{0,42544966-…}}`, the uuid of `StyleItems/ДобавленныйРеквизитФон`);
     /// the other eight hold the unset encoding `{3,4,{0}}`.
-    pub(crate) const COLUMN_GROUP_TITLE_BACK_COLOR_SLOT: usize = 6;
+    pub const COLUMN_GROUP_TITLE_BACK_COLOR_SLOT: usize = 6;
 
-    pub(crate) fn from_column_group_layout(
+    pub fn from_column_group_layout(
         wrapper: &str,
         item_tag: &str,
         container: &[&str],
@@ -2081,7 +2099,7 @@ impl FormFieldHeaderPictureSchema {
     /// `КонтрагентыСуммаСНДС` (`CommonPicture.Сумма`), both with the
     /// transparency flag clear.  The record was never read, so the element was
     /// never written.
-    pub(crate) fn from_footer_layout(
+    pub fn from_footer_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -2105,20 +2123,20 @@ impl FormFieldHeaderPictureSchema {
         })
     }
 
-    pub(crate) const fn picture_slot(self) -> usize {
+    pub const fn picture_slot(self) -> usize {
         self.picture_slot
     }
 
     /// The whole picture value, so a reader of this schema answers about the
     /// transparent pixel from the same record it answers about the reference
     /// and the transparency flag.
-    pub(crate) const fn picture(self) -> FormPictureValueSchema {
+    pub const fn picture(self) -> FormPictureValueSchema {
         self.value
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFieldHeaderPictureXmlProperty {
+pub enum FormFieldHeaderPictureXmlProperty {
     Value,
     LoadTransparent,
     TransparentPixel,
@@ -2129,14 +2147,14 @@ pub(crate) enum FormFieldHeaderPictureXmlProperty {
 /// the form command's own picture writer already spell it.  Over the 63 449
 /// picture elements of the five reference trees no picture writes the pixel
 /// anywhere but last.
-pub(crate) const FORM_FIELD_HEADER_PICTURE_XML_ORDER: &[FormFieldHeaderPictureXmlProperty] = &[
+pub const FORM_FIELD_HEADER_PICTURE_XML_ORDER: &[FormFieldHeaderPictureXmlProperty] = &[
     FormFieldHeaderPictureXmlProperty::Value,
     FormFieldHeaderPictureXmlProperty::LoadTransparent,
     FormFieldHeaderPictureXmlProperty::TransparentPixel,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootMobileDeviceCommandBarContentSchema {
+pub struct FormRootMobileDeviceCommandBarContentSchema {
     item_count: usize,
 }
 
@@ -2158,7 +2176,7 @@ impl FormRootMobileDeviceCommandBarContentSchema {
     /// `<MobileDeviceCommandBarContent>`; the 24-only trailer this schema
     /// previously required matched none of the 25-trailer forms among them,
     /// silently dropping the whole block.
-    pub(crate) const CONTENT_TRAILER_SLOT: usize = 22;
+    pub const CONTENT_TRAILER_SLOT: usize = 22;
 
     /// The content block is validated against the trailer's declared
     /// optional-block count, not against a fixed trailer length.
@@ -2173,7 +2191,7 @@ impl FormRootMobileDeviceCommandBarContentSchema {
     /// The block leads with its own copy of the root discriminator -- `{50,0}`
     /// under root `50`, `{49,0}` under root `49` -- so `content_kind` is
     /// checked against the root rather than against a literal `50`.
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         root_discriminator: Option<&str>,
         trailer: &[&str],
         content_kind: Option<&str>,
@@ -2194,19 +2212,19 @@ impl FormRootMobileDeviceCommandBarContentSchema {
             })
     }
 
-    pub(crate) const fn item_count(self) -> usize {
+    pub const fn item_count(self) -> usize {
         self.item_count
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormMobileDeviceCommandBarContentItemXmlProperty {
+pub enum FormMobileDeviceCommandBarContentItemXmlProperty {
     Presentation,
     CheckState,
     Value,
 }
 
-pub(crate) const FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER:
+pub const FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER:
     &[FormMobileDeviceCommandBarContentItemXmlProperty] = &[
     FormMobileDeviceCommandBarContentItemXmlProperty::Presentation,
     FormMobileDeviceCommandBarContentItemXmlProperty::CheckState,
@@ -2214,7 +2232,7 @@ pub(crate) const FORM_MOBILE_DEVICE_COMMAND_BAR_CONTENT_ITEM_XML_ORDER:
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormDecorationHeaderXmlProperty {
+pub enum FormDecorationHeaderXmlProperty {
     Title,
     ToolTip,
     ToolTipRepresentation,
@@ -2222,7 +2240,7 @@ pub(crate) enum FormDecorationHeaderXmlProperty {
     GroupVerticalAlign,
 }
 
-pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] = &[
+pub const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProperty] = &[
     FormDecorationHeaderXmlProperty::Title,
     FormDecorationHeaderXmlProperty::ToolTip,
     FormDecorationHeaderXmlProperty::ToolTipRepresentation,
@@ -2231,7 +2249,7 @@ pub(crate) const FORM_DECORATION_HEADER_XML_ORDER: &[FormDecorationHeaderXmlProp
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormExtendedTooltipXmlProperty {
+pub enum FormExtendedTooltipXmlProperty {
     Width,
     AutoMaxWidth,
     MaxWidth,
@@ -2260,7 +2278,7 @@ pub(crate) enum FormExtendedTooltipXmlProperty {
 /// `Title`, `Hyperlink` and the other `TextColor`, `Hyperlink`, `Events`.  Its
 /// position relative to `GroupHorizontalAlign` and `VerticalAlign` is
 /// unobserved, since it never co-occurs with either.
-pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProperty] = &[
+pub const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProperty] = &[
     FormExtendedTooltipXmlProperty::Width,
     FormExtendedTooltipXmlProperty::AutoMaxWidth,
     FormExtendedTooltipXmlProperty::MaxWidth,
@@ -2307,7 +2325,7 @@ pub(crate) const FORM_EXTENDED_TOOLTIP_XML_ORDER: &[FormExtendedTooltipXmlProper
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormExtendedTooltipSchema {
+pub struct FormExtendedTooltipSchema {
     width_slot: usize,
     height_slot: usize,
     horizontal_stretch_slot: usize,
@@ -2328,9 +2346,9 @@ pub(crate) struct FormExtendedTooltipSchema {
 }
 
 impl FormExtendedTooltipSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 18;
-    pub(crate) const TITLE_SLOT: usize = 22;
-    pub(crate) const EVENT_OPTION_SLOT: usize = 5;
+    pub const OPTIONS_SLOT: usize = 18;
+    pub const TITLE_SLOT: usize = 22;
+    pub const EVENT_OPTION_SLOT: usize = 5;
     /// The option slot immediately behind the event record carries the
     /// tooltip's `BackColor`, in the same three-member `{3, space, payload}`
     /// shape every control colour uses.  Census of all 206 891 traced
@@ -2339,18 +2357,18 @@ impl FormExtendedTooltipSchema {
     /// "unset" encoding, both of them this one, and they are exactly the two
     /// tooltips the platform writes `<BackColor>` on -- `style:ToolTipBackColor`
     /// and `#FFDCDC`, value for value.
-    pub(crate) const BACK_COLOR_OPTION_SLOT: usize = 6;
+    pub const BACK_COLOR_OPTION_SLOT: usize = 6;
     /// The adjacent option member carries `BorderColor`. In the complete
     /// measured population it departs from `{3,4,{0}}` once, as raw
     /// `{3,3,{-22}}`; that same tooltip is the sole native item carrying
     /// `style:BorderColor`.
-    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 7;
+    pub const BORDER_COLOR_OPTION_SLOT: usize = 7;
     /// `Hyperlink` flag slot of the tooltip option tuple: `1` on exactly the 8
     /// native `ExtendedTooltip` items that carry `<Hyperlink>true</Hyperlink>`
     /// and `0` on the other 170 224.
-    pub(crate) const HYPERLINK_OPTION_SLOT: usize = 1;
+    pub const HYPERLINK_OPTION_SLOT: usize = 1;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         direct_discriminator: Option<&str>,
@@ -2447,83 +2465,83 @@ impl FormExtendedTooltipSchema {
                     == fields.get(5).map(|field| field.trim()))
     }
 
-    pub(crate) const fn width_slot(self) -> usize {
+    pub const fn width_slot(self) -> usize {
         self.width_slot
     }
 
-    pub(crate) const fn height_slot(self) -> usize {
+    pub const fn height_slot(self) -> usize {
         self.height_slot
     }
 
-    pub(crate) const fn horizontal_stretch_slot(self) -> usize {
+    pub const fn horizontal_stretch_slot(self) -> usize {
         self.horizontal_stretch_slot
     }
 
-    pub(crate) const fn vertical_stretch_slot(self) -> usize {
+    pub const fn vertical_stretch_slot(self) -> usize {
         self.vertical_stretch_slot
     }
 
-    pub(crate) const fn text_color_slot(self) -> usize {
+    pub const fn text_color_slot(self) -> usize {
         self.text_color_slot
     }
 
-    pub(crate) const fn font_slot(self) -> usize {
+    pub const fn font_slot(self) -> usize {
         self.font_slot
     }
 
-    pub(crate) const fn auto_max_width_slot(self) -> usize {
+    pub const fn auto_max_width_slot(self) -> usize {
         self.auto_max_width_slot
     }
 
-    pub(crate) const fn max_width_slot(self) -> usize {
+    pub const fn max_width_slot(self) -> usize {
         self.max_width_slot
     }
 
-    pub(crate) const fn auto_max_height_slot(self) -> usize {
+    pub const fn auto_max_height_slot(self) -> usize {
         self.auto_max_height_slot
     }
 
-    pub(crate) const fn max_height_slot(self) -> usize {
+    pub const fn max_height_slot(self) -> usize {
         self.max_height_slot
     }
 
-    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+    pub const fn group_horizontal_align_slot(self) -> usize {
         self.group_horizontal_align_slot
     }
 
-    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+    pub const fn group_vertical_align_slot(self) -> usize {
         self.group_vertical_align_slot
     }
 
-    pub(crate) const fn horizontal_align_option_slot(self) -> usize {
+    pub const fn horizontal_align_option_slot(self) -> usize {
         self.horizontal_align_option_slot
     }
 
-    pub(crate) const fn title_height_option_slot(self) -> usize {
+    pub const fn title_height_option_slot(self) -> usize {
         self.title_height_option_slot
     }
 
-    pub(crate) const fn vertical_align_option_slot(self) -> usize {
+    pub const fn vertical_align_option_slot(self) -> usize {
         self.vertical_align_option_slot
     }
 
-    pub(crate) const fn title_values_slot(self) -> usize {
+    pub const fn title_values_slot(self) -> usize {
         self.title_values_slot
     }
 
-    pub(crate) const fn title_formatted_slot(self) -> usize {
+    pub const fn title_formatted_slot(self) -> usize {
         self.title_formatted_slot
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormDecorationHeaderSchema {
+pub struct FormDecorationHeaderSchema {
     tooltip_slot: usize,
     tooltip_representation_slot: usize,
 }
 
 impl FormDecorationHeaderSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -2539,17 +2557,17 @@ impl FormDecorationHeaderSchema {
         }
     }
 
-    pub(crate) const fn tooltip_slot(self) -> usize {
+    pub const fn tooltip_slot(self) -> usize {
         self.tooltip_slot
     }
 
-    pub(crate) const fn tooltip_representation_slot(self) -> usize {
+    pub const fn tooltip_representation_slot(self) -> usize {
         self.tooltip_representation_slot
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormPictureDecorationGeometryXmlProperty {
+pub enum FormPictureDecorationGeometryXmlProperty {
     Width,
     AutoMaxWidth,
     MaxWidth,
@@ -2560,7 +2578,7 @@ pub(crate) enum FormPictureDecorationGeometryXmlProperty {
     VerticalStretch,
 }
 
-pub(crate) const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
+pub const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
     &[FormPictureDecorationGeometryXmlProperty] = &[
     FormPictureDecorationGeometryXmlProperty::Width,
     FormPictureDecorationGeometryXmlProperty::AutoMaxWidth,
@@ -2573,7 +2591,7 @@ pub(crate) const FORM_PICTURE_DECORATION_GEOMETRY_XML_ORDER:
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormControlBorderStyle {
+pub enum FormControlBorderStyle {
     WithoutBorder,
     Single,
     Embossed,
@@ -2602,7 +2620,7 @@ impl FormControlBorderStyle {
     /// the only two `<v8ui:style xsi:type="v8ui:ControlBorderType">Indented</>`
     /// elements in the eight native trees. The code had no arm, so both
     /// borders went unwritten.
-    pub(crate) fn from_raw_code(value: &str) -> Option<Self> {
+    pub fn from_raw_code(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::WithoutBorder),
             "1" => Some(Self::Single),
@@ -2615,7 +2633,7 @@ impl FormControlBorderStyle {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::WithoutBorder => "0",
             Self::Single => "1",
@@ -2627,7 +2645,7 @@ impl FormControlBorderStyle {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value.trim() {
             "WithoutBorder" => Some(Self::WithoutBorder),
             "Single" => Some(Self::Single),
@@ -2640,7 +2658,7 @@ impl FormControlBorderStyle {
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::WithoutBorder => "WithoutBorder",
             Self::Single => "Single",
@@ -2656,20 +2674,20 @@ impl FormControlBorderStyle {
 /// A control border as the platform writes it: the style spelling and the
 /// `width` attribute that rides member 4 of the same tuple.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormControlBorder {
-    pub(crate) style: FormControlBorderStyle,
-    pub(crate) width: u32,
-    pub(crate) reference: Option<&'static str>,
+pub struct FormControlBorder {
+    pub style: FormControlBorderStyle,
+    pub width: u32,
+    pub reference: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormControlBorderSchema {
+pub struct FormControlBorderSchema {
     border_option_slot: usize,
     default_style: FormControlBorderStyle,
 }
 
 impl FormControlBorderSchema {
-    pub(crate) fn options_slot(item_tag: &str, top_level_offset: usize) -> Option<usize> {
+    pub fn options_slot(item_tag: &str, top_level_offset: usize) -> Option<usize> {
         match item_tag {
             "LabelField" | "PictureField" if top_level_offset <= 1 => {
                 Some(FormFieldSchema::OPTIONS_BASE_SLOT + top_level_offset)
@@ -2680,7 +2698,7 @@ impl FormControlBorderSchema {
         }
     }
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -2728,7 +2746,7 @@ impl FormControlBorderSchema {
         })
     }
 
-    pub(crate) const fn border_option_slot(self) -> usize {
+    pub const fn border_option_slot(self) -> usize {
         self.border_option_slot
     }
 
@@ -2738,7 +2756,7 @@ impl FormControlBorderSchema {
     /// and `0` on exactly the three `width="5"`, the one `width="3"` and the
     /// one `width="0"` label decorations.  Pinning it to `1` had made the
     /// reader refuse those five borders and had hard-coded the attribute.
-    pub(crate) fn tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
+    pub fn tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
         if tuple.len() != 7
             || tuple.first().map(|field| field.trim()) != Some("3")
             || tuple.get(1).map(|field| field.trim()) != Some("0")
@@ -2779,7 +2797,7 @@ impl FormControlBorderSchema {
     /// default *or* the width is not `1`: on the whole native tree every
     /// `<Border>` satisfies one of the two and every record satisfying neither
     /// carries none, with no counter-example on any of the five owners.
-    pub(crate) fn non_default_tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
+    pub fn non_default_tuple_border(self, tuple: &[&str]) -> Option<FormControlBorder> {
         Self::reference_border(tuple).or_else(|| {
             self.tuple_border(tuple)
                 .filter(|border| border.style != self.default_style || border.width != 1)
@@ -2788,10 +2806,10 @@ impl FormControlBorderSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPictureDecorationSchema;
+pub struct FormPictureDecorationSchema;
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct FormPictureDecorationProperties {
+pub struct FormPictureDecorationProperties {
     width: Option<String>,
     auto_max_width: Option<bool>,
     max_width: Option<String>,
@@ -2806,11 +2824,11 @@ pub(crate) struct FormPictureDecorationProperties {
 }
 
 impl FormPictureDecorationSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 18;
+    pub const OPTIONS_SLOT: usize = 18;
     /// `BorderColor` of the decoration, inside its own option tuple.
-    pub(crate) const BORDER_COLOR_SLOT: usize = 6;
+    pub const BORDER_COLOR_SLOT: usize = 6;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -2823,12 +2841,12 @@ impl FormPictureDecorationSchema {
         .then_some(Self)
     }
 
-    pub(crate) fn hyperlink(self, options: &[&str]) -> Option<bool> {
+    pub fn hyperlink(self, options: &[&str]) -> Option<bool> {
         self.hyperlink_option_slot(options)?;
         (options[2].trim() == "1").then_some(true)
     }
 
-    pub(crate) fn hyperlink_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn hyperlink_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(2)
     }
 
@@ -2840,7 +2858,7 @@ impl FormPictureDecorationSchema {
     /// `RealSizeIgnoreScale` (1).  Every code shared with the `PictureField`
     /// tuple maps to the same spelling in both, so the two owners read one
     /// table, not two.
-    pub(crate) fn picture_size_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn picture_size_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(3)
     }
 
@@ -2848,7 +2866,7 @@ impl FormPictureDecorationSchema {
     /// localised-string record `{1,0}` on exactly the 3 650 native
     /// `PictureDecoration` items without the property and a populated record on
     /// the other 16.
-    pub(crate) fn nonselected_picture_text_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn nonselected_picture_text_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(5)
     }
 
@@ -2859,11 +2877,11 @@ impl FormPictureDecorationSchema {
     /// and slot 9 holds `1` on exactly the 4 it writes `<EnableDrag>true</...>`
     /// on; both slots hold `0` on every other decoration and no other code
     /// occurs in either.
-    pub(crate) fn enable_start_drag_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn enable_start_drag_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(8)
     }
 
-    pub(crate) fn enable_drag_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn enable_drag_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(9)
     }
 
@@ -2872,7 +2890,7 @@ impl FormPictureDecorationSchema {
     /// on exactly the 7 the platform writes `<Zoomable>true</Zoomable>` on and
     /// `0` on the other 3 718; the platform never writes the element with any
     /// other value.
-    pub(crate) fn zoomable_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn zoomable_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(4)
     }
 
@@ -2881,7 +2899,7 @@ impl FormPictureDecorationSchema {
     /// `<ImageScale>` and, on the 7 that do, exactly the number the platform
     /// writes -- `200` six times and `108` once.  `100` is therefore the
     /// unwritten default, not an absence.
-    pub(crate) fn image_scale_option_slot(self, options: &[&str]) -> Option<usize> {
+    pub fn image_scale_option_slot(self, options: &[&str]) -> Option<usize> {
         self.option_tuple_is_exact(options).then_some(12)
     }
 
@@ -2913,7 +2931,7 @@ impl FormPictureDecorationSchema {
         revision && matches!(options.get(2).map(|field| field.trim()), Some("0" | "1"))
     }
 
-    pub(crate) fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
+    pub fn properties(self, fields: &[&str]) -> FormPictureDecorationProperties {
         FormPictureDecorationProperties {
             width: Self::non_zero_u32(fields, 10),
             height: Self::non_zero_u32(fields, 11),
@@ -2960,58 +2978,58 @@ impl FormPictureDecorationSchema {
 }
 
 impl FormPictureDecorationProperties {
-    pub(crate) fn width(&self) -> Option<&str> {
+    pub fn width(&self) -> Option<&str> {
         self.width.as_deref()
     }
 
-    pub(crate) const fn auto_max_width(&self) -> Option<bool> {
+    pub const fn auto_max_width(&self) -> Option<bool> {
         self.auto_max_width
     }
 
-    pub(crate) fn max_width(&self) -> Option<&str> {
+    pub fn max_width(&self) -> Option<&str> {
         self.max_width.as_deref()
     }
 
-    pub(crate) fn height(&self) -> Option<&str> {
+    pub fn height(&self) -> Option<&str> {
         self.height.as_deref()
     }
 
-    pub(crate) const fn auto_max_height(&self) -> Option<bool> {
+    pub const fn auto_max_height(&self) -> Option<bool> {
         self.auto_max_height
     }
 
-    pub(crate) fn max_height(&self) -> Option<&str> {
+    pub fn max_height(&self) -> Option<&str> {
         self.max_height.as_deref()
     }
 
-    pub(crate) const fn horizontal_stretch(&self) -> Option<bool> {
+    pub const fn horizontal_stretch(&self) -> Option<bool> {
         self.horizontal_stretch
     }
 
-    pub(crate) const fn vertical_stretch(&self) -> Option<bool> {
+    pub const fn vertical_stretch(&self) -> Option<bool> {
         self.vertical_stretch
     }
 
-    pub(crate) const fn skip_on_input(&self) -> Option<bool> {
+    pub const fn skip_on_input(&self) -> Option<bool> {
         self.skip_on_input
     }
 
-    pub(crate) const fn group_horizontal_align(&self) -> Option<&'static str> {
+    pub const fn group_horizontal_align(&self) -> Option<&'static str> {
         self.group_horizontal_align
     }
 
-    pub(crate) const fn group_vertical_align(&self) -> Option<&'static str> {
+    pub const fn group_vertical_align(&self) -> Option<&'static str> {
         self.group_vertical_align
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormChildItemDisplayImportanceSchema {
+pub struct FormChildItemDisplayImportanceSchema {
     slot: usize,
 }
 
 impl FormChildItemDisplayImportanceSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -3078,7 +3096,7 @@ impl FormChildItemDisplayImportanceSchema {
         Some(Self { slot })
     }
 
-    pub(crate) fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn display_importance(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(self.slot)?.trim() {
             "1" => Some("VeryHigh"),
             "2" => Some("High"),
@@ -3091,7 +3109,7 @@ impl FormChildItemDisplayImportanceSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationSchema {
+pub struct FormLabelDecorationSchema {
     width_slot: usize,
     height_slot: usize,
     horizontal_stretch_slot: usize,
@@ -3111,8 +3129,8 @@ pub(crate) struct FormLabelDecorationSchema {
 }
 
 impl FormLabelDecorationSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 18;
-    pub(crate) const TITLE_SLOT: usize = 23;
+    pub const OPTIONS_SLOT: usize = 18;
+    pub const TITLE_SLOT: usize = 23;
 
     /// The decoration keeps its border colour in option slot 7, one slot ahead
     /// of the back colour it already reads from slot 6.
@@ -3121,9 +3139,9 @@ impl FormLabelDecorationSchema {
     /// under the one colour grammar, the slot is a total function of the
     /// platform's `<BorderColor>`: the unset shape on the 11 545 that carry no
     /// element and a readable colour on all five that do.
-    pub(crate) const BORDER_COLOR_OPTION_SLOT: usize = 7;
+    pub const BORDER_COLOR_OPTION_SLOT: usize = 7;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -3160,23 +3178,23 @@ impl FormLabelDecorationSchema {
         }
     }
 
-    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+    pub const fn group_horizontal_align_slot(self) -> usize {
         self.group_horizontal_align_slot
     }
 
-    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+    pub const fn group_vertical_align_slot(self) -> usize {
         self.group_vertical_align_slot
     }
 
-    pub(crate) const fn horizontal_align_option_slot(self) -> usize {
+    pub const fn horizontal_align_option_slot(self) -> usize {
         self.horizontal_align_option_slot
     }
 
-    pub(crate) const fn vertical_align_option_slot(self) -> usize {
+    pub const fn vertical_align_option_slot(self) -> usize {
         self.vertical_align_option_slot
     }
 
-    pub(crate) fn title_schema(self, title: &[&str]) -> Option<FormLabelDecorationTitleSchema> {
+    pub fn title_schema(self, title: &[&str]) -> Option<FormLabelDecorationTitleSchema> {
         matches!(
             (
                 title.len(),
@@ -3193,11 +3211,7 @@ impl FormLabelDecorationSchema {
         })
     }
 
-    pub(crate) fn alignment(
-        self,
-        fields: &[&str],
-        options: &[&str],
-    ) -> FormLabelDecorationAlignment {
+    pub fn alignment(self, fields: &[&str], options: &[&str]) -> FormLabelDecorationAlignment {
         FormLabelDecorationAlignment {
             // 11 463 traced label decorations, 438 carrying the property: slot 33
             // is a total function under the shared table.  Omitting the `Top`
@@ -3224,7 +3238,7 @@ impl FormLabelDecorationSchema {
         }
     }
 
-    pub(crate) fn geometry(self, fields: &[&str]) -> FormLabelDecorationGeometry {
+    pub fn geometry(self, fields: &[&str]) -> FormLabelDecorationGeometry {
         FormLabelDecorationGeometry {
             width: Self::non_zero_u32(fields, self.width_slot),
             auto_max_width: Self::false_or_omit(fields, self.auto_max_width_slot),
@@ -3237,13 +3251,13 @@ impl FormLabelDecorationSchema {
         }
     }
 
-    pub(crate) fn visual_tail(self, options: &[&str]) -> FormLabelDecorationVisualTail {
+    pub fn visual_tail(self, options: &[&str]) -> FormLabelDecorationVisualTail {
         FormLabelDecorationVisualTail {
             title_height: Self::non_zero_u32(options, self.title_height_option_slot),
         }
     }
 
-    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+    pub fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.skip_on_input_slot)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -3270,41 +3284,41 @@ impl FormLabelDecorationSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationTitleSchema {
+pub struct FormLabelDecorationTitleSchema {
     values_slot: usize,
     formatted_slot: usize,
 }
 
 impl FormLabelDecorationTitleSchema {
-    pub(crate) const fn values_slot(self) -> usize {
+    pub const fn values_slot(self) -> usize {
         self.values_slot
     }
 
-    pub(crate) const fn formatted_slot(self) -> usize {
+    pub const fn formatted_slot(self) -> usize {
         self.formatted_slot
     }
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationVisualTail {
+pub struct FormLabelDecorationVisualTail {
     title_height: Option<String>,
 }
 
 impl FormLabelDecorationVisualTail {
-    pub(crate) fn title_height(&self) -> Option<&str> {
+    pub fn title_height(&self) -> Option<&str> {
         self.title_height.as_deref()
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationAlignment {
+pub struct FormLabelDecorationAlignment {
     group_vertical_align: Option<&'static str>,
     horizontal_align: Option<&'static str>,
     vertical_align: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct FormLabelDecorationGeometry {
+pub struct FormLabelDecorationGeometry {
     width: Option<String>,
     auto_max_width: Option<bool>,
     max_width: Option<String>,
@@ -3316,61 +3330,61 @@ pub(crate) struct FormLabelDecorationGeometry {
 }
 
 impl FormLabelDecorationGeometry {
-    pub(crate) fn width(&self) -> Option<&str> {
+    pub fn width(&self) -> Option<&str> {
         self.width.as_deref()
     }
 
-    pub(crate) const fn auto_max_width(&self) -> Option<bool> {
+    pub const fn auto_max_width(&self) -> Option<bool> {
         self.auto_max_width
     }
 
-    pub(crate) fn max_width(&self) -> Option<&str> {
+    pub fn max_width(&self) -> Option<&str> {
         self.max_width.as_deref()
     }
 
-    pub(crate) fn height(&self) -> Option<&str> {
+    pub fn height(&self) -> Option<&str> {
         self.height.as_deref()
     }
 
-    pub(crate) const fn auto_max_height(&self) -> Option<bool> {
+    pub const fn auto_max_height(&self) -> Option<bool> {
         self.auto_max_height
     }
 
-    pub(crate) fn max_height(&self) -> Option<&str> {
+    pub fn max_height(&self) -> Option<&str> {
         self.max_height.as_deref()
     }
 
-    pub(crate) const fn horizontal_stretch(&self) -> Option<bool> {
+    pub const fn horizontal_stretch(&self) -> Option<bool> {
         self.horizontal_stretch
     }
 
-    pub(crate) const fn vertical_stretch(&self) -> Option<bool> {
+    pub const fn vertical_stretch(&self) -> Option<bool> {
         self.vertical_stretch
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormChildItemAlignment {
+pub enum FormChildItemAlignment {
     Horizontal(&'static str),
     LabelDecoration(FormLabelDecorationAlignment),
 }
 
 impl FormChildItemAlignment {
-    pub(crate) const fn horizontal_align(self) -> Option<&'static str> {
+    pub const fn horizontal_align(self) -> Option<&'static str> {
         match self {
             Self::Horizontal(value) => Some(value),
             Self::LabelDecoration(alignment) => alignment.horizontal_align,
         }
     }
 
-    pub(crate) const fn group_vertical_align(self) -> Option<&'static str> {
+    pub const fn group_vertical_align(self) -> Option<&'static str> {
         match self {
             Self::Horizontal(_) => None,
             Self::LabelDecoration(alignment) => alignment.group_vertical_align,
         }
     }
 
-    pub(crate) const fn vertical_align(self) -> Option<&'static str> {
+    pub const fn vertical_align(self) -> Option<&'static str> {
         match self {
             Self::Horizontal(_) => None,
             Self::LabelDecoration(alignment) => alignment.vertical_align,
@@ -3379,28 +3393,28 @@ impl FormChildItemAlignment {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormLabelDecorationAlignmentTailXmlProperty {
+pub enum FormLabelDecorationAlignmentTailXmlProperty {
     HorizontalAlign,
     VerticalAlign,
 }
 
-pub(crate) const FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER:
+pub const FORM_LABEL_DECORATION_ALIGNMENT_TAIL_XML_ORDER:
     &[FormLabelDecorationAlignmentTailXmlProperty] = &[
     FormLabelDecorationAlignmentTailXmlProperty::HorizontalAlign,
     FormLabelDecorationAlignmentTailXmlProperty::VerticalAlign,
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormLabelDecorationVisualTailXmlProperty {
+pub enum FormLabelDecorationVisualTailXmlProperty {
     TitleHeight,
 }
 
-pub(crate) const FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER:
+pub const FORM_LABEL_DECORATION_VISUAL_TAIL_XML_ORDER:
     &[FormLabelDecorationVisualTailXmlProperty] =
     &[FormLabelDecorationVisualTailXmlProperty::TitleHeight];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormLabelDecorationGeometryXmlProperty {
+pub enum FormLabelDecorationGeometryXmlProperty {
     Width,
     AutoMaxWidth,
     MaxWidth,
@@ -3411,8 +3425,7 @@ pub(crate) enum FormLabelDecorationGeometryXmlProperty {
     VerticalStretch,
 }
 
-pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
-    &[FormLabelDecorationGeometryXmlProperty] = &[
+pub const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER: &[FormLabelDecorationGeometryXmlProperty] = &[
     FormLabelDecorationGeometryXmlProperty::Width,
     FormLabelDecorationGeometryXmlProperty::AutoMaxWidth,
     FormLabelDecorationGeometryXmlProperty::MaxWidth,
@@ -3424,32 +3437,32 @@ pub(crate) const FORM_LABEL_DECORATION_GEOMETRY_XML_ORDER:
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCheckBoxFieldSchema {
+pub struct FormCheckBoxFieldSchema {
     top_level_offset: usize,
     /// Option slot the block's own declared revision keeps `CheckBoxType` in.
     check_box_type_option_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormFieldTitleLocationSchema {
+pub struct FormFieldTitleLocationSchema {
     slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormWarningOnEditRepresentation {
+pub enum FormWarningOnEditRepresentation {
     Show,
     DontShow,
 }
 
 impl FormWarningOnEditRepresentation {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Show => "Show",
             Self::DontShow => "DontShow",
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "Show" => Some(Self::Show),
             "DontShow" => Some(Self::DontShow),
@@ -3457,7 +3470,7 @@ impl FormWarningOnEditRepresentation {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Show => "0",
             Self::DontShow => "1",
@@ -3466,7 +3479,7 @@ impl FormWarningOnEditRepresentation {
 }
 
 impl FormFieldTitleLocationSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -3519,7 +3532,7 @@ impl FormFieldTitleLocationSchema {
         })
     }
 
-    pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn title_location(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(self.slot)?.trim() {
             "0" => Some("None"),
             "2" => Some("Left"),
@@ -3539,20 +3552,20 @@ impl FormFieldTitleLocationSchema {
         }
     }
 
-    pub(crate) fn follows_title_in_xml(item_tag: &str, has_title: bool) -> bool {
+    pub fn follows_title_in_xml(item_tag: &str, has_title: bool) -> bool {
         item_tag == "FormattedDocumentField" && has_title
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFieldGroupHorizontalAlign {
+pub enum FormFieldGroupHorizontalAlign {
     Left,
     Center,
     Right,
 }
 
 impl FormFieldGroupHorizontalAlign {
-    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+    pub fn from_raw_value(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::Left),
             "1" => Some(Self::Center),
@@ -3561,7 +3574,7 @@ impl FormFieldGroupHorizontalAlign {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value.trim() {
             "Left" => Some(Self::Left),
             "Center" => Some(Self::Center),
@@ -3570,7 +3583,7 @@ impl FormFieldGroupHorizontalAlign {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Left => "0",
             Self::Center => "1",
@@ -3578,7 +3591,7 @@ impl FormFieldGroupHorizontalAlign {
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Left => "Left",
             Self::Center => "Center",
@@ -3588,13 +3601,13 @@ impl FormFieldGroupHorizontalAlign {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFixingInTable {
+pub enum FormFixingInTable {
     Left,
     Right,
 }
 
 impl FormFixingInTable {
-    pub(crate) fn from_field_raw_value(value: &str) -> Option<Self> {
+    pub fn from_field_raw_value(value: &str) -> Option<Self> {
         match value.trim() {
             "1" => Some(Self::Left),
             "2" => Some(Self::Right),
@@ -3602,7 +3615,7 @@ impl FormFixingInTable {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value.trim() {
             "Left" => Some(Self::Left),
             "Right" => Some(Self::Right),
@@ -3610,14 +3623,14 @@ impl FormFixingInTable {
         }
     }
 
-    pub(crate) const fn field_raw_code(self) -> &'static str {
+    pub const fn field_raw_code(self) -> &'static str {
         match self {
             Self::Left => "1",
             Self::Right => "2",
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Left => "Left",
             Self::Right => "Right",
@@ -3626,13 +3639,13 @@ impl FormFixingInTable {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormColumnGroupSchema;
+pub struct FormColumnGroupSchema;
 
 impl FormColumnGroupSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
-    pub(crate) const FIXING_IN_TABLE_OPTION_SLOT: usize = 11;
+    pub const OPTIONS_SLOT: usize = 20;
+    pub const FIXING_IN_TABLE_OPTION_SLOT: usize = 11;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -3641,7 +3654,7 @@ impl FormColumnGroupSchema {
     ) -> Option<Self> {
         (wrapper == "22"
             && field_count >= 30
-            && (field_count - 30) % 2 == 0
+            && (field_count - 30).is_multiple_of(2)
             && item_tag == "ColumnGroup"
             && direct_discriminator == Some("2")
             && options.len() == 12
@@ -3662,27 +3675,24 @@ impl FormColumnGroupSchema {
     /// `Left` and 2 `Right`, with no counter-example.  `2` used to be rejected
     /// by the layout gate itself, which threw away the whole schema -- and with
     /// it every other property -- on those two groups.
-    pub(crate) fn fixing_in_table(self, options: &[&str]) -> Option<FormFixingInTable> {
+    pub fn fixing_in_table(self, options: &[&str]) -> Option<FormFixingInTable> {
         FormFixingInTable::from_field_raw_value(options.get(Self::FIXING_IN_TABLE_OPTION_SLOT)?)
     }
 
-    pub(crate) const fn fixing_in_table_raw_code(
-        self,
-        value: FormFixingInTable,
-    ) -> Option<&'static str> {
+    pub const fn fixing_in_table_raw_code(self, value: FormFixingInTable) -> Option<&'static str> {
         Some(value.field_raw_code())
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFieldVerticalAlign {
+pub enum FormFieldVerticalAlign {
     Top,
     Center,
     Bottom,
 }
 
 impl FormFieldVerticalAlign {
-    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+    pub fn from_raw_value(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::Top),
             "1" => Some(Self::Center),
@@ -3691,7 +3701,7 @@ impl FormFieldVerticalAlign {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value.trim() {
             "Top" => Some(Self::Top),
             "Center" => Some(Self::Center),
@@ -3700,7 +3710,7 @@ impl FormFieldVerticalAlign {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Top => "0",
             Self::Center => "1",
@@ -3708,7 +3718,7 @@ impl FormFieldVerticalAlign {
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Top => "Top",
             Self::Center => "Center",
@@ -3718,7 +3728,7 @@ impl FormFieldVerticalAlign {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormFieldSchema {
+pub struct FormFieldSchema {
     top_level_offset: usize,
     input_field_options: bool,
     spreadsheet_document_options: bool,
@@ -3751,32 +3761,32 @@ pub(crate) struct FormFieldSchema {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct FormSpreadsheetDocumentFieldProperties {
-    pub(crate) default_item: Option<bool>,
-    pub(crate) width: Option<String>,
-    pub(crate) height: Option<String>,
-    pub(crate) auto_max_width: Option<bool>,
-    pub(crate) auto_max_height: Option<bool>,
-    pub(crate) vertical_stretch: Option<bool>,
-    pub(crate) show_grid: Option<bool>,
-    pub(crate) show_headers: Option<bool>,
-    pub(crate) show_cell_names: Option<bool>,
-    pub(crate) show_row_and_column_names: Option<bool>,
-    pub(crate) vertical_scroll_bar: Option<bool>,
-    pub(crate) horizontal_scroll_bar: Option<bool>,
-    pub(crate) edit: Option<bool>,
-    pub(crate) selection_show_mode: Option<&'static str>,
-    pub(crate) output: Option<&'static str>,
-    pub(crate) protection: Option<bool>,
-    pub(crate) enable_start_drag: Option<bool>,
-    pub(crate) enable_drag: Option<bool>,
-    pub(crate) view_scaling_mode: Option<&'static str>,
-    pub(crate) show_groups: Option<bool>,
-    pub(crate) drawing_selection_show_mode: Option<&'static str>,
+pub struct FormSpreadsheetDocumentFieldProperties {
+    pub default_item: Option<bool>,
+    pub width: Option<String>,
+    pub height: Option<String>,
+    pub auto_max_width: Option<bool>,
+    pub auto_max_height: Option<bool>,
+    pub vertical_stretch: Option<bool>,
+    pub show_grid: Option<bool>,
+    pub show_headers: Option<bool>,
+    pub show_cell_names: Option<bool>,
+    pub show_row_and_column_names: Option<bool>,
+    pub vertical_scroll_bar: Option<bool>,
+    pub horizontal_scroll_bar: Option<bool>,
+    pub edit: Option<bool>,
+    pub selection_show_mode: Option<&'static str>,
+    pub output: Option<&'static str>,
+    pub protection: Option<bool>,
+    pub enable_start_drag: Option<bool>,
+    pub enable_drag: Option<bool>,
+    pub view_scaling_mode: Option<&'static str>,
+    pub show_groups: Option<bool>,
+    pub drawing_selection_show_mode: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormChildItemEventCollectionOwner {
+pub enum FormChildItemEventCollectionOwner {
     LabelField,
     PictureField,
     SpreadSheetDocumentField,
@@ -3789,7 +3799,7 @@ pub(crate) enum FormChildItemEventCollectionOwner {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormChildItemEventCollectionSchema {
+pub struct FormChildItemEventCollectionSchema {
     owner: FormChildItemEventCollectionOwner,
     collection_slot: usize,
 }
@@ -3859,10 +3869,7 @@ const FORM_PLANNER_SELECTION_EVENT_UUID: &str = "b6aaed5c-8a5a-4a03-bd5b-1f14d0f
 const FORM_PLANNER_ON_ACTIVATE_EVENT_UUID: &str = "be7d3bef-f900-44da-a5e9-88da3c0a9a8a";
 
 impl FormChildItemEventCollectionSchema {
-    pub(crate) fn from_field_schema(
-        _field_schema: FormFieldSchema,
-        item_tag: &str,
-    ) -> Option<Self> {
+    pub fn from_field_schema(_field_schema: FormFieldSchema, item_tag: &str) -> Option<Self> {
         let (owner, collection_slot) = match item_tag {
             "LabelField" => (FormChildItemEventCollectionOwner::LabelField, 12),
             "PictureField" => (FormChildItemEventCollectionOwner::PictureField, 16),
@@ -3900,7 +3907,7 @@ impl FormChildItemEventCollectionSchema {
     /// identifier beside a second, and both are written `Selection` followed
     /// by `DetailProcessing`. The other 21 hold `{0,1,0}` in the slot and
     /// carry no element.
-    pub(crate) fn from_special_field_schema(schema: FormSpecialFieldSchema) -> Option<Self> {
+    pub fn from_special_field_schema(schema: FormSpecialFieldSchema) -> Option<Self> {
         let owner = match schema.xml_tag() {
             "ChartField" => FormChildItemEventCollectionOwner::ChartField,
             // The Gantt chart keeps its collection in the same option member
@@ -3949,7 +3956,7 @@ impl FormChildItemEventCollectionSchema {
     /// handler the platform writes, so the revision drops the trailing member
     /// the count already accounts for. Reading the declared count admits both
     /// without naming either arity.
-    pub(crate) fn from_pages_layout(
+    pub fn from_pages_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -3961,7 +3968,7 @@ impl FormChildItemEventCollectionSchema {
             .and_then(|field| field.trim().parse::<usize>().ok());
         (wrapper == "22"
             && field_count >= 30
-            && (field_count - 30) % 2 == 0
+            && (field_count - 30).is_multiple_of(2)
             && item_tag == "Pages"
             && direct_discriminator == Some("3")
             && declared_members
@@ -3975,11 +3982,11 @@ impl FormChildItemEventCollectionSchema {
         })
     }
 
-    pub(crate) const fn collection_slot(self) -> usize {
+    pub const fn collection_slot(self) -> usize {
         self.collection_slot
     }
 
-    pub(crate) fn event_name(self, event_id: &str) -> Option<&'static str> {
+    pub fn event_name(self, event_id: &str) -> Option<&'static str> {
         let mappings: &[(&str, &str)] = match self.owner {
             FormChildItemEventCollectionOwner::LabelField => &[
                 (FORM_LABEL_FIELD_CLICK_EVENT_UUID, "Click"),
@@ -4132,7 +4139,7 @@ impl FormChildItemEventCollectionSchema {
 /// `0` and no element, 3 with `1` and `Enable`, 1 with `2` and `Disable`) and
 /// `HTMLDocumentField` option 4 (171 / 4 / 3), each with no record holding a
 /// code the platform writes nothing for and no element written without it.
-pub(crate) fn form_output_code(value: Option<&str>) -> Option<&'static str> {
+pub fn form_output_code(value: Option<&str>) -> Option<&'static str> {
     match value.map(str::trim) {
         Some("1") => Some("Enable"),
         Some("2") => Some("Disable"),
@@ -4141,19 +4148,19 @@ pub(crate) fn form_output_code(value: Option<&str>) -> Option<&'static str> {
 }
 
 impl FormFieldSchema {
-    pub(crate) const OPTIONS_BASE_SLOT: usize = 39;
+    pub const OPTIONS_BASE_SLOT: usize = 39;
 
     /// The `<Output>` of an `HTMLDocumentField`, option member 4 of its own
     /// 13-member tuple.  The member has no meaning in any other field kind's
     /// tuple, which is why the schema gates it on the kind rather than reading
     /// the same index everywhere.
-    pub(crate) fn document_field_output(self, options: &[&str]) -> Option<&'static str> {
+    pub fn document_field_output(self, options: &[&str]) -> Option<&'static str> {
         self.html_document_options
             .then(|| form_output_code(options.get(4).copied()))
             .flatten()
     }
 
-    pub(crate) const fn options_slot(self) -> usize {
+    pub const fn options_slot(self) -> usize {
         Self::OPTIONS_BASE_SLOT + self.top_level_offset
     }
 
@@ -4167,13 +4174,13 @@ impl FormFieldSchema {
     /// the two the platform writes `<TitleBackColor>` on, value for value. No
     /// other item in the configuration holds anything but the platform's
     /// "unset" encoding here.
-    pub(crate) const TITLE_BACK_COLOR_BASE_SLOT: usize = 33;
+    pub const TITLE_BACK_COLOR_BASE_SLOT: usize = 33;
 
-    pub(crate) const fn title_back_color_slot(self) -> usize {
+    pub const fn title_back_color_slot(self) -> usize {
         Self::TITLE_BACK_COLOR_BASE_SLOT + self.top_level_offset
     }
 
-    pub(crate) fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
+    pub fn item_tag_from_discriminator(discriminator: &str) -> Option<&'static str> {
         match discriminator {
             "1" => Some("LabelField"),
             "2" => Some("InputField"),
@@ -4190,7 +4197,7 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) fn supports_item_tag(item_tag: &str) -> bool {
+    pub fn supports_item_tag(item_tag: &str) -> bool {
         matches!(
             item_tag,
             "LabelField"
@@ -4207,7 +4214,7 @@ impl FormFieldSchema {
         )
     }
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -4487,11 +4494,11 @@ impl FormFieldSchema {
         })
     }
 
-    pub(crate) const fn title_slot(self) -> usize {
+    pub const fn title_slot(self) -> usize {
         self.title_slot
     }
 
-    pub(crate) const fn footer_text_slot(self) -> usize {
+    pub const fn footer_text_slot(self) -> usize {
         self.footer_text_slot
     }
 
@@ -4499,7 +4506,7 @@ impl FormFieldSchema {
     /// `PictureField` option tuples the export walks, the slot holds `1` on
     /// exactly the 6 items the platform writes `<Zoomable>true</Zoomable>` on
     /// and `0` on the other 2 214.
-    pub(crate) const fn picture_field_zoomable_option_slot(self) -> Option<usize> {
+    pub const fn picture_field_zoomable_option_slot(self) -> Option<usize> {
         if self.picture_field_options {
             Some(7)
         } else {
@@ -4507,27 +4514,27 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) const fn tooltip_slot(self) -> usize {
+    pub const fn tooltip_slot(self) -> usize {
         10 + self.top_level_offset
     }
 
-    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+    pub fn width(self, options: &[&str]) -> Option<String> {
         self.dimension(options, self.width_option_slot?)
     }
 
-    pub(crate) fn height(self, options: &[&str]) -> Option<String> {
+    pub fn height(self, options: &[&str]) -> Option<String> {
         self.dimension(options, self.height_option_slot?)
     }
 
-    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+    pub fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         (options.get(self.horizontal_stretch_option_slot?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+    pub fn auto_max_width(self, options: &[&str]) -> Option<bool> {
         (options.get(self.auto_max_width_option_slot?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn equal_items_width(self, options: &[&str]) -> Option<bool> {
+    pub fn equal_items_width(self, options: &[&str]) -> Option<bool> {
         match options.get(self.equal_items_width_option_slot?)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -4535,15 +4542,15 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
+    pub fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
         (options.get(self.vertical_stretch_option_slot?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn show_in_header(self, fields: &[&str]) -> Option<bool> {
+    pub fn show_in_header(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.show_in_header_slot?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn auto_cell_height(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_cell_height(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.auto_cell_height_slot?)?.trim() == "1").then_some(true)
     }
 
@@ -4554,14 +4561,14 @@ impl FormFieldSchema {
     /// `<PictureSize>` at all (1 055), `2` -> `Proportionally` (101), `4` ->
     /// `AutoSize` (29), `7` -> `ByFontSize` (5), `6` -> `AutoSizeIgnoreScale`
     /// (2) and `1` -> `Stretch` (1).
-    pub(crate) const fn picture_size_option_slot(self) -> Option<usize> {
+    pub const fn picture_size_option_slot(self) -> Option<usize> {
         self.picture_size_option_slot
     }
 
     /// `Hyperlink` flag slot of the owning field's option tuple: `1` on exactly
     /// the 51 native `PictureField` items that carry
     /// `<Hyperlink>true</Hyperlink>` and `0` on the other 1 142.
-    pub(crate) fn hyperlink(self, options: &[&str]) -> Option<bool> {
+    pub fn hyperlink(self, options: &[&str]) -> Option<bool> {
         match options.get(self.hyperlink_option_slot?)?.trim() {
             "1" => Some(true),
             _ => None,
@@ -4572,11 +4579,11 @@ impl FormFieldSchema {
     /// empty localised-string record `{1,0}` on exactly the 1 166 native
     /// `PictureField` items without the property and a populated record on the
     /// other 27.
-    pub(crate) const fn nonselected_picture_text_option_slot(self) -> Option<usize> {
+    pub const fn nonselected_picture_text_option_slot(self) -> Option<usize> {
         self.nonselected_picture_text_option_slot
     }
 
-    pub(crate) fn cell_hyperlink(self, fields: &[&str]) -> Option<bool> {
+    pub fn cell_hyperlink(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.cell_hyperlink_slot?)?.trim() {
             "1" => Some(true),
             "0" => None,
@@ -4584,11 +4591,11 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) const fn cell_hyperlink_slot(self) -> Option<usize> {
+    pub const fn cell_hyperlink_slot(self) -> Option<usize> {
         self.cell_hyperlink_slot
     }
 
-    pub(crate) fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
+    pub fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.show_in_footer_slot?)?.trim() {
             "0" => Some(false),
             "1" => None,
@@ -4596,19 +4603,19 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) const fn show_in_footer_slot(self) -> Option<usize> {
+    pub const fn show_in_footer_slot(self) -> Option<usize> {
         self.show_in_footer_slot
     }
 
-    pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {
+    pub fn read_only(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.read_only_slot?)?.trim() == "1").then_some(true)
     }
 
-    pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
+    pub fn title_height(self, fields: &[&str]) -> Option<String> {
         self.dimension(fields, self.title_height_slot?)
     }
 
-    pub(crate) fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(self.horizontal_align_slot?)?.trim() {
             "0" => Some("Left"),
             "1" => Some("Center"),
@@ -4618,52 +4625,49 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) const fn fixing_in_table_slot(self) -> Option<usize> {
+    pub const fn fixing_in_table_slot(self) -> Option<usize> {
         self.fixing_in_table_slot
     }
 
-    pub(crate) fn fixing_in_table(self, fields: &[&str]) -> Option<FormFixingInTable> {
+    pub fn fixing_in_table(self, fields: &[&str]) -> Option<FormFixingInTable> {
         FormFixingInTable::from_field_raw_value(fields.get(self.fixing_in_table_slot?)?)
     }
 
-    pub(crate) const fn vertical_align_slot(self) -> usize {
+    pub const fn vertical_align_slot(self) -> usize {
         27 + self.top_level_offset
     }
 
-    pub(crate) fn vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
+    pub fn vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
         FormFieldVerticalAlign::from_raw_value(fields.get(self.vertical_align_slot())?)
     }
 
-    pub(crate) const fn group_horizontal_align_slot(self) -> usize {
+    pub const fn group_horizontal_align_slot(self) -> usize {
         53 + self.top_level_offset
     }
 
-    pub(crate) fn group_horizontal_align(
-        self,
-        fields: &[&str],
-    ) -> Option<FormFieldGroupHorizontalAlign> {
+    pub fn group_horizontal_align(self, fields: &[&str]) -> Option<FormFieldGroupHorizontalAlign> {
         FormFieldGroupHorizontalAlign::from_raw_value(
             fields.get(self.group_horizontal_align_slot())?,
         )
     }
 
-    pub(crate) const fn group_vertical_align_slot(self) -> usize {
+    pub const fn group_vertical_align_slot(self) -> usize {
         54 + self.top_level_offset
     }
 
-    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
+    pub fn group_vertical_align(self, fields: &[&str]) -> Option<FormFieldVerticalAlign> {
         FormFieldVerticalAlign::from_raw_value(fields.get(self.group_vertical_align_slot())?)
     }
 
-    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+    pub fn enabled(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.enabled_slot?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) const fn warning_on_edit_representation_slot(self) -> usize {
+    pub const fn warning_on_edit_representation_slot(self) -> usize {
         17 + self.top_level_offset
     }
 
-    pub(crate) fn warning_on_edit_representation(
+    pub fn warning_on_edit_representation(
         self,
         fields: &[&str],
     ) -> Option<FormWarningOnEditRepresentation> {
@@ -4677,7 +4681,7 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) const fn warning_on_edit_slot(self) -> usize {
+    pub const fn warning_on_edit_slot(self) -> usize {
         18 + self.top_level_offset
     }
 
@@ -4696,7 +4700,7 @@ impl FormFieldSchema {
     /// `TextDocumentField`, `FormattedDocumentField`, `GraphicalSchemaField`
     /// and `HTMLDocumentField` reading `3` throughout and writing nothing.
     /// Reading only code `0` is what hid the nineteen `Center`/`Right` items.
-    pub(crate) fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn footer_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(25 + self.top_level_offset)?.trim() {
             "0" => Some("Left"),
             "1" => Some("Center"),
@@ -4705,7 +4709,7 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+    pub fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
         match fields.get(15 + self.top_level_offset)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -4713,11 +4717,11 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) fn picture_field_file_drag_mode(self, options: &[&str]) -> Option<&'static str> {
+    pub fn picture_field_file_drag_mode(self, options: &[&str]) -> Option<&'static str> {
         (options.get(22)?.trim() == "0").then_some("AsFile")
     }
 
-    pub(crate) fn extended_edit_multiple_values(self, options: &[&str]) -> Option<bool> {
+    pub fn extended_edit_multiple_values(self, options: &[&str]) -> Option<bool> {
         match options
             .get(self.extended_edit_multiple_values_option_slot?)?
             .trim()
@@ -4728,7 +4732,7 @@ impl FormFieldSchema {
         }
     }
 
-    pub(crate) fn spreadsheet_document_properties(
+    pub fn spreadsheet_document_properties(
         self,
         fields: &[&str],
         options: &[&str],
@@ -4752,7 +4756,7 @@ impl FormFieldSchema {
     /// That is an absence, not a value: a reader that got the placeholder
     /// through would report the property malformed rather than missing, and a
     /// malformed choice-parameter member is a hard writer refusal.
-    pub(crate) fn input_field_option<'a>(
+    pub fn input_field_option<'a>(
         self,
         options: &'a [&'a str],
         slot: FormInputFieldExtendedOptionSlot,
@@ -4763,7 +4767,7 @@ impl FormFieldSchema {
             .filter(|member| *member != FORM_ABSENT_MEMBER)
     }
 
-    pub(crate) fn choice_button_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+    pub fn choice_button_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
         self.input_field_options.then_some(())?;
         let picture = FormPictureValueSchema::from_raw_layout(value)?;
         matches!(
@@ -4773,15 +4777,15 @@ impl FormFieldSchema {
         .then_some(picture)
     }
 
-    pub(crate) const fn text_color_option_slot(self) -> Option<usize> {
+    pub const fn text_color_option_slot(self) -> Option<usize> {
         self.text_color_option_slot
     }
 
-    pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
+    pub const fn back_color_option_slot(self) -> Option<usize> {
         self.back_color_option_slot
     }
 
-    pub(crate) const fn border_color_option_slot(self) -> Option<usize> {
+    pub const fn border_color_option_slot(self) -> Option<usize> {
         self.border_color_option_slot
     }
 
@@ -4792,17 +4796,17 @@ impl FormFieldSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonColorSchema {
+pub struct FormButtonColorSchema {
     top_level_offset: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonCommonSchema {
+pub struct FormButtonCommonSchema {
     top_level_offset: usize,
 }
 
 impl FormButtonCommonSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -4814,7 +4818,7 @@ impl FormButtonCommonSchema {
         }
     }
 
-    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+    pub fn enabled(self, fields: &[&str]) -> Option<bool> {
         (fields.get(7 + self.top_level_offset)?.trim() == "0").then_some(false)
     }
 
@@ -4833,7 +4837,7 @@ impl FormButtonCommonSchema {
     /// the chain `{2,{1},{-8}}` at member 10, one behind each of the
     /// unprefixed positions, and the platform writes
     /// `<DataPath>Объект.Ref</DataPath>` for it.
-    pub(crate) const fn data_path_slot(self) -> Option<usize> {
+    pub const fn data_path_slot(self) -> Option<usize> {
         Some(9 + self.top_level_offset)
     }
 
@@ -4847,7 +4851,7 @@ impl FormButtonCommonSchema {
     /// value dereferencing to the reference the platform writes, character for
     /// character. The property had no reader at all, so the writer had nothing
     /// to emit.
-    pub(crate) const fn parameter_slot(self) -> usize {
+    pub const fn parameter_slot(self) -> usize {
         33 + self.top_level_offset
     }
 
@@ -4863,32 +4867,32 @@ impl FormButtonCommonSchema {
     /// carries for every other member of this schema.
     ///
     /// The property had no reader at all, so the writer had nothing to emit.
-    pub(crate) fn check(self, fields: &[&str]) -> Option<bool> {
+    pub fn check(self, fields: &[&str]) -> Option<bool> {
         (fields.get(24 + self.top_level_offset)?.trim() == "1").then_some(true)
     }
 
-    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+    pub fn height(self, fields: &[&str]) -> Option<String> {
         self.non_zero_dimension(fields, 17)
     }
 
-    pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
+    pub fn title_height(self, fields: &[&str]) -> Option<String> {
         self.non_zero_dimension(fields, 18)
     }
 
-    pub(crate) fn font<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
+    pub fn font<'a>(self, fields: &'a [&'a str]) -> Option<&'a str> {
         let value = fields.get(22 + self.top_level_offset)?.trim();
         (value != "{7,3,0,1,100}").then_some(value)
     }
 
-    pub(crate) fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
+    pub fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
         (fields.get(39 + self.top_level_offset)?.trim() == "1").then_some(true)
     }
 
-    pub(crate) fn vertical_stretch(self, fields: &[&str]) -> Option<bool> {
+    pub fn vertical_stretch(self, fields: &[&str]) -> Option<bool> {
         (fields.get(40 + self.top_level_offset)?.trim() == "1").then_some(true)
     }
 
-    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(42 + self.top_level_offset)?.trim() {
             "0" => Some("Top"),
             "1" => Some("Center"),
@@ -4912,7 +4916,7 @@ impl FormButtonColorSchema {
     /// admit only the unprefixed shape, so a prefixed button lost `<BackColor>`,
     /// `<TextColor>` and `<BorderColor>` outright rather than reading them one
     /// slot later.
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -4924,26 +4928,26 @@ impl FormButtonColorSchema {
         }
     }
 
-    pub(crate) const fn back_color_slot(self) -> usize {
+    pub const fn back_color_slot(self) -> usize {
         19 + self.top_level_offset
     }
 
-    pub(crate) const fn text_color_slot(self) -> usize {
+    pub const fn text_color_slot(self) -> usize {
         20 + self.top_level_offset
     }
 
-    pub(crate) const fn border_color_slot(self) -> usize {
+    pub const fn border_color_slot(self) -> usize {
         21 + self.top_level_offset
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonShapeRepresentationSchema {
+pub struct FormButtonShapeRepresentationSchema {
     slot: usize,
 }
 
 impl FormButtonShapeRepresentationSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -4960,7 +4964,7 @@ impl FormButtonShapeRepresentationSchema {
         }
     }
 
-    pub(crate) fn shape_representation(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn shape_representation(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(self.slot)?.trim() {
             "1" => Some("Always"),
             "2" => Some("WhenActive"),
@@ -4981,21 +4985,17 @@ impl FormButtonShapeRepresentationSchema {
 /// platform answers, and no other code occurs.  The properties were read
 /// nowhere before, so the writer had nothing to emit.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormButtonShapeSchema;
+pub struct FormButtonShapeSchema;
 
 impl FormButtonShapeSchema {
     const SHAPE_REVERSE_OFFSET: usize = 8;
     const PICTURE_LOCATION_REVERSE_OFFSET: usize = 5;
 
-    pub(crate) fn from_raw_layout(
-        wrapper: &str,
-        field_count: usize,
-        item_tag: &str,
-    ) -> Option<Self> {
+    pub fn from_raw_layout(wrapper: &str, field_count: usize, item_tag: &str) -> Option<Self> {
         (wrapper == "31" && matches!(field_count, 52 | 53) && item_tag == "Button").then_some(Self)
     }
 
-    pub(crate) fn shape(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn shape(self, fields: &[&str]) -> Option<&'static str> {
         let slot = fields.len().checked_sub(Self::SHAPE_REVERSE_OFFSET)?;
         match fields.get(slot)?.trim() {
             "1" => Some("Usual"),
@@ -5004,7 +5004,7 @@ impl FormButtonShapeSchema {
         }
     }
 
-    pub(crate) fn picture_location(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn picture_location(self, fields: &[&str]) -> Option<&'static str> {
         let slot = fields
             .len()
             .checked_sub(Self::PICTURE_LOCATION_REVERSE_OFFSET)?;
@@ -5069,7 +5069,7 @@ impl FormButtonShapeSchema {
 /// `<AutoMaxWidth>false</AutoMaxWidth>`, across all eight corpora, with no
 /// counter-example.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormSearchStringAdditionSchema {
+pub struct FormSearchStringAdditionSchema {
     width_option_slot: Option<usize>,
     horizontal_stretch_option_slot: Option<usize>,
     auto_max_width_option_slot: Option<usize>,
@@ -5079,11 +5079,11 @@ pub(crate) struct FormSearchStringAdditionSchema {
 }
 
 impl FormSearchStringAdditionSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 13;
+    pub const OPTIONS_SLOT: usize = 13;
     const FIELD_COUNT: usize = 24;
     const TOOLTIP_REPRESENTATION_SLOT: usize = 11;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -5127,15 +5127,15 @@ impl FormSearchStringAdditionSchema {
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
-    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+    pub fn width(self, options: &[&str]) -> Option<String> {
         self.dimension(options, self.width_option_slot?)
     }
 
-    pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
+    pub fn max_width(self, options: &[&str]) -> Option<String> {
         self.dimension(options, self.max_width_option_slot?)
     }
 
-    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+    pub fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         match options
             .get(self.horizontal_stretch_option_slot?)
             .map(|field| field.trim())
@@ -5146,7 +5146,7 @@ impl FormSearchStringAdditionSchema {
         }
     }
 
-    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+    pub fn auto_max_width(self, options: &[&str]) -> Option<bool> {
         (options
             .get(self.auto_max_width_option_slot?)
             .map(|field| field.trim())
@@ -5154,20 +5154,17 @@ impl FormSearchStringAdditionSchema {
         .then_some(false)
     }
 
-    pub(crate) fn group_horizontal_align(
-        self,
-        fields: &[&str],
-    ) -> Option<FormFieldGroupHorizontalAlign> {
+    pub fn group_horizontal_align(self, fields: &[&str]) -> Option<FormFieldGroupHorizontalAlign> {
         FormFieldGroupHorizontalAlign::from_raw_value(
             fields.get(self.group_horizontal_align_slot?)?.trim(),
         )
     }
 
-    pub(crate) fn tooltip_representation(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn tooltip_representation(self, fields: &[&str]) -> Option<&'static str> {
         decode_form_tooltip_representation(fields.get(self.tooltip_representation_slot?)?.trim())
     }
 
-    pub(crate) fn properties(
+    pub fn properties(
         self,
         fields: &[&str],
         options: &[&str],
@@ -5186,13 +5183,13 @@ impl FormSearchStringAdditionSchema {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-pub(crate) struct FormSearchStringAdditionProperties {
-    pub(crate) width: Option<String>,
-    pub(crate) max_width: Option<String>,
-    pub(crate) horizontal_stretch: Option<bool>,
-    pub(crate) auto_max_width: Option<bool>,
-    pub(crate) group_horizontal_align: Option<&'static str>,
-    pub(crate) tooltip_representation: Option<&'static str>,
+pub struct FormSearchStringAdditionProperties {
+    pub width: Option<String>,
+    pub max_width: Option<String>,
+    pub horizontal_stretch: Option<bool>,
+    pub auto_max_width: Option<bool>,
+    pub group_horizontal_align: Option<&'static str>,
+    pub tooltip_representation: Option<&'static str>,
 }
 
 /// `ShapeRepresentation` of a `Popup`.
@@ -5204,14 +5201,14 @@ pub(crate) struct FormSearchStringAdditionProperties {
 /// say `WhenActive` and `3` on the 86 that say `None`, with no code mapping to
 /// two answers -- the same table `Button` uses for the property.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormPopupShapeRepresentationSchema;
+pub struct FormPopupShapeRepresentationSchema;
 
 impl FormPopupShapeRepresentationSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub const OPTIONS_SLOT: usize = 20;
     const OPTION_COUNT: usize = 9;
     const SHAPE_REPRESENTATION_OPTION_SLOT: usize = 6;
 
-    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(wrapper: &str, item_tag: &str, options: &[&str]) -> Option<Self> {
         (wrapper == "22"
             && item_tag == "Popup"
             && options.len() == Self::OPTION_COUNT
@@ -5219,7 +5216,7 @@ impl FormPopupShapeRepresentationSchema {
         .then_some(Self)
     }
 
-    pub(crate) fn shape_representation(self, options: &[&str]) -> Option<&'static str> {
+    pub fn shape_representation(self, options: &[&str]) -> Option<&'static str> {
         match options
             .get(Self::SHAPE_REPRESENTATION_OPTION_SLOT)
             .map(|field| field.trim())
@@ -5257,10 +5254,7 @@ impl FormCheckBoxFieldSchema {
     /// coordinate and remains unread.
     const ITEM_HEIGHT_OPTION_SLOT: usize = 10;
 
-    pub(crate) fn top_level_offset_for_raw_layout(
-        wrapper: &str,
-        field_count: usize,
-    ) -> Option<usize> {
+    pub fn top_level_offset_for_raw_layout(wrapper: &str, field_count: usize) -> Option<usize> {
         match (wrapper, field_count) {
             ("37", 59) => Some(0),
             ("37", 60) => Some(1),
@@ -5280,7 +5274,7 @@ impl FormCheckBoxFieldSchema {
         }
     }
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         direct_discriminator: Option<&str>,
@@ -5324,20 +5318,20 @@ impl FormCheckBoxFieldSchema {
         })
     }
 
-    pub(crate) const fn options_slot(self) -> usize {
+    pub const fn options_slot(self) -> usize {
         39 + self.top_level_offset
     }
 
-    pub(crate) const fn edit_format_option_slot(self) -> usize {
+    pub const fn edit_format_option_slot(self) -> usize {
         Self::EDIT_FORMAT_OPTION_SLOT
     }
 
-    pub(crate) fn item_title_height(self, options: &[&str]) -> Option<String> {
+    pub fn item_title_height(self, options: &[&str]) -> Option<String> {
         let value = options.get(Self::ITEM_TITLE_HEIGHT_OPTION_SLOT)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
-    pub(crate) fn item_height(self, options: &[&str]) -> Option<String> {
+    pub fn item_height(self, options: &[&str]) -> Option<String> {
         if options.first().map(|field| field.trim()) != Some("11") || options.len() != 13 {
             return None;
         }
@@ -5345,11 +5339,11 @@ impl FormCheckBoxFieldSchema {
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
-    pub(crate) const fn tooltip_slot(self) -> usize {
+    pub const fn tooltip_slot(self) -> usize {
         10 + self.top_level_offset
     }
 
-    pub(crate) fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         match fields
             .get(23 + self.top_level_offset)
             .map(|field| field.trim())?
@@ -5361,7 +5355,7 @@ impl FormCheckBoxFieldSchema {
         }
     }
 
-    pub(crate) fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
+    pub fn show_in_footer(self, fields: &[&str]) -> Option<bool> {
         match fields
             .get(Self::SHOW_IN_FOOTER_SLOT + self.top_level_offset)?
             .trim()
@@ -5376,19 +5370,19 @@ impl FormCheckBoxFieldSchema {
     // alignment tables (47 and 22 present).  The transcribed pair had omitted
     // `Center` from the horizontal table and `Bottom` from the vertical one,
     // which dropped 4 of the 22.
-    pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         form_group_horizontal_align_xml(
             fields.get(Self::GROUP_HORIZONTAL_ALIGN_SLOT + self.top_level_offset)?,
         )
     }
 
-    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
         form_group_vertical_align_xml(
             fields.get(Self::GROUP_VERTICAL_ALIGN_SLOT + self.top_level_offset)?,
         )
     }
 
-    pub(crate) fn check_box_type(self, options: &[&str]) -> Option<&'static str> {
+    pub fn check_box_type(self, options: &[&str]) -> Option<&'static str> {
         match (
             options.get(1).map(|field| field.trim()),
             options
@@ -5404,7 +5398,7 @@ impl FormCheckBoxFieldSchema {
         }
     }
 
-    pub(crate) fn three_state(self, options: &[&str]) -> Option<bool> {
+    pub fn three_state(self, options: &[&str]) -> Option<bool> {
         match options
             .get(Self::THREE_STATE_OPTION_SLOT)
             .map(|field| field.trim())?
@@ -5415,13 +5409,13 @@ impl FormCheckBoxFieldSchema {
         }
     }
 
-    pub(crate) const fn three_state_option_slot(self) -> usize {
+    pub const fn three_state_option_slot(self) -> usize {
         Self::THREE_STATE_OPTION_SLOT
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormChildItemUserVisibleSchema;
+pub struct FormChildItemUserVisibleSchema;
 
 impl FormChildItemUserVisibleSchema {
     /// Validates the conditional-`UserVisible` prefix shape and returns the
@@ -5446,7 +5440,7 @@ impl FormChildItemUserVisibleSchema {
     /// declared member `<n>` may name roles that override the common answer.
     /// This function validates the record shape that puts a tuple at that
     /// slot and passes the caller's reading of it straight through.
-    pub(crate) fn from_raw_layout<T>(
+    pub fn from_raw_layout<T>(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -5481,41 +5475,41 @@ impl FormChildItemUserVisibleSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormChildItemVisibleSchema {
+pub struct FormChildItemVisibleSchema {
     slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormConditionalGroupSchema {
+pub struct FormConditionalGroupSchema {
     prefix_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormConditionalTableSchema {
+pub struct FormConditionalTableSchema {
     prefix_slot: usize,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormCommandInterfaceContainerOwner {
+pub enum FormCommandInterfaceContainerOwner {
     CommandBar,
     NavigationPanel,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCommandInterfaceContainerSchema {
+pub struct FormCommandInterfaceContainerSchema {
     owner: FormCommandInterfaceContainerOwner,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCommandInterfaceItemSchema;
+pub struct FormCommandInterfaceItemSchema;
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCommandInterfaceVisibilitySchema {
+pub struct FormCommandInterfaceVisibilitySchema {
     role_count: usize,
 }
 
 impl FormCommandInterfaceContainerSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         trailing_slot: usize,
         wrapper: &str,
         field_count: usize,
@@ -5534,13 +5528,13 @@ impl FormCommandInterfaceContainerSchema {
             .then_some(Self { owner })
     }
 
-    pub(crate) const fn owner(self) -> FormCommandInterfaceContainerOwner {
+    pub const fn owner(self) -> FormCommandInterfaceContainerOwner {
         self.owner
     }
 }
 
 impl FormCommandInterfaceItemSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_type: &str,
@@ -5555,7 +5549,7 @@ impl FormCommandInterfaceItemSchema {
 }
 
 impl FormCommandInterfaceVisibilitySchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         scope_wrapper: &str,
@@ -5572,13 +5566,13 @@ impl FormCommandInterfaceVisibilitySchema {
             .then_some(Self { role_count })
     }
 
-    pub(crate) const fn role_count(self) -> usize {
+    pub const fn role_count(self) -> usize {
         self.role_count
     }
 }
 
 impl FormConditionalGroupSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         user_visible_common: Option<bool>,
@@ -5684,13 +5678,13 @@ impl FormConditionalGroupSchema {
         }
     }
 
-    pub(crate) const fn prefix_slot(self) -> usize {
+    pub const fn prefix_slot(self) -> usize {
         self.prefix_slot
     }
 }
 
 impl FormConditionalTableSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         user_visible_common: Option<bool>,
@@ -5718,11 +5712,11 @@ impl FormConditionalTableSchema {
         }
     }
 
-    pub(crate) const fn prefix_slot(self) -> usize {
+    pub const fn prefix_slot(self) -> usize {
         self.prefix_slot
     }
 
-    pub(crate) const fn raw_slot_for_normalized(self, normalized_slot: usize) -> usize {
+    pub const fn raw_slot_for_normalized(self, normalized_slot: usize) -> usize {
         if normalized_slot < self.prefix_slot {
             normalized_slot
         } else {
@@ -5732,7 +5726,7 @@ impl FormConditionalTableSchema {
 }
 
 impl FormChildItemVisibleSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -5748,7 +5742,7 @@ impl FormChildItemVisibleSchema {
             | ("22", "Page", Some("4"))
             | ("22", "UsualGroup", Some("5"))
             | ("22", "ButtonGroup", Some("6"))
-                if field_count >= 30 && (field_count - 30) % 2 == 0 =>
+                if field_count >= 30 && (field_count - 30).is_multiple_of(2) =>
             {
                 field_count.checked_sub(8)?
             }
@@ -5832,7 +5826,7 @@ impl FormChildItemVisibleSchema {
             {
                 9
             }
-            ("55", "Table", _) if field_count >= 99 && (field_count - 99) % 2 == 0 => {
+            ("55", "Table", _) if field_count >= 99 && (field_count - 99).is_multiple_of(2) => {
                 field_count.checked_sub(35)?
             }
             _ => return None,
@@ -5840,16 +5834,16 @@ impl FormChildItemVisibleSchema {
         Some(Self { slot })
     }
 
-    pub(crate) fn visible(self, fields: &[&str]) -> Option<bool> {
+    pub fn visible(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.slot)?.trim() == "0").then_some(false)
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormCommandBarSchema;
+pub struct FormCommandBarSchema;
 
 impl FormCommandBarSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 20;
+    pub const OPTIONS_SLOT: usize = 20;
     const CHILD_COUNT_SLOT: usize = 21;
     const ENABLED_SLOT: usize = 10;
     const WIDTH_SLOT: usize = 12;
@@ -5858,7 +5852,7 @@ impl FormCommandBarSchema {
     const GROUP_HORIZONTAL_ALIGN_REVERSE_OFFSET: usize = 3;
     const GROUP_VERTICAL_ALIGN_REVERSE_OFFSET: usize = 2;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         item_tag: &str,
         direct_discriminator: Option<&str>,
@@ -5945,19 +5939,19 @@ impl FormCommandBarSchema {
         source_is_valid.then_some(Self)
     }
 
-    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+    pub fn enabled(self, fields: &[&str]) -> Option<bool> {
         (fields.get(Self::ENABLED_SLOT)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn width(self, fields: &[&str]) -> Option<String> {
+    pub fn width(self, fields: &[&str]) -> Option<String> {
         Self::dimension(fields, Self::WIDTH_SLOT)
     }
 
-    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+    pub fn height(self, fields: &[&str]) -> Option<String> {
         Self::dimension(fields, Self::HEIGHT_SLOT)
     }
 
-    pub(crate) fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
+    pub fn horizontal_stretch(self, fields: &[&str]) -> Option<bool> {
         match fields.get(Self::HORIZONTAL_STRETCH_SLOT)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -5968,7 +5962,7 @@ impl FormCommandBarSchema {
     // Reverse slots 3 and 2 are total functions on all 1 840 traced command bars
     // under the shared alignment tables (111 and 29 present).  The transcribed
     // pair had omitted `Left` and `Top`, losing 11 and 4 respectively.
-    pub(crate) fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_horizontal_align(self, fields: &[&str]) -> Option<&'static str> {
         form_group_horizontal_align_xml(
             fields.get(
                 fields
@@ -5978,7 +5972,7 @@ impl FormCommandBarSchema {
         )
     }
 
-    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
         form_group_vertical_align_xml(
             fields.get(
                 fields
@@ -5999,26 +5993,26 @@ impl FormCommandBarSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormChildItemShowTitleSchema {
+pub struct FormChildItemShowTitleSchema {
     option_slot: usize,
     back_color_option_slot: Option<usize>,
     hidden_state_title_back_color_option_slot: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormSharedContainerContentChangeSchema {
+pub struct FormSharedContainerContentChangeSchema {
     enable_content_change: Option<bool>,
 }
 
 impl FormSharedContainerContentChangeSchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
         direct_discriminator: Option<&str>,
         marker: Option<&str>,
     ) -> Option<Self> {
-        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+        if wrapper != "22" || field_count < 30 || !(field_count - 30).is_multiple_of(2) {
             return None;
         }
         match (item_tag, direct_discriminator) {
@@ -6039,11 +6033,11 @@ impl FormSharedContainerContentChangeSchema {
         })
     }
 
-    pub(crate) const fn enable_content_change(self) -> Option<bool> {
+    pub const fn enable_content_change(self) -> Option<bool> {
         self.enable_content_change
     }
 
-    pub(crate) fn supports_xml_tag(item_tag: &str) -> bool {
+    pub fn supports_xml_tag(item_tag: &str) -> bool {
         matches!(
             item_tag,
             "CommandBar" | "Popup" | "ColumnGroup" | "Pages" | "ButtonGroup"
@@ -6052,17 +6046,17 @@ impl FormSharedContainerContentChangeSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormContainerReadOnlySchema;
+pub struct FormContainerReadOnlySchema;
 
 impl FormContainerReadOnlySchema {
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
         direct_discriminator: Option<&str>,
         options: &[&str],
     ) -> Option<Self> {
-        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+        if wrapper != "22" || field_count < 30 || !(field_count - 30).is_multiple_of(2) {
             return None;
         }
         match (
@@ -6084,15 +6078,15 @@ impl FormContainerReadOnlySchema {
         }
     }
 
-    pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {
+    pub fn read_only(self, fields: &[&str]) -> Option<bool> {
         (fields.get(11).map(|field| field.trim()) == Some("1")).then_some(true)
     }
 }
 
 impl FormChildItemShowTitleSchema {
-    pub(crate) const OPTIONS_SLOT: usize = FormPageSchema::OPTIONS_SLOT;
+    pub const OPTIONS_SLOT: usize = FormPageSchema::OPTIONS_SLOT;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         item_tag: &str,
@@ -6130,7 +6124,7 @@ impl FormChildItemShowTitleSchema {
                 hidden_state_title_back_color_option_slot: None,
             });
         }
-        if wrapper != "22" || field_count < 30 || (field_count - 30) % 2 != 0 {
+        if wrapper != "22" || field_count < 30 || !(field_count - 30).is_multiple_of(2) {
             return None;
         }
         // The usual group's own 29-member option tuple carries a second
@@ -6181,15 +6175,15 @@ impl FormChildItemShowTitleSchema {
         })
     }
 
-    pub(crate) fn show_title(self, options: &[&str]) -> Option<bool> {
+    pub fn show_title(self, options: &[&str]) -> Option<bool> {
         (options.get(self.option_slot)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) const fn back_color_option_slot(self) -> Option<usize> {
+    pub const fn back_color_option_slot(self) -> Option<usize> {
         self.back_color_option_slot
     }
 
-    pub(crate) const fn hidden_state_title_back_color_option_slot(self) -> Option<usize> {
+    pub const fn hidden_state_title_back_color_option_slot(self) -> Option<usize> {
         self.hidden_state_title_back_color_option_slot
     }
 }
@@ -6206,25 +6200,25 @@ impl FormChildItemShowTitleSchema {
 /// hides the 1 400 single-entry bags, 13 of which carry the
 /// `UseForFoldersAndItems` entry under key 0.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootPropertyBagSchema {
+pub struct FormRootPropertyBagSchema {
     entry_count: usize,
 }
 
 impl FormRootPropertyBagSchema {
-    pub(crate) const COUNT_SLOT: usize = 18;
-    pub(crate) const FIRST_ENTRY_SLOT: usize = 19;
+    pub const COUNT_SLOT: usize = 18;
+    pub const FIRST_ENTRY_SLOT: usize = 19;
 
-    pub(crate) fn from_raw_layout(count_field: Option<&str>, field_count: usize) -> Option<Self> {
+    pub fn from_raw_layout(count_field: Option<&str>, field_count: usize) -> Option<Self> {
         let entry_count = count_field?.trim().parse::<usize>().ok()?;
         let required = Self::FIRST_ENTRY_SLOT.checked_add(entry_count.checked_mul(2)?)?;
         (field_count >= required).then_some(Self { entry_count })
     }
 
-    pub(crate) const fn entry_count(self) -> usize {
+    pub const fn entry_count(self) -> usize {
         self.entry_count
     }
 
-    pub(crate) const fn key_slot(self, entry_index: usize) -> usize {
+    pub const fn key_slot(self, entry_index: usize) -> usize {
         Self::FIRST_ENTRY_SLOT + entry_index * 2
     }
 }
@@ -6253,22 +6247,19 @@ impl FormRootPropertyBagSchema {
 /// ЛичныйКабинет/Forms/ФормаДлительнаяОперация}` and
 /// `Catalogs/БланкиОтчетов/Forms/СопоставлениеАналитике`.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootCustomizableSchema {
+pub struct FormRootCustomizableSchema {
     slot: usize,
 }
 
 impl FormRootCustomizableSchema {
     const SLOT: usize = 14;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        field_count: usize,
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, field_count: usize) -> Option<Self> {
         (matches!(root_discriminator, Some("49" | "50")) && field_count > Self::SLOT)
             .then_some(Self { slot: Self::SLOT })
     }
 
-    pub(crate) fn customizable(self, fields: &[&str]) -> Option<bool> {
+    pub fn customizable(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.slot)?.trim() {
             "0" => Some(false),
             _ => None,
@@ -6284,7 +6275,7 @@ impl FormRootCustomizableSchema {
 /// document carries `<Enabled>false</Enabled>` and `1` for the other 5 198 that
 /// omit it - a total function with no third code and no counter-example.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootEnabledSchema {
+pub struct FormRootEnabledSchema {
     slot: usize,
 }
 
@@ -6301,15 +6292,12 @@ impl FormRootEnabledSchema {
     /// no third code and no root disagreeing. Admitting only `50` hid exactly
     /// those two: ERP УХ `Catalogs/{ВидыСобытийОповещений,
     /// КатегорииСобытийОповещений}/Forms/ФормаЭлемента`.
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        field_count: usize,
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, field_count: usize) -> Option<Self> {
         (matches!(root_discriminator, Some("49" | "50")) && field_count > Self::SLOT)
             .then_some(Self { slot: Self::SLOT })
     }
 
-    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+    pub fn enabled(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.slot)?.trim() {
             "0" => Some(false),
             _ => None,
@@ -6326,12 +6314,12 @@ impl FormRootEnabledSchema {
 /// write in `<VariantAppearance>` and to nothing on the other 5 197, the same
 /// score the two neighbouring keys post (25/25 and 14/14, no false positive).
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootVariantAppearanceSchema;
+pub struct FormRootVariantAppearanceSchema;
 
 impl FormRootVariantAppearanceSchema {
-    pub(crate) const PROPERTY_BAG_KEY: &'static str = "20";
+    pub const PROPERTY_BAG_KEY: &'static str = "20";
 
-    pub(crate) fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>) -> Option<Self> {
         matches!(root_discriminator, Some("49" | "50")).then_some(Self)
     }
 }
@@ -6354,22 +6342,19 @@ impl FormRootVariantAppearanceSchema {
 /// (`Report.<…>.Form.<…>` on 4, each of them the naming form itself), so it is
 /// read through the reference index that carries both.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootSettingsStorageSchema {
+pub struct FormRootSettingsStorageSchema {
     slot: usize,
 }
 
 impl FormRootSettingsStorageSchema {
     const SLOT: usize = 8;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        field_count: usize,
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, field_count: usize) -> Option<Self> {
         (matches!(root_discriminator, Some("49") | Some("50")) && field_count > Self::SLOT)
             .then_some(Self { slot: Self::SLOT })
     }
 
-    pub(crate) const fn slot(self) -> usize {
+    pub const fn slot(self) -> usize {
         self.slot
     }
 }
@@ -6403,26 +6388,26 @@ impl FormRootSettingsStorageSchema {
 /// roots spell `<CustomSettingsFolder>3:02023637-…` and two spell
 /// `<GroupList>5:02023637-…`, at ids that no item of those forms declares.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootItemReferenceSchema {
+pub struct FormRootItemReferenceSchema {
     property_bag_key: &'static str,
 }
 
 impl FormRootItemReferenceSchema {
-    pub(crate) const CUSTOM_SETTINGS_FOLDER_KEY: &'static str = "23";
-    pub(crate) const GROUP_LIST_KEY: &'static str = "1";
+    pub const CUSTOM_SETTINGS_FOLDER_KEY: &'static str = "23";
+    pub const GROUP_LIST_KEY: &'static str = "1";
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         root_discriminator: Option<&str>,
         property_bag_key: &'static str,
     ) -> Option<Self> {
         matches!(root_discriminator, Some("49") | Some("50")).then_some(Self { property_bag_key })
     }
 
-    pub(crate) const fn property_bag_key(self) -> &'static str {
+    pub const fn property_bag_key(self) -> &'static str {
         self.property_bag_key
     }
 
-    pub(crate) fn item_id(self, value_fields: &[&str]) -> Option<String> {
+    pub fn item_id(self, value_fields: &[&str]) -> Option<String> {
         match (
             value_fields.first().map(|field| field.trim()),
             value_fields.get(1).map(|field| field.trim()),
@@ -6481,7 +6466,7 @@ impl FormRootItemReferenceSchema {
 /// `extract_form_show_title` (slot 17 -> 18) each arrived at the same
 /// one-member offset independently, from ERP УХ MDM_Management, before the
 /// count behind it was identified.
-pub(crate) fn form_root_trailer_optional_blocks(
+pub fn form_root_trailer_optional_blocks(
     root_discriminator: Option<&str>,
     trailer: &[&str],
 ) -> Option<usize> {
@@ -6510,24 +6495,21 @@ pub(crate) fn form_root_trailer_optional_blocks(
 /// report form's `AutoShowState` instead, which is why the previous bag-keyed
 /// reader never emitted the property on any of the 5 075 roots.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootConversationsRepresentationSchema {
+pub struct FormRootConversationsRepresentationSchema {
     trailer_slot: usize,
 }
 
 impl FormRootConversationsRepresentationSchema {
     const TRAILER_SLOT: usize = 19;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer: &[&str],
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, trailer: &[&str]) -> Option<Self> {
         let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             trailer_slot: Self::TRAILER_SLOT.checked_add(blocks)?,
         })
     }
 
-    pub(crate) fn conversations_representation(self, trailer: &[&str]) -> Option<&'static str> {
+    pub fn conversations_representation(self, trailer: &[&str]) -> Option<&'static str> {
         match trailer.get(self.trailer_slot)?.trim() {
             "1" => Some("Show"),
             "2" => Some("DontShow"),
@@ -6548,7 +6530,7 @@ impl FormRootConversationsRepresentationSchema {
 /// four; the spacing pair and the width read the same shared tables as
 /// `UsualGroup` and `Page`.  The root carried none of the four before.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootGroupingSchema {
+pub struct FormRootGroupingSchema {
     horizontal_spacing_trailer_slot: usize,
     vertical_spacing_trailer_slot: usize,
     collapse_items_by_importance_trailer_slot: usize,
@@ -6561,10 +6543,7 @@ impl FormRootGroupingSchema {
     const VERTICAL_SPACING_SLOT: usize = 10;
     const COLLAPSE_ITEMS_BY_IMPORTANCE_SLOT: usize = 20;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer: &[&str],
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, trailer: &[&str]) -> Option<Self> {
         let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             horizontal_spacing_trailer_slot: Self::HORIZONTAL_SPACING_SLOT.checked_add(blocks)?,
@@ -6574,18 +6553,15 @@ impl FormRootGroupingSchema {
         })
     }
 
-    pub(crate) fn horizontal_spacing(self, trailer: &[&str]) -> Option<&'static str> {
+    pub fn horizontal_spacing(self, trailer: &[&str]) -> Option<&'static str> {
         form_item_spacing_xml(trailer.get(self.horizontal_spacing_trailer_slot)?)
     }
 
-    pub(crate) fn vertical_spacing(self, trailer: &[&str]) -> Option<&'static str> {
+    pub fn vertical_spacing(self, trailer: &[&str]) -> Option<&'static str> {
         form_item_spacing_xml(trailer.get(self.vertical_spacing_trailer_slot)?)
     }
 
-    pub(crate) fn collapse_items_by_importance_variant(
-        self,
-        trailer: &[&str],
-    ) -> Option<&'static str> {
+    pub fn collapse_items_by_importance_variant(self, trailer: &[&str]) -> Option<&'static str> {
         match trailer
             .get(self.collapse_items_by_importance_trailer_slot)?
             .trim()
@@ -6615,7 +6591,7 @@ impl FormRootGroupingSchema {
     /// (`AutoFillCheck`, whose own census records the identical `49`/`50`
     /// split) -- so admitting only `50` was a gate on the discriminator, not on
     /// anything the record says. It cost the element on seven ERP УХ forms.
-    pub(crate) fn child_items_width(
+    pub fn child_items_width(
         root_discriminator: Option<&str>,
         fields: &[&str],
     ) -> Option<&'static str> {
@@ -6627,7 +6603,7 @@ impl FormRootGroupingSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootVerticalScrollSchema {
+pub struct FormRootVerticalScrollSchema {
     qualifier_slot: usize,
     mode_slot: usize,
 }
@@ -6646,10 +6622,7 @@ impl FormRootVerticalScrollSchema {
     const QUALIFIER_SLOT: usize = 5;
     const MODE_SLOT: usize = 15;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer: &[&str],
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, trailer: &[&str]) -> Option<Self> {
         let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             qualifier_slot: Self::QUALIFIER_SLOT.checked_add(blocks)?,
@@ -6657,7 +6630,7 @@ impl FormRootVerticalScrollSchema {
         })
     }
 
-    pub(crate) fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
+    pub fn vertical_scroll(self, trailer: &[&str]) -> Option<&'static str> {
         match (
             trailer.get(self.qualifier_slot).map(|field| field.trim()),
             trailer.get(self.mode_slot).map(|field| field.trim()),
@@ -6670,7 +6643,7 @@ impl FormRootVerticalScrollSchema {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormRootVerticalAlign {
+pub enum FormRootVerticalAlign {
     Top,
     Center,
     Bottom,
@@ -6683,7 +6656,7 @@ impl FormRootVerticalAlign {
     /// the trailer member is `3` on the 5 132 forms without a `<VerticalAlign>`
     /// and `0`/`1`/`2` on exactly the 2/2/3 that say `Top`, `Center` and
     /// `Bottom`, with no counter-example.  Only `Bottom` used to be decoded.
-    pub(crate) fn from_raw_value(value: &str) -> Option<Self> {
+    pub fn from_raw_value(value: &str) -> Option<Self> {
         match value.trim() {
             "0" => Some(Self::Top),
             "1" => Some(Self::Center),
@@ -6692,7 +6665,7 @@ impl FormRootVerticalAlign {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "Top" => Some(Self::Top),
             "Center" => Some(Self::Center),
@@ -6701,7 +6674,7 @@ impl FormRootVerticalAlign {
         }
     }
 
-    pub(crate) const fn raw_value(self) -> &'static str {
+    pub const fn raw_value(self) -> &'static str {
         match self {
             Self::Top => "0",
             Self::Center => "1",
@@ -6709,7 +6682,7 @@ impl FormRootVerticalAlign {
         }
     }
 
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Top => "Top",
             Self::Center => "Center",
@@ -6719,7 +6692,7 @@ impl FormRootVerticalAlign {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootVerticalAlignSchema {
+pub struct FormRootVerticalAlignSchema {
     trailer_slot: usize,
     children_align_trailer_slot: usize,
 }
@@ -6727,10 +6700,7 @@ pub(crate) struct FormRootVerticalAlignSchema {
 impl FormRootVerticalAlignSchema {
     const TRAILER_SLOT: usize = 12;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer: &[&str],
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, trailer: &[&str]) -> Option<Self> {
         let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         Some(Self {
             trailer_slot: Self::TRAILER_SLOT.checked_add(blocks)?,
@@ -6746,11 +6716,11 @@ impl FormRootVerticalAlignSchema {
     /// off their own tuples, so the roots share one table rather than a second.
     const CHILDREN_ALIGN_TRAILER_SLOT: usize = 13;
 
-    pub(crate) fn vertical_align(self, trailer: &[&str]) -> Option<FormRootVerticalAlign> {
+    pub fn vertical_align(self, trailer: &[&str]) -> Option<FormRootVerticalAlign> {
         FormRootVerticalAlign::from_raw_value(trailer.get(self.trailer_slot)?.trim())
     }
 
-    pub(crate) fn children_align(self, trailer: &[&str]) -> Option<&'static str> {
+    pub fn children_align(self, trailer: &[&str]) -> Option<&'static str> {
         match trailer.get(self.children_align_trailer_slot)?.trim() {
             "1" => Some("None"),
             "2" => Some("ItemsLeftTitlesLeft"),
@@ -6762,17 +6732,17 @@ impl FormRootVerticalAlignSchema {
         }
     }
 
-    pub(crate) const fn trailer_slot(self) -> usize {
+    pub const fn trailer_slot(self) -> usize {
         self.trailer_slot
     }
 
-    pub(crate) fn accepts_raw_value(self, value: &str) -> bool {
+    pub fn accepts_raw_value(self, value: &str) -> bool {
         matches!(value.trim(), "0" | "1" | "2" | "3")
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootAutoUrlSchema {
+pub struct FormRootAutoUrlSchema {
     auto_url: Option<bool>,
 }
 
@@ -6821,10 +6791,7 @@ impl FormRootAutoUrlSchema {
     /// they stay fail-closed.
     const AUTO_URL_SLOT_WITHOUT_OPTIONAL_BLOCKS: usize = 3;
 
-    pub(crate) fn from_raw_layout(
-        root_discriminator: Option<&str>,
-        trailer: &[&str],
-    ) -> Option<Self> {
+    pub fn from_raw_layout(root_discriminator: Option<&str>, trailer: &[&str]) -> Option<Self> {
         let blocks = form_root_trailer_optional_blocks(root_discriminator, trailer)?;
         let slot = Self::AUTO_URL_SLOT_WITHOUT_OPTIONAL_BLOCKS.checked_add(blocks)?;
         let auto_url = match trailer.get(slot)?.trim() {
@@ -6835,7 +6802,7 @@ impl FormRootAutoUrlSchema {
         Some(Self { auto_url })
     }
 
-    pub(crate) fn from_legacy_raw_layout(
+    pub fn from_legacy_raw_layout(
         root_discriminator: Option<&str>,
         fields: &[&str],
         uses_property_bag: bool,
@@ -6854,13 +6821,13 @@ impl FormRootAutoUrlSchema {
         Some(Self { auto_url })
     }
 
-    pub(crate) const fn auto_url(self) -> Option<bool> {
+    pub const fn auto_url(self) -> Option<bool> {
         self.auto_url
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormRootGroupSchema {
+pub struct FormRootGroupSchema {
     group: Option<&'static str>,
 }
 
@@ -6868,7 +6835,7 @@ impl FormRootGroupSchema {
     const GROUP_KIND_SLOT: usize = 14;
     const GROUP_VALUE_SLOT: usize = 21;
 
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         root_discriminator: Option<&str>,
         header_group_marker: Option<&str>,
         trailer: &[&str],
@@ -6892,7 +6859,7 @@ impl FormRootGroupSchema {
         Some(Self { group })
     }
 
-    pub(crate) fn from_legacy_raw_layout(
+    pub fn from_legacy_raw_layout(
         root_discriminator: Option<&str>,
         fields: &[&str],
     ) -> Option<Self> {
@@ -6910,13 +6877,13 @@ impl FormRootGroupSchema {
         })
     }
 
-    pub(crate) const fn group(self) -> Option<&'static str> {
+    pub const fn group(self) -> Option<&'static str> {
         self.group
     }
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormSpecialFieldKind {
+pub enum FormSpecialFieldKind {
     ProgressBar,
     TrackBar,
     Chart,
@@ -6924,7 +6891,7 @@ pub(crate) enum FormSpecialFieldKind {
 }
 
 /// Calendar option member 5; the reader publishes Multiple=1 and Interval=2.
-pub(crate) fn form_calendar_selection_mode_code(value: Option<&str>) -> Option<&'static str> {
+pub fn form_calendar_selection_mode_code(value: Option<&str>) -> Option<&'static str> {
     match value {
         None => Some("0"),
         Some("Multiple") => Some("1"),
@@ -6936,7 +6903,7 @@ pub(crate) fn form_calendar_selection_mode_code(value: Option<&str>) -> Option<&
 /// Track-bar option member 11, shared with `FormSpecialFieldSchema::marking_appearance`.
 /// Управление задачами Reports/узПланированиеПроекта/Forms/ФормаУправляемая
 /// stores 0 for DontShow; the omitted/default spelling stores 2.
-pub(crate) fn form_track_bar_marking_appearance_code(value: Option<&str>) -> Option<&'static str> {
+pub fn form_track_bar_marking_appearance_code(value: Option<&str>) -> Option<&'static str> {
     match value {
         None => Some("2"),
         Some("TopLeft") => Some("1"),
@@ -6952,7 +6919,7 @@ const FORM_GANTT_CHART_SHORT_OPTION_BAG: [&str; 12] = [
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormSpecialFieldSchema {
+pub struct FormSpecialFieldSchema {
     kind: FormSpecialFieldKind,
     /// The optional conditional-appearance head shifts every shared field
     /// coordinate by one member, including the two group-alignment slots.
@@ -6963,10 +6930,10 @@ pub(crate) struct FormSpecialFieldSchema {
 }
 
 impl FormSpecialFieldSchema {
-    pub(crate) const OPTIONS_SLOT: usize = 39;
+    pub const OPTIONS_SLOT: usize = 39;
     /// The slot that declares whether a trailing member follows the shared
     /// 59-member field layout, at the record's own top-level offset.
-    pub(crate) const NESTED_ITEM_COUNT_SLOT: usize = 58;
+    pub const NESTED_ITEM_COUNT_SLOT: usize = 58;
 
     /// `wrapper`, `field_count` and `discriminator` are the record's own; the
     /// last three are read at the record's `top_level_offset`, which the caller
@@ -7005,7 +6972,7 @@ impl FormSpecialFieldSchema {
     /// event from it -- which is what the platform writes on the one record
     /// that has it. A revision-`2` bag with any other member is refused rather
     /// than read at revision-`3` coordinates.
-    pub(crate) fn from_raw_layout(
+    pub fn from_raw_layout(
         wrapper: &str,
         field_count: usize,
         discriminator: Option<&str>,
@@ -7062,11 +7029,11 @@ impl FormSpecialFieldSchema {
         })
     }
 
-    pub(crate) const fn gantt_short_option_revision(self) -> bool {
+    pub const fn gantt_short_option_revision(self) -> bool {
         self.gantt_short_option_revision
     }
 
-    pub(crate) const fn xml_tag(self) -> &'static str {
+    pub const fn xml_tag(self) -> &'static str {
         match self.kind {
             FormSpecialFieldKind::ProgressBar => "ProgressBarField",
             FormSpecialFieldKind::TrackBar => "TrackBarField",
@@ -7122,7 +7089,7 @@ impl FormSpecialFieldSchema {
         (value != default && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
-    pub(crate) fn width(self, options: &[&str]) -> Option<String> {
+    pub fn width(self, options: &[&str]) -> Option<String> {
         if self.kind == FormSpecialFieldKind::GanttChart {
             return self.gantt_dimension(options, 1, "50");
         }
@@ -7136,7 +7103,7 @@ impl FormSpecialFieldSchema {
         (is_non_default && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
-    pub(crate) fn height(self, options: &[&str]) -> Option<String> {
+    pub fn height(self, options: &[&str]) -> Option<String> {
         match self.kind {
             FormSpecialFieldKind::TrackBar => Self::track_bar_dimension(options, 2, "2"),
             FormSpecialFieldKind::GanttChart => self.gantt_dimension(options, 2, "10"),
@@ -7144,31 +7111,31 @@ impl FormSpecialFieldSchema {
         }
     }
 
-    pub(crate) fn min_value(self, options: &[&str]) -> Option<String> {
+    pub fn min_value(self, options: &[&str]) -> Option<String> {
         (self.kind == FormSpecialFieldKind::TrackBar)
             .then(|| Self::track_bar_dimension(options, 5, "0"))
             .flatten()
     }
 
-    pub(crate) fn step(self, options: &[&str]) -> Option<String> {
+    pub fn step(self, options: &[&str]) -> Option<String> {
         (self.kind == FormSpecialFieldKind::TrackBar)
             .then(|| Self::track_bar_dimension(options, 7, "1"))
             .flatten()
     }
 
-    pub(crate) fn large_step(self, options: &[&str]) -> Option<String> {
+    pub fn large_step(self, options: &[&str]) -> Option<String> {
         (self.kind == FormSpecialFieldKind::TrackBar)
             .then(|| Self::track_bar_dimension(options, 9, "10"))
             .flatten()
     }
 
-    pub(crate) fn marking_step(self, options: &[&str]) -> Option<String> {
+    pub fn marking_step(self, options: &[&str]) -> Option<String> {
         (self.kind == FormSpecialFieldKind::TrackBar)
             .then(|| Self::track_bar_dimension(options, 10, "5"))
             .flatten()
     }
 
-    pub(crate) fn marking_appearance(self, options: &[&str]) -> Option<&'static str> {
+    pub fn marking_appearance(self, options: &[&str]) -> Option<&'static str> {
         match (self.kind, options.get(11).map(|field| field.trim())) {
             (FormSpecialFieldKind::TrackBar, Some("0")) => Some("DontShow"),
             (FormSpecialFieldKind::TrackBar, Some("1")) => Some("TopLeft"),
@@ -7176,7 +7143,7 @@ impl FormSpecialFieldSchema {
         }
     }
 
-    pub(crate) fn auto_max_width(self, options: &[&str]) -> Option<bool> {
+    pub fn auto_max_width(self, options: &[&str]) -> Option<bool> {
         let slot = match self.kind {
             FormSpecialFieldKind::ProgressBar => 11,
             FormSpecialFieldKind::TrackBar => 13,
@@ -7196,7 +7163,7 @@ impl FormSpecialFieldSchema {
     /// here and all 148 omitted properties have `1`.
     /// The revision-3 Gantt bag uses member 9: Src stores `0` where native
     /// XML publishes false, while the existing default bags store `1`.
-    pub(crate) fn auto_max_height(self, options: &[&str]) -> Option<bool> {
+    pub fn auto_max_height(self, options: &[&str]) -> Option<bool> {
         let slot = match self.kind {
             FormSpecialFieldKind::ProgressBar => 14,
             FormSpecialFieldKind::GanttChart if !self.gantt_short_option_revision => 9,
@@ -7212,7 +7179,7 @@ impl FormSpecialFieldSchema {
     /// `<HorizontalStretch>false</HorizontalStretch>`; the member never carries
     /// any other value on this owner, so the raised state stays unread rather
     /// than guessed.
-    pub(crate) fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
+    pub fn horizontal_stretch(self, options: &[&str]) -> Option<bool> {
         match self.kind {
             FormSpecialFieldKind::TrackBar | FormSpecialFieldKind::ProgressBar
                 if options.get(3).map(|field| field.trim()) == Some("0") =>
@@ -7238,7 +7205,7 @@ impl FormSpecialFieldSchema {
         .then_some(false)
     }
 
-    pub(crate) fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
+    pub fn vertical_stretch(self, options: &[&str]) -> Option<bool> {
         (self.kind == FormSpecialFieldKind::GanttChart)
             .then(|| self.gantt_stretch(options, 4))
             .flatten()
@@ -7251,10 +7218,7 @@ impl FormSpecialFieldSchema {
     /// total function of the platform answer: raw `3` on the 214 items with no
     /// element and raw `1` on exactly the mobile chart written
     /// `<GroupHorizontalAlign>Center</GroupHorizontalAlign>`, with no mismatch.
-    pub(crate) fn group_horizontal_align(
-        self,
-        fields: &[&str],
-    ) -> Option<FormFieldGroupHorizontalAlign> {
+    pub fn group_horizontal_align(self, fields: &[&str]) -> Option<FormFieldGroupHorizontalAlign> {
         FormFieldGroupHorizontalAlign::from_raw_value(fields.get(53 + self.top_level_offset)?)
     }
 
@@ -7263,7 +7227,7 @@ impl FormSpecialFieldSchema {
     /// answer `Center` for an ordinal the corpus never carries here while
     /// answering nothing for the one progress bar that does carry the property -
     /// raw `2`, which the platform writes as `Bottom`.
-    pub(crate) fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn group_vertical_align(self, fields: &[&str]) -> Option<&'static str> {
         match self.kind {
             FormSpecialFieldKind::ProgressBar => form_group_vertical_align_xml(fields.get(54)?),
             // The same shared slot on the Gantt chart: Монитор
@@ -7279,7 +7243,7 @@ impl FormSpecialFieldSchema {
     /// Progress-bar option member 12 is its `MaxWidth`: `40` on the one
     /// 8.5.1.1150 BSP bar written `<MaxWidth>40</MaxWidth>`, `0` on the 20
     /// others (the member beside `AutoMaxWidth`, as on the other kinds).
-    pub(crate) fn max_width(self, options: &[&str]) -> Option<String> {
+    pub fn max_width(self, options: &[&str]) -> Option<String> {
         // The track bar keeps its cap in member 14, behind the `AutoMaxWidth`
         // flag at 13 (1C:Документооборот `ТочностьПоискаРегулирование`:
         // `...,{3,4,{0}},0,20,0,1,0}` writes `<AutoMaxWidth>false` and
@@ -7293,7 +7257,7 @@ impl FormSpecialFieldSchema {
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_string())
     }
 
-    pub(crate) fn max_value(self, options: &[&str]) -> Option<String> {
+    pub fn max_value(self, options: &[&str]) -> Option<String> {
         match self.kind {
             FormSpecialFieldKind::ProgressBar | FormSpecialFieldKind::TrackBar => {
                 Self::track_bar_dimension(options, 6, "100")
@@ -7302,7 +7266,7 @@ impl FormSpecialFieldSchema {
         }
     }
 
-    pub(crate) fn show_percent(self, options: &[&str]) -> Option<bool> {
+    pub fn show_percent(self, options: &[&str]) -> Option<bool> {
         matches!(
             (self.kind, options.get(9).map(|field| field.trim())),
             (FormSpecialFieldKind::ProgressBar, Some("1"))
@@ -7314,7 +7278,7 @@ impl FormSpecialFieldSchema {
     /// 149 wrapper-`37` progress bars in the eight corpora it is `1` on the
     /// 148 bars with no XML property and `0` on the sole bar whose native XML
     /// says `Broken`. Other codes remain unread.
-    pub(crate) fn representation(self, options: &[&str]) -> Option<&'static str> {
+    pub fn representation(self, options: &[&str]) -> Option<&'static str> {
         matches!(
             (self.kind, options.get(8).map(|field| field.trim())),
             (FormSpecialFieldKind::ProgressBar, Some("0"))
@@ -7386,7 +7350,7 @@ impl FormTooltipRepresentationItemKind {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTooltipRepresentationXmlOrder {
+pub enum FormTooltipRepresentationXmlOrder {
     UsualGroupHeader,
     DecorationHeader,
     FieldProperties,
@@ -7397,17 +7361,17 @@ pub(crate) enum FormTooltipRepresentationXmlOrder {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormTooltipRepresentationSchema {
+pub struct FormTooltipRepresentationSchema {
     slot: usize,
 }
 
 impl FormTooltipRepresentationSchema {
-    pub(crate) const fn slot(self) -> usize {
+    pub const fn slot(self) -> usize {
         self.slot
     }
 }
 
-pub(crate) fn form_tooltip_representation_schema(
+pub fn form_tooltip_representation_schema(
     wrapper: &str,
     field_count: usize,
     item_tag: &str,
@@ -7424,7 +7388,7 @@ pub(crate) fn form_tooltip_representation_schema(
         });
     }
     let item_kind = FormTooltipRepresentationItemKind::from_xml_tag(item_tag);
-    if wrapper == "22" && field_count >= 30 && (field_count - 30) % 2 == 0 {
+    if wrapper == "22" && field_count >= 30 && (field_count - 30).is_multiple_of(2) {
         let admitted = matches!(
             (item_kind, direct_discriminator),
             (FormTooltipRepresentationItemKind::Popup, Some("1"))
@@ -7519,7 +7483,7 @@ pub(crate) fn form_tooltip_representation_schema(
     Some(FormTooltipRepresentationSchema { slot })
 }
 
-pub(crate) fn form_tooltip_representation_xml_order(
+pub fn form_tooltip_representation_xml_order(
     item_tag: &str,
 ) -> Option<FormTooltipRepresentationXmlOrder> {
     match FormTooltipRepresentationItemKind::from_xml_tag(item_tag) {
@@ -7596,7 +7560,7 @@ pub(crate) fn form_tooltip_representation_xml_order(
     }
 }
 
-pub(crate) fn form_tooltip_representation_supports_xml_tag(item_tag: &str) -> bool {
+pub fn form_tooltip_representation_supports_xml_tag(item_tag: &str) -> bool {
     !matches!(
         FormTooltipRepresentationItemKind::from_xml_tag(item_tag),
         FormTooltipRepresentationItemKind::Other
@@ -7604,7 +7568,7 @@ pub(crate) fn form_tooltip_representation_supports_xml_tag(item_tag: &str) -> bo
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTooltipRepresentation {
+pub enum FormTooltipRepresentation {
     Omit,
     None,
     Balloon,
@@ -7617,7 +7581,7 @@ pub(crate) enum FormTooltipRepresentation {
 }
 
 impl FormTooltipRepresentation {
-    pub(crate) fn from_raw_scalar(value: &str) -> Option<Self> {
+    pub fn from_raw_scalar(value: &str) -> Option<Self> {
         match value {
             "0" => Some(Self::Omit),
             "1" => Some(Self::None),
@@ -7632,7 +7596,7 @@ impl FormTooltipRepresentation {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "None" => Some(Self::None),
             "Balloon" => Some(Self::Balloon),
@@ -7646,7 +7610,7 @@ impl FormTooltipRepresentation {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Omit => "0",
             Self::None => "1",
@@ -7675,12 +7639,12 @@ impl FormTooltipRepresentation {
     }
 }
 
-pub(crate) fn decode_form_tooltip_representation(value: &str) -> Option<&'static str> {
+pub fn decode_form_tooltip_representation(value: &str) -> Option<&'static str> {
     FormTooltipRepresentation::from_raw_scalar(value)?.xml_value()
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormInputFieldXmlProperty {
+pub enum FormInputFieldXmlProperty {
     DropListButton,
     ChoiceButton,
     ChoiceButtonRepresentation,
@@ -7691,7 +7655,7 @@ pub(crate) enum FormInputFieldXmlProperty {
     ChoiceListButton,
 }
 
-pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty] = &[
+pub const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty] = &[
     FormInputFieldXmlProperty::DropListButton,
     FormInputFieldXmlProperty::ChoiceButton,
     FormInputFieldXmlProperty::ChoiceButtonRepresentation,
@@ -7702,7 +7666,7 @@ pub(crate) const FORM_INPUT_FIELD_BUTTON_XML_ORDER: &[FormInputFieldXmlProperty]
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormInputFieldTailXmlProperty {
+pub enum FormInputFieldTailXmlProperty {
     MultipleValuesFont,
     MultipleValuesBackColor,
     MultipleValuesHyperlink,
@@ -7716,7 +7680,7 @@ pub(crate) enum FormInputFieldTailXmlProperty {
     AutoMarkIncomplete,
 }
 
-pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlProperty] = &[
+pub const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlProperty] = &[
     // `AllowInputEmptyMultipleValues` opens the tail: the one native item that
     // carries it puts it behind `DataPath`, `EditMode`, `Width` and
     // `HorizontalStretch` and ahead of `ExtendedEditMultipleValues`,
@@ -7762,7 +7726,7 @@ pub(crate) const FORM_INPUT_FIELD_TAIL_XML_ORDER: &[FormInputFieldTailXmlPropert
 ];
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableXmlProperty {
+pub enum FormTableXmlProperty {
     Representation,
     HeaderHeight,
     VerticalScrollBar,
@@ -7846,7 +7810,7 @@ pub(crate) enum FormTableXmlProperty {
     AllowGettingCurrentRowURL,
 }
 
-pub(crate) fn normalize_form_table_command_bar_location_xml(value: &str) -> Option<&'static str> {
+pub fn normalize_form_table_command_bar_location_xml(value: &str) -> Option<&'static str> {
     match value {
         "None" => Some("None"),
         "Top" => Some("Top"),
@@ -7855,7 +7819,7 @@ pub(crate) fn normalize_form_table_command_bar_location_xml(value: &str) -> Opti
     }
 }
 
-pub(crate) fn encode_form_table_command_bar_location(value: &str) -> Option<&'static str> {
+pub fn encode_form_table_command_bar_location(value: &str) -> Option<&'static str> {
     match value {
         "None" => Some("0"),
         "Top" => Some("1"),
@@ -7863,7 +7827,7 @@ pub(crate) fn encode_form_table_command_bar_location(value: &str) -> Option<&'st
     }
 }
 
-pub(crate) const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
+pub const FORM_TABLE_XML_ORDER: &[FormTableXmlProperty] = &[
     FormTableXmlProperty::Representation,
     // Native `Table` bodies run `Visible` -> `UserVisible` -> `TitleLocation`
     // (UT 11.5.27.75 native tree: Visible<UserVisible 2, Visible<TitleLocation 1,
@@ -8204,20 +8168,20 @@ impl FormTableSlot {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableHorizontalScrollBar {
+pub enum FormTableHorizontalScrollBar {
     DontUse,
     UseAlways,
 }
 
 impl FormTableHorizontalScrollBar {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::DontUse => "DontUse",
             Self::UseAlways => "UseAlways",
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "DontUse" => Some(Self::DontUse),
             "UseAlways" => Some(Self::UseAlways),
@@ -8225,7 +8189,7 @@ impl FormTableHorizontalScrollBar {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::DontUse => "0",
             Self::UseAlways => "1",
@@ -8239,20 +8203,20 @@ impl FormTableHorizontalScrollBar {
 /// reached by and then spells that many. `{0}` states there is no picture, and
 /// every other count states a walk of that length from the table's own row.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableRowPictureDataPath<'a> {
+pub enum FormTableRowPictureDataPath<'a> {
     Empty,
     Payload(&'a [&'a str]),
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableCurrentRowUse {
+pub enum FormTableCurrentRowUse {
     Choice,
     SelectionPresentation,
     SelectionPresentationAndChoice,
 }
 
 impl FormTableCurrentRowUse {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Choice => "Choice",
             Self::SelectionPresentation => "SelectionPresentation",
@@ -8260,7 +8224,7 @@ impl FormTableCurrentRowUse {
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "Choice" => Some(Self::Choice),
             "SelectionPresentation" => Some(Self::SelectionPresentation),
@@ -8269,7 +8233,7 @@ impl FormTableCurrentRowUse {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Choice => "1",
             Self::SelectionPresentation => "2",
@@ -8279,20 +8243,20 @@ impl FormTableCurrentRowUse {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableSearchOnInput {
+pub enum FormTableSearchOnInput {
     Use,
     DontUse,
 }
 
 impl FormTableSearchOnInput {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Use => "Use",
             Self::DontUse => "DontUse",
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "Use" => Some(Self::Use),
             "DontUse" => Some(Self::DontUse),
@@ -8300,7 +8264,7 @@ impl FormTableSearchOnInput {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Use => "0",
             Self::DontUse => "1",
@@ -8309,20 +8273,20 @@ impl FormTableSearchOnInput {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableInitialListView {
+pub enum FormTableInitialListView {
     Beginning,
     End,
 }
 
 impl FormTableInitialListView {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::Beginning => "Beginning",
             Self::End => "End",
         }
     }
 
-    pub(crate) fn from_xml_value(value: &str) -> Option<Self> {
+    pub fn from_xml_value(value: &str) -> Option<Self> {
         match value {
             "Beginning" => Some(Self::Beginning),
             "End" => Some(Self::End),
@@ -8330,7 +8294,7 @@ impl FormTableInitialListView {
         }
     }
 
-    pub(crate) const fn raw_code(self) -> &'static str {
+    pub const fn raw_code(self) -> &'static str {
         match self {
             Self::Beginning => "0",
             Self::End => "1",
@@ -8339,7 +8303,7 @@ impl FormTableInitialListView {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableSearchStringLocation {
+pub enum FormTableSearchStringLocation {
     None,
     CommandBar,
     Top,
@@ -8349,7 +8313,7 @@ pub(crate) enum FormTableSearchStringLocation {
 }
 
 impl FormTableSearchStringLocation {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::None => "None",
             Self::CommandBar => "CommandBar",
@@ -8362,14 +8326,14 @@ impl FormTableSearchStringLocation {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableViewStatusLocation {
+pub enum FormTableViewStatusLocation {
     None,
     Top,
     Bottom,
 }
 
 impl FormTableViewStatusLocation {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::None => "None",
             Self::Top => "Top",
@@ -8379,13 +8343,13 @@ impl FormTableViewStatusLocation {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableSearchControlLocation {
+pub enum FormTableSearchControlLocation {
     None,
     CommandBar,
 }
 
 impl FormTableSearchControlLocation {
-    pub(crate) const fn xml_value(self) -> &'static str {
+    pub const fn xml_value(self) -> &'static str {
         match self {
             Self::None => "None",
             Self::CommandBar => "CommandBar",
@@ -8434,7 +8398,7 @@ impl FormTableSkipOnInput {
 /// the strict `FormTableSchema` shape test -- it reads cleanly on all 4 543
 /// native `Table` items of UT 11.5.27.75 -- so the readers that only need one
 /// bag key take this function rather than a schema they do not otherwise use.
-pub(crate) fn form_table_counted_property_bag_bounds(fields: &[&str]) -> Option<(usize, usize)> {
+pub fn form_table_counted_property_bag_bounds(fields: &[&str]) -> Option<(usize, usize)> {
     const PAIR_COUNT_SLOT: usize = 54;
     let pair_count = fields.get(PAIR_COUNT_SLOT)?.trim().parse::<usize>().ok()?;
     let start = PAIR_COUNT_SLOT.checked_add(1)?;
@@ -8443,7 +8407,7 @@ pub(crate) fn form_table_counted_property_bag_bounds(fields: &[&str]) -> Option<
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) struct FormTableSchema;
+pub struct FormTableSchema;
 
 impl FormTableSchema {
     const BASE_FIELD_COUNT: usize = 99;
@@ -8519,7 +8483,7 @@ impl FormTableSchema {
     /// counter-example.
     const REFRESH_REQUEST_REVERSE_OFFSET: usize = 16;
 
-    pub(crate) fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
+    pub fn from_raw_layout(wrapper: &str, item_tag: &str, fields: &[&str]) -> Option<Self> {
         if wrapper != "55"
             || item_tag != "Table"
             || fields.first().map(|field| field.trim()) != Some("55")
@@ -8528,7 +8492,7 @@ impl FormTableSchema {
             return None;
         }
         // The suffix combines several paired sections; the bag at slot 54 is only one of them.
-        if (fields.len() - Self::BASE_FIELD_COUNT) % 2 != 0 {
+        if !(fields.len() - Self::BASE_FIELD_COUNT).is_multiple_of(2) {
             return None;
         }
 
@@ -8580,15 +8544,15 @@ impl FormTableSchema {
         Some(Self)
     }
 
-    pub(crate) const fn counted_property_bag_pair_count_slot(self) -> usize {
+    pub const fn counted_property_bag_pair_count_slot(self) -> usize {
         Self::COUNTED_PROPERTY_BAG_PAIR_COUNT_SLOT
     }
 
-    pub(crate) fn counted_property_bag_bounds(self, fields: &[&str]) -> Option<(usize, usize)> {
+    pub fn counted_property_bag_bounds(self, fields: &[&str]) -> Option<(usize, usize)> {
         form_table_counted_property_bag_bounds(fields)
     }
 
-    pub(crate) fn counted_property_bag_value_slot(
+    pub fn counted_property_bag_value_slot(
         self,
         fields: &[&str],
         expected_key: FormTablePropertyBagKey,
@@ -8612,11 +8576,11 @@ impl FormTableSchema {
         result
     }
 
-    pub(crate) const fn tooltip_slot(self) -> usize {
+    pub const fn tooltip_slot(self) -> usize {
         10
     }
 
-    pub(crate) fn tooltip_representation_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn tooltip_representation_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::TOOLTIP_REPRESENTATION_REVERSE_OFFSET)?;
@@ -8624,7 +8588,7 @@ impl FormTableSchema {
         Some(slot)
     }
 
-    pub(crate) fn title_location(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn title_location(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(6)?.trim() {
             "1" => Some("Auto"),
             // Census of all 19 078 tables: code 2 occurs once and that table
@@ -8640,11 +8604,11 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) const fn data_path_slot(self) -> usize {
+    pub const fn data_path_slot(self) -> usize {
         Self::DATA_PATH_SLOT
     }
 
-    pub(crate) const fn row_picture_data_path_slot(self) -> usize {
+    pub const fn row_picture_data_path_slot(self) -> usize {
         Self::ROW_PICTURE_DATA_PATH_SLOT
     }
 
@@ -8657,7 +8621,7 @@ impl FormTableSchema {
     /// and the platform writes
     /// `<RowPictureDataPath>Объект.Обращения.Обращение.DeletionMark</RowPictureDataPath>`.
     /// The arity bound refused that slot whole and the element went unwritten.
-    pub(crate) fn row_picture_data_path<'a>(
+    pub fn row_picture_data_path<'a>(
         self,
         value: &'a [&'a str],
     ) -> Option<FormTableRowPictureDataPath<'a>> {
@@ -8672,26 +8636,23 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) const fn rows_picture_slot(self) -> usize {
+    pub const fn rows_picture_slot(self) -> usize {
         Self::ROWS_PICTURE_SLOT
     }
 
-    pub(crate) const fn back_color_slot(self) -> usize {
+    pub const fn back_color_slot(self) -> usize {
         Self::BACK_COLOR_SLOT
     }
 
-    pub(crate) const fn text_color_slot(self) -> usize {
+    pub const fn text_color_slot(self) -> usize {
         Self::TEXT_COLOR_SLOT
     }
 
-    pub(crate) const fn border_color_slot(self) -> usize {
+    pub const fn border_color_slot(self) -> usize {
         Self::BORDER_COLOR_SLOT
     }
 
-    pub(crate) fn search_string_location(
-        self,
-        fields: &[&str],
-    ) -> Option<FormTableSearchStringLocation> {
+    pub fn search_string_location(self, fields: &[&str]) -> Option<FormTableSearchStringLocation> {
         let slot = fields
             .len()
             .checked_sub(Self::SEARCH_STRING_LOCATION_REVERSE_OFFSET)?;
@@ -8718,10 +8679,7 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn view_status_location(
-        self,
-        fields: &[&str],
-    ) -> Option<FormTableViewStatusLocation> {
+    pub fn view_status_location(self, fields: &[&str]) -> Option<FormTableViewStatusLocation> {
         let slot = fields
             .len()
             .checked_sub(Self::VIEW_STATUS_LOCATION_REVERSE_OFFSET)?;
@@ -8742,7 +8700,7 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn search_control_location(
+    pub fn search_control_location(
         self,
         fields: &[&str],
     ) -> Option<FormTableSearchControlLocation> {
@@ -8756,7 +8714,7 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn behavior_on_horizontal_compression_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn behavior_on_horizontal_compression_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET)?;
@@ -8767,10 +8725,7 @@ impl FormTableSchema {
     /// `MoveItemsByImportance` (raw `2`); raw `0` is the platform default and
     /// writes nothing. See `BEHAVIOR_ON_HORIZONTAL_COMPRESSION_REVERSE_OFFSET`
     /// for the evidence.
-    pub(crate) fn behavior_on_horizontal_compression(
-        self,
-        fields: &[&str],
-    ) -> Option<&'static str> {
+    pub fn behavior_on_horizontal_compression(self, fields: &[&str]) -> Option<&'static str> {
         // `1` is `HideItemsByImportance`: ЛИМС КОРП
         // `Documents/лимсРегистрацияРезультатовКонтроля/Forms/ФормаДокумента`
         // `ДеревоНормативов` holds it and the platform writes that spelling.
@@ -8784,14 +8739,14 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn current_row_use_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn current_row_use_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::CURRENT_ROW_USE_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2" | "3").then_some(slot)
     }
 
-    pub(crate) fn current_row_use(self, fields: &[&str]) -> Option<FormTableCurrentRowUse> {
+    pub fn current_row_use(self, fields: &[&str]) -> Option<FormTableCurrentRowUse> {
         match fields.get(self.current_row_use_slot(fields)?)?.trim() {
             "1" => Some(FormTableCurrentRowUse::Choice),
             "2" => Some(FormTableCurrentRowUse::SelectionPresentation),
@@ -8800,25 +8755,25 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn auto_max_width_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn auto_max_width_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::AUTO_MAX_WIDTH_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1").then_some(slot)
     }
 
-    pub(crate) fn auto_max_width(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_max_width(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.auto_max_width_slot(fields)?)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn auto_add_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn auto_add_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::AUTO_ADD_INCOMPLETE_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
-    pub(crate) fn auto_add_incomplete(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_add_incomplete(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.auto_add_incomplete_slot(fields)?)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -8827,14 +8782,14 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn auto_mark_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn auto_mark_incomplete_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::AUTO_MARK_INCOMPLETE_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
-    pub(crate) fn auto_mark_incomplete(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_mark_incomplete(self, fields: &[&str]) -> Option<bool> {
         match fields.get(self.auto_mark_incomplete_slot(fields)?)?.trim() {
             "0" => Some(false),
             "1" => Some(true),
@@ -8842,11 +8797,11 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn enabled(self, fields: &[&str]) -> Option<bool> {
+    pub fn enabled(self, fields: &[&str]) -> Option<bool> {
         (fields.get(Self::ENABLED_SLOT)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn height_control_variant(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn height_control_variant(self, fields: &[&str]) -> Option<&'static str> {
         let slot = fields
             .len()
             .checked_sub(Self::HEIGHT_CONTROL_VARIANT_REVERSE_OFFSET)?;
@@ -8858,14 +8813,14 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn auto_max_rows_count(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_max_rows_count(self, fields: &[&str]) -> Option<bool> {
         let slot = fields
             .len()
             .checked_sub(Self::AUTO_MAX_ROWS_COUNT_REVERSE_OFFSET)?;
         (fields.get(slot)?.trim() == "0").then_some(false)
     }
 
-    pub(crate) fn max_rows_count(self, fields: &[&str]) -> Option<String> {
+    pub fn max_rows_count(self, fields: &[&str]) -> Option<String> {
         let slot = fields
             .len()
             .checked_sub(Self::MAX_ROWS_COUNT_REVERSE_OFFSET)?;
@@ -8881,21 +8836,21 @@ impl FormTableSchema {
     /// all 5 that carry one; slot 40 is `0` on the 4 536 without an
     /// `<Output>`, `1` on the 5 that say `Enable` and `2` on the one that says
     /// `Disable`.
-    pub(crate) fn title_height(self, fields: &[&str]) -> Option<String> {
+    pub fn title_height(self, fields: &[&str]) -> Option<String> {
         let value = fields.get(Self::TITLE_HEIGHT_SLOT)?.trim();
         (value != "0" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
-    pub(crate) fn footer_height(self, fields: &[&str]) -> Option<String> {
+    pub fn footer_height(self, fields: &[&str]) -> Option<String> {
         let value = fields.get(Self::FOOTER_HEIGHT_SLOT)?.trim();
         (value != "1" && value.parse::<u32>().is_ok()).then(|| value.to_owned())
     }
 
-    pub(crate) fn output(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn output(self, fields: &[&str]) -> Option<&'static str> {
         form_output_code(fields.get(Self::OUTPUT_SLOT).copied())
     }
 
-    pub(crate) fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn refresh_request(self, fields: &[&str]) -> Option<&'static str> {
         let slot = fields
             .len()
             .checked_sub(Self::REFRESH_REQUEST_REVERSE_OFFSET)?;
@@ -8913,54 +8868,54 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
+    pub fn rows_picture(self, value: &[&str]) -> Option<FormPictureValueSchema> {
         FormPictureValueSchema::from_raw_layout(value)
     }
 
-    pub(crate) fn autofill(self, fields: &[&str]) -> Option<bool> {
+    pub fn autofill(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::Autofill)
     }
 
-    pub(crate) fn read_only(self, fields: &[&str]) -> Option<bool> {
+    pub fn read_only(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::ReadOnly)
     }
 
-    pub(crate) fn default_item(self, fields: &[&str]) -> Option<bool> {
+    pub fn default_item(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::DefaultItem)
     }
 
-    pub(crate) fn change_row_set(self, fields: &[&str]) -> Option<bool> {
+    pub fn change_row_set(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::ChangeRowSet)
     }
 
-    pub(crate) fn change_row_order(self, fields: &[&str]) -> Option<bool> {
+    pub fn change_row_order(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::ChangeRowOrder)
     }
 
-    pub(crate) fn width(self, fields: &[&str]) -> Option<String> {
+    pub fn width(self, fields: &[&str]) -> Option<String> {
         self.non_zero_u32(fields, FormTableSlot::Width)
     }
 
-    pub(crate) fn height(self, fields: &[&str]) -> Option<String> {
+    pub fn height(self, fields: &[&str]) -> Option<String> {
         self.non_zero_u32(fields, FormTableSlot::Height)
     }
 
-    pub(crate) fn choice_mode(self, fields: &[&str]) -> Option<bool> {
+    pub fn choice_mode(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::ChoiceMode)
     }
 
-    pub(crate) fn multiple_choice_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn multiple_choice_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::MULTIPLE_CHOICE_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1").then_some(slot)
     }
 
-    pub(crate) fn multiple_choice(self, fields: &[&str]) -> Option<bool> {
+    pub fn multiple_choice(self, fields: &[&str]) -> Option<bool> {
         (fields.get(self.multiple_choice_slot(fields)?)?.trim() == "1").then_some(true)
     }
 
-    pub(crate) fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn row_input_mode(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(FormTableSlot::RowInputMode.index())?.trim() {
             "1" => Some("EndOfWindow"),
             "2" => Some("AfterCurrentRow"),
@@ -8969,30 +8924,27 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn selection_mode(self, fields: &[&str]) -> Option<&'static str> {
         (fields.get(FormTableSlot::SelectionMode.index())?.trim() == "0").then_some("SingleRow")
     }
 
-    pub(crate) fn row_selection_mode(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn row_selection_mode(self, fields: &[&str]) -> Option<&'static str> {
         (fields.get(FormTableSlot::RowSelectionMode.index())?.trim() == "1").then_some("Row")
     }
 
-    pub(crate) fn header(self, fields: &[&str]) -> Option<bool> {
+    pub fn header(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::Header)
     }
 
-    pub(crate) fn footer(self, fields: &[&str]) -> Option<bool> {
+    pub fn footer(self, fields: &[&str]) -> Option<bool> {
         (fields.get(FormTableSlot::Footer.index())?.trim() == "1").then_some(true)
     }
 
-    pub(crate) const fn horizontal_scroll_bar_slot(self) -> usize {
+    pub const fn horizontal_scroll_bar_slot(self) -> usize {
         FormTableSlot::HorizontalScrollBar.index()
     }
 
-    pub(crate) fn horizontal_scroll_bar(
-        self,
-        fields: &[&str],
-    ) -> Option<FormTableHorizontalScrollBar> {
+    pub fn horizontal_scroll_bar(self, fields: &[&str]) -> Option<FormTableHorizontalScrollBar> {
         match fields.get(self.horizontal_scroll_bar_slot())?.trim() {
             "0" => Some(FormTableHorizontalScrollBar::DontUse),
             "1" => Some(FormTableHorizontalScrollBar::UseAlways),
@@ -9000,31 +8952,31 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn horizontal_lines(self, fields: &[&str]) -> Option<bool> {
+    pub fn horizontal_lines(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::HorizontalLines)
     }
 
-    pub(crate) fn vertical_lines(self, fields: &[&str]) -> Option<bool> {
+    pub fn vertical_lines(self, fields: &[&str]) -> Option<bool> {
         self.explicit_false(fields, FormTableSlot::VerticalLines)
     }
 
-    pub(crate) fn use_alternation_row_color(self, fields: &[&str]) -> Option<bool> {
+    pub fn use_alternation_row_color(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::UseAlternationRowColor)
     }
 
-    pub(crate) fn auto_insert_new_row(self, fields: &[&str]) -> Option<bool> {
+    pub fn auto_insert_new_row(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::AutoInsertNewRow)
     }
 
-    pub(crate) fn enable_start_drag(self, fields: &[&str]) -> Option<bool> {
+    pub fn enable_start_drag(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::EnableStartDrag)
     }
 
-    pub(crate) fn enable_drag(self, fields: &[&str]) -> Option<bool> {
+    pub fn enable_drag(self, fields: &[&str]) -> Option<bool> {
         self.explicit_true(fields, FormTableSlot::EnableDrag)
     }
 
-    pub(crate) fn file_drag_mode_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn file_drag_mode_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::FILE_DRAG_MODE_REVERSE_OFFSET)?;
@@ -9032,21 +8984,21 @@ impl FormTableSchema {
         Some(slot)
     }
 
-    pub(crate) fn file_drag_mode_raw_code(self, value: &str) -> Option<&'static str> {
+    pub fn file_drag_mode_raw_code(self, value: &str) -> Option<&'static str> {
         match value {
             "AsFile" => Some("0"),
             _ => None,
         }
     }
 
-    pub(crate) fn file_drag_mode(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn file_drag_mode(self, fields: &[&str]) -> Option<&'static str> {
         match FormTableFileDragMode::from_raw(fields.get(self.file_drag_mode_slot(fields)?)?)? {
             FormTableFileDragMode::AsFile => Some("AsFile"),
             FormTableFileDragMode::Omit => None,
         }
     }
 
-    pub(crate) fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
+    pub fn skip_on_input(self, fields: &[&str]) -> Option<bool> {
         match FormTableSkipOnInput::from_raw(Self::reverse_field(
             fields,
             Self::SKIP_ON_INPUT_REVERSE_OFFSET,
@@ -9057,14 +9009,14 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn search_on_input_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn search_on_input_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = fields
             .len()
             .checked_sub(Self::SEARCH_ON_INPUT_REVERSE_OFFSET)?;
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
-    pub(crate) fn search_on_input(self, fields: &[&str]) -> Option<FormTableSearchOnInput> {
+    pub fn search_on_input(self, fields: &[&str]) -> Option<FormTableSearchOnInput> {
         match fields.get(self.search_on_input_slot(fields)?)?.trim() {
             "0" => Some(FormTableSearchOnInput::Use),
             "1" => Some(FormTableSearchOnInput::DontUse),
@@ -9072,12 +9024,12 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn initial_list_view_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn initial_list_view_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = FormTableSlot::InitialListView.index();
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
-    pub(crate) fn initial_list_view(self, fields: &[&str]) -> Option<FormTableInitialListView> {
+    pub fn initial_list_view(self, fields: &[&str]) -> Option<FormTableInitialListView> {
         match fields.get(self.initial_list_view_slot(fields)?)?.trim() {
             "0" => Some(FormTableInitialListView::Beginning),
             "1" => Some(FormTableInitialListView::End),
@@ -9085,12 +9037,12 @@ impl FormTableSchema {
         }
     }
 
-    pub(crate) fn initial_tree_view_slot(self, fields: &[&str]) -> Option<usize> {
+    pub fn initial_tree_view_slot(self, fields: &[&str]) -> Option<usize> {
         let slot = FormTableSlot::InitialTreeView.index();
         matches!(fields.get(slot)?.trim(), "0" | "1" | "2").then_some(slot)
     }
 
-    pub(crate) fn initial_tree_view(self, fields: &[&str]) -> Option<&'static str> {
+    pub fn initial_tree_view(self, fields: &[&str]) -> Option<&'static str> {
         match fields.get(self.initial_tree_view_slot(fields)?)?.trim() {
             "1" => Some("ExpandTopLevel"),
             "2" => Some("ExpandAllLevels"),
@@ -9225,7 +9177,7 @@ impl FormSpreadsheetDocumentFieldProperties {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableRootPropertyBagKey {
+pub enum FormTableRootPropertyBagKey {
     RestoreCurrentRow,
     TopLevelParent,
     ShowRoot,
@@ -9233,7 +9185,7 @@ pub(crate) enum FormTableRootPropertyBagKey {
 }
 
 impl FormTableRootPropertyBagKey {
-    pub(crate) const fn key(self) -> usize {
+    pub const fn key(self) -> usize {
         match self {
             Self::RestoreCurrentRow => 9,
             Self::TopLevelParent => 10,
@@ -9244,7 +9196,7 @@ impl FormTableRootPropertyBagKey {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTablePropertyBagKey {
+pub enum FormTablePropertyBagKey {
     AutoRefresh,
     AutoRefreshPeriod,
     Period,
@@ -9261,7 +9213,7 @@ pub(crate) enum FormTablePropertyBagKey {
 }
 
 impl FormTablePropertyBagKey {
-    pub(crate) const fn key(self) -> &'static str {
+    pub const fn key(self) -> &'static str {
         match self {
             Self::AutoRefresh => "5",
             Self::AutoRefreshPeriod => "6",
@@ -9289,12 +9241,12 @@ impl FormTablePropertyBagKey {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormTableOrdinaryTailKey {
+pub enum FormTableOrdinaryTailKey {
     RowFilter,
 }
 
 impl FormTableOrdinaryTailKey {
-    pub(crate) const fn key(self) -> &'static str {
+    pub const fn key(self) -> &'static str {
         match self {
             Self::RowFilter => "13",
         }
@@ -9302,7 +9254,7 @@ impl FormTableOrdinaryTailKey {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormInputFieldExtendedOptionSlot {
+pub enum FormInputFieldExtendedOptionSlot {
     ChoiceList,
     Width,
     Height,
@@ -9366,7 +9318,7 @@ pub(crate) enum FormInputFieldExtendedOptionSlot {
 }
 
 impl FormInputFieldExtendedOptionSlot {
-    pub(crate) const fn index(self) -> usize {
+    pub const fn index(self) -> usize {
         match self {
             Self::ChoiceList => 1,
             Self::Width => 2,
@@ -9502,7 +9454,7 @@ impl FormInputFieldExtendedOptionSlot {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormFieldTopLevelSlot {
+pub enum FormFieldTopLevelSlot {
     DefaultItem,
     TitleTextColor,
     TitleFont,
@@ -9511,7 +9463,7 @@ pub(crate) enum FormFieldTopLevelSlot {
 }
 
 impl FormFieldTopLevelSlot {
-    pub(crate) const fn index(self, top_level_offset: usize) -> usize {
+    pub const fn index(self, top_level_offset: usize) -> usize {
         match self {
             Self::DefaultItem => 16 + top_level_offset,
             // The title colour is the slot immediately ahead of the title font,
@@ -9535,7 +9487,7 @@ impl FormFieldTopLevelSlot {
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-pub(crate) enum FormLabelFieldOptionSlot {
+pub enum FormLabelFieldOptionSlot {
     Width,
     Height,
     HorizontalStretch,
@@ -9561,7 +9513,7 @@ impl FormLabelFieldOptionSlot {
     /// platform writes on the 8 337 `LabelField` items of the native
     /// "1С:Управление торговлей 11.5.27.75" form dumps, with no misses and no
     /// false positives on the items that carry none of them.
-    pub(crate) const fn index(self) -> usize {
+    pub const fn index(self) -> usize {
         match self {
             Self::Width => 1,
             Self::Height => 2,
@@ -9793,7 +9745,7 @@ mod table_tail_property_tests {
     /// field `55`, 99 base fields plus an even-sized suffix, every slot the
     /// layout gate reads holding a code it accepts.
     fn table_fields(len: usize) -> Vec<&'static str> {
-        assert!(len >= 99 && (len - 99) % 2 == 0);
+        assert!(len >= 99 && (len - 99).is_multiple_of(2));
         let mut fields = vec!["0"; len];
         fields[0] = "55";
         // FormTableSlot codes the gate insists on.
@@ -9976,55 +9928,55 @@ mod track_bar_extent_tests {
 
 /// List row operations belong to a main attribute even when the raw form
 /// command set retains them on a form without one (LIMS selection forms).
-pub(crate) fn form_list_row_command_requires_main_attribute(command: &str) -> bool {
+pub fn form_list_row_command_requires_main_attribute(command: &str) -> bool {
     matches!(command, "Change" | "Choose" | "Copy" | "Create" | "Delete")
 }
 
 /// Font mask revisions 7 and 8 have the same member ordering. Revision 8
 /// occurs in 8.3.27 forms and must retain the revision 7 interpretation.
-pub(crate) struct FormFontMaskLayout;
+pub struct FormFontMaskLayout;
 impl FormFontMaskLayout {
-    pub(crate) fn recognizes_revision(revision: &str) -> bool {
+    pub fn recognizes_revision(revision: &str) -> bool {
         matches!(revision, "7" | "8")
     }
 }
 
 /// Percent scales serialize only when they differ from the 100% default.
-pub(crate) fn form_nondefault_percent_scale(value: &str) -> Option<String> {
+pub fn form_nondefault_percent_scale(value: &str) -> Option<String> {
     (value != "100" && value.parse::<u32>().is_ok()).then(|| value.to_string())
 }
 
 /// A qualified query member cannot start a clause. Classifying the lexical
 /// token keeps the binding walker independent of the query punctuation.
-pub(crate) enum FormQueryLexeme {
+pub enum FormQueryLexeme {
     MemberSeparator,
     Other,
 }
 impl FormQueryLexeme {
-    pub(crate) fn classify(token: &str) -> Self {
+    pub fn classify(token: &str) -> Self {
         match token {
             "." => Self::MemberSeparator,
             _ => Self::Other,
         }
     }
-    pub(crate) fn is_member_separator(self) -> bool {
+    pub fn is_member_separator(self) -> bool {
         matches!(self, Self::MemberSeparator)
     }
 }
 
 /// Only input fields own the multiple-value and metadata-member binding bag.
-pub(crate) struct FormInputBindingLayout;
+pub struct FormInputBindingLayout;
 impl FormInputBindingLayout {
-    pub(crate) fn applies_to(tag: &str) -> bool {
+    pub fn applies_to(tag: &str) -> bool {
         tag == "InputField"
     }
 }
 
 /// The extended button trailer has a command uniqueness flag two members
 /// before its end; compact button layouts have no such member.
-pub(crate) struct FormButtonCommandUniquenessSchema;
+pub struct FormButtonCommandUniquenessSchema;
 impl FormButtonCommandUniquenessSchema {
-    pub(crate) fn decode(tag: &str, extended: bool, fields: &[&str]) -> Option<bool> {
+    pub fn decode(tag: &str, extended: bool, fields: &[&str]) -> Option<bool> {
         (tag == "Button" && extended)
             .then(|| fields.len().checked_sub(2))
             .flatten()
@@ -10036,25 +9988,25 @@ impl FormButtonCommandUniquenessSchema {
 /// Current-row ownership is stored in two distinct container option layouts.
 /// Usual groups use member 25; the six-member revision 4 Pages bag uses member 3.
 #[derive(Clone, Copy)]
-pub(crate) enum FormContainerCurrentRowSchema {
+pub enum FormContainerCurrentRowSchema {
     UsualGroup,
     Pages,
 }
 impl FormContainerCurrentRowSchema {
-    pub(crate) fn from_tag(tag: &str) -> Option<Self> {
+    pub fn from_tag(tag: &str) -> Option<Self> {
         match tag {
             "UsualGroup" => Some(Self::UsualGroup),
             "Pages" => Some(Self::Pages),
             _ => None,
         }
     }
-    pub(crate) const fn options_slot(self) -> usize {
+    pub const fn options_slot(self) -> usize {
         20
     }
-    pub(crate) const fn is_pages(self) -> bool {
+    pub const fn is_pages(self) -> bool {
         matches!(self, Self::Pages)
     }
-    pub(crate) fn decode(self, members: &[&str]) -> Option<&'static str> {
+    pub fn decode(self, members: &[&str]) -> Option<&'static str> {
         match self {
             Self::UsualGroup => match members.get(25)?.trim() {
                 "0" => Some("Use"),
@@ -10071,31 +10023,31 @@ impl FormContainerCurrentRowSchema {
 
 /// Built-in binding members have owner-specific physical markers. Period
 /// stays physical when undeclared; Ref preserves the referenced owner type.
-pub(crate) enum FormStandardBindingMember {
+pub enum FormStandardBindingMember {
     Period,
     Reference,
 }
 impl FormStandardBindingMember {
-    pub(crate) const fn marker(self) -> &'static str {
+    pub const fn marker(self) -> &'static str {
         match self {
             Self::Period => "-2",
             Self::Reference => "-5",
         }
     }
-    pub(crate) const fn name(self) -> &'static str {
+    pub const fn name(self) -> &'static str {
         match self {
             Self::Period => "Period",
             Self::Reference => "Ref",
         }
     }
-    pub(crate) fn retains_reference_type(name: &str) -> bool {
+    pub fn retains_reference_type(name: &str) -> bool {
         name == Self::Reference.name()
     }
 }
 
 /// Planner standard commands are an item-scoped registry, independent of the
 /// actual form name or item id. The dated planner corpus records Preview.
-pub(crate) fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> {
+pub fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'static str> {
     match uuid {
         "2c75e90f-36f0-48c8-913d-0d92afdb4b93" => Some("Preview"),
         _ => None,
@@ -10103,9 +10055,9 @@ pub(crate) fn form_planner_standard_command_suffix(uuid: &str) -> Option<&'stati
 }
 
 /// Chart revision 75 adds eight color tuples after the revision 74 payload.
-pub(crate) struct FormChartColorTailLayout;
+pub struct FormChartColorTailLayout;
 impl FormChartColorTailLayout {
-    pub(crate) fn payload_end(fields: &[&str], compact: fn(&str) -> String) -> Option<usize> {
+    pub fn payload_end(fields: &[&str], compact: fn(&str) -> String) -> Option<usize> {
         let cut = fields.len().checked_sub(8)?;
         fields[cut..]
             .iter()
@@ -10117,13 +10069,13 @@ impl FormChartColorTailLayout {
 /// Canonical form scalars that have more than one physical placement.
 /// Callers choose their measured order; this boundary owns their XML QName
 /// and CRLF spelling. Values have already been escaped by the common writer.
-pub(crate) enum FormScalarXmlProperty {
+pub enum FormScalarXmlProperty {
     Scale,
     CurrentRowUse,
     AutoCorrectionOnTextInput,
 }
 impl FormScalarXmlProperty {
-    pub(crate) fn emit(self, xml: &mut String, tab: &str, escaped_value: &str) {
+    pub fn emit(self, xml: &mut String, tab: &str, escaped_value: &str) {
         let name = match self {
             Self::Scale => "Scale",
             Self::CurrentRowUse => "CurrentRowUse",
@@ -10133,23 +10085,23 @@ impl FormScalarXmlProperty {
     }
 }
 
-pub(crate) struct FormPlannerDatedLabel {
-    pub(crate) key: String,
-    pub(crate) line_color: String,
-    pub(crate) text_color: String,
+pub struct FormPlannerDatedLabel {
+    pub key: String,
+    pub line_color: String,
+    pub text_color: String,
 }
 
 /// Dated labels carry empty, unformatted text and two independent colors.
 /// The schema owns the versioned layout and the corresponding canonical XML;
 /// physical adapters supply only decoded dates, colors and tick counts.
-pub(crate) struct FormPlannerDatedLabelsSchema;
+pub struct FormPlannerDatedLabelsSchema;
 impl FormPlannerDatedLabelsSchema {
-    pub(crate) fn recognizes_record(record: &[&str], count: usize, limit: usize) -> bool {
+    pub fn recognizes_record(record: &[&str], count: usize, limit: usize) -> bool {
         record.first().is_some_and(|version| version.trim() == "1")
             && count <= limit
             && record.len() == 3 + 2 * count
     }
-    pub(crate) fn recognizes_label(compact: &[String]) -> bool {
+    pub fn recognizes_label(compact: &[String]) -> bool {
         compact.len() == 7
             && compact[0] == "5"
             && compact[1] == "{0}"
@@ -10157,7 +10109,7 @@ impl FormPlannerDatedLabelsSchema {
             && compact[3] == "{\"U\"}"
             && compact[6] == "{1,{1,0},0}"
     }
-    pub(crate) fn emit(labels: &[FormPlannerDatedLabel], ticks: &str, indent: usize) -> String {
+    pub fn emit(labels: &[FormPlannerDatedLabel], ticks: &str, indent: usize) -> String {
         let tab = "\t".repeat(indent);
         let mut xml = format!("{tab}<labels>\r\n");
         for label in labels {

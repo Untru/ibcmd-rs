@@ -2,7 +2,7 @@
 //! fixture is a configuration built and dumped by 8.3.27.2214
 //! (`_onecdec/make_search_form_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -3,7 +3,7 @@
 //! Ext/MainSectionCommandInterface.xml, built and dumped by 8.3.27.2214
 //! (`_onecdec/make_empty_root_interface_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -66,7 +66,7 @@ After independent SOURCE review, ROOT may run the named ordinary target using
 its owned build/FIFO context:
 
 ```powershell
-cargo test --locked --offline --test cache_insertion_trace -- --test-threads=2
+cargo test --locked --offline --test integration cache_insertion_trace:: -- --test-threads=2
 ```
 
 The implemented ignored retained-corpus command and its reviewed manifest/output
@@ -196,7 +196,7 @@ that gate, then (with its owned context and separately reviewed inputs):
 $env:IBCMD_RS_CACHE_TRACE_MANIFEST = 'F:/ROOT-reviewed/current-corpus.json'
 $env:IBCMD_RS_CACHE_TRACE_MANIFEST_SHA256 = '<independently pinned SHA256>'
 $env:IBCMD_RS_CACHE_TRACE_OUTPUT = 'F:/ROOT-reviewed/new-diagnostic-output'
-cargo test --locked --offline --test cache_insertion_trace retained_closed_corpus_projection -- --ignored --exact --nocapture
+cargo test --locked --offline --test integration cache_insertion_trace::retained_closed_corpus_projection -- --ignored --exact --nocapture
 ```
 
 These paths are placeholders, not a ready retained run. The selected historical

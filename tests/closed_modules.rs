@@ -1,7 +1,7 @@
 //! Modules delivered without source text. 8.3.27.2214 dumps each as
 //! `<Module>.bin`, the inflated storage entry byte for byte.
 
-mod common;
+use crate::common;
 
 use std::fs;
 

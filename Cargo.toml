@@ -3,6 +3,9 @@ name = "ibcmd-rs"
 version = "0.4.1"
 edition = "2024"
 license = "MIT"
+# tests/integration.rs builds the integration suites as one binary; the
+# `[[test]]` targets below are the ones that need a process of their own.
+autotests = false
 
 [workspace]
 members = [
@@ -15,6 +18,7 @@ members = [
     "crates/ibcmd-number-format",
     "crates/ibcmd-filedb",
     "crates/ibcmd-postgres",
+    "crates/ibcmd-form-schema",
 ]
 resolver = "3"
 exclude = ["crates/ibcmd-edt/vendor/morph1c"]
@@ -47,6 +51,7 @@ ibcmd-xml = { path = "crates/ibcmd-xml" }
 ibcmd-edt = { path = "crates/ibcmd-edt" }
 ibcmd-filedb = { path = "crates/ibcmd-filedb" }
 ibcmd-postgres = { path = "crates/ibcmd-postgres" }
+ibcmd-form-schema = { path = "crates/ibcmd-form-schema" }
 # The process allocator, installed in main.rs.
 mimalloc = "0.1.52"
 quick-xml = "0.38"
@@ -92,6 +97,44 @@ formats-xml = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats-xml" }
 morph1c-pipeline = { path = "crates/ibcmd-edt/vendor/morph1c/crates/pipeline" }
 formats-edt = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/edt" }
 formats-designer = { path = "crates/ibcmd-edt/vendor/morph1c/crates/formats/designer" }
+
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+# Suites that run engine operations in the test process itself, which keep
+# process-wide state for the one operation a process runs: cancellation
+# scopes (editor_partial_import), the once-per-process offline compile
+# (cf_load), offline rows read outside the stored-object lock
+# (native_export_status) and the stored-object views of the editor and
+# descriptor suites. Each keeps its own process, as before the merge.
+[[test]]
+name = "cf_load"
+path = "tests/cf_load.rs"
+
+[[test]]
+name = "descriptor_read"
+path = "tests/descriptor_read.rs"
+
+[[test]]
+name = "editor_export_plan"
+path = "tests/editor_export_plan.rs"
+
+[[test]]
+name = "editor_file_db"
+path = "tests/editor_file_db.rs"
+
+[[test]]
+name = "editor_partial_import"
+path = "tests/editor_partial_import.rs"
+
+[[test]]
+name = "editor_server"
+path = "tests/editor_server.rs"
+
+[[test]]
+name = "native_export_status"
+path = "tests/native_export_status.rs"
 
 # Real original-process/BOTH boundary tests, each scenario in its own process.
 [[test]]

@@ -11,7 +11,7 @@
 //! preamble for a configuration in a current compatibility mode, Format15 for
 //! one in 8.3.10's (`config_compat/c10_e27`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 use std::io::Write;

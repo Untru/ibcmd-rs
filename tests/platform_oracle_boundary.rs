@@ -1,5 +1,3 @@
-#![cfg(not(feature = "platform-oracle"))]
-
 use std::{fs, path::PathBuf, process::Command};
 
 #[path = "support/elf_debug.rs"]

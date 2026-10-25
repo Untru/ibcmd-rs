@@ -7,7 +7,7 @@
 //! incremental export writes is byte for byte what the full export writes,
 //! and a folder updated with `--sync` ends as the full export.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::{BTreeMap, BTreeSet},

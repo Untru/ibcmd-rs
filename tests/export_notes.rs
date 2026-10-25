@@ -2,7 +2,7 @@
 //! containers are platform-built fixtures damaged on purpose
 //! (`_onecdec/make_export_notes_fixtures.py`).
 
-mod common;
+use crate::common;
 
 fn entry_message(input: &str, tag: &str, entry: &str) -> (String, String) {
     let out = common::temp_dir(tag);

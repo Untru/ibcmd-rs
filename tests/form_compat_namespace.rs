@@ -3,7 +3,7 @@
 //! Each fixture is a file built by 8.3.27.2214 beside that platform's own dump
 //! of its one common form (`_onecdec/make_compat_form_fixtures.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

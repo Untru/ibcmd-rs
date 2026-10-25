@@ -4,7 +4,7 @@
 //! platform built beside its own dump (`_onecdec/make_extension_root_fixtures.py`,
 //! `make_cfe_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::{fs, path::Path};
 

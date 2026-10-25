@@ -3,7 +3,7 @@
 //! writes the uuid (ИТК: 21 and 3 bindings, every one by uuid). The fixture is
 //! built and dumped by 8.3.27.2214 (`_onecdec/make_form_events_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

@@ -2,7 +2,7 @@
 //! file by rewriting only what changed. The acceptance check is always the
 //! same: the tree ends exactly as a full export of the newer file.
 
-mod common;
+use crate::common;
 
 use std::{
     fs,

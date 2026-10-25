@@ -65,7 +65,7 @@
 3. Добавить версию схемы и точные итоговые счётчики.
 
 **Проверка:**
-- [ ] `cargo test --locked --test source_parity_matrix --no-default-features`
+- [ ] `cargo test --locked -p ibcmd-rs --test integration source_parity_matrix:: --no-default-features`
 - [ ] JSON-модель не содержит секретных полей.
 
 **Коммит:** `feat(parity): define per-file matrix model`

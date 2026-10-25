@@ -2,7 +2,7 @@
 //! register: stored set, dumped `false` by 8.3.27.2214, in a configuration
 //! and in an extension (`_onecdec/make_main_filter_fixture.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 

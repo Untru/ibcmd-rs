@@ -13,7 +13,7 @@
 //! The fixture is `home_page/two_variable/input.cf` (Designer `/DumpCfg` of
 //! 8.3.27.2214): two common forms with a module each.
 
-mod common;
+use crate::common;
 
 use std::{
     collections::{BTreeMap, BTreeSet},

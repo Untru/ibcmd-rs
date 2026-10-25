@@ -2,7 +2,7 @@
 //! output tree must equal the platform's own dump byte for byte. Fixtures are
 //! clean-room objects built by 8.3.27.2214 (`_onecdec/make_fixtures.py`).
 
-mod common;
+use crate::common;
 
 use common::{assert_tree_eq, export, fixture, temp_dir};
 

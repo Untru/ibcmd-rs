@@ -9615,7 +9615,7 @@ fn extracts_form_attributes_and_commands_from_body_tail() {
 #[test]
 fn extracts_form_commands_from_wrapper9_body_tail() {
     let option_uuid = "bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb";
-    // `FormCommandSchema::from_raw_layout` (`src/form_schema.rs`) requires
+    // `FormCommandSchema::from_raw_layout` (`crates/ibcmd-form-schema`) requires
     // the command's own field list to be *exactly* 19 elements; the fixture
     // had two stray trailing `0` scalars past `current_row_use` (slot 18,
     // the schema's last field), pushing it to 21 and making the whole
@@ -13883,7 +13883,7 @@ fn formatter_emits_form_command_children_in_native_order() {
 
 #[test]
 fn omits_form_command_current_row_use_for_command_tail_kind_2() {
-    // `FormCommandSchema::from_raw_layout` (`src/form_schema.rs`) reads the
+    // `FormCommandSchema::from_raw_layout` (`crates/ibcmd-form-schema`) reads the
     // command's picture value (slot 7) via `split_1c_braced_fields`, which
     // requires a braced structure; the fixture's bare `0` placeholder is no
     // longer accepted (the "no picture" marker now has to be the fully
@@ -14507,7 +14507,7 @@ fn tooltip_representation_follows_f50_when_tooltip_is_empty() {
 
 #[test]
 fn tooltip_representation_requires_exact_wrapper_kind_arity_and_scalar_enum() {
-    // `FormTooltipRepresentation::from_raw_scalar` (`src/form_schema.rs`)
+    // `FormTooltipRepresentation::from_raw_scalar` (`crates/ibcmd-form-schema`)
     // defines 9 deliberate, evidence-backed codes, "0".."8" (Omit..ShowRight)
     // — "6" is a genuinely valid code (ShowLeft), not a malformed value, so
     // it doesn't belong in this "should be rejected" fuzz list; "9" (past
@@ -14689,7 +14689,7 @@ fn extracts_form_usual_group_group_from_layout_code() {
     // valid options block (`options[4] = 0` for `ShowTitle=false`,
     // `options[27] = 4` for `Group=HorizontalIfPossible`; see
     // `FormUsualGroupSchema`/`parse_form_usual_group_property_bag_group` /
-    // `FormChildItemShowTitleSchema` in `src/form_schema.rs`) padded to the
+    // `FormChildItemShowTitleSchema` in `crates/ibcmd-form-schema`) padded to the
     // 30-field minimum.
     let item = parse_form_child_item(
         r#"{22,{22,02023637-7868-4a5f-8576-835a76e0c9ba},0,0,0,5,"MainGroup",{1,0},{1,0},0,1,0,0,0,2,2,{3,4,{0}},{8,3,0,1,100},{0,0,0},1,{29,0,0,3,0,{0},{1,0},{"Pattern"},"",{3,4,{0}},0,0,0,1,{1,0},0,0,3,3,2,0,1,0,{3,4,{0}},0,2,0,4,0},0,11111111-1111-4111-8111-111111111111,0,0,0,0,0,0,0}"#,
@@ -15098,7 +15098,7 @@ fn maps_the_six_remaining_native_form_event_identifiers() {
 
 #[test]
 fn extracts_form_pages_and_page_from_layout_codes() {
-    // The nested "Page" child's `group` needs `FormPageSchema` (`src/form_schema.rs`),
+    // The nested "Page" child's `group` needs `FormPageSchema` (`crates/ibcmd-form-schema`),
     // which requires an *exact* multiple-of-2-past-30 field count and a
     // 20-field `{18,...}` options block (`FormPageSchema::OPTIONS_SLOT = 20`).
     // The legacy 12-field Page blob predates that options block entirely.
@@ -15289,7 +15289,7 @@ fn extracts_text_document_field_read_only() {
     // its original (>20-field) minimum length for `LabelField`,
     // `InputField`, and `CheckBoxField` (see the "Preserve the three
     // wrapper-48 field owners decoded by the legacy path" comment in
-    // `src/form_schema.rs`, `FormChildItemVisibleSchema::from_raw_layout`).
+    // `crates/ibcmd-form-schema`, `FormChildItemVisibleSchema::from_raw_layout`).
     // `TextDocumentField` isn't in that allow-list, so the whole item
     // failed to parse below 42 total fields; verified empirically (via
     // bisection against the actual decoder) that 42 is the exact minimum —
@@ -18844,7 +18844,7 @@ fn extracts_label_decoration_and_standard_close_command_from_layout_code() {
         Some("Form.StandardCommand.Close")
     );
 
-    // `FormDecorationHeaderSchema::from_raw_layout` (`src/form_schema.rs`)
+    // `FormDecorationHeaderSchema::from_raw_layout` (`crates/ibcmd-form-schema`)
     // requires wrapper `"12"` items to have *exactly* 36 top-level fields
     // for `form_child_item_tag` to even resolve `"LabelDecoration"` at all;
     // the legacy 27-field fixture predates that gate. Padded with trailing
@@ -19331,7 +19331,7 @@ fn extracts_form_input_field_skip_on_input_from_layout_code() {
     // The legacy wrapper-48, 25-field layout code predates `FormFieldSchema`,
     // which now requires wrapper `"37"` and an *exact* 59-field item with a
     // full 66-field `{36,...}` options block (`FormFieldSchema::from_raw_layout`
-    // in `src/form_schema.rs`) before `skip_on_input` is even queried.
+    // in `crates/ibcmd-form-schema`) before `skip_on_input` is even queried.
     // Rebuilt from the real, currently-valid `InputField` fixture used by
     // `extracts_live_input_field_auto_choice_incomplete`, mutating only slot
     // 15 (`FormFieldSchema::skip_on_input`'s own slot) — the same absolute
@@ -21382,7 +21382,7 @@ fn formats_form_input_field_button_options_in_schema_order() {
 
 #[test]
 fn extracts_form_input_field_choice_folders_and_items_from_layout_code() {
-    // `FormFieldSchema::from_raw_layout` (`src/form_schema.rs`) requires
+    // `FormFieldSchema::from_raw_layout` (`crates/ibcmd-form-schema`) requires
     // wrapper `"37"` (not `"48"`), an *exact* 59-field item, and an options
     // block tagged `"36"` (not `"38"`) for `InputField`. The legacy
     // all-zero/all-`"2"` 45-field, wrapper-48 construction predates that
@@ -79111,7 +79111,7 @@ fn short_decoration_revision_resolves_both_of_its_kinds() {
     );
 }
 
-/// `FormConditionalGroupSchema::from_raw_layout` (`src/form_schema.rs`)
+/// `FormConditionalGroupSchema::from_raw_layout` (`crates/ibcmd-form-schema`)
 /// admitted the wrapper-`22` conditional `UserVisible`-common prefix tuple
 /// only for shifted discriminators `2`|`3`|`4`|`5` (grouping controls) and
 /// `8`|`9` (a `Table`'s own service items) -- never `0` (`CommandBar`), `1`

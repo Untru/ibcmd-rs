@@ -5,7 +5,7 @@
 //! platform's own dump of the adopted objects
 //! (`_onecdec/make_adopted_fixtures.py`).
 
-mod common;
+use crate::common;
 
 use std::{fs, path::Path};
 

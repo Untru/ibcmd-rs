@@ -2,10 +2,10 @@
 //! `tests/fixtures/external/corpus-baseline.txt` must stay byte-identical to
 //! the platform's dump made in the configuration infobase.
 //!
-//! IBCMD_ONECDEC_CORPUS=<root> cargo test --release --no-default-features --test external_corpus -- --ignored
+//! IBCMD_ONECDEC_CORPUS=<root> cargo test --release --no-default-features --test integration external_corpus:: -- --ignored
 //! IBCMD_UPDATE_BASELINE=1 also rewrites the baseline with every file that matches now.
 
-mod common;
+use crate::common;
 
 use std::{collections::BTreeSet, fs, path::Path};
 

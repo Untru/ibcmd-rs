@@ -32,5 +32,5 @@ Fixture — структурное evidence, а не обещание полно
 
 ```powershell
 $env:IBCMD_CF_EXTERNAL_CORPUS = 'C:\path\to\private-cf-corpus'
-cargo test --locked --test cf_corpus
+cargo test --locked -p ibcmd-rs --test integration cf_corpus::
 ```

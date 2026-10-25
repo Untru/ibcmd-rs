@@ -2,7 +2,7 @@
 //! with one role, built and dumped by 8.3.27.2214
 //! (`_onecdec/make_role_rights_fixtures.py`).
 
-mod common;
+use crate::common;
 
 use std::fs;
 
