@@ -1,11 +1,15 @@
 {
+  "schema_version": 2,
   "snapshot": "2026-10-25",
-  "scope": "Current Coverage; CF export and XML compilation only, no SQL writes",
-  "product_commit": "8e4d14305b91051088523142fb3b841c0cfd356d",
-  "product_binary_sha256": "ae4fff3244359c581fe51f373c5023bf60f8a125cd132993959cce3d1c6d373c",
+  "scope": "CF export and XML compilation against unchanged native oracles; no SQL writes",
+  "product_commit": "4dec3ea079f3600cda35020d45918be5f891bf89",
+  "product_binary_sha256": "1a37f510c67b450095b8f0c9d72450d0970757f5d0a056c65dcd81e194aee50b",
+  "product_profile": "iter, no-default-features",
   "corpus_commit": "afcdcb010841f89f07c04a99aa07120a76b7116f",
+  "previous_product_commit": "8e4d14305b91051088523142fb3b841c0cfd356d",
+  "previous_report_url": "https://github.com/Untru/ibcmd-rs/blob/4dec3ea079f3600cda35020d45918be5f891bf89/docs/evidence/coverage-current.json",
   "all_sets_measured": 177,
-  "full_matrix_profile": "debug test harness",
+  "full_matrix_profile": "iter production binary through integration harness",
   "iter_regression_sets": 66,
   "all_combined_sets": 4,
   "separate_sets": 173,
@@ -13,54 +17,103 @@
     "generated": 1728,
     "platform_proven": 1679,
     "platform_refused": 49,
-    "equal": 1249,
-    "different": 293,
+    "equal": 1255,
+    "different": 287,
     "refused": 137
   },
+  "separate_variant_delta": {
+    "generated": 0,
+    "platform_proven": 0,
+    "platform_refused": 0,
+    "equal": 6,
+    "different": -6,
+    "refused": 0
+  },
   "lab_diagnostic_classes_reproduced": {
-    "native_cf": 99,
+    "native_cf": 98,
+    "not_reproduced": 1,
     "xml_probe": 5
   },
   "source_probes": 7,
+  "verified_source_parity": [
+    {
+      "id": "existing-interfaces-8.3.27.2342",
+      "set": "8.3.27.2342/interfaces",
+      "source": "Interfaces/CovTemplate.xml",
+      "proof": "full_native_descriptor_and_byte_identical_xml"
+    },
+    {
+      "id": "existing-interfaces-8.5.1.1150",
+      "set": "8.5.1.1150/interfaces",
+      "source": "Interfaces/CovTemplate.xml",
+      "proof": "full_native_descriptor_and_byte_identical_xml"
+    }
+  ],
+  "baseline_files_preserved": 223,
+  "baseline_equal_entries_preserved": 3189,
   "combined": [
     {
       "set": "8.3.27.2214/combined",
       "native_files": 607,
-      "equal_files": 513,
-      "different_files": 74,
-      "missing_files": 20,
+      "equal_files": 516,
+      "different_files": 73,
+      "missing_files": 18,
       "extra_files": 0,
-      "xml_compile_failure_count": 54,
-      "diagnostic_classes": 46,
+      "xml_compile_failure_count": 52,
       "native_cf_sha256": "8a79cc8e6ec5a6a8e52780b0cbdfef4d9ab33ac3c12cf634c1b47e8ead4a5120",
       "manifest_sha256": "deb5e75e915c75e6b36cd6282293641600c1250f4746a86fa54efa6cd509c74f",
-      "cf_export_exit_code": 2
+      "cf_export_exit_code": 2,
+      "diagnostic_classes": 45,
+      "delta_previous": {
+        "equal_files": 3,
+        "different_files": -1,
+        "missing_files": -2,
+        "extra_files": 0,
+        "xml_compile_failure_count": -2,
+        "diagnostic_classes": -1
+      }
     },
     {
       "set": "8.5.1.1150/combined",
       "native_files": 616,
-      "equal_files": 519,
-      "different_files": 75,
-      "missing_files": 22,
+      "equal_files": 522,
+      "different_files": 74,
+      "missing_files": 20,
       "extra_files": 0,
-      "xml_compile_failure_count": 55,
-      "diagnostic_classes": 47,
+      "xml_compile_failure_count": 53,
       "native_cf_sha256": "c163d76f6970afd946e0d1a13430ff4dd2f005496560e70dd37842b84d22b4c1",
       "manifest_sha256": "ef1216fcfd2451fd3220c622d6435c4b4d519026d64a267a1ee069ca2c9bff29",
-      "cf_export_exit_code": 2
+      "cf_export_exit_code": 2,
+      "diagnostic_classes": 46,
+      "delta_previous": {
+        "equal_files": 3,
+        "different_files": -1,
+        "missing_files": -2,
+        "extra_files": 0,
+        "xml_compile_failure_count": -2,
+        "diagnostic_classes": -1
+      }
     },
     {
       "set": "8.5.1.1529/combined",
       "native_files": 939,
-      "equal_files": 736,
+      "equal_files": 738,
       "different_files": 133,
-      "missing_files": 70,
+      "missing_files": 68,
       "extra_files": 0,
-      "xml_compile_failure_count": 158,
-      "diagnostic_classes": 100,
+      "xml_compile_failure_count": 156,
       "native_cf_sha256": "a9459561aec93cdbd06509ece439ddf51ad9219965e7d95a9154320cb7228003",
       "manifest_sha256": "bf7d67c7c431b75fd68a5cfde5ed455f5d9bad52e73f126df947720bee3d684b",
-      "cf_export_exit_code": 2
+      "cf_export_exit_code": 2,
+      "diagnostic_classes": 99,
+      "delta_previous": {
+        "equal_files": 2,
+        "different_files": 0,
+        "missing_files": -2,
+        "extra_files": 0,
+        "xml_compile_failure_count": -2,
+        "diagnostic_classes": -1
+      }
     }
   ],
   "class_matches": [
@@ -553,17 +606,20 @@
     {
       "class": "I027",
       "diagnostic": "no base-free compiler for Interface yet",
-      "scope": "native_cf",
-      "reproductions": [
+      "scope": "not_reproduced",
+      "reproductions": [],
+      "verified_resolution": [
         {
+          "id": "existing-interfaces-8.3.27.2342",
           "set": "8.3.27.2342/interfaces",
           "source": "Interfaces/CovTemplate.xml",
-          "route": "unchanged_native_cf_xml"
+          "proof": "full_native_descriptor_and_byte_identical_xml"
         },
         {
+          "id": "existing-interfaces-8.5.1.1150",
           "set": "8.5.1.1150/interfaces",
           "source": "Interfaces/CovTemplate.xml",
-          "route": "unchanged_native_cf_xml"
+          "proof": "full_native_descriptor_and_byte_identical_xml"
         }
       ]
     },
@@ -1408,6 +1464,8 @@
       "scope": "xml_probe",
       "reproductions": [
         {
+          "set": "8.5.1.1529/corpus-modern-spreadsheet",
+          "source": "CommonTemplates/CovModernSheetEmbeddedTable.xml",
           "probe": "embedded-table",
           "native_behavior": "accepted_then_normalized_away"
         }
@@ -1445,6 +1503,8 @@
       "scope": "xml_probe",
       "reproductions": [
         {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
           "probe": "generated-user-settings-group",
           "native_behavior": "accepted_then_normalized_away"
         }
@@ -1534,6 +1594,8 @@
       "scope": "xml_probe",
       "reproductions": [
         {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "DocumentJournals/CovNavigationJournal/Forms/ListForm.xml",
           "probe": "legacy-create-by-parameter",
           "native_behavior": "refused_by_current_native"
         }
@@ -1605,6 +1667,8 @@
       "scope": "xml_probe",
       "reproductions": [
         {
+          "set": "8.5.1.1529/corpus-chart-settings",
+          "source": "CommonForms/CovChartMissingSeries.xml",
           "probe": "series-count",
           "native_behavior": "accepted_then_normalized_away"
         }
@@ -1616,6 +1680,8 @@
       "scope": "xml_probe",
       "reproductions": [
         {
+          "set": "8.5.1.1529/corpus-navigation-commands",
+          "source": "Catalogs/CovNavigationCatalog/Forms/EditListForm.xml",
           "probe": "legacy-edit-list",
           "native_behavior": "refused_by_current_native"
         }
@@ -1657,6 +1723,5278 @@
           "source": "Enums/CovPaletteEnum.xml"
         }
       ]
+    }
+  ],
+  "sets": [
+    {
+      "generated": 478,
+      "platform_proven": 478,
+      "platform_refused": 0,
+      "equal": 390,
+      "different": 88,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-combined",
+      "kind": "combined"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 2,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-business-process-flowchart",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-catalog-additional-index",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-catalog-pictures",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-client-application-interface",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 2,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-cross-forms-from85",
+      "kind": "cross_version"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-defined-type-resource",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-english-composition",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-form-deep-bindings",
+      "kind": "configuration"
+    },
+    {
+      "generated": 20,
+      "platform_proven": 19,
+      "platform_refused": 1,
+      "equal": 12,
+      "different": 7,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-form-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 17,
+      "platform_proven": 17,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 11,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-form-settings",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-graphical-schema-image",
+      "kind": "configuration"
+    },
+    {
+      "generated": 24,
+      "platform_proven": 24,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 18,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-managed-forms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-mobile-permission-messages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-nested-subsystem-rights",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-orphan-catalog-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-orphan-characteristics",
+      "kind": "configuration"
+    },
+    {
+      "generated": 8,
+      "platform_proven": 8,
+      "platform_refused": 0,
+      "equal": 5,
+      "different": 3,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-owned-catalog-forms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-recordset-references",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-reference-network",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-resource-storage",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-role-object-rights",
+      "kind": "configuration"
+    },
+    {
+      "generated": 11,
+      "platform_proven": 11,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 8,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-spreadsheet-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-spreadsheet-standard-picture",
+      "kind": "configuration"
+    },
+    {
+      "generated": 5,
+      "platform_proven": 5,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 3,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-style-colors",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-subsystem-references",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-task-addressing",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-task-form-events",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 5,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2214-xml-2.20-corpus-template-bodies",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 7,
+      "platform_refused": 0,
+      "equal": 7,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-accountingregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-accumulationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-bots",
+      "kind": "configuration"
+    },
+    {
+      "generated": 12,
+      "platform_proven": 12,
+      "platform_refused": 0,
+      "equal": 9,
+      "different": 3,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-businessprocesses",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 5,
+      "platform_refused": 1,
+      "equal": 1,
+      "different": 4,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-calculationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 46,
+      "platform_proven": 44,
+      "platform_refused": 2,
+      "equal": 44,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-catalogs",
+      "kind": "configuration"
+    },
+    {
+      "generated": 16,
+      "platform_proven": 15,
+      "platform_refused": 1,
+      "equal": 15,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-chartsofaccounts",
+      "kind": "configuration"
+    },
+    {
+      "generated": 13,
+      "platform_proven": 12,
+      "platform_refused": 1,
+      "equal": 10,
+      "different": 2,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-chartsofcalculationtypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 18,
+      "platform_proven": 17,
+      "platform_refused": 1,
+      "equal": 17,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-chartsofcharacteristictypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 337,
+      "platform_proven": 337,
+      "platform_refused": 0,
+      "equal": 311,
+      "different": 26,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-combined",
+      "kind": "combined"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commandgroups",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 13,
+      "platform_refused": 1,
+      "equal": 6,
+      "different": 7,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commonattributes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 16,
+      "platform_proven": 16,
+      "platform_refused": 0,
+      "equal": 16,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commoncommands",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commonforms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 11,
+      "platform_proven": 11,
+      "platform_refused": 0,
+      "equal": 11,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commonmodules",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commonpictures",
+      "kind": "configuration"
+    },
+    {
+      "generated": 8,
+      "platform_proven": 8,
+      "platform_refused": 0,
+      "equal": 8,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-commontemplates",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 14,
+      "platform_refused": 0,
+      "equal": 12,
+      "different": 2,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-constants",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-dataprocessors",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-definedtypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-documentjournals",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-documentnumerators",
+      "kind": "configuration"
+    },
+    {
+      "generated": 26,
+      "platform_proven": 26,
+      "platform_refused": 0,
+      "equal": 26,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-documents",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 7,
+      "platform_refused": 0,
+      "equal": 7,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-enums",
+      "kind": "configuration"
+    },
+    {
+      "generated": 18,
+      "platform_proven": 9,
+      "platform_refused": 9,
+      "equal": 9,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-eventsubscriptions",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 13,
+      "platform_refused": 1,
+      "equal": 11,
+      "different": 2,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-exchangeplans",
+      "kind": "configuration"
+    },
+    {
+      "generated": 36,
+      "platform_proven": 36,
+      "platform_refused": 0,
+      "equal": 36,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-extensions-basic",
+      "kind": "extension"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-extensions-combined",
+      "kind": "extension"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-external-combined-epf",
+      "kind": "external"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 0,
+      "different": 0,
+      "refused": 1,
+      "set": "8.3.27.2342-xml-2.20-external-combined-erf",
+      "kind": "external"
+    },
+    {
+      "generated": 101,
+      "platform_proven": 100,
+      "platform_refused": 1,
+      "equal": 100,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-external-epf-attributes",
+      "kind": "external"
+    },
+    {
+      "generated": 101,
+      "platform_proven": 100,
+      "platform_refused": 1,
+      "equal": 65,
+      "different": 0,
+      "refused": 35,
+      "set": "8.3.27.2342-xml-2.20-external-erf-attributes",
+      "kind": "external"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-externaldatasources",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-filtercriteria",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-functionaloptions",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-functionaloptionsparameters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 6,
+      "platform_refused": 1,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-httpservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 21,
+      "platform_proven": 20,
+      "platform_refused": 1,
+      "equal": 20,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-informationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-integrationservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-interfaces",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-reports",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-roles",
+      "kind": "configuration"
+    },
+    {
+      "generated": 10,
+      "platform_proven": 10,
+      "platform_refused": 0,
+      "equal": 10,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-scheduledjobs",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-sequences",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-sessionparameters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-settingsstorages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-styleitems",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-styles",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-subsystems",
+      "kind": "configuration"
+    },
+    {
+      "generated": 12,
+      "platform_proven": 12,
+      "platform_refused": 0,
+      "equal": 8,
+      "different": 4,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-tasks",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 2,
+      "platform_refused": 1,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-webservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-websocketclients",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-wsreferences",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.3.27.2342-xml-2.20-xdtopackages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 7,
+      "platform_refused": 0,
+      "equal": 7,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-accountingregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-accumulationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-bots",
+      "kind": "configuration"
+    },
+    {
+      "generated": 12,
+      "platform_proven": 12,
+      "platform_refused": 0,
+      "equal": 9,
+      "different": 3,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-businessprocesses",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 5,
+      "platform_refused": 1,
+      "equal": 1,
+      "different": 4,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-calculationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 46,
+      "platform_proven": 44,
+      "platform_refused": 2,
+      "equal": 44,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-catalogs",
+      "kind": "configuration"
+    },
+    {
+      "generated": 16,
+      "platform_proven": 15,
+      "platform_refused": 1,
+      "equal": 15,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-chartsofaccounts",
+      "kind": "configuration"
+    },
+    {
+      "generated": 13,
+      "platform_proven": 12,
+      "platform_refused": 1,
+      "equal": 10,
+      "different": 2,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-chartsofcalculationtypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 18,
+      "platform_proven": 17,
+      "platform_refused": 1,
+      "equal": 17,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-chartsofcharacteristictypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 483,
+      "platform_proven": 483,
+      "platform_refused": 0,
+      "equal": 392,
+      "different": 91,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-combined",
+      "kind": "combined"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commandgroups",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 13,
+      "platform_refused": 1,
+      "equal": 6,
+      "different": 7,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commonattributes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 16,
+      "platform_proven": 16,
+      "platform_refused": 0,
+      "equal": 16,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commoncommands",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commonforms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 11,
+      "platform_proven": 11,
+      "platform_refused": 0,
+      "equal": 11,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commonmodules",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commonpictures",
+      "kind": "configuration"
+    },
+    {
+      "generated": 8,
+      "platform_proven": 8,
+      "platform_refused": 0,
+      "equal": 8,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-commontemplates",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 14,
+      "platform_refused": 0,
+      "equal": 12,
+      "different": 2,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-constants",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 2,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-business-process-flowchart",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-catalog-additional-index",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-catalog-pictures",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-client-application-interface",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-compatible-form-layouts",
+      "kind": "configuration"
+    },
+    {
+      "generated": 17,
+      "platform_proven": 17,
+      "platform_refused": 0,
+      "equal": 5,
+      "different": 12,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-cross-forms-from27",
+      "kind": "cross_version"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-defined-type-resource",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-english-composition",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-form-deep-bindings",
+      "kind": "configuration"
+    },
+    {
+      "generated": 20,
+      "platform_proven": 20,
+      "platform_refused": 0,
+      "equal": 11,
+      "different": 9,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-form-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 17,
+      "platform_proven": 17,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 11,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-form-settings",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-graphical-schema-image",
+      "kind": "configuration"
+    },
+    {
+      "generated": 24,
+      "platform_proven": 24,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 18,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-managed-forms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-mobile-permission-messages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-nested-subsystem-rights",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-orphan-catalog-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-orphan-characteristics",
+      "kind": "configuration"
+    },
+    {
+      "generated": 8,
+      "platform_proven": 8,
+      "platform_refused": 0,
+      "equal": 5,
+      "different": 3,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-owned-catalog-forms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 4,
+      "platform_proven": 4,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-recordset-references",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-reference-network",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-resource-storage",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-role-object-rights",
+      "kind": "configuration"
+    },
+    {
+      "generated": 11,
+      "platform_proven": 11,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 8,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-spreadsheet-facets",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-spreadsheet-standard-picture",
+      "kind": "configuration"
+    },
+    {
+      "generated": 5,
+      "platform_proven": 5,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 3,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-style-colors",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-subsystem-references",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-task-addressing",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-task-form-events",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 5,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-corpus-template-bodies",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-dataprocessors",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-definedtypes",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-documentjournals",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-documentnumerators",
+      "kind": "configuration"
+    },
+    {
+      "generated": 26,
+      "platform_proven": 26,
+      "platform_refused": 0,
+      "equal": 26,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-documents",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 7,
+      "platform_refused": 0,
+      "equal": 7,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-enums",
+      "kind": "configuration"
+    },
+    {
+      "generated": 18,
+      "platform_proven": 9,
+      "platform_refused": 9,
+      "equal": 9,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-eventsubscriptions",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 13,
+      "platform_refused": 1,
+      "equal": 11,
+      "different": 2,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-exchangeplans",
+      "kind": "configuration"
+    },
+    {
+      "generated": 36,
+      "platform_proven": 36,
+      "platform_refused": 0,
+      "equal": 36,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-extensions-basic",
+      "kind": "extension"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-extensions-combined",
+      "kind": "extension"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-external-combined-epf",
+      "kind": "external"
+    },
+    {
+      "generated": 1,
+      "platform_proven": 1,
+      "platform_refused": 0,
+      "equal": 0,
+      "different": 0,
+      "refused": 1,
+      "set": "8.5.1.1150-xml-2.21-external-combined-erf",
+      "kind": "external"
+    },
+    {
+      "generated": 101,
+      "platform_proven": 100,
+      "platform_refused": 1,
+      "equal": 100,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-external-epf-attributes",
+      "kind": "external"
+    },
+    {
+      "generated": 101,
+      "platform_proven": 100,
+      "platform_refused": 1,
+      "equal": 0,
+      "different": 0,
+      "refused": 100,
+      "set": "8.5.1.1150-xml-2.21-external-erf-attributes",
+      "kind": "external"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-externaldatasources",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-filtercriteria",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-functionaloptions",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-functionaloptionsparameters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 7,
+      "platform_proven": 6,
+      "platform_refused": 1,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-httpservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 21,
+      "platform_proven": 20,
+      "platform_refused": 1,
+      "equal": 20,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-informationregisters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-integrationservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-interfaces",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-palettecolors",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-reports",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-roles",
+      "kind": "configuration"
+    },
+    {
+      "generated": 10,
+      "platform_proven": 10,
+      "platform_refused": 0,
+      "equal": 10,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-scheduledjobs",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-sequences",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-sessionparameters",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-settingsstorages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-styleitems",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-styles",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-subsystems",
+      "kind": "configuration"
+    },
+    {
+      "generated": 12,
+      "platform_proven": 12,
+      "platform_refused": 0,
+      "equal": 8,
+      "different": 4,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-tasks",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 2,
+      "platform_refused": 1,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-webservices",
+      "kind": "configuration"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-websocketclients",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-wsreferences",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 0,
+      "refused": 0,
+      "set": "8.5.1.1150-xml-2.21-xdtopackages",
+      "kind": "configuration"
+    },
+    {
+      "generated": 632,
+      "platform_proven": 632,
+      "platform_refused": 0,
+      "equal": 443,
+      "different": 189,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-combined",
+      "kind": "combined"
+    },
+    {
+      "generated": 6,
+      "platform_proven": 6,
+      "platform_refused": 0,
+      "equal": 2,
+      "different": 4,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-chart-settings",
+      "kind": "configuration"
+    },
+    {
+      "generated": 48,
+      "platform_proven": 48,
+      "platform_refused": 0,
+      "equal": 14,
+      "different": 34,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-hybrid-interface",
+      "kind": "configuration"
+    },
+    {
+      "generated": 14,
+      "platform_proven": 14,
+      "platform_refused": 0,
+      "equal": 6,
+      "different": 8,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-legacy-form-properties",
+      "kind": "configuration"
+    },
+    {
+      "generated": 42,
+      "platform_proven": 40,
+      "platform_refused": 2,
+      "equal": 14,
+      "different": 26,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-modern-details",
+      "kind": "configuration"
+    },
+    {
+      "generated": 12,
+      "platform_proven": 12,
+      "platform_refused": 0,
+      "equal": 3,
+      "different": 9,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-modern-forms",
+      "kind": "configuration"
+    },
+    {
+      "generated": 2,
+      "platform_proven": 2,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 1,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-modern-owned-interface",
+      "kind": "configuration"
+    },
+    {
+      "generated": 9,
+      "platform_proven": 9,
+      "platform_refused": 0,
+      "equal": 4,
+      "different": 5,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-modern-spreadsheet",
+      "kind": "configuration"
+    },
+    {
+      "generated": 13,
+      "platform_proven": 11,
+      "platform_refused": 2,
+      "equal": 4,
+      "different": 7,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-navigation-commands",
+      "kind": "configuration"
+    },
+    {
+      "generated": 3,
+      "platform_proven": 3,
+      "platform_refused": 0,
+      "equal": 1,
+      "different": 2,
+      "refused": 0,
+      "set": "8.5.1.1529-xml-2.21-corpus-palette-help-and-interface",
+      "kind": "configuration"
+    }
+  ],
+  "file_differences": [
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovCheckUnique_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovCreateTaskInPrivilegedMode_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CalculationRegisters/CovBasePeriod_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CalculationRegisters/CovIncludeHelpInContents_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CalculationRegisters/CovTemplate_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CalculationRegisters/CovUseStandardCommands_false_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovCatalogPictureTemplate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovOrphanCharacteristics.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Catalogs/CovOwnedUnionCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "ChartsOfCalculationTypes/CovQuickChoice_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "ChartsOfCalculationTypes/CovUseStandardCommands_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovAuthenticationSeparation_Separate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovAutoUse_Use.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovExtendedEdit_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovFillFromFillingValue_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovMarkNegatives_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovMultiLine_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonAttributes/CovPasswordMode_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovDataCompositionParameters/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Ext/ClientApplicationInterface.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "InformationRegisters/CovNetworkOptions.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "StyleItems/CovStyleColorLinen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "StyleItems/CovStyleColorMediumGreen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "StyleItems/CovStyleColorTomato.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "StyleItems/CovType_Font.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Tasks/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Tasks/CovCheckUnique_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "path": "WSReferences/CovTemplate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovCheckUnique_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovCreateTaskInPrivilegedMode_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CalculationRegisters/CovBasePeriod_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CalculationRegisters/CovIncludeHelpInContents_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CalculationRegisters/CovTemplate_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CalculationRegisters/CovUseStandardCommands_false_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovCatalogPictureTemplate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovOrphanCharacteristics.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Catalogs/CovOwnedUnionCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "ChartsOfCalculationTypes/CovQuickChoice_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "ChartsOfCalculationTypes/CovUseStandardCommands_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovAuthenticationSeparation_Separate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovAutoUse_Use.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovExtendedEdit_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovFillFromFillingValue_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovMarkNegatives_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovMultiLine_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonAttributes/CovPasswordMode_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovCompatibleTable/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetTableExcludesDeselectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFacetTableExcludesSelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovDataCompositionParameters/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Ext/ClientApplicationInterface.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "InformationRegisters/CovNetworkOptions.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "StyleItems/CovStyleColorLinen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "StyleItems/CovStyleColorMediumGreen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "StyleItems/CovStyleColorTomato.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "StyleItems/CovType_Font.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Tasks/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Tasks/CovCheckUnique_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "path": "WSReferences/CovTemplate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovCheckUnique_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovCreateTaskInPrivilegedMode_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovGifFlowchart/Ext/Flowchart/Items/Work/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "BusinessProcesses/CovPrintedFlowchart/Ext/Flowchart.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CalculationRegisters/CovBasePeriod_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CalculationRegisters/CovIncludeHelpInContents_true_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CalculationRegisters/CovTemplate_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CalculationRegisters/CovUseStandardCommands_false_Calc.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovCatalogPictureTemplate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovHelpCatalog/Ext/Help/ru.html",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovNavigationCatalog/Forms/EditListForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovOrphanCharacteristics.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovOwnedBindingCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovOwnedDefinedCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Catalogs/CovOwnedUnionCatalog/Forms/TableForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "ChartsOfCalculationTypes/CovQuickChoice_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "ChartsOfCalculationTypes/CovUseStandardCommands_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovAuthenticationSeparation_Separate.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovAutoUse_Use.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovExtendedEdit_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovFillFromFillingValue_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovMarkNegatives_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovMultiLine_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonAttributes/CovPasswordMode_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovBoundTableExcludesSelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovButtonPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovChartMissingSeries/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovChartSelectionMode/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovChartTypeColumn/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovChartTypePie3D/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureAccountingRegister/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureAppearanceStarHalfFilled/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureGotoURL/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureNewConversation/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureQueryWizardTempTableDescription/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCommandPictureToday/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovCompatibleTable/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovDeepComposerBinding/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovDynamicListRowNumber/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetChartAutoMaxHeight/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetChartAutoMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetChartMaxWidth/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetChartOnActivate/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetPlannerCommandGenerateProcessing/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetTableExcludesAddAutoSelectedField/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetTableExcludesDeselectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFacetTableExcludesSelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovFormCommandSpace/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovGeneratedUserSettingsGroup/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridBrokenTilt/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridButtonTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridChoicePeriod/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridColumnGroupCard/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridCommandBarAppearance/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridGeographicalSchema/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridInputFieldAutofillHint/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridInputFieldWidthInCard/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridInputMultipleValueEvent/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridInputPictureExternalUser/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelDecorationBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelDecorationTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelDecorationTitleLevel4/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelFieldTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelFieldTitleLevel4/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridLabelFieldUseCopy/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridModeTaxi.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridModeVersion85.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridParentButton/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPdfGray/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureAppearanceUpArrowGray/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureChar/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureDecorationPictureColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureDontNotify/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureGrayedAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridPictureStartVideoconference/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridReducedText/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridSheetFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridTrackBarFieldMarkingAppearance/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovHybridUsualGroupBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLabelDecorationTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLabelDecorationTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLabelFieldTextColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLabelFieldTextColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyButtonTextColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyGroupTitleFont/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelDecorationBackColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelDecorationTextColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelFieldTextColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyLabelFieldTitleLevel4/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyPictureDecorationPictureColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovLegacyUsualGroupBackColorPalette/Ext/Form/Module.bsl",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernBrokenTilt/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernButtonTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernChoicePeriod/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernColumnGroupCard/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernCommandBarAppearance/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernGeographicalSchema/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernInputFieldAutofillHint/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernInputFieldWidthInCard/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernInputMultipleValueEvent/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernInputPictureExternalUser/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelDecorationBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelDecorationFont/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelDecorationTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelDecorationTitleLevel4/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelFieldFont/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelFieldTextColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelFieldTitleLevel4/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernLabelFieldUseCopy/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernModeTaxi.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernModeVersion85.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernParentButton/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPdfGray/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureAppearanceUpArrowGray/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureChar/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureDecorationPictureColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureDontNotify/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureGrayedAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernPictureStartVideoconference/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernRadioButtonFieldHorizontalStretch/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernReducedText/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernSheetFormattedString/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernTrackBarFieldMarkingAppearance/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovModernUsualGroupBackColorPalette/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovPeriodField/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovPlannerBackCommand/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovRecordSetRowPicture/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovReportExcludePreview/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovTableOnlyDeselectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovTableOnlySelectAll/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovTablePictureTitleFont/Ext/Form.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovUsualGroupBackColorMediumGreen/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovUsualGroupBackColorTomato/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovValueTableChildDataPath/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonForms/CovVerticalScrollAlways/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovDataCompositionParameters/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovEnglishComposition/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovGraphicalSchemaGif/Ext/Template/Items/Probe/Picture.gif",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovModernSheetChartColumn/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovModernSheetChartLine/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovModernSheetDashed/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovModernSheetPalette/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovModernSheetSkyBlue/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetAppearanceCheckIcon/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetAutoFontHeight/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetDashDotted/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetGapLine/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetOEMFixedFont/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetPageSizeA4/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetSandyBrown/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSheetValueListDetail/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovSpreadsheetStandardPicture/Ext/Template.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "CommonTemplates/CovVerticalBrackets/Ext/Template.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Configuration.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Constants/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Constants/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "DocumentJournals/CovNavigationJournal/Forms/ListForm/Ext/Form.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Enums/CovPaletteEnum.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "ExchangePlans/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "ExchangePlans/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Ext/ClientApplicationInterface.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "InformationRegisters/CovNetworkOptions.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "StyleItems/CovPaletteViolet.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "StyleItems/CovStyleColorLinen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "StyleItems/CovStyleColorMediumGreen.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "StyleItems/CovStyleColorTomato.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "StyleItems/CovType_Font.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Subsystems/CovCommandSubsystem/Ext/CommandInterface.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Tasks/CovAutonumbering_false.xml",
+      "status": "different"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Tasks/CovCheckUnique_false.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Tasks/CovExecuteAfterWriteDataHistoryVersionProcessing_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "Tasks/CovUpdateDataHistoryImmediatelyAfterWrite_true.xml",
+      "status": "missing"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "path": "WSReferences/CovTemplate.xml",
+      "status": "different"
+    }
+  ],
+  "xml_failures": [
+    {
+      "platform": "8.3.27.2214",
+      "source": "Configuration.xml",
+      "class": "I044",
+      "diagnostic": "ClientApplicationInterface: unsupported layout property"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovOrphanCharacteristics.xml",
+      "class": "I069",
+      "diagnostic": "unresolved reference -2"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovCatalogPictureTemplate.xml",
+      "class": "I067",
+      "diagnostic": "no stored value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+      "class": "I072",
+      "diagnostic": "unsupported picture reference 0"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Configuration.xml",
+      "class": "I045",
+      "diagnostic": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "InformationRegisters/CovNetworkOptions.xml",
+      "class": "I057",
+      "diagnostic": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "StyleItems/CovStyleColorLinen.xml",
+      "class": "I103",
+      "diagnostic": "unsupported colour \"web:Linen\""
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "StyleItems/CovStyleColorMediumGreen.xml",
+      "class": "I070",
+      "diagnostic": "unsupported colour \"web:MediumGreen\""
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "StyleItems/CovStyleColorTomato.xml",
+      "class": "I071",
+      "diagnostic": "unsupported colour \"web:Tomato\""
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+      "class": "I063",
+      "diagnostic": "no measured value for StdPicture.AppearanceStarHalfFilled"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureToday.xml",
+      "class": "I037",
+      "diagnostic": "no measured value for StdPicture.Today"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureNewConversation.xml",
+      "class": "I028",
+      "diagnostic": "no measured value for StdPicture.NewConversation"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+      "class": "I041",
+      "diagnostic": "<PlannerField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureGotoURL.xml",
+      "class": "I065",
+      "diagnostic": "no measured value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovPeriodField.xml",
+      "class": "I040",
+      "diagnostic": "<PeriodField> has no writer yet"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovDeepComposerBinding.xml",
+      "class": "I039",
+      "diagnostic": "<CheckBoxField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+      "class": "I066",
+      "diagnostic": "no measured value for StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+      "class": "I062",
+      "diagnostic": "no measured value for StdPicture.AccountingRegister"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+      "class": "I012",
+      "diagnostic": "an embedded mxl:SpreadsheetDocument with cells has no writer yet"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetChartOnActivate.xml",
+      "class": "I038",
+      "diagnostic": "<ChartField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovVerticalScrollAlways.xml",
+      "class": "I021",
+      "diagnostic": "unsupported Form VerticalScroll: use"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovButtonPictureFormattedString.xml",
+      "class": "I064",
+      "diagnostic": "no measured value for StdPicture.FormattedString"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+      "class": "I043",
+      "diagnostic": "<Table> excludes AddAutoSelectedField, which has no measured uuid"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml",
+      "class": "additional_observation",
+      "diagnostic": "Form Attribute type is not supported yet: xs:base64Binary"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetChartMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonForms/CovDynamicListRowNumber.xml",
+      "class": "I054",
+      "diagnostic": "a dynamic list's <KeyType>RowNumber is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovVerticalBrackets.xml",
+      "class": "I091",
+      "diagnostic": "no flowchart code for Shape \"VerticalBrackets\""
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetSandyBrown.xml",
+      "class": "I051",
+      "diagnostic": "MXL: web colour SandyBrown has no stored code"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetValueListDetail.xml",
+      "class": "I048",
+      "diagnostic": "MXL: a value of type v8:ValueListType has no writer"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetDashDotted.xml",
+      "class": "I049",
+      "diagnostic": "MXL: drawing line style DashDotted has no stored code"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+      "class": "I001",
+      "diagnostic": "MXL: <verticalPageBreak> of a SpreadsheetDocument has no writer"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetAutoFontHeight.xml",
+      "class": "I017",
+      "diagnostic": "MXL: an AutoFont <font> spells members"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetGapLine.xml",
+      "class": "I047",
+      "diagnostic": "MXL: a <line> with a gap has no writer"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetPageSizeA4.xml",
+      "class": "I016",
+      "diagnostic": "MXL: <printSettings><pageSize> has no writer"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "CommonTemplates/CovSheetOEMFixedFont.xml",
+      "class": "I050",
+      "diagnostic": "MXL: system font sys:OEMFixedFont has no stored code"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+      "class": "I023",
+      "diagnostic": "<LabelField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+      "class": "I029",
+      "diagnostic": "the form names an event the writer cannot place"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+      "class": "I053",
+      "diagnostic": "a command names the shortcut Space, which is not measured"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+      "class": "I031",
+      "diagnostic": "<InputField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.3.27.2214",
+      "source": "Catalogs/CovIndexedCatalog.xml",
+      "class": "I030",
+      "diagnostic": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Configuration.xml",
+      "class": "I044",
+      "diagnostic": "ClientApplicationInterface: unsupported layout property"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovOrphanCharacteristics.xml",
+      "class": "I069",
+      "diagnostic": "unresolved reference -2"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovCatalogPictureTemplate.xml",
+      "class": "I067",
+      "diagnostic": "no stored value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+      "class": "I072",
+      "diagnostic": "unsupported picture reference 0"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Configuration.xml",
+      "class": "I045",
+      "diagnostic": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "InformationRegisters/CovNetworkOptions.xml",
+      "class": "I057",
+      "diagnostic": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "StyleItems/CovStyleColorLinen.xml",
+      "class": "I103",
+      "diagnostic": "unsupported colour \"web:Linen\""
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "StyleItems/CovStyleColorMediumGreen.xml",
+      "class": "I070",
+      "diagnostic": "unsupported colour \"web:MediumGreen\""
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "StyleItems/CovStyleColorTomato.xml",
+      "class": "I071",
+      "diagnostic": "unsupported colour \"web:Tomato\""
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetTableExcludesDeselectAll.xml",
+      "class": "I020",
+      "diagnostic": "<Table> excludes DeselectAll, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+      "class": "I063",
+      "diagnostic": "no measured value for StdPicture.AppearanceStarHalfFilled"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureToday.xml",
+      "class": "I037",
+      "diagnostic": "no measured value for StdPicture.Today"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureNewConversation.xml",
+      "class": "I028",
+      "diagnostic": "no measured value for StdPicture.NewConversation"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+      "class": "I041",
+      "diagnostic": "<PlannerField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureGotoURL.xml",
+      "class": "I065",
+      "diagnostic": "no measured value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovPeriodField.xml",
+      "class": "I040",
+      "diagnostic": "<PeriodField> has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovDeepComposerBinding.xml",
+      "class": "I039",
+      "diagnostic": "<CheckBoxField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+      "class": "I066",
+      "diagnostic": "no measured value for StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+      "class": "I062",
+      "diagnostic": "no measured value for StdPicture.AccountingRegister"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+      "class": "I012",
+      "diagnostic": "an embedded mxl:SpreadsheetDocument with cells has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetChartOnActivate.xml",
+      "class": "I038",
+      "diagnostic": "<ChartField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovVerticalScrollAlways.xml",
+      "class": "I021",
+      "diagnostic": "unsupported Form VerticalScroll: use"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovButtonPictureFormattedString.xml",
+      "class": "I064",
+      "diagnostic": "no measured value for StdPicture.FormattedString"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+      "class": "I043",
+      "diagnostic": "<Table> excludes AddAutoSelectedField, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml",
+      "class": "additional_observation",
+      "diagnostic": "Form Attribute type is not supported yet: xs:base64Binary"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetChartMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonForms/CovDynamicListRowNumber.xml",
+      "class": "I054",
+      "diagnostic": "a dynamic list's <KeyType>RowNumber is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovVerticalBrackets.xml",
+      "class": "I091",
+      "diagnostic": "no flowchart code for Shape \"VerticalBrackets\""
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetSandyBrown.xml",
+      "class": "I051",
+      "diagnostic": "MXL: web colour SandyBrown has no stored code"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetValueListDetail.xml",
+      "class": "I048",
+      "diagnostic": "MXL: a value of type v8:ValueListType has no writer"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetDashDotted.xml",
+      "class": "I049",
+      "diagnostic": "MXL: drawing line style DashDotted has no stored code"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+      "class": "I001",
+      "diagnostic": "MXL: <verticalPageBreak> of a SpreadsheetDocument has no writer"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetAutoFontHeight.xml",
+      "class": "I017",
+      "diagnostic": "MXL: an AutoFont <font> spells members"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetGapLine.xml",
+      "class": "I047",
+      "diagnostic": "MXL: a <line> with a gap has no writer"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetPageSizeA4.xml",
+      "class": "I016",
+      "diagnostic": "MXL: <printSettings><pageSize> has no writer"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "CommonTemplates/CovSheetOEMFixedFont.xml",
+      "class": "I050",
+      "diagnostic": "MXL: system font sys:OEMFixedFont has no stored code"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+      "class": "I023",
+      "diagnostic": "<LabelField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+      "class": "I029",
+      "diagnostic": "the form names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+      "class": "I053",
+      "diagnostic": "a command names the shortcut Space, which is not measured"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+      "class": "I031",
+      "diagnostic": "<InputField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1150",
+      "source": "Catalogs/CovIndexedCatalog.xml",
+      "class": "I030",
+      "diagnostic": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Configuration.xml",
+      "class": "I044",
+      "diagnostic": "ClientApplicationInterface: unsupported layout property"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovOrphanCharacteristics.xml",
+      "class": "I069",
+      "diagnostic": "unresolved reference -2"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovCatalogPictureTemplate.xml",
+      "class": "I067",
+      "diagnostic": "no stored value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovOrphanCatalogTemplate.xml",
+      "class": "I072",
+      "diagnostic": "unsupported picture reference 0"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridModeTaxi.xml",
+      "class": "I003",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Taxi\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridModeVersion85.xml",
+      "class": "I002",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Version85\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernModeTaxi.xml",
+      "class": "I003",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Taxi\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernModeVersion85.xml",
+      "class": "I002",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Version85\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Configuration.xml",
+      "class": "I045",
+      "diagnostic": "InvalidEnvelope(\"mobile functionality block is not the complete dialect roster\")"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Enums/CovPaletteEnum.xml",
+      "class": "I104",
+      "diagnostic": "unsupported enum value colour pal:<name>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeVersion85.xml",
+      "class": "I002",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Version85\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "DataProcessors/CovModernOwnedProcessor/Forms/ModeTaxi.xml",
+      "class": "I003",
+      "diagnostic": "no code for UseInInterfaceCompatibilityMode \"Taxi\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "InformationRegisters/CovNetworkOptions.xml",
+      "class": "I057",
+      "diagnostic": "command: unknown standard picture StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "StyleItems/CovStyleColorLinen.xml",
+      "class": "I103",
+      "diagnostic": "unsupported colour \"web:Linen\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "StyleItems/CovStyleColorMediumGreen.xml",
+      "class": "I070",
+      "diagnostic": "unsupported colour \"web:MediumGreen\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "StyleItems/CovPaletteViolet.xml",
+      "class": "I022",
+      "diagnostic": "unsupported colour \"pal:<name>\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "StyleItems/CovStyleColorTomato.xml",
+      "class": "I071",
+      "diagnostic": "unsupported colour \"web:Tomato\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridSheetFormattedString.xml",
+      "class": "I042",
+      "diagnostic": "<SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetTableExcludesDeselectAll.xml",
+      "class": "I020",
+      "diagnostic": "<Table> excludes DeselectAll, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridParentButton.xml",
+      "class": "I004",
+      "diagnostic": "form <UsualGroup>: ControlRepresentation ButtonInParentElement has no 8.3.27 spelling"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelFieldUseCopy.xml",
+      "class": "I019",
+      "diagnostic": "form <LabelField>: UseCopy: the 2.21 value Some(\"false\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernChoicePeriod.xml",
+      "class": "I087",
+      "diagnostic": "a <ChoiceList> item names <variant>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureAppearanceStarHalfFilled.xml",
+      "class": "I063",
+      "diagnostic": "no measured value for StdPicture.AppearanceStarHalfFilled"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernInputFieldCellHyperlinkRepresentation.xml",
+      "class": "I090",
+      "diagnostic": "form <InputField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovNavigationAccountingRegister.xml",
+      "class": "I061",
+      "diagnostic": "no measured ordinal for AccountingRegister.StandardCommand.OpenList"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureStartVideoconference.xml",
+      "class": "I099",
+      "diagnostic": "no measured value for StdPicture.StartVideoconference"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureToday.xml",
+      "class": "I037",
+      "diagnostic": "no measured value for StdPicture.Today"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureNewConversation.xml",
+      "class": "I028",
+      "diagnostic": "no measured value for StdPicture.NewConversation"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridGeographicalSchema.xml",
+      "class": "I075",
+      "diagnostic": "<GeographicalSchemaField> has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernSheetFormattedString.xml",
+      "class": "I042",
+      "diagnostic": "<SpreadSheetDocumentField> excludes FormattedString, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyLabelFieldTitleLevel4.xml",
+      "class": "I032",
+      "diagnostic": "<LabelField> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridRadioButtonFieldHorizontalStretch.xml",
+      "class": "I035",
+      "diagnostic": "form <RadioButtonField>: HorizontalStretch: the 2.21 value Some(\"false\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLabelFieldTextColorMediumGreen.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetPlannerCommandGenerateProcessing.xml",
+      "class": "I041",
+      "diagnostic": "<PlannerField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureAppearanceUpArrowGray.xml",
+      "class": "I096",
+      "diagnostic": "no measured value for StdPicture.AppearanceUpArrowGray"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyPictureDecorationPictureColorPalette.xml",
+      "class": "I015",
+      "diagnostic": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernGeographicalSchema.xml",
+      "class": "I075",
+      "diagnostic": "<GeographicalSchemaField> has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureGotoURL.xml",
+      "class": "I065",
+      "diagnostic": "no measured value for StdPicture.GotoURL"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyLabelFieldTextColorPalette.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyGroupTitleFont.xml",
+      "class": "I080",
+      "diagnostic": "<UsualGroup> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridInputPictureExternalUser.xml",
+      "class": "I034",
+      "diagnostic": "form <InputField>: no measured value for StdPicture.CollaborationSystemExternalUser"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovPeriodField.xml",
+      "class": "I040",
+      "diagnostic": "<PeriodField> has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureChar.xml",
+      "class": "I036",
+      "diagnostic": "no measured value for StdPicture.Char"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridButtonTextColorPalette.xml",
+      "class": "I074",
+      "diagnostic": "<Button> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelFieldUseCopy.xml",
+      "class": "I019",
+      "diagnostic": "form <LabelField>: UseCopy: the 2.21 value Some(\"false\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovDeepComposerBinding.xml",
+      "class": "I039",
+      "diagnostic": "<CheckBoxField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovUsualGroupBackColorTomato.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridColumnGroupCard.xml",
+      "class": "I058",
+      "diagnostic": "form <ColumnGroup>: ShowTitleInCard: the 2.21 value Some(\"true\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureDecorationPictureColorPalette.xml",
+      "class": "I015",
+      "diagnostic": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelFieldCellHyperlinkRepresentation.xml",
+      "class": "I060",
+      "diagnostic": "form <LabelField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureQueryWizardTempTableDescription.xml",
+      "class": "I066",
+      "diagnostic": "no measured value for StdPicture.QueryWizardTempTableDescription"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridInputMultipleValueEvent.xml",
+      "class": "I076",
+      "diagnostic": "<InputField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorMediumGreen.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernReducedText.xml",
+      "class": "I018",
+      "diagnostic": "form <InputField>: TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridReducedText.xml",
+      "class": "I018",
+      "diagnostic": "form <InputField>: TextSize: the 2.21 value Some(\"Reduced\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyButtonTextColorPalette.xml",
+      "class": "I074",
+      "diagnostic": "<Button> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelDecorationTitleLevel4.xml",
+      "class": "I007",
+      "diagnostic": "<LabelDecoration> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovChartMissingSeries.xml",
+      "class": "additional_observation",
+      "diagnostic": "<chart:chartType> spells StackedLine, which the chart writer has not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovTableOnlySelectAll.xml",
+      "class": "I010",
+      "diagnostic": "<Table> excludes SelectAll, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelFieldFont.xml",
+      "class": "I032",
+      "diagnostic": "<LabelField> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureAccountingRegister.xml",
+      "class": "I062",
+      "diagnostic": "no measured value for StdPicture.AccountingRegister"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernInputPictureExternalUser.xml",
+      "class": "I034",
+      "diagnostic": "form <InputField>: no measured value for StdPicture.CollaborationSystemExternalUser"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernColumnGroupCard.xml",
+      "class": "I058",
+      "diagnostic": "form <ColumnGroup>: ShowTitleInCard: the 2.21 value Some(\"true\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernRadioButtonFieldHorizontalStretch.xml",
+      "class": "I035",
+      "diagnostic": "form <RadioButtonField>: HorizontalStretch: the 2.21 value Some(\"false\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelDecorationTextColorPalette.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureStartVideoconference.xml",
+      "class": "I099",
+      "diagnostic": "no measured value for StdPicture.StartVideoconference"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelFieldTextColorPalette.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovChartTypePie3D.xml",
+      "class": "I082",
+      "diagnostic": "<chart:chartType> spells Pie3D, which the chart writer has not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelFieldTextColorPalette.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPdfGray.xml",
+      "class": "I078",
+      "diagnostic": "<PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovEmbeddedSpreadsheetCells.xml",
+      "class": "I012",
+      "diagnostic": "an embedded mxl:SpreadsheetDocument with cells has no writer yet"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovUsualGroupBackColorMediumGreen.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernInputFieldWidthInCard.xml",
+      "class": "I033",
+      "diagnostic": "form <InputField>: WidthInCard: the 2.21 value Some(\"Full\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureDontNotify.xml",
+      "class": "I097",
+      "diagnostic": "no measured value for StdPicture.DontNotify"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetChartOnActivate.xml",
+      "class": "I038",
+      "diagnostic": "<ChartField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovVerticalScrollAlways.xml",
+      "class": "I021",
+      "diagnostic": "unsupported Form VerticalScroll: use"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelDecorationBackColorPalette.xml",
+      "class": "I077",
+      "diagnostic": "<LabelDecoration> names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetChartAutoMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyLabelDecorationTextColorPalette.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovTableOnlyDeselectAll.xml",
+      "class": "I020",
+      "diagnostic": "<Table> excludes DeselectAll, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridInputFieldWidthInCard.xml",
+      "class": "I033",
+      "diagnostic": "form <InputField>: WidthInCard: the 2.21 value Some(\"Full\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyChildrenAlign.xml",
+      "class": "I005",
+      "diagnostic": "the form's tail names something the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernBrokenTilt.xml",
+      "class": "I055",
+      "diagnostic": "a progress bar's <Representation>BrokenTilt is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelDecorationFont.xml",
+      "class": "I007",
+      "diagnostic": "<LabelDecoration> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernButtonTextColorPalette.xml",
+      "class": "I074",
+      "diagnostic": "<Button> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridBrokenTilt.xml",
+      "class": "I055",
+      "diagnostic": "a progress bar's <Representation>BrokenTilt is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureDecorationPictureColorPalette.xml",
+      "class": "I015",
+      "diagnostic": "form <PictureDecoration>: PictureColor: the writer cannot place the colour pal:<name>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridChoicePeriod.xml",
+      "class": "I087",
+      "diagnostic": "a <ChoiceList> item names <variant>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelDecorationTitleLevel4.xml",
+      "class": "I007",
+      "diagnostic": "<LabelDecoration> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovPlannerBackCommand.xml",
+      "class": "I094",
+      "diagnostic": "no measured uuid for Form.Item.<name>.StandardCommand.Back on <PlannerField>"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridUsualGroupBackColorPalette.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovButtonPictureFormattedString.xml",
+      "class": "I064",
+      "diagnostic": "no measured value for StdPicture.FormattedString"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLabelDecorationTextColorMediumGreen.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyUsualGroupBackColorPalette.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelFieldCellHyperlinkRepresentation.xml",
+      "class": "I060",
+      "diagnostic": "form <LabelField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetTableExcludesAddAutoSelectedField.xml",
+      "class": "I043",
+      "diagnostic": "<Table> excludes AddAutoSelectedField, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureDontNotify.xml",
+      "class": "I097",
+      "diagnostic": "no measured value for StdPicture.DontNotify"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovReportExcludePreview.xml",
+      "class": "I102",
+      "diagnostic": "unsupported Form ExcludedCommand: Preview"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovChartSelectionMode.xml",
+      "class": "I079",
+      "diagnostic": "<Settings> names <chart:selectionMode>, which the chart writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovPictureTitleFontEnterOnInput.xml",
+      "class": "additional_observation",
+      "diagnostic": "Form Attribute type is not supported yet: xs:base64Binary"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPdfGray.xml",
+      "class": "I078",
+      "diagnostic": "<PDFDocumentField> excludes ConvertToGrayScale, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridTrackBarFieldMarkingAppearance.xml",
+      "class": "I089",
+      "diagnostic": "a track bar's marking appearance is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernLabelFieldTitleLevel4.xml",
+      "class": "I032",
+      "diagnostic": "<LabelField> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernTrackBarFieldMarkingAppearance.xml",
+      "class": "I089",
+      "diagnostic": "a track bar's marking appearance is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovRecordSetRowPicture.xml",
+      "class": "I056",
+      "diagnostic": "a table's <RowPictureDataPath> names <path>, which the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLabelDecorationTextColorTomato.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelFieldTitleLevel4.xml",
+      "class": "I032",
+      "diagnostic": "<LabelField> names a font the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridInputFieldAutofillHint.xml",
+      "class": "I073",
+      "diagnostic": "<AutofillHint>PhoneNumber is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyVerticalSingle.xml",
+      "class": "I005",
+      "diagnostic": "the form's tail names something the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernInputMultipleValueEvent.xml",
+      "class": "I076",
+      "diagnostic": "<InputField> names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelDecorationTextColorPalette.xml",
+      "class": "I011",
+      "diagnostic": "<LabelDecoration> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovGraphicalSchemaFieldBorderColorTomato.xml",
+      "class": "I026",
+      "diagnostic": "a <GraphicalSchemaField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLegacyLabelDecorationBackColorPalette.xml",
+      "class": "I077",
+      "diagnostic": "<LabelDecoration> names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovLabelFieldTextColorTomato.xml",
+      "class": "I024",
+      "diagnostic": "<LabelField> names a colour the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureChar.xml",
+      "class": "I036",
+      "diagnostic": "no measured value for StdPicture.Char"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernUsualGroupBackColorPalette.xml",
+      "class": "I013",
+      "diagnostic": "a group names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernParentButton.xml",
+      "class": "I004",
+      "diagnostic": "form <UsualGroup>: ControlRepresentation ButtonInParentElement has no 8.3.27 spelling"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovNavigationChartOfAccounts.xml",
+      "class": "I092",
+      "diagnostic": "no measured ordinal for ChartOfAccounts.StandardCommand.OpenList"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovChartTypeColumn.xml",
+      "class": "I081",
+      "diagnostic": "<chart:chartType> spells Column, which the chart writer has not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridLabelDecorationBackColorPalette.xml",
+      "class": "I077",
+      "diagnostic": "<LabelDecoration> names a background colour it cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernCommandBarAppearance.xml",
+      "class": "I059",
+      "diagnostic": "form <CommandBar>: AppearanceMode: the 2.21 value Some(\"UsualGroup\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridInputFieldCellHyperlinkRepresentation.xml",
+      "class": "I090",
+      "diagnostic": "form <InputField>: CellHyperlinkRepresentation: the 2.21 value Some(\"DontShow\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovExchangePlanHistory.xml",
+      "class": "I093",
+      "diagnostic": "no measured uuid for <ExcludedCommand>ChangeHistory</ExcludedCommand> on cfg:ExchangePlanObject"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridPictureGrayedAll.xml",
+      "class": "I098",
+      "diagnostic": "no measured value for StdPicture.GrayedAll"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetChartMaxWidth.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernInputFieldAutofillHint.xml",
+      "class": "I073",
+      "diagnostic": "<AutofillHint>PhoneNumber is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovFacetChartAutoMaxHeight.xml",
+      "class": "I014",
+      "diagnostic": "a <ChartField> names a property whose slot is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovDynamicListRowNumber.xml",
+      "class": "I054",
+      "diagnostic": "a dynamic list's <KeyType>RowNumber is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovHybridCommandBarAppearance.xml",
+      "class": "I059",
+      "diagnostic": "form <CommandBar>: AppearanceMode: the 2.21 value Some(\"UsualGroup\") has no 8.5 code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureAppearanceUpArrowGray.xml",
+      "class": "I096",
+      "diagnostic": "no measured value for StdPicture.AppearanceUpArrowGray"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonForms/CovModernPictureGrayedAll.xml",
+      "class": "I098",
+      "diagnostic": "no measured value for StdPicture.GrayedAll"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetChartColumn.xml",
+      "class": "I046",
+      "diagnostic": "MXL: <chart:chartType> spells Column, which the chart writer has not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovVerticalBrackets.xml",
+      "class": "I091",
+      "diagnostic": "no flowchart code for Shape \"VerticalBrackets\""
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSpreadsheetStandardPicture.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetBuiltinFont.xml",
+      "class": "I009",
+      "diagnostic": "MXL: built-in StyleItem font reference read as a file"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetSandyBrown.xml",
+      "class": "I051",
+      "diagnostic": "MXL: web colour SandyBrown has no stored code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetSkyBlue.xml",
+      "class": "I052",
+      "diagnostic": "MXL: web colour SkyBlue has no stored code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetValueListDetail.xml",
+      "class": "I048",
+      "diagnostic": "MXL: a value of type v8:ValueListType has no writer"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetDashDotted.xml",
+      "class": "I049",
+      "diagnostic": "MXL: drawing line style DashDotted has no stored code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetAppearanceCheckIcon.xml",
+      "class": "I025",
+      "diagnostic": "MXL: standard picture reference read as a file"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetVerticalPageBreak.xml",
+      "class": "I001",
+      "diagnostic": "MXL: <verticalPageBreak> of a SpreadsheetDocument has no writer"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetAutoFontHeight.xml",
+      "class": "I017",
+      "diagnostic": "MXL: an AutoFont <font> spells members"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetGapLine.xml",
+      "class": "I047",
+      "diagnostic": "MXL: a <line> with a gap has no writer"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetChartLine.xml",
+      "class": "I086",
+      "diagnostic": "MXL: the exporter cannot read back the chart the writer built"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetPageSizeA4.xml",
+      "class": "I016",
+      "diagnostic": "MXL: <printSettings><pageSize> has no writer"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetDashed.xml",
+      "class": "I008",
+      "diagnostic": "MXL: drawing line style Dashed has no stored code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovSheetOEMFixedFont.xml",
+      "class": "I050",
+      "diagnostic": "MXL: system font sys:OEMFixedFont has no stored code"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "CommonTemplates/CovModernSheetPalette.xml",
+      "class": "I006",
+      "diagnostic": "MXL: colour pal:<name> names an unknown namespace"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepForm.xml",
+      "class": "I023",
+      "diagnostic": "<LabelField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Tasks/CovEventTask/Forms/EventsForm.xml",
+      "class": "I029",
+      "diagnostic": "the form names an event the writer cannot place"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovOwnedBindingCatalog/Forms/SpaceForm.xml",
+      "class": "I053",
+      "diagnostic": "a command names the shortcut Space, which is not measured"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovOwnedDefinedCatalog/Forms/DeepInputForm.xml",
+      "class": "I031",
+      "diagnostic": "<InputField> cannot encode a bound path"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "DataProcessors/CovModernOwnedProcessor/Forms/TableSelection.xml",
+      "class": "I020",
+      "diagnostic": "<Table> excludes DeselectAll, which has no measured uuid"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovHelpCatalog.xml",
+      "class": "I084",
+      "diagnostic": "Help: stored-page read-back differs"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Subsystems/CovCommandSubsystem.xml",
+      "class": "I068",
+      "diagnostic": "the exporter names no `ExchangePlan` standard command `Create`"
+    },
+    {
+      "platform": "8.5.1.1529",
+      "source": "Catalogs/CovIndexedCatalog.xml",
+      "class": "I030",
+      "diagnostic": "unsupported AdditionalIndexes: AdditionalIndexes target suffix is not mapped for this source family"
     }
   ]
 }
